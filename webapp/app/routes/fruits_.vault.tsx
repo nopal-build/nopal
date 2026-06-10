@@ -1,7 +1,14 @@
 // app/routes/fruits_.vault.tsx
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect, useLoaderData, useRevalidator } from "react-router";
-import { useRef, useState, useCallback } from "react";
+import {
+  useRef,
+  useState,
+  useCallback,
+  useEffect,
+  lazy,
+  Suspense,
+} from "react";
 import { getUser } from "../modules/auth/auth.server";
 // Types + shared utils live in a server-free file — safe on client and server.
 import { isFileRefLocked } from "../data/vault.types";
@@ -17,6 +24,10 @@ import {
 import { getHumans, getHumansById } from "../data/humans.server";
 import { AppLayout } from "../components/AppLayout";
 import "../styles/vault.css";
+
+// Lazy-load the MDX editor — client only, never runs on the server.
+const MdxEditorClient = lazy(() => import("../components/MdxEditorClient"));
+import type { EditorHandle } from "../components/MdxEditorClient";
 
 // ─── Upload constants ────────────────────────────────────────────────────────
 
@@ -694,7 +705,34 @@ function MdEditorModal({
   onClose: () => void;
   onSave: (content: string) => void;
 }) {
-  const [content, setContent] = useState(file.content ?? "");
+  const [isClient, setIsClient] = useState(false);
+  const contentRef = useRef(file.content ?? "");
+  const editorHandleRef = useRef<EditorHandle | null>(null);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  const handleEditorReady = useCallback((handle: EditorHandle) => {
+    editorHandleRef.current = handle;
+  }, []);
+
+  const handleChange = useCallback((md: string) => {
+    contentRef.current = md;
+  }, []);
+
+  const uploadFile = useCallback(async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("source", "vault");
+    const res = await fetch("/api/upload", { method: "POST", body: formData });
+    if (!res.ok) {
+      const err = (await res.json()) as { error?: string };
+      throw new Error(err.error ?? `Upload failed: ${res.status}`);
+    }
+    const { url } = (await res.json()) as { url: string };
+    return url;
+  }, []);
 
   return (
     <div
@@ -721,7 +759,7 @@ function MdEditorModal({
           <div style={{ display: "flex", gap: "8px" }}>
             <button
               onClick={() => {
-                onSave(content);
+                onSave(contentRef.current);
                 onClose();
               }}
               className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
@@ -738,13 +776,52 @@ function MdEditorModal({
         </div>
 
         {/* Editor */}
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          className="vault-md-textarea"
-          style={{ padding: "20px", fontSize: "13px", lineHeight: 1.65 }}
-          autoFocus
-        />
+        <div
+          className="mdx-editor-wrapper"
+          style={{
+            flex: 1,
+            overflow: "auto",
+            borderRadius: 0,
+            border: "none",
+            borderTop: "1px solid var(--midground)",
+          }}
+        >
+          {isClient ? (
+            <Suspense
+              fallback={
+                <div
+                  style={{
+                    fontFamily: "inherit",
+                    fontSize: "0.95rem",
+                    color: "var(--subtle-text)",
+                    padding: "20px",
+                  }}
+                >
+                  Loading editor…
+                </div>
+              }
+            >
+              <MdxEditorClient
+                key={file._id}
+                markdown={file.content ?? ""}
+                onChange={handleChange}
+                uploadFile={uploadFile}
+                onEditorReady={handleEditorReady}
+              />
+            </Suspense>
+          ) : (
+            <div
+              style={{
+                fontFamily: "inherit",
+                fontSize: "0.95rem",
+                color: "var(--subtle-text)",
+                padding: "20px",
+              }}
+            >
+              Loading editor…
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

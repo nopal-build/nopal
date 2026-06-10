@@ -181,14 +181,16 @@
 .mdxeditor
   :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
   ul
-  > li {
+  > li:not([class*="_listItemChecked_"]):not([class*="_listItemUnchecked_"]) {
   position: relative;
 }
 
 .mdxeditor
   :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
   ul
-  > li::before {
+  > li:not([class*="_listItemChecked_"]):not(
+    [class*="_listItemUnchecked_"]
+  )::before {
   content: "•";
   position: absolute;
   left: -1.2em;
@@ -205,8 +207,66 @@
   :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
   ul
   ul
-  > li::before {
+  > li:not([class*="_listItemChecked_"]):not(
+    [class*="_listItemUnchecked_"]
+  )::before {
   content: "–";
+}
+
+/* ── Task list (checklist) checkboxes ────────────────────────────────────── *
+ * The ::before pseudo-element on task items IS the checkbox box. We give it  *
+ * a white background and a chunky border so it reads clearly in both modes.  */
+.mdxeditor
+  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  [class*="_listItemUnchecked_"]::before,
+.mdxeditor
+  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  [class*="_listItemChecked_"]::before {
+  border-radius: 4px;
+}
+
+/* unchecked — white box, chunky purple border */
+.mdxeditor
+  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  [class*="_listItemUnchecked_"]::before {
+  background-color: white;
+  border: 2.5px solid var(--purple-light);
+}
+
+/* checked — solid purple fill, matching border */
+.mdxeditor
+  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  [class*="_listItemChecked_"]::before {
+  background-color: var(--purple);
+  border: 2.5px solid var(--purple);
+}
+
+/* focus ring — --moon outline in light mode, replaces the default accentBgActive ring */
+.mdxeditor
+  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  [class*="_listItemUnchecked_"]:focus::before,
+.mdxeditor
+  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  [class*="_listItemChecked_"]:focus::before {
+  box-shadow: none;
+}
+
+/* checked — X mark instead of checkmark, sized to just fill the inner box */
+.mdxeditor
+  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  [class*="_listItemChecked_"]::after {
+  content: "";
+  border: none;
+  transform: none;
+  top: 0;
+  left: 0;
+  right: auto;
+  width: 1rem;
+  height: 1rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='1.5' y1='1.5' x2='8.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='8.5' y1='1.5' x2='1.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-size: calc(100% - 5px);
+  background-repeat: no-repeat;
+  background-position: center;
 }
 
 /* ordered — number */
@@ -761,12 +821,16 @@
   .mdxeditor
     :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
     ul
-    > li::before,
+    > li:not([class*="_listItemChecked_"]):not(
+      [class*="_listItemUnchecked_"]
+    )::before,
   .mdxeditor
     :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
     ul
     ul
-    > li::before,
+    > li:not([class*="_listItemChecked_"]):not(
+      [class*="_listItemUnchecked_"]
+    )::before,
   .mdxeditor
     :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
     ol
@@ -778,6 +842,27 @@
     > li::before {
     color: var(--white);
     opacity: 0.35;
+  }
+
+  /* Task checkboxes — dark mode */
+  .mdxeditor
+    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+    [class*="_listItemUnchecked_"]::before {
+    background-color: var(--dark-farground);
+    border: 2.5px solid var(--moon);
+  }
+
+  .mdxeditor
+    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+    [class*="_listItemChecked_"]::before {
+    background-color: var(--moon);
+    border: 2.5px solid var(--moon);
+  }
+
+  .mdxeditor
+    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+    [class*="_listItemChecked_"]::after {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='1.5' y1='1.5' x2='8.5' y2='8.5' stroke='%233f2b46' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='8.5' y1='1.5' x2='1.5' y2='8.5' stroke='%233f2b46' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
   }
 
   /* Placed-file chips – dark mode */
