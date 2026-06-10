@@ -64,10 +64,12 @@
 /* ── Content / editable area ─────────────────────────────────────────────── */
 .mdxeditor [class*="_contentEditable_"],
 .mdxeditor [class*="_rootContentEditableWrapper_"] {
-  padding: 16px;
+  padding: 8px;
   min-height: 260px;
-  font-size: 0.9375rem; /* 15 px – comfortable reading size  */
+  font-size: 1.2rem; /* 15 px – comfortable reading size  */
+  font-weight: 267;
   line-height: 1.2;
+  letter-spacing: 0.5px;
   color: var(--purple);
   overflow-x: hidden;
   overflow-wrap: break-word;
@@ -134,9 +136,14 @@
 .mdxeditor [class*="_rootContentEditableWrapper_"] h1 {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--purple);
-  margin-top: 1.25em;
+  color: black;
+  letter-spacing: 1px;
   margin-bottom: 0.4em;
+  padding-bottom: 0.1em;
+  border-bottom: 2px dotted var(--midground);
+  @media (prefers-color-scheme: dark) {
+    border-bottom: 2px dotted var(--dark-midground);
+  }
 }
 
 .mdxeditor [class*="_contentEditable_"] h2,
