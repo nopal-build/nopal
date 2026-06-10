@@ -325,6 +325,15 @@
     background: var(--dark-farground);
   }
 }
+.vault-file-card--selected {
+  border-color: var(--purple-light);
+  background: color-mix(in srgb, var(--purple-light) 8%, var(--farground));
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--moon);
+    background: color-mix(in srgb, var(--moon) 10%, var(--dark-farground));
+  }
+}
+
 .vault-file-card:hover .vault-file-actions {
   opacity: 1;
 }

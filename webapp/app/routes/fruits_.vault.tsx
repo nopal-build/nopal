@@ -1,11 +1,17 @@
 // app/routes/fruits_.vault.tsx
 import type { LoaderFunctionArgs } from "react-router";
-import { redirect, useLoaderData, useRevalidator } from "react-router";
+import {
+  redirect,
+  useLoaderData,
+  useRevalidator,
+  useSearchParams,
+} from "react-router";
 import {
   useRef,
   useState,
   useCallback,
   useEffect,
+  useMemo,
   lazy,
   Suspense,
 } from "react";
@@ -27,7 +33,6 @@ import "../styles/vault.css";
 
 // Lazy-load the MDX editor — client only, never runs on the server.
 const MdxEditorClient = lazy(() => import("../components/MdxEditorClient"));
-import type { EditorHandle } from "../components/MdxEditorClient";
 
 // ─── Upload constants ────────────────────────────────────────────────────────
 
@@ -119,7 +124,12 @@ function formatSize(bytes: number | null): string {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
+  // Parse the calendar date directly from the ISO string so that server (UTC)
+  // and browser (local timezone) always produce the same string and React
+  // hydration stays in sync.
+  const [datePart] = iso.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -408,6 +418,21 @@ function MoveModal({
 
 // ─── Folder Tree Item ─────────────────────────────────────────────────────────
 
+// Returns true if targetId is a descendant of folderId in the folder tree.
+function hasDescendant(
+  folderId: string,
+  targetId: string,
+  allFolders: VaultFolder[],
+): boolean {
+  return allFolders
+    .filter((f) => f.parent_folder_id === folderId)
+    .some(
+      (child) =>
+        child._id === targetId ||
+        hasDescendant(child._id, targetId, allFolders),
+    );
+}
+
 function FolderTreeItem({
   folder,
   allFolders,
@@ -431,8 +456,20 @@ function FolderTreeItem({
   const children = allFolders.filter((f) => f.parent_folder_id === folder._id);
   const hasChildren = children.length > 0;
   const active = activeFolderId === folder._id;
-  const [expanded, setExpanded] = useState(false);
+
+  // Auto-expand this node if the active folder is this node or any descendant.
+  const shouldAutoExpand = useMemo(() => {
+    if (!activeFolderId) return false;
+    if (activeFolderId === folder._id) return true;
+    return hasDescendant(folder._id, activeFolderId, allFolders);
+  }, [activeFolderId, folder._id, allFolders]);
+
+  const [expanded, setExpanded] = useState(shouldAutoExpand);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (shouldAutoExpand) setExpanded(true);
+  }, [shouldAutoExpand]);
   const menuRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -488,7 +525,10 @@ function FolderTreeItem({
 
         {/* Folder name */}
         <button
-          onClick={() => onSelect(folder)}
+          onClick={() => {
+            onSelect(folder);
+            setExpanded(true);
+          }}
           className={`vault-folder-name-btn ${active ? "vault-folder-name-btn--active" : ""}`}
           title={
             folder.shared_with === "everyone"
@@ -577,6 +617,8 @@ function FileCard({
   myFolders,
   isOwned,
   isLocked,
+  isSelected,
+  onSelect,
   onRename,
   onDelete,
   onMove,
@@ -586,6 +628,8 @@ function FileCard({
   myFolders: VaultFolder[];
   isOwned: boolean;
   isLocked: boolean;
+  isSelected?: boolean;
+  onSelect: (file: FileRef) => void;
   onRename: (file: FileRef) => void;
   onDelete: (file: FileRef) => void;
   onMove: (file: FileRef) => void;
@@ -595,9 +639,12 @@ function FileCard({
 
   return (
     <div
-      className="vault-file-card"
-      style={{ cursor: isMd ? "pointer" : "default" }}
-      onClick={isMd ? () => onEditMd(file) : undefined}
+      className={`vault-file-card${isSelected ? " vault-file-card--selected" : ""}`}
+      style={{ cursor: "pointer" }}
+      onClick={() => {
+        onSelect(file);
+        if (isMd) onEditMd(file);
+      }}
     >
       {/* Icon + name */}
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -698,34 +745,79 @@ function FileCard({
 
 function MdEditorModal({
   file,
-  onDone,
+  onSave,
+  onClose,
 }: {
   file: FileRef;
-  onDone: (content: string) => void;
+  onSave: (content: string) => void;
+  onClose: () => void;
 }) {
   const [isClient, setIsClient] = useState(false);
   const contentRef = useRef(file.content ?? "");
-  const editorHandleRef = useRef<EditorHandle | null>(null);
+  const lastSavedRef = useRef(file.content ?? ""); // tracks what's already on the server
+  const isDirtyRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setIsClient(true);
   }, []);
 
+  // Fire any pending save and cancel the timer. Safe to call multiple times.
+  const flushSave = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (isDirtyRef.current) {
+      onSave(contentRef.current);
+      lastSavedRef.current = contentRef.current;
+      isDirtyRef.current = false;
+    }
+  }, [onSave]);
+
+  // Close the modal, flushing any unsaved changes first.
+  const close = useCallback(() => {
+    flushSave();
+    onClose();
+  }, [flushSave, onClose]);
+
+  // Keyboard shortcuts: Escape and Cmd/Ctrl+Enter both act as Done.
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onDone(contentRef.current);
+      if (e.key === "Escape") close();
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        close();
+      }
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [onDone]);
+  }, [close]);
 
-  const handleEditorReady = useCallback((handle: EditorHandle) => {
-    editorHandleRef.current = handle;
-  }, []);
+  // Cancel any pending debounce on unmount.
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
 
-  const handleChange = useCallback((md: string) => {
-    contentRef.current = md;
-  }, []);
+  // Auto-save 200 ms after the last keystroke, but only if content changed.
+  const handleChange = useCallback(
+    (md: string) => {
+      contentRef.current = md;
+      if (md === lastSavedRef.current) return; // nothing new to save
+      isDirtyRef.current = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        onSave(contentRef.current);
+        lastSavedRef.current = contentRef.current;
+        isDirtyRef.current = false;
+        debounceRef.current = null;
+      }, 200);
+    },
+    [onSave],
+  );
 
   const uploadFile = useCallback(async (file: File): Promise<string> => {
     const formData = new FormData();
@@ -744,7 +836,7 @@ function MdEditorModal({
     <div
       className="vault-modal-backdrop"
       style={{ alignItems: "stretch", padding: "16px 32px" }}
-      onClick={() => onDone(contentRef.current)}
+      onClick={close}
     >
       <div
         className="vault-modal"
@@ -793,10 +885,9 @@ function MdEditorModal({
                 markdown={file.content ?? ""}
                 onChange={handleChange}
                 uploadFile={uploadFile}
-                onEditorReady={handleEditorReady}
                 actions={
                   <button
-                    onClick={() => onDone(contentRef.current)}
+                    onClick={close}
                     className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
                   >
                     Done
@@ -989,23 +1080,34 @@ export default function VaultPage() {
   const { myFiles, myFolders, sharedFolders, sharedFiles, allOtherHumans } =
     useLoaderData<typeof loader>();
   const { revalidate } = useRevalidator();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL params that encode navigation state
+  const folderParam = searchParams.get("folder");
+  const sharedParam = searchParams.get("shared");
+  const fileParam = searchParams.get("file");
 
   // ── Sidebar drawer (mobile) ───────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // ── Panel selection state ───────────────────────────────────────────────────────────────
-  const [panel, setPanel] = useState<PanelTarget>({ kind: "my-root" });
-
-  // Navigate to a panel and close the mobile drawer.
-  const handleSelectPanel = useCallback((target: PanelTarget) => {
-    setPanel(target);
-    setSidebarOpen(false);
-  }, []);
+  // ── Panel derived from URL ────────────────────────────────────────────────
+  const panel: PanelTarget = useMemo(() => {
+    if (folderParam) return { kind: "my-folder", folderId: folderParam };
+    if (sharedParam) {
+      const sf = sharedFolders.find((f) => f._id === sharedParam);
+      if (sf)
+        return {
+          kind: "shared-folder",
+          folderId: sharedParam,
+          ownerName: sf.ownerName,
+        };
+    }
+    return { kind: "my-root" };
+  }, [folderParam, sharedParam, sharedFolders]);
 
   // ── Modals / inline UI ────────────────────────────────────────────────────
   const [shareFolder, setShareFolder] = useState<VaultFolder | null>(null);
   const [moveFile, setMoveFile] = useState<FileRef | null>(null);
-  const [editMdFile, setEditMdFile] = useState<FileRef | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
   const [addingFolder, setAddingFolder] = useState(false);
@@ -1013,7 +1115,60 @@ export default function VaultPage() {
   // ── Collapsibles ──────────────────────────────────────────────────────────
   const [myFilesOpen, setMyFilesOpen] = useState(true);
   const [sharedOpen, setSharedOpen] = useState(true);
-  const [expandedOwners, setExpandedOwners] = useState<Set<string>>(new Set());
+
+  // Auto-expand the owner group for the active shared folder on first render.
+  const [expandedOwners, setExpandedOwners] = useState<Set<string>>(() => {
+    if (sharedParam) {
+      const sf = sharedFolders.find((f) => f._id === sharedParam);
+      if (sf) return new Set([sf.ownerHumanId]);
+    }
+    return new Set();
+  });
+
+  // Navigate to a panel — updates the URL (and closes the mobile drawer).
+  const handleSelectPanel = useCallback(
+    (target: PanelTarget) => {
+      setSidebarOpen(false);
+      if (target.kind === "my-root") {
+        setSearchParams({});
+      } else if (target.kind === "my-folder") {
+        setSearchParams({ folder: target.folderId });
+      } else if (target.kind === "shared-folder") {
+        setSearchParams({ shared: target.folderId });
+        // Auto-expand the owner section when navigating to a shared folder.
+        const sf = sharedFolders.find((f) => f._id === target.folderId);
+        if (sf) {
+          setExpandedOwners((prev) => {
+            if (prev.has(sf.ownerHumanId)) return prev;
+            const next = new Set(prev);
+            next.add(sf.ownerHumanId);
+            return next;
+          });
+        }
+      }
+    },
+    [setSearchParams, sharedFolders],
+  );
+
+  // Select a file — adds ?file=<id> to the URL, preserving the current panel.
+  const handleSelectFile = useCallback(
+    (file: FileRef) => {
+      const params: Record<string, string> = {};
+      if (panel.kind === "my-folder") params.folder = panel.folderId;
+      if (panel.kind === "shared-folder") params.shared = panel.folderId;
+      params.file = file._id;
+      setSearchParams(params);
+    },
+    [panel, setSearchParams],
+  );
+
+  // Close the MD editor — removes the file param while keeping the panel.
+  const handleCloseEditor = useCallback(() => {
+    const params: Record<string, string> = {};
+    if (panel.kind === "my-folder") params.folder = panel.folderId;
+    if (panel.kind === "shared-folder") params.shared = panel.folderId;
+    setSearchParams(params);
+  }, [panel, setSearchParams]);
 
   // ── File uploads ─────────────────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1022,6 +1177,15 @@ export default function VaultPage() {
   // ─── Derived data ──────────────────────────────────────────────────────────
 
   const currentFolderId = panel.kind === "my-folder" ? panel.folderId : null;
+
+  // The currently-selected file (drives the MD editor and card highlight).
+  const editMdFile = useMemo(() => {
+    if (!fileParam) return null;
+    const file = [...myFiles, ...sharedFiles].find((f) => f._id === fileParam);
+    return file?.content_type === "text/markdown" ? (file ?? null) : null;
+  }, [fileParam, myFiles, sharedFiles]);
+
+  const selectedFileId = fileParam ?? null;
 
   // Pending uploads visible in the current panel
   const pendingForCurrentFolder = pendingUploads.filter(
@@ -1101,7 +1265,7 @@ export default function VaultPage() {
       return;
     await apiFetch(`/api/vault/folders/${folderId}`, { method: "DELETE" });
     if (panel.kind === "my-folder" && panel.folderId === folderId) {
-      setPanel({ kind: "my-root" });
+      setSearchParams({});
     }
     revalidate();
   };
@@ -1685,10 +1849,12 @@ export default function VaultPage() {
                     myFolders={myFolders}
                     isOwned={isMyPanel}
                     isLocked={locked}
+                    isSelected={selectedFileId === file._id}
+                    onSelect={handleSelectFile}
                     onRename={(f) => setRenamingFileId(f._id)}
                     onDelete={(f) => deleteFile(f._id)}
                     onMove={(f) => setMoveFile(f)}
-                    onEditMd={(f) => setEditMdFile(f)}
+                    onEditMd={(f) => handleSelectFile(f)}
                   />
                 );
               })}
@@ -1720,10 +1886,8 @@ export default function VaultPage() {
       {editMdFile && (
         <MdEditorModal
           file={editMdFile}
-          onDone={(content) => {
-            saveMdFile(editMdFile._id, content);
-            setEditMdFile(null);
-          }}
+          onSave={(content) => saveMdFile(editMdFile._id, content)}
+          onClose={handleCloseEditor}
         />
       )}
     </AppLayout>
