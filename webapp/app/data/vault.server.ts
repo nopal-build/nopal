@@ -18,6 +18,8 @@ export async function createFileRef(data: {
   folder_id?: string | null;
   size?: number | null;
   source?: "daily_log";
+  /** YYYY-MM-DD — set for daily_log files. */
+  date?: string;
 }): Promise<FileRef | undefined> {
   const now = new Date().toISOString();
   const result = await upsert("file_refs", {
@@ -31,6 +33,7 @@ export async function createFileRef(data: {
     folder_id: data.folder_id ?? null,
     size: data.size ?? null,
     ...(data.source ? { source: data.source } : {}),
+    ...(data.date ? { date: data.date } : {}),
     created_at: now,
     updated_at: now,
   });
@@ -321,117 +324,11 @@ export async function upsertDailyLogReadme(
       content_type: "text/markdown",
       folder_id: dateFolder._id,
       source: "daily_log",
+      date: dateStr,
     });
   } catch (err) {
     console.error("upsertDailyLogReadme failed:", err);
     return undefined;
-  }
-}
-
-// ─── New-user provisioning ──────────────────────────────────────────────────
-
-const SAMPLE_LOG_MARKDOWN = `# Welcome to your Daily Log
-
-This is a sample entry so you can see all the markdown you can use. Delete it whenever — your real entries will live right alongside it.
-
----
-
-## Headings
-
-# H1
-## H2
-### H3
-#### H4
-
----
-
-## Text Formatting
-
-**Bold**, *italic*, and ***bold italic***.
-
-~~Strikethrough~~ and \`inline code\`.
-
-> Blockquote: a thought, a quote, something worth remembering.
-
----
-
-## Lists
-
-**Unordered:**
-- Item one
-- Item two
-  - Nested item
-  - Another nested item
-- Item three
-
-**Ordered:**
-1. First
-2. Second
-3. Third
-
-**Task list:**
-- [x] Something already done
-- [ ] Something still to do
-- [ ] Another task
-
----
-
-## Code
-
-Inline: \`const greeting = "hello world"\`
-
-Block:
-\`\`\`js
-function greet(name) {
-  return \`Hello, \${name}!\`;
-}
-\`\`\`
-
----
-
-## Table
-
-| Name      | Value | Notes       |
-|-----------|-------|-------------|
-| Example A | 42    | First row   |
-| Example B | 7     | Second row  |
-
----
-
-## Links
-
-[Visit nopal](https://nopal.build)
-
----
-
-Happy logging! ✨
-`;
-
-/**
- * Call this once, right after a new Human record is created.
- *
- * Creates the \`daily-logs/\` root folder and seeds a sample readme.md
- * inside a date-subfolder for the day before the user was created so they
- * open the vault to something useful on their very first visit.
- */
-export async function provisionNewUserVault(humanId: string): Promise<void> {
-  try {
-    // "Yesterday" in local wall-clock time — one day before account creation.
-    // Deliberately avoids UTC methods: the seed runs on the host machine and
-    // toISOString() always outputs UTC, so late-evening runs in US timezones
-    // would compute UTC "yesterday" = local today.
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const dateStr = [
-      yesterday.getFullYear(),
-      String(yesterday.getMonth() + 1).padStart(2, "0"),
-      String(yesterday.getDate()).padStart(2, "0"),
-    ].join("-");
-
-    await upsertDailyLogReadme(humanId, dateStr, SAMPLE_LOG_MARKDOWN);
-  } catch (err) {
-    // Non-fatal: log but don't break user creation
-    console.error("provisionNewUserVault failed:", err);
   }
 }
 

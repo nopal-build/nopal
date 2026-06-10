@@ -19,7 +19,7 @@ import {
   saveDailyLog,
   type DailyLog,
 } from "../data/dailyLog.server";
-import { upsertDailyLogReadme } from "../data/vault.server";
+
 import { useMarkdown } from "../hooks/useMarkdown";
 import { resolveNopalMarkdown } from "../util/nopalMarkdown";
 import projectStyles from "../styles/project.css?url";
@@ -93,8 +93,6 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!date || typeof content !== "string")
       return { error: "Invalid request" };
     const entry = await saveDailyLog(user._id, date, content);
-    // Keep vault readme.md in sync (fire-and-forget — errors are logged, not thrown)
-    upsertDailyLogReadme(user._id, date, content);
     return { success: true, entry };
   }
 
@@ -106,8 +104,6 @@ export async function action({ request }: ActionFunctionArgs) {
   const content = String(form.get("content") ?? "");
   if (!date || typeof content !== "string") return { error: "Invalid request" };
   const entry = await saveDailyLog(user._id, date, content);
-  // Keep vault readme.md in sync
-  upsertDailyLogReadme(user._id, date, content);
   return { success: true, entry };
 }
 

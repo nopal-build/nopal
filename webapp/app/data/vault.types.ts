@@ -24,6 +24,8 @@ export type FileRef = {
   size: number | null;
   /** Set when the file was uploaded from the Daily Log. */
   source?: "daily_log";
+  /** YYYY-MM-DD log date — only present when source === "daily_log". */
+  date?: string;
   created_at: string;
   updated_at: string;
 };
@@ -35,7 +37,9 @@ export type FileRef = {
 export function isFileRefLocked(file: FileRef): boolean {
   if (file.source !== "daily_log") return false;
   const today = new Date().toISOString().slice(0, 10);
-  return file.created_at.slice(0, 10) !== today;
+  // Prefer the explicit date field; fall back to created_at for older records.
+  const logDate = file.date ?? file.created_at.slice(0, 10);
+  return logDate !== today;
 }
 
 export type VaultFolder = {

@@ -6,6 +6,7 @@ import {
   deleteFileRef,
   computeMdUpdate,
 } from "../data/vault.server";
+import { cacheDailyLog, deleteDailyLogCache } from "../data/dailyLog.server";
 import { isFileRefLocked } from "../data/vault.types";
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -42,6 +43,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (request.method === "DELETE") {
     await deleteFileRef(fileId);
+    // Keep the daily_logs cache in sync
+    if (file.source === "daily_log" && file.date) {
+      await deleteDailyLogCache(file.human_id, file.date);
+    }
     return Response.json({ success: true });
   }
 
@@ -64,6 +69,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const updated = await updateFileRef(fileId, updates);
+    // Keep the daily_logs cache in sync when content changes
+    if (
+      file.source === "daily_log" &&
+      file.date &&
+      body.content !== undefined
+    ) {
+      await cacheDailyLog(
+        file.human_id,
+        file.date,
+        updates.content ?? body.content,
+      );
+    }
     return Response.json({ fileRef: updated });
   }
 

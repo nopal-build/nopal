@@ -17,7 +17,7 @@ import {
   type Human,
   type Role,
 } from "../data/humans.server";
-import { provisionNewUserVault } from "../data/vault.server";
+import { provisionNewUserVault } from "../data/dailyLog.server";
 import { Input } from "../components/Input";
 
 export async function loader({ request }: LoaderFunctionArgs) {
