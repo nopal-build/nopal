@@ -69,6 +69,8 @@
   font-size: 0.9375rem; /* 15 px – comfortable reading size  */
   line-height: 1.2;
   color: var(--purple);
+  overflow-x: hidden;
+  overflow-wrap: break-word;
 }
 
 /* ── Gutter indicators ───────────────────────────────────────────────────── *
@@ -162,6 +164,17 @@
   padding-left: 16px;
   color: var(--text-subtle);
   font-style: italic;
+}
+
+/* ── Paragraphs ─────────────────────────────────────────────────────────── */
+.mdxeditor [class*="_contentEditable_"] p,
+.mdxeditor [class*="_rootContentEditableWrapper_"] p {
+  margin-bottom: 1em;
+}
+
+.mdxeditor [class*="_contentEditable_"] p:last-child,
+.mdxeditor [class*="_rootContentEditableWrapper_"] p:last-child {
+  margin-bottom: 0;
 }
 
 /* ── List items ──────────────────────────────────────────────────────────── *
