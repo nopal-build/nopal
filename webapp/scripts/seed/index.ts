@@ -8,6 +8,7 @@ import { getDb } from "../../app/data/db.server";
 import { humansSeed } from "./tables/humans";
 import { dailyLogsSeed } from "./tables/dailyLogs";
 import { projectsSeed } from "./tables/projects";
+import { provisionNewUserVault } from "../../app/data/vault.server";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,6 +61,13 @@ async function runSeed() {
         await db.upsert(thing, data);
         console.log(`    ✓  ${table}:${id}`);
       }
+    }
+
+    // Provision the daily-logs vault folder + sample entry for every seeded human
+    console.log("\n  Provisioning vault for seeded humans…");
+    for (const human of humansSeed.records) {
+      await provisionNewUserVault(human.id);
+      console.log(`    ✓  vault provisioned for humans:${human.id}`);
     }
 
     console.log("\n✅  Seed complete.\n");

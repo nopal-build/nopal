@@ -17,6 +17,7 @@ import {
   type Human,
   type Role,
 } from "../data/humans.server";
+import { provisionNewUserVault } from "../data/vault.server";
 import { Input } from "../components/Input";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -44,6 +45,8 @@ export async function action({ request }: ActionFunctionArgs) {
             intent: "create",
           };
         }
+        // Seed the daily-logs folder + sample entry for the new user
+        await provisionNewUserVault(result._id);
         return { ok: true, error: null, intent: "create" };
       } catch (err) {
         console.error(err);

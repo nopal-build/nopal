@@ -5,6 +5,8 @@ type DailyLogSeed = SeedRecord<DailyLog>;
 
 export const dailyLogsSeed: SeedTable<DailyLog> = {
   table: "daily_logs",
+  records: [],
+  /**
   records: [
     // ── Gerald L (super_1) ─────────────────────────────────────────────────
     {
@@ -415,4 +417,5 @@ Still want proactive updates. Going to ask for a weekly check-in.`,
       updatedAt: "2026-04-21T21:00:00.000Z",
     },
   ] satisfies DailyLogSeed[],
+ */
 };
