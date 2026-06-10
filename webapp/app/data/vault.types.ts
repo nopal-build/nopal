@@ -33,13 +33,24 @@ export type FileRef = {
 /**
  * A daily-log file is read-only once the upload date is no longer today.
  * Safe to call on both client and server — no Node-only imports.
+ *
+ * The file's `date` field is the user's LOCAL date (YYYY-MM-DD), while
+ * Date.toISOString() always returns UTC. Users behind UTC would have their
+ * "today" entry look like yesterday in UTC, causing a spurious 403.
+ * We therefore allow a 1-day buffer: anything within 1 UTC day of now is
+ * considered unlocked, which safely covers every UTC±14 timezone offset.
  */
 export function isFileRefLocked(file: FileRef): boolean {
   if (file.source !== "daily_log") return false;
-  const today = new Date().toISOString().slice(0, 10);
   // Prefer the explicit date field; fall back to created_at for older records.
   const logDate = file.date ?? file.created_at.slice(0, 10);
-  return logDate !== today;
+  const utcNowMs = Date.now();
+  const logMs = new Date(logDate + "T00:00:00Z").getTime();
+  const diffDays = (utcNowMs - logMs) / (1000 * 60 * 60 * 24);
+  // Locked only when the log date is more than 2 full UTC days in the past.
+  // A UTC-12 user's "today" entry sits up to 1.5 UTC days behind midnight,
+  // so 2 days covers every real-world timezone offset with a safe margin.
+  return diffDays > 2;
 }
 
 export type VaultFolder = {

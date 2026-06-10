@@ -26,7 +26,6 @@ import projectStyles from "../styles/project.css?url";
 
 // Lazy-load the MDX editor — client only, never runs on the server.
 const MdxEditorClient = lazy(() => import("../components/MdxEditorClient"));
-import type { EditorHandle } from "../components/MdxEditorClient";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: projectStyles },
@@ -265,67 +264,9 @@ function TodayLogEntry({
   onChange: (v: string) => void;
 }) {
   const [isClient, setIsClient] = useState(false);
-  const contentRef = useRef(content);
-  const editorHandleRef = useRef<EditorHandle | null>(null);
-
-  const handleEditorReady = useCallback((handle: EditorHandle) => {
-    editorHandleRef.current = handle;
-  }, []);
 
   useEffect(() => {
     setIsClient(true);
-  }, []);
-
-  // Keep contentRef in sync so the blur handler always sees the latest value
-  useEffect(() => {
-    contentRef.current = content;
-  }, [content]);
-
-  // Page-level file drop → add to editor tray
-  useEffect(() => {
-    const onDragOver = (e: DragEvent) => {
-      if (
-        Array.from(e.dataTransfer?.items ?? []).some((i) => i.kind === "file")
-      ) {
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-      }
-    };
-    const onDrop = (e: DragEvent) => {
-      const files = Array.from(e.dataTransfer?.files ?? []);
-      if (!files.length) return;
-      e.preventDefault();
-      editorHandleRef.current?.addFiles(files);
-    };
-    document.addEventListener("dragover", onDragOver);
-    document.addEventListener("drop", onDrop);
-    return () => {
-      document.removeEventListener("dragover", onDragOver);
-      document.removeEventListener("drop", onDrop);
-    };
-  }, []);
-
-  // ── Upload helpers ────────────────────────────────────────────────────────
-
-  const uploadFile = useCallback(async (file: File): Promise<string> => {
-    // Upload via the server — avoids any browser→S3 CORS issues.
-    // The server handles S3 upload + vault registration in one request.
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("source", "daily_log");
-
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const err = (await res.json()) as { error?: string };
-      throw new Error(err.error ?? `Upload failed: ${res.status}`);
-    }
-
-    const { url } = (await res.json()) as { url: string };
-    return url;
   }, []);
 
   // Build "Today — Monday, November 15, 2024"
@@ -367,7 +308,7 @@ function TodayLogEntry({
       </div>
 
       <div className="mdx-editor-wrapper">
-        {isClient ? (
+        {isClient && date ? (
           <Suspense
             fallback={
               <div
@@ -386,8 +327,6 @@ function TodayLogEntry({
               key={date}
               markdown={content}
               onChange={onChange}
-              uploadFile={uploadFile}
-              onEditorReady={handleEditorReady}
             />
           </Suspense>
         ) : (

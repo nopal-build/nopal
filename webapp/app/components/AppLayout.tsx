@@ -41,7 +41,11 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 const navLinkStyle = ({ isActive }: { isActive: boolean }) =>
   ({
     ...(isActive
-      ? { color: "var(--purple)", background: "var(--farground)" }
+      ? {
+          color: "var(--purple)",
+          background: "var(--farground)",
+          paddingLeft: "8px",
+        }
       : {}),
     textDecoration: "none",
     transition: "background 150ms, color 150ms",

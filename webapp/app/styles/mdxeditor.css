@@ -669,45 +669,16 @@
   opacity: 0.82;
 }
 
-/* Dark-mode image grid – no extra overrides needed (inherits above) */
-
-/* ── Preview mode ─────────────────────────────────────────────────────────── *
- * Wrapper for the useMarkdown output.  Content styling comes from the        *
- * app-wide .uncooked-markdown rules in project.css.                          */
-
-.nopal-preview {
-  padding: 12px 16px 20px;
-  min-height: 80px;
-}
-
-/* ── Preview toggle bar ───────────────────────────────────────────────────── */
-
-.nopal-preview-toggle-bar {
+/* Actions slot — Save/Cancel or other contextual buttons rendered to the right
+ * of the add-files button. A hairline left border provides a visual separator. */
+.nopal-tray-actions {
   display: flex;
-  justify-content: center;
-  padding: 4px 0;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
 }
 
-.nopal-preview-toggle {
-  display: inline-block;
-  padding: 3px 12px;
-  font-size: 0.72rem;
-  font-family: ui-monospace, "SF Mono", monospace;
-  letter-spacing: 0.03em;
-  color: var(--text-subtle, #817186);
-  background: none;
-  border: 1px solid var(--midground, #ede4da);
-  border-radius: 12px;
-  cursor: pointer;
-  transition:
-    color 0.15s,
-    border-color 0.15s;
-}
-
-.nopal-preview-toggle:hover {
-  color: var(--purple-light, #a78bfa);
-  border-color: var(--purple-light, #a78bfa);
-}
+/* Dark-mode image grid – no extra overrides needed (inherits above) */
 
 /* ── Dark mode overrides ─────────────────────────────────────────────────── *
  * Mirrors the app's @media (prefers-color-scheme: dark) pattern.             */
@@ -880,8 +851,12 @@
 
   /* Tray – dark mode */
   .nopal-tray {
-    background: color-mix(in srgb, var(--midground, #2a2035) 80%, #000);
-    border-top-color: var(--foreground, #3a2f45);
+    background: var(--dark-midground);
+    border-top-color: var(--dark-foreground);
+  }
+
+  .nopal-tray-actions {
+    border-left-color: var(--dark-foreground);
   }
 
   .nopal-tray-item {
@@ -891,16 +866,5 @@
 
   .nopal-tray-item:hover:not(.nopal-tray-item--uploading) {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  }
-
-  /* Preview toggle – dark mode */
-  .nopal-preview-toggle {
-    border-color: var(--dark-midground, #2a2035);
-    color: var(--text-subtle-dark, #9a8ea8);
-  }
-
-  .nopal-preview-toggle:hover {
-    color: var(--moon, #c4c6fc);
-    border-color: var(--moon, #c4c6fc);
   }
 }

@@ -698,12 +698,10 @@ function FileCard({
 
 function MdEditorModal({
   file,
-  onClose,
-  onSave,
+  onDone,
 }: {
   file: FileRef;
-  onClose: () => void;
-  onSave: (content: string) => void;
+  onDone: (content: string) => void;
 }) {
   const [isClient, setIsClient] = useState(false);
   const contentRef = useRef(file.content ?? "");
@@ -712,6 +710,14 @@ function MdEditorModal({
   useEffect(() => {
     setIsClient(true);
   }, []);
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDone(contentRef.current);
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onDone]);
 
   const handleEditorReady = useCallback((handle: EditorHandle) => {
     editorHandleRef.current = handle;
@@ -737,8 +743,8 @@ function MdEditorModal({
   return (
     <div
       className="vault-modal-backdrop"
-      style={{ alignItems: "stretch", padding: "32px" }}
-      onClick={onClose}
+      style={{ alignItems: "stretch", padding: "16px 32px" }}
+      onClick={() => onDone(contentRef.current)}
     >
       <div
         className="vault-modal"
@@ -752,38 +758,19 @@ function MdEditorModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="vault-panel-header" style={{ padding: "14px 20px" }}>
+        <div className="vault-panel-header" style={{ padding: "10px 20px" }}>
           <span className="vault-modal-title" style={{ marginBottom: 0 }}>
             📝 {file.name}
           </span>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              onClick={() => {
-                onSave(contentRef.current);
-                onClose();
-              }}
-              className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
-            >
-              Save
-            </button>
-            <button
-              onClick={onClose}
-              className="btn-outline text-xs font-mono px-3 py-1.5 rounded"
-            >
-              Cancel
-            </button>
-          </div>
         </div>
 
         {/* Editor */}
         <div
-          className="mdx-editor-wrapper"
+          className="mdx-editor-wrapper vault-editor-container"
           style={{
             flex: 1,
-            overflow: "auto",
+            overflow: "hidden",
             borderRadius: 0,
-            border: "none",
-            borderTop: "1px solid var(--midground)",
           }}
         >
           {isClient ? (
@@ -807,6 +794,14 @@ function MdEditorModal({
                 onChange={handleChange}
                 uploadFile={uploadFile}
                 onEditorReady={handleEditorReady}
+                actions={
+                  <button
+                    onClick={() => onDone(contentRef.current)}
+                    className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
+                  >
+                    Done
+                  </button>
+                }
               />
             </Suspense>
           ) : (
@@ -1725,8 +1720,10 @@ export default function VaultPage() {
       {editMdFile && (
         <MdEditorModal
           file={editMdFile}
-          onClose={() => setEditMdFile(null)}
-          onSave={(content) => saveMdFile(editMdFile._id, content)}
+          onDone={(content) => {
+            saveMdFile(editMdFile._id, content);
+            setEditMdFile(null);
+          }}
         />
       )}
     </AppLayout>

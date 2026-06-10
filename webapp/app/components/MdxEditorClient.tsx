@@ -1,6 +1,6 @@
 import "@mdxeditor/editor/style.css";
 import "../styles/mdxeditor.css";
-import { buildDisplayMarkdown } from "../util/nopalMarkdown";
+
 import {
   MDXEditor,
   type MDXEditorMethods,
@@ -19,8 +19,8 @@ import {
   useState,
   useCallback,
   useMemo,
+  type ReactNode,
 } from "react";
-import { useMarkdown } from "../hooks/useMarkdown";
 
 const IMAGE_MIME = /^image\//i;
 const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)(\?.*)?$/i;
@@ -99,6 +99,7 @@ interface MdxEditorClientProps {
   onChange: (md: string) => void;
   uploadFile?: (file: File) => Promise<string>;
   onEditorReady?: (handle: EditorHandle) => void;
+  actions?: ReactNode;
 }
 
 // ── Document parsing / serialization ─────────────────────────────────────────
@@ -189,6 +190,7 @@ export default function MdxEditorClient({
   onChange,
   uploadFile,
   onEditorReady,
+  actions,
 }: MdxEditorClientProps) {
   const [initialState] = useState(() => {
     const { userContent, files } = parseDocument(markdown);
@@ -207,7 +209,6 @@ export default function MdxEditorClient({
     Array<{ fileIndex: number; y: number }>
   >([]);
   const [expandedGroupKey, setExpandedGroupKey] = useState<number | null>(null);
-  const [isPreview, setIsPreview] = useState(false);
 
   const nextIndexRef = useRef(initialState.nextIndex);
   const filesRef = useRef<FileEntry[]>(initialState.files);
@@ -381,7 +382,6 @@ export default function MdxEditorClient({
 
   // ── Chip position computation ───────────────────────────────────────────
   useLayoutEffect(() => {
-    if (isPreview) return; // positions are not needed in preview mode
     const containerEl = editorContainerRef.current;
     const bodyEl = editorBodyRef.current;
     const contentEl = bodyEl?.querySelector('[contenteditable="true"]');
@@ -413,7 +413,7 @@ export default function MdxEditorClient({
     });
 
     setChipPositions(positions);
-  }, [placements, editorText, isPreview]);
+  }, [placements, editorText]);
 
   // ── Derived state ───────────────────────────────────────────────────────
 
@@ -445,23 +445,6 @@ export default function MdxEditorClient({
     }
     return groups;
   }, [chipPositions]);
-
-  // ── Preview content ─────────────────────────────────────────────────────
-  /**
-   * Builds the full merged markdown string for the preview using the shared
-   * buildDisplayMarkdown utility — same logic used by PastLogEntry so both
-   * views are always consistent.
-   * When not in preview mode we return "" to avoid unnecessary work.
-   */
-  const previewMarkdown = useMemo(
-    () =>
-      isPreview ? buildDisplayMarkdown(editorText, placements, files) : "",
-    [isPreview, editorText, placements, files],
-  );
-
-  // useMarkdown must be called unconditionally (Rules of Hooks).
-  // When isPreview is false, previewMarkdown is "" so the hook is a no-op.
-  const previewElement = useMarkdown(previewMarkdown);
 
   // ── Handlers ────────────────────────────────────────────────────────────
 
@@ -615,11 +598,11 @@ export default function MdxEditorClient({
       ref={editorContainerRef}
       style={{ display: "flex", flexDirection: "column", position: "relative" }}
     >
-      {/* Editor — always mounted so state is preserved; hidden in preview */}
+      {/* Editor */}
       <div
         ref={editorBodyRef}
+        className="nopal-editor-body"
         onPaste={handlePaste}
-        style={{ display: isPreview ? "none" : undefined }}
       >
         <MDXEditor
           ref={editorRef}
@@ -637,80 +620,74 @@ export default function MdxEditorClient({
         />
       </div>
 
-      {/* Preview — rendered via useMarkdown, same as the rest of the app */}
-      {isPreview && <div className="nopal-preview">{previewElement}</div>}
+      {/* Placed-file chips */}
+      {chipGroups.map((group) => {
+        const isStack = group.chips.length > 1;
+        const isExpanded = expandedGroupKey === group.key;
 
-      {/* Placed-file chips (edit mode only) */}
-      {!isPreview &&
-        chipGroups.map((group) => {
-          const isStack = group.chips.length > 1;
-          const isExpanded = expandedGroupKey === group.key;
+        return group.chips.map((chip, i) => {
+          const file = files.find((f) => f.index === chip.fileIndex);
+          if (!file) return null;
 
-          return group.chips.map((chip, i) => {
-            const file = files.find((f) => f.index === chip.fileIndex);
-            if (!file) return null;
+          let chipY: number;
+          let chipZIndex: number;
 
-            let chipY: number;
-            let chipZIndex: number;
+          if (!isStack) {
+            chipY = chip.y;
+            chipZIndex = 10;
+          } else if (!isExpanded) {
+            chipY = group.baseY + i * 5;
+            chipZIndex = 10 + (group.chips.length - i);
+          } else {
+            const FAN_SPACING = 44;
+            const totalSpan = (group.chips.length - 1) * FAN_SPACING;
+            chipY = group.baseY - totalSpan / 2 + i * FAN_SPACING;
+            chipZIndex = 10 + i;
+          }
 
-            if (!isStack) {
-              chipY = chip.y;
-              chipZIndex = 10;
-            } else if (!isExpanded) {
-              chipY = group.baseY + i * 5;
-              chipZIndex = 10 + (group.chips.length - i);
-            } else {
-              const FAN_SPACING = 44;
-              const totalSpan = (group.chips.length - 1) * FAN_SPACING;
-              chipY = group.baseY - totalSpan / 2 + i * FAN_SPACING;
-              chipZIndex = 10 + i;
-            }
+          const isTopOfCollapsedStack = isStack && !isExpanded && i === 0;
 
-            const isTopOfCollapsedStack = isStack && !isExpanded && i === 0;
-
-            return (
-              <button
-                key={chip.fileIndex}
-                className={[
-                  "nopal-image-chip",
-                  isStack && !isExpanded ? "nopal-image-chip--stacked" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                style={{ top: chipY, zIndex: chipZIndex }}
-                draggable
-                onDragStart={(e) => handleChipDragStart(e, chip.fileIndex)}
-                onDragEnd={handleChipDragEnd}
-                onClick={() => {
-                  if (isStack && !isExpanded) {
-                    setExpandedGroupKey(group.key);
-                  } else if (isExpanded) {
-                    setExpandedGroupKey(null);
-                  }
-                }}
-                title={
-                  isStack && !isExpanded
-                    ? `${group.chips.length} items — click to expand`
-                    : `[${chip.fileIndex}] ${file.name} — drag to tray to remove`
+          return (
+            <button
+              key={chip.fileIndex}
+              className={[
+                "nopal-image-chip",
+                isStack && !isExpanded ? "nopal-image-chip--stacked" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              style={{ top: chipY, zIndex: chipZIndex }}
+              draggable
+              onDragStart={(e) => handleChipDragStart(e, chip.fileIndex)}
+              onDragEnd={handleChipDragEnd}
+              onClick={() => {
+                if (isStack && !isExpanded) {
+                  setExpandedGroupKey(group.key);
+                } else if (isExpanded) {
+                  setExpandedGroupKey(null);
                 }
-              >
-                {file.isImage && file.url ? (
-                  <img src={file.url} alt={file.name} />
-                ) : (
-                  <img src={FILE_ICON_URI} alt={file.name} />
-                )}
-                <span className="nopal-image-chip-label">
-                  [{chip.fileIndex}]
+              }}
+              title={
+                isStack && !isExpanded
+                  ? `${group.chips.length} items — click to expand`
+                  : `[${chip.fileIndex}] ${file.name} — drag to tray to remove`
+              }
+            >
+              {file.isImage && file.url ? (
+                <img src={file.url} alt={file.name} />
+              ) : (
+                <img src={FILE_ICON_URI} alt={file.name} />
+              )}
+              <span className="nopal-image-chip-label">[{chip.fileIndex}]</span>
+              {isTopOfCollapsedStack && (
+                <span className="nopal-image-chip-stack-badge">
+                  +{group.chips.length - 1}
                 </span>
-                {isTopOfCollapsedStack && (
-                  <span className="nopal-image-chip-stack-badge">
-                    +{group.chips.length - 1}
-                  </span>
-                )}
-              </button>
-            );
-          });
-        })}
+              )}
+            </button>
+          );
+        });
+      })}
 
       {/* ── Drop zones ─────────────────────────────────────────────────────
            "file" drag  → full-width overlay so the user can drop anywhere
@@ -721,7 +698,7 @@ export default function MdxEditorClient({
       ────────────────────────────────────────────────────────────────────── */}
 
       {/* FILE DRAG: full-width overlay */}
-      {!isPreview && dragType === "file" && (
+      {dragType === "file" && (
         <div
           onDragOver={handleDropLineDragOver}
           onDrop={handleDropLineDrop}
@@ -773,7 +750,7 @@ export default function MdxEditorClient({
       )}
 
       {/* CHIP DRAG: original narrow strip (preserves chip→tray removal) */}
-      {!isPreview && dragType === "chip" && (
+      {dragType === "chip" && (
         <>
           {/* Dashed guide from left edge to strip */}
           <div
@@ -834,102 +811,95 @@ export default function MdxEditorClient({
         </>
       )}
 
-      {/* Preview toggle button */}
-      <div className="nopal-preview-toggle-bar">
-        <button
-          className="nopal-preview-toggle"
-          onClick={() => setIsPreview((v) => !v)}
-        >
-          {isPreview ? "← edit" : "preview"}
-        </button>
-      </div>
-
-      {/* File tray (edit mode only) */}
-      {uploadFile && !isPreview && (
-        <div
-          className="nopal-tray"
-          onDragOver={handleTrayChipDragOver}
-          onDrop={handleTrayChipDrop}
-        >
-          {trayFiles.map((file) => (
-            <div
-              key={file.index}
-              className={[
-                "nopal-tray-item",
-                file.status === "uploading" ? "nopal-tray-item--uploading" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              draggable={file.status === "ready"}
-              onDragStart={
-                file.status === "ready"
-                  ? (e) => handleTrayDragStart(e, file.index)
-                  : undefined
-              }
-              onDragEnd={handleTrayDragEnd}
-              title={`[${file.index}] ${file.name}`}
-            >
-              {file.status === "uploading" ? (
-                <img
-                  src={TRAY_LOADING_URI}
-                  width={28}
-                  height={28}
-                  alt="uploading"
-                  draggable={false}
-                  style={{ display: "block" }}
-                />
-              ) : file.isImage && file.url ? (
-                <img
-                  src={file.url}
-                  alt={file.name}
-                  draggable={false}
-                  className="nopal-tray-item-thumb"
-                />
-              ) : (
-                <img
-                  src={TRAY_FILE_URI}
-                  width={28}
-                  height={28}
-                  alt={file.name}
-                  draggable={false}
-                  style={{ display: "block" }}
-                />
-              )}
-              <span className="nopal-tray-item-badge">[{file.index}]</span>
-            </div>
-          ))}
-
-          <button
-            className="nopal-tray-add"
-            onClick={() => fileInputRef.current?.click()}
-            title="Attach photos or files"
+      {/* Bottom tray */}
+      <div
+        className="nopal-tray"
+        onDragOver={handleTrayChipDragOver}
+        onDrop={handleTrayChipDrop}
+      >
+        {trayFiles.map((file) => (
+          <div
+            key={file.index}
+            className={[
+              "nopal-tray-item",
+              file.status === "uploading" ? "nopal-tray-item--uploading" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            draggable={file.status === "ready"}
+            onDragStart={
+              file.status === "ready"
+                ? (e) => handleTrayDragStart(e, file.index)
+                : undefined
+            }
+            onDragEnd={handleTrayDragEnd}
+            title={`[${file.index}] ${file.name}`}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
+            {file.status === "uploading" ? (
+              <img
+                src={TRAY_LOADING_URI}
+                width={28}
+                height={28}
+                alt="uploading"
+                draggable={false}
+                style={{ display: "block" }}
+              />
+            ) : file.isImage && file.url ? (
+              <img
+                src={file.url}
+                alt={file.name}
+                draggable={false}
+                className="nopal-tray-item-thumb"
+              />
+            ) : (
+              <img
+                src={TRAY_FILE_URI}
+                width={28}
+                height={28}
+                alt={file.name}
+                draggable={false}
+                style={{ display: "block" }}
+              />
+            )}
+            <span className="nopal-tray-item-badge">[{file.index}]</span>
+          </div>
+        ))}
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,.pdf,.h264"
-            multiple
-            style={{ display: "none" }}
-            onChange={handleFileSelect}
-          />
-        </div>
-      )}
+        {uploadFile && (
+          <>
+            <button
+              className="nopal-tray-add"
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach photos or files"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf,.h264"
+              multiple
+              style={{ display: "none" }}
+              onChange={handleFileSelect}
+            />
+          </>
+        )}
+
+        {actions && <div className="nopal-tray-actions">{actions}</div>}
+      </div>
     </div>
   );
 }

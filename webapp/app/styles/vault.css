@@ -449,6 +449,36 @@
   border-bottom: none;
 }
 
+/* ── Vault MD editor modal — scroll layout ───────────────────────────────── *
+ * Only the editor text area scrolls; the preview toggle and file tray are    *
+ * pinned to the bottom of the modal.                                         */
+.vault-editor-container {
+  display: flex;
+  flex-direction: column;
+  &.mdx-editor-wrapper {
+    border: 0;
+    border-top: 1px solid var(--foreground);
+    @media (prefers-color-scheme: dark) {
+      border-top: 1px solid var(--dark-foreground);
+    }
+  }
+}
+
+/* MdxEditorClient's root div (direct child of the container) */
+.vault-editor-container > div {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollable text area */
+.vault-editor-container .nopal-editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* MD editor modal textarea */
 .vault-md-textarea {
   flex: 1;
@@ -491,10 +521,10 @@
   flex-wrap: wrap;
   gap: 8px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--foreground);
+  /*border-bottom: 1px solid var(--foreground);
   @media (prefers-color-scheme: dark) {
     border-color: var(--dark-foreground);
-  }
+  }*/
 }
 
 /* Small toolbar button (+ New Folder, Upload, etc.) */
