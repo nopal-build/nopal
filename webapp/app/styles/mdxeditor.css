@@ -138,7 +138,6 @@
     font-weight: 700;
     color: black;
     letter-spacing: 1px;
-    margin-top: 82px;
   }
   h1:first-child {
     margin-top: 0;
@@ -147,7 +146,6 @@
     font-size: 28px;
     font-weight: 700;
     color: var(--purple-light);
-    margin-top: 82px;
   }
   h2:first-child {
     margin-top: 0;
@@ -156,7 +154,6 @@
     font-size: 22px;
     font-weight: 700;
     color: var(--purple-light);
-    margin-top: 41px;
   }
 
   /* ── Blockquote ──────────────────────────────────────────────────────────── */
@@ -368,6 +365,31 @@
   background: var(--farground);
   border: 1px solid var(--midground);
   box-shadow: 0 4px 16px rgba(63, 43, 70, 0.12);
+}
+
+/* ── Code block ─────────────────────────────────────────────────────────── */
+.mdxeditor [class*="_codeMirrorWrapper_"] {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  box-shadow: 0 0 2px 0px var(--pink);
+}
+.mdxeditor [class*="_codeMirrorWrapper_"] .cm-content {
+  padding-top: 10.25px;
+  padding-bottom: 10.25px;
+}
+
+.mdxeditor [class*="_codeMirrorWrapper_"] .cm-line {
+  line-height: 20.5px;
+}
+
+.mdxeditor [class*="_codeMirrorWrapper_"] .cm-gutterElement {
+  line-height: 20.5px;
+  color: var(--text-subtle);
+}
+.mdxeditor [class*="_codeMirrorWrapper_"] .cm-activeLineGutter {
+  /*.mdxeditor [class*="_codeMirrorWrapper_"] .cm-activeLine {*/
+  background-color: var(--yellow-light);
 }
 
 /* ── Image grid layout ───────────────────────────────────────────────────── *
