@@ -31,9 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const sharedFoldersWithOwner = sharedFolders.map((f) => ({
     ...f,
     ownerName:
-      ownerMap[f.human_id]?.name ??
-      ownerMap[f.human_id]?.email ??
-      "Unknown",
+      ownerMap[f.human_id]?.name ?? ownerMap[f.human_id]?.email ?? "Unknown",
     ownerHumanId: f.human_id,
   }));
 
@@ -65,39 +63,43 @@ export async function action({ request }: ActionFunctionArgs) {
     size?: number | null;
   };
 
-  const { name, s3_url, s3_key, content, content_type, folder_id, size } =
-    body;
+  const { name, s3_url, s3_key, content, content_type, folder_id, size } = body;
 
   if (!name || !content_type) {
     return Response.json(
       { error: "name and content_type are required" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  const isMd =
-    content_type === "text/markdown" || name.toLowerCase().endsWith(".md");
+  // .md and .csv files store their content inline (no S3 object).
+  const lowerName = name.toLowerCase();
+  const isInlineContent =
+    content_type === "text/markdown" ||
+    content_type === "text/csv" ||
+    lowerName.endsWith(".md") ||
+    lowerName.endsWith(".csv");
 
-  if (isMd && !content) {
+  if (isInlineContent && content === undefined) {
     return Response.json(
-      { error: "content is required for .md files" },
-      { status: 400 }
+      { error: "content is required for .md/.csv files" },
+      { status: 400 },
     );
   }
 
-  if (!isMd && !s3_url) {
+  if (!isInlineContent && !s3_url) {
     return Response.json(
-      { error: "s3_url is required for non-.md files" },
-      { status: 400 }
+      { error: "s3_url is required for non-text files" },
+      { status: 400 },
     );
   }
 
   const fileRef = await createFileRef({
     human_id: user._id,
     name,
-    s3_url: isMd ? null : s3_url,
-    s3_key: isMd ? null : s3_key,
-    content: isMd ? content : null,
+    s3_url: isInlineContent ? null : s3_url,
+    s3_key: isInlineContent ? null : s3_key,
+    content: isInlineContent ? content : null,
     content_type,
     folder_id: folder_id ?? null,
     size: size ?? null,

@@ -15,6 +15,7 @@ import {
   codeMirrorPlugin,
   realmPlugin,
   addComposerChild$,
+  addImportVisitor$,
 } from "@mdxeditor/editor";
 import {
   $createParagraphNode,
@@ -27,6 +28,12 @@ import {
 import { $isQuoteNode } from "@lexical/rich-text";
 import { $findMatchingParent } from "@lexical/utils";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { csvRefPlugin, CsvFieldsContext } from "./csvRefPlugin";
+import {
+  refPopoverPlugin,
+  RefPopoverContext,
+  type VaultRefItem,
+} from "./refPopoverPlugin";
 import {
   useRef,
   useEffect,
@@ -115,6 +122,20 @@ interface MdxEditorClientProps {
   uploadFile?: (file: File) => Promise<string>;
   onEditorReady?: (handle: EditorHandle) => void;
   actions?: ReactNode;
+  /**
+   * key → value data from a sibling CSV file (e.g. a project's project.csv).
+   * When provided, `[key]` references in the markdown render as inline,
+   * click-to-edit value chips.
+   */
+  csvFields?: Record<string, string>;
+  /** Called when a CSV value chip is edited inline. */
+  onCsvFieldChange?: (key: string, value: string) => void;
+  /**
+   * Vault items offered by the `[` reference popover (pages, photos, files).
+   * Together with csvFields these power the typeahead; either prop alone
+   * also activates it.
+   */
+  refItems?: VaultRefItem[];
 }
 
 // ── Document parsing / serialization ─────────────────────────────────────────
@@ -181,7 +202,13 @@ function buildUserContent(
   editorText: string,
   placements: ImagePlacement[],
 ): string {
-  const paras = editorText.split("\n\n").filter((p) => p.trim() !== "");
+  // Split and trim only trailing empty segments so that internal blank
+  // paragraphs (extra spacing between content) are preserved but trailing
+  // empty lines added by the editor cursor do not accumulate.
+  const allParas = editorText.split("\n\n");
+  let hi = allParas.length - 1;
+  while (hi >= 0 && allParas[hi].trim() === "") hi--;
+  const paras = hi >= 0 ? allParas.slice(0, hi + 1) : [];
   const result = [...paras];
 
   const sorted = [...placements].sort(
@@ -285,6 +312,48 @@ function NoChecklistSpacePlugin() {
   return null;
 }
 
+// ── Blank-line preservation plugin ─────────────────────────────────────────
+// remark's fromMarkdown discards extra blank lines between top-level blocks
+// (they are just separator whitespace in MDAST). We replace the default root
+// visitor with a higher-priority one that reads the position metadata emitted
+// by fromMarkdown and re-injects the correct number of empty Lexical
+// paragraphs between nodes wherever the original markdown had extra gaps.
+const blankLinesPlugin = realmPlugin({
+  init(realm) {
+    realm.pub(addImportVisitor$, {
+      testNode: "root",
+      priority: 10, // beats the built-in MdastRootVisitor (priority 0)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      visitNode({ mdastNode, lexicalParent, actions }: any) {
+        const children: any[] = mdastNode.children ?? [];
+        for (let i = 0; i < children.length; i++) {
+          // Visit this child by wrapping it in a one-item fake root so that
+          // visitChildren iterates just this node.
+          actions.visitChildren({ children: [children[i]] }, lexicalParent);
+
+          // Insert empty paragraphs for every extra blank line between this
+          // node and the next one. Standard paragraph separation uses a gap
+          // of 2 lines; each additional blank adds 2 more lines to the gap.
+          if (i < children.length - 1) {
+            const currEnd: number = children[i].position?.end?.line ?? 0;
+            const nextStart: number =
+              children[i + 1].position?.start?.line ?? 0;
+            if (currEnd > 0 && nextStart > 0) {
+              const extra = Math.max(
+                0,
+                Math.round((nextStart - currEnd - 2) / 2),
+              );
+              for (let j = 0; j < extra; j++) {
+                lexicalParent.append($createParagraphNode());
+              }
+            }
+          }
+        }
+      },
+    });
+  },
+});
+
 const noChecklistSpacePlugin = realmPlugin({
   init(realm) {
     realm.pub(addComposerChild$, NoChecklistSpacePlugin);
@@ -299,7 +368,14 @@ export default function MdxEditorClient({
   uploadFile,
   onEditorReady,
   actions,
+  csvFields,
+  onCsvFieldChange,
+  refItems,
 }: MdxEditorClientProps) {
+  // Whether CSV references / the reference popover are enabled is fixed at
+  // mount (the plugin list is static).
+  const [csvEnabled] = useState(csvFields != null);
+  const [popoverEnabled] = useState(csvFields != null || refItems != null);
   const [initialState] = useState(() => {
     const { userContent, files } = parseDocument(markdown);
     const { editorText, placements } = parseUserContent(userContent);
@@ -420,6 +496,35 @@ export default function MdxEditorClient({
   useEffect(() => {
     addFilesCoreRef.current = addFilesCore;
   }, [addFilesCore]);
+
+  // ── Embed an existing vault image (no upload — it already has a URL) ────
+  // Used by the `[` reference popover: registers the image in the file
+  // registry and places it at the given paragraph gap.
+  const embedImage = useCallback(
+    (item: VaultRefItem, afterParagraphIndex: number) => {
+      if (!item.url) return;
+      const index = nextIndexRef.current++;
+      setFiles((prev) => {
+        const updated: FileEntry[] = [
+          ...prev,
+          {
+            index,
+            url: item.url ?? null,
+            name: item.label,
+            isImage: true,
+            status: "ready" as const,
+          },
+        ];
+        filesRef.current = updated;
+        return updated;
+      });
+      setPlacements((prev) => [
+        ...prev,
+        { fileIndex: index, afterParagraphIndex },
+      ]);
+    },
+    [],
+  );
 
   // ── Expose imperative handle ────────────────────────────────────────────
   useEffect(() => {
@@ -614,7 +719,13 @@ export default function MdxEditorClient({
       const totalBlocks = contentEl ? contentEl.children.length : 0;
 
       const text = editorTextRef.current;
-      const paragraphs = text.split("\n\n").filter((p) => p.trim() !== "");
+      // Include empty segments so the index aligns with buildUserContent,
+      // which also keeps internal blank paragraphs.
+      const allTextParas = text.split("\n\n");
+      let lastNonEmpty = allTextParas.length - 1;
+      while (lastNonEmpty >= 0 && allTextParas[lastNonEmpty].trim() === "")
+        lastNonEmpty--;
+      const paragraphs = allTextParas.slice(0, lastNonEmpty + 1);
       const afterParagraphIndex =
         totalBlocks > 0
           ? Math.min(
@@ -676,6 +787,11 @@ export default function MdxEditorClient({
   );
 
   const handleUserContentChange = useCallback((newMd: string) => {
+    // Guard against async Lexical initialization callbacks that can fire
+    // before the component is committed (Placement flag still set on the
+    // fiber in concurrent mode). mountedRef becomes true in the first
+    // useEffect run, which is always post-commit.
+    if (!mountedRef.current) return;
     setEditorText(newMd);
   }, []);
 
@@ -701,123 +817,153 @@ export default function MdxEditorClient({
 
   // ── Render ──────────────────────────────────────────────────────────────
 
+  const csvContextValue = useMemo(
+    () => ({ fields: csvFields ?? {}, onChange: onCsvFieldChange }),
+    [csvFields, onCsvFieldChange],
+  );
+
+  const refPopoverContextValue = useMemo(
+    () => ({ items: refItems ?? [], embedImage }),
+    [refItems, embedImage],
+  );
+
+  // Memoised so MDXEditor doesn't recreate its Lexical instance on every
+  // parent re-render (e.g. when setChipPositions fires from useLayoutEffect).
+  const editorPlugins = useMemo(
+    () => [
+      headingsPlugin(),
+      listsPlugin(),
+      quotePlugin(),
+      thematicBreakPlugin(),
+      linkPlugin(),
+      linkDialogPlugin(),
+      codeBlockPlugin({ defaultCodeBlockLanguage: "" }),
+      codeMirrorPlugin({
+        codeBlockLanguages: {
+          "": "Plain text",
+          js: "JavaScript",
+          jsx: "JSX",
+          ts: "TypeScript",
+          tsx: "TSX",
+          html: "HTML",
+          css: "CSS",
+          json: "JSON",
+          md: "Markdown",
+          py: "Python",
+          sh: "Shell",
+          sql: "SQL",
+          yaml: "YAML",
+        },
+      }),
+      markdownShortcutPlugin(),
+      blankLinesPlugin(),
+      blockquoteEnterPlugin(),
+      noChecklistSpacePlugin(),
+      ...(csvEnabled ? [csvRefPlugin()] : []),
+      ...(popoverEnabled ? [refPopoverPlugin()] : []),
+    ],
+    // csvEnabled/popoverEnabled are fixed at mount (useState initialisers),
+    // so this memo effectively only runs once per component lifetime.
+    [csvEnabled, popoverEnabled],
+  );
+
   return (
-    <div
-      ref={editorContainerRef}
-      style={{ display: "flex", flexDirection: "column", position: "relative" }}
-    >
-      {/* Editor */}
-      <div
-        ref={editorBodyRef}
-        className="nopal-editor-body"
-        onPaste={handlePaste}
-      >
-        <MDXEditor
-          ref={editorRef}
-          markdown={initialState.editorText}
-          onChange={handleUserContentChange}
-          plugins={[
-            headingsPlugin(),
-            listsPlugin(),
-            quotePlugin(),
-            thematicBreakPlugin(),
-            linkPlugin(),
-            linkDialogPlugin(),
-            codeBlockPlugin({ defaultCodeBlockLanguage: "" }),
-            codeMirrorPlugin({
-              codeBlockLanguages: {
-                "": "Plain text",
-                js: "JavaScript",
-                jsx: "JSX",
-                ts: "TypeScript",
-                tsx: "TSX",
-                html: "HTML",
-                css: "CSS",
-                json: "JSON",
-                md: "Markdown",
-                py: "Python",
-                sh: "Shell",
-                sql: "SQL",
-                yaml: "YAML",
-              },
-            }),
-            markdownShortcutPlugin(),
-            blockquoteEnterPlugin(),
-            noChecklistSpacePlugin(),
-          ]}
-        />
-      </div>
+    <CsvFieldsContext.Provider value={csvContextValue}>
+      <RefPopoverContext.Provider value={refPopoverContextValue}>
+        <div
+          ref={editorContainerRef}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            position: "relative",
+          }}
+        >
+          {/* Editor */}
+          <div
+            ref={editorBodyRef}
+            className="nopal-editor-body"
+            onPaste={handlePaste}
+          >
+            <MDXEditor
+              ref={editorRef}
+              markdown={initialState.editorText}
+              onChange={handleUserContentChange}
+              plugins={editorPlugins}
+            />
+          </div>
 
-      {/* Placed-file chips */}
-      {chipGroups.map((group) => {
-        const isStack = group.chips.length > 1;
-        const isExpanded = expandedGroupKey === group.key;
+          {/* Placed-file chips */}
+          {chipGroups.map((group) => {
+            const isStack = group.chips.length > 1;
+            const isExpanded = expandedGroupKey === group.key;
 
-        return group.chips.map((chip, i) => {
-          const file = files.find((f) => f.index === chip.fileIndex);
-          if (!file) return null;
+            return group.chips.map((chip, i) => {
+              const file = files.find((f) => f.index === chip.fileIndex);
+              if (!file) return null;
 
-          let chipY: number;
-          let chipZIndex: number;
+              let chipY: number;
+              let chipZIndex: number;
 
-          if (!isStack) {
-            chipY = chip.y;
-            chipZIndex = 10;
-          } else if (!isExpanded) {
-            chipY = group.baseY + i * 5;
-            chipZIndex = 10 + (group.chips.length - i);
-          } else {
-            const FAN_SPACING = 44;
-            const totalSpan = (group.chips.length - 1) * FAN_SPACING;
-            chipY = group.baseY - totalSpan / 2 + i * FAN_SPACING;
-            chipZIndex = 10 + i;
-          }
-
-          const isTopOfCollapsedStack = isStack && !isExpanded && i === 0;
-
-          return (
-            <button
-              key={chip.fileIndex}
-              className={[
-                "nopal-image-chip",
-                isStack && !isExpanded ? "nopal-image-chip--stacked" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              style={{ top: chipY, zIndex: chipZIndex }}
-              draggable
-              onDragStart={(e) => handleChipDragStart(e, chip.fileIndex)}
-              onDragEnd={handleChipDragEnd}
-              onClick={() => {
-                if (isStack && !isExpanded) {
-                  setExpandedGroupKey(group.key);
-                } else if (isExpanded) {
-                  setExpandedGroupKey(null);
-                }
-              }}
-              title={
-                isStack && !isExpanded
-                  ? `${group.chips.length} items — click to expand`
-                  : `[${chip.fileIndex}] ${file.name} — drag to tray to remove`
+              if (!isStack) {
+                chipY = chip.y;
+                chipZIndex = 10;
+              } else if (!isExpanded) {
+                chipY = group.baseY + i * 5;
+                chipZIndex = 10 + (group.chips.length - i);
+              } else {
+                const FAN_SPACING = 44;
+                const totalSpan = (group.chips.length - 1) * FAN_SPACING;
+                chipY = group.baseY - totalSpan / 2 + i * FAN_SPACING;
+                chipZIndex = 10 + i;
               }
-            >
-              {file.isImage && file.url ? (
-                <img src={file.url} alt={file.name} />
-              ) : (
-                <img src={FILE_ICON_URI} alt={file.name} />
-              )}
-              <span className="nopal-image-chip-label">[{chip.fileIndex}]</span>
-              {isTopOfCollapsedStack && (
-                <span className="nopal-image-chip-stack-badge">
-                  +{group.chips.length - 1}
-                </span>
-              )}
-            </button>
-          );
-        });
-      })}
 
-      {/* ── Drop zones ─────────────────────────────────────────────────────
+              const isTopOfCollapsedStack = isStack && !isExpanded && i === 0;
+
+              return (
+                <button
+                  key={chip.fileIndex}
+                  className={[
+                    "nopal-image-chip",
+                    isStack && !isExpanded ? "nopal-image-chip--stacked" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  style={{ top: chipY, zIndex: chipZIndex }}
+                  draggable
+                  onDragStart={(e) => handleChipDragStart(e, chip.fileIndex)}
+                  onDragEnd={handleChipDragEnd}
+                  onClick={() => {
+                    if (isStack && !isExpanded) {
+                      setExpandedGroupKey(group.key);
+                    } else if (isExpanded) {
+                      setExpandedGroupKey(null);
+                    }
+                  }}
+                  title={
+                    isStack && !isExpanded
+                      ? `${group.chips.length} items — click to expand`
+                      : `[${chip.fileIndex}] ${file.name} — drag to tray to remove`
+                  }
+                >
+                  {file.isImage && file.url ? (
+                    <img src={file.url} alt={file.name} />
+                  ) : (
+                    <img src={FILE_ICON_URI} alt={file.name} />
+                  )}
+                  <span className="nopal-image-chip-label">
+                    [{chip.fileIndex}]
+                  </span>
+                  {isTopOfCollapsedStack && (
+                    <span className="nopal-image-chip-stack-badge">
+                      +{group.chips.length - 1}
+                    </span>
+                  )}
+                </button>
+              );
+            });
+          })}
+
+          {/* ── Drop zones ─────────────────────────────────────────────────────
            "file" drag  → full-width overlay so the user can drop anywhere
                           in the editor area (covers tray too, which is fine
                           since the user is dragging FROM the tray).
@@ -825,209 +971,213 @@ export default function MdxEditorClient({
                           so chips can still be dragged back to remove them.
       ────────────────────────────────────────────────────────────────────── */}
 
-      {/* FILE DRAG: full-width overlay */}
-      {dragType === "file" && (
-        <div
-          onDragOver={handleDropLineDragOver}
-          onDrop={handleDropLineDrop}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 40,
-            cursor: "copy",
-            background: "rgba(167, 139, 250, 0.06)",
-            borderRadius: "4px",
-            outline: "2px dashed rgba(167, 139, 250, 0.35)",
-            outlineOffset: "-2px",
-          }}
-        >
-          {/* Horizontal snap line */}
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: dotY,
-              height: 0,
-              borderTop: "2px solid rgba(167, 139, 250, 0.75)",
-              transform: "translateY(-50%)",
-              pointerEvents: "none",
-              transition: "top 0.06s ease",
-            }}
-          />
-          {/* Dot on the snap line */}
-          <div
-            style={{
-              position: "absolute",
-              left: "50%",
-              top: dotY,
-              width: "16px",
-              height: "16px",
-              borderRadius: "50%",
-              background: "var(--purple-light, #a78bfa)",
-              transform: "translate(-50%, -50%)",
-              boxShadow: "0 2px 8px rgba(63,43,70,0.4)",
-              pointerEvents: "none",
-              transition: "top 0.06s ease",
-            }}
-          />
-        </div>
-      )}
-
-      {/* CHIP DRAG: original narrow strip (preserves chip→tray removal) */}
-      {dragType === "chip" && (
-        <>
-          {/* Dashed guide from left edge to strip */}
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 48,
-              top: dotY,
-              height: 0,
-              borderTop: "1.5px dashed rgba(167, 139, 250, 0.5)",
-              transform: "translateY(-50%)",
-              pointerEvents: "none",
-              zIndex: 39,
-            }}
-          />
-          <div
-            onDragOver={handleDropLineDragOver}
-            onDrop={handleDropLineDrop}
-            style={{
-              position: "absolute",
-              top: 0,
-              right: 0,
-              bottom: 0,
-              width: "48px",
-              zIndex: 40,
-              cursor: "move",
-            }}
-          >
+          {/* FILE DRAG: full-width overlay */}
+          {dragType === "file" && (
             <div
+              onDragOver={handleDropLineDragOver}
+              onDrop={handleDropLineDrop}
               style={{
                 position: "absolute",
                 top: 0,
+                left: 0,
+                right: 0,
                 bottom: 0,
-                left: "50%",
-                width: "2px",
-                background: "var(--purple-light, #a78bfa)",
-                transform: "translateX(-50%)",
-                opacity: 0.8,
-                pointerEvents: "none",
+                zIndex: 40,
+                cursor: "copy",
+                background: "rgba(167, 139, 250, 0.06)",
+                borderRadius: "4px",
+                outline: "2px dashed rgba(167, 139, 250, 0.35)",
+                outlineOffset: "-2px",
               }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                left: "50%",
-                top: dotY,
-                width: "20px",
-                height: "20px",
-                borderRadius: "50%",
-                background: "var(--purple-light, #a78bfa)",
-                transform: "translate(-50%, -50%)",
-                boxShadow: "0 2px 10px rgba(63,43,70,0.45)",
-                pointerEvents: "none",
-                transition: "top 0.08s ease",
-              }}
-            />
-          </div>
-        </>
-      )}
-
-      {/* Bottom tray */}
-      <div
-        className="nopal-tray"
-        onDragOver={handleTrayChipDragOver}
-        onDrop={handleTrayChipDrop}
-      >
-        {trayFiles.map((file) => (
-          <div
-            key={file.index}
-            className={[
-              "nopal-tray-item",
-              file.status === "uploading" ? "nopal-tray-item--uploading" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            draggable={file.status === "ready"}
-            onDragStart={
-              file.status === "ready"
-                ? (e) => handleTrayDragStart(e, file.index)
-                : undefined
-            }
-            onDragEnd={handleTrayDragEnd}
-            title={`[${file.index}] ${file.name}`}
-          >
-            {file.status === "uploading" ? (
-              <img
-                src={TRAY_LOADING_URI}
-                width={28}
-                height={28}
-                alt="uploading"
-                draggable={false}
-                style={{ display: "block" }}
-              />
-            ) : file.isImage && file.url ? (
-              <img
-                src={file.url}
-                alt={file.name}
-                draggable={false}
-                className="nopal-tray-item-thumb"
-              />
-            ) : (
-              <img
-                src={TRAY_FILE_URI}
-                width={28}
-                height={28}
-                alt={file.name}
-                draggable={false}
-                style={{ display: "block" }}
-              />
-            )}
-            <span className="nopal-tray-item-badge">[{file.index}]</span>
-          </div>
-        ))}
-
-        {uploadFile && (
-          <>
-            <button
-              className="nopal-tray-add"
-              onClick={() => fileInputRef.current?.click()}
-              title="Attach photos or files"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,.pdf,.h264"
-              multiple
-              style={{ display: "none" }}
-              onChange={handleFileSelect}
-            />
-          </>
-        )}
+              {/* Horizontal snap line */}
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: dotY,
+                  height: 0,
+                  borderTop: "2px solid rgba(167, 139, 250, 0.75)",
+                  transform: "translateY(-50%)",
+                  pointerEvents: "none",
+                  transition: "top 0.06s ease",
+                }}
+              />
+              {/* Dot on the snap line */}
+              <div
+                style={{
+                  position: "absolute",
+                  left: "50%",
+                  top: dotY,
+                  width: "16px",
+                  height: "16px",
+                  borderRadius: "50%",
+                  background: "var(--purple-light, #a78bfa)",
+                  transform: "translate(-50%, -50%)",
+                  boxShadow: "0 2px 8px rgba(63,43,70,0.4)",
+                  pointerEvents: "none",
+                  transition: "top 0.06s ease",
+                }}
+              />
+            </div>
+          )}
 
-        {actions && <div className="nopal-tray-actions">{actions}</div>}
-      </div>
-    </div>
+          {/* CHIP DRAG: original narrow strip (preserves chip→tray removal) */}
+          {dragType === "chip" && (
+            <>
+              {/* Dashed guide from left edge to strip */}
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 48,
+                  top: dotY,
+                  height: 0,
+                  borderTop: "1.5px dashed rgba(167, 139, 250, 0.5)",
+                  transform: "translateY(-50%)",
+                  pointerEvents: "none",
+                  zIndex: 39,
+                }}
+              />
+              <div
+                onDragOver={handleDropLineDragOver}
+                onDrop={handleDropLineDrop}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  width: "48px",
+                  zIndex: 40,
+                  cursor: "move",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: "50%",
+                    width: "2px",
+                    background: "var(--purple-light, #a78bfa)",
+                    transform: "translateX(-50%)",
+                    opacity: 0.8,
+                    pointerEvents: "none",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "50%",
+                    top: dotY,
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "50%",
+                    background: "var(--purple-light, #a78bfa)",
+                    transform: "translate(-50%, -50%)",
+                    boxShadow: "0 2px 10px rgba(63,43,70,0.45)",
+                    pointerEvents: "none",
+                    transition: "top 0.08s ease",
+                  }}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Bottom tray */}
+          <div
+            className="nopal-tray"
+            onDragOver={handleTrayChipDragOver}
+            onDrop={handleTrayChipDrop}
+          >
+            {trayFiles.map((file) => (
+              <div
+                key={file.index}
+                className={[
+                  "nopal-tray-item",
+                  file.status === "uploading"
+                    ? "nopal-tray-item--uploading"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                draggable={file.status === "ready"}
+                onDragStart={
+                  file.status === "ready"
+                    ? (e) => handleTrayDragStart(e, file.index)
+                    : undefined
+                }
+                onDragEnd={handleTrayDragEnd}
+                title={`[${file.index}] ${file.name}`}
+              >
+                {file.status === "uploading" ? (
+                  <img
+                    src={TRAY_LOADING_URI}
+                    width={28}
+                    height={28}
+                    alt="uploading"
+                    draggable={false}
+                    style={{ display: "block" }}
+                  />
+                ) : file.isImage && file.url ? (
+                  <img
+                    src={file.url}
+                    alt={file.name}
+                    draggable={false}
+                    className="nopal-tray-item-thumb"
+                  />
+                ) : (
+                  <img
+                    src={TRAY_FILE_URI}
+                    width={28}
+                    height={28}
+                    alt={file.name}
+                    draggable={false}
+                    style={{ display: "block" }}
+                  />
+                )}
+                <span className="nopal-tray-item-badge">[{file.index}]</span>
+              </div>
+            ))}
+
+            {uploadFile && (
+              <>
+                <button
+                  className="nopal-tray-add"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Attach photos or files"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,.pdf,.h264"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={handleFileSelect}
+                />
+              </>
+            )}
+
+            {actions && <div className="nopal-tray-actions">{actions}</div>}
+          </div>
+        </div>
+      </RefPopoverContext.Provider>
+    </CsvFieldsContext.Provider>
   );
 }

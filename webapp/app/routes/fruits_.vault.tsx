@@ -29,6 +29,19 @@ import {
 } from "../data/vault.server";
 import { getHumans, getHumansById } from "../data/humans.server";
 import { AppLayout } from "../components/AppLayout";
+import type { VaultRefItem } from "../components/refPopoverPlugin";
+import {
+  PROJECTS_FOLDER_NAME,
+  PROJECT_CSV_NAME,
+  PROJECT_README_NAME,
+  defaultProjectCsv,
+  defaultProjectReadme,
+  parseCsvFields,
+  serializeCsvFields,
+  csvFieldsToRecord,
+  isCsvFileName,
+  type CsvField,
+} from "../util/projectCsv";
 import "../styles/vault.css";
 
 // Lazy-load the MDX editor — client only, never runs on the server.
@@ -112,6 +125,7 @@ function fileIcon(contentType: string): string {
   if (contentType.startsWith("image/")) return "🖼️";
   if (contentType === "application/pdf") return "📄";
   if (contentType === "text/markdown") return "📝";
+  if (contentType === "text/csv") return "📊";
   if (contentType.startsWith("video/")) return "🎬";
   return "📎";
 }
@@ -881,11 +895,19 @@ function FolderCard({
 
 function MdEditorModal({
   file,
+  csvFile,
+  refItems,
   onSave,
+  onSaveCsv,
   onClose,
 }: {
   file: FileRef;
+  /** Sibling project CSV file (e.g. project.csv) — enables `[key]` chips. */
+  csvFile?: FileRef | null;
+  /** Vault pages/files offered by the `[` reference popover. */
+  refItems?: VaultRefItem[];
   onSave: (content: string) => void;
+  onSaveCsv?: (content: string) => void;
   onClose: () => void;
 }) {
   const [isClient, setIsClient] = useState(false);
@@ -968,6 +990,27 @@ function MdEditorModal({
     return url;
   }, []);
 
+  // ── Project CSV fields (for `[key]` references in the markdown) ────────
+  const [csvFields, setCsvFields] = useState<CsvField[]>(() =>
+    csvFile ? parseCsvFields(csvFile.content ?? "") : [],
+  );
+  const csvFieldsRef = useRef(csvFields);
+
+  const csvRecord = useMemo(() => csvFieldsToRecord(csvFields), [csvFields]);
+
+  const handleCsvFieldChange = useCallback(
+    (key: string, value: string) => {
+      const prev = csvFieldsRef.current;
+      const next = prev.some((f) => f.key === key)
+        ? prev.map((f) => (f.key === key ? { ...f, value } : f))
+        : [...prev, { key, value }];
+      csvFieldsRef.current = next;
+      setCsvFields(next);
+      onSaveCsv?.(serializeCsvFields(next));
+    },
+    [onSaveCsv],
+  );
+
   return (
     <div
       className="vault-modal-backdrop"
@@ -1021,6 +1064,9 @@ function MdEditorModal({
                 markdown={file.content ?? ""}
                 onChange={handleChange}
                 uploadFile={uploadFile}
+                csvFields={csvFile ? csvRecord : undefined}
+                onCsvFieldChange={csvFile ? handleCsvFieldChange : undefined}
+                refItems={refItems}
                 actions={
                   <button
                     onClick={close}
@@ -1049,7 +1095,205 @@ function MdEditorModal({
   );
 }
 
-// ─── New Folder Input ─────────────────────────────────────────────────────────
+// ─── CSV Editor Modal ──────────────────────────────────────────────────────────────
+
+/**
+ * Simple two-column (name / value) table editor for project CSV files.
+ * Saves are debounced while typing and flushed on close.
+ */
+function CsvEditorModal({
+  file,
+  readOnly,
+  onSave,
+  onClose,
+}: {
+  file: FileRef;
+  readOnly: boolean;
+  onSave: (content: string) => void;
+  onClose: () => void;
+}) {
+  const [fields, setFields] = useState<CsvField[]>(() =>
+    parseCsvFields(file.content ?? ""),
+  );
+  const fieldsRef = useRef(fields);
+  const isDirtyRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleSave = useCallback(
+    (next: CsvField[]) => {
+      fieldsRef.current = next;
+      setFields(next);
+      if (readOnly) return;
+      isDirtyRef.current = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        onSave(serializeCsvFields(fieldsRef.current));
+        isDirtyRef.current = false;
+        debounceRef.current = null;
+      }, 400);
+    },
+    [onSave, readOnly],
+  );
+
+  const close = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (isDirtyRef.current && !readOnly) {
+      onSave(serializeCsvFields(fieldsRef.current));
+      isDirtyRef.current = false;
+    }
+    onClose();
+  }, [onSave, onClose, readOnly]);
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [close]);
+
+  // Cancel any pending debounce on unmount.
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
+
+  const updateField = (i: number, patch: Partial<CsvField>) => {
+    scheduleSave(
+      fieldsRef.current.map((f, idx) => (idx === i ? { ...f, ...patch } : f)),
+    );
+  };
+
+  const removeField = (i: number) => {
+    scheduleSave(fieldsRef.current.filter((_, idx) => idx !== i));
+  };
+
+  const addField = () => {
+    scheduleSave([...fieldsRef.current, { key: "", value: "" }]);
+  };
+
+  return (
+    <div className="vault-modal-backdrop" onClick={close}>
+      <div
+        className="vault-modal"
+        style={{ maxWidth: "560px" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="vault-modal-title">📊 {file.name}</div>
+
+        <p
+          className="text-xs font-mono"
+          style={{ color: "var(--text-subtle)", margin: "0 0 12px" }}
+        >
+          Reference any of these in the readme with <code>[name]</code> — e.g.{" "}
+          <code>[location]</code>.
+        </p>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px",
+            marginBottom: "14px",
+            maxHeight: "50vh",
+            overflowY: "auto",
+          }}
+        >
+          {/* Header row */}
+          <div
+            className="text-xs font-mono font-bold"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1.4fr 28px",
+              gap: "8px",
+              color: "var(--text-subtle)",
+            }}
+          >
+            <span>name</span>
+            <span>value</span>
+            <span />
+          </div>
+
+          {fields.map((field, i) => (
+            <div
+              key={i}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1.4fr 28px",
+                gap: "8px",
+                alignItems: "center",
+              }}
+            >
+              <input
+                value={field.key}
+                disabled={readOnly}
+                placeholder="e.g. location"
+                className="vault-inline-input font-mono text-xs"
+                onChange={(e) => updateField(i, { key: e.target.value })}
+              />
+              <input
+                value={field.value}
+                disabled={readOnly}
+                placeholder="value"
+                className="vault-inline-input font-mono text-xs"
+                onChange={(e) => updateField(i, { value: e.target.value })}
+              />
+              {!readOnly ? (
+                <button
+                  onClick={() => removeField(i)}
+                  title="Remove field"
+                  className="vault-action-btn vault-action-btn--danger"
+                >
+                  ✕
+                </button>
+              ) : (
+                <span />
+              )}
+            </div>
+          ))}
+
+          {fields.length === 0 && (
+            <div
+              className="text-xs font-mono"
+              style={{ color: "var(--text-subtle)", padding: "8px 0" }}
+            >
+              No fields yet.
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            justifyContent: "space-between",
+          }}
+        >
+          {!readOnly ? (
+            <button className="vault-toolbar-btn" onClick={addField}>
+              + Add field
+            </button>
+          ) : (
+            <span />
+          )}
+          <button
+            onClick={close}
+            className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── New Folder Input ─────────────────────────────────────────────────────────────
 
 function NewFolderInput({
   parentFolderId,
@@ -1213,8 +1457,14 @@ function UploadPlaceholderCard({
 }
 
 export default function VaultPage() {
-  const { myFiles, myFolders, sharedFolders, sharedFiles, allOtherHumans } =
-    useLoaderData<typeof loader>();
+  const {
+    user,
+    myFiles,
+    myFolders,
+    sharedFolders,
+    sharedFiles,
+    allOtherHumans,
+  } = useLoaderData<typeof loader>();
   const { revalidate } = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -1320,6 +1570,92 @@ export default function VaultPage() {
     const file = [...myFiles, ...sharedFiles].find((f) => f._id === fileParam);
     return file?.content_type === "text/markdown" ? (file ?? null) : null;
   }, [fileParam, myFiles, sharedFiles]);
+
+  // CSV files open in the table editor instead.
+  const editCsvFile = useMemo(() => {
+    if (!fileParam) return null;
+    const file = [...myFiles, ...sharedFiles].find((f) => f._id === fileParam);
+    return file && isCsvFileName(file.name, file.content_type) ? file : null;
+  }, [fileParam, myFiles, sharedFiles]);
+
+  // Sibling CSV for the markdown file being edited (project.csv preferred).
+  // Enables `[key]` value chips inside the readme editor.
+  const projectCsvFile = useMemo(() => {
+    if (!editMdFile) return null;
+    const siblings = [...myFiles, ...sharedFiles].filter(
+      (f) =>
+        f.folder_id === editMdFile.folder_id &&
+        f._id !== editMdFile._id &&
+        isCsvFileName(f.name, f.content_type),
+    );
+    return (
+      siblings.find((f) => f.name === PROJECT_CSV_NAME) ?? siblings[0] ?? null
+    );
+  }, [editMdFile, myFiles, sharedFiles]);
+
+  // Everything the `[` popover can reference: vault pages, photos and files,
+  // searchable by name + folder path (+ owner for shared items).
+  const refItems = useMemo<VaultRefItem[]>(() => {
+    if (!editMdFile) return [];
+
+    const folderById = new Map<string, VaultFolder>();
+    for (const f of [...myFolders, ...sharedFolders]) folderById.set(f._id, f);
+    const sharedById = new Map(sharedFolders.map((f) => [f._id, f]));
+
+    const folderPathOf = (folderId: string | null): string => {
+      const parts: string[] = [];
+      let current = folderId ? folderById.get(folderId) : undefined;
+      // Defensive depth cap in case of a parent_folder_id cycle
+      for (let depth = 0; current && depth < 20; depth++) {
+        parts.unshift(current.name);
+        current = current.parent_folder_id
+          ? folderById.get(current.parent_folder_id)
+          : undefined;
+      }
+      return parts.join("/");
+    };
+
+    const items: VaultRefItem[] = [];
+    for (const f of [...myFiles, ...sharedFiles]) {
+      if (f._id === editMdFile._id) continue;
+      // CSV fields are offered individually — skip the csv files themselves
+      if (isCsvFileName(f.name, f.content_type)) continue;
+
+      const shared = f.folder_id ? sharedById.get(f.folder_id) : undefined;
+      const path = folderPathOf(f.folder_id);
+      const detail = shared ? `${shared.ownerName} / ${path}` : path;
+
+      if (f.content_type === "text/markdown") {
+        const params = new URLSearchParams();
+        if (f.folder_id) params.set(shared ? "shared" : "folder", f.folder_id);
+        params.set("file", f._id);
+        items.push({
+          id: f._id,
+          label: f.name,
+          detail,
+          kind: "page",
+          href: `/fruits/vault?${params.toString()}`,
+        });
+      } else if (f.content_type.startsWith("image/") && f.s3_url) {
+        items.push({
+          id: f._id,
+          label: f.name,
+          detail,
+          kind: "image",
+          url: f.s3_url,
+        });
+      } else if (f.s3_url) {
+        items.push({
+          id: f._id,
+          label: f.name,
+          detail,
+          kind: "file",
+          href: f.s3_url,
+        });
+      }
+    }
+    return items;
+  }, [editMdFile, myFiles, sharedFiles, myFolders, sharedFolders]);
 
   const selectedFileId = fileParam ?? null;
 
@@ -1471,6 +1807,76 @@ export default function VaultPage() {
       body: JSON.stringify({ content }),
     });
     revalidate();
+  };
+
+  /**
+   * Scaffolds a new project:
+   *   projects/<name>/readme.md   — top-level reference (template)
+   *   projects/<name>/project.csv — key/value project info (template)
+   * Creates the top-level `projects` folder on first use, then navigates
+   * into the new project folder.
+   */
+  const createProject = async () => {
+    const name = window.prompt("Project name:");
+    if (!name?.trim()) return;
+    const projectName = name.trim();
+
+    // 1. Ensure the top-level projects/ folder exists
+    let projectsFolderId = myFolders.find(
+      (f) => !f.parent_folder_id && f.name === PROJECTS_FOLDER_NAME,
+    )?._id;
+    if (!projectsFolderId) {
+      const res = (await apiFetch("/api/vault/folders", {
+        method: "POST",
+        body: JSON.stringify({
+          name: PROJECTS_FOLDER_NAME,
+          parent_folder_id: null,
+        }),
+      })) as { folder: VaultFolder };
+      projectsFolderId = res.folder._id;
+    } else if (
+      myFolders.some(
+        (f) =>
+          f.parent_folder_id === projectsFolderId && f.name === projectName,
+      )
+    ) {
+      alert(`A project named "${projectName}" already exists.`);
+      return;
+    }
+
+    // 2. Create the project folder
+    const folderRes = (await apiFetch("/api/vault/folders", {
+      method: "POST",
+      body: JSON.stringify({
+        name: projectName,
+        parent_folder_id: projectsFolderId,
+      }),
+    })) as { folder: VaultFolder };
+
+    // 3. Seed readme.md + project.csv
+    await Promise.all([
+      apiFetch("/api/vault", {
+        method: "POST",
+        body: JSON.stringify({
+          name: PROJECT_README_NAME,
+          content: defaultProjectReadme(projectName),
+          content_type: "text/markdown",
+          folder_id: folderRes.folder._id,
+        }),
+      }),
+      apiFetch("/api/vault", {
+        method: "POST",
+        body: JSON.stringify({
+          name: PROJECT_CSV_NAME,
+          content: defaultProjectCsv(projectName),
+          content_type: "text/csv",
+          folder_id: folderRes.folder._id,
+        }),
+      }),
+    ]);
+
+    revalidate();
+    setSearchParams({ folder: folderRes.folder._id });
   };
 
   const createMdFile = async () => {
@@ -1954,6 +2360,9 @@ export default function VaultPage() {
                 <button className="vault-toolbar-btn" onClick={createMdFile}>
                   + New .md File
                 </button>
+                <button className="vault-toolbar-btn" onClick={createProject}>
+                  + New Project
+                </button>
                 <button
                   className="vault-toolbar-btn"
                   onClick={() => fileInputRef.current?.click()}
@@ -2107,7 +2516,23 @@ export default function VaultPage() {
       {editMdFile && (
         <MdEditorModal
           file={editMdFile}
+          csvFile={projectCsvFile}
+          refItems={refItems}
           onSave={(content) => saveMdFile(editMdFile._id, content)}
+          onSaveCsv={
+            projectCsvFile
+              ? (content) => saveMdFile(projectCsvFile._id, content)
+              : undefined
+          }
+          onClose={handleCloseEditor}
+        />
+      )}
+
+      {editCsvFile && (
+        <CsvEditorModal
+          file={editCsvFile}
+          readOnly={editCsvFile.human_id !== user._id}
+          onSave={(content) => saveMdFile(editCsvFile._id, content)}
           onClose={handleCloseEditor}
         />
       )}
