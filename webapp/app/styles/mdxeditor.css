@@ -214,12 +214,16 @@
   }
 
   /* second-level unordered — dash */
+  ul ul > li {
+    padding-left: 21px;
+  }
   ul
     ul
     > li:not([class*="_listItemChecked_"]):not(
       [class*="_listItemUnchecked_"]
     )::before {
     content: "–";
+    margin-left: 21px;
   }
 
   /* ── Task list (checklist) checkboxes ──────────────────────────────────── *
