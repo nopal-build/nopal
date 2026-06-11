@@ -1230,6 +1230,13 @@ export default function VaultPage() {
   }, []);
 
   const createFolder = async (name: string) => {
+    const duplicate = myFolders.some(
+      (f) => f.parent_folder_id === currentFolderId && f.name === name,
+    );
+    if (duplicate) {
+      alert(`A folder named "${name}" already exists here.`);
+      return;
+    }
     await apiFetch("/api/vault/folders", {
       method: "POST",
       body: JSON.stringify({ name, parent_folder_id: currentFolderId }),
@@ -1238,6 +1245,17 @@ export default function VaultPage() {
   };
 
   const renameFolder = async (folderId: string, name: string) => {
+    const folder = myFolders.find((f) => f._id === folderId);
+    const duplicate = myFolders.some(
+      (f) =>
+        f._id !== folderId &&
+        f.parent_folder_id === (folder?.parent_folder_id ?? null) &&
+        f.name === name,
+    );
+    if (duplicate) {
+      alert(`A folder named "${name}" already exists here.`);
+      return;
+    }
     await apiFetch(`/api/vault/folders/${folderId}`, {
       method: "PATCH",
       body: JSON.stringify({ name }),
@@ -1271,6 +1289,17 @@ export default function VaultPage() {
   };
 
   const renameFile = async (fileId: string, name: string) => {
+    const file = myFiles.find((f) => f._id === fileId);
+    const duplicate = myFiles.some(
+      (f) =>
+        f._id !== fileId &&
+        f.folder_id === (file?.folder_id ?? null) &&
+        f.name === name,
+    );
+    if (duplicate) {
+      alert(`A file named "${name}" already exists here.`);
+      return;
+    }
     await apiFetch(`/api/vault/${fileId}`, {
       method: "PATCH",
       body: JSON.stringify({ name }),
@@ -1306,6 +1335,13 @@ export default function VaultPage() {
     const fullName = name.trim().endsWith(".md")
       ? name.trim()
       : `${name.trim()}.md`;
+    const duplicate = myFiles.some(
+      (f) => f.folder_id === currentFolderId && f.name === fullName,
+    );
+    if (duplicate) {
+      alert(`A file named "${fullName}" already exists here.`);
+      return;
+    }
     await apiFetch("/api/vault", {
       method: "POST",
       body: JSON.stringify({
@@ -1523,7 +1559,16 @@ export default function VaultPage() {
 
   // Not memoized — always reads the live currentFolderId from the render scope
   // so the file lands in whichever folder the user currently has open.
-  const uploadFile = (file: File) => startUpload(file, currentFolderId);
+  const uploadFile = (file: File) => {
+    const duplicate = myFiles.some(
+      (f) => f.folder_id === currentFolderId && f.name === file.name,
+    );
+    if (duplicate) {
+      alert(`A file named "${file.name}" already exists here.`);
+      return;
+    }
+    startUpload(file, currentFolderId);
+  };
 
   // ─── Owner groupings for shared section ───────────────────────────────────
   const sharedByOwner = sharedFolders.reduce<
