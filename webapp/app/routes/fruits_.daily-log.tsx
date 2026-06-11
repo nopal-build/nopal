@@ -262,11 +262,13 @@ function TodayLogEntry({
   today,
   content,
   onChange,
+  onEditorMounted,
 }: {
   date: string;
   today: string;
   content: string;
   onChange: (v: string) => void;
+  onEditorMounted?: () => void;
 }) {
   const [isClient, setIsClient] = useState(false);
 
@@ -337,6 +339,9 @@ function TodayLogEntry({
               markdown={content}
               onChange={onChange}
               uploadFile={uploadFile}
+              onEditorReady={
+                onEditorMounted ? () => onEditorMounted() : undefined
+              }
             />
           </Suspense>
         ) : (
@@ -436,21 +441,34 @@ export default function DailyLogPage() {
     [today, scheduleSave],
   );
 
-  // ── Scroll "Today" into view once today resolves ────────────────────────
-  // Using block: "start" ensures the heading lands at the top of the
-  // viewport regardless of whether the page is taller or shorter than it.
+  // ── Scroll "Today" into view ────────────────────────────────────────────
+  //
+  // Two-pass scroll:
+  //  1. First pass fires when `today` resolves — jumps the page to the today
+  //     section immediately, even while the editor is still lazy-loading.
+  //  2. Correction pass fires once MdxEditorClient has mounted and the browser
+  //     has had one frame to lay out the full entry content. This corrects the
+  //     scroll position for long existing entries whose lazy-loaded editor
+  //     height was unknown at step 1.
 
   const todayRef = useRef<HTMLDivElement>(null);
-  const hasScrolledRef = useRef(false);
 
   useEffect(() => {
-    if (!today || hasScrolledRef.current) return;
-    hasScrolledRef.current = true;
+    if (!today) return;
     todayRef.current?.scrollIntoView({
       behavior: "instant" as ScrollBehavior,
       block: "start",
     });
   }, [today]); // fires when today transitions from "" to the real date
+
+  const handleEditorMounted = useCallback(() => {
+    requestAnimationFrame(() => {
+      todayRef.current?.scrollIntoView({
+        behavior: "instant" as ScrollBehavior,
+        block: "start",
+      });
+    });
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -477,6 +495,7 @@ export default function DailyLogPage() {
             today={today}
             content={todayContent}
             onChange={handleChange}
+            onEditorMounted={handleEditorMounted}
           />
         </div>
       </div>
