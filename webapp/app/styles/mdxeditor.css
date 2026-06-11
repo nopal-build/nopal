@@ -228,6 +228,8 @@
    * modes.                                                                   */
   :is([class*="_listItemUnchecked_"], [class*="_listItemChecked_"])::before {
     border-radius: 4px;
+    /* vertically center the 1rem checkbox within the 41px grid line */
+    top: calc((41px - 1rem) / 2);
   }
 
   /* unchecked — white box, chunky purple border */
@@ -255,7 +257,7 @@
     content: "";
     border: none;
     transform: none;
-    top: 0;
+    top: calc((41px - 1rem) / 2);
     left: 0;
     right: auto;
     width: 1rem;
@@ -630,6 +632,22 @@
 }
 
 /* Dark-mode image grid – no extra overrides needed (inherits above) */
+
+/* ── Sticky header bar for the today editor ─────────────────────────────── */
+.nopal-editor-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: white;
+  border-bottom: 1px solid var(--foreground);
+  padding: 10px 16px 10px 40px;
+  margin-bottom: 4px;
+
+  @media (prefers-color-scheme: dark) {
+    background: var(--purple);
+    border-bottom-color: var(--dark-foreground);
+  }
+}
 
 /* ── Read-only log entry content ────────────────────────────────────────── *
  * Applied to past daily-log entries rendered via useMarkdown.                *

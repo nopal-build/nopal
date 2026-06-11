@@ -304,16 +304,7 @@ function TodayLogEntry({
         marginBottom: "12px",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "12px",
-          marginBottom: "4px",
-          marginLeft: "40px",
-        }}
-      >
+      <div className="nopal-editor-sticky-header">
         <span
           className="purple-light-text"
           style={{
@@ -445,16 +436,19 @@ export default function DailyLogPage() {
     [today, scheduleSave],
   );
 
-  // ── Scroll to bottom once today resolves (past entries are now rendered) ──
+  // ── Scroll "Today" into view once today resolves ────────────────────────
+  // Using block: "start" ensures the heading lands at the top of the
+  // viewport regardless of whether the page is taller or shorter than it.
 
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const todayRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
 
   useEffect(() => {
     if (!today || hasScrolledRef.current) return;
     hasScrolledRef.current = true;
-    bottomRef.current?.scrollIntoView({
+    todayRef.current?.scrollIntoView({
       behavior: "instant" as ScrollBehavior,
+      block: "start",
     });
   }, [today]); // fires when today transitions from "" to the real date
 
@@ -476,16 +470,15 @@ export default function DailyLogPage() {
           <PastLogEntry key={entry.date} entry={entry} today={today} />
         ))}
 
-        {/* Today's editable entry */}
-        <TodayLogEntry
-          date={today}
-          today={today}
-          content={todayContent}
-          onChange={handleChange}
-        />
-
-        {/* Invisible anchor scrolled into view once today resolves */}
-        <div ref={bottomRef} />
+        {/* Today's editable entry — ref lets us scroll it to the top */}
+        <div ref={todayRef}>
+          <TodayLogEntry
+            date={today}
+            today={today}
+            content={todayContent}
+            onChange={handleChange}
+          />
+        </div>
       </div>
     </AppLayout>
   );
