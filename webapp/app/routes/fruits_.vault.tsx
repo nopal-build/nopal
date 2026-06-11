@@ -612,6 +612,35 @@ function FolderTreeItem({
 
 // ─── File Card ────────────────────────────────────────────────────────────────
 
+function ImageModal({
+  url,
+  name,
+  onClose,
+}: {
+  url: string;
+  name: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div className="vault-image-modal-backdrop" onClick={onClose}>
+      <img
+        src={url}
+        alt={name}
+        className="vault-image-modal-img"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
+}
+
 function FileCard({
   file,
   myFolders,
@@ -636,107 +665,132 @@ function FileCard({
   onEditMd: (file: FileRef) => void;
 }) {
   const isMd = file.content_type === "text/markdown";
+  const isImage = file.content_type.startsWith("image/");
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
-    <div
-      className={`vault-file-card${isSelected ? " vault-file-card--selected" : ""}`}
-      style={{ cursor: "pointer" }}
-      onClick={() => {
-        onSelect(file);
-        if (isMd) onEditMd(file);
-      }}
-    >
-      {/* Icon + name */}
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <span style={{ fontSize: "20px", flexShrink: 0 }}>
-          {fileIcon(file.content_type)}
-        </span>
-        <span
-          className="text-sm font-mono purple-light-text"
-          style={{
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            flex: 1,
-          }}
-          title={file.name}
-        >
-          {file.name}
-        </span>
-      </div>
-
-      {/* Meta */}
+    <>
+      {previewOpen && file.s3_url && (
+        <ImageModal
+          url={file.s3_url}
+          name={file.name}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
       <div
-        className="text-xs font-mono"
-        style={{
-          color: "var(--text-subtle)",
-          display: "flex",
-          gap: "10px",
-          flexWrap: "wrap",
+        className={`vault-file-card${isSelected ? " vault-file-card--selected" : ""}`}
+        style={{ cursor: "pointer" }}
+        onClick={() => {
+          onSelect(file);
+          if (isMd) onEditMd(file);
+          if (isImage && file.s3_url) setPreviewOpen(true);
         }}
       >
-        {file.size && <span>{formatSize(file.size)}</span>}
-        <span>{formatDate(file.created_at)}</span>
-        {isLocked && (
-          <span
-            title="Uploaded from Daily Log — read-only after today"
-            style={{ color: "var(--text-subtle)", opacity: 0.6 }}
-          >
-            🔒
+        {/* Image thumbnail */}
+        {isImage && file.s3_url && (
+          <img
+            src={file.s3_url}
+            alt={file.name}
+            className="vault-image-thumb"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPreviewOpen(true);
+            }}
+          />
+        )}
+
+        {/* Icon + name */}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "20px", flexShrink: 0 }}>
+            {fileIcon(file.content_type)}
           </span>
+          <span
+            className="text-sm font-mono purple-light-text"
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
+            }}
+            title={file.name}
+          >
+            {file.name}
+          </span>
+        </div>
+
+        {/* Meta */}
+        <div
+          className="text-xs font-mono"
+          style={{
+            color: "var(--text-subtle)",
+            display: "flex",
+            gap: "10px",
+            flexWrap: "wrap",
+          }}
+        >
+          {file.size && <span>{formatSize(file.size)}</span>}
+          <span>{formatDate(file.created_at)}</span>
+          {isLocked && (
+            <span
+              title="Uploaded from Daily Log — read-only after today"
+              style={{ color: "var(--text-subtle)", opacity: 0.6 }}
+            >
+              🔒
+            </span>
+          )}
+        </div>
+
+        {/* s3 link for non-md */}
+        {!isMd && file.s3_url && (
+          <a
+            href={file.s3_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs font-mono"
+            style={{ color: "var(--purple-light)", textDecoration: "none" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            Open ↗
+          </a>
+        )}
+
+        {/* Action buttons (hover) — hidden for locked daily-log files */}
+        {isOwned && !isLocked && (
+          <div className="vault-file-actions">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRename(file);
+              }}
+              title="Rename"
+              className="vault-action-btn"
+            >
+              ✏️
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onMove(file);
+              }}
+              title="Move"
+              className="vault-action-btn"
+            >
+              📂
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(file);
+              }}
+              title="Delete"
+              className="vault-action-btn vault-action-btn--danger"
+            >
+              🗑️
+            </button>
+          </div>
         )}
       </div>
-
-      {/* s3 link for non-md */}
-      {!isMd && file.s3_url && (
-        <a
-          href={file.s3_url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs font-mono"
-          style={{ color: "var(--purple-light)", textDecoration: "none" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          Open ↗
-        </a>
-      )}
-
-      {/* Action buttons (hover) — hidden for locked daily-log files */}
-      {isOwned && !isLocked && (
-        <div className="vault-file-actions">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRename(file);
-            }}
-            title="Rename"
-            className="vault-action-btn"
-          >
-            ✏️
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onMove(file);
-            }}
-            title="Move"
-            className="vault-action-btn"
-          >
-            📂
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(file);
-            }}
-            title="Delete"
-            className="vault-action-btn vault-action-btn--danger"
-          >
-            🗑️
-          </button>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
