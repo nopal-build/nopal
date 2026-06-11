@@ -652,13 +652,12 @@ function FileCard({
           {fileIcon(file.content_type)}
         </span>
         <span
-          className="text-sm font-mono"
+          className="text-sm font-mono purple-light-text"
           style={{
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
             flex: 1,
-            color: "var(--foreground)",
           }}
           title={file.name}
         >
@@ -742,6 +741,89 @@ function FileCard({
 }
 
 // ─── Markdown Editor Modal ────────────────────────────────────────────────────
+
+function FolderCard({
+  folder,
+  onSelect,
+  onRename,
+  onShare,
+  onDelete,
+}: {
+  folder: VaultFolder;
+  onSelect: (folder: VaultFolder) => void;
+  onRename: (folder: VaultFolder) => void;
+  onShare: (folder: VaultFolder) => void;
+  onDelete: (folder: VaultFolder) => void;
+}) {
+  return (
+    <div
+      className="vault-file-card"
+      style={{ cursor: "pointer" }}
+      onClick={() => onSelect(folder)}
+    >
+      {/* Icon + name */}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <span style={{ fontSize: "20px", flexShrink: 0 }}>
+          {folderIcon(folder.shared_with)}
+        </span>
+        <span
+          className="text-sm font-mono purple-light-text"
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+          }}
+          title={folder.name}
+        >
+          {folder.name}
+        </span>
+      </div>
+
+      {/* Meta */}
+      <div
+        className="text-xs font-mono"
+        style={{ color: "var(--text-subtle)", display: "flex", gap: "10px" }}
+      >
+        <span>{formatDate(folder.created_at)}</span>
+      </div>
+
+      {/* Action buttons */}
+      <div className="vault-file-actions">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRename(folder);
+          }}
+          title="Rename"
+          className="vault-action-btn"
+        >
+          ✏️
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onShare(folder);
+          }}
+          title="Share"
+          className="vault-action-btn"
+        >
+          👥
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(folder);
+          }}
+          title="Delete"
+          className="vault-action-btn vault-action-btn--danger"
+        >
+          🗑️
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function MdEditorModal({
   file,
@@ -1191,6 +1273,14 @@ export default function VaultPage() {
   const pendingForCurrentFolder = pendingUploads.filter(
     (p) => p.targetFolderId === currentFolderId,
   );
+
+  const visibleFolders: VaultFolder[] = (() => {
+    if (panel.kind === "my-root")
+      return myFolders.filter((f) => !f.parent_folder_id);
+    if (panel.kind === "my-folder")
+      return myFolders.filter((f) => f.parent_folder_id === panel.folderId);
+    return [];
+  })();
 
   const visibleFiles: FileRef[] = (() => {
     if (panel.kind === "my-root") return myFiles.filter((f) => !f.folder_id);
@@ -1833,7 +1923,9 @@ export default function VaultPage() {
           </div>
 
           {/* File grid */}
-          {visibleFiles.length === 0 && pendingForCurrentFolder.length === 0 ? (
+          {visibleFolders.length === 0 &&
+          visibleFiles.length === 0 &&
+          pendingForCurrentFolder.length === 0 ? (
             <div
               className="text-sm font-mono subtle-text"
               style={{ padding: "40px 0", textAlign: "center" }}
@@ -1850,6 +1942,36 @@ export default function VaultPage() {
                 gap: "12px",
               }}
             >
+              {/* Folders first */}
+              {visibleFolders.map((folder) =>
+                renamingFolderId === folder._id ? (
+                  <div
+                    key={folder._id}
+                    className="vault-file-card"
+                    style={{ borderColor: "var(--purple)" }}
+                  >
+                    <RenameInput
+                      initialValue={folder.name}
+                      onDone={(name) => {
+                        setRenamingFolderId(null);
+                        if (name) renameFolder(folder._id, name);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <FolderCard
+                    key={folder._id}
+                    folder={folder}
+                    onSelect={(f) =>
+                      handleSelectPanel({ kind: "my-folder", folderId: f._id })
+                    }
+                    onRename={(f) => setRenamingFolderId(f._id)}
+                    onShare={(f) => setShareFolder(f)}
+                    onDelete={(f) => deleteFolder(f._id)}
+                  />
+                ),
+              )}
+
               {/* In-progress and errored upload placeholders */}
               {pendingForCurrentFolder.map((upload) => (
                 <UploadPlaceholderCard
