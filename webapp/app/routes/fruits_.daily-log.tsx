@@ -23,12 +23,14 @@ import {
 import { useMarkdown } from "../hooks/useMarkdown";
 import { resolveNopalMarkdown } from "../util/nopalMarkdown";
 import projectStyles from "../styles/project.css?url";
+import mdxEditorStyles from "../styles/mdxeditor.css?url";
 
 // Lazy-load the MDX editor — client only, never runs on the server.
 const MdxEditorClient = lazy(() => import("../components/MdxEditorClient"));
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: projectStyles },
+  { rel: "stylesheet", href: mdxEditorStyles },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -140,7 +142,7 @@ function ExpandButton({
         background: "none",
         border: "none",
         cursor: "pointer",
-        padding: "6px 0 0 0",
+        padding: "6px 0 0 40px",
         fontFamily: "monospace",
         display: "block",
       }}
@@ -233,13 +235,16 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
       <div
         style={{
           fontFamily: "monospace",
-          fontSize: "1rem",
+          fontSize: "20px",
+          fontWeight: "100",
+          marginLeft: "40px",
           color: "var(--text-subtle)",
+          borderBottom: "1px solid var(--midground)",
         }}
       >
         {formatEntryDate(entry.date, today)}
       </div>
-      {expanded ? fullMd : previewMd}
+      <div className="log-entry-content">{expanded ? fullMd : previewMd}</div>
       {hasMore && (
         <ExpandButton
           expanded={expanded}
@@ -293,14 +298,14 @@ function TodayLogEntry({
           justifyContent: "space-between",
           gap: "12px",
           marginBottom: "4px",
+          marginLeft: "40px",
         }}
       >
         <span
           className="purple-light-text"
           style={{
             fontFamily: "monospace",
-            fontSize: "0.82rem",
-            fontWeight: "bold",
+            fontSize: "16px",
           }}
         >
           {heading}

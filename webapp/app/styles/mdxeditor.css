@@ -631,6 +631,202 @@
 
 /* Dark-mode image grid – no extra overrides needed (inherits above) */
 
+/* ── Read-only log entry content ────────────────────────────────────────── *
+ * Applied to past daily-log entries rendered via useMarkdown.                *
+ * Mirrors the editor's _contentEditable_ styles using standard HTML selectors */
+.log-entry-content {
+  padding: 8px 8px 16px 40px;
+  font-size: 1.2rem;
+  font-weight: 267;
+  line-height: 1.2;
+  letter-spacing: 0.5px;
+  color: var(--purple);
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  background-image: radial-gradient(var(--moon) 1px, transparent 0);
+  background-size: 41px 41px;
+  background-position: -22px -12px;
+
+  @media (prefers-color-scheme: dark) {
+    background-image: radial-gradient(var(--dark-midground) 1px, transparent 0);
+  }
+
+  :is(h1, h2, h3, blockquote) {
+    position: relative;
+  }
+
+  :is(h1, h2, h3, blockquote)::before {
+    position: absolute;
+    top: 4px;
+    left: -38px;
+    width: 32px;
+    text-align: right;
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-weight: 400;
+    color: var(--purple-light);
+    opacity: 0.4;
+    pointer-events: none;
+    user-select: none;
+    line-height: inherit;
+  }
+
+  h1::before {
+    content: "#";
+    font-size: 24px;
+  }
+  h2::before {
+    content: "##";
+    font-size: 17px;
+  }
+  h3::before {
+    content: "###";
+    font-size: 11px;
+  }
+
+  blockquote::before {
+    content: ">";
+    font-size: 15px;
+    padding-right: 3px;
+    line-height: 10px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    line-height: 41px;
+    padding: 0;
+  }
+  h1 {
+    font-size: 34px;
+    font-weight: 700;
+    color: black;
+    letter-spacing: 1px;
+    margin-top: 82px;
+  }
+  h1:first-child {
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--purple-light);
+    margin-top: 82px;
+  }
+  h2:first-child {
+    margin-top: 0;
+  }
+  h3 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--purple-light);
+    margin-top: 41px;
+  }
+
+  blockquote {
+    border-left: 3px solid var(--purple-light);
+    padding-left: 16px;
+    color: var(--text-subtle);
+    font-style: italic;
+    line-height: 41px;
+  }
+
+  p {
+    margin-bottom: 0;
+    line-height: 41px;
+  }
+  p:last-child {
+    margin-bottom: 0;
+  }
+
+  ul {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+    line-height: 41px;
+  }
+  ul > li {
+    position: relative;
+  }
+  ul > li::before {
+    content: "—";
+    position: absolute;
+    left: -18px;
+    font-size: 14px;
+    color: var(--purple-light);
+    pointer-events: none;
+    user-select: none;
+    line-height: inherit;
+  }
+  ul ul > li::before {
+    content: "–";
+  }
+
+  ol {
+    list-style: none;
+    padding-left: 0;
+    counter-reset: mdx-ol;
+    line-height: 41px;
+  }
+  ol > li {
+    position: relative;
+    counter-increment: mdx-ol;
+  }
+  ol > li::before {
+    content: counter(mdx-ol) ".";
+    position: absolute;
+    top: 2px;
+    left: -1.8em;
+    width: 1.5em;
+    text-align: right;
+    font-size: 0.78rem;
+    font-family: ui-monospace, "SF Mono", monospace;
+    color: var(--purple-light);
+    opacity: 0.55;
+    pointer-events: none;
+    user-select: none;
+    line-height: inherit;
+  }
+  ol ol {
+    counter-reset: mdx-ol-alpha;
+  }
+  ol ol > li {
+    counter-increment: mdx-ol-alpha;
+  }
+  ol ol > li::before {
+    content: counter(mdx-ol-alpha, lower-alpha) ".";
+  }
+
+  code {
+    background: var(--midground);
+    color: var(--purple);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 0.875em;
+    font-family: ui-monospace, "SF Mono", "Fira Code", "Fira Mono", monospace;
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid var(--midground);
+    margin: 1.5em 0;
+  }
+
+  a {
+    color: var(--purple-light);
+    text-decoration: underline;
+    text-decoration-color: color-mix(
+      in srgb,
+      var(--purple-light) 40%,
+      transparent
+    );
+    text-underline-offset: 2px;
+  }
+  a:hover {
+    color: var(--purple);
+    text-decoration-color: var(--purple);
+  }
+}
+
 /* ── Dark mode overrides ─────────────────────────────────────────────────── *
  * Mirrors the app's @media (prefers-color-scheme: dark) pattern.             */
 @media (prefers-color-scheme: dark) {
@@ -801,5 +997,44 @@
 
   .nopal-tray-item:hover:not(.nopal-tray-item--uploading) {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Read-only log entry content – dark mode */
+  .log-entry-content {
+    color: #ffffff;
+  }
+  .log-entry-content h1 {
+    color: #ffffff;
+  }
+  .log-entry-content h2,
+  .log-entry-content h3 {
+    color: var(--white);
+  }
+  .log-entry-content blockquote {
+    border-left-color: var(--pink);
+    color: var(--text-subtle-dark);
+  }
+  .log-entry-content code {
+    background: var(--dark-midground);
+    color: var(--pink);
+  }
+  .log-entry-content hr {
+    border-top-color: var(--dark-midground);
+  }
+  .log-entry-content a {
+    color: var(--pink);
+    text-decoration-color: color-mix(in srgb, var(--pink) 50%, transparent);
+  }
+  .log-entry-content a:hover {
+    color: #f0c0ff;
+    text-decoration-color: #f0c0ff;
+  }
+  .log-entry-content :is(h1, h2, h3, blockquote)::before,
+  .log-entry-content ul > li::before,
+  .log-entry-content ul ul > li::before,
+  .log-entry-content ol > li::before,
+  .log-entry-content ol ol > li::before {
+    color: var(--white);
+    opacity: 0.35;
   }
 }
