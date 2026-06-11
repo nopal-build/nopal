@@ -238,7 +238,7 @@
 
   /* unchecked — white box, chunky purple border */
   [class*="_listItemUnchecked_"]::before {
-    background-color: white;
+    background-color: transparent;
     border: 2.5px solid var(--purple-light);
   }
 
@@ -972,7 +972,6 @@
   .mdxeditor
     :is([class*="_contentEditable_"])
     [class*="_listItemUnchecked_"]::before {
-    background-color: var(--dark-farground);
     border: 2.5px solid var(--moon);
   }
 
