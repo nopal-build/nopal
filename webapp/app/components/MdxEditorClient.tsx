@@ -11,7 +11,20 @@ import {
   markdownShortcutPlugin,
   linkPlugin,
   linkDialogPlugin,
+  realmPlugin,
+  addComposerChild$,
 } from "@mdxeditor/editor";
+import {
+  $createParagraphNode,
+  $getSelection,
+  $isRangeSelection,
+  INSERT_PARAGRAPH_COMMAND,
+  COMMAND_PRIORITY_HIGH,
+  KEY_SPACE_COMMAND,
+} from "lexical";
+import { $isQuoteNode } from "@lexical/rich-text";
+import { $findMatchingParent } from "@lexical/utils";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   useRef,
   useEffect,
@@ -182,6 +195,99 @@ function buildUserContent(
 
   return result.join("\n\n");
 }
+
+// ── Blockquote Enter plugin ──────────────────────────────────────────────────
+// Lexical's QuoteNode.insertNewAfter() always exits the blockquote by creating
+// a ParagraphNode. We intercept INSERT_PARAGRAPH_COMMAND at high priority so:
+//   • Non-empty blockquote line → split and stay inside the blockquote.
+//   • Empty blockquote line    → replace with a paragraph (exit blockquote).
+
+function BlockquoteEnterPlugin() {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    return editor.registerCommand(
+      INSERT_PARAGRAPH_COMMAND,
+      () => {
+        const selection = $getSelection();
+        if (!$isRangeSelection(selection)) return false;
+
+        const anchorNode = selection.anchor.getNode();
+        const quoteNode = $findMatchingParent(anchorNode, $isQuoteNode);
+        if (!quoteNode) return false;
+
+        // Find the direct child of the QuoteNode that contains the cursor
+        // (typically a ParagraphNode — the <p> inside the <blockquote>).
+        const directChild = $findMatchingParent(
+          anchorNode,
+          (node) => node.getParent()?.getKey() === quoteNode.getKey(),
+        );
+
+        // Only intercept when that block is empty (double-Enter to exit).
+        // For non-empty blocks, return false so Lexical's default handler
+        // creates a new sibling ParagraphNode inside the QuoteNode.
+        if (directChild && directChild.getTextContent() === "") {
+          directChild.remove();
+          const paragraph = $createParagraphNode();
+          if (quoteNode.isEmpty()) {
+            quoteNode.replace(paragraph);
+          } else {
+            quoteNode.insertAfter(paragraph);
+          }
+          paragraph.selectStart();
+          return true;
+        }
+
+        return false;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+  }, [editor]);
+
+  return null;
+}
+
+const blockquoteEnterPlugin = realmPlugin({
+  init(realm) {
+    realm.pub(addComposerChild$, BlockquoteEnterPlugin);
+  },
+});
+
+// Prevent the space key from toggling checklist checkboxes.
+// @lexical/list registers KEY_SPACE_COMMAND at COMMAND_PRIORITY_LOW and
+// toggles the checkbox whenever a checklist <li> has DOM focus. Intercept
+// at higher priority and return focus to the editor so the user can type.
+function NoChecklistSpacePlugin() {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    return editor.registerCommand(
+      KEY_SPACE_COMMAND,
+      (_event) => {
+        const active = document.activeElement;
+        if (
+          active instanceof HTMLElement &&
+          active.tagName === "LI" &&
+          active.parentElement != null &&
+          (active.parentElement as any).__lexicalListType === "check"
+        ) {
+          editor.getRootElement()?.focus();
+          return true;
+        }
+        return false;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+  }, [editor]);
+
+  return null;
+}
+
+const noChecklistSpacePlugin = realmPlugin({
+  init(realm) {
+    realm.pub(addComposerChild$, NoChecklistSpacePlugin);
+  },
+});
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -616,6 +722,8 @@ export default function MdxEditorClient({
             markdownShortcutPlugin(),
             linkPlugin(),
             linkDialogPlugin(),
+            blockquoteEnterPlugin(),
+            noChecklistSpacePlugin(),
           ]}
         />
       </div>
