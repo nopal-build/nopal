@@ -22,13 +22,14 @@ dev:
 	@echo ""
 
 ## Seed the running database with default namespaces, databases, and users.
-seed:
+## Depends on migrate so the tables exist before data is inserted.
+seed: migrate
 	cat db/seed.surql | docker compose exec -T db /surreal sql \
 		--endpoint http://localhost:8080 \
 		--user $(SURREAL_USER) \
 		--pass $(SURREAL_PASS) \
 		--pretty
-	cd webapp && npm run seed:data
+	cd webapp && DATABASE_USERNAME=$(SURREAL_USER) DATABASE_PASSWORD=$(SURREAL_PASS) npm run seed:data
 	@echo ""
 	@echo "  DB users:"
 	@echo "    root   user: $$SURREAL_USER        pass: $$SURREAL_PASS"
