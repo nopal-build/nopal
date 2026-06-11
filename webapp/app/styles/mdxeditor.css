@@ -62,9 +62,8 @@
 }
 
 /* ── Content / editable area ─────────────────────────────────────────────── */
-.mdxeditor [class*="_contentEditable_"],
-.mdxeditor [class*="_rootContentEditableWrapper_"] {
-  padding: 8px;
+.mdxeditor [class*="_contentEditable_"] {
+  padding: 8px 8px 167px 40px;
   min-height: 260px;
   font-size: 1.2rem; /* 15 px – comfortable reading size  */
   font-weight: 267;
@@ -81,310 +80,266 @@
  * Uses ::before on a position:relative ancestor so it never interferes with  *
  * cursor placement or text selection inside the editable area.               */
 
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  :is(h1, h2, h3, blockquote) {
-  position: relative;
-}
-
-/* shared ::before layout */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  :is(h1, h2, h3, blockquote)::before {
-  position: absolute;
-  top: 4px;
-  left: -38px;
-  width: 32px;
-  text-align: right;
-  font-family: ui-monospace, "SF Mono", monospace;
-  font-weight: 400;
-  color: var(--purple-light);
-  opacity: 0.4;
-  pointer-events: none;
-  user-select: none;
-  line-height: inherit;
-}
-
-/* specific labels */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  h1::before {
-  content: "#";
-  font-size: 1em;
-}
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  h2::before {
-  content: "##";
-  font-size: 0.8rem;
-}
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  h3::before {
-  content: "###";
-  font-size: 0.7rem;
-}
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  blockquote::before {
-  content: ">";
-  font-size: 0.9rem;
-}
-
-/* ── Headings inside the editor ──────────────────────────────────────────── */
-.mdxeditor [class*="_contentEditable_"] h1,
-.mdxeditor [class*="_rootContentEditableWrapper_"] h1 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: black;
-  letter-spacing: 1px;
-  margin-bottom: 0.4em;
-  padding-bottom: 0.1em;
-  border-bottom: 2px dotted var(--midground);
+/* shared ::before layout + specific labels */
+.mdxeditor :is([class*="_contentEditable_"]) {
+  background-image: radial-gradient(var(--moon) 1px, transparent 0);
+  background-size: 41px 41px;
+  background-position: -22px -12px;
   @media (prefers-color-scheme: dark) {
-    border-bottom: 2px dotted var(--dark-midground);
+    background-image: radial-gradient(var(--dark-midground) 1px, transparent 0);
   }
-}
 
-.mdxeditor [class*="_contentEditable_"] h2,
-.mdxeditor [class*="_rootContentEditableWrapper_"] h2 {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--purple-light);
-  margin-top: 1.1em;
-  margin-bottom: 0.35em;
-}
+  :is(h1, h2, h3, blockquote) {
+    position: relative;
+  }
+  :is(h1, h2, h3, blockquote)::before {
+    position: absolute;
+    top: 4px;
+    left: -38px;
+    width: 32px;
+    text-align: right;
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-weight: 400;
+    color: var(--purple-light);
+    opacity: 0.4;
+    pointer-events: none;
+    user-select: none;
+    line-height: inherit;
+  }
 
-.mdxeditor [class*="_contentEditable_"] h3,
-.mdxeditor [class*="_rootContentEditableWrapper_"] h3 {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--purple-light);
-  margin-top: 1em;
-  margin-bottom: 0.3em;
-}
+  h1::before {
+    content: "#";
+    font-size: 24px;
+  }
+  h2::before {
+    content: "##";
+    font-size: 17px;
+  }
+  h3::before {
+    content: "###";
+    font-size: 11px;
+  }
+  blockquote::before {
+    content: ">";
+    font-size: 15px;
+    padding-right: 3px;
+    line-height: 10px;
+  }
 
-/* ── Blockquote ──────────────────────────────────────────────────────────── */
-.mdxeditor [class*="_contentEditable_"] blockquote,
-.mdxeditor [class*="_rootContentEditableWrapper_"] blockquote {
-  border-left: 3px solid var(--purple-light);
-  padding-left: 16px;
-  color: var(--text-subtle);
-  font-style: italic;
-}
+  /* ── Headings inside the editor ──────────────────────────────────────────── */
+  h1,
+  h2,
+  h3 {
+    line-height: 41px;
+    padding: 0;
+  }
+  h1 {
+    font-size: 34px;
+    font-weight: 700;
+    color: black;
+    letter-spacing: 1px;
+    margin-top: 82px;
+  }
+  h1:first-child {
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--purple-light);
+    margin-top: 82px;
+  }
+  h2:first-child {
+    margin-top: 0;
+  }
+  h3 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--purple-light);
+    margin-top: 41px;
+  }
 
-/* ── Paragraphs ─────────────────────────────────────────────────────────── */
-.mdxeditor [class*="_contentEditable_"] p,
-.mdxeditor [class*="_rootContentEditableWrapper_"] p {
-  margin-bottom: 1em;
-}
+  /* ── Blockquote ──────────────────────────────────────────────────────────── */
+  blockquote {
+    border-left: 3px solid var(--purple-light);
+    padding-left: 16px;
+    color: var(--text-subtle);
+    font-style: italic;
+    line-height: 41px;
+  }
 
-.mdxeditor [class*="_contentEditable_"] p:last-child,
-.mdxeditor [class*="_rootContentEditableWrapper_"] p:last-child {
-  margin-bottom: 0;
-}
+  /* ── Paragraphs ─────────────────────────────────────────────────────────── */
+  p {
+    margin-bottom: 0;
+    line-height: 41px;
+  }
+  p:last-child {
+    margin-bottom: 0;
+  }
 
-/* ── List items ──────────────────────────────────────────────────────────── *
- * Remove native list markers and replace with styled ::before indicators.   *
- * Nested items (_nestedListItem_*) already have display:none on ::before    *
- * from Lexical's own CSS; our higher-specificity rule replaces that with a  *
- * consistent bullet, keeping the visual language uniform at every depth.    */
+  /* ── List items ──────────────────────────────────────────────────────────── *
+  * Remove native list markers and replace with styled ::before indicators.   *
+  * Nested items (_nestedListItem_*) already have display:none on ::before    *
+  * from Lexical's own CSS; our higher-specificity rule replaces that with a  *
+  * consistent bullet, keeping the visual language uniform at every depth.    */
 
-/* unordered — bullet */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  [class*="_listitem_"] {
+    margin: 0;
+  }
+  /* unordered — bullet + task list checkboxes */
   ul {
-  list-style: none;
-  padding-left: 1em;
-}
+    list-style: none;
+    padding-left: 0px;
+    margin: 0;
+    line-height: 41px;
+  }
 
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
   ul
-  > li:not([class*="_listItemChecked_"]):not([class*="_listItemUnchecked_"]) {
-  position: relative;
-}
+    > li:not([class*="_listItemChecked_"]):not([class*="_listItemUnchecked_"]) {
+    position: relative;
+  }
 
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
   ul
-  > li:not([class*="_listItemChecked_"]):not(
-    [class*="_listItemUnchecked_"]
-  )::before {
-  content: "•";
-  position: absolute;
-  left: -1.2em;
-  font-size: 0.85em;
-  color: var(--purple-light);
-  opacity: 0.55;
-  pointer-events: none;
-  user-select: none;
-  line-height: inherit;
-}
+    > li:not([class*="_listItemChecked_"]):not(
+      [class*="_listItemUnchecked_"]
+    )::before {
+    content: "—";
+    position: absolute;
+    left: -18px;
+    font-size: 14px;
+    color: var(--purple-light);
+    pointer-events: none;
+    user-select: none;
+    line-height: inherit;
+  }
 
-/* second-level unordered — dash */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  /* second-level unordered — dash */
   ul
-  ul
-  > li:not([class*="_listItemChecked_"]):not(
-    [class*="_listItemUnchecked_"]
-  )::before {
-  content: "–";
-}
+    ul
+    > li:not([class*="_listItemChecked_"]):not(
+      [class*="_listItemUnchecked_"]
+    )::before {
+    content: "–";
+  }
 
-/* ── Task list (checklist) checkboxes ────────────────────────────────────── *
- * The ::before pseudo-element on task items IS the checkbox box. We give it  *
- * a white background and a chunky border so it reads clearly in both modes.  */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  [class*="_listItemUnchecked_"]::before,
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  [class*="_listItemChecked_"]::before {
-  border-radius: 4px;
-}
+  /* ── Task list (checklist) checkboxes ──────────────────────────────────── *
+   * The ::before pseudo-element on task items IS the checkbox box. We give   *
+   * it a white background and a chunky border so it reads clearly in both    *
+   * modes.                                                                   */
+  :is([class*="_listItemUnchecked_"], [class*="_listItemChecked_"])::before {
+    border-radius: 4px;
+  }
 
-/* unchecked — white box, chunky purple border */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  /* unchecked — white box, chunky purple border */
   [class*="_listItemUnchecked_"]::before {
-  background-color: white;
-  border: 2.5px solid var(--purple-light);
-}
+    background-color: white;
+    border: 2.5px solid var(--purple-light);
+  }
 
-/* checked — solid purple fill, matching border */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  /* checked — solid purple fill, matching border */
   [class*="_listItemChecked_"]::before {
-  background-color: var(--purple);
-  border: 2.5px solid var(--purple);
-}
+    background-color: var(--purple);
+    border: 2.5px solid var(--purple);
+  }
 
-/* focus ring — --moon outline in light mode, replaces the default accentBgActive ring */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  [class*="_listItemUnchecked_"]:focus::before,
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  [class*="_listItemChecked_"]:focus::before {
-  box-shadow: none;
-}
+  /* focus ring — --moon outline in light mode, replaces the default accentBgActive ring */
+  :is(
+      [class*="_listItemUnchecked_"],
+      [class*="_listItemChecked_"]
+    ):focus::before {
+    box-shadow: none;
+  }
 
-/* checked — X mark instead of checkmark, sized to just fill the inner box */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  /* checked — X mark instead of checkmark, sized to just fill the inner box */
   [class*="_listItemChecked_"]::after {
-  content: "";
-  border: none;
-  transform: none;
-  top: 0;
-  left: 0;
-  right: auto;
-  width: 1rem;
-  height: 1rem;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='1.5' y1='1.5' x2='8.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='8.5' y1='1.5' x2='1.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-size: calc(100% - 5px);
-  background-repeat: no-repeat;
-  background-position: center;
-}
+    content: "";
+    border: none;
+    transform: none;
+    top: 0;
+    left: 0;
+    right: auto;
+    width: 1rem;
+    height: 1rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='1.5' y1='1.5' x2='8.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='8.5' y1='1.5' x2='1.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-size: calc(100% - 5px);
+    background-repeat: no-repeat;
+    background-position: center;
+  }
 
-/* ordered — number */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  /* ordered — number */
   ol {
-  list-style: none;
-  padding-left: 1em;
-  counter-reset: mdx-ol;
-}
+    list-style: none;
+    padding-left: 0;
+    counter-reset: mdx-ol;
+    line-height: 41px;
+  }
 
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  ol
-  > li {
-  position: relative;
-  counter-increment: mdx-ol;
-}
+  ol > li {
+    position: relative;
+    counter-increment: mdx-ol;
+  }
 
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  ol
-  > li::before {
-  content: counter(mdx-ol) ".";
-  position: absolute;
-  top: 2px;
-  left: -1.8em;
-  width: 1.5em;
-  text-align: right;
-  font-size: 0.78rem;
-  font-family: ui-monospace, "SF Mono", monospace;
-  color: var(--purple-light);
-  opacity: 0.55;
-  pointer-events: none;
-  user-select: none;
-  line-height: inherit;
-}
+  ol > li::before {
+    content: counter(mdx-ol) ".";
+    position: absolute;
+    top: 2px;
+    left: -1.8em;
+    width: 1.5em;
+    text-align: right;
+    font-size: 0.78rem;
+    font-family: ui-monospace, "SF Mono", monospace;
+    color: var(--purple-light);
+    opacity: 0.55;
+    pointer-events: none;
+    user-select: none;
+    line-height: inherit;
+  }
 
-/* second-level ordered — alphabetical (a. b. c.) */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  ol
-  ol {
-  counter-reset: mdx-ol-alpha;
-}
+  /* second-level ordered — alphabetical (a. b. c.) */
+  ol ol {
+    counter-reset: mdx-ol-alpha;
+  }
 
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  ol
-  ol
-  > li {
-  counter-increment: mdx-ol-alpha;
-}
+  ol ol > li {
+    counter-increment: mdx-ol-alpha;
+  }
 
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  ol
-  ol
-  > li::before {
-  content: counter(mdx-ol-alpha, lower-alpha) ".";
-}
+  ol ol > li::before {
+    content: counter(mdx-ol-alpha, lower-alpha) ".";
+  }
 
-/* ── Inline code ─────────────────────────────────────────────────────────── */
-.mdxeditor [class*="_contentEditable_"] code,
-.mdxeditor [class*="_rootContentEditableWrapper_"] code {
-  background: var(--midground);
-  color: var(--purple);
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-size: 0.875em;
-  font-family: var(--font-mono);
-}
+  /* ── Inline code ─────────────────────────────────────────────────────────── */
+  code {
+    background: var(--midground);
+    color: var(--purple);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 0.875em;
+    font-family: var(--font-mono);
+  }
 
-/* ── Horizontal rule ─────────────────────────────────────────────────────── */
-.mdxeditor [class*="_contentEditable_"] hr,
-.mdxeditor [class*="_rootContentEditableWrapper_"] hr {
-  border: none;
-  border-top: 1px solid var(--midground);
-  margin: 1.5em 0;
-}
+  /* ── Horizontal rule ─────────────────────────────────────────────────────── */
+  hr {
+    border: none;
+    border-top: 1px solid var(--midground);
+    margin: 1.5em 0;
+  }
 
-/* ── Links ───────────────────────────────────────────────────────────────── */
-.mdxeditor [class*="_contentEditable_"] a,
-.mdxeditor [class*="_rootContentEditableWrapper_"] a {
-  color: var(--purple-light);
-  text-decoration: underline;
-  text-decoration-color: color-mix(
-    in srgb,
-    var(--purple-light) 40%,
-    transparent
-  );
-  text-underline-offset: 2px;
-}
-
-.mdxeditor [class*="_contentEditable_"] a:hover,
-.mdxeditor [class*="_rootContentEditableWrapper_"] a:hover {
-  color: var(--purple);
-  text-decoration-color: var(--purple);
+  /* ── Links ───────────────────────────────────────────────────────────────── */
+  a {
+    color: var(--purple-light);
+    text-decoration: underline;
+    text-decoration-color: color-mix(
+      in srgb,
+      var(--purple-light) 40%,
+      transparent
+    );
+    text-underline-offset: 2px;
+  }
+  a:hover {
+    color: var(--purple);
+    text-decoration-color: var(--purple);
+  }
 }
 
 /* ── Select / dropdown popover ───────────────────────────────────────────── */
@@ -416,87 +371,63 @@
  *   • 1 image  → grows to fill the full width, natural aspect ratio          *
  *   • 2+ images → equal-width columns, square-cropped for a clean grid       */
 
-/* Paragraph containing at least one image wrapper → flex row */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+.mdxeditor :is([class*="_contentEditable_"]) {
+  /* Paragraph containing at least one image wrapper → flex row */
   p:has([class*="_imageWrapper_"]) {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: flex-start;
-}
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-start;
 
-/* Each image-containing span is a flex item with a min width */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  p:has([class*="_imageWrapper_"])
-  > span {
-  flex: 1 1 180px;
-  min-width: 0;
-}
+    /* Each image-containing span is a flex item with a min width */
+    > span {
+      flex: 1 1 180px;
+      min-width: 0;
+    }
 
-/* Image wrapper fills its span */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  p:has([class*="_imageWrapper_"])
-  [class*="_imageWrapper_"] {
-  display: block !important;
-  width: 100% !important;
-  max-width: 100% !important;
-}
+    /* Image wrapper fills its span */
+    [class*="_imageWrapper_"] {
+      display: block !important;
+      width: 100% !important;
+      max-width: 100% !important;
+    }
 
-/* img fills the wrapper */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  p:has([class*="_imageWrapper_"])
-  [class*="_imageWrapper_"]
-  img {
-  display: block;
-  width: 100%;
-}
+    /* img fills the wrapper */
+    [class*="_imageWrapper_"] img {
+      display: block;
+      width: 100%;
+    }
 
-/* Multiple images in the same paragraph → grid, no crop */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  p:has([class*="_imageWrapper_"])
-  > span:not(:only-child)
-  [class*="_imageWrapper_"]
-  img {
-  border-radius: 6px;
-}
+    /* Multiple images in the same paragraph → grid, no crop */
+    > span:not(:only-child) [class*="_imageWrapper_"] img {
+      border-radius: 6px;
+    }
 
-/* ── Broken-image placeholder: natural size, no crop ───────────────────── */
-/* img[src*="nopal-broken"] works because encodeURIComponent leaves hyphens  *
- * and ASCII letters untouched, so the id="nopal-broken" attribute value     *
- * remains a literal substring of the data URI.                              */
+    /* ── Broken-image placeholder: natural size, no crop ─────────────────── *
+     * img[src*="nopal-broken"] works because encodeURIComponent leaves       *
+     * hyphens and ASCII letters untouched, so the id="nopal-broken" value    *
+     * remains a literal substring of the data URI.                           */
 
-/* The flex span shouldn't stretch to fill available space */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  p:has([class*="_imageWrapper_"])
-  > span:has(img[src*="nopal-broken"]) {
-  flex: 0 0 auto;
-}
+    /* The flex span shouldn't stretch to fill available space */
+    > span:has(img[src*="nopal-broken"]) {
+      flex: 0 0 auto;
+    }
 
-/* The imageWrapper itself shouldn't force full width */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-  p:has([class*="_imageWrapper_"])
-  > span:has(img[src*="nopal-broken"])
-  [class*="_imageWrapper_"] {
-  width: auto !important;
-  max-width: 160px !important;
-}
+    /* The imageWrapper itself shouldn't force full width */
+    > span:has(img[src*="nopal-broken"]) [class*="_imageWrapper_"] {
+      width: auto !important;
+      max-width: 160px !important;
+    }
+  }
 
-/* The img: natural dimensions, no square-crop overrides */
-.mdxeditor
-  :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+  /* The img: natural dimensions, no square-crop overrides */
   img[src*="nopal-broken"] {
-  width: auto !important;
-  max-width: 160px !important;
-  aspect-ratio: auto !important;
-  object-fit: contain !important;
-  border-radius: 0 !important;
+    width: auto !important;
+    max-width: 160px !important;
+    aspect-ratio: auto !important;
+    object-fit: contain !important;
+    border-radius: 0 !important;
+  }
 }
 
 /* ── Nopal placed-file chips (outside the editor) ────────────────────────── *
@@ -733,49 +664,40 @@
     --accentTextContrast: var(--purple);
   }
 
-  .mdxeditor [class*="_contentEditable_"],
-  .mdxeditor [class*="_rootContentEditableWrapper_"] {
+  .mdxeditor [class*="_contentEditable_"] {
     background-color: var(--dark-farground);
     color: #ffffff;
   }
 
-  .mdxeditor [class*="_contentEditable_"] h1,
-  .mdxeditor [class*="_rootContentEditableWrapper_"] h1 {
+  .mdxeditor [class*="_contentEditable_"] h1 {
     color: #ffffff;
   }
 
   .mdxeditor [class*="_contentEditable_"] h2,
-  .mdxeditor [class*="_rootContentEditableWrapper_"] h2,
-  .mdxeditor [class*="_contentEditable_"] h3,
-  .mdxeditor [class*="_rootContentEditableWrapper_"] h3 {
+  .mdxeditor [class*="_contentEditable_"] h3 {
     color: var(--white);
   }
 
-  .mdxeditor [class*="_contentEditable_"] blockquote,
-  .mdxeditor [class*="_rootContentEditableWrapper_"] blockquote {
+  .mdxeditor [class*="_contentEditable_"] blockquote {
     border-left-color: var(--pink);
     color: var(--text-subtle-dark);
   }
 
-  .mdxeditor [class*="_contentEditable_"] code,
-  .mdxeditor [class*="_rootContentEditableWrapper_"] code {
+  .mdxeditor [class*="_contentEditable_"] code {
     background: var(--dark-midground);
     color: var(--pink);
   }
 
-  .mdxeditor [class*="_contentEditable_"] hr,
-  .mdxeditor [class*="_rootContentEditableWrapper_"] hr {
+  .mdxeditor [class*="_contentEditable_"] hr {
     border-top-color: var(--dark-midground);
   }
 
-  .mdxeditor [class*="_contentEditable_"] a,
-  .mdxeditor [class*="_rootContentEditableWrapper_"] a {
+  .mdxeditor [class*="_contentEditable_"] a {
     color: var(--pink);
     text-decoration-color: color-mix(in srgb, var(--pink) 50%, transparent);
   }
 
-  .mdxeditor [class*="_contentEditable_"] a:hover,
-  .mdxeditor [class*="_rootContentEditableWrapper_"] a:hover {
+  .mdxeditor [class*="_contentEditable_"] a:hover {
     color: #f0c0ff;
     text-decoration-color: #f0c0ff;
   }
@@ -807,51 +729,44 @@
 
   /* gutter + list indicators — softer in dark mode */
   .mdxeditor
-    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+    :is([class*="_contentEditable_"])
     :is(h1, h2, h3, blockquote)::before,
   .mdxeditor
-    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+    :is([class*="_contentEditable_"])
     ul
     > li:not([class*="_listItemChecked_"]):not(
       [class*="_listItemUnchecked_"]
     )::before,
   .mdxeditor
-    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+    :is([class*="_contentEditable_"])
     ul
     ul
     > li:not([class*="_listItemChecked_"]):not(
       [class*="_listItemUnchecked_"]
     )::before,
-  .mdxeditor
-    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-    ol
-    > li::before,
-  .mdxeditor
-    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
-    ol
-    ol
-    > li::before {
+  .mdxeditor :is([class*="_contentEditable_"]) ol > li::before,
+  .mdxeditor :is([class*="_contentEditable_"]) ol ol > li::before {
     color: var(--white);
     opacity: 0.35;
   }
 
   /* Task checkboxes — dark mode */
   .mdxeditor
-    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+    :is([class*="_contentEditable_"])
     [class*="_listItemUnchecked_"]::before {
     background-color: var(--dark-farground);
     border: 2.5px solid var(--moon);
   }
 
   .mdxeditor
-    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+    :is([class*="_contentEditable_"])
     [class*="_listItemChecked_"]::before {
     background-color: var(--moon);
     border: 2.5px solid var(--moon);
   }
 
   .mdxeditor
-    :is([class*="_contentEditable_"], [class*="_rootContentEditableWrapper_"])
+    :is([class*="_contentEditable_"])
     [class*="_listItemChecked_"]::after {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='1.5' y1='1.5' x2='8.5' y2='8.5' stroke='%233f2b46' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='8.5' y1='1.5' x2='1.5' y2='8.5' stroke='%233f2b46' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
   }
