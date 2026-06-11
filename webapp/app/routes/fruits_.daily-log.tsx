@@ -274,6 +274,19 @@ function TodayLogEntry({
     setIsClient(true);
   }, []);
 
+  const uploadFile = useCallback(async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("source", "daily-log");
+    const res = await fetch("/api/upload", { method: "POST", body: formData });
+    if (!res.ok) {
+      const err = (await res.json()) as { error?: string };
+      throw new Error(err.error ?? `Upload failed: ${res.status}`);
+    }
+    const { url } = (await res.json()) as { url: string };
+    return url;
+  }, []);
+
   // Build "Today — Monday, November 15, 2024"
   const [y, m, d] = date.split("-").map(Number);
   const fullDate = new Date(y, m - 1, d).toLocaleDateString("en-US", {
@@ -332,6 +345,7 @@ function TodayLogEntry({
               key={date}
               markdown={content}
               onChange={onChange}
+              uploadFile={uploadFile}
             />
           </Suspense>
         ) : (
