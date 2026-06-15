@@ -21,8 +21,6 @@ import {
   type DailyLog,
 } from "../data/dailyLog.server";
 
-import { useMarkdown } from "../hooks/useMarkdown";
-import { resolveNopalMarkdown } from "../util/nopalMarkdown";
 import projectStyles from "../styles/project.css?url";
 import mdxEditorStyles from "../styles/mdxeditor.css?url";
 
@@ -60,15 +58,6 @@ function formatEntryDate(dateStr: string, today: string): string {
     day: "numeric",
     year: "numeric",
   });
-}
-
-function getPreview(
-  content: string,
-  lineCount = 10,
-): { preview: string; hasMore: boolean } {
-  const lines = content.split("\n");
-  if (lines.length <= lineCount) return { preview: content, hasMore: false };
-  return { preview: lines.slice(0, lineCount).join("\n"), hasMore: true };
 }
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -118,134 +107,11 @@ export async function action({ request }: ActionFunctionArgs) {
   return { success: true, entry };
 }
 
-// ─── Static intro content ─────────────────────────────────────────────────────
-
-const INTRO_CONTENT = `Welcome to your daily log. This is a quiet place to capture what you're working on, what you're thinking about, and what's happening on your projects.
-
-I use mine to record:
-— Decisions and why I made them
-— Blockers I ran into
-— Things I want to follow up on
-— Small wins worth writing down
-
-The format is loose. Some days a few sentences, other days a few paragraphs. There's no wrong way to do it. The goal is just to have a record.
-
-Your log stays open all day based on your device's clock and saves automatically as you type. Scroll up to see past entries.
-
-— Gerald`;
-
-// ─── Shared expand button ─────────────────────────────────────────────────────
-
-function ExpandButton({
-  expanded,
-  onToggle,
-}: {
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      onClick={onToggle}
-      style={{
-        fontSize: "0.8rem",
-        color: "var(--purple-light)",
-        background: "none",
-        border: "none",
-        cursor: "pointer",
-        padding: "6px 0 0 40px",
-        fontFamily: "monospace",
-        display: "block",
-      }}
-    >
-      {expanded ? "Show less ↑" : "Show more ↓"}
-    </button>
-  );
-}
-
-// ─── AuthorIntroEntry ─────────────────────────────────────────────────────────
-
-function AuthorIntroEntry() {
-  const [expanded, setExpanded] = useState(false);
-  const { preview, hasMore } = getPreview(INTRO_CONTENT, 10);
-
-  return (
-    <div
-      style={{
-        padding: "20px 24px",
-        marginBottom: "80px",
-        background: "var(--farground)",
-        border: "1px dashed var(--midground)",
-        borderRadius: "8px",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          marginBottom: "12px",
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "monospace",
-            fontSize: "0.82rem",
-            color: "var(--text-subtle)",
-          }}
-        >
-          A note from the author
-        </span>
-        <span
-          style={{
-            background: "var(--yellow)",
-            color: "var(--purple)",
-            borderRadius: "4px",
-            padding: "2px 6px",
-            fontSize: "0.72rem",
-            fontFamily: "monospace",
-          }}
-        >
-          pinned
-        </span>
-      </div>
-      <pre
-        style={{
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          fontFamily: "inherit",
-          fontSize: "0.93rem",
-          lineHeight: "1.65",
-          margin: "0",
-          color: "var(--text-subtle)",
-        }}
-      >
-        {expanded ? INTRO_CONTENT : preview}
-      </pre>
-      {hasMore && (
-        <ExpandButton
-          expanded={expanded}
-          onToggle={() => setExpanded((e) => !e)}
-        />
-      )}
-    </div>
-  );
-}
-
 // ─── PastLogEntry ─────────────────────────────────────────────────────────────
 
 function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
-  const [expanded, setExpanded] = useState(false);
-  // Local content state so task changes are reflected immediately in the
-  // collapsed preview without waiting for a server round-trip.
   const [content, setContent] = useState(entry.content);
 
-  // Collapsed preview — lightweight showdown path, same as before
-  const resolved = resolveNopalMarkdown(content);
-  const { preview, hasMore } = getPreview(resolved, 10);
-  const previewMd = useMarkdown(preview);
-
-  // Debounced save: workable mode flag routes to workableSaveDailyLog
-  // on the server, which patches content without creating an md_version.
   const saveFetcher = useFetcher<typeof action>();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -267,11 +133,6 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
     [entry.date, saveFetcher],
   );
 
-  // Show the expand button when there is more content than the preview, OR
-  // when the entry has task items so the user can access interactive mode.
-  const hasTasks = /- \[[ xX]\]/.test(content);
-  const showExpand = hasMore || hasTasks;
-
   return (
     <div style={{ marginBottom: "80px" }}>
       <div
@@ -287,36 +148,22 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
         {formatEntryDate(entry.date, today)}
       </div>
 
-      {expanded ? (
-        // Workable mode: tasks are interactive, saves are debounced.
-        // MdxEditorWorkable is lazy-loaded so it only mounts when expanded.
-        <Suspense
-          fallback={
-            <div
-              style={{
-                fontFamily: "inherit",
-                fontSize: "0.95rem",
-                color: "var(--subtle-text)",
-                padding: "8px 40px",
-              }}
-            >
-              Loading…
-            </div>
-          }
-        >
-          <MdxEditorWorkable markdown={content} onChange={handleChange} />
-        </Suspense>
-      ) : (
-        // Collapsed preview — fast, static, showdown-rendered
-        <div className="log-entry-content">{previewMd}</div>
-      )}
-
-      {(showExpand || expanded) && (
-        <ExpandButton
-          expanded={expanded}
-          onToggle={() => setExpanded((e) => !e)}
-        />
-      )}
+      <Suspense
+        fallback={
+          <div
+            style={{
+              fontFamily: "inherit",
+              fontSize: "0.95rem",
+              color: "var(--subtle-text)",
+              padding: "8px 40px",
+            }}
+          >
+            Loading…
+          </div>
+        }
+      >
+        <MdxEditorWorkable markdown={content} onChange={handleChange} />
+      </Suspense>
     </div>
   );
 }
@@ -453,10 +300,7 @@ export default function DailyLogPage() {
   // While today === "" all entries render as past entries on the server;
   // after hydration the correct split is applied.
   const pastEntries = today
-    ? serverEntries
-        .filter((e) => e.date !== today)
-        .slice()
-        .reverse()
+    ? serverEntries.filter((e) => e.date !== today)
     : [];
 
   // ── Server save ───────────────────────────────────────────────────────────
@@ -507,35 +351,6 @@ export default function DailyLogPage() {
     [today, scheduleSave],
   );
 
-  // ── Scroll "Today" into view ────────────────────────────────────────────
-  //
-  // Two-pass scroll:
-  //  1. First pass fires when `today` resolves — jumps the page to the today
-  //     section immediately, even while the editor is still lazy-loading.
-  //  2. Correction pass fires once MdxEditorClient has mounted and the browser
-  //     has had one frame to lay out the full entry content. This corrects the
-  //     scroll position for long existing entries whose lazy-loaded editor
-  //     height was unknown at step 1.
-
-  const todayRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!today) return;
-    todayRef.current?.scrollIntoView({
-      behavior: "instant" as ScrollBehavior,
-      block: "start",
-    });
-  }, [today]); // fires when today transitions from "" to the real date
-
-  const handleEditorMounted = useCallback(() => {
-    requestAnimationFrame(() => {
-      todayRef.current?.scrollIntoView({
-        behavior: "instant" as ScrollBehavior,
-        block: "start",
-      });
-    });
-  }, []);
-
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
@@ -547,22 +362,19 @@ export default function DailyLogPage() {
           margin: "0 auto",
         }}
       >
-        <AuthorIntroEntry />
+        {/* Today's editable entry — at the top of the page */}
+        <TodayLogEntry
+          date={today}
+          today={today}
+          content={todayContent}
+          onChange={handleChange}
+        />
 
-        {/* Past entries: oldest at top, newest just above today */}
-        {pastEntries.map((entry) => (
-          <PastLogEntry key={entry.date} entry={entry} today={today} />
-        ))}
-
-        {/* Today's editable entry — ref lets us scroll it to the top */}
-        <div ref={todayRef}>
-          <TodayLogEntry
-            date={today}
-            today={today}
-            content={todayContent}
-            onChange={handleChange}
-            onEditorMounted={handleEditorMounted}
-          />
+        {/* Past entries: newest first */}
+        <div style={{ marginTop: "60px" }}>
+          {pastEntries.map((entry) => (
+            <PastLogEntry key={entry.date} entry={entry} today={today} />
+          ))}
         </div>
       </div>
     </AppLayout>

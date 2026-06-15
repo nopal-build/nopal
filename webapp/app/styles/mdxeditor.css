@@ -63,7 +63,7 @@
 
 /* ── Content / editable area ─────────────────────────────────────────────── */
 .mdxeditor [class*="_contentEditable_"] {
-  padding: 8px 8px 167px 40px;
+  padding: 8px 8px 40px 40px;
   min-height: 260px;
   font-size: 1.2rem; /* 15 px – comfortable reading size  */
   font-weight: 267;
@@ -1485,7 +1485,7 @@
   hr {
     border: none;
     border-top: 1px solid var(--midground);
-    margin: 1.5em 0;
+    margin: 20px 0;
   }
 
   /* ── Links ───────────────────────────────────────────────────────────────── */
