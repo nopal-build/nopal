@@ -1,4 +1,4 @@
-.PHONY: dev seed migrate down reset clean deploy
+.PHONY: dev seed migrate down reset clean deploy restart
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -40,6 +40,12 @@ seed: migrate
 ## Run database migrations against the running local database.
 migrate:
 	sh db/migrate.sh
+
+## Restart the webapp container, clearing the Vite dep cache first.
+## Use this after package changes or whenever the dev server needs a clean reload.
+restart:
+	docker compose exec webapp rm -rf /app/node_modules/.vite
+	docker compose restart webapp
 
 ## Stop all containers (data is preserved in named volumes).
 down:

@@ -17,6 +17,7 @@ import { AppLayout } from "../components/AppLayout";
 import {
   getDailyLogs,
   saveDailyLog,
+  workableSaveDailyLog,
   type DailyLog,
 } from "../data/dailyLog.server";
 
@@ -25,8 +26,9 @@ import { resolveNopalMarkdown } from "../util/nopalMarkdown";
 import projectStyles from "../styles/project.css?url";
 import mdxEditorStyles from "../styles/mdxeditor.css?url";
 
-// Lazy-load the MDX editor — client only, never runs on the server.
-const MdxEditorClient = lazy(() => import("../components/MdxEditorClient"));
+// Lazy-load editor components — client only, never run on the server.
+const MdxEditorEditable = lazy(() => import("../components/MdxEditorEditable"));
+const MdxEditorWorkable = lazy(() => import("../components/MdxEditorWorkable"));
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: projectStyles },
@@ -87,13 +89,21 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const ct = request.headers.get("content-type") ?? "";
 
-  // ── JSON save ──────────────────────────────────────────────────────────────────
+  // ── JSON save ──────────────────────────────────────────────────────────────────────────────
   if (ct.includes("application/json")) {
     const body = await request.json();
-    const { date, content } = body;
+    const { date, content, mode } = body as {
+      date: string;
+      content: string;
+      mode?: string;
+    };
     if (!date || typeof content !== "string")
       return { error: "Invalid request" };
-    const entry = await saveDailyLog(user._id, date, content);
+    // workable mode — skip md_version snapshots for task check-offs etc.
+    const entry =
+      mode === "workable"
+        ? await workableSaveDailyLog(user._id, date, content)
+        : await saveDailyLog(user._id, date, content);
     return { success: true, entry };
   }
 
@@ -225,10 +235,42 @@ function AuthorIntroEntry() {
 
 function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
   const [expanded, setExpanded] = useState(false);
-  const resolved = resolveNopalMarkdown(entry.content);
+  // Local content state so task changes are reflected immediately in the
+  // collapsed preview without waiting for a server round-trip.
+  const [content, setContent] = useState(entry.content);
+
+  // Collapsed preview — lightweight showdown path, same as before
+  const resolved = resolveNopalMarkdown(content);
   const { preview, hasMore } = getPreview(resolved, 10);
   const previewMd = useMarkdown(preview);
-  const fullMd = useMarkdown(resolved);
+
+  // Debounced save: workable mode flag routes to workableSaveDailyLog
+  // on the server, which patches content without creating an md_version.
+  const saveFetcher = useFetcher<typeof action>();
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleChange = useCallback(
+    (newContent: string) => {
+      setContent(newContent);
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        saveFetcher.submit(
+          { date: entry.date, content: newContent, mode: "workable" },
+          {
+            method: "POST",
+            action: "/fruits/daily-log",
+            encType: "application/json",
+          },
+        );
+      }, 1500);
+    },
+    [entry.date, saveFetcher],
+  );
+
+  // Show the expand button when there is more content than the preview, OR
+  // when the entry has task items so the user can access interactive mode.
+  const hasTasks = /- \[[ xX]\]/.test(content);
+  const showExpand = hasMore || hasTasks;
 
   return (
     <div style={{ marginBottom: "80px" }}>
@@ -244,8 +286,32 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
       >
         {formatEntryDate(entry.date, today)}
       </div>
-      <div className="log-entry-content">{expanded ? fullMd : previewMd}</div>
-      {hasMore && (
+
+      {expanded ? (
+        // Workable mode: tasks are interactive, saves are debounced.
+        // MdxEditorWorkable is lazy-loaded so it only mounts when expanded.
+        <Suspense
+          fallback={
+            <div
+              style={{
+                fontFamily: "inherit",
+                fontSize: "0.95rem",
+                color: "var(--subtle-text)",
+                padding: "8px 40px",
+              }}
+            >
+              Loading…
+            </div>
+          }
+        >
+          <MdxEditorWorkable markdown={content} onChange={handleChange} />
+        </Suspense>
+      ) : (
+        // Collapsed preview — fast, static, showdown-rendered
+        <div className="log-entry-content">{previewMd}</div>
+      )}
+
+      {(showExpand || expanded) && (
         <ExpandButton
           expanded={expanded}
           onToggle={() => setExpanded((e) => !e)}
@@ -334,7 +400,7 @@ function TodayLogEntry({
               </div>
             }
           >
-            <MdxEditorClient
+            <MdxEditorEditable
               key={date}
               markdown={content}
               onChange={onChange}

@@ -367,7 +367,7 @@ const noChecklistSpacePlugin = realmPlugin({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function MdxEditorClient({
+export default function MdxEditorEditable({
   markdown,
   onChange,
   uploadFile,

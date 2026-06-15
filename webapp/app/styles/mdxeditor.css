@@ -1098,7 +1098,8 @@
   line-height: 1.3;
   padding: 0 7px;
   border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--purple-light, #a78bfa) 45%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--purple-light, #a78bfa) 45%, transparent);
   background: color-mix(in srgb, var(--purple-light, #a78bfa) 12%, transparent);
   color: var(--purple, #7c5cbf);
   cursor: pointer;
@@ -1130,17 +1131,26 @@
   background: var(--white, #fff);
   color: inherit;
   outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--purple-light, #a78bfa) 25%, transparent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--purple-light, #a78bfa) 25%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {
   .csv-ref-chip {
-    background: color-mix(in srgb, var(--purple-light, #a78bfa) 18%, transparent);
+    background: color-mix(
+      in srgb,
+      var(--purple-light, #a78bfa) 18%,
+      transparent
+    );
     color: var(--purple-light, #c4b0f5);
   }
 
   .csv-ref-chip:hover {
-    background: color-mix(in srgb, var(--purple-light, #a78bfa) 30%, transparent);
+    background: color-mix(
+      in srgb,
+      var(--purple-light, #a78bfa) 30%,
+      transparent
+    );
   }
 
   .csv-ref-chip--empty {
@@ -1171,7 +1181,8 @@
   max-height: 320px;
   overflow-y: auto;
   border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--purple-light, #a78bfa) 40%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--purple-light, #a78bfa) 40%, transparent);
   background: var(--white, #fff);
   box-shadow: 0 6px 24px rgba(63, 43, 70, 0.18);
   font-family: var(--font-mono, monospace);
@@ -1219,7 +1230,11 @@
 @media (prefers-color-scheme: dark) {
   .ref-popover {
     background: var(--dark-midground, #2a2233);
-    border-color: color-mix(in srgb, var(--purple-light, #a78bfa) 35%, transparent);
+    border-color: color-mix(
+      in srgb,
+      var(--purple-light, #a78bfa) 35%,
+      transparent
+    );
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
   }
 
@@ -1228,10 +1243,695 @@
   }
 
   .ref-popover-item--active {
-    background: color-mix(in srgb, var(--purple-light, #a78bfa) 24%, transparent);
+    background: color-mix(
+      in srgb,
+      var(--purple-light, #a78bfa) 24%,
+      transparent
+    );
   }
 
   .ref-popover-detail {
     color: var(--text-subtle-dark, #9b90ab);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   * .nopal-content — shared content styles for MdxEditorView + MdxEditorWorkable
+   *
+   * Visually identical to the MDX editor's contentEditable area and to
+   * .log-entry-content.  Used by the react-markdown based renderer so all
+   * three editor modes (View, Workable, Editable) look the same.
+   * ═══════════════════════════════════════════════════════════════════════════ */
+
+.nopal-content {
+  padding: 8px 8px 16px 40px;
+  font-size: 1.2rem;
+  font-weight: 267;
+  line-height: 1.2;
+  letter-spacing: 0.5px;
+  color: var(--purple);
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  background-image: radial-gradient(var(--moon) 1px, transparent 0);
+  background-size: 41px 41px;
+  background-position: -22px -12px;
+
+  @media (prefers-color-scheme: dark) {
+    background-image: radial-gradient(var(--dark-midground) 1px, transparent 0);
+  }
+
+  /* ── Gutter labels (# / ## / ### / >) ──────────────────────────────────── */
+  :is(h1, h2, h3, blockquote) {
+    position: relative;
+  }
+  :is(h1, h2, h3, blockquote)::before {
+    position: absolute;
+    top: 4px;
+    left: -38px;
+    width: 32px;
+    text-align: right;
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-weight: 400;
+    color: var(--purple-light);
+    opacity: 0.4;
+    pointer-events: none;
+    user-select: none;
+    line-height: inherit;
+  }
+  h1::before {
+    content: "#";
+    font-size: 24px;
+  }
+  h2::before {
+    content: "##";
+    font-size: 17px;
+  }
+  h3::before {
+    content: "###";
+    font-size: 11px;
+  }
+  blockquote::before {
+    content: ">";
+    font-size: 15px;
+    padding-right: 3px;
+    line-height: 10px;
+  }
+
+  /* ── Headings ────────────────────────────────────────────────────────────── */
+  h1,
+  h2,
+  h3 {
+    line-height: 41px;
+    padding: 0;
+  }
+  h1 {
+    font-size: 34px;
+    font-weight: 700;
+    color: black;
+    letter-spacing: 1px;
+    margin-top: 82px;
+  }
+  h1:first-child {
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--purple-light);
+    margin-top: 82px;
+  }
+  h2:first-child {
+    margin-top: 0;
+  }
+  h3 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--purple-light);
+    margin-top: 41px;
+  }
+
+  /* ── Blockquote ──────────────────────────────────────────────────────────── */
+  blockquote {
+    border-left: 3px solid var(--purple-light);
+    padding-left: 16px;
+    color: var(--text-subtle);
+    font-style: italic;
+    line-height: 41px;
+  }
+
+  /* ── Paragraphs ─────────────────────────────────────────────────────────── */
+  p {
+    margin-bottom: 0;
+    line-height: 41px;
+  }
+  p:last-child {
+    margin-bottom: 0;
+  }
+
+  /* ── Unordered lists ─────────────────────────────────────────────────────── */
+  ul {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+    line-height: 41px;
+  }
+  ul > li:not(.nopal-task-item) {
+    position: relative;
+  }
+  ul > li:not(.nopal-task-item)::before {
+    content: "—";
+    position: absolute;
+    left: -18px;
+    font-size: 14px;
+    color: var(--purple-light);
+    pointer-events: none;
+    user-select: none;
+    line-height: inherit;
+  }
+  ul ul > li:not(.nopal-task-item)::before {
+    content: "–";
+  }
+
+  /* ── Ordered lists ───────────────────────────────────────────────────────── */
+  ol {
+    list-style: none;
+    padding-left: 0;
+    counter-reset: nopal-ol;
+    line-height: 41px;
+  }
+  ol > li {
+    position: relative;
+    counter-increment: nopal-ol;
+  }
+  ol > li::before {
+    content: counter(nopal-ol) ".";
+    position: absolute;
+    top: 2px;
+    left: -1.8em;
+    width: 1.5em;
+    text-align: right;
+    font-size: 0.78rem;
+    font-family: ui-monospace, "SF Mono", monospace;
+    color: var(--purple-light);
+    opacity: 0.55;
+    pointer-events: none;
+    user-select: none;
+    line-height: inherit;
+  }
+  ol ol {
+    counter-reset: nopal-ol-alpha;
+  }
+  ol ol > li {
+    counter-increment: nopal-ol-alpha;
+  }
+  ol ol > li::before {
+    content: counter(nopal-ol-alpha, lower-alpha) ".";
+  }
+
+  /* ── Inline code ──────────────────────────────────────────────────────────── */
+  code {
+    background: var(--midground);
+    color: var(--purple);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 0.875em;
+    font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  }
+
+  /* ── Tables ───────────────────────────────────────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid var(--foreground);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 41px 0;
+    font-size: 0.9em;
+  }
+  table:first-child {
+    margin-top: 0;
+  }
+  thead tr {
+    background: var(--midground);
+  }
+  th {
+    height: 41px;
+    padding: 0 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.78rem;
+    font-family: ui-monospace, "SF Mono", monospace;
+    color: var(--purple-light);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--foreground);
+    white-space: nowrap;
+  }
+  td {
+    height: 41px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--midground);
+    vertical-align: middle;
+  }
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+  tbody tr:hover {
+    background: color-mix(in srgb, var(--midground) 30%, transparent);
+  }
+
+  /* ── Horizontal rule ──────────────────────────────────────────────────────── */
+  hr {
+    border: none;
+    border-top: 1px solid var(--midground);
+    margin: 1.5em 0;
+  }
+
+  /* ── Links ───────────────────────────────────────────────────────────────── */
+  a {
+    color: var(--purple-light);
+    text-decoration: underline;
+    text-decoration-color: color-mix(
+      in srgb,
+      var(--purple-light) 40%,
+      transparent
+    );
+    text-underline-offset: 2px;
+  }
+  a:hover {
+    color: var(--purple);
+    text-decoration-color: var(--purple);
+  }
+}
+
+/* ── Task list items ─────────────────────────────────────────────────────────
+   * .nopal-task-list  — the <ul> wrapping a checklist group
+   * .nopal-task-item  — each <li> in the checklist
+   * .nopal-task-checkbox — the styled checkbox (button in workable, span in view)
+   * .nopal-task-text  — the task label
+   * ─────────────────────────────────────────────────────────────────────────── */
+
+.nopal-content .nopal-task-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  line-height: 41px;
+}
+
+.nopal-content .nopal-task-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 41px;
+  padding: 0;
+}
+
+/* Suppress the dash bullet that the generic ul > li rule would add */
+.nopal-content .nopal-task-item::before {
+  display: none !important;
+}
+
+.nopal-task-checkbox {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 4px;
+  border: 2.5px solid var(--purple-light);
+  background: transparent;
+  padding: 0;
+  cursor: default;
+  position: relative;
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button.nopal-task-checkbox {
+  cursor: pointer;
+}
+
+.nopal-task-checkbox.checked {
+  background-color: var(--purple);
+  border-color: var(--purple);
+}
+
+/* X-mark inside a checked checkbox */
+.nopal-task-checkbox.checked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='1.5' y1='1.5' x2='8.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='8.5' y1='1.5' x2='1.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-size: calc(100% - 3px);
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.nopal-task-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 41px;
+}
+
+.nopal-task-text--checked {
+  opacity: 0.45;
+  text-decoration: line-through;
+  text-decoration-color: var(--purple-light);
+}
+
+.nopal-task-edit-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid var(--purple-light);
+  outline: none;
+  font: inherit;
+  font-size: inherit;
+  color: inherit;
+  line-height: 41px;
+  padding: 0;
+}
+
+.nopal-task-delete {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  cursor: pointer;
+  color: var(--text-subtle);
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.nopal-task-item:hover .nopal-task-delete {
+  opacity: 0.5;
+}
+
+.nopal-task-delete:hover {
+  opacity: 1 !important;
+  color: var(--purple);
+}
+
+/* Add-task row at the bottom of each checklist group */
+.nopal-add-task-item {
+  list-style: none;
+  line-height: 41px;
+}
+
+.nopal-add-task-item::before {
+  display: none !important;
+}
+
+.nopal-add-task-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--purple-light);
+  font-size: 0.9em;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  line-height: 41px;
+}
+
+.nopal-add-task-btn:hover {
+  opacity: 1;
+}
+
+.nopal-add-task-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nopal-task-checkbox-placeholder {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 4px;
+  border: 2.5px solid var(--purple-light);
+  opacity: 0.4;
+  box-sizing: border-box;
+  display: inline-block;
+}
+
+.nopal-add-task-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid var(--purple-light);
+  outline: none;
+  font: inherit;
+  font-size: inherit;
+  color: inherit;
+  line-height: 41px;
+  padding: 0;
+}
+
+/* ── Code blocks (no syntax highlighting) ────────────────────────────────────
+   * Simple monospace blocks that match the design without CodeMirror overhead.
+   * ─────────────────────────────────────────────────────────────────────────── */
+
+.nopal-code-block {
+  background: var(--midground);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+.nopal-code-block code,
+.nopal-code-block .nopal-code-lang {
+  background: none;
+  padding: 0;
+  font-size: 0.875em;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  color: var(--purple);
+  border-radius: 0;
+}
+
+/* ── Inline image blocks (from placed image chips) ───────────────────────────
+   * ─────────────────────────────────────────────────────────────────────────── */
+
+.nopal-image-block {
+  margin: 16px 0;
+}
+
+.nopal-image-block--single img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 8px;
+  height: auto;
+}
+
+.nopal-image-block--masonry {
+  columns: 2;
+  column-gap: 8px;
+}
+
+.nopal-image-block--masonry .nopal-image-block-item {
+  break-inside: avoid;
+  margin-bottom: 8px;
+}
+
+.nopal-image-block--masonry img {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  height: auto;
+}
+
+/* ── References section ──────────────────────────────────────────────────────
+   * Shown at the bottom of view and workable modes.
+   * ─────────────────────────────────────────────────────────────────────────── */
+
+.nopal-references {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--midground);
+}
+
+.nopal-references-heading {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--purple-light);
+  margin: 0 0 16px 0;
+  position: relative;
+}
+
+.nopal-references-heading::before {
+  content: "###";
+  position: absolute;
+  top: 4px;
+  left: -38px;
+  width: 32px;
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--purple-light);
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+  line-height: inherit;
+}
+
+.nopal-references-gallery {
+  columns: 3;
+  column-gap: 8px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 600px) {
+  .nopal-references-gallery {
+    columns: 2;
+  }
+  .nopal-image-block--masonry {
+    columns: 1;
+  }
+}
+
+.nopal-references-gallery-item {
+  break-inside: avoid;
+  margin-bottom: 8px;
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.nopal-references-gallery-item img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.nopal-references-gallery-item:hover .nopal-references-remove {
+  opacity: 1;
+}
+
+.nopal-references-files {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px 0;
+}
+
+.nopal-references-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 41px;
+}
+
+.nopal-references-files li::before {
+  display: none !important;
+}
+
+.nopal-references-files a {
+  color: var(--purple-light);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  flex: 1;
+}
+
+.nopal-references-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-subtle);
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* For file list items the remove button is inline, not absolute */
+.nopal-references-files .nopal-references-remove {
+  position: static;
+  background: none;
+  border-radius: 0;
+  width: auto;
+  height: auto;
+}
+
+.nopal-references-files li:hover .nopal-references-remove {
+  opacity: 1;
+}
+
+.nopal-references-remove:hover {
+  opacity: 1;
+  color: var(--purple);
+}
+
+.nopal-references-add-file {
+  background: none;
+  border: 1.5px dashed var(--purple-light);
+  border-radius: 6px;
+  padding: 8px 16px;
+  cursor: pointer;
+  color: var(--purple-light);
+  font-size: 0.9em;
+  opacity: 0.65;
+  transition: opacity 0.15s;
+  margin-top: 8px;
+}
+
+.nopal-references-add-file:hover {
+  opacity: 1;
+}
+
+/* ── Dark mode overrides for .nopal-content ──────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  .nopal-content {
+    color: var(--dark-text, #e8ddd4);
+  }
+  .nopal-content h1 {
+    color: var(--dark-text, #e8ddd4);
+  }
+  .nopal-content h2,
+  .nopal-content h3 {
+    color: var(--purple-light);
+  }
+  .nopal-content blockquote {
+    color: var(--text-subtle);
+  }
+  .nopal-content code {
+    background: var(--dark-midground, #2a2030);
+    color: var(--purple-light);
+  }
+  .nopal-content hr {
+    border-top-color: var(--dark-midground, #2a2030);
+  }
+  .nopal-content a {
+    color: var(--purple-light);
+  }
+  .nopal-content a:hover {
+    color: var(--moon, #c4c6fc);
+  }
+  .nopal-content table {
+    border-color: var(--dark-midground, #2a2030);
+  }
+  .nopal-content thead tr {
+    background: var(--dark-midground, #2a2030);
+  }
+  .nopal-content th {
+    border-bottom-color: var(--dark-farground, #494a72);
+    color: var(--moon, #c4c6fc);
+  }
+  .nopal-content td {
+    border-bottom-color: var(--dark-midground, #2a2030);
+  }
+  .nopal-content tbody tr:hover {
+    background: color-mix(
+      in srgb,
+      var(--dark-midground, #2a2030) 40%,
+      transparent
+    );
+  }
+  .nopal-references-remove {
+    background: rgba(30, 20, 40, 0.85);
+    color: var(--purple-light);
+  }
+  .nopal-code-block {
+    background: var(--dark-midground, #2a2030);
   }
 }

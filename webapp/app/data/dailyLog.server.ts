@@ -1,6 +1,11 @@
 import { RecordId } from "surrealdb";
 import { Data, query, formatRecord, upsert, remove } from "./generic.server";
-import { upsertDailyLogReadme } from "./vault.server";
+import {
+  upsertDailyLogReadme,
+  updateFileRef,
+  getOrCreateVaultFolder,
+} from "./vault.server";
+import type { FileRef } from "./vault.types";
 
 export type DailyLog = Data & {
   humanId: string;
@@ -67,6 +72,58 @@ export async function saveDailyLog(
   content: string,
 ): Promise<DailyLog | undefined> {
   await upsertDailyLogReadme(humanId, date, content);
+  return cacheDailyLog(humanId, date, content);
+}
+
+/**
+ * Lightweight save for workable-mode edits (task check-offs, minor tweaks).
+ *
+ * Unlike saveDailyLog, this updates the vault file content in-place WITHOUT
+ * creating an md_version snapshot — keeping the version history clean for
+ * intentional, significant content revisions rather than task state changes.
+ *
+ * Falls back to a full saveDailyLog when the vault record doesn't exist yet
+ * (e.g. the user accesses a day that pre-dates the vault migration).
+ */
+export async function workableSaveDailyLog(
+  humanId: string,
+  date: string,
+  content: string,
+): Promise<DailyLog | undefined> {
+  try {
+    const rootFolder = await getOrCreateVaultFolder(
+      humanId,
+      "daily-logs",
+      null,
+    );
+    const dateFolder = await getOrCreateVaultFolder(
+      humanId,
+      date,
+      rootFolder._id,
+    );
+    const result = await query<[FileRef[]]>(
+      `SELECT * FROM file_refs
+       WHERE human_id = $humanId
+         AND folder_id = $folderId
+         AND name = 'readme.md'
+       LIMIT 1`,
+      { humanId, folderId: dateFolder._id },
+    );
+    const existing = result?.[0]?.[0]
+      ? formatRecord(result[0][0] as unknown as FileRef)
+      : null;
+
+    if (existing) {
+      // Direct content patch — skips computeMdUpdate so no md_version snapshot
+      await updateFileRef(existing._id, { content });
+    } else {
+      // Vault record missing (e.g. pre-vault entry) — create it properly
+      await upsertDailyLogReadme(humanId, date, content);
+    }
+  } catch (err) {
+    console.error("workableSaveDailyLog vault update failed:", err);
+    // Non-fatal — cache update proceeds even if vault write fails
+  }
   return cacheDailyLog(humanId, date, content);
 }
 

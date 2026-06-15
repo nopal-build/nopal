@@ -91,6 +91,173 @@ export function parseNopalUserContent(content: string): {
   return { editorText: clean.join("\n\n"), placements };
 }
 
+// ── Serialisation helpers (used by workable + editable modes) ───────────────
+
+/**
+ * Rebuilds the user-content section from clean editorText + placements.
+ * Placement tokens (`[nopal-image][N]`) are re-inserted at the recorded
+ * paragraph boundaries so the stored markdown can be round-tripped.
+ */
+export function buildUserContent(
+  editorText: string,
+  placements: NopalImagePlacement[],
+): string {
+  const allParas = editorText.split("\n\n");
+  let hi = allParas.length - 1;
+  while (hi >= 0 && allParas[hi].trim() === "") hi--;
+  const paras = hi >= 0 ? allParas.slice(0, hi + 1) : [];
+  const result = [...paras];
+
+  const sorted = [...placements].sort(
+    (a, b) => b.afterParagraphIndex - a.afterParagraphIndex,
+  );
+  for (const { fileIndex, afterParagraphIndex } of sorted) {
+    result.splice(
+      Math.min(afterParagraphIndex, result.length),
+      0,
+      `[nopal-image][${fileIndex}]`,
+    );
+  }
+  return result.join("\n\n");
+}
+
+/**
+ * Serialises userContent + file registry back into the full stored nopal
+ * markdown format. Accepts any object with `index`, `url`, and `name` so
+ * both FileEntry (editable) and NopalFileEntry (view/workable) work.
+ */
+export function serializeDocument(
+  userContent: string,
+  files: Array<{ index: number; url: string | null; name: string }>,
+): string {
+  if (files.length === 0) return userContent;
+  const lines = files.map((f) => `[${f.index}] ${f.url ?? f.name}`);
+  return `${userContent.trimEnd()}${NOPAL_MARKER}\n${lines.join("\n")}`;
+}
+
+// ── Task-mutation utilities (used by workable mode) ──────────────────────────
+
+const TASK_LINE_RE = /^(\s*[-*]\s+)\[([xX ])\]\s+(.*)/;
+
+/** Returns metadata for every task line found in the markdown. */
+function getTaskLinesMeta(
+  text: string,
+): Array<{
+  lineIndex: number;
+  checked: boolean;
+  text: string;
+  prefix: string;
+}> {
+  const lines = text.split("\n");
+  const tasks: Array<{
+    lineIndex: number;
+    checked: boolean;
+    text: string;
+    prefix: string;
+  }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(TASK_LINE_RE);
+    if (!m) continue;
+    tasks.push({
+      lineIndex: i,
+      checked: m[2].toLowerCase() === "x",
+      text: m[3],
+      prefix: m[1],
+    });
+  }
+  return tasks;
+}
+
+/** Groups of consecutive task lines (one group = one checklist block). */
+export interface TaskGroup {
+  startTaskIndex: number;
+  count: number;
+}
+
+export function getTaskGroups(editorText: string): TaskGroup[] {
+  const lines = editorText.split("\n");
+  const groups: TaskGroup[] = [];
+  let inTask = false;
+  let groupStart = 0;
+  let globalTaskIdx = 0;
+  let groupCount = 0;
+
+  for (const line of lines) {
+    const isTask = TASK_LINE_RE.test(line);
+    if (isTask) {
+      if (!inTask) {
+        inTask = true;
+        groupStart = globalTaskIdx;
+        groupCount = 0;
+      }
+      groupCount++;
+      globalTaskIdx++;
+    } else if (inTask) {
+      inTask = false;
+      groups.push({ startTaskIndex: groupStart, count: groupCount });
+    }
+  }
+  if (inTask) groups.push({ startTaskIndex: groupStart, count: groupCount });
+  return groups;
+}
+
+/** Toggle a task checkbox by global task index. */
+export function toggleTask(
+  markdown: string,
+  taskIndex: number,
+  checked: boolean,
+): string {
+  const lines = markdown.split("\n");
+  const tasks = getTaskLinesMeta(markdown);
+  const task = tasks[taskIndex];
+  if (!task) return markdown;
+  lines[task.lineIndex] = `${task.prefix}[${checked ? "x" : " "}] ${task.text}`;
+  return lines.join("\n");
+}
+
+/** Replace the text of a task item by global task index. */
+export function editTaskText(
+  markdown: string,
+  taskIndex: number,
+  newText: string,
+): string {
+  const lines = markdown.split("\n");
+  const tasks = getTaskLinesMeta(markdown);
+  const task = tasks[taskIndex];
+  if (!task) return markdown;
+  const mark = task.checked ? "x" : " ";
+  lines[task.lineIndex] = `${task.prefix}[${mark}] ${newText}`;
+  return lines.join("\n");
+}
+
+/** Remove a task item by global task index. */
+export function removeTask(markdown: string, taskIndex: number): string {
+  const lines = markdown.split("\n");
+  const tasks = getTaskLinesMeta(markdown);
+  const task = tasks[taskIndex];
+  if (!task) return markdown;
+  lines.splice(task.lineIndex, 1);
+  return lines.join("\n");
+}
+
+/**
+ * Insert a new empty task (`- [ ] `) immediately after the task at
+ * `afterTaskIndex`. If `afterTaskIndex` is -1, appends to the document.
+ */
+export function addTaskAfterTask(
+  markdown: string,
+  afterTaskIndex: number,
+  newText = "",
+): string {
+  const lines = markdown.split("\n");
+  const tasks = getTaskLinesMeta(markdown);
+  const task = tasks[afterTaskIndex];
+  const insertAt = task ? task.lineIndex + 1 : lines.length;
+  const prefix = task ? task.prefix : "- ";
+  lines.splice(insertAt, 0, `${prefix}[ ] ${newText}`);
+  return lines.join("\n");
+}
+
 // ── Display rendering ─────────────────────────────────────────────────────────
 
 /**

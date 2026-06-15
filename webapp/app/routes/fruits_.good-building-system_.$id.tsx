@@ -22,7 +22,7 @@ import {
 import { useMarkdown } from "../hooks/useMarkdown";
 
 // Lazy-load the MDX editor — client only, never runs on the server.
-const MdxEditorClient = lazy(() => import("../components/MdxEditorClient"));
+const MdxEditorEditable = lazy(() => import("../components/MdxEditorEditable"));
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -595,7 +595,7 @@ export default function GoodBuildingSystemDetail() {
               }
             >
               <div className="mdx-editor-wrapper">
-                <MdxEditorClient
+                <MdxEditorEditable
                   markdown={markdown}
                   onChange={handleMarkdownChange}
                 />
