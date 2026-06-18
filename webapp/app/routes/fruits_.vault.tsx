@@ -29,6 +29,10 @@ import {
 } from "../data/vault.server";
 import { getHumans, getHumansById } from "../data/humans.server";
 import { AppLayout } from "../components/AppLayout";
+import {
+  EditorLoadingFallback,
+  EditorErrorBoundary,
+} from "../components/MdxEditorFallback";
 import type { VaultRefItem } from "../components/refPopoverPlugin";
 import {
   PROJECTS_FOLDER_NAME,
@@ -1045,49 +1049,29 @@ function MdEditorModal({
           }}
         >
           {isClient ? (
-            <Suspense
-              fallback={
-                <div
-                  style={{
-                    fontFamily: "inherit",
-                    fontSize: "0.95rem",
-                    color: "var(--subtle-text)",
-                    padding: "20px",
-                  }}
-                >
-                  Loading editor…
-                </div>
-              }
-            >
-              <MdxEditorClient
-                key={file._id}
-                markdown={file.content ?? ""}
-                onChange={handleChange}
-                uploadFile={uploadFile}
-                csvFields={csvFile ? csvRecord : undefined}
-                onCsvFieldChange={csvFile ? handleCsvFieldChange : undefined}
-                refItems={refItems}
-                actions={
-                  <button
-                    onClick={close}
-                    className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
-                  >
-                    Done
-                  </button>
-                }
-              />
-            </Suspense>
+            <EditorErrorBoundary>
+              <Suspense fallback={<EditorLoadingFallback />}>
+                <MdxEditorClient
+                  key={file._id}
+                  markdown={file.content ?? ""}
+                  onChange={handleChange}
+                  uploadFile={uploadFile}
+                  csvFields={csvFile ? csvRecord : undefined}
+                  onCsvFieldChange={csvFile ? handleCsvFieldChange : undefined}
+                  refItems={refItems}
+                  actions={
+                    <button
+                      onClick={close}
+                      className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
+                    >
+                      Done
+                    </button>
+                  }
+                />
+              </Suspense>
+            </EditorErrorBoundary>
           ) : (
-            <div
-              style={{
-                fontFamily: "inherit",
-                fontSize: "0.95rem",
-                color: "var(--subtle-text)",
-                padding: "20px",
-              }}
-            >
-              Loading editor…
-            </div>
+            <EditorLoadingFallback />
           )}
         </div>
       </div>

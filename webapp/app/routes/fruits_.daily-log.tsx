@@ -15,6 +15,10 @@ import {
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import {
+  EditorLoadingFallback,
+  EditorErrorBoundary,
+} from "../components/MdxEditorFallback";
+import {
   getDailyLogs,
   saveDailyLog,
   workableSaveDailyLog,
@@ -148,22 +152,11 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
         {formatEntryDate(entry.date, today)}
       </div>
 
-      <Suspense
-        fallback={
-          <div
-            style={{
-              fontFamily: "inherit",
-              fontSize: "0.95rem",
-              color: "var(--subtle-text)",
-              padding: "8px 40px",
-            }}
-          >
-            Loading…
-          </div>
-        }
-      >
-        <MdxEditorWorkable markdown={content} onChange={handleChange} />
-      </Suspense>
+      <EditorErrorBoundary>
+        <Suspense fallback={<EditorLoadingFallback />}>
+          <MdxEditorWorkable markdown={content} onChange={handleChange} />
+        </Suspense>
+      </EditorErrorBoundary>
     </div>
   );
 }
@@ -233,41 +226,21 @@ function TodayLogEntry({
 
       <div className="mdx-editor-wrapper">
         {isClient && date ? (
-          <Suspense
-            fallback={
-              <div
-                style={{
-                  fontFamily: "inherit",
-                  fontSize: "0.95rem",
-                  color: "var(--subtle-text)",
-                  padding: "8px 0 0 0",
-                }}
-              >
-                Loading editor…
-              </div>
-            }
-          >
-            <MdxEditorEditable
-              key={date}
-              markdown={content}
-              onChange={onChange}
-              uploadFile={uploadFile}
-              onEditorReady={
-                onEditorMounted ? () => onEditorMounted() : undefined
-              }
-            />
-          </Suspense>
+          <EditorErrorBoundary>
+            <Suspense fallback={<EditorLoadingFallback />}>
+              <MdxEditorEditable
+                key={date}
+                markdown={content}
+                onChange={onChange}
+                uploadFile={uploadFile}
+                onEditorReady={
+                  onEditorMounted ? () => onEditorMounted() : undefined
+                }
+              />
+            </Suspense>
+          </EditorErrorBoundary>
         ) : (
-          <div
-            style={{
-              fontFamily: "inherit",
-              fontSize: "0.95rem",
-              color: "var(--subtle-text)",
-              padding: "8px 0 0 0",
-            }}
-          >
-            Loading editor…
-          </div>
+          <EditorLoadingFallback />
         )}
       </div>
     </div>

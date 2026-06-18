@@ -61,6 +61,48 @@
   background: var(--farground);
 }
 
+/* ── Editor loading & error placeholders ─────────────────────────────────── *
+ * Sized to match the editor's minimum height (toolbar + content area) so      *
+ * the page layout doesn't shift when the editor finishes initialising.        */
+.mdx-editor-loading,
+.mdx-editor-error {
+  min-height: 300px;
+  padding: 10px 8px 40px 40px;
+  display: flex;
+  align-items: flex-start;
+}
+
+.mdx-editor-loading-text {
+  font-size: 0.72rem;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  color: var(--purple);
+  opacity: 0.28;
+  letter-spacing: 0.5px;
+  user-select: none;
+}
+
+.mdx-editor-error-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mdx-editor-error-title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  color: var(--text-subtle);
+  opacity: 0.7;
+}
+
+.mdx-editor-error-hint {
+  margin: 0;
+  font-size: 0.7rem;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  color: var(--text-subtle);
+  opacity: 0.45;
+}
+
 /* ── Content / editable area ─────────────────────────────────────────────── */
 .mdxeditor [class*="_contentEditable_"] {
   padding: 8px 8px 40px 40px;
@@ -227,10 +269,17 @@
    * The ::before pseudo-element on task items IS the checkbox box. We give   *
    * it a white background and a chunky border so it reads clearly in both    *
    * modes.                                                                   */
+  :is([class*="_listItemUnchecked_"], [class*="_listItemChecked_"]) {
+    /* widen the indent to fit the larger 23px checkbox + 10px gap */
+    padding-left: 33px;
+  }
+
   :is([class*="_listItemUnchecked_"], [class*="_listItemChecked_"])::before {
-    border-radius: 4px;
-    /* vertically center the 1rem checkbox within the 41px grid line */
-    top: calc((41px - 1rem) / 2);
+    width: 23px;
+    height: 23px;
+    border-radius: 5px;
+    /* center the 23px checkbox within the 41px grid line */
+    top: 9px;
   }
 
   /* unchecked — white box, chunky purple border */
@@ -239,10 +288,10 @@
     border: 2.5px solid var(--purple-light);
   }
 
-  /* checked — solid purple fill, matching border */
+  /* checked — no fill, same border as unchecked */
   [class*="_listItemChecked_"]::before {
-    background-color: var(--purple);
-    border: 2.5px solid var(--purple);
+    background-color: transparent;
+    border: 2.5px solid var(--purple-light);
   }
 
   /* focus ring — --moon outline in light mode, replaces the default accentBgActive ring */
@@ -258,12 +307,12 @@
     content: "";
     border: none;
     transform: none;
-    top: calc((41px - 1rem) / 2);
+    top: 9px;
     left: 0;
     right: auto;
-    width: 1rem;
-    height: 1rem;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='1.5' y1='1.5' x2='8.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='8.5' y1='1.5' x2='1.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    width: 23px;
+    height: 23px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
     background-size: calc(100% - 5px);
     background-repeat: no-repeat;
     background-position: center;
@@ -967,6 +1016,16 @@
     background: var(--dark-farground);
   }
 
+  .mdx-editor-loading-text {
+    color: var(--white);
+    opacity: 0.18;
+  }
+
+  .mdx-editor-error-title,
+  .mdx-editor-error-hint {
+    color: var(--white);
+  }
+
   /* gutter + list indicators — softer in dark mode */
   .mdxeditor
     :is([class*="_contentEditable_"])
@@ -1000,14 +1059,14 @@
   .mdxeditor
     :is([class*="_contentEditable_"])
     [class*="_listItemChecked_"]::before {
-    background-color: var(--moon);
+    background-color: transparent;
     border: 2.5px solid var(--moon);
   }
 
   .mdxeditor
     :is([class*="_contentEditable_"])
     [class*="_listItemChecked_"]::after {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='1.5' y1='1.5' x2='8.5' y2='8.5' stroke='%233f2b46' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='8.5' y1='1.5' x2='1.5' y2='8.5' stroke='%233f2b46' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%23c4c6fc' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%23c4c6fc' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
   }
 
   /* Placed-file chips – dark mode */
@@ -1521,7 +1580,7 @@
 
 .nopal-content .nopal-task-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   line-height: 41px;
   padding: 0;
@@ -1532,12 +1591,12 @@
   display: none !important;
 }
 
+/* Full 41×41 tap target; visual box lives in ::before */
 .nopal-task-checkbox {
   flex-shrink: 0;
-  width: 1rem;
-  height: 1rem;
-  border-radius: 4px;
-  border: 2.5px solid var(--purple-light);
+  width: 41px;
+  height: 41px;
+  border: none;
   background: transparent;
   padding: 0;
   cursor: default;
@@ -1545,26 +1604,37 @@
   box-sizing: border-box;
   appearance: none;
   -webkit-appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+}
+
+/* Visual 23×23 box, always centered inside the 41×41 tap target */
+.nopal-task-checkbox::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 23px;
+  height: 23px;
+  border-radius: 5px;
+  border: 2.5px solid var(--purple-light);
+  background: transparent;
+  box-sizing: border-box;
 }
 
 button.nopal-task-checkbox {
   cursor: pointer;
 }
 
-.nopal-task-checkbox.checked {
-  background-color: var(--purple);
-  border-color: var(--purple);
-}
-
-/* X-mark inside a checked checkbox */
+/* X-mark — centered to match the 23px visual box */
 .nopal-task-checkbox.checked::after {
   content: "";
   position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='1.5' y1='1.5' x2='8.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='8.5' y1='1.5' x2='1.5' y2='8.5' stroke='%23ede4da' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 23px;
+  height: 23px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
   background-size: calc(100% - 3px);
   background-repeat: no-repeat;
   background-position: center;
@@ -1607,6 +1677,8 @@ button.nopal-task-checkbox {
   line-height: 1;
   opacity: 0;
   transition: opacity 0.15s;
+  /* center the delete button within the first 41px line */
+  margin-top: 12px;
 }
 
 .nopal-task-item:hover .nopal-task-delete {
@@ -1652,9 +1724,9 @@ button.nopal-task-checkbox {
 
 .nopal-task-checkbox-placeholder {
   flex-shrink: 0;
-  width: 1rem;
-  height: 1rem;
-  border-radius: 4px;
+  width: 23px;
+  height: 23px;
+  border-radius: 5px;
   border: 2.5px solid var(--purple-light);
   opacity: 0.4;
   box-sizing: border-box;

@@ -12,6 +12,10 @@ import {
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import {
+  EditorLoadingFallback,
+  EditorErrorBoundary,
+} from "../components/MdxEditorFallback";
+import {
   getBuildingSystemById,
   getCategories,
   updateBuildingSystem,
@@ -586,24 +590,22 @@ export default function GoodBuildingSystemDetail() {
           }}
         />
 
-        {/* ── Content ───────────────────────────────────────────────────── */}
+        {/* ── Content ─────────────────────────────────────────────── */}
         {isAdmin ? (
-          isClient ? (
-            <Suspense
-              fallback={
-                <div className="text-sm subtle-text">Loading editor…</div>
-              }
-            >
-              <div className="mdx-editor-wrapper">
-                <MdxEditorEditable
-                  markdown={markdown}
-                  onChange={handleMarkdownChange}
-                />
-              </div>
-            </Suspense>
-          ) : (
-            <div className="text-sm subtle-text">Loading editor…</div>
-          )
+          <div className="mdx-editor-wrapper">
+            {isClient ? (
+              <EditorErrorBoundary>
+                <Suspense fallback={<EditorLoadingFallback />}>
+                  <MdxEditorEditable
+                    markdown={markdown}
+                    onChange={handleMarkdownChange}
+                  />
+                </Suspense>
+              </EditorErrorBoundary>
+            ) : (
+              <EditorLoadingFallback />
+            )}
+          </div>
         ) : markdown ? (
           renderedMarkdown
         ) : (
