@@ -977,7 +977,8 @@ body {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: scroll;
 }
 
 @media (max-width: 859px) {

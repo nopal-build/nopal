@@ -68,7 +68,7 @@
 .mdx-editor-error {
   display: flex;
   flex-direction: column;
-  min-height: 300px;
+  min-height: 308px;
 }
 
 /* Content body: same dot-grid as the editable area */
@@ -1785,7 +1785,7 @@ button.nopal-task-checkbox {
 .nopal-add-task-btn::before {
   content: "[ ]";
   flex-shrink: 0;
-  width: 44px;
+  width: 41px;
   height: 41px;
   line-height: 41px;
   text-align: center;
@@ -1801,18 +1801,29 @@ button.nopal-task-checkbox {
 .nopal-add-task-input-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 3px;
 }
 
 .nopal-task-checkbox-placeholder {
   flex-shrink: 0;
+  width: 41px;
+  height: 41px;
+  position: relative;
+  opacity: 0.4;
+  display: inline-block;
+}
+
+.nopal-task-checkbox-placeholder::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   width: 23px;
   height: 23px;
   border-radius: 5px;
   border: 2.5px solid var(--purple-light);
-  opacity: 0.4;
   box-sizing: border-box;
-  display: inline-block;
 }
 
 .nopal-add-task-input {

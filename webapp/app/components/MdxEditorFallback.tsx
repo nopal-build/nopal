@@ -20,9 +20,7 @@ export function EditorLoadingFallback({
 }) {
   return (
     <div className="mdx-editor-loading">
-      <div className="mdx-editor-loading-content">
-        <span className="mdx-editor-loading-text">loading…</span>
-      </div>
+      <div className="mdx-editor-loading-content" />
       {hasTray && <div className="mdx-editor-loading-tray" />}
     </div>
   );
