@@ -140,9 +140,7 @@ export function serializeDocument(
 const TASK_LINE_RE = /^(\s*[-*]\s+)\[([xX ])\]\s+(.*)/;
 
 /** Returns metadata for every task line found in the markdown. */
-function getTaskLinesMeta(
-  text: string,
-): Array<{
+function getTaskLinesMeta(text: string): Array<{
   lineIndex: number;
   checked: boolean;
   text: string;
@@ -184,6 +182,7 @@ export function getTaskGroups(editorText: string): TaskGroup[] {
 
   for (const line of lines) {
     const isTask = TASK_LINE_RE.test(line);
+    const isBlank = line.trim() === "";
     if (isTask) {
       if (!inTask) {
         inTask = true;
@@ -192,7 +191,9 @@ export function getTaskGroups(editorText: string): TaskGroup[] {
       }
       groupCount++;
       globalTaskIdx++;
-    } else if (inTask) {
+    } else if (inTask && !isBlank) {
+      // Only a non-blank, non-task line ends the group.
+      // Blank lines within a GFM loose list don't break the checklist boundary.
       inTask = false;
       groups.push({ startTaskIndex: groupStart, count: groupCount });
     }

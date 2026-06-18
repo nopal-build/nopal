@@ -393,6 +393,11 @@ export default function MdxRenderer({
         }
 
         const gi = groupCountRef.current++;
+        // Capture the global task index of the first task in this rendered
+        // group. This is read from taskCountRef BEFORE the group's <li> children
+        // render (React renders the parent ul before its li children), so it
+        // equals the start-task-index for this checklist block.
+        const startTaskIndex = taskCountRef.current;
         const isAdding = workable && addingGroupIndex === gi;
 
         const handleAddCommit = (text: string) => {
@@ -402,7 +407,15 @@ export default function MdxRenderer({
             return;
           }
           const groups = getTaskGroups(editorText);
-          const g = groups[gi];
+          // Prefer finding the group by its start task index — this is robust
+          // against GFM loose lists (blank-line-separated tasks that remark-gfm
+          // keeps in one <ul>) where gi and getTaskGroups indices can diverge.
+          const g =
+            groups.find(
+              (g) =>
+                g.startTaskIndex <= startTaskIndex &&
+                startTaskIndex < g.startTaskIndex + g.count,
+            ) ?? groups[gi];
           // Insert after the last task in this group; if group is somehow not
           // found fall back to appending at the end of the document.
           const lastTaskIdx = g ? g.startTaskIndex + g.count - 1 : -1;
