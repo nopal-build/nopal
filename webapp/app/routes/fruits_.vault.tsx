@@ -2472,6 +2472,44 @@ export default function VaultPage() {
     }
   }, [pendingUploads, startUploadHttp]);
 
+  // Keep the screen awake while files are uploading so the user doesn't have
+  // to fight their phone's auto-lock during long video uploads.
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  useEffect(() => {
+    const isActive = pendingUploads.some(
+      (p) => p.status === "queued" || p.status === "uploading",
+    );
+
+    if (!isActive) {
+      wakeLockRef.current?.release().catch(() => {});
+      wakeLockRef.current = null;
+      return;
+    }
+
+    const acquire = () => {
+      if (!("wakeLock" in navigator)) return;
+      if (document.visibilityState !== "visible") return;
+      if (wakeLockRef.current) return; // already held
+      navigator.wakeLock
+        .request("screen")
+        .then((lock) => {
+          wakeLockRef.current = lock;
+          // The system releases the lock when the tab is hidden; clear our ref so
+          // the visibilitychange handler knows to re-acquire on the way back.
+          lock.addEventListener("release", () => {
+            wakeLockRef.current = null;
+          });
+        })
+        .catch(() => {}); // silently ignore — denied or unsupported
+    };
+
+    acquire();
+
+    // Re-acquire when the user switches back to this tab
+    document.addEventListener("visibilitychange", acquire);
+    return () => document.removeEventListener("visibilitychange", acquire);
+  }, [pendingUploads]);
+
   // Not memoized — always reads the live currentFolderId from the render scope
   // so files land in whichever folder the user currently has open.
   const enqueueFiles = (files: File[]) => {
