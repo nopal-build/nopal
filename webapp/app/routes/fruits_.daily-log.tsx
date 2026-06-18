@@ -125,12 +125,15 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
 
   const saveFetcher = useFetcher<typeof action>();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedRef = useRef(entry.content);
 
   const handleChange = useCallback(
     (newContent: string) => {
       setContent(newContent);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
+        if (newContent === lastSavedRef.current) return;
+        lastSavedRef.current = newContent;
         saveFetcher.submit(
           { date: entry.date, content: newContent, mode: "workable" },
           {
@@ -439,7 +442,10 @@ export default function DailyLogPage() {
     setToday(d);
 
     const serverEntry = serverEntries.find((e) => e.date === d);
-    if (serverEntry?.content) setTodayContent(serverEntry.content);
+    if (serverEntry?.content) {
+      setTodayContent(serverEntry.content);
+      lastSavedRef.current = serverEntry.content;
+    }
   }, []); // intentionally empty — run exactly once after hydration
 
   // ── Derived values (gated on today being resolved) ───────────────────────
@@ -454,14 +460,17 @@ export default function DailyLogPage() {
 
   const saveFetcher = useFetcher<typeof action>();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedRef = useRef("");
 
   const saveNow = useCallback(
     (content: string) => {
       if (!today) return;
+      if (content === lastSavedRef.current) return;
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
+      lastSavedRef.current = content;
       saveFetcher.submit(
         { date: today, content },
         {
