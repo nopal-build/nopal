@@ -3,8 +3,18 @@ import { query, formatRecord, upsert, remove, merge } from "./generic.server";
 import { deleteFromS3 } from "./file.server";
 
 // ─── Types (defined in vault.types.ts; re-exported from here for convenience) ──
-export type { MdVersion, FileRef, VaultFolder } from "./vault.types";
-import type { MdVersion, FileRef, VaultFolder } from "./vault.types";
+export type {
+  MdVersion,
+  FileRef,
+  FileShareType,
+  VaultFolder,
+} from "./vault.types";
+import type {
+  MdVersion,
+  FileRef,
+  FileShareType,
+  VaultFolder,
+} from "./vault.types";
 
 // ─── FileRef CRUD ─────────────────────────────────────────────────────────────
 
@@ -76,6 +86,8 @@ export async function updateFileRef(
     folder_id: string | null;
     content: string;
     md_versions: MdVersion[];
+    shared_type: FileShareType;
+    is_public: boolean;
   }>,
 ): Promise<FileRef | undefined> {
   const result = await merge("file_refs", id, {

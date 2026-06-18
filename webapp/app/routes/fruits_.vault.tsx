@@ -47,6 +47,8 @@ import {
   type CsvField,
 } from "../util/projectCsv";
 import "../styles/vault.css";
+import MdxEditorView from "../components/MdxEditorView";
+import MdxEditorWorkable from "../components/MdxEditorWorkable";
 
 // Lazy-load the MDX editor — client only, never runs on the server.
 const MdxEditorClient = lazy(() => import("../components/MdxEditorClient"));
@@ -670,6 +672,7 @@ function FileCard({
   onDelete,
   onMove,
   onEditMd,
+  onShareFile,
 }: {
   file: FileRef;
   myFolders: VaultFolder[];
@@ -681,6 +684,7 @@ function FileCard({
   onDelete: (file: FileRef) => void;
   onMove: (file: FileRef) => void;
   onEditMd: (file: FileRef) => void;
+  onShareFile?: (file: FileRef) => void;
 }) {
   const isMd = file.content_type === "text/markdown";
   const isImage = file.content_type.startsWith("image/");
@@ -734,6 +738,11 @@ function FileCard({
           >
             {file.name}
           </span>
+          {file.is_public && (
+            <span title="Public" style={{ fontSize: "14px", flexShrink: 0 }}>
+              🌐
+            </span>
+          )}
         </div>
 
         {/* Meta */}
@@ -795,6 +804,18 @@ function FileCard({
             >
               📂
             </button>
+            {isMd && onShareFile && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShareFile(file);
+                }}
+                title="Share"
+                className="vault-action-btn"
+              >
+                🔗
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -904,6 +925,7 @@ function MdEditorModal({
   onSave,
   onSaveCsv,
   onClose,
+  mode = "editable",
 }: {
   file: FileRef;
   /** Sibling project CSV file (e.g. project.csv) — enables `[key]` chips. */
@@ -913,6 +935,7 @@ function MdEditorModal({
   onSave: (content: string) => void;
   onSaveCsv?: (content: string) => void;
   onClose: () => void;
+  mode?: "view" | "workable" | "editable";
 }) {
   const [isClient, setIsClient] = useState(false);
   const contentRef = useRef(file.content ?? "");
@@ -1033,10 +1056,27 @@ function MdEditorModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="vault-panel-header" style={{ padding: "10px 20px" }}>
+        <div
+          className="vault-panel-header"
+          style={{
+            padding: "10px 20px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
           <span className="vault-modal-title" style={{ marginBottom: 0 }}>
-            📝 {file.name}
+            {mode === "view" ? "👁" : mode === "workable" ? "✅" : "📝"}{" "}
+            {file.name}
           </span>
+          {(mode === "view" || mode === "workable") && (
+            <button
+              onClick={close}
+              className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
+            >
+              Done
+            </button>
+          )}
         </div>
 
         {/* Editor */}
@@ -1048,7 +1088,19 @@ function MdEditorModal({
             borderRadius: 0,
           }}
         >
-          {isClient ? (
+          {mode === "view" ? (
+            <MdxEditorView markdown={file.content ?? ""} />
+          ) : mode === "workable" ? (
+            <EditorErrorBoundary>
+              <Suspense fallback={<EditorLoadingFallback />}>
+                <MdxEditorWorkable
+                  key={file._id}
+                  markdown={file.content ?? ""}
+                  onChange={handleChange}
+                />
+              </Suspense>
+            </EditorErrorBoundary>
+          ) : isClient ? (
             <EditorErrorBoundary>
               <Suspense fallback={<EditorLoadingFallback />}>
                 <MdxEditorClient
@@ -1440,6 +1492,171 @@ function UploadPlaceholderCard({
   );
 }
 
+// ─── File Share Modal ────────────────────────────────────────────────────────
+
+function FileShareModal({
+  file,
+  onClose,
+  onSave,
+}: {
+  file: FileRef;
+  onClose: () => void;
+  onSave: (updates: {
+    is_public: boolean;
+    shared_type: "view" | "workable" | "editable";
+  }) => void;
+}) {
+  const [isPublic, setIsPublic] = useState(file.is_public ?? false);
+  const [sharedType, setSharedType] = useState<
+    "view" | "workable" | "editable"
+  >(file.shared_type ?? "view");
+  const publicUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/card/${file._id}`
+      : `/card/${file._id}`;
+
+  const handleSave = () => {
+    onSave({ is_public: isPublic, shared_type: sharedType });
+    onClose();
+  };
+
+  const inputStyle: React.CSSProperties = {
+    accentColor: "var(--purple)",
+    cursor: "pointer",
+    flexShrink: 0,
+  };
+  const radioRowStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    cursor: "pointer",
+  };
+
+  return (
+    <div className="vault-modal-backdrop" onClick={onClose}>
+      <div className="vault-modal" onClick={(e) => e.stopPropagation()}>
+        <h3 className="vault-modal-title">
+          Share "{file.name.replace(/\.md$/i, "")}"
+        </h3>
+
+        {/* Public toggle */}
+        <div style={{ marginBottom: "20px" }}>
+          <label
+            style={{
+              ...radioRowStyle,
+              marginBottom: isPublic ? "10px" : 0,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(e) => setIsPublic(e.target.checked)}
+              style={inputStyle}
+            />
+            <span className="text-sm font-mono">🌐 Public on the web</span>
+          </label>
+          {isPublic && (
+            <div
+              style={{
+                display: "flex",
+                gap: "6px",
+                alignItems: "center",
+                marginTop: "8px",
+                padding: "8px 10px",
+                background: "var(--midground)",
+                borderRadius: "6px",
+              }}
+            >
+              <span
+                className="text-xs font-mono"
+                style={{
+                  flex: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  color: "var(--purple-light)",
+                }}
+              >
+                {publicUrl}
+              </span>
+              <button
+                className="vault-action-btn"
+                onClick={() => navigator.clipboard.writeText(publicUrl)}
+                title="Copy link"
+              >
+                📋
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Sharing type for vault visitors */}
+        <p
+          className="text-xs font-mono"
+          style={{ color: "var(--text-subtle)", marginBottom: "10px" }}
+        >
+          Vault visitor access:
+        </p>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            marginBottom: "20px",
+          }}
+        >
+          <label style={radioRowStyle}>
+            <input
+              type="radio"
+              checked={sharedType === "view"}
+              onChange={() => setSharedType("view")}
+              style={inputStyle}
+            />
+            <span className="text-sm font-mono">👁 View only</span>
+          </label>
+          <label style={radioRowStyle}>
+            <input
+              type="radio"
+              checked={sharedType === "workable"}
+              onChange={() => setSharedType("workable")}
+              style={inputStyle}
+            />
+            <span className="text-sm font-mono">
+              ✅ Workable (tasks editable)
+            </span>
+          </label>
+          <label style={radioRowStyle}>
+            <input
+              type="radio"
+              checked={sharedType === "editable"}
+              onChange={() => setSharedType("editable")}
+              style={inputStyle}
+            />
+            <span className="text-sm font-mono">✏️ Editable</span>
+          </label>
+        </div>
+
+        <div
+          style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}
+        >
+          <button
+            onClick={onClose}
+            className="btn-outline text-xs font-mono px-3 py-1.5 rounded"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function VaultPage() {
   const {
     user,
@@ -1478,6 +1695,7 @@ export default function VaultPage() {
   // ── Modals / inline UI ────────────────────────────────────────────────────
   const [shareFolder, setShareFolder] = useState<VaultFolder | null>(null);
   const [moveFile, setMoveFile] = useState<FileRef | null>(null);
+  const [shareFile, setShareFile] = useState<FileRef | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
   const [addingFolder, setAddingFolder] = useState(false);
@@ -1554,6 +1772,12 @@ export default function VaultPage() {
     const file = [...myFiles, ...sharedFiles].find((f) => f._id === fileParam);
     return file?.content_type === "text/markdown" ? (file ?? null) : null;
   }, [fileParam, myFiles, sharedFiles]);
+
+  const editMdMode = useMemo<"view" | "workable" | "editable">(() => {
+    if (!editMdFile) return "view";
+    if (editMdFile.human_id === user._id) return "editable";
+    return editMdFile.shared_type ?? "view";
+  }, [editMdFile, user._id]);
 
   // CSV files open in the table editor instead.
   const editCsvFile = useMemo(() => {
@@ -1664,6 +1888,18 @@ export default function VaultPage() {
       return sharedFiles.filter((f) => f.folder_id === panel.folderId);
     return [];
   })();
+
+  // Readme displayed inline at the top of the folder view (case-insensitive match).
+  const readmeFile =
+    visibleFiles.find(
+      (f) =>
+        f.name.toLowerCase() === "readme.md" &&
+        f.content_type === "text/markdown",
+    ) ?? null;
+  // All files except the readme — these become the card grid below the readme.
+  const cardFiles = readmeFile
+    ? visibleFiles.filter((f) => f._id !== readmeFile._id)
+    : visibleFiles;
 
   const breadcrumb = (() => {
     if (panel.kind === "my-root") return "My Files";
@@ -1793,6 +2029,20 @@ export default function VaultPage() {
     revalidate();
   };
 
+  const shareFileMutation = async (
+    fileId: string,
+    updates: {
+      is_public: boolean;
+      shared_type: "view" | "workable" | "editable";
+    },
+  ) => {
+    await apiFetch(`/api/vault/${fileId}`, {
+      method: "PATCH",
+      body: JSON.stringify(updates),
+    });
+    revalidate();
+  };
+
   /**
    * Scaffolds a new project:
    *   projects/<name>/readme.md   — top-level reference (template)
@@ -1864,7 +2114,7 @@ export default function VaultPage() {
   };
 
   const createMdFile = async () => {
-    const name = window.prompt("File name (without extension):");
+    const name = window.prompt("Card name (without extension):");
     if (!name?.trim()) return;
     const fullName = name.trim().endsWith(".md")
       ? name.trim()
@@ -2342,7 +2592,7 @@ export default function VaultPage() {
                   + New Folder
                 </button>
                 <button className="vault-toolbar-btn" onClick={createMdFile}>
-                  + New .md File
+                  + New Card
                 </button>
                 <button className="vault-toolbar-btn" onClick={createProject}>
                   + New Project
@@ -2369,19 +2619,29 @@ export default function VaultPage() {
             )}
           </div>
 
+          {/* Readme — shown as the main content when the folder has a readme.md */}
+          {readmeFile && (
+            <div className="vault-readme-section">
+              <MdxEditorView markdown={readmeFile.content ?? ""} />
+            </div>
+          )}
+
           {/* File grid */}
-          {visibleFolders.length === 0 &&
-          visibleFiles.length === 0 &&
+          {!readmeFile &&
+          visibleFolders.length === 0 &&
+          cardFiles.length === 0 &&
           pendingForCurrentFolder.length === 0 ? (
             <div
               className="text-sm font-mono subtle-text"
               style={{ padding: "40px 0", textAlign: "center" }}
             >
               {isMyPanel
-                ? "No files here yet. Upload one or create a .md file."
+                ? "No files here yet. Upload one or create a card."
                 : "No files in this shared folder."}
             </div>
-          ) : (
+          ) : visibleFolders.length > 0 ||
+            cardFiles.length > 0 ||
+            pendingForCurrentFolder.length > 0 ? (
             <div
               style={{
                 display: "grid",
@@ -2439,7 +2699,7 @@ export default function VaultPage() {
               ))}
 
               {/* Completed files */}
-              {visibleFiles.map((file) => {
+              {cardFiles.map((file) => {
                 const locked = isFileRefLocked(file);
                 // Don't allow the inline rename widget for locked files
                 return renamingFileId === file._id && !locked ? (
@@ -2469,11 +2729,12 @@ export default function VaultPage() {
                     onDelete={(f) => deleteFile(f._id)}
                     onMove={(f) => setMoveFile(f)}
                     onEditMd={(f) => handleSelectFile(f)}
+                    onShareFile={isMyPanel ? (f) => setShareFile(f) : undefined}
                   />
                 );
               })}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -2509,6 +2770,7 @@ export default function VaultPage() {
               : undefined
           }
           onClose={handleCloseEditor}
+          mode={editMdMode}
         />
       )}
 
@@ -2518,6 +2780,14 @@ export default function VaultPage() {
           readOnly={editCsvFile.human_id !== user._id}
           onSave={(content) => saveMdFile(editCsvFile._id, content)}
           onClose={handleCloseEditor}
+        />
+      )}
+
+      {shareFile && (
+        <FileShareModal
+          file={shareFile}
+          onClose={() => setShareFile(null)}
+          onSave={(updates) => shareFileMutation(shareFile._id, updates)}
         />
       )}
     </AppLayout>

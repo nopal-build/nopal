@@ -589,6 +589,19 @@
   opacity: 0.9;
 }
 
+/* ── Readme section (folder view) ───────────────────────────────────────── */
+
+.vault-readme-section {
+  border: 1px solid var(--foreground);
+  border-radius: 8px;
+  padding: 24px 28px;
+  background: var(--farground);
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--dark-foreground);
+    background: var(--dark-farground);
+  }
+}
+
 /* ── Image thumbnail (inside file card) ─────────────────────────────────── */
 
 .vault-image-thumb {

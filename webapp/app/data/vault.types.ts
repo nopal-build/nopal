@@ -5,6 +5,8 @@
  * route loaders (server) and React components (client).
  */
 
+export type FileShareType = "view" | "workable" | "editable";
+
 export type MdVersion = {
   content: string;
   date: string; // YYYY-MM-DD
@@ -28,6 +30,10 @@ export type FileRef = {
   date?: string;
   created_at: string;
   updated_at: string;
+  /** How the file is shared when accessed via a shared folder. Defaults to "view". */
+  shared_type?: FileShareType;
+  /** Whether this card is publicly accessible without authentication. */
+  is_public?: boolean;
 };
 
 /**
