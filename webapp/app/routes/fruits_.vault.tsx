@@ -57,6 +57,7 @@ const MdxEditorClient = lazy(() => import("../components/MdxEditorClient"));
 
 const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB per S3 multipart part
 const MULTIPART_THRESHOLD = 100 * 1024 * 1024; // switch to multipart for files ≥ 100 MB
+const MAX_CONCURRENT_UPLOADS = 2; // max files uploading at the same time
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ type PendingUpload = {
   size: number;
   contentType: string;
   progress: number; // 0–100
-  status: "uploading" | "error";
+  status: "queued" | "uploading" | "error";
   error?: string;
   targetFolderId: string | null; // folder captured at upload-start time
 };
@@ -673,6 +674,9 @@ function FileCard({
   onMove,
   onEditMd,
   onShareFile,
+  onDownload,
+  onArchive,
+  onUnarchive,
 }: {
   file: FileRef;
   myFolders: VaultFolder[];
@@ -685,9 +689,14 @@ function FileCard({
   onMove: (file: FileRef) => void;
   onEditMd: (file: FileRef) => void;
   onShareFile?: (file: FileRef) => void;
+  onDownload?: (file: FileRef) => void;
+  onArchive?: (file: FileRef) => void;
+  onUnarchive?: (file: FileRef) => void;
 }) {
   const isMd = file.content_type === "text/markdown";
   const isImage = file.content_type.startsWith("image/");
+  const isVideo = file.content_type.startsWith("video/");
+  const isArchived = !!file.archived_at;
   const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
@@ -781,9 +790,46 @@ function FileCard({
           </a>
         )}
 
+        {isArchived && (
+          <div
+            className="text-xs font-mono"
+            style={{
+              color: "var(--red)",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <span>🗃️</span>
+            <span>
+              Archived — deletes{" "}
+              {new Date(
+                new Date(file.archived_at!).getTime() +
+                  30 * 24 * 60 * 60 * 1000,
+              ).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </span>
+          </div>
+        )}
+
         {/* Action buttons (hover) — hidden for locked daily-log files */}
         {isOwned && !isLocked && (
           <div className="vault-file-actions">
+            {isVideo && file.s3_url && onDownload && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownload(file);
+                }}
+                title="Download"
+                className="vault-action-btn"
+              >
+                ⬇️
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -814,6 +860,30 @@ function FileCard({
                 className="vault-action-btn"
               >
                 🔗
+              </button>
+            )}
+            {isVideo && !isArchived && onArchive && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onArchive(file);
+                }}
+                title="Archive (schedules deletion in 30 days)"
+                className="vault-action-btn"
+              >
+                🗃️
+              </button>
+            )}
+            {isVideo && isArchived && onUnarchive && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUnarchive(file);
+                }}
+                title="Unarchive (cancel scheduled deletion)"
+                className="vault-action-btn"
+              >
+                ↩️
               </button>
             )}
             <button
@@ -1422,6 +1492,7 @@ function UploadPlaceholderCard({
   onDismiss: () => void;
 }) {
   const isError = upload.status === "error";
+  const isQueued = upload.status === "queued";
 
   return (
     <div className="vault-file-card vault-upload-placeholder">
@@ -1450,7 +1521,9 @@ function UploadPlaceholderCard({
         {formatSize(upload.size)}
       </div>
 
-      {isError ? (
+      {isQueued ? (
+        <div className="text-xs font-mono subtle-text">Queued…</div>
+      ) : isError ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
           <div
             className="text-xs font-mono red-text"
@@ -1761,6 +1834,8 @@ export default function VaultPage() {
   // ── File uploads ─────────────────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  // Tracks IDs currently being HTTP-uploaded to prevent the queue effect from double-starting them
+  const activeUploadIds = useRef<Set<string>>(new Set());
 
   // ─── Derived data ──────────────────────────────────────────────────────────
 
@@ -2021,6 +2096,36 @@ export default function VaultPage() {
     revalidate();
   };
 
+  const downloadFile = async (file: FileRef) => {
+    const data = await apiFetch(`/api/vault/download/${file._id}`, {
+      method: "GET",
+      headers: {},
+    });
+    if (data?.url) {
+      const a = document.createElement("a");
+      a.href = data.url;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  };
+
+  const archiveFile = async (file: FileRef) => {
+    await apiFetch(`/api/vault/${file._id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived_at: new Date().toISOString() }),
+    });
+    revalidate();
+  };
+
+  const unarchiveFile = async (file: FileRef) => {
+    await apiFetch(`/api/vault/${file._id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived_at: null }),
+    });
+    revalidate();
+  };
+
   const saveMdFile = async (fileId: string, content: string) => {
     await apiFetch(`/api/vault/${fileId}`, {
       method: "PATCH",
@@ -2238,35 +2343,24 @@ export default function VaultPage() {
 
   // Start an upload. Uses XHR (with byte-level progress) for small files and
   // multipart chunked upload (with per-part progress) for large ones.
-  const startUpload = useCallback(
-    (file: File, folderId: string | null) => {
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const contentType = file.type || "application/octet-stream";
-
-      setPendingUploads((prev) => [
-        ...prev,
-        {
-          id,
-          file,
-          name: file.name,
-          size: file.size,
-          contentType,
-          progress: 0,
-          status: "uploading",
-          targetFolderId: folderId,
-        },
-      ]);
-
+  // Starts the actual HTTP transfer for an upload already present in pendingUploads.
+  // Always call after adding the id to activeUploadIds.current.
+  const startUploadHttp = useCallback(
+    (id: string, file: File, folderId: string | null) => {
       if (file.size >= MULTIPART_THRESHOLD) {
         // Large file: chunked multipart (no proxy timeout risk)
-        runMultipartUpload(file, folderId, id).catch((err) => {
-          const error = err instanceof Error ? err.message : "Upload failed";
-          setPendingUploads((prev) =>
-            prev.map((p) =>
-              p.id === id ? { ...p, status: "error", error } : p,
-            ),
-          );
-        });
+        runMultipartUpload(file, folderId, id)
+          .catch((err) => {
+            const error = err instanceof Error ? err.message : "Upload failed";
+            setPendingUploads((prev) =>
+              prev.map((p) =>
+                p.id === id ? { ...p, status: "error", error } : p,
+              ),
+            );
+          })
+          .finally(() => {
+            activeUploadIds.current.delete(id);
+          });
         return;
       }
 
@@ -2287,6 +2381,7 @@ export default function VaultPage() {
       };
 
       xhr.onload = () => {
+        activeUploadIds.current.delete(id);
         if (xhr.status >= 200 && xhr.status < 300) {
           setPendingUploads((prev) => prev.filter((p) => p.id !== id));
           revalidate();
@@ -2307,6 +2402,7 @@ export default function VaultPage() {
       };
 
       xhr.onerror = () => {
+        activeUploadIds.current.delete(id);
         setPendingUploads((prev) =>
           prev.map((p) =>
             p.id === id
@@ -2321,6 +2417,7 @@ export default function VaultPage() {
       };
 
       xhr.ontimeout = () => {
+        activeUploadIds.current.delete(id);
         setPendingUploads((prev) =>
           prev.map((p) =>
             p.id === id
@@ -2338,20 +2435,85 @@ export default function VaultPage() {
       xhr.open("POST", "/api/vault/upload");
       xhr.send(formData);
     },
-    [revalidate, runMultipartUpload, setPendingUploads],
+    [revalidate, runMultipartUpload],
   );
 
-  // Not memoized — always reads the live currentFolderId from the render scope
-  // so the file lands in whichever folder the user currently has open.
-  const uploadFile = (file: File) => {
-    const duplicate = myFiles.some(
-      (f) => f.folder_id === currentFolderId && f.name === file.name,
-    );
-    if (duplicate) {
-      alert(`A file named "${file.name}" already exists here.`);
-      return;
+  // Queue processor: starts queued uploads whenever a slot opens up (max 2 concurrent).
+  useEffect(() => {
+    const activeCount = pendingUploads.filter(
+      (p) => p.status === "uploading",
+    ).length;
+    const slots = MAX_CONCURRENT_UPLOADS - activeCount;
+    if (slots <= 0) return;
+
+    const toStart = pendingUploads
+      .filter(
+        (p) => p.status === "queued" && !activeUploadIds.current.has(p.id),
+      )
+      .slice(0, slots);
+
+    if (!toStart.length) return;
+
+    // Claim slots synchronously (before the state update) to prevent a
+    // second effect run from starting the same uploads again.
+    for (const p of toStart) {
+      activeUploadIds.current.add(p.id);
     }
-    startUpload(file, currentFolderId);
+
+    const toStartIds = new Set(toStart.map((p) => p.id));
+    setPendingUploads((prev) =>
+      prev.map((p) =>
+        toStartIds.has(p.id) ? { ...p, status: "uploading" } : p,
+      ),
+    );
+
+    for (const upload of toStart) {
+      startUploadHttp(upload.id, upload.file, upload.targetFolderId);
+    }
+  }, [pendingUploads, startUploadHttp]);
+
+  // Not memoized — always reads the live currentFolderId from the render scope
+  // so files land in whichever folder the user currently has open.
+  const enqueueFiles = (files: File[]) => {
+    if (!files.length) return;
+
+    // Sort smallest → largest so smaller files clear first (fewer retries on failure)
+    const sorted = [...files].sort((a, b) => a.size - b.size);
+
+    const newUploads: PendingUpload[] = [];
+    const skipped: string[] = [];
+
+    for (const file of sorted) {
+      const duplicate = myFiles.some(
+        (f) => f.folder_id === currentFolderId && f.name === file.name,
+      );
+      if (duplicate) {
+        skipped.push(file.name);
+        continue;
+      }
+      newUploads.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file,
+        name: file.name,
+        size: file.size,
+        contentType: file.type || "application/octet-stream",
+        progress: 0,
+        status: "queued",
+        targetFolderId: currentFolderId,
+      });
+    }
+
+    if (skipped.length) {
+      alert(
+        `Skipped ${
+          skipped.length
+        } file(s) that already exist in this folder:\n${skipped.join("\n")}`,
+      );
+    }
+
+    if (newUploads.length) {
+      setPendingUploads((prev) => [...prev, ...newUploads]);
+    }
   };
 
   // ─── Owner groupings for shared section ───────────────────────────────────
@@ -2601,17 +2763,18 @@ export default function VaultPage() {
                   className="vault-toolbar-btn"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  ↑ Upload File
+                  ↑ Upload Files
                 </button>
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   style={{ display: "none" }}
                   onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      uploadFile(file);
-                      e.target.value = ""; // allow re-selecting the same file
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length) {
+                      enqueueFiles(files);
+                      e.target.value = ""; // allow re-selecting the same files
                     }
                   }}
                 />
@@ -2685,10 +2848,19 @@ export default function VaultPage() {
                   key={upload.id}
                   upload={upload}
                   onRetry={() => {
+                    // Reset to queued; the queue processor will pick it up when a slot opens
                     setPendingUploads((prev) =>
-                      prev.filter((p) => p.id !== upload.id),
+                      prev.map((p) =>
+                        p.id === upload.id
+                          ? {
+                              ...p,
+                              status: "queued",
+                              progress: 0,
+                              error: undefined,
+                            }
+                          : p,
+                      ),
                     );
-                    startUpload(upload.file, upload.targetFolderId);
                   }}
                   onDismiss={() =>
                     setPendingUploads((prev) =>
@@ -2730,6 +2902,11 @@ export default function VaultPage() {
                     onMove={(f) => setMoveFile(f)}
                     onEditMd={(f) => handleSelectFile(f)}
                     onShareFile={isMyPanel ? (f) => setShareFile(f) : undefined}
+                    onDownload={isMyPanel ? (f) => downloadFile(f) : undefined}
+                    onArchive={isMyPanel ? (f) => archiveFile(f) : undefined}
+                    onUnarchive={
+                      isMyPanel ? (f) => unarchiveFile(f) : undefined
+                    }
                   />
                 );
               })}

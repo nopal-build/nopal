@@ -3,6 +3,7 @@ import {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
+  GetObjectCommand,
   ObjectCannedACL,
   CreateMultipartUploadCommand,
   UploadPartCommand,
@@ -94,6 +95,30 @@ export async function getPresignedUploadUrl(
   const publicUrl = getPublicFileUrl(filename);
 
   return { presignedUrl, publicUrl };
+}
+
+/**
+ * Generate a short-lived presigned GET URL that forces a file download.
+ * The URL includes `Content-Disposition: attachment` so the browser saves
+ * the file rather than opening it inline, even for cross-origin requests.
+ *
+ * @param s3Key     The S3 key of the object to download
+ * @param filename  The suggested save-as filename
+ * @param expiresIn Seconds until the URL expires (default: 300 = 5 minutes)
+ */
+export async function getPresignedDownloadUrl(
+  s3Key: string,
+  filename: string,
+  expiresIn = 300,
+): Promise<string> {
+  const client = createS3Client();
+  const cmd = new GetObjectCommand({
+    Bucket: process.env.BUCKET_NAME,
+    Key: s3Key,
+    ResponseContentDisposition: `attachment; filename="${encodeURIComponent(filename)}"`,
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return getSignedUrl(client as any, cmd, { expiresIn });
 }
 
 export async function downloadAndUploadToS3(

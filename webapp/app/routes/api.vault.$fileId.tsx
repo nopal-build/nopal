@@ -112,6 +112,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       content?: string;
       is_public?: boolean;
       shared_type?: "view" | "workable" | "editable";
+      archived_at?: string | null;
     };
 
     const updates: Parameters<typeof updateFileRef>[1] = {};
@@ -120,6 +121,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if ("folder_id" in body) updates.folder_id = body.folder_id ?? null;
     if (body.is_public !== undefined) updates.is_public = body.is_public;
     if (body.shared_type !== undefined) updates.shared_type = body.shared_type;
+    if ("archived_at" in body) updates.archived_at = body.archived_at ?? null;
 
     if (body.content !== undefined) {
       const { content, md_versions } = computeMdUpdate(file, body.content);

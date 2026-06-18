@@ -34,6 +34,8 @@ export type FileRef = {
   shared_type?: FileShareType;
   /** Whether this card is publicly accessible without authentication. */
   is_public?: boolean;
+  /** ISO timestamp set when the file is archived; null/absent when not archived. */
+  archived_at?: string | null;
 };
 
 /**

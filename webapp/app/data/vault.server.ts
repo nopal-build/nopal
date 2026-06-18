@@ -88,6 +88,8 @@ export async function updateFileRef(
     md_versions: MdVersion[];
     shared_type: FileShareType;
     is_public: boolean;
+    /** ISO timestamp to archive the file; null to unarchive. */
+    archived_at: string | null;
   }>,
 ): Promise<FileRef | undefined> {
   const result = await merge("file_refs", id, {
@@ -95,6 +97,26 @@ export async function updateFileRef(
     updated_at: new Date().toISOString(),
   });
   return result ? formatRecord(result as unknown as FileRef) : undefined;
+}
+
+/**
+ * Returns all file_refs where archived_at is set and older than `olderThanDays` days.
+ * Used by the archive cleanup job to find files due for permanent deletion.
+ */
+export async function getArchivedFilesForCleanup(
+  olderThanDays = 30,
+): Promise<FileRef[]> {
+  const cutoff = new Date(
+    Date.now() - olderThanDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const result = await query<[FileRef[]]>(
+    `SELECT * FROM file_refs
+     WHERE archived_at != NONE
+       AND archived_at != null
+       AND archived_at <= $cutoff`,
+    { cutoff },
+  );
+  return (result?.[0] ?? []).map(formatRecord);
 }
 
 export async function deleteFileRef(id: string): Promise<void> {
