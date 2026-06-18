@@ -26,6 +26,7 @@ import {
   COMMAND_PRIORITY_HIGH,
   KEY_SPACE_COMMAND,
 } from "lexical";
+import { INSERT_CHECK_LIST_COMMAND } from "@lexical/list";
 import { $isQuoteNode } from "@lexical/rich-text";
 import { $findMatchingParent } from "@lexical/utils";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
@@ -365,6 +366,24 @@ const noChecklistSpacePlugin = realmPlugin({
   },
 });
 
+// ── Lexical editor capture plugin ────────────────────────────────────────────
+// Exposes the underlying LexicalEditor instance so the action bar can dispatch
+// commands (e.g. INSERT_CHECK_LIST_COMMAND) without going through markdown.
+type LexicalEditor = ReturnType<typeof useLexicalComposerContext>[0];
+
+function makeLexicalCapturePlugin(ref: { current: LexicalEditor | null }) {
+  function LexicalCaptureInner() {
+    const [editor] = useLexicalComposerContext();
+    ref.current = editor;
+    return null;
+  }
+  return realmPlugin({
+    init(realm) {
+      realm.pub(addComposerChild$, LexicalCaptureInner);
+    },
+  });
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function MdxEditorClient({
@@ -415,6 +434,13 @@ export default function MdxEditorClient({
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorBodyRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(false);
+  const lexicalEditorRef = useRef<LexicalEditor | null>(null);
+  // Stable plugin instance — created once so the Lexical composer isn't remounted.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const lexicalCapturePlugin = useMemo(
+    () => makeLexicalCapturePlugin(lexicalEditorRef),
+    [],
+  );
 
   // "file"  = dragging a tray item onto the editor   → full-width drop zone
   // "chip"  = dragging a placed chip to reposition  → narrow right-edge strip
@@ -875,6 +901,7 @@ export default function MdxEditorClient({
       blankLinesPlugin(),
       blockquoteEnterPlugin(),
       noChecklistSpacePlugin(),
+      lexicalCapturePlugin(),
       ...(csvEnabled ? [csvRefPlugin()] : []),
       ...(popoverEnabled ? [refPopoverPlugin()] : []),
     ],
@@ -1107,58 +1134,62 @@ export default function MdxEditorClient({
             onDragOver={handleTrayChipDragOver}
             onDrop={handleTrayChipDrop}
           >
-            {trayFiles.map((file) => (
-              <div
-                key={file.index}
-                className={[
-                  "nopal-tray-item",
-                  file.status === "uploading"
-                    ? "nopal-tray-item--uploading"
-                    : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                draggable={file.status === "ready"}
-                onDragStart={
-                  file.status === "ready"
-                    ? (e) => handleTrayDragStart(e, file.index)
-                    : undefined
-                }
-                onDragEnd={handleTrayDragEnd}
-                title={`[${file.index}] ${file.name}`}
-              >
-                {file.status === "uploading" ? (
-                  <img
-                    src={TRAY_LOADING_URI}
-                    width={28}
-                    height={28}
-                    alt="uploading"
-                    draggable={false}
-                    style={{ display: "block" }}
-                  />
-                ) : file.isImage && file.url ? (
-                  <img
-                    src={file.url}
-                    alt={file.name}
-                    draggable={false}
-                    className="nopal-tray-item-thumb"
-                  />
-                ) : (
-                  <img
-                    src={TRAY_FILE_URI}
-                    width={28}
-                    height={28}
-                    alt={file.name}
-                    draggable={false}
-                    style={{ display: "block" }}
-                  />
-                )}
-                <span className="nopal-tray-item-badge">[{file.index}]</span>
-              </div>
-            ))}
+            {/* File chips */}
+            <div className="nopal-tray-chips">
+              {trayFiles.map((file) => (
+                <div
+                  key={file.index}
+                  className={[
+                    "nopal-tray-item",
+                    file.status === "uploading"
+                      ? "nopal-tray-item--uploading"
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  draggable={file.status === "ready"}
+                  onDragStart={
+                    file.status === "ready"
+                      ? (e) => handleTrayDragStart(e, file.index)
+                      : undefined
+                  }
+                  onDragEnd={handleTrayDragEnd}
+                  title={`[${file.index}] ${file.name}`}
+                >
+                  {file.status === "uploading" ? (
+                    <img
+                      src={TRAY_LOADING_URI}
+                      width={28}
+                      height={28}
+                      alt="uploading"
+                      draggable={false}
+                      style={{ display: "block" }}
+                    />
+                  ) : file.isImage && file.url ? (
+                    <img
+                      src={file.url}
+                      alt={file.name}
+                      draggable={false}
+                      className="nopal-tray-item-thumb"
+                    />
+                  ) : (
+                    <img
+                      src={TRAY_FILE_URI}
+                      width={28}
+                      height={28}
+                      alt={file.name}
+                      draggable={false}
+                      style={{ display: "block" }}
+                    />
+                  )}
+                  <span className="nopal-tray-item-badge">[{file.index}]</span>
+                </div>
+              ))}
+            </div>
 
-            {uploadFile && (
-              <>
+            {/* Unified button group: + | [ ] | actions */}
+            <div className="nopal-tray-group">
+              {uploadFile && (
                 <button
                   className="nopal-tray-add"
                   onClick={() => fileInputRef.current?.click()}
@@ -1179,18 +1210,36 @@ export default function MdxEditorClient({
                     <line x1="5" y1="12" x2="19" y2="12" />
                   </svg>
                 </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*,.pdf,.h264"
-                  multiple
-                  style={{ display: "none" }}
-                  onChange={handleFileSelect}
-                />
-              </>
-            )}
+              )}
+              <button
+                className="nopal-tray-task"
+                title="Insert task"
+                aria-label="Insert task checkbox"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  lexicalEditorRef.current?.dispatchCommand(
+                    INSERT_CHECK_LIST_COMMAND,
+                    undefined,
+                  );
+                }}
+              >
+                [ ]
+              </button>
+              {actions && <div className="nopal-tray-actions">{actions}</div>}
+            </div>
 
-            {actions && <div className="nopal-tray-actions">{actions}</div>}
+            {/* Hidden file input — kept outside the group so it doesn't
+                affect flex layout or border-left sibling counting */}
+            {uploadFile && (
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.pdf,.h264"
+                multiple
+                style={{ display: "none" }}
+                onChange={handleFileSelect}
+              />
+            )}
           </div>
         </div>
       </RefPopoverContext.Provider>

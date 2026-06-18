@@ -653,20 +653,75 @@
 
 .nopal-tray {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 10px;
   border-top: 1px solid var(--foreground, #e5d6c5);
   background: var(--midground, #ede4da);
   min-height: 48px;
 }
 
-.nopal-tray > div {
+/* ── Daily-log today-editor: body scroll + fixed tray on mobile ───────────────
+ *                                                                              *
+ * iOS Safari treats position:fixed as position:absolute inside any ancestor   *
+ * that has overflow:scroll, so the tray would end up at the very bottom of    *
+ * all scroll content instead of the viewport.                                 *
+ *                                                                              *
+ * Fix: when .nopal-today-editor is present on the page, allow app-layout to   *
+ * grow naturally and let html (which already has overflow-y:scroll in         *
+ * root.css) be the scroll container. position:fixed then works correctly.     *
+ *                                                                              *
+ * :has() support: Safari 16.4+, Chrome 105+, Firefox 121+.                   *
+ * ─────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 859px) {
+  /* Switch from app-main scroll to html/body scroll */
+  html:has(.nopal-today-editor) .app-layout {
+    height: auto;
+  }
+
+  html:has(.nopal-today-editor) .app-main {
+    overflow: visible;
+    height: auto;
+  }
+
+  /* With body scroll the sticky editor header competes with the sticky topnav.
+     Offset it by the topnav height (set as a CSS variable by JS; fallback 60px). */
+  .nopal-today-editor .nopal-editor-sticky-header {
+    top: var(--topnav-h, 60px);
+  }
+
+  /* Fixed tray — only when .tray-fixed is present (set by JS only when the
+     sentinel is off-screen AND the section is still in view).
+     --tray-x / --tray-w are the tray's inner bounds (inside the wrapper's
+     1px border); we step 1px outward on each side and draw matching borders
+     so the content stays pixel-perfectly aligned with the docked state. */
+  .nopal-today-editor.tray-fixed .nopal-tray {
+    position: fixed;
+    bottom: 0;
+    left: calc(var(--tray-x, 0px) - 1px);
+    width: calc(var(--tray-w, 100%) + 2px);
+    border-left: 1px solid var(--midground, #ede4da);
+    border-right: 1px solid var(--midground, #ede4da);
+    z-index: 100;
+    border-radius: 0;
+    /* Restore the base 8px bottom padding and add safe-area clearance. */
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Compensate for the tray leaving the flex flow when fixed. */
+  .nopal-today-editor.tray-fixed .mdx-editor-wrapper {
+    margin-bottom: var(--tray-h, 48px);
+  }
+}
+
+.nopal-tray-chips {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
 .nopal-tray-item {
@@ -721,36 +776,91 @@
   user-select: none;
 }
 
-.nopal-tray-add {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+/* ── Tray button group ──────────────────────────────────────────────────────────────
+ * +, [ ], and any action buttons (Save/Done/Cancel) share one pill container. *
+ * ─────────────────────────────────────────────────────────────────────────── */
+.nopal-tray-group {
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+  border-radius: 8px;
+  overflow: hidden;
   background: var(--purple-light, #a78bfa);
-  color: #fff;
-  border: none;
-  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(63, 43, 70, 0.22);
+  flex-shrink: 0;
+}
+
+/* Hairline divider between every group member */
+.nopal-tray-group > * + * {
+  border-left: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+/* Shared base for the icon buttons */
+.nopal-tray-add,
+.nopal-tray-task {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  width: 34px;
+  background: transparent;
+  color: #fff;
+  border: none;
+  cursor: pointer;
   padding: 0;
-  box-shadow: 0 1px 4px rgba(63, 43, 70, 0.22);
-  transition:
-    opacity 0.15s,
-    background 0.15s;
+  flex-shrink: 0;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.12s;
 }
 
-.nopal-tray-add:hover {
-  opacity: 0.82;
+.nopal-tray-task {
+  font-size: 9px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-weight: 700;
+  letter-spacing: -0.03em;
 }
 
-/* Actions slot — Save/Cancel or other contextual buttons rendered to the right
- * of the add-files button. A hairline left border provides a visual separator. */
+.nopal-tray-add:hover,
+.nopal-tray-task:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.nopal-tray-add:active,
+.nopal-tray-task:active {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Actions slot — wraps contextual buttons (Save / Done / Cancel etc.) */
 .nopal-tray-actions {
   display: flex;
+  align-items: stretch;
+}
+
+/* Normalise whatever button the consumer passes in.
+ * Specificity is (0,2,0) — beats any single Tailwind utility class (0,1,0)
+ * so py-*, rounded, etc. from btn-purple are always overridden. */
+.nopal-tray-group .nopal-tray-actions > * {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  margin-left: 8px;
+  height: 100%;
+  padding: 0 12px;
+  background: transparent;
+  color: #fff;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+.nopal-tray-group .nopal-tray-actions > *:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.nopal-tray-group .nopal-tray-actions > *:active {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Dark-mode image grid – no extra overrides needed (inherits above) */
@@ -1157,9 +1267,7 @@
     border-top-color: var(--dark-foreground);
   }
 
-  .nopal-tray-actions {
-    border-left-color: var(--dark-foreground);
-  }
+  /* group uses rgba(255,255,255,…) dividers — no dark-mode override needed */
 
   .nopal-tray-item {
     border-color: var(--foreground, #3a2f45);

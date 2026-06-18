@@ -188,6 +188,87 @@ function TodayLogEntry({
     setIsClient(true);
   }, []);
 
+  // ── Tray positioning (mobile only) ────────────────────────────────────
+  // Sets CSS custom properties on the section element so the fixed tray:
+  //   --tray-x / --tray-w  bound it to the editor's horizontal footprint
+  //   --topnav-h           offsets the sticky editor header below the topnav
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    const sentinel = sentinelRef.current;
+    if (!section || !sentinel) return;
+
+    // ── CSS custom properties: tray bounds + topnav height ────────────────
+    const sync = () => {
+      // Measure the wrapper's inner content bounds (inside its 1px border)
+      // so the fixed tray's content aligns pixel-perfectly with natural flow.
+      const wrapper = section.querySelector<HTMLElement>(".mdx-editor-wrapper");
+      const wr = wrapper?.getBoundingClientRect();
+      if (wr) {
+        section.style.setProperty("--tray-x", `${wr.left + 1}px`);
+        section.style.setProperty("--tray-w", `${wr.width - 2}px`);
+      }
+      const topnav = document.querySelector<HTMLElement>(".app-topnav");
+      section.style.setProperty(
+        "--topnav-h",
+        `${topnav?.offsetHeight ?? 60}px`,
+      );
+    };
+
+    const ro = new ResizeObserver(sync);
+    ro.observe(section);
+    window.addEventListener("resize", sync, { passive: true });
+    sync();
+
+    // ── Two observers: sentinel (bottom edge) + section (whole editor) ─────
+    //
+    // tray-fixed is applied only when BOTH conditions hold:
+    //   1. sentinel is off-screen  → tray's natural position is above the fold
+    //   2. section is still in view → at least part of the editor is visible
+    //
+    // When the entire section scrolls above the viewport condition 2 becomes
+    // false and the class is removed, hiding the fixed tray.
+    let sentinelVisible = true;
+    let sectionVisible = true;
+
+    const updateTray = () => {
+      const shouldFix = !sentinelVisible && sectionVisible;
+      // Measure tray height while it's still in normal flow (before fixing).
+      if (shouldFix && !section.classList.contains("tray-fixed")) {
+        const tray = section.querySelector<HTMLElement>(".nopal-tray");
+        section.style.setProperty("--tray-h", `${tray?.offsetHeight ?? 48}px`);
+      }
+      section.classList.toggle("tray-fixed", shouldFix);
+    };
+
+    const sentinelObs = new IntersectionObserver(
+      ([entry]) => {
+        sentinelVisible = entry.isIntersecting;
+        updateTray();
+      },
+      { threshold: 0 },
+    );
+    sentinelObs.observe(sentinel);
+
+    const sectionObs = new IntersectionObserver(
+      ([entry]) => {
+        sectionVisible = entry.isIntersecting;
+        updateTray();
+      },
+      { threshold: 0 },
+    );
+    sectionObs.observe(section);
+
+    return () => {
+      ro.disconnect();
+      sentinelObs.disconnect();
+      sectionObs.disconnect();
+      window.removeEventListener("resize", sync);
+    };
+  }, []);
+
   const uploadFile = useCallback(async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append("file", file);
@@ -214,9 +295,9 @@ function TodayLogEntry({
 
   return (
     <div
-      style={{
-        marginBottom: "12px",
-      }}
+      ref={sectionRef}
+      className="nopal-today-editor"
+      style={{ marginBottom: "12px" }}
     >
       <div className="nopal-editor-sticky-header">
         <span
@@ -249,6 +330,20 @@ function TodayLogEntry({
           <EditorLoadingFallback />
         )}
       </div>
+
+      {/* Sentinel: sits at the natural bottom of the editor (just below the
+          wrapper). While visible the tray stays in normal flow; once it
+          scrolls off screen the tray becomes position:fixed. */}
+      <div
+        ref={sentinelRef}
+        style={{
+          height: 1,
+          marginTop: -1,
+          visibility: "hidden",
+          pointerEvents: "none",
+        }}
+        aria-hidden="true"
+      />
     </div>
   );
 }
@@ -352,7 +447,7 @@ export default function DailyLogPage() {
   // While today === "" all entries render as past entries on the server;
   // after hydration the correct split is applied.
   const pastEntries = today
-    ? serverEntries.filter((e) => e.date !== today)
+    ? serverEntries.filter((e) => e.date !== today && e.content?.trim())
     : [];
 
   // ── Server save ───────────────────────────────────────────────────────────
