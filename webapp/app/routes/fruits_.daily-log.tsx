@@ -3,7 +3,14 @@ import type {
   ActionFunctionArgs,
   LinksFunction,
 } from "react-router";
-import { redirect, useLoaderData, useFetcher } from "react-router";
+import {
+  redirect,
+  useLoaderData,
+  useFetcher,
+  useRevalidator,
+  useRouteError,
+  isRouteErrorResponse,
+} from "react-router";
 import {
   useState,
   useEffect,
@@ -246,10 +253,83 @@ function TodayLogEntry({
   );
 }
 
+// ─── ErrorBoundary ───────────────────────────────────────────────────────────
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  let message = "Couldn't load Daily Log.";
+
+  if (isRouteErrorResponse(error)) {
+    if (error.status === 401 || error.status === 403) {
+      message = "Your session has expired.";
+    } else {
+      message = `Error ${error.status}: ${error.statusText}`;
+    }
+  } else if (error instanceof Error) {
+    // iOS Safari reports network failures as "Load failed"
+    if (
+      error.message.includes("Failed to fetch") ||
+      error.message.includes("NetworkError") ||
+      error.message.includes("Load failed")
+    ) {
+      message =
+        "Couldn't reach the server. Check your connection and try again.";
+    } else {
+      message = error.message;
+    }
+  }
+
+  return (
+    <AppLayout>
+      <div
+        style={{
+          padding: "60px 16px",
+          maxWidth: "480px",
+          margin: "0 auto",
+          textAlign: "center",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "16px",
+        }}
+      >
+        <p
+          style={{
+            fontFamily: "monospace",
+            fontSize: "11px",
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: "var(--text-subtle)",
+          }}
+        >
+          Daily Log
+        </p>
+        <p
+          style={{
+            fontSize: "14px",
+            color: "var(--text-subtle)",
+            lineHeight: "1.5",
+          }}
+        >
+          {message}
+        </p>
+        <button
+          className="btn btn-primary"
+          onClick={() => window.location.reload()}
+        >
+          Try again
+        </button>
+      </div>
+    </AppLayout>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DailyLogPage() {
   const { user, entries: serverEntries } = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
 
   // ── today + todayContent ──────────────────────────────────────────────────
   // Both start as "" so the server render and the initial client render
@@ -314,6 +394,19 @@ export default function DailyLogPage() {
     },
     [],
   );
+
+  // iOS Safari BFCache: when a frozen tab is restored, revalidate loader data
+  // so session expiry or stale entries surface immediately rather than silently
+  // leaving the page in a broken state.
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        revalidator.revalidate();
+      }
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, [revalidator]);
 
   const handleChange = useCallback(
     (content: string) => {

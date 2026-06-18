@@ -148,23 +148,77 @@ export function Layout({ children }: { children: ReactNode }) {
 export function ErrorBoundary() {
   const error = useRouteError();
 
+  let heading = "Something went wrong";
+  let detail: string;
+  let showLogin = false;
+
   if (isRouteErrorResponse(error)) {
-    return (
-      <>
-        <h1>
-          {error.status} {error.statusText}
-        </h1>
-        <p>{error.data}</p>
-      </>
-    );
+    if (error.status === 401 || error.status === 403) {
+      heading = "Session expired";
+      detail = "Please log in to continue.";
+      showLogin = true;
+    } else if (error.status === 404) {
+      heading = "Page not found";
+      detail = "This page doesn't exist.";
+    } else {
+      heading = `${error.status} ${error.statusText}`;
+      detail =
+        typeof error.data === "string"
+          ? error.data
+          : "An error occurred on the server.";
+    }
+  } else {
+    detail =
+      error instanceof Error ? error.message : "An unexpected error occurred.";
   }
 
   return (
-    <>
-      <h1>Error!</h1>
-      {/* @ts-ignore */}
-      <p>{error?.message ?? "Unknown error"}</p>
-    </>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "60vh",
+        padding: "40px 20px",
+        textAlign: "center",
+        gap: "16px",
+      }}
+    >
+      <p
+        style={{
+          fontFamily: "monospace",
+          fontSize: "11px",
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          color: "var(--text-subtle)",
+        }}
+      >
+        {heading}
+      </p>
+      <p
+        style={{
+          fontSize: "14px",
+          color: "var(--text-subtle)",
+          maxWidth: "360px",
+          lineHeight: "1.5",
+        }}
+      >
+        {detail}
+      </p>
+      {showLogin ? (
+        <a href="/login" className="btn btn-primary">
+          Go to login
+        </a>
+      ) : (
+        <button
+          className="btn btn-primary"
+          onClick={() => window.location.reload()}
+        >
+          Reload page
+        </button>
+      )}
+    </div>
   );
 }
 
