@@ -662,20 +662,42 @@
   min-height: 48px;
 }
 
-/* ── Daily-log today-editor: body scroll + fixed tray on mobile ───────────────
- *                                                                              *
- * iOS Safari treats position:fixed as position:absolute inside any ancestor   *
- * that has overflow:scroll, so the tray would end up at the very bottom of    *
- * all scroll content instead of the viewport.                                 *
- *                                                                              *
- * Fix: when .nopal-today-editor is present on the page, allow app-layout to   *
- * grow naturally and let html (which already has overflow-y:scroll in         *
- * root.css) be the scroll container. position:fixed then works correctly.     *
- *                                                                              *
+/* ── Daily-log today-editor: floating tray ─────────────────────────────────────
+ * .tray-fixed is toggled by JS whenever the sentinel (editor bottom edge)    *
+ * leaves the viewport but the section is still partially visible.             *
+ * On all screen sizes the tray floats at the viewport bottom; it disappears   *
+ * once the editor has fully scrolled out of view.                             *
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/* Fixed tray — --tray-x/--tray-w are the wrapper's inner bounds; we step
+   1px outward on each side and add matching borders so the fixed tray is
+   pixel-perfectly aligned with the docked state on all screen sizes. */
+.nopal-today-editor.tray-fixed .nopal-tray {
+  position: fixed;
+  bottom: 0;
+  left: calc(var(--tray-x, 0px) - 1px);
+  width: calc(var(--tray-w, 100%) + 2px);
+  border-left: 1px solid var(--midground, #ede4da);
+  border-right: 1px solid var(--midground, #ede4da);
+  z-index: 100;
+  border-radius: 0;
+  /* Restore the base 8px bottom padding and add safe-area clearance. */
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Compensate for the tray leaving the flex flow when fixed. */
+.nopal-today-editor.tray-fixed .mdx-editor-wrapper {
+  margin-bottom: var(--tray-h, 48px);
+}
+
+/* ── Mobile-only: body scroll so position:fixed works correctly on iOS ───────
+ * iOS Safari treats position:fixed as position:absolute inside overflow:scroll.*
+ * Switching app-main to visible scroll lets html be the scroll root, which    *
+ * makes position:fixed behave as expected. Desktop browsers handle fixed       *
+ * inside overflow:scroll correctly so no change is needed there.              *
  * :has() support: Safari 16.4+, Chrome 105+, Firefox 121+.                   *
  * ─────────────────────────────────────────────────────────────────────────── */
 @media (max-width: 859px) {
-  /* Switch from app-main scroll to html/body scroll */
   html:has(.nopal-today-editor) .app-layout {
     height: auto;
   }
@@ -686,32 +708,9 @@
   }
 
   /* With body scroll the sticky editor header competes with the sticky topnav.
-     Offset it by the topnav height (set as a CSS variable by JS; fallback 60px). */
+     Offset it by the topnav height (measured by JS; fallback 60px). */
   .nopal-today-editor .nopal-editor-sticky-header {
     top: var(--topnav-h, 60px);
-  }
-
-  /* Fixed tray — only when .tray-fixed is present (set by JS only when the
-     sentinel is off-screen AND the section is still in view).
-     --tray-x / --tray-w are the tray's inner bounds (inside the wrapper's
-     1px border); we step 1px outward on each side and draw matching borders
-     so the content stays pixel-perfectly aligned with the docked state. */
-  .nopal-today-editor.tray-fixed .nopal-tray {
-    position: fixed;
-    bottom: 0;
-    left: calc(var(--tray-x, 0px) - 1px);
-    width: calc(var(--tray-w, 100%) + 2px);
-    border-left: 1px solid var(--midground, #ede4da);
-    border-right: 1px solid var(--midground, #ede4da);
-    z-index: 100;
-    border-radius: 0;
-    /* Restore the base 8px bottom padding and add safe-area clearance. */
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-  }
-
-  /* Compensate for the tray leaving the flex flow when fixed. */
-  .nopal-today-editor.tray-fixed .mdx-editor-wrapper {
-    margin-bottom: var(--tray-h, 48px);
   }
 }
 
