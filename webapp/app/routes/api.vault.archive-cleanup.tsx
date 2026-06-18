@@ -1,5 +1,8 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getArchivedFilesForCleanup, deleteFileRef } from "../data/vault.server";
+import {
+  getArchivedFilesForCleanup,
+  deleteFileRef,
+} from "../data/vault.server";
 
 /**
  * POST /api/vault/archive-cleanup
@@ -7,16 +10,15 @@ import { getArchivedFilesForCleanup, deleteFileRef } from "../data/vault.server"
  * Permanently deletes all vault files that were archived more than 30 days ago.
  * Protected by the CRON_SECRET environment variable.
  *
- * Usage (e.g. from a Fly.io scheduled machine or external cron service):
+ * This endpoint is called automatically by the server's built-in daily cron
+ * (see server.js). To enable it, set CRON_SECRET in your environment:
+ *
+ *   fly secrets set CRON_SECRET=$(openssl rand -hex 32)
+ *
+ * You can also trigger it manually:
  *
  *   curl -X POST https://<your-app>.fly.dev/api/vault/archive-cleanup \
  *     -H "Authorization: Bearer $CRON_SECRET"
- *
- * To set up a daily scheduled machine on Fly.io:
- *   fly machine run --app <app-name> \
- *     --schedule daily \
- *     --env CRON_SECRET=<your-secret> \
- *     --entrypoint 'sh -c "curl -fsS -X POST http://localhost:3000/api/vault/archive-cleanup -H \"Authorization: Bearer $CRON_SECRET\""'
  */
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
