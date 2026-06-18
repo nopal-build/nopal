@@ -371,262 +371,280 @@ export default function MdxRenderer({
   );
 
   // ── React-markdown component overrides ────────────────────────────────────
-  // Defined inline so every closure captures the current render's state values.
-  // Accepted tradeoff: ReactMarkdown children remount on each editing-state
-  // change. This is fine for personal-vault documents (small, infrequent edits).
-  const components = {
-    // ── Unordered list ───────────────────────────────────────────────────────
-    ul({ className, children, ordered, ...rest }: any) {
-      const isTaskList = className === "contains-task-list";
+  // Memoised so that react-markdown's component functions keep stable
+  // references across parent re-renders (e.g. debounced saves completing).
+  // react-markdown uses these functions as React element *types*; a changed
+  // reference causes React to unmount+remount the element rather than patch it,
+  // which is the source of visible DOM thrashing on task list items.
+  // The memo only busts when a value the closures actually read changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const components = useMemo(
+    () => ({
+      // ── Unordered list ───────────────────────────────────────────────────────
+      ul({ className, children, ordered, ...rest }: any) {
+        const isTaskList = className === "contains-task-list";
 
-      if (!isTaskList) {
-        return (
-          <ul className={className} {...rest}>
-            {children}
-          </ul>
-        );
-      }
+        if (!isTaskList) {
+          return (
+            <ul className={className} {...rest}>
+              {children}
+            </ul>
+          );
+        }
 
-      const gi = groupCountRef.current++;
-      const isAdding = workable && addingGroupIndex === gi;
+        const gi = groupCountRef.current++;
+        const isAdding = workable && addingGroupIndex === gi;
 
-      const handleAddCommit = (text: string) => {
-        if (!text.trim() || !onChange) {
+        const handleAddCommit = (text: string) => {
+          if (!text.trim() || !onChange) {
+            setAddingGroupIndex(null);
+            setNewTaskText("");
+            return;
+          }
+          const groups = getTaskGroups(editorText);
+          const g = groups[gi];
+          // Insert after the last task in this group; if group is somehow not
+          // found fall back to appending at the end of the document.
+          const lastTaskIdx = g ? g.startTaskIndex + g.count - 1 : -1;
+          onChange(addTaskAfterTask(editorText, lastTaskIdx, text));
           setAddingGroupIndex(null);
           setNewTaskText("");
-          return;
-        }
-        const groups = getTaskGroups(editorText);
-        const g = groups[gi];
-        // Insert after the last task in this group; if group is somehow not
-        // found fall back to appending at the end of the document.
-        const lastTaskIdx = g ? g.startTaskIndex + g.count - 1 : -1;
-        onChange(addTaskAfterTask(editorText, lastTaskIdx, text));
-        setAddingGroupIndex(null);
-        setNewTaskText("");
-      };
+        };
 
-      return (
-        <ul className="contains-task-list nopal-task-list" {...rest}>
-          {children}
-          {workable &&
-            (isAdding ? (
-              // Input row — matches the layout of a task item
-              <li className="nopal-add-task-item">
-                <div className="nopal-add-task-input-row">
-                  <span className="nopal-task-checkbox-placeholder" />
-                  <input
-                    autoFocus
-                    className="nopal-add-task-input"
-                    value={newTaskText}
-                    placeholder="New task…"
-                    onChange={(e) => setNewTaskText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleAddCommit(newTaskText);
-                      }
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        setAddingGroupIndex(null);
-                        setNewTaskText("");
-                      }
-                    }}
-                    onBlur={() => handleAddCommit(newTaskText)}
-                  />
-                </div>
-              </li>
-            ) : (
-              <li className="nopal-add-task-item">
-                <button
-                  type="button"
-                  className="nopal-add-task-btn"
-                  onClick={() => {
-                    setAddingGroupIndex(gi);
-                    setNewTaskText("");
-                  }}
-                >
-                  + Add task
-                </button>
-              </li>
-            ))}
-        </ul>
-      );
-    },
-
-    // ── List item ────────────────────────────────────────────────────────────
-    li({
-      node,
-      className,
-      children,
-      checked: checkedProp,
-      ordered,
-      ...rest
-    }: any) {
-      const isTask = className === "task-list-item";
-
-      if (!isTask) {
         return (
-          <li className={className} {...rest}>
+          <ul className="contains-task-list nopal-task-list" {...rest}>
             {children}
-          </li>
+            {workable &&
+              (isAdding ? (
+                // Input row — matches the layout of a task item
+                <li className="nopal-add-task-item">
+                  <div className="nopal-add-task-input-row">
+                    <span className="nopal-task-checkbox-placeholder" />
+                    <input
+                      autoFocus
+                      className="nopal-add-task-input"
+                      value={newTaskText}
+                      placeholder="New task…"
+                      onChange={(e) => setNewTaskText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleAddCommit(newTaskText);
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setAddingGroupIndex(null);
+                          setNewTaskText("");
+                        }
+                      }}
+                      onBlur={() => handleAddCommit(newTaskText)}
+                    />
+                  </div>
+                </li>
+              ) : (
+                <li className="nopal-add-task-item">
+                  <button
+                    type="button"
+                    className="nopal-add-task-btn"
+                    onClick={() => {
+                      setAddingGroupIndex(gi);
+                      setNewTaskText("");
+                    }}
+                  >
+                    Add task
+                  </button>
+                </li>
+              ))}
+          </ul>
         );
-      }
+      },
 
-      const ti = taskCountRef.current++;
-      // react-markdown v8 surfaces `checked` as a direct prop on task-list <li>s.
-      // v9 dropped it; fall back to reading the hast node's first child
-      // (the injected <input type="checkbox">) in case we ever upgrade.
-      const checked =
-        checkedProp === true ||
-        (node as any)?.children?.[0]?.properties?.checked === true;
-      const isEditing = workable && editingTaskIndex === ti;
+      // ── List item ────────────────────────────────────────────────────────────
+      li({
+        node,
+        className,
+        children,
+        checked: checkedProp,
+        ordered,
+        ...rest
+      }: any) {
+        const isTask = className === "task-list-item";
 
-      return (
-        <li className="nopal-task-item">
-          {/* Checkbox — clickable button in workable mode, display-only span in view mode */}
-          {workable ? (
-            <button
-              type="button"
-              className={`nopal-task-checkbox${checked ? " checked" : ""}`}
-              aria-label={checked ? "Uncheck task" : "Check task"}
-              onClick={() => onChange!(toggleTask(editorText, ti, !checked))}
-            />
-          ) : (
-            <span
-              className={`nopal-task-checkbox${checked ? " checked" : ""}`}
-              role="checkbox"
-              aria-checked={checked}
-            />
-          )}
+        if (!isTask) {
+          return (
+            <li className={className} {...rest}>
+              {children}
+            </li>
+          );
+        }
 
-          {/* Task text — input while editing, clickable span otherwise */}
-          {isEditing ? (
-            <input
-              autoFocus
-              className="nopal-task-edit-input"
-              value={editingTaskDraft}
-              onChange={(e) => setEditingTaskDraft(e.target.value)}
-              onBlur={() => {
-                if (onChange)
-                  onChange(editTaskText(editorText, ti, editingTaskDraft));
-                setEditingTaskIndex(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
+        const ti = taskCountRef.current++;
+        // react-markdown v8 surfaces `checked` as a direct prop on task-list <li>s.
+        // v9 dropped it; fall back to reading the hast node's first child
+        // (the injected <input type="checkbox">) in case we ever upgrade.
+        const checked =
+          checkedProp === true ||
+          (node as any)?.children?.[0]?.properties?.checked === true;
+        const isEditing = workable && editingTaskIndex === ti;
+
+        return (
+          <li className="nopal-task-item">
+            {/* Checkbox — clickable button in workable mode, display-only span in view mode */}
+            {workable ? (
+              <button
+                type="button"
+                className={`nopal-task-checkbox${checked ? " checked" : ""}`}
+                aria-label={checked ? "Uncheck task" : "Check task"}
+                onClick={() => onChange!(toggleTask(editorText, ti, !checked))}
+              />
+            ) : (
+              <span
+                className={`nopal-task-checkbox${checked ? " checked" : ""}`}
+                role="checkbox"
+                aria-checked={checked}
+              />
+            )}
+
+            {/* Task text — input while editing, clickable span otherwise */}
+            {isEditing ? (
+              <input
+                autoFocus
+                className="nopal-task-edit-input"
+                value={editingTaskDraft}
+                onChange={(e) => setEditingTaskDraft(e.target.value)}
+                onBlur={() => {
                   if (onChange)
                     onChange(editTaskText(editorText, ti, editingTaskDraft));
                   setEditingTaskIndex(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (onChange)
+                      onChange(editTaskText(editorText, ti, editingTaskDraft));
+                    setEditingTaskIndex(null);
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setEditingTaskIndex(null);
+                  }
+                }}
+              />
+            ) : (
+              <span
+                className={`nopal-task-text${checked ? " nopal-task-text--checked" : ""}`}
+                onClick={
+                  workable
+                    ? () => {
+                        setEditingTaskIndex(ti);
+                        setEditingTaskDraft(getTaskText(editorText, ti));
+                      }
+                    : undefined
                 }
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setEditingTaskIndex(null);
-                }
-              }}
-            />
-          ) : (
-            <span
-              className={`nopal-task-text${checked ? " nopal-task-text--checked" : ""}`}
-              onClick={
-                workable
-                  ? () => {
-                      setEditingTaskIndex(ti);
-                      setEditingTaskDraft(getTaskText(editorText, ti));
-                    }
-                  : undefined
-              }
-              style={workable ? { cursor: "text" } : undefined}
-            >
-              {/* `children` includes the null from the suppressed <input> renderer
+                style={workable ? { cursor: "text" } : undefined}
+              >
+                {/* `children` includes the null from the suppressed <input> renderer
                   as its first slot; React silently skips null children. */}
-              {children}
-            </span>
-          )}
+                {children}
+              </span>
+            )}
 
-          {/* Delete button — workable mode only, fades in on row hover */}
-          {workable && (
-            <button
-              type="button"
-              className="nopal-task-delete"
-              aria-label="Remove task"
-              onClick={() => {
-                if (onChange) onChange(removeTask(editorText, ti));
-                if (editingTaskIndex === ti) setEditingTaskIndex(null);
-              }}
-            >
-              ×
-            </button>
-          )}
-        </li>
-      );
-    },
-
-    // ── Suppress native GFM checkbox — our li renderer renders its own ───────
-    input({ type, ...rest }: any) {
-      if (type === "checkbox") return null;
-      return <input type={type} {...rest} />;
-    },
-
-    // ── Inline span — intercept CSV ref placeholders injected by preprocessCsvRefs
-    span({ node, className, children, ...rest }: any) {
-      if (className === "nopal-csv-placeholder") {
-        // hast converts data-csv-key → dataCsvKey in properties
-        const encoded = (node as any)?.properties?.dataCsvKey ?? "";
-        const csvKey = encoded ? decodeURIComponent(String(encoded)) : "";
-        if (!csvKey || !csvFields) return null;
-        const value = csvFields[csvKey] ?? "";
-        return (
-          <CsvChip
-            csvKey={csvKey}
-            value={value}
-            editable={workable && !!onCsvFieldChange}
-            onChange={onCsvFieldChange}
-          />
+            {/* Delete button — workable mode only, fades in on row hover */}
+            {workable && (
+              <button
+                type="button"
+                className="nopal-task-delete"
+                aria-label="Remove task"
+                onClick={() => {
+                  if (onChange) onChange(removeTask(editorText, ti));
+                  if (editingTaskIndex === ti) setEditingTaskIndex(null);
+                }}
+              >
+                ×
+              </button>
+            )}
+          </li>
         );
-      }
-      return (
-        <span className={className} {...rest}>
-          {children}
-        </span>
-      );
-    },
+      },
 
-    // ── Code blocks (no syntax highlighting) ────────────────────────────────
-    pre({ children }: any) {
-      return <pre className="nopal-code-block">{children}</pre>;
-    },
+      // ── Suppress native GFM checkbox — our li renderer renders its own ───────
+      input({ type, ...rest }: any) {
+        if (type === "checkbox") return null;
+        return <input type={type} {...rest} />;
+      },
 
-    code({ className, children, inline, ...rest }: any) {
-      const isBlock = !!className?.startsWith("language-");
-      if (isBlock) {
-        // Rendered inside our .nopal-code-block pre; .nopal-code-lang resets
-        // the inherited inline-code background from .nopal-content code { }.
+      // ── Inline span — intercept CSV ref placeholders injected by preprocessCsvRefs
+      span({ node, className, children, ...rest }: any) {
+        if (className === "nopal-csv-placeholder") {
+          // hast converts data-csv-key → dataCsvKey in properties
+          const encoded = (node as any)?.properties?.dataCsvKey ?? "";
+          const csvKey = encoded ? decodeURIComponent(String(encoded)) : "";
+          if (!csvKey || !csvFields) return null;
+          const value = csvFields[csvKey] ?? "";
+          return (
+            <CsvChip
+              csvKey={csvKey}
+              value={value}
+              editable={workable && !!onCsvFieldChange}
+              onChange={onCsvFieldChange}
+            />
+          );
+        }
         return (
-          <code className={`nopal-code-lang ${className}`} {...rest}>
+          <span className={className} {...rest}>
             {children}
-          </code>
+          </span>
         );
-      }
-      // Inline code — inherits .nopal-content code { } styles
-      return <code {...rest}>{children}</code>;
-    },
+      },
 
-    // ── Links — open external URLs in a new tab ──────────────────────────────
-    a({ href, children, target, rel, ...rest }: any) {
-      const isExternal = typeof href === "string" && href.startsWith("http");
-      return (
-        <a
-          href={href}
-          target={isExternal ? "_blank" : target}
-          rel={isExternal ? "noopener noreferrer" : rel}
-          {...rest}
-        >
-          {children}
-        </a>
-      );
-    },
-  };
+      // ── Code blocks (no syntax highlighting) ────────────────────────────────
+      pre({ children }: any) {
+        return <pre className="nopal-code-block">{children}</pre>;
+      },
+
+      code({ className, children, inline, ...rest }: any) {
+        const isBlock = !!className?.startsWith("language-");
+        if (isBlock) {
+          // Rendered inside our .nopal-code-block pre; .nopal-code-lang resets
+          // the inherited inline-code background from .nopal-content code { }.
+          return (
+            <code className={`nopal-code-lang ${className}`} {...rest}>
+              {children}
+            </code>
+          );
+        }
+        // Inline code — inherits .nopal-content code { } styles
+        return <code {...rest}>{children}</code>;
+      },
+
+      // ── Links — open external URLs in a new tab ──────────────────────────────
+      a({ href, children, target, rel, ...rest }: any) {
+        const isExternal = typeof href === "string" && href.startsWith("http");
+        return (
+          <a
+            href={href}
+            target={isExternal ? "_blank" : target}
+            rel={isExternal ? "noopener noreferrer" : rel}
+            {...rest}
+          >
+            {children}
+          </a>
+        );
+      },
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }),
+    [
+      workable,
+      editorText,
+      onChange,
+      editingTaskIndex,
+      editingTaskDraft,
+      addingGroupIndex,
+      newTaskText,
+      csvFields,
+      onCsvFieldChange,
+    ],
+  );
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (

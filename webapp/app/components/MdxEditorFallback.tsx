@@ -9,22 +9,29 @@
  *   render/lazy-load failures and shows a gentle inline error message.
  */
 
-import React from 'react'
+import React from "react";
 
 // ── Loading placeholder ────────────────────────────────────────────────────
 
-export function EditorLoadingFallback() {
+export function EditorLoadingFallback({
+  hasTray = true,
+}: {
+  hasTray?: boolean;
+}) {
   return (
     <div className="mdx-editor-loading">
-      <span className="mdx-editor-loading-text">loading…</span>
+      <div className="mdx-editor-loading-content">
+        <span className="mdx-editor-loading-text">loading…</span>
+      </div>
+      {hasTray && <div className="mdx-editor-loading-tray" />}
     </div>
-  )
+  );
 }
 
 // ── Error boundary ─────────────────────────────────────────────────────────
 
 interface EditorErrorBoundaryState {
-  hasError: boolean
+  hasError: boolean;
 }
 
 export class EditorErrorBoundary extends React.Component<
@@ -32,12 +39,12 @@ export class EditorErrorBoundary extends React.Component<
   EditorErrorBoundaryState
 > {
   constructor(props: { children: React.ReactNode }) {
-    super(props)
-    this.state = { hasError: false }
+    super(props);
+    this.state = { hasError: false };
   }
 
   static getDerivedStateFromError(): EditorErrorBoundaryState {
-    return { hasError: true }
+    return { hasError: true };
   }
 
   render() {
@@ -45,13 +52,14 @@ export class EditorErrorBoundary extends React.Component<
       return (
         <div className="mdx-editor-error">
           <div className="mdx-editor-error-content">
-            <p className="mdx-editor-error-title">Editor couldn't load</p>
+            <p className="mdx-editor-error-title">Editor couldn’t load</p>
             <p className="mdx-editor-error-hint">Try refreshing the page</p>
           </div>
+          <div className="mdx-editor-error-tray" />
         </div>
-      )
+      );
     }
 
-    return this.props.children
+    return this.props.children;
   }
 }

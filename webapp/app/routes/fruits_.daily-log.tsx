@@ -144,7 +144,6 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
           fontFamily: "monospace",
           fontSize: "20px",
           fontWeight: "100",
-          marginLeft: "40px",
           color: "var(--text-subtle)",
           borderBottom: "1px solid var(--midground)",
         }}
@@ -153,7 +152,7 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
       </div>
 
       <EditorErrorBoundary>
-        <Suspense fallback={<EditorLoadingFallback />}>
+        <Suspense fallback={<EditorLoadingFallback hasTray={false} />}>
           <MdxEditorWorkable markdown={content} onChange={handleChange} />
         </Suspense>
       </EditorErrorBoundary>

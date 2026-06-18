@@ -1,3 +1,7 @@
+html {
+  overflow-y: scroll;
+}
+
 :root {
   /* TODO: At some point create a more offical color spread, e.g. purple-100 to purple-900 */
   --white: #fff;

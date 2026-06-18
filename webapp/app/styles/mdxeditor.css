@@ -62,33 +62,48 @@
 }
 
 /* ── Editor loading & error placeholders ─────────────────────────────────── *
- * Sized to match the editor's minimum height (toolbar + content area) so      *
- * the page layout doesn't shift when the editor finishes initialising.        */
+ * Mirrors the editor's initial visual footprint — dot-grid content area +     *
+ * tray — so the page doesn’t shift and the editor fades in rather than flashes. */
 .mdx-editor-loading,
 .mdx-editor-error {
-  min-height: 300px;
-  padding: 10px 8px 40px 40px;
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  min-height: 300px;
+}
+
+/* Content body: same dot-grid as the editable area */
+.mdx-editor-loading-content,
+.mdx-editor-error-content {
+  flex: 1;
+  padding: 41px 8px 40px 40px; /* 41px top → text sits one grid-line down */
+  background-image: radial-gradient(var(--moon) 1px, transparent 0);
+  background-size: 41px 41px;
+  background-position: -22px -12px;
+}
+
+/* Faux tray: mirrors .nopal-tray */
+.mdx-editor-loading-tray,
+.mdx-editor-error-tray {
+  border-top: 1px solid var(--foreground, #e5d6c5);
+  background: var(--midground, #ede4da);
+  min-height: 48px;
 }
 
 .mdx-editor-loading-text {
-  font-size: 0.72rem;
-  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  display: block;
+  line-height: 41px;
+  font-size: 1.2rem;
+  font-family: inherit;
+  font-weight: 267;
+  letter-spacing: 0.5px;
   color: var(--purple);
   opacity: 0.28;
-  letter-spacing: 0.5px;
   user-select: none;
-}
-
-.mdx-editor-error-content {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
 }
 
 .mdx-editor-error-title {
   margin: 0;
+  line-height: 41px;
   font-size: 0.78rem;
   font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
   color: var(--text-subtle);
@@ -98,6 +113,7 @@
 .mdx-editor-error-hint {
   margin: 0;
   font-size: 0.7rem;
+  line-height: 1.5;
   font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
   color: var(--text-subtle);
   opacity: 0.45;
@@ -266,12 +282,13 @@
   }
 
   /* ── Task list (checklist) checkboxes ──────────────────────────────────── *
-   * The ::before pseudo-element on task items IS the checkbox box. We give   *
-   * it a white background and a chunky border so it reads clearly in both    *
-   * modes.                                                                   */
+   * The ::before pseudo-element on task items IS the checkbox box.           *
+   * The X mark is drawn via background-image on ::before (checked items),   *
+   * which frees ::after for the [ ] / [x] gutter indicator.                 */
   :is([class*="_listItemUnchecked_"], [class*="_listItemChecked_"]) {
     /* widen the indent to fit the larger 23px checkbox + 10px gap */
     padding-left: 33px;
+    position: relative; /* ensures ::before and ::after gutter indicators work */
   }
 
   :is([class*="_listItemUnchecked_"], [class*="_listItemChecked_"])::before {
@@ -288,10 +305,15 @@
     border: 2.5px solid var(--purple-light);
   }
 
-  /* checked — no fill, same border as unchecked */
+  /* checked — same border as unchecked; X mark via background-image so
+     ::after is free to serve as the [x] gutter indicator */
   [class*="_listItemChecked_"]::before {
     background-color: transparent;
     border: 2.5px solid var(--purple-light);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-size: calc(100% - 5px);
+    background-repeat: no-repeat;
+    background-position: center;
   }
 
   /* focus ring — --moon outline in light mode, replaces the default accentBgActive ring */
@@ -302,20 +324,45 @@
     box-shadow: none;
   }
 
-  /* checked — X mark instead of checkmark, sized to just fill the inner box */
+  /* checked — [x] in the left gutter (X mark now lives on ::before) */
   [class*="_listItemChecked_"]::after {
-    content: "";
+    content: "[x]";
     border: none;
     transform: none;
-    top: 9px;
-    left: 0;
+    position: absolute;
+    top: 0;
+    left: -38px;
     right: auto;
-    width: 23px;
-    height: 23px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
-    background-size: calc(100% - 5px);
-    background-repeat: no-repeat;
-    background-position: center;
+    width: 32px;
+    height: auto;
+    background-image: none;
+    text-align: right;
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-weight: 400;
+    font-size: 10px;
+    color: var(--purple-light);
+    opacity: 0.4;
+    pointer-events: none;
+    user-select: none;
+    line-height: 41px;
+  }
+
+  /* unchecked — [ ] in the left gutter */
+  [class*="_listItemUnchecked_"]::after {
+    content: "[ ]";
+    position: absolute;
+    top: 0;
+    left: -38px;
+    width: 32px;
+    text-align: right;
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-weight: 400;
+    font-size: 10px;
+    color: var(--purple-light);
+    opacity: 0.4;
+    pointer-events: none;
+    user-select: none;
+    line-height: 41px;
   }
 
   /* ordered — number */
@@ -1016,6 +1063,17 @@
     background: var(--dark-farground);
   }
 
+  .mdx-editor-loading-content,
+  .mdx-editor-error-content {
+    background-image: radial-gradient(var(--dark-midground) 1px, transparent 0);
+  }
+
+  .mdx-editor-loading-tray,
+  .mdx-editor-error-tray {
+    background: var(--dark-midground);
+    border-top-color: var(--dark-foreground);
+  }
+
   .mdx-editor-loading-text {
     color: var(--white);
     opacity: 0.18;
@@ -1056,17 +1114,28 @@
     border: 2.5px solid var(--moon);
   }
 
+  /* Checked: border in moon colour + X mark via background on ::before */
   .mdxeditor
     :is([class*="_contentEditable_"])
     [class*="_listItemChecked_"]::before {
     background-color: transparent;
     border: 2.5px solid var(--moon);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%23c4c6fc' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%23c4c6fc' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-size: calc(100% - 5px);
+    background-repeat: no-repeat;
+    background-position: center;
   }
 
+  /* Gutter indicators [ ] / [x] — white, slightly dimmed */
   .mdxeditor
     :is([class*="_contentEditable_"])
-    [class*="_listItemChecked_"]::after {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%23c4c6fc' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%23c4c6fc' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+    [class*="_listItemChecked_"]::after,
+  .mdxeditor
+    :is([class*="_contentEditable_"])
+    [class*="_listItemUnchecked_"]::after {
+    background-image: none;
+    color: var(--white);
+    opacity: 0.35;
   }
 
   /* Placed-file chips – dark mode */
@@ -1323,7 +1392,7 @@
    * ═══════════════════════════════════════════════════════════════════════════ */
 
 .nopal-content {
-  padding: 8px 8px 16px 40px;
+  padding: 8px 8px 16px 0;
   font-size: 1.2rem;
   font-weight: 267;
   line-height: 1.2;
@@ -1581,7 +1650,7 @@
 .nopal-content .nopal-task-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 3px;
   line-height: 41px;
   padding: 0;
 }
@@ -1706,10 +1775,23 @@ button.nopal-task-checkbox {
   padding: 0;
   cursor: pointer;
   color: var(--purple-light);
-  font-size: 0.9em;
   opacity: 0.5;
   transition: opacity 0.15s;
+  display: flex;
+  align-items: center;
+}
+
+/* [ ] placeholder — 41×41 grid cell, mimics the checkbox gutter indicator */
+.nopal-add-task-btn::before {
+  content: "[ ]";
+  flex-shrink: 0;
+  width: 44px;
+  height: 41px;
   line-height: 41px;
+  text-align: center;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10px;
+  font-weight: 400;
 }
 
 .nopal-add-task-btn:hover {
