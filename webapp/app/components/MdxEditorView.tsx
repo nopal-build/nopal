@@ -5,17 +5,14 @@
  * No Lexical, no editor overhead. Visually identical to MdxEditorEditable.
  */
 
-import { useMemo } from 'react'
-import {
-  parseNopalDocument,
-  parseNopalUserContent,
-} from '../util/nopalMarkdown'
-import MdxRenderer from './MdxRenderer'
+import { useMemo } from "react";
+import { importFromMarkdown } from "../util/nopalEditorState";
+import MdxRenderer from "./MdxRenderer";
 
 interface MdxEditorViewProps {
-  markdown: string
-  csvFields?: Record<string, string>
-  className?: string
+  markdown: string;
+  csvFields?: Record<string, string>;
+  className?: string;
 }
 
 export default function MdxEditorView({
@@ -23,19 +20,13 @@ export default function MdxEditorView({
   csvFields,
   className,
 }: MdxEditorViewProps) {
-  const { editorText, files, placements } = useMemo(() => {
-    const { userContent, files } = parseNopalDocument(markdown)
-    const { editorText, placements } = parseNopalUserContent(userContent)
-    return { editorText, files, placements }
-  }, [markdown])
+  const editorState = useMemo(() => importFromMarkdown(markdown), [markdown]);
 
   return (
     <MdxRenderer
-      editorText={editorText}
-      files={files}
-      placements={placements}
+      state={editorState}
       csvFields={csvFields}
       className={className}
     />
-  )
+  );
 }

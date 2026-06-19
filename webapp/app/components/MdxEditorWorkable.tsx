@@ -9,35 +9,39 @@
  * Visually identical to MdxEditorEditable.
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react'
 import {
-  parseNopalDocument,
-  parseNopalUserContent,
-  buildUserContent,
-  serializeDocument,
-  type NopalFileEntry,
-  type NopalImagePlacement,
-} from '../util/nopalMarkdown'
-import MdxRenderer from './MdxRenderer'
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  useReducer,
+} from "react";
+import {
+  importFromMarkdown,
+  exportToMarkdown,
+  editorReducer,
+  type EditorState,
+  type EditorCommand,
+} from "../util/nopalEditorState";
+import MdxRenderer from "./MdxRenderer";
 
 interface MdxEditorWorkableProps {
-  markdown: string
-  onChange: (md: string) => void
-  uploadFile?: (file: File) => Promise<string>
-  csvFields?: Record<string, string>
-  onCsvFieldChange?: (key: string, value: string) => void
+  markdown: string;
+  onChange: (md: string) => void;
+  uploadFile?: (file: File) => Promise<string>;
+  csvFields?: Record<string, string>;
+  onCsvFieldChange?: (key: string, value: string) => void;
 }
 
-interface WorkableFile {
-  index: number
-  url: string | null
-  name: string
-  isImage: boolean
-  status: 'uploading' | 'ready'
+interface UploadingFile {
+  index: number;
+  name: string; // original file name (for display)
+  isImage: boolean;
 }
 
-const IMAGE_MIME = /^image\//i
-const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)(\?.*)?$/i
+const IMAGE_MIME = /^image\//i;
+const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)(\?.*)?$/i;
 
 export default function MdxEditorWorkable({
   markdown,
@@ -46,114 +50,121 @@ export default function MdxEditorWorkable({
   csvFields,
   onCsvFieldChange,
 }: MdxEditorWorkableProps) {
-  const [initialState] = useState(() => {
-    const { userContent, files } = parseNopalDocument(markdown)
-    const { editorText, placements } = parseNopalUserContent(userContent)
-    const nextIndex =
-      files.length > 0 ? Math.max(...files.map((f) => f.index)) + 1 : 1
-    const workableFiles: WorkableFile[] = files.map((f) => ({
-      ...f,
-      status: 'ready' as const,
-    }))
-    return { editorText, placements, files: workableFiles, nextIndex }
-  })
+  // Primary editor state — useReducer with lazy initializer
+  const [editorState, dispatch] = useReducer(
+    editorReducer,
+    markdown,
+    importFromMarkdown,
+  );
 
-  const [files, setFiles] = useState<WorkableFile[]>(initialState.files)
-  const [editorText, setEditorText] = useState(initialState.editorText)
-  const [placements] = useState<NopalImagePlacement[]>(initialState.placements)
-  const nextIndexRef = useRef(initialState.nextIndex)
+  // Uploading files — local state only (not in EditorState until upload completes)
+  const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
+
+  const nextIndexRef = useRef(
+    editorState.files.length > 0
+      ? Math.max(...editorState.files.map((f) => f.index)) + 1
+      : 1,
+  );
 
   // ── Emit changes to parent ─────────────────────────────────────────────────
 
-  const mountedRef = useRef(false)
+  const mountedRef = useRef(false);
   useEffect(() => {
     if (!mountedRef.current) {
-      mountedRef.current = true
-      return
+      mountedRef.current = true;
+      return;
     }
-    const userContent = buildUserContent(editorText, placements)
-    onChange(
-      serializeDocument(
-        userContent,
-        files.filter((f) => f.status === 'ready'),
-      ),
-    )
-  }, [editorText, files]) // eslint-disable-line react-hooks/exhaustive-deps
+    onChange(exportToMarkdown(editorState));
+  }, [editorState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Display state (ready files + uploading placeholders for ReferencesSection) ──
+
+  const displayState = useMemo<EditorState>(
+    () => ({
+      ...editorState,
+      files: [
+        ...editorState.files,
+        ...uploadingFiles.map((f) => ({
+          index: f.index,
+          url: null,
+          name: `Uploading ${f.name}…`,
+          isImage: f.isImage,
+        })),
+      ],
+    }),
+    [editorState, uploadingFiles],
+  );
 
   // ── File management ────────────────────────────────────────────────────────
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleAddFile = useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
+    fileInputRef.current?.click();
+  }, []);
 
   const handleFileSelected = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const list = Array.from(e.target.files ?? [])
-      e.target.value = ''
-      if (!list.length || !uploadFile) return
+      const list = Array.from(e.target.files ?? []);
+      e.target.value = "";
+      if (!list.length || !uploadFile) return;
 
-      const startIdx = nextIndexRef.current
-      nextIndexRef.current += list.length
+      const startIdx = nextIndexRef.current;
+      nextIndexRef.current += list.length;
 
       // Add uploading placeholders
-      const placeholders: WorkableFile[] = list.map((file, i) => ({
-        index: startIdx + i,
-        url: null,
-        name: `Uploading ${file.name}…`,
-        isImage: IMAGE_MIME.test(file.type) || IMAGE_EXT.test(file.name),
-        status: 'uploading' as const,
-      }))
-      setFiles((prev) => [...prev, ...placeholders])
+      list.forEach((file, i) => {
+        const isImage = IMAGE_MIME.test(file.type) || IMAGE_EXT.test(file.name);
+        setUploadingFiles((prev) => [
+          ...prev,
+          { index: startIdx + i, name: file.name, isImage },
+        ]);
+      });
 
       // Upload each file concurrently
       await Promise.all(
         list.map(async (file, i) => {
+          const isImage =
+            IMAGE_MIME.test(file.type) || IMAGE_EXT.test(file.name);
           try {
-            const url = await uploadFile(file)
-            setFiles((prev) =>
-              prev.map((f) =>
-                f.index === startIdx + i
-                  ? { ...f, url, name: file.name, status: 'ready' as const }
-                  : f,
-              ),
-            )
+            const url = await uploadFile(file);
+            dispatch({
+              type: "ADD_FILE",
+              file: { index: startIdx + i, url, name: file.name, isImage },
+            });
+            setUploadingFiles((prev) =>
+              prev.filter((f) => f.index !== startIdx + i),
+            );
           } catch (err) {
-            console.error('Upload error:', err)
-            // Remove failed placeholder
-            setFiles((prev) => prev.filter((f) => f.index !== startIdx + i))
+            console.error("Upload error:", err);
+            setUploadingFiles((prev) =>
+              prev.filter((f) => f.index !== startIdx + i),
+            );
           }
         }),
-      )
+      );
     },
     [uploadFile],
-  )
+  );
 
-  const handleRemoveFile = useCallback((fileIndex: number) => {
-    setFiles((prev) => prev.filter((f) => f.index !== fileIndex))
-  }, [])
-
-  // ── Editor text change ─────────────────────────────────────────────────────
-
-  const handleEditorTextChange = useCallback((newText: string) => {
-    setEditorText(newText)
-  }, [])
+  const handleRemoveFile = useCallback(
+    (fileIndex: number) => {
+      if (uploadingFiles.some((f) => f.index === fileIndex)) {
+        setUploadingFiles((prev) => prev.filter((f) => f.index !== fileIndex));
+      } else {
+        dispatch({ type: "REMOVE_FILE", fileIndex });
+      }
+    },
+    [uploadingFiles],
+  );
 
   // ── Render ─────────────────────────────────────────────────────────────────
-
-  // Convert WorkableFile[] to NopalFileEntry[] for the renderer (omit status)
-  const rendererFiles: NopalFileEntry[] = files
-    .filter((f) => f.status === 'ready')
-    .map(({ index, url, name, isImage }) => ({ index, url, name, isImage }))
 
   return (
     <div>
       <MdxRenderer
-        editorText={editorText}
-        files={rendererFiles}
-        placements={placements}
-        onChange={handleEditorTextChange}
+        state={displayState}
+        dispatch={dispatch}
         csvFields={csvFields}
         onCsvFieldChange={onCsvFieldChange}
         canManageFiles={!!uploadFile}
@@ -166,10 +177,10 @@ export default function MdxEditorWorkable({
           type="file"
           accept="image/*,.pdf"
           multiple
-          style={{ display: 'none' }}
+          style={{ display: "none" }}
           onChange={handleFileSelected}
         />
       )}
     </div>
-  )
+  );
 }

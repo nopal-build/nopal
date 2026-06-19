@@ -8,106 +8,45 @@
  * No CodeMirror / heavy syntax highlighting — code blocks are plain <pre><code>.
  * Visual appearance matches the MDX editor (.nopal-content CSS class).
  *
- * Mode detection: when `onChange` is present → workable mode.
+ * Mode detection: when `dispatch` is present → workable mode.
  */
 
 import "../styles/mdxeditor.css";
 
-import type {
-  NopalFileEntry,
-  NopalImagePlacement,
-} from "../util/nopalMarkdown";
+import type { Dispatch } from "react";
+import type { NopalFileEntry } from "../util/nopalMarkdown";
 import {
-  getTaskGroups,
-  toggleTask,
-  editTaskText,
-  removeTask,
-  addTaskAfterTask,
-} from "../util/nopalMarkdown";
+  EditorState,
+  EditorCommand,
+  EditorNode,
+  NodeKey,
+  RootNode,
+  ProseNode,
+  TaskGroupNode,
+  TaskItemNode,
+  ImagePlacementNode,
+  getNode,
+  getPlacedFileIndices,
+} from "../util/nopalEditorState";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import { useState, useRef, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 
 // ── Public props interface ─────────────────────────────────────────────────────
 
 export interface MdxRendererProps {
-  /** Clean markdown (no nopal placement tokens) */
-  editorText: string;
-  /** File entries from nopalMarkdown.ts */
-  files: NopalFileEntry[];
-  /** Image placements from nopalMarkdown.ts */
-  placements: NopalImagePlacement[];
-  /** Present → workable mode; absent → view mode */
-  onChange?: (newEditorText: string) => void;
-  /** key→value map for CSV ref chips */
+  state: EditorState;
+  dispatch?: Dispatch<EditorCommand>; // absent → view mode (read-only)
   csvFields?: Record<string, string>;
-  /** Called when a CSV chip value is edited inline (workable only) */
   onCsvFieldChange?: (key: string, value: string) => void;
-  /** Show × Remove / + Add file controls */
   canManageFiles?: boolean;
   onAddFile?: () => void;
   onRemoveFile?: (fileIndex: number) => void;
-  /** Extra class names merged onto the root .nopal-content div */
   className?: string;
 }
 
-// ── Internal types ────────────────────────────────────────────────────────────
-
-type Segment =
-  | { type: "markdown"; text: string }
-  | { type: "images"; fileIndices: number[] };
-
 // ── Pure helpers ──────────────────────────────────────────────────────────────
-
-/**
- * Splits the clean editorText into alternating markdown/image segments by
- * resolving afterParagraphIndex placements against the paragraph array.
- *
- * afterParagraphIndex=N means "insert before paras[N]", so:
- *   N=0 → images first, then all text
- *   N=1 → paras[0], images, paras[1…]
- *   N=len → all text, then images
- */
-function buildSegments(
-  editorText: string,
-  placements: NopalImagePlacement[],
-): Segment[] {
-  // Split and trim trailing empty paragraphs
-  const allParas = editorText.split("\n\n");
-  let hi = allParas.length - 1;
-  while (hi >= 0 && allParas[hi].trim() === "") hi--;
-  const paras = hi >= 0 ? allParas.slice(0, hi + 1) : [];
-
-  if (placements.length === 0) {
-    const text = paras.join("\n\n");
-    return text ? [{ type: "markdown", text }] : [];
-  }
-
-  // Group file indices by afterParagraphIndex
-  const groups = new Map<number, number[]>();
-  for (const { fileIndex, afterParagraphIndex } of placements) {
-    const arr = groups.get(afterParagraphIndex) ?? [];
-    arr.push(fileIndex);
-    groups.set(afterParagraphIndex, arr);
-  }
-
-  const sortedKeys = [...groups.keys()].sort((a, b) => a - b);
-  const segments: Segment[] = [];
-  let prev = 0;
-
-  for (const idx of sortedKeys) {
-    const text = paras.slice(prev, idx).join("\n\n");
-    if (text.trim()) segments.push({ type: "markdown", text });
-    segments.push({ type: "images", fileIndices: groups.get(idx)! });
-    prev = idx;
-  }
-
-  const remaining = paras.slice(prev).join("\n\n");
-  if (remaining.trim()) segments.push({ type: "markdown", text: remaining });
-
-  return segments;
-}
 
 /**
  * Replace known `[key]` patterns with an HTML span placeholder that rehype-raw
@@ -122,20 +61,6 @@ function preprocessCsvRefs(
       return `<span class="nopal-csv-placeholder" data-csv-key="${encodeURIComponent(key)}"></span>`;
     return match;
   });
-}
-
-/** Extract the raw text of task #taskIndex from the editorText. */
-const TASK_TEXT_RE = /^\s*[-*]\s+\[([xX ])\]\s+(.*)/;
-
-function getTaskText(editorText: string, taskIndex: number): string {
-  let count = 0;
-  for (const line of editorText.split("\n")) {
-    const m = line.match(TASK_TEXT_RE);
-    if (!m) continue;
-    if (count === taskIndex) return m[2];
-    count++;
-  }
-  return "";
 }
 
 // ── CsvChip ───────────────────────────────────────────────────────────────────
@@ -239,8 +164,8 @@ function ImageBlock({ fileIndices, files }: ImageBlockProps) {
 // ── ReferencesSection ─────────────────────────────────────────────────────────
 
 interface ReferencesSectionProps {
-  files: NopalFileEntry[];
-  placements: NopalImagePlacement[];
+  files: ReadonlyArray<NopalFileEntry>;
+  placedFileIndices: Set<number>;
   canManageFiles?: boolean;
   onAddFile?: () => void;
   onRemoveFile?: (fileIndex: number) => void;
@@ -248,12 +173,12 @@ interface ReferencesSectionProps {
 
 function ReferencesSection({
   files,
-  placements,
+  placedFileIndices,
   canManageFiles,
   onAddFile,
   onRemoveFile,
 }: ReferencesSectionProps) {
-  const placedSet = new Set(placements.map((p) => p.fileIndex));
+  const placedSet = placedFileIndices;
   const unplaced = files.filter((f) => !placedSet.has(f.index));
   const images = unplaced.filter((f) => f.isImage && !!f.url);
   const others = unplaced.filter((f) => !f.isImage || !f.url);
@@ -330,13 +255,198 @@ function ReferencesSection({
   );
 }
 
+// ── TaskItemView ──────────────────────────────────────────────────────────────
+
+interface TaskItemViewProps {
+  state: EditorState;
+  taskKey: NodeKey;
+  groupKey: NodeKey;
+  dispatch?: Dispatch<EditorCommand>;
+}
+
+function TaskItemView({
+  state,
+  taskKey,
+  groupKey,
+  dispatch,
+}: TaskItemViewProps) {
+  const task = getNode<TaskItemNode>(state, taskKey, "task-item");
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingDraft, setEditingDraft] = useState("");
+  if (!task) return null;
+
+  const commitEdit = () => {
+    if (dispatch && editingDraft.trim())
+      dispatch({
+        type: "EDIT_TASK_TEXT",
+        groupKey,
+        taskKey,
+        text: editingDraft,
+      });
+    setIsEditing(false);
+  };
+
+  return (
+    <li className="nopal-task-item">
+      {dispatch ? (
+        <button
+          type="button"
+          className={`nopal-task-checkbox${task.checked ? " checked" : ""}`}
+          aria-label={task.checked ? "Uncheck task" : "Check task"}
+          onClick={() =>
+            dispatch({
+              type: "TOGGLE_TASK",
+              groupKey,
+              taskKey,
+              checked: !task.checked,
+            })
+          }
+        />
+      ) : (
+        <span
+          className={`nopal-task-checkbox${task.checked ? " checked" : ""}`}
+          role="checkbox"
+          aria-checked={task.checked}
+        />
+      )}
+
+      {isEditing ? (
+        <input
+          autoFocus
+          className="nopal-task-edit-input"
+          value={editingDraft}
+          onChange={(e) => setEditingDraft(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitEdit();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setIsEditing(false);
+            }
+          }}
+        />
+      ) : (
+        <span
+          className={`nopal-task-text${task.checked ? " nopal-task-text--checked" : ""}`}
+          onClick={
+            dispatch
+              ? () => {
+                  setIsEditing(true);
+                  setEditingDraft(task.text);
+                }
+              : undefined
+          }
+          style={dispatch ? { cursor: "text" } : undefined}
+        >
+          {task.text}
+        </span>
+      )}
+
+      {dispatch && (
+        <button
+          type="button"
+          className="nopal-task-delete"
+          aria-label="Remove task"
+          onClick={() => dispatch({ type: "REMOVE_TASK", groupKey, taskKey })}
+        >
+          ×
+        </button>
+      )}
+    </li>
+  );
+}
+
+// ── TaskGroupView ─────────────────────────────────────────────────────────────
+
+interface TaskGroupViewProps {
+  state: EditorState;
+  groupKey: NodeKey;
+  dispatch?: Dispatch<EditorCommand>;
+}
+
+function TaskGroupView({ state, groupKey, dispatch }: TaskGroupViewProps) {
+  const group = getNode<TaskGroupNode>(state, groupKey, "task-group");
+  const [isAdding, setIsAdding] = useState(false);
+  const [newTaskText, setNewTaskText] = useState("");
+  if (!group) return null;
+
+  const commitAdd = (text: string) => {
+    if (text.trim() && dispatch) {
+      const lastKey = group.children[group.children.length - 1] ?? null;
+      dispatch({ type: "ADD_TASK", groupKey, afterKey: lastKey, text });
+    }
+    setIsAdding(false);
+    setNewTaskText("");
+  };
+
+  return (
+    <ul className="contains-task-list nopal-task-list">
+      {group.children.map((taskKey) => (
+        <TaskItemView
+          key={taskKey}
+          state={state}
+          taskKey={taskKey}
+          groupKey={groupKey}
+          dispatch={dispatch}
+        />
+      ))}
+      {dispatch &&
+        (isAdding ? (
+          <li className="nopal-add-task-item">
+            <div className="nopal-add-task-input-row">
+              <span className="nopal-task-checkbox-placeholder" />
+              <input
+                autoFocus
+                className="nopal-add-task-input"
+                value={newTaskText}
+                placeholder="New task…"
+                onChange={(e) => setNewTaskText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitAdd(newTaskText);
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setIsAdding(false);
+                    setNewTaskText("");
+                  }
+                }}
+                onBlur={() => commitAdd(newTaskText)}
+              />
+            </div>
+          </li>
+        ) : (
+          <li className="nopal-add-task-item">
+            <button
+              type="button"
+              className="nopal-add-task-btn"
+              onClick={() => {
+                setIsAdding(true);
+                setNewTaskText("");
+              }}
+            >
+              Add task
+            </button>
+          </li>
+        ))}
+    </ul>
+  );
+}
+
 // ── MdxRenderer ───────────────────────────────────────────────────────────────
 
+type RenderSegment =
+  | { type: "prose"; key: NodeKey }
+  | { type: "task-group"; key: NodeKey }
+  | { type: "images"; fileIndices: number[] };
+
 export default function MdxRenderer({
-  editorText,
-  files,
-  placements,
-  onChange,
+  state,
+  dispatch,
   csvFields,
   onCsvFieldChange,
   canManageFiles,
@@ -344,243 +454,48 @@ export default function MdxRenderer({
   onRemoveFile,
   className,
 }: MdxRendererProps) {
-  const workable = onChange !== undefined;
+  // ── Build render segments ──────────────────────────────────────────────────
+  const renderSegments = useMemo((): RenderSegment[] => {
+    const root = state.nodes.get("root") as RootNode | undefined;
+    if (!root) return [];
 
-  // ── Workable-mode editing state ────────────────────────────────────────────
-  const [editingTaskIndex, setEditingTaskIndex] = useState<number | null>(null);
-  const [editingTaskDraft, setEditingTaskDraft] = useState("");
-  const [addingGroupIndex, setAddingGroupIndex] = useState<number | null>(null);
-  const [newTaskText, setNewTaskText] = useState("");
+    const segments: RenderSegment[] = [];
+    let pendingImages: number[] = [];
 
-  // ── Per-render counters ────────────────────────────────────────────────────
-  // These refs are reset in the render body and incremented inside the `li` and
-  // `ul` component renderers, which execute synchronously in document order
-  // during React's render phase — so counts stay in sync across multiple
-  // ReactMarkdown segments without any extra bookkeeping.
-  const taskCountRef = useRef(0);
-  const groupCountRef = useRef(0);
+    for (const childKey of root.children) {
+      const node = state.nodes.get(childKey);
+      if (!node) continue;
 
-  // Reset at the top of each render pass
-  taskCountRef.current = 0;
-  groupCountRef.current = 0;
+      if (node.type === "image-placement") {
+        pendingImages.push((node as ImagePlacementNode).fileIndex);
+      } else {
+        if (pendingImages.length > 0) {
+          segments.push({ type: "images", fileIndices: pendingImages });
+          pendingImages = [];
+        }
+        if (node.type === "task-group") {
+          segments.push({ type: "task-group", key: childKey });
+        } else if (node.type === "prose") {
+          segments.push({ type: "prose", key: childKey });
+        }
+      }
+    }
 
-  // ── Segments (memoised — only rebuilds when text/placements change) ────────
-  const segments = useMemo(
-    () => buildSegments(editorText, placements),
-    [editorText, placements],
-  );
+    if (pendingImages.length > 0) {
+      segments.push({ type: "images", fileIndices: pendingImages });
+    }
+
+    return segments;
+  }, [state]);
 
   // ── React-markdown component overrides ────────────────────────────────────
   // Memoised so that react-markdown's component functions keep stable
-  // references across parent re-renders (e.g. debounced saves completing).
-  // react-markdown uses these functions as React element *types*; a changed
-  // reference causes React to unmount+remount the element rather than patch it,
-  // which is the source of visible DOM thrashing on task list items.
+  // references across parent re-renders.
   // The memo only busts when a value the closures actually read changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const components = useMemo(
     () => ({
-      // ── Unordered list ───────────────────────────────────────────────────────
-      ul({ className, children, ordered, ...rest }: any) {
-        const isTaskList = className === "contains-task-list";
-
-        if (!isTaskList) {
-          return (
-            <ul className={className} {...rest}>
-              {children}
-            </ul>
-          );
-        }
-
-        const gi = groupCountRef.current++;
-        // Capture the global task index of the first task in this rendered
-        // group. This is read from taskCountRef BEFORE the group's <li> children
-        // render (React renders the parent ul before its li children), so it
-        // equals the start-task-index for this checklist block.
-        const startTaskIndex = taskCountRef.current;
-        const isAdding = workable && addingGroupIndex === gi;
-
-        const handleAddCommit = (text: string) => {
-          if (!text.trim() || !onChange) {
-            setAddingGroupIndex(null);
-            setNewTaskText("");
-            return;
-          }
-          const groups = getTaskGroups(editorText);
-          // Prefer finding the group by its start task index — this is robust
-          // against GFM loose lists (blank-line-separated tasks that remark-gfm
-          // keeps in one <ul>) where gi and getTaskGroups indices can diverge.
-          const g =
-            groups.find(
-              (g) =>
-                g.startTaskIndex <= startTaskIndex &&
-                startTaskIndex < g.startTaskIndex + g.count,
-            ) ?? groups[gi];
-          // Insert after the last task in this group; if group is somehow not
-          // found fall back to appending at the end of the document.
-          const lastTaskIdx = g ? g.startTaskIndex + g.count - 1 : -1;
-          onChange(addTaskAfterTask(editorText, lastTaskIdx, text));
-          setAddingGroupIndex(null);
-          setNewTaskText("");
-        };
-
-        return (
-          <ul className="contains-task-list nopal-task-list" {...rest}>
-            {children}
-            {workable &&
-              (isAdding ? (
-                // Input row — matches the layout of a task item
-                <li className="nopal-add-task-item">
-                  <div className="nopal-add-task-input-row">
-                    <span className="nopal-task-checkbox-placeholder" />
-                    <input
-                      autoFocus
-                      className="nopal-add-task-input"
-                      value={newTaskText}
-                      placeholder="New task…"
-                      onChange={(e) => setNewTaskText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleAddCommit(newTaskText);
-                        }
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          setAddingGroupIndex(null);
-                          setNewTaskText("");
-                        }
-                      }}
-                      onBlur={() => handleAddCommit(newTaskText)}
-                    />
-                  </div>
-                </li>
-              ) : (
-                <li className="nopal-add-task-item">
-                  <button
-                    type="button"
-                    className="nopal-add-task-btn"
-                    onClick={() => {
-                      setAddingGroupIndex(gi);
-                      setNewTaskText("");
-                    }}
-                  >
-                    Add task
-                  </button>
-                </li>
-              ))}
-          </ul>
-        );
-      },
-
-      // ── List item ────────────────────────────────────────────────────────────
-      li({
-        node,
-        className,
-        children,
-        checked: checkedProp,
-        ordered,
-        ...rest
-      }: any) {
-        const isTask = className === "task-list-item";
-
-        if (!isTask) {
-          return (
-            <li className={className} {...rest}>
-              {children}
-            </li>
-          );
-        }
-
-        const ti = taskCountRef.current++;
-        // react-markdown v8 surfaces `checked` as a direct prop on task-list <li>s.
-        // v9 dropped it; fall back to reading the hast node's first child
-        // (the injected <input type="checkbox">) in case we ever upgrade.
-        const checked =
-          checkedProp === true ||
-          (node as any)?.children?.[0]?.properties?.checked === true;
-        const isEditing = workable && editingTaskIndex === ti;
-
-        return (
-          <li className="nopal-task-item">
-            {/* Checkbox — clickable button in workable mode, display-only span in view mode */}
-            {workable ? (
-              <button
-                type="button"
-                className={`nopal-task-checkbox${checked ? " checked" : ""}`}
-                aria-label={checked ? "Uncheck task" : "Check task"}
-                onClick={() => onChange!(toggleTask(editorText, ti, !checked))}
-              />
-            ) : (
-              <span
-                className={`nopal-task-checkbox${checked ? " checked" : ""}`}
-                role="checkbox"
-                aria-checked={checked}
-              />
-            )}
-
-            {/* Task text — input while editing, clickable span otherwise */}
-            {isEditing ? (
-              <input
-                autoFocus
-                className="nopal-task-edit-input"
-                value={editingTaskDraft}
-                onChange={(e) => setEditingTaskDraft(e.target.value)}
-                onBlur={() => {
-                  if (onChange)
-                    onChange(editTaskText(editorText, ti, editingTaskDraft));
-                  setEditingTaskIndex(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (onChange)
-                      onChange(editTaskText(editorText, ti, editingTaskDraft));
-                    setEditingTaskIndex(null);
-                  }
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    setEditingTaskIndex(null);
-                  }
-                }}
-              />
-            ) : (
-              <span
-                className={`nopal-task-text${checked ? " nopal-task-text--checked" : ""}`}
-                onClick={
-                  workable
-                    ? () => {
-                        setEditingTaskIndex(ti);
-                        setEditingTaskDraft(getTaskText(editorText, ti));
-                      }
-                    : undefined
-                }
-                style={workable ? { cursor: "text" } : undefined}
-              >
-                {/* `children` includes the null from the suppressed <input> renderer
-                  as its first slot; React silently skips null children. */}
-                {children}
-              </span>
-            )}
-
-            {/* Delete button — workable mode only, fades in on row hover */}
-            {workable && (
-              <button
-                type="button"
-                className="nopal-task-delete"
-                aria-label="Remove task"
-                onClick={() => {
-                  if (onChange) onChange(removeTask(editorText, ti));
-                  if (editingTaskIndex === ti) setEditingTaskIndex(null);
-                }}
-              >
-                ×
-              </button>
-            )}
-          </li>
-        );
-      },
-
-      // ── Suppress native GFM checkbox — our li renderer renders its own ───────
+      // ── Suppress native GFM checkbox — TaskItemView renders its own ──────────
       input({ type, ...rest }: any) {
         if (type === "checkbox") return null;
         return <input type={type} {...rest} />;
@@ -598,7 +513,7 @@ export default function MdxRenderer({
             <CsvChip
               csvKey={csvKey}
               value={value}
-              editable={workable && !!onCsvFieldChange}
+              editable={dispatch !== undefined && !!onCsvFieldChange}
               onChange={onCsvFieldChange}
             />
           );
@@ -646,43 +561,49 @@ export default function MdxRenderer({
       },
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }),
-    [
-      workable,
-      editorText,
-      onChange,
-      editingTaskIndex,
-      editingTaskDraft,
-      addingGroupIndex,
-      newTaskText,
-      csvFields,
-      onCsvFieldChange,
-    ],
+    [dispatch, csvFields, onCsvFieldChange],
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className={`nopal-content${className ? ` ${className}` : ""}`}>
-      {segments.map((seg, i) =>
-        seg.type === "images" ? (
-          <ImageBlock
-            key={`img-${i}`}
-            fileIndices={seg.fileIndices}
-            files={files}
-          />
-        ) : (
+      {renderSegments.map((seg, i) => {
+        if (seg.type === "images")
+          return (
+            <ImageBlock
+              key={`img-${i}`}
+              fileIndices={seg.fileIndices}
+              files={state.files as NopalFileEntry[]}
+            />
+          );
+        if (seg.type === "task-group")
+          return (
+            <TaskGroupView
+              key={seg.key}
+              state={state}
+              groupKey={seg.key}
+              dispatch={dispatch}
+            />
+          );
+        // prose
+        const node = state.nodes.get(seg.key) as ProseNode;
+        const text = csvFields
+          ? preprocessCsvRefs(node.content, csvFields)
+          : node.content;
+        return (
           <ReactMarkdown
-            key={i}
+            key={seg.key}
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeRaw]}
             components={components as any}
           >
-            {csvFields ? preprocessCsvRefs(seg.text, csvFields) : seg.text}
+            {text}
           </ReactMarkdown>
-        ),
-      )}
+        );
+      })}
       <ReferencesSection
-        files={files}
-        placements={placements}
+        files={state.files}
+        placedFileIndices={getPlacedFileIndices(state)}
         canManageFiles={canManageFiles}
         onAddFile={onAddFile}
         onRemoveFile={onRemoveFile}
