@@ -796,6 +796,8 @@
 
 /* Shared base for the icon buttons */
 .nopal-tray-add,
+.nopal-tray-wiki,
+.nopal-tray-embed,
 .nopal-tray-task {
   display: flex;
   align-items: center;
@@ -813,7 +815,9 @@
   transition: background 0.12s;
 }
 
-.nopal-tray-task {
+.nopal-tray-task,
+.nopal-tray-wiki,
+.nopal-tray-embed {
   font-size: 9px;
   font-family: ui-monospace, "SF Mono", monospace;
   font-weight: 700;
@@ -821,11 +825,15 @@
 }
 
 .nopal-tray-add:hover,
+.nopal-tray-wiki:hover,
+.nopal-tray-embed:hover,
 .nopal-tray-task:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 
 .nopal-tray-add:active,
+.nopal-tray-wiki:active,
+.nopal-tray-embed:active,
 .nopal-tray-task:active {
   background: rgba(255, 255, 255, 0.2);
 }
@@ -1436,6 +1444,11 @@
 
 .ref-popover-item--active {
   background: color-mix(in srgb, var(--purple-light, #a78bfa) 16%, transparent);
+}
+
+.ref-popover-item--create {
+  border-top: 1px solid rgba(124, 92, 191, 0.18);
+  margin-top: 4px;
 }
 
 .ref-popover-icon {
@@ -2205,5 +2218,147 @@ button.nopal-task-checkbox {
   }
   .nopal-code-block {
     background: var(--dark-midground, #2a2030);
+  }
+}
+
+/* ── Wiki-link inline elements ──────────────────────────────────────────────── */
+
+.nopal-wiki-link {
+  color: var(--purple, #7c5cbf);
+  text-decoration: underline;
+  text-decoration-color: rgba(124, 92, 191, 0.4);
+  text-underline-offset: 2px;
+  background: none;
+  border: none;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  transition:
+    color 0.12s,
+    text-decoration-color 0.12s;
+}
+
+.nopal-wiki-link:hover {
+  color: var(--purple-light, #a78bfa);
+  text-decoration-color: var(--purple-light, #a78bfa);
+}
+
+.nopal-wiki-link--create {
+  color: var(--purple, #7c5cbf);
+  opacity: 0.65;
+  text-decoration-style: dashed;
+}
+
+.nopal-wiki-link--create:hover {
+  opacity: 1;
+}
+
+/* ── Embed / page cards ─────────────────────────────────────────────────────── */
+
+.nopal-page-embed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(124, 92, 191, 0.28);
+  border-radius: 8px;
+  margin: 8px 0;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+a.nopal-page-embed:hover {
+  border-color: rgba(124, 92, 191, 0.55);
+  background: rgba(124, 92, 191, 0.05);
+}
+
+.nopal-page-embed--broken {
+  border-color: rgba(0, 0, 0, 0.12);
+  opacity: 0.72;
+}
+
+.nopal-page-embed-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.nopal-page-embed-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.nopal-page-embed-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nopal-page-embed-detail {
+  font-size: 0.8em;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nopal-page-embed-arrow {
+  flex-shrink: 0;
+  opacity: 0.35;
+}
+
+.nopal-page-embed-create {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  background: rgba(124, 92, 191, 0.1);
+  border: 1px solid rgba(124, 92, 191, 0.35);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8em;
+  color: var(--purple, #7c5cbf);
+  transition: background 0.12s;
+}
+
+.nopal-page-embed-create:hover {
+  background: rgba(124, 92, 191, 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  .nopal-wiki-link {
+    color: var(--purple-light, #a78bfa);
+    text-decoration-color: rgba(167, 139, 250, 0.4);
+  }
+  .nopal-wiki-link:hover {
+    color: #c4b0f5;
+    text-decoration-color: #c4b0f5;
+  }
+  .nopal-wiki-link--create {
+    color: var(--purple-light, #a78bfa);
+  }
+  .nopal-page-embed {
+    border-color: rgba(167, 139, 250, 0.22);
+  }
+  a.nopal-page-embed:hover {
+    border-color: rgba(167, 139, 250, 0.5);
+    background: rgba(167, 139, 250, 0.06);
+  }
+  .nopal-page-embed--broken {
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  .nopal-page-embed-create {
+    background: rgba(167, 139, 250, 0.12);
+    border-color: rgba(167, 139, 250, 0.35);
+    color: var(--purple-light, #a78bfa);
+  }
+  .nopal-page-embed-create:hover {
+    background: rgba(167, 139, 250, 0.22);
+  }
+  .ref-popover-item--create {
+    border-top-color: rgba(167, 139, 250, 0.18);
   }
 }

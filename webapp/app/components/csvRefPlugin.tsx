@@ -200,7 +200,7 @@ export function $isCsvRefNode(
 
 // ── Text transform: turn `[key]` text into chips as it appears ──────────────
 
-const REF_RE = /\[([^\[\]\n]+)\]/g;
+const REF_RE = /(?<!\[)\[([^\[\]\n]+)\](?!\])/g;
 
 function CsvRefTransformPlugin() {
   const [editor] = useLexicalComposerContext();

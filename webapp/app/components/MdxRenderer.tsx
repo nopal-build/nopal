@@ -32,6 +32,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { useState, useMemo } from "react";
+import type { VaultRefItem } from "./refPopoverPlugin";
 
 // ── Public props interface ─────────────────────────────────────────────────────
 
@@ -44,6 +45,10 @@ export interface MdxRendererProps {
   onAddFile?: () => void;
   onRemoveFile?: (fileIndex: number) => void;
   className?: string;
+  /** Vault items used to resolve [[wiki-links]] and ![[embeds]] at render time. */
+  wikiItems?: VaultRefItem[];
+  /** Called when the user clicks an unresolved [[wiki-link]] to create the page. */
+  onWikiLinkCreate?: (label: string) => void;
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -56,11 +61,141 @@ function preprocessCsvRefs(
   text: string,
   csvFields: Record<string, string>,
 ): string {
-  return text.replace(/\[([^\[\]\n]+)\]/g, (match, key) => {
+  return text.replace(/(?<!\[)\[([^\[\]\n]+)\](?!\])/g, (match, key) => {
     if (key in csvFields)
       return `<span class="nopal-csv-placeholder" data-csv-key="${encodeURIComponent(key)}"></span>`;
     return match;
   });
+}
+
+/**
+ * Replace [[label]] and ![[label]] with HTML span placeholders that rehype-raw
+ * will keep as-is. Must run BEFORE preprocessCsvRefs so that [[key]] is not
+ * mistaken for a CSV reference.
+ */
+function preprocessWikiLinks(text: string): string {
+  // ![[label]] — embed placeholder (process first, more specific)
+  text = text.replace(/!\[\[([^\[\]\n]+)\]\]/g, (_match, label: string) => {
+    return `<span class="nopal-embed-ref" data-embed-label="${encodeURIComponent(label)}"></span>`;
+  });
+  // [[label]] — wiki-link placeholder
+  text = text.replace(/\[\[([^\[\]\n]+)\]\]/g, (_match, label: string) => {
+    return `<span class="nopal-wiki-ref" data-wiki-label="${encodeURIComponent(label)}"></span>`;
+  });
+  return text;
+}
+
+/**
+ * Find the vault item that best matches a wiki-link label.
+ * - "Page name" matches an item whose label is "Page name.md" (case-insensitive)
+ * - "folder/Page name" also checks that item.detail contains the folder path
+ */
+function resolveWikiLink(
+  label: string,
+  items: VaultRefItem[],
+): VaultRefItem | null {
+  const q = label.toLowerCase().trim();
+
+  if (q.includes("/")) {
+    const parts = q.split("/");
+    const fileName = parts[parts.length - 1];
+    const folderHint = parts.slice(0, -1).join("/");
+    for (const item of items) {
+      const name = item.label.replace(/\.md$/i, "").toLowerCase();
+      const detail = (item.detail ?? "").toLowerCase();
+      if (name === fileName && detail.includes(folderHint)) return item;
+    }
+  }
+
+  for (const item of items) {
+    const name = item.label.replace(/\.md$/i, "").toLowerCase();
+    if (name === q) return item;
+  }
+
+  return null;
+}
+
+interface WikiLinkProps {
+  label: string;
+  item: VaultRefItem | null;
+  onCreate?: (label: string) => void;
+}
+
+function WikiLink({ label, item, onCreate }: WikiLinkProps) {
+  if (item?.href) {
+    return (
+      <a href={item.href} className="nopal-wiki-link">
+        {label}
+      </a>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="nopal-wiki-link nopal-wiki-link--create"
+      title={`Create page "${label}"`}
+      onClick={() => onCreate?.(label)}
+    >
+      {label}
+    </button>
+  );
+}
+
+interface EmbedCardProps {
+  label: string;
+  items: VaultRefItem[];
+  onCreate?: (label: string) => void;
+}
+
+function EmbedCard({ label, items, onCreate }: EmbedCardProps) {
+  const item = resolveWikiLink(label, items);
+
+  if (!item) {
+    return (
+      <div className="nopal-page-embed nopal-page-embed--broken">
+        <span className="nopal-page-embed-icon">📝</span>
+        <span className="nopal-page-embed-body">
+          <span className="nopal-page-embed-title">{label}</span>
+          <span className="nopal-page-embed-detail">Page not found</span>
+        </span>
+        {onCreate && (
+          <button
+            type="button"
+            className="nopal-page-embed-create"
+            onClick={() => onCreate(label)}
+          >
+            Create
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (item.kind === "image" && item.url) {
+    return (
+      <div className="nopal-image-block nopal-image-block--single">
+        <img src={item.url} alt={item.label} />
+      </div>
+    );
+  }
+
+  const displayLabel = item.label.replace(/\.md$/i, "");
+  const href = item.href ?? item.url ?? "#";
+
+  return (
+    <a href={href} className="nopal-page-embed">
+      <span className="nopal-page-embed-icon">
+        {item.kind === "page" ? "📝" : "📎"}
+      </span>
+      <span className="nopal-page-embed-body">
+        <span className="nopal-page-embed-title">{displayLabel}</span>
+        {item.detail && (
+          <span className="nopal-page-embed-detail">{item.detail}</span>
+        )}
+      </span>
+      <span className="nopal-page-embed-arrow">→</span>
+    </a>
+  );
 }
 
 // ── CsvChip ───────────────────────────────────────────────────────────────────
@@ -453,6 +588,8 @@ export default function MdxRenderer({
   onAddFile,
   onRemoveFile,
   className,
+  wikiItems,
+  onWikiLinkCreate,
 }: MdxRendererProps) {
   // ── Build render segments ──────────────────────────────────────────────────
   const renderSegments = useMemo((): RenderSegment[] => {
@@ -501,7 +638,7 @@ export default function MdxRenderer({
         return <input type={type} {...rest} />;
       },
 
-      // ── Inline span — intercept CSV ref placeholders injected by preprocessCsvRefs
+      // ── Inline span — intercept CSV ref placeholders and wiki-link placeholders
       span({ node, className, children, ...rest }: any) {
         if (className === "nopal-csv-placeholder") {
           // hast converts data-csv-key → dataCsvKey in properties
@@ -515,6 +652,27 @@ export default function MdxRenderer({
               value={value}
               editable={dispatch !== undefined && !!onCsvFieldChange}
               onChange={onCsvFieldChange}
+            />
+          );
+        }
+        if (className === "nopal-wiki-ref") {
+          const encoded = (node as any)?.properties?.dataWikiLabel ?? "";
+          const label = encoded ? decodeURIComponent(String(encoded)) : "";
+          if (!label) return null;
+          const item = wikiItems ? resolveWikiLink(label, wikiItems) : null;
+          return (
+            <WikiLink label={label} item={item} onCreate={onWikiLinkCreate} />
+          );
+        }
+        if (className === "nopal-embed-ref") {
+          const encoded = (node as any)?.properties?.dataEmbedLabel ?? "";
+          const label = encoded ? decodeURIComponent(String(encoded)) : "";
+          if (!label) return null;
+          return (
+            <EmbedCard
+              label={label}
+              items={wikiItems ?? []}
+              onCreate={onWikiLinkCreate}
             />
           );
         }
@@ -561,7 +719,7 @@ export default function MdxRenderer({
       },
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }),
-    [dispatch, csvFields, onCsvFieldChange],
+    [dispatch, csvFields, onCsvFieldChange, wikiItems, onWikiLinkCreate],
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -587,9 +745,10 @@ export default function MdxRenderer({
           );
         // prose
         const node = state.nodes.get(seg.key) as ProseNode;
+        const withWiki = preprocessWikiLinks(node.content);
         const text = csvFields
-          ? preprocessCsvRefs(node.content, csvFields)
-          : node.content;
+          ? preprocessCsvRefs(withWiki, csvFields)
+          : withWiki;
         return (
           <ReactMarkdown
             key={seg.key}

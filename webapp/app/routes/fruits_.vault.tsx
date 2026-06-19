@@ -995,16 +995,19 @@ function MdEditorModal({
   onSave,
   onSaveCsv,
   onClose,
+  onWikiLinkCreate,
   mode = "editable",
 }: {
   file: FileRef;
   /** Sibling project CSV file (e.g. project.csv) — enables `[key]` chips. */
   csvFile?: FileRef | null;
-  /** Vault pages/files offered by the `[` reference popover. */
+  /** Vault pages/files offered by the `[[` reference popover. */
   refItems?: VaultRefItem[];
   onSave: (content: string) => void;
   onSaveCsv?: (content: string) => void;
   onClose: () => void;
+  /** Called when the user clicks an unresolved [[wiki-link]] to create the page. */
+  onWikiLinkCreate?: (label: string) => void;
   mode?: "view" | "workable" | "editable";
 }) {
   const [isClient, setIsClient] = useState(false);
@@ -1159,7 +1162,11 @@ function MdEditorModal({
           }}
         >
           {mode === "view" ? (
-            <MdxEditorView markdown={file.content ?? ""} />
+            <MdxEditorView
+              markdown={file.content ?? ""}
+              wikiItems={refItems}
+              onWikiLinkCreate={onWikiLinkCreate}
+            />
           ) : mode === "workable" ? (
             <EditorErrorBoundary>
               <Suspense fallback={<EditorLoadingFallback />}>
@@ -1167,6 +1174,8 @@ function MdEditorModal({
                   key={file._id}
                   markdown={file.content ?? ""}
                   onChange={handleChange}
+                  wikiItems={refItems}
+                  onWikiLinkCreate={onWikiLinkCreate}
                 />
               </Suspense>
             </EditorErrorBoundary>
@@ -2218,6 +2227,24 @@ export default function VaultPage() {
     setSearchParams({ folder: folderRes.folder._id });
   };
 
+  const createMdFileFromWikiLink = async (label: string) => {
+    const fullName = label.endsWith(".md") ? label : `${label}.md`;
+    const duplicate = myFiles.some(
+      (f) => f.folder_id === currentFolderId && f.name === fullName,
+    );
+    if (duplicate) return;
+    await apiFetch("/api/vault", {
+      method: "POST",
+      body: JSON.stringify({
+        name: fullName,
+        content: "",
+        content_type: "text/markdown",
+        folder_id: currentFolderId,
+      }),
+    });
+    revalidate();
+  };
+
   const createMdFile = async () => {
     const name = window.prompt("Card name (without extension):");
     if (!name?.trim()) return;
@@ -2985,6 +3012,7 @@ export default function VaultPage() {
               : undefined
           }
           onClose={handleCloseEditor}
+          onWikiLinkCreate={createMdFileFromWikiLink}
           mode={editMdMode}
         />
       )}

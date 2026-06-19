@@ -1187,7 +1187,7 @@ export default function MdxEditorEditable({
               ))}
             </div>
 
-            {/* Unified button group: + | [ ] | actions */}
+            {/* Unified button group: + | [[]] | ![[]] | [ ] | actions */}
             <div className="nopal-tray-group">
               {uploadFile && (
                 <button
@@ -1211,6 +1211,34 @@ export default function MdxEditorEditable({
                   </svg>
                 </button>
               )}
+              <button
+                className="nopal-tray-wiki"
+                title="Insert page link"
+                aria-label="Insert wiki-link"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  lexicalEditorRef.current?.update(() => {
+                    const sel = $getSelection();
+                    if ($isRangeSelection(sel)) sel.insertText("[[");
+                  });
+                }}
+              >
+                {"[[]]"}
+              </button>
+              <button
+                className="nopal-tray-embed"
+                title="Insert page embed"
+                aria-label="Insert embed reference"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  lexicalEditorRef.current?.update(() => {
+                    const sel = $getSelection();
+                    if ($isRangeSelection(sel)) sel.insertText("![[");
+                  });
+                }}
+              >
+                {"![[]]"}
+              </button>
               <button
                 className="nopal-tray-task"
                 title="Insert task"

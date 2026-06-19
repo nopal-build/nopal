@@ -25,6 +25,7 @@ import {
   type EditorCommand,
 } from "../util/nopalEditorState";
 import MdxRenderer from "./MdxRenderer";
+import type { VaultRefItem } from "./refPopoverPlugin";
 
 interface MdxEditorWorkableProps {
   markdown: string;
@@ -32,6 +33,10 @@ interface MdxEditorWorkableProps {
   uploadFile?: (file: File) => Promise<string>;
   csvFields?: Record<string, string>;
   onCsvFieldChange?: (key: string, value: string) => void;
+  /** Vault items for resolving [[wiki-links]] and ![[embeds]]. */
+  wikiItems?: VaultRefItem[];
+  /** Called when the user clicks an unresolved [[wiki-link]] to create it. */
+  onWikiLinkCreate?: (label: string) => void;
 }
 
 interface UploadingFile {
@@ -49,6 +54,8 @@ export default function MdxEditorWorkable({
   uploadFile,
   csvFields,
   onCsvFieldChange,
+  wikiItems,
+  onWikiLinkCreate,
 }: MdxEditorWorkableProps) {
   // Primary editor state — useReducer with lazy initializer
   const [editorState, dispatch] = useReducer(
@@ -170,6 +177,8 @@ export default function MdxEditorWorkable({
         canManageFiles={!!uploadFile}
         onAddFile={handleAddFile}
         onRemoveFile={handleRemoveFile}
+        wikiItems={wikiItems}
+        onWikiLinkCreate={onWikiLinkCreate}
       />
       {uploadFile && (
         <input

@@ -1,15 +1,20 @@
 /**
  * Reference popover for the MDX editor.
  *
- * Typing `[` opens a typeahead popover anchored at the caret. As the user
- * keeps typing, the list narrows. It offers three kinds of references:
+ * Typing `[[` opens a unified typeahead popover. As the user keeps typing the
+ * list narrows. Typing `![[` instead opens it in "embed" mode.
  *
- *   • CSV values  — from the project's CSV file → inserted as an inline,
- *                   click-to-edit value chip (see csvRefPlugin).
- *   • Pages       — markdown files in the Vault (searchable by folder path)
- *                   → inserted as a link to that page.
- *   • Files       — other vault files. Photos are embedded as an image
- *                   placement; everything else becomes a link to the file.
+ * Link mode `[[`:
+ *   • CSV values  — from the project's CSV file → inline click-to-edit chip
+ *   • Pages       — markdown files in the Vault → wiki-link `[[Page name]]`
+ *   • Images      — vault photos → markdown image link `[label](url)`
+ *   • Files       — other vault files → markdown link `[label](href)`
+ *   • Create new  — shown when query has no matching page → inserts `[[query]]`
+ *
+ * Embed mode `![[`:
+ *   • Pages  → `![[Page name]]` (rendered as a page card)
+ *   • Images → embedded via the file registry (existing behaviour)
+ *   • Files  → `![[filename]]` (rendered as a file attachment card)
  */
 
 import { realmPlugin, addComposerChild$ } from "@mdxeditor/editor";
@@ -26,6 +31,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
@@ -63,48 +69,49 @@ export const RefPopoverContext = createContext<RefPopoverContextValue>({
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
+type TriggerMode = "link" | "embed";
+
 type RefOptionData =
   | { type: "csv"; key: string; value: string }
-  | { type: "item"; item: VaultRefItem };
+  | { type: "item"; item: VaultRefItem }
+  | { type: "create-page"; label: string };
 
 class RefOption extends MenuOption {
   data: RefOptionData;
 
   constructor(data: RefOptionData) {
-    super(data.type === "csv" ? `csv:${data.key}` : `item:${data.item.id}`);
+    if (data.type === "csv") super(`csv:${data.key}`);
+    else if (data.type === "create-page") super(`create:${data.label}`);
+    else super(`item:${data.item.id}`);
     this.data = data;
   }
 }
 
 function optionIcon(data: RefOptionData): string {
   if (data.type === "csv") return "📊";
+  if (data.type === "create-page") return "✨";
   if (data.item.kind === "page") return "📝";
   if (data.item.kind === "image") return "🖼️";
   return "📎";
 }
 
 function optionLabel(data: RefOptionData): string {
-  return data.type === "csv" ? data.key : data.item.label;
+  if (data.type === "csv") return data.key;
+  if (data.type === "create-page") return `Create "[[${data.label}]]"`;
+  return data.item.label;
 }
 
 function optionDetail(data: RefOptionData): string {
   if (data.type === "csv") return data.value || "—";
+  if (data.type === "create-page") return "new page";
   return data.item.detail ?? "";
 }
 
-// ── Trigger: an unclosed `[` before the caret ────────────────────────────────
+// ── Trigger: `[[query` or `![[query` before the caret ────────────────────────
 
-const TRIGGER_RE = /\[([^\[\]]{0,48})$/;
-
-function checkForRefTrigger(text: string): MenuTextMatch | null {
-  const match = TRIGGER_RE.exec(text);
-  if (match === null) return null;
-  return {
-    leadOffset: match.index,
-    matchingString: match[1],
-    replaceableString: match[0],
-  };
-}
+// Matches "![[query" or "[[query" at the end of the text.
+// Group 1 = the prefix ("![[" or "[["), group 2 = the query text.
+const TRIGGER_RE = /(!?\[\[)([^\[\]]{0,48})$/;
 
 // ── Plugin component ─────────────────────────────────────────────────────────
 
@@ -116,25 +123,46 @@ function RefPopoverPluginComponent() {
   const { items, embedImage } = useContext(RefPopoverContext);
   const [queryString, setQueryString] = useState<string | null>(null);
 
+  // Tracks which trigger prefix fired most recently.
+  const triggerModeRef = useRef<TriggerMode>("link");
+
+  const checkForTrigger = useCallback((text: string): MenuTextMatch | null => {
+    const match = TRIGGER_RE.exec(text);
+    if (!match) return null;
+    triggerModeRef.current = match[1] === "![[" ? "embed" : "link";
+    return {
+      leadOffset: match.index,
+      matchingString: match[2],
+      replaceableString: match[0],
+    };
+  }, []);
+
   const options = useMemo(() => {
+    const mode = triggerModeRef.current;
     const q = (queryString ?? "").toLowerCase().trim();
     const matches = (hay: string) => hay.toLowerCase().includes(q);
     const starts = (hay: string) => hay.toLowerCase().startsWith(q);
 
-    const csv: RefOption[] = [];
-    for (const [key, value] of Object.entries(fields)) {
-      if (!q || matches(key) || matches(value)) {
-        csv.push(new RefOption({ type: "csv", key, value }));
-      }
-    }
-    csv.sort((a, b) => {
-      if (!q) return 0;
-      return (
-        Number(starts(optionLabel(b.data))) -
-        Number(starts(optionLabel(a.data)))
-      );
-    });
+    const result: RefOption[] = [];
 
+    // CSV — only in link mode
+    if (mode === "link") {
+      const csv: RefOption[] = [];
+      for (const [key, value] of Object.entries(fields)) {
+        if (!q || matches(key) || matches(value)) {
+          csv.push(new RefOption({ type: "csv", key, value }));
+        }
+      }
+      csv.sort((a, b) => {
+        if (!q) return 0;
+        const ad = a.data as { type: "csv"; key: string };
+        const bd = b.data as { type: "csv"; key: string };
+        return Number(starts(bd.key)) - Number(starts(ad.key));
+      });
+      result.push(...csv);
+    }
+
+    // Pages, images, files
     const byKind = (kind: VaultRefItem["kind"]) =>
       items
         .filter(
@@ -145,12 +173,16 @@ function RefPopoverPluginComponent() {
         .sort((a, b) => Number(starts(b.label)) - Number(starts(a.label)))
         .map((item) => new RefOption({ type: "item", item }));
 
-    return [
-      ...csv,
-      ...byKind("page"),
-      ...byKind("image"),
-      ...byKind("file"),
-    ].slice(0, MAX_OPTIONS);
+    result.push(...byKind("page"), ...byKind("image"), ...byKind("file"));
+
+    // "Create new page" — only in link mode when there is a query
+    if (mode === "link" && q) {
+      result.push(
+        new RefOption({ type: "create-page", label: queryString ?? q }),
+      );
+    }
+
+    return result.slice(0, MAX_OPTIONS);
   }, [queryString, fields, items]);
 
   const onSelectOption = useCallback(
@@ -161,6 +193,7 @@ function RefPopoverPluginComponent() {
     ) => {
       editor.update(() => {
         const { data } = option;
+        const mode = triggerModeRef.current;
 
         if (data.type === "csv") {
           const refNode = $createCsvRefNode(data.key);
@@ -172,23 +205,72 @@ function RefPopoverPluginComponent() {
           const after = $createTextNode(" ");
           refNode.insertAfter(after);
           after.select();
-        } else if (data.item.kind === "image") {
-          // Embed after the paragraph the caret is in.
-          const topLevel = nodeToRemove?.getTopLevelElement();
-          const blockIndex = topLevel ? topLevel.getIndexWithinParent() : 0;
-          nodeToRemove?.remove();
-          embedImage?.(data.item, blockIndex + 1);
-        } else {
-          const linkNode = $createLinkNode(data.item.href ?? "");
-          linkNode.append($createTextNode(data.item.label));
+        } else if (data.type === "create-page") {
+          const wikiText = $createTextNode(`[[${data.label}]]`);
           if (nodeToRemove) {
-            nodeToRemove.replace(linkNode);
+            nodeToRemove.replace(wikiText);
           } else {
-            $insertNodes([linkNode]);
+            $insertNodes([wikiText]);
           }
           const after = $createTextNode(" ");
-          linkNode.insertAfter(after);
+          wikiText.insertAfter(after);
           after.select();
+        } else if (data.item.kind === "image") {
+          if (mode === "embed") {
+            const topLevel = nodeToRemove?.getTopLevelElement();
+            const blockIndex = topLevel ? topLevel.getIndexWithinParent() : 0;
+            nodeToRemove?.remove();
+            embedImage?.(data.item, blockIndex + 1);
+          } else {
+            const linkNode = $createLinkNode(
+              data.item.url ?? data.item.href ?? "",
+            );
+            linkNode.append($createTextNode(data.item.label));
+            if (nodeToRemove) {
+              nodeToRemove.replace(linkNode);
+            } else {
+              $insertNodes([linkNode]);
+            }
+            const after = $createTextNode(" ");
+            linkNode.insertAfter(after);
+            after.select();
+          }
+        } else if (data.item.kind === "page") {
+          const label = data.item.label.replace(/\.md$/i, "");
+          const syntax = mode === "embed" ? `![[${label}]]` : `[[${label}]]`;
+          const wikiText = $createTextNode(syntax);
+          if (nodeToRemove) {
+            nodeToRemove.replace(wikiText);
+          } else {
+            $insertNodes([wikiText]);
+          }
+          const after = $createTextNode(" ");
+          wikiText.insertAfter(after);
+          after.select();
+        } else {
+          // file
+          if (mode === "embed") {
+            const wikiText = $createTextNode(`![[${data.item.label}]]`);
+            if (nodeToRemove) {
+              nodeToRemove.replace(wikiText);
+            } else {
+              $insertNodes([wikiText]);
+            }
+            const after = $createTextNode(" ");
+            wikiText.insertAfter(after);
+            after.select();
+          } else {
+            const linkNode = $createLinkNode(data.item.href ?? "");
+            linkNode.append($createTextNode(data.item.label));
+            if (nodeToRemove) {
+              nodeToRemove.replace(linkNode);
+            } else {
+              $insertNodes([linkNode]);
+            }
+            const after = $createTextNode(" ");
+            linkNode.insertAfter(after);
+            after.select();
+          }
         }
 
         closeMenu();
@@ -201,7 +283,7 @@ function RefPopoverPluginComponent() {
     <LexicalTypeaheadMenuPlugin<RefOption>
       onQueryChange={setQueryString}
       onSelectOption={onSelectOption}
-      triggerFn={checkForRefTrigger}
+      triggerFn={checkForTrigger}
       options={options}
       anchorClassName="ref-popover-anchor"
       menuRenderFn={(
@@ -219,6 +301,10 @@ function RefPopoverPluginComponent() {
                     aria-selected={selectedIndex === i}
                     className={`ref-popover-item${
                       selectedIndex === i ? " ref-popover-item--active" : ""
+                    }${
+                      option.data.type === "create-page"
+                        ? " ref-popover-item--create"
+                        : ""
                     }`}
                     onMouseDown={(e) => e.preventDefault()}
                     onMouseEnter={() => setHighlightedIndex(i)}
