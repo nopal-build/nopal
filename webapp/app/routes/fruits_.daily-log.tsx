@@ -10,12 +10,14 @@ import {
   useRevalidator,
   useRouteError,
   isRouteErrorResponse,
+  useNavigate,
 } from "react-router";
 import {
   useState,
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   lazy,
   Suspense,
 } from "react";
@@ -31,6 +33,8 @@ import {
   workableSaveDailyLog,
   type DailyLog,
 } from "../data/dailyLog.server";
+import { getFileRefsByHuman } from "../data/vault.server";
+import type { VaultRefItem } from "../components/refPopoverPlugin";
 
 import projectStyles from "../styles/project.css?url";
 import mdxEditorStyles from "../styles/mdxeditor.css?url";
@@ -78,7 +82,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!user) return redirect("/login");
   // Load all entries newest-first; 500 is a generous ceiling for any user
   const { entries } = await getDailyLogs(user._id, { limit: 500 });
-  return { user, entries };
+  const vaultFiles = await getFileRefsByHuman(user._id);
+  return { user, entries, vaultFiles };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -120,7 +125,17 @@ export async function action({ request }: ActionFunctionArgs) {
 
 // ─── PastLogEntry ─────────────────────────────────────────────────────────────
 
-function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
+function PastLogEntry({
+  entry,
+  today,
+  wikiItems,
+  onWikiLinkNavigate,
+}: {
+  entry: DailyLog;
+  today: string;
+  wikiItems?: VaultRefItem[];
+  onWikiLinkNavigate?: (href: string) => void;
+}) {
   const [content, setContent] = useState(entry.content);
 
   const saveFetcher = useFetcher<typeof action>();
@@ -163,7 +178,16 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
 
       <EditorErrorBoundary>
         <Suspense fallback={<EditorLoadingFallback hasTray={false} />}>
-          <MdxEditorWorkable markdown={content} onChange={handleChange} />
+          <MdxEditorWorkable
+            markdown={content}
+            onChange={handleChange}
+            wikiItems={wikiItems}
+            onWikiLinkCreate={
+              onWikiLinkNavigate
+                ? () => onWikiLinkNavigate("/fruits/vault")
+                : undefined
+            }
+          />
         </Suspense>
       </EditorErrorBoundary>
     </div>
@@ -178,12 +202,18 @@ function TodayLogEntry({
   content,
   onChange,
   onEditorMounted,
+  refItems,
+  onWikiLinkNavigate,
+  onWikiLinkCreate,
 }: {
   date: string;
   today: string;
   content: string;
   onChange: (v: string) => void;
   onEditorMounted?: () => void;
+  refItems?: VaultRefItem[];
+  onWikiLinkNavigate?: (href: string) => void;
+  onWikiLinkCreate?: (label: string) => void;
 }) {
   const [isClient, setIsClient] = useState(false);
 
@@ -323,6 +353,9 @@ function TodayLogEntry({
                 markdown={content}
                 onChange={onChange}
                 uploadFile={uploadFile}
+                refItems={refItems}
+                onWikiLinkNavigate={onWikiLinkNavigate}
+                onWikiLinkCreate={onWikiLinkCreate}
                 onEditorReady={
                   onEditorMounted ? () => onEditorMounted() : undefined
                 }
@@ -426,8 +459,26 @@ export function ErrorBoundary() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DailyLogPage() {
-  const { user, entries: serverEntries } = useLoaderData<typeof loader>();
+  const {
+    user,
+    entries: serverEntries,
+    vaultFiles,
+  } = useLoaderData<typeof loader>();
+  const navigate = useNavigate();
   const revalidator = useRevalidator();
+
+  const refItems = useMemo<VaultRefItem[]>(
+    () =>
+      vaultFiles
+        .filter((f) => f.content_type === "text/markdown")
+        .map((f) => ({
+          id: f._id,
+          label: f.name,
+          kind: "page" as const,
+          href: `/fruits/vault?file=${f._id}`,
+        })),
+    [vaultFiles],
+  );
 
   // ── today + todayContent ──────────────────────────────────────────────────
   // Both start as "" so the server render and the initial client render
@@ -520,6 +571,38 @@ export default function DailyLogPage() {
     [today, scheduleSave],
   );
 
+  // Create a vault page from a [[wiki-link]] and open it in the editor.
+  const createMdFileFromWikiLink = useCallback(
+    async (label: string) => {
+      const fullName = label.endsWith(".md") ? label : `${label}.md`;
+
+      // If a matching file already exists, navigate directly to it.
+      const existing = vaultFiles.find(
+        (f) => f.content_type === "text/markdown" && f.name === fullName,
+      );
+      if (existing) {
+        navigate(`/fruits/vault?file=${existing._id}`);
+        return;
+      }
+
+      // Create at root level (no folder) and open immediately.
+      const res = await fetch("/api/vault", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: fullName,
+          content: "",
+          content_type: "text/markdown",
+          folder_id: null,
+        }),
+      });
+      if (!res.ok) return;
+      const { fileRef } = (await res.json()) as { fileRef: { _id: string } };
+      navigate(`/fruits/vault?file=${fileRef._id}`);
+    },
+    [vaultFiles, navigate],
+  );
+
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
@@ -537,12 +620,21 @@ export default function DailyLogPage() {
           today={today}
           content={todayContent}
           onChange={handleChange}
+          refItems={refItems}
+          onWikiLinkNavigate={(href) => navigate(href)}
+          onWikiLinkCreate={createMdFileFromWikiLink}
         />
 
         {/* Past entries: newest first */}
         <div style={{ marginTop: "60px" }}>
           {pastEntries.map((entry) => (
-            <PastLogEntry key={entry.date} entry={entry} today={today} />
+            <PastLogEntry
+              key={entry.date}
+              entry={entry}
+              today={today}
+              wikiItems={refItems}
+              onWikiLinkNavigate={(href) => navigate(href)}
+            />
           ))}
         </div>
       </div>

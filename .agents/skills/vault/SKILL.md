@@ -23,3 +23,6 @@ Folder & File Sharing:
   - These corrispond to the @mdx-editor
 
 URL: /fruits/vault
+
+Daily Logs
+Daily logs are stored in the vault, so even though they have a specific page, they still end up in the vault, meaning we should treat the daily logs like any other file in the vault.

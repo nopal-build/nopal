@@ -5,6 +5,7 @@ import {
   useLoaderData,
   useRevalidator,
   useSearchParams,
+  useNavigate,
 } from "react-router";
 import {
   useRef,
@@ -996,6 +997,7 @@ function MdEditorModal({
   onSaveCsv,
   onClose,
   onWikiLinkCreate,
+  onWikiLinkNavigate,
   mode = "editable",
 }: {
   file: FileRef;
@@ -1008,6 +1010,8 @@ function MdEditorModal({
   onClose: () => void;
   /** Called when the user clicks an unresolved [[wiki-link]] to create the page. */
   onWikiLinkCreate?: (label: string) => void;
+  /** Called when the user clicks a resolved [[wiki-link]] chip to navigate. */
+  onWikiLinkNavigate?: (href: string) => void;
   mode?: "view" | "workable" | "editable";
 }) {
   const [isClient, setIsClient] = useState(false);
@@ -1190,6 +1194,8 @@ function MdEditorModal({
                   csvFields={csvFile ? csvRecord : undefined}
                   onCsvFieldChange={csvFile ? handleCsvFieldChange : undefined}
                   refItems={refItems}
+                  onWikiLinkNavigate={onWikiLinkNavigate}
+                  onWikiLinkCreate={onWikiLinkCreate}
                   actions={
                     <button
                       onClick={close}
@@ -1749,6 +1755,7 @@ export default function VaultPage() {
     allOtherHumans,
   } = useLoaderData<typeof loader>();
   const { revalidate } = useRevalidator();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // URL params that encode navigation state
@@ -2229,11 +2236,21 @@ export default function VaultPage() {
 
   const createMdFileFromWikiLink = async (label: string) => {
     const fullName = label.endsWith(".md") ? label : `${label}.md`;
-    const duplicate = myFiles.some(
+
+    // If a file with this name already exists in the current folder, open it.
+    const existing = myFiles.find(
       (f) => f.folder_id === currentFolderId && f.name === fullName,
     );
-    if (duplicate) return;
-    await apiFetch("/api/vault", {
+    if (existing) {
+      const params: Record<string, string> = {};
+      if (panel.kind === "my-folder") params.folder = panel.folderId;
+      if (panel.kind === "shared-folder") params.shared = panel.folderId;
+      params.file = existing._id;
+      setSearchParams(params);
+      return;
+    }
+
+    const { fileRef } = (await apiFetch("/api/vault", {
       method: "POST",
       body: JSON.stringify({
         name: fullName,
@@ -2241,8 +2258,16 @@ export default function VaultPage() {
         content_type: "text/markdown",
         folder_id: currentFolderId,
       }),
-    });
+    })) as { fileRef: FileRef };
+
     revalidate();
+
+    // Open the newly created file in the editor right away.
+    const params: Record<string, string> = {};
+    if (panel.kind === "my-folder") params.folder = panel.folderId;
+    if (panel.kind === "shared-folder") params.shared = panel.folderId;
+    params.file = fileRef._id;
+    setSearchParams(params);
   };
 
   const createMdFile = async () => {
@@ -3013,6 +3038,7 @@ export default function VaultPage() {
           }
           onClose={handleCloseEditor}
           onWikiLinkCreate={createMdFileFromWikiLink}
+          onWikiLinkNavigate={(href) => navigate(href)}
           mode={editMdMode}
         />
       )}

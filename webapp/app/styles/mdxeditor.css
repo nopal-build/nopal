@@ -2362,3 +2362,78 @@ a.nopal-page-embed:hover {
     border-top-color: rgba(167, 139, 250, 0.18);
   }
 }
+
+/* ── Wiki-link chip (in Lexical edit mode) ────────────────────────────────── */
+
+.wiki-link-wrap {
+  display: inline;
+}
+
+.nopal-wiki-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px 1px 6px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--purple, #7c5cbf) 35%, transparent);
+  background: color-mix(in srgb, var(--purple-light, #a78bfa) 10%, transparent);
+  color: var(--purple, #7c5cbf);
+  font-size: 0.88em;
+  line-height: 1.4;
+  cursor: pointer;
+  vertical-align: baseline;
+  font-family: inherit;
+  transition: background 0.1s;
+}
+
+.nopal-wiki-chip:hover {
+  background: color-mix(in srgb, var(--purple-light, #a78bfa) 20%, transparent);
+}
+
+.nopal-wiki-chip--unresolved {
+  border-style: dashed;
+  color: var(--text-subtle, #8a7f99);
+  background: transparent;
+}
+
+.nopal-wiki-chip--unresolved:hover {
+  background: color-mix(in srgb, var(--purple-light, #a78bfa) 8%, transparent);
+}
+
+.nopal-wiki-chip-label {
+  /* inherits all font properties */
+}
+
+.nopal-wiki-chip-arrow {
+  font-size: 0.78em;
+  opacity: 0.65;
+}
+
+@media (prefers-color-scheme: dark) {
+  .nopal-wiki-chip {
+    border-color: color-mix(
+      in srgb,
+      var(--purple-light, #a78bfa) 40%,
+      transparent
+    );
+    background: color-mix(
+      in srgb,
+      var(--purple-light, #a78bfa) 12%,
+      transparent
+    );
+    color: var(--purple-light, #c4b0f5);
+  }
+
+  .nopal-wiki-chip:hover {
+    background: color-mix(
+      in srgb,
+      var(--purple-light, #a78bfa) 22%,
+      transparent
+    );
+  }
+
+  .nopal-wiki-chip--unresolved {
+    color: var(--text-subtle-dark, #9b90ab);
+    background: transparent;
+  }
+}
