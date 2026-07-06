@@ -35,6 +35,12 @@ import {
 } from "../data/dailyLog.server";
 import { getFileRefsByHuman } from "../data/vault.server";
 import type { VaultRefItem } from "../components/refPopoverPlugin";
+import {
+  importFromMarkdown,
+  getTaskItems,
+  type RootNode,
+  type TaskGroupNode,
+} from "../util/nopalEditorState";
 
 import projectStyles from "../styles/project.css?url";
 import mdxEditorStyles from "../styles/mdxeditor.css?url";
@@ -49,6 +55,32 @@ export const links: LinksFunction = () => [
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Parse `prevContent` and collect all unchecked task texts.
+ * Returns a `# Tasks` markdown block with each task carrying a [[prevDate]] ref,
+ * or null when there are no unchecked tasks to carry over.
+ */
+function buildCarryoverContent(
+  prevDate: string,
+  prevContent: string,
+): string | null {
+  const state = importFromMarkdown(prevContent);
+  const root = state.nodes.get("root") as RootNode | undefined;
+  if (!root) return null;
+
+  const lines: string[] = [];
+  for (const key of root.children) {
+    const node = state.nodes.get(key);
+    if (node?.type !== "task-group") continue;
+    for (const task of getTaskItems(state, node as TaskGroupNode)) {
+      if (!task.checked) lines.push(`[ ] ${task.text} [[${prevDate}]]`);
+    }
+  }
+
+  if (lines.length === 0) return null;
+  return `# Tasks\n\n${lines.join("\n")}`;
+}
 
 function localDateString(): string {
   const d = new Date();
@@ -473,7 +505,9 @@ export default function DailyLogPage() {
         .filter((f) => f.content_type === "text/markdown")
         .map((f) => ({
           id: f._id,
-          label: f.name,
+          // Daily-log entries are all named "readme.md"; use the date as the
+          // label so that [[YYYY-MM-DD]] wiki links resolve to the right day.
+          label: f.source === "daily_log" && f.date ? f.date : f.name,
           kind: "page" as const,
           href: `/fruits/vault?file=${f._id}`,
         })),
@@ -494,8 +528,27 @@ export default function DailyLogPage() {
 
     const serverEntry = serverEntries.find((e) => e.date === d);
     if (serverEntry?.content) {
+      // Today already has saved content — use it as-is.
       setTodayContent(serverEntry.content);
       lastSavedRef.current = serverEntry.content;
+      return;
+    }
+
+    // No entry for today yet: carry over unchecked tasks from the most recent
+    // previous log so the user can continue working on open items.
+    const prevEntry = serverEntries.find(
+      (e) => e.date !== d && e.content?.trim(),
+    );
+    if (prevEntry) {
+      const carryover = buildCarryoverContent(
+        prevEntry.date,
+        prevEntry.content,
+      );
+      if (carryover) {
+        setTodayContent(carryover);
+        // Intentionally NOT updating lastSavedRef — the pre-populated content
+        // is unsaved scaffolding; the first real edit triggers the save.
+      }
     }
   }, []); // intentionally empty — run exactly once after hydration
 
