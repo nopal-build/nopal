@@ -66,7 +66,7 @@ export interface TaskGroupNode {
  * Task-item node — a single checkbox item.  Mirrors Lexical's ListItemNode.
  * `parent` is the owning TaskGroupNode key (mirrors Lexical's __parent).
  *
- * `prefix`       — original bullet marker ("- ", "* ", "  - " …).
+ * `prefix`       — original bullet marker ("- ", "* ", "  - " …, or "" for bare `[ ]` style).
  *                  Preserved so serialisation round-trips cleanly.
  * `trailingBlank` — true when a blank line followed this item in the source,
  *                  producing a GFM loose-list entry.  Preserved on save.
@@ -143,7 +143,9 @@ export type EditorCommand =
 
 // ── Parsing (importFromMarkdown) ──────────────────────────────────────────────
 
-const TASK_LINE_RE = /^(\s*[-*]\s+)\[([xX ])\]\s+(.*)/;
+// Matches both `- [ ] text` (GFM / Obsidian) and bare `[ ] text` (GitHub-wiki style).
+// The bullet prefix group (`- `, `* `, …) is optional and defaults to "" when absent.
+const TASK_LINE_RE = /^(\s*(?:[-*]\s+)?)\[([xX ])\]\s+(.*)/;
 /** Matches a whole \n\n-paragraph that is purely a placement token. */
 const PLACEMENT_PARA_RE = /^\[nopal-image\]\[(\d+)\]$|^\[(\d+)\]$/;
 

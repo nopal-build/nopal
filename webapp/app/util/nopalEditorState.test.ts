@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { importFromMarkdown, exportToMarkdown } from "./nopalEditorState";
+import {
+  importFromMarkdown,
+  exportToMarkdown,
+  editorReducer,
+} from "./nopalEditorState";
 import { decodeMarkdownEntities } from "./decodeMarkdownEntities";
 import type {
   ProseNode,
@@ -153,6 +157,67 @@ describe("importFromMarkdown — blank line preservation", () => {
     expect(group.children).toHaveLength(2);
     const firstTask = state.nodes.get(group.children[0]) as TaskItemNode;
     expect(firstTask.trailingBlank).toBe(true);
+  });
+});
+
+// ── importFromMarkdown — bare [ ] task syntax ───────────────────────────────────
+
+describe("importFromMarkdown — bare [ ] task syntax", () => {
+  it("parses a bare unchecked task without a bullet prefix", () => {
+    const types = rootNodeTypes("[ ] buy groceries");
+    expect(types).toEqual(["task-group"]);
+    const state = importFromMarkdown("[ ] buy groceries");
+    const root = state.nodes.get("root") as { children: string[] };
+    const group = state.nodes.get(root.children[0]) as TaskGroupNode;
+    const task = state.nodes.get(group.children[0]) as TaskItemNode;
+    expect(task.checked).toBe(false);
+    expect(task.text).toBe("buy groceries");
+    expect(task.prefix).toBe("");
+  });
+
+  it("parses a bare checked task without a bullet prefix", () => {
+    const state = importFromMarkdown("[x] done");
+    const root = state.nodes.get("root") as { children: string[] };
+    const group = state.nodes.get(root.children[0]) as TaskGroupNode;
+    const task = state.nodes.get(group.children[0]) as TaskItemNode;
+    expect(task.checked).toBe(true);
+    expect(task.text).toBe("done");
+    expect(task.prefix).toBe("");
+  });
+
+  it("merges bare and dash-prefixed tasks in the same paragraph into one group", () => {
+    const md = "- [ ] task one\n[ ] task two";
+    const types = rootNodeTypes(md);
+    expect(types).toEqual(["task-group"]);
+    const state = importFromMarkdown(md);
+    const root = state.nodes.get("root") as { children: string[] };
+    const group = state.nodes.get(root.children[0]) as TaskGroupNode;
+    expect(group.children).toHaveLength(2);
+  });
+
+  it("round-trips bare tasks preserving the empty prefix", () => {
+    const md = "[ ] task one\n[x] task two";
+    expect(exportToMarkdown(importFromMarkdown(md))).toBe(md);
+  });
+
+  it("new tasks added to a bare-prefix group inherit the empty prefix", () => {
+    const state = importFromMarkdown("[ ] original");
+    const root = state.nodes.get("root") as { children: string[] };
+    const groupKey = root.children[0];
+    const group = state.nodes.get(groupKey) as TaskGroupNode;
+    const lastKey = group.children[group.children.length - 1];
+    const next = editorReducer(state, {
+      type: "ADD_TASK",
+      groupKey,
+      afterKey: lastKey,
+      text: "new",
+    });
+    const nextRoot = next.nodes.get("root") as { children: string[] };
+    const nextGroup = next.nodes.get(nextRoot.children[0]) as TaskGroupNode;
+    const newTask = next.nodes.get(
+      nextGroup.children[nextGroup.children.length - 1],
+    ) as TaskItemNode;
+    expect(newTask.prefix).toBe("");
   });
 });
 
