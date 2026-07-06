@@ -4,6 +4,17 @@ import { createServer } from "http";
 
 const app = express();
 
+// Trust the first proxy hop (Fly.io in prod). This makes req.ip reflect the
+// real client IP from x-forwarded-for rather than the proxy's address.
+app.set("trust proxy", 1);
+
+app.use((req, _res, next) => {
+  // Expose the resolved client IP as a custom header so React Router
+  // action functions can read it from request.headers without importing Express.
+  req.headers["x-real-ip"] = req.ip ?? req.socket.remoteAddress ?? "unknown";
+  next();
+});
+
 const httpServer = createServer(app);
 
 const viteDevServer =

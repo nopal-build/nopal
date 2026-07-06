@@ -419,19 +419,17 @@ function WikiLinkExpandPlugin() {
 
           if (!stillInside) {
             lastInsideRef.current = null;
-            const capturedParaKey = paragraphKey;
-            editor.update(() => {
-              const para = $getNodeByKey(capturedParaKey);
-              if (!$isElementNode(para)) return;
-              for (const child of para.getChildren()) {
-                if (child instanceof TextNode) {
-                  const t = child.getTextContent();
-                  WIKI_RE.lastIndex = 0;
-                  if (WIKI_RE.test(t)) child.setTextContent(t);
-                }
-              }
-            });
-            // Fall through — cursor might be adjacent to a WikiLinkNode.
+            // Skip the next expansion pass so the chip we're about to
+            // re-create doesn't immediately re-expand (same guard used by
+            // the boundary-arrow handlers).
+            skipNextExpansionRef.current = true;
+            // Directly convert [[...]] back to a WikiLinkNode instead of
+            // trying to dirty the TextNode via setTextContent(t).
+            // Lexical short-circuits setTextContent when t === __text,
+            // so the text-node transform never fires and the chip stays
+            // as raw text indefinitely.
+            convertTrackedSpan(paragraphKey, nodeKey, start, end);
+            // Fall through — cursor might be adjacent to a different WikiLinkNode.
           }
         }
 

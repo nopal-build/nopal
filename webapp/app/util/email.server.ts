@@ -3,10 +3,17 @@ import { ReactNode, ReactElement } from "react";
 import { createTransport } from "nodemailer";
 import { Resend } from "resend";
 
+export type EmailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+};
+
 export type SendEmailBody = {
   to: string[];
   subject: string;
   react: ReactNode;
+  attachments?: EmailAttachment[];
 };
 
 const isDev = process.env.NODE_ENV === "development";
@@ -25,7 +32,12 @@ const smtpTransport = isDev
     })
   : undefined;
 
-export async function sendEmail({ to, subject, react }: SendEmailBody) {
+export async function sendEmail({
+  to,
+  subject,
+  react,
+  attachments,
+}: SendEmailBody) {
   if (smtpTransport) {
     console.log("[email] Sending via SMTP (Mailpit)...", {
       host: process.env.SMTP_HOST ?? "localhost",
@@ -39,6 +51,11 @@ export async function sendEmail({ to, subject, react }: SendEmailBody) {
       to: to.join(", "),
       subject,
       html,
+      attachments: attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     });
     console.log("[email] Sent via SMTP (Mailpit).", {
       messageId: result.messageId,
@@ -57,6 +74,11 @@ export async function sendEmail({ to, subject, react }: SendEmailBody) {
       to,
       subject,
       react,
+      attachments: attachments?.map((a) => ({
+        filename: a.filename,
+        // Resend accepts Buffer directly
+        content: a.content,
+      })),
     });
     if (result.error) {
       console.error("[email] Resend error:", result.error);
