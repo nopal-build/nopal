@@ -711,7 +711,6 @@ function FileCard({
       )}
       <div
         className={`vault-file-card${isSelected ? " vault-file-card--selected" : ""}`}
-        style={{ cursor: "pointer" }}
         onClick={() => {
           onSelect(file);
           if (isMd) onEditMd(file);
