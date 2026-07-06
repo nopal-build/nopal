@@ -18,16 +18,16 @@
  *   View:      const state = useMemo(() => importFromMarkdown(rawMd), [rawMd])
  */
 
-import type { NopalFileEntry } from './nopalMarkdown'
-import { parseNopalDocument, serializeDocument } from './nopalMarkdown'
+import type { NopalFileEntry } from "./nopalMarkdown";
+import { parseNopalDocument, serializeDocument } from "./nopalMarkdown";
 
 // ── Node key ──────────────────────────────────────────────────────────────────
 
 /** Stable UUID string assigned once on import.  Mirrors Lexical's NodeKey. */
-export type NodeKey = string
+export type NodeKey = string;
 
 function uuid(): NodeKey {
-  return crypto.randomUUID()
+  return crypto.randomUUID();
 }
 
 // ── Node types ────────────────────────────────────────────────────────────────
@@ -37,9 +37,9 @@ function uuid(): NodeKey {
  * Mirrors Lexical's RootNode.  Always stored under the fixed key `"root"`.
  */
 export interface RootNode {
-  type: 'root'
-  key: 'root'
-  children: NodeKey[]
+  type: "root";
+  key: "root";
+  children: NodeKey[];
 }
 
 /**
@@ -47,9 +47,9 @@ export interface RootNode {
  * Rendered by <ReactMarkdown>.
  */
 export interface ProseNode {
-  type: 'prose'
-  key: NodeKey
-  content: string
+  type: "prose";
+  key: NodeKey;
+  content: string;
 }
 
 /**
@@ -57,9 +57,9 @@ export interface ProseNode {
  * `children` are TaskItemNode keys in document order.
  */
 export interface TaskGroupNode {
-  type: 'task-group'
-  key: NodeKey
-  children: NodeKey[]
+  type: "task-group";
+  key: NodeKey;
+  children: NodeKey[];
 }
 
 /**
@@ -72,13 +72,13 @@ export interface TaskGroupNode {
  *                  producing a GFM loose-list entry.  Preserved on save.
  */
 export interface TaskItemNode {
-  type: 'task-item'
-  key: NodeKey
-  parent: NodeKey
-  text: string
-  checked: boolean
-  prefix: string
-  trailingBlank: boolean
+  type: "task-item";
+  key: NodeKey;
+  parent: NodeKey;
+  text: string;
+  checked: boolean;
+  prefix: string;
+  trailingBlank: boolean;
 }
 
 /**
@@ -87,9 +87,9 @@ export interface TaskItemNode {
  * array needed at render time).
  */
 export interface ImagePlacementNode {
-  type: 'image-placement'
-  key: NodeKey
-  fileIndex: number
+  type: "image-placement";
+  key: NodeKey;
+  fileIndex: number;
 }
 
 export type EditorNode =
@@ -97,7 +97,7 @@ export type EditorNode =
   | ProseNode
   | TaskGroupNode
   | TaskItemNode
-  | ImagePlacementNode
+  | ImagePlacementNode;
 
 /**
  * EditorState — an immutable snapshot of the document.
@@ -107,8 +107,8 @@ export type EditorNode =
  *   files  — nopal file registry (from the "# Nopal Markdown" section).
  */
 export interface EditorState {
-  nodes: ReadonlyMap<NodeKey, EditorNode>
-  files: ReadonlyArray<NopalFileEntry>
+  nodes: ReadonlyMap<NodeKey, EditorNode>;
+  files: ReadonlyArray<NopalFileEntry>;
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -118,19 +118,34 @@ export interface EditorState {
  * Handled by editorReducer — our editor.update() + registerCommand equivalent.
  */
 export type EditorCommand =
-  | { type: 'TOGGLE_TASK';    groupKey: NodeKey; taskKey: NodeKey; checked: boolean }
-  | { type: 'EDIT_TASK_TEXT'; groupKey: NodeKey; taskKey: NodeKey; text: string }
-  | { type: 'REMOVE_TASK';    groupKey: NodeKey; taskKey: NodeKey }
-  | { type: 'ADD_TASK';       groupKey: NodeKey; afterKey: NodeKey | null; text?: string }
-  | { type: 'ADD_FILE';       file: NopalFileEntry }
-  | { type: 'REMOVE_FILE';    fileIndex: number }
-  | { type: 'IMPORT';         markdown: string }
+  | {
+      type: "TOGGLE_TASK";
+      groupKey: NodeKey;
+      taskKey: NodeKey;
+      checked: boolean;
+    }
+  | {
+      type: "EDIT_TASK_TEXT";
+      groupKey: NodeKey;
+      taskKey: NodeKey;
+      text: string;
+    }
+  | { type: "REMOVE_TASK"; groupKey: NodeKey; taskKey: NodeKey }
+  | {
+      type: "ADD_TASK";
+      groupKey: NodeKey;
+      afterKey: NodeKey | null;
+      text?: string;
+    }
+  | { type: "ADD_FILE"; file: NopalFileEntry }
+  | { type: "REMOVE_FILE"; fileIndex: number }
+  | { type: "IMPORT"; markdown: string };
 
 // ── Parsing (importFromMarkdown) ──────────────────────────────────────────────
 
-const TASK_LINE_RE = /^(\s*[-*]\s+)\[([xX ])\]\s+(.*)/
+const TASK_LINE_RE = /^(\s*[-*]\s+)\[([xX ])\]\s+(.*)/;
 /** Matches a whole \n\n-paragraph that is purely a placement token. */
-const PLACEMENT_PARA_RE = /^\[nopal-image\]\[(\d+)\]$|^\[(\d+)\]$/
+const PLACEMENT_PARA_RE = /^\[nopal-image\]\[(\d+)\]$|^\[(\d+)\]$/;
 
 /**
  * Parse a raw nopal markdown string into an EditorState.
@@ -147,99 +162,115 @@ const PLACEMENT_PARA_RE = /^\[nopal-image\]\[(\d+)\]$|^\[(\d+)\]$/
  * All created nodes receive fresh UUIDs, stable for the editor session.
  */
 export function importFromMarkdown(rawMarkdown: string): EditorState {
-  const { userContent, files } = parseNopalDocument(rawMarkdown)
+  const { userContent, files } = parseNopalDocument(rawMarkdown);
 
-  const nodes = new Map<NodeKey, EditorNode>()
-  const rootChildren: NodeKey[] = []
-  const root: RootNode = { type: 'root', key: 'root', children: rootChildren }
-  nodes.set('root', root)
+  const nodes = new Map<NodeKey, EditorNode>();
+  const rootChildren: NodeKey[] = [];
+  const root: RootNode = { type: "root", key: "root", children: rootChildren };
+  nodes.set("root", root);
 
   // ── Running group accumulator ──────────────────────────────────────────────
-  let groupKey: NodeKey | null = null
-  let groupChildren: NodeKey[] = []
-  let lastTaskKey: NodeKey | null = null  // used to stamp trailingBlank
-  let prevWasTask = false
+  let groupKey: NodeKey | null = null;
+  let groupChildren: NodeKey[] = [];
+  let lastTaskKey: NodeKey | null = null; // used to stamp trailingBlank
+  let prevWasTask = false;
 
   const flushGroup = () => {
     if (groupKey && groupChildren.length > 0) {
       nodes.set(groupKey, {
-        type: 'task-group',
+        type: "task-group",
         key: groupKey,
         children: groupChildren,
-      } as TaskGroupNode)
-      rootChildren.push(groupKey)
+      } as TaskGroupNode);
+      rootChildren.push(groupKey);
     }
-    groupKey = null
-    groupChildren = []
-    lastTaskKey = null
-  }
+    groupKey = null;
+    groupChildren = [];
+    lastTaskKey = null;
+  };
 
-  for (const para of userContent.split('\n\n')) {
-    const trimmed = para.trim()
-    if (!trimmed) { prevWasTask = false; continue }
+  for (const para of userContent.split("\n\n")) {
+    const trimmed = para.trim();
+    if (!trimmed) {
+      // Preserve the blank line as an empty prose node so View/Workable mode
+      // shows the same spacing the user created in the editable mode.  Extra
+      // consecutive \n\n separators each produce one empty ProseNode; they
+      // all render as a single blank line height in MdxRenderer.
+      flushGroup();
+      prevWasTask = false;
+      const key = uuid();
+      nodes.set(key, { type: "prose", key, content: "" } as ProseNode);
+      rootChildren.push(key);
+      continue;
+    }
 
     // ── Image placement token ──────────────────────────────────────────────
-    const pm = trimmed.match(PLACEMENT_PARA_RE)
+    const pm = trimmed.match(PLACEMENT_PARA_RE);
     if (pm) {
-      flushGroup()
-      prevWasTask = false
-      const fileIndex = parseInt(pm[1] ?? pm[2], 10)
-      const key = uuid()
-      nodes.set(key, { type: 'image-placement', key, fileIndex } as ImagePlacementNode)
-      rootChildren.push(key)
-      continue
+      flushGroup();
+      prevWasTask = false;
+      const fileIndex = parseInt(pm[1] ?? pm[2], 10);
+      const key = uuid();
+      nodes.set(key, {
+        type: "image-placement",
+        key,
+        fileIndex,
+      } as ImagePlacementNode);
+      rootChildren.push(key);
+      continue;
     }
 
     // ── Decide: task paragraph or prose? ──────────────────────────────────
-    const lines = para.split('\n')
-    const nonEmpty = lines.filter(l => l.trim() !== '')
-    const isTaskPara = nonEmpty.length > 0 && nonEmpty.every(l => TASK_LINE_RE.test(l))
+    const lines = para.split("\n");
+    const nonEmpty = lines.filter((l) => l.trim() !== "");
+    const isTaskPara =
+      nonEmpty.length > 0 && nonEmpty.every((l) => TASK_LINE_RE.test(l));
 
     if (isTaskPara) {
       // Mark the last task of the in-progress group as having a trailing blank
       // line — we know this because the \n\n separator just happened.
       if (prevWasTask && lastTaskKey) {
-        const prev = nodes.get(lastTaskKey) as TaskItemNode
-        nodes.set(lastTaskKey, { ...prev, trailingBlank: true })
+        const prev = nodes.get(lastTaskKey) as TaskItemNode;
+        nodes.set(lastTaskKey, { ...prev, trailingBlank: true });
       }
 
       // Start a new group only if we aren't continuing one from the prev para.
       if (!groupKey) {
-        groupKey = uuid()
-        groupChildren = []
+        groupKey = uuid();
+        groupChildren = [];
       }
 
       for (const line of lines) {
-        const m = line.match(TASK_LINE_RE)
-        if (!m) continue
-        const taskKey = uuid()
+        const m = line.match(TASK_LINE_RE);
+        if (!m) continue;
+        const taskKey = uuid();
         const task: TaskItemNode = {
-          type: 'task-item',
+          type: "task-item",
           key: taskKey,
           parent: groupKey,
           text: m[3],
-          checked: m[2].toLowerCase() === 'x',
+          checked: m[2].toLowerCase() === "x",
           prefix: m[1],
           trailingBlank: false,
-        }
-        nodes.set(taskKey, task)
-        groupChildren.push(taskKey)
-        lastTaskKey = taskKey
+        };
+        nodes.set(taskKey, task);
+        groupChildren.push(taskKey);
+        lastTaskKey = taskKey;
       }
-      prevWasTask = true
+      prevWasTask = true;
     } else {
       // ── Prose paragraph ──────────────────────────────────────────────────
-      flushGroup()
-      prevWasTask = false
-      const key = uuid()
-      nodes.set(key, { type: 'prose', key, content: para } as ProseNode)
-      rootChildren.push(key)
+      flushGroup();
+      prevWasTask = false;
+      const key = uuid();
+      nodes.set(key, { type: "prose", key, content: para } as ProseNode);
+      rootChildren.push(key);
     }
   }
 
-  flushGroup()
+  flushGroup();
 
-  return { nodes, files }
+  return { nodes, files };
 }
 
 // ── Serialisation (exportToMarkdown) ─────────────────────────────────────────
@@ -249,43 +280,45 @@ export function importFromMarkdown(rawMarkdown: string): EditorState {
  * Mirrors Lexical's $convertToMarkdownString / exportJSON.
  */
 export function exportToMarkdown(state: EditorState): string {
-  const root = state.nodes.get('root') as RootNode | undefined
-  if (!root) return ''
+  const root = state.nodes.get("root") as RootNode | undefined;
+  if (!root) return "";
 
-  const parts: string[] = []
+  const parts: string[] = [];
 
   for (const childKey of root.children) {
-    const node = state.nodes.get(childKey)
-    if (!node) continue
+    const node = state.nodes.get(childKey);
+    if (!node) continue;
 
     switch (node.type) {
-      case 'prose': {
-        parts.push(node.content)
-        break
+      case "prose": {
+        parts.push(node.content);
+        break;
       }
-      case 'task-group': {
-        const lines: string[] = []
+      case "task-group": {
+        const lines: string[] = [];
         for (const taskKey of node.children) {
-          const task = state.nodes.get(taskKey) as TaskItemNode | undefined
-          if (!task) continue
-          lines.push(`${task.prefix}[${task.checked ? 'x' : ' '}] ${task.text}`)
-          if (task.trailingBlank) lines.push('')  // restore GFM loose-list blank
+          const task = state.nodes.get(taskKey) as TaskItemNode | undefined;
+          if (!task) continue;
+          lines.push(
+            `${task.prefix}[${task.checked ? "x" : " "}] ${task.text}`,
+          );
+          if (task.trailingBlank) lines.push(""); // restore GFM loose-list blank
         }
         // Drop any trailing blank line left by the last task item
-        while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-        parts.push(lines.join('\n'))
-        break
+        while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+        parts.push(lines.join("\n"));
+        break;
       }
-      case 'image-placement': {
-        parts.push(`[nopal-image][${node.fileIndex}]`)
-        break
+      case "image-placement": {
+        parts.push(`[nopal-image][${node.fileIndex}]`);
+        break;
       }
       // 'root', 'task-item' are never top-level children — skip
     }
   }
 
-  const userContent = parts.join('\n\n')
-  return serializeDocument(userContent, state.files as NopalFileEntry[])
+  const userContent = parts.join("\n\n");
+  return serializeDocument(userContent, state.files as NopalFileEntry[]);
 }
 
 // ── Reducer helpers ───────────────────────────────────────────────────────────
@@ -293,21 +326,21 @@ export function exportToMarkdown(state: EditorState): string {
 // All return a new EditorState — never mutate in place.
 
 function setNode(state: EditorState, node: EditorNode): EditorState {
-  const nodes = new Map(state.nodes)
-  nodes.set(node.key, node)
-  return { ...state, nodes }
+  const nodes = new Map(state.nodes);
+  nodes.set(node.key, node);
+  return { ...state, nodes };
 }
 
 function setNodes(state: EditorState, updates: EditorNode[]): EditorState {
-  const nodes = new Map(state.nodes)
-  for (const n of updates) nodes.set(n.key, n)
-  return { ...state, nodes }
+  const nodes = new Map(state.nodes);
+  for (const n of updates) nodes.set(n.key, n);
+  return { ...state, nodes };
 }
 
 function dropNode(state: EditorState, key: NodeKey): EditorState {
-  const nodes = new Map(state.nodes)
-  nodes.delete(key)
-  return { ...state, nodes }
+  const nodes = new Map(state.nodes);
+  nodes.delete(key);
+  return { ...state, nodes };
 }
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
@@ -318,107 +351,112 @@ function dropNode(state: EditorState, key: NodeKey): EditorState {
  * Usage:
  *   const [state, dispatch] = useReducer(editorReducer, rawMarkdown, importFromMarkdown)
  */
-export function editorReducer(state: EditorState, cmd: EditorCommand): EditorState {
+export function editorReducer(
+  state: EditorState,
+  cmd: EditorCommand,
+): EditorState {
   switch (cmd.type) {
-
     // ── Task mutations ───────────────────────────────────────────────────────
 
-    case 'TOGGLE_TASK': {
-      const task = state.nodes.get(cmd.taskKey) as TaskItemNode | undefined
-      if (task?.type !== 'task-item') return state
-      return setNode(state, { ...task, checked: cmd.checked })
+    case "TOGGLE_TASK": {
+      const task = state.nodes.get(cmd.taskKey) as TaskItemNode | undefined;
+      if (task?.type !== "task-item") return state;
+      return setNode(state, { ...task, checked: cmd.checked });
     }
 
-    case 'EDIT_TASK_TEXT': {
-      const task = state.nodes.get(cmd.taskKey) as TaskItemNode | undefined
-      if (task?.type !== 'task-item') return state
-      return setNode(state, { ...task, text: cmd.text })
+    case "EDIT_TASK_TEXT": {
+      const task = state.nodes.get(cmd.taskKey) as TaskItemNode | undefined;
+      if (task?.type !== "task-item") return state;
+      return setNode(state, { ...task, text: cmd.text });
     }
 
-    case 'REMOVE_TASK': {
-      const group = state.nodes.get(cmd.groupKey) as TaskGroupNode | undefined
-      if (group?.type !== 'task-group') return state
-      const newChildren = group.children.filter(k => k !== cmd.taskKey)
-      const newGroup: TaskGroupNode = { ...group, children: newChildren }
+    case "REMOVE_TASK": {
+      const group = state.nodes.get(cmd.groupKey) as TaskGroupNode | undefined;
+      if (group?.type !== "task-group") return state;
+      const newChildren = group.children.filter((k) => k !== cmd.taskKey);
+      const newGroup: TaskGroupNode = { ...group, children: newChildren };
 
       if (newChildren.length === 0) {
         // Empty group — also remove it from the root
-        const root = state.nodes.get('root') as RootNode
+        const root = state.nodes.get("root") as RootNode;
         const newRoot: RootNode = {
           ...root,
-          children: root.children.filter(k => k !== cmd.groupKey),
-        }
-        return setNodes(dropNode(state, cmd.taskKey), [newGroup, newRoot])
+          children: root.children.filter((k) => k !== cmd.groupKey),
+        };
+        return setNodes(dropNode(state, cmd.taskKey), [newGroup, newRoot]);
       }
-      return setNodes(dropNode(state, cmd.taskKey), [newGroup])
+      return setNodes(dropNode(state, cmd.taskKey), [newGroup]);
     }
 
-    case 'ADD_TASK': {
-      const group = state.nodes.get(cmd.groupKey) as TaskGroupNode | undefined
-      if (group?.type !== 'task-group') return state
+    case "ADD_TASK": {
+      const group = state.nodes.get(cmd.groupKey) as TaskGroupNode | undefined;
+      if (group?.type !== "task-group") return state;
 
       // Inherit the prefix from the last item in the group for consistency
-      const lastKey = group.children[group.children.length - 1]
-      const lastTask = state.nodes.get(lastKey) as TaskItemNode | undefined
-      const prefix = lastTask?.prefix ?? '- '
+      const lastKey = group.children[group.children.length - 1];
+      const lastTask = state.nodes.get(lastKey) as TaskItemNode | undefined;
+      const prefix = lastTask?.prefix ?? "- ";
 
       const newTask: TaskItemNode = {
-        type: 'task-item',
+        type: "task-item",
         key: uuid(),
         parent: cmd.groupKey,
-        text: cmd.text ?? '',
+        text: cmd.text ?? "",
         checked: false,
         prefix,
         trailingBlank: false,
-      }
+      };
 
-      const insertIdx = cmd.afterKey !== null
-        ? group.children.indexOf(cmd.afterKey) + 1
-        : group.children.length
+      const insertIdx =
+        cmd.afterKey !== null
+          ? group.children.indexOf(cmd.afterKey) + 1
+          : group.children.length;
 
-      const newChildren = [...group.children]
-      newChildren.splice(insertIdx, 0, newTask.key)
-      const newGroup: TaskGroupNode = { ...group, children: newChildren }
-      return setNodes(state, [newTask, newGroup])
+      const newChildren = [...group.children];
+      newChildren.splice(insertIdx, 0, newTask.key);
+      const newGroup: TaskGroupNode = { ...group, children: newChildren };
+      return setNodes(state, [newTask, newGroup]);
     }
 
     // ── File mutations ───────────────────────────────────────────────────────
 
-    case 'ADD_FILE': {
-      return { ...state, files: [...state.files, cmd.file] }
+    case "ADD_FILE": {
+      return { ...state, files: [...state.files, cmd.file] };
     }
 
-    case 'REMOVE_FILE': {
-      const files = state.files.filter(f => f.index !== cmd.fileIndex)
+    case "REMOVE_FILE": {
+      const files = state.files.filter((f) => f.index !== cmd.fileIndex);
 
       // Remove any ImagePlacementNodes pointing at this file index
-      const root = state.nodes.get('root') as RootNode | undefined
-      if (!root) return { ...state, files }
+      const root = state.nodes.get("root") as RootNode | undefined;
+      if (!root) return { ...state, files };
 
-      const toRemove = root.children.filter(k => {
-        const n = state.nodes.get(k)
-        return n?.type === 'image-placement' &&
+      const toRemove = root.children.filter((k) => {
+        const n = state.nodes.get(k);
+        return (
+          n?.type === "image-placement" &&
           (n as ImagePlacementNode).fileIndex === cmd.fileIndex
-      })
+        );
+      });
 
-      if (toRemove.length === 0) return { ...state, files }
+      if (toRemove.length === 0) return { ...state, files };
 
       const newRoot: RootNode = {
         ...root,
-        children: root.children.filter(k => !toRemove.includes(k)),
-      }
-      let next: EditorState = { ...state, files }
-      for (const k of toRemove) next = dropNode(next, k)
-      return setNode(next, newRoot)
+        children: root.children.filter((k) => !toRemove.includes(k)),
+      };
+      let next: EditorState = { ...state, files };
+      for (const k of toRemove) next = dropNode(next, k);
+      return setNode(next, newRoot);
     }
 
     // ── Full reload ──────────────────────────────────────────────────────────
 
-    case 'IMPORT':
-      return importFromMarkdown(cmd.markdown)
+    case "IMPORT":
+      return importFromMarkdown(cmd.markdown);
 
     default:
-      return state
+      return state;
   }
 }
 
@@ -430,10 +468,10 @@ export function editorReducer(state: EditorState, cmd: EditorCommand): EditorSta
 export function getNode<T extends EditorNode>(
   state: EditorState,
   key: NodeKey,
-  type: T['type'],
+  type: T["type"],
 ): T | undefined {
-  const node = state.nodes.get(key)
-  return node?.type === type ? (node as T) : undefined
+  const node = state.nodes.get(key);
+  return node?.type === type ? (node as T) : undefined;
 }
 
 /** Returns TaskItemNodes for a group in document order. */
@@ -442,8 +480,8 @@ export function getTaskItems(
   group: TaskGroupNode,
 ): TaskItemNode[] {
   return group.children
-    .map(k => state.nodes.get(k))
-    .filter((n): n is TaskItemNode => n?.type === 'task-item')
+    .map((k) => state.nodes.get(k))
+    .filter((n): n is TaskItemNode => n?.type === "task-item");
 }
 
 /**
@@ -451,12 +489,12 @@ export function getTaskItems(
  * Used by ReferencesSection to determine which files are "placed" vs unplaced.
  */
 export function getPlacedFileIndices(state: EditorState): Set<number> {
-  const root = state.nodes.get('root') as RootNode | undefined
-  if (!root) return new Set()
-  const placed = new Set<number>()
+  const root = state.nodes.get("root") as RootNode | undefined;
+  if (!root) return new Set();
+  const placed = new Set<number>();
   for (const key of root.children) {
-    const node = state.nodes.get(key)
-    if (node?.type === 'image-placement') placed.add(node.fileIndex)
+    const node = state.nodes.get(key);
+    if (node?.type === "image-placement") placed.add(node.fileIndex);
   }
-  return placed
+  return placed;
 }

@@ -33,6 +33,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { useState, useMemo } from "react";
 import type { VaultRefItem } from "./refPopoverPlugin";
+import { decodeMarkdownEntities } from "../util/decodeMarkdownEntities";
 
 // ── Public props interface ─────────────────────────────────────────────────────
 
@@ -745,7 +746,17 @@ export default function MdxRenderer({
           );
         // prose
         const node = state.nodes.get(seg.key) as ProseNode;
-        const withWiki = preprocessWikiLinks(node.content);
+        // Blank-line spacer: an empty ProseNode preserved from extra Enter
+        // presses in the editable mode.  Renders as a full line-height gap.
+        if (!node.content.trim()) {
+          return (
+            <p key={seg.key} className="nopal-blank-line">
+              &nbsp;
+            </p>
+          );
+        }
+        const decoded = decodeMarkdownEntities(node.content);
+        const withWiki = preprocessWikiLinks(decoded);
         const text = csvFields
           ? preprocessCsvRefs(withWiki, csvFields)
           : withWiki;
