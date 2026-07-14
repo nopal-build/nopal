@@ -584,6 +584,17 @@ export default function FruitsStyles() {
               Use the <Code>{"<Input>"}</Code> component from{" "}
               <Code>components/Input.tsx</Code> for text and textarea fields. It
               wraps native elements with a consistent label+field layout.
+              Never reach for a raw <Code>{"<input>"}</Code> or{" "}
+              <Code>{"<textarea>"}</Code> for a form field — use{" "}
+              <Code>{"<Input>"}</Code> even for compact/inline rows (see the{" "}
+              <Code>hideLabel</Code> example below).
+            </p>
+            <p className="text-xs font-mono subtle-text">
+              Default field styling (border, radius, padding) is baked into{" "}
+              <Code>{"<Input>"}</Code> automatically —{" "}
+              <Code>border border-gray-300 rounded px-2 py-1</Code>. Any{" "}
+              <Code>className</Code> you pass is appended, not replacing the
+              default, so you only need it for one-off overrides.
             </p>
 
             <div
@@ -663,6 +674,31 @@ export default function FruitsStyles() {
                     </label>
                     <input type="number" placeholder="0" />
                   </div>
+                </div>
+              </div>
+
+              <div>
+                <Label>
+                  <Code>hideLabel</Code> — compact inline-edit row
+                </Label>
+                <p className="text-xs subtle-text mb-1">
+                  Use this when a heading is already shown elsewhere on the
+                  page (e.g. an "Edit" toggle next to a Save/Cancel button).
+                  The label stays in the DOM for screen readers via{" "}
+                  <Code>sr-only</Code>, it's just not shown visually.
+                </p>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <Input
+                      label="Name"
+                      hideLabel
+                      defaultValue="Smith Residence"
+                      name="demo-hidden-label"
+                    />
+                  </div>
+                  <button className="btn-secondary" type="button">
+                    Save
+                  </button>
                 </div>
               </div>
             </div>

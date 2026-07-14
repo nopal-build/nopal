@@ -14,6 +14,12 @@ type Pages = {
   "/": {
     params: {};
   };
+  "/api/passkeys/invite-register-options": {
+    params: {};
+  };
+  "/api/passkeys/invite-register-verify": {
+    params: {};
+  };
   "/fruits/good-building-system/:id": {
     params: {
       "id": string;
@@ -22,7 +28,19 @@ type Pages = {
   "/fruits/good-building-system/new": {
     params: {};
   };
+  "/api/passkeys/register-options": {
+    params: {};
+  };
+  "/api/passkeys/register-verify": {
+    params: {};
+  };
   "/fruits/good-building-system": {
+    params: {};
+  };
+  "/api/passkeys/login-options": {
+    params: {};
+  };
+  "/api/passkeys/login-verify": {
     params: {};
   };
   "/tools/frames-volume-calc": {
@@ -85,6 +103,11 @@ type Pages = {
   };
   "/sunny-home-no1": {
     params: {};
+  };
+  "/welcome/:token": {
+    params: {
+      "token": string;
+    };
   };
   "/fruits/vault": {
     params: {};
@@ -257,7 +280,15 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/fruits/good-building-system/:id" | "/fruits/good-building-system/new" | "/fruits/good-building-system" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/tools/building-envelope" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/fruits/all-projects" | "/fruits/projects/:id" | "/tools/erv-calculator" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/tools/do-not-use" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/presign" | "/api/vault/upload" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/projects" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
+    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/fruits/good-building-system/:id" | "/fruits/good-building-system/new" | "/api/passkeys/register-options" | "/api/passkeys/register-verify" | "/fruits/good-building-system" | "/api/passkeys/login-options" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/tools/building-envelope" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/fruits/all-projects" | "/fruits/projects/:id" | "/tools/erv-calculator" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/tools/do-not-use" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/presign" | "/api/vault/upload" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/projects" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
+  };
+  "routes/api.passkeys.invite-register-options.tsx": {
+    id: "routes/api.passkeys.invite-register-options";
+    page: "/api/passkeys/invite-register-options";
+  };
+  "routes/api.passkeys.invite-register-verify.tsx": {
+    id: "routes/api.passkeys.invite-register-verify";
+    page: "/api/passkeys/invite-register-verify";
   };
   "routes/fruits_.good-building-system_.$id.tsx": {
     id: "routes/fruits_.good-building-system_.$id";
@@ -267,9 +298,25 @@ type RouteFiles = {
     id: "routes/fruits_.good-building-system_.new";
     page: "/fruits/good-building-system/new";
   };
+  "routes/api.passkeys.register-options.tsx": {
+    id: "routes/api.passkeys.register-options";
+    page: "/api/passkeys/register-options";
+  };
+  "routes/api.passkeys.register-verify.tsx": {
+    id: "routes/api.passkeys.register-verify";
+    page: "/api/passkeys/register-verify";
+  };
   "routes/fruits_.good-building-system.tsx": {
     id: "routes/fruits_.good-building-system";
     page: "/fruits/good-building-system";
+  };
+  "routes/api.passkeys.login-options.tsx": {
+    id: "routes/api.passkeys.login-options";
+    page: "/api/passkeys/login-options";
+  };
+  "routes/api.passkeys.login-verify.tsx": {
+    id: "routes/api.passkeys.login-verify";
+    page: "/api/passkeys/login-verify";
   };
   "routes/tools.frames-volume-calc.tsx": {
     id: "routes/tools.frames-volume-calc";
@@ -346,6 +393,10 @@ type RouteFiles = {
   "routes/sunny-home-no1.tsx": {
     id: "routes/sunny-home-no1";
     page: "/sunny-home-no1";
+  };
+  "routes/welcome.$token.tsx": {
+    id: "routes/welcome.$token";
+    page: "/welcome/:token";
   };
   "routes/fruits_.vault.tsx": {
     id: "routes/fruits_.vault";
@@ -563,9 +614,15 @@ type RouteFiles = {
 
 type RouteModules = {
   "root": typeof import("./app/root.tsx");
+  "routes/api.passkeys.invite-register-options": typeof import("./app/routes/api.passkeys.invite-register-options.tsx");
+  "routes/api.passkeys.invite-register-verify": typeof import("./app/routes/api.passkeys.invite-register-verify.tsx");
   "routes/fruits_.good-building-system_.$id": typeof import("./app/routes/fruits_.good-building-system_.$id.tsx");
   "routes/fruits_.good-building-system_.new": typeof import("./app/routes/fruits_.good-building-system_.new.tsx");
+  "routes/api.passkeys.register-options": typeof import("./app/routes/api.passkeys.register-options.tsx");
+  "routes/api.passkeys.register-verify": typeof import("./app/routes/api.passkeys.register-verify.tsx");
   "routes/fruits_.good-building-system": typeof import("./app/routes/fruits_.good-building-system.tsx");
+  "routes/api.passkeys.login-options": typeof import("./app/routes/api.passkeys.login-options.tsx");
+  "routes/api.passkeys.login-verify": typeof import("./app/routes/api.passkeys.login-verify.tsx");
   "routes/tools.frames-volume-calc": typeof import("./app/routes/tools.frames-volume-calc.tsx");
   "routes/tools.grade-differential": typeof import("./app/routes/tools.grade-differential.tsx");
   "routes/tools.building-envelope": typeof import("./app/routes/tools.building-envelope.tsx");
@@ -585,6 +642,7 @@ type RouteModules = {
   "routes/fruits_.styles": typeof import("./app/routes/fruits_.styles.tsx");
   "routes/good.sunny-no1": typeof import("./app/routes/good.sunny-no1.tsx");
   "routes/sunny-home-no1": typeof import("./app/routes/sunny-home-no1.tsx");
+  "routes/welcome.$token": typeof import("./app/routes/welcome.$token.tsx");
   "routes/fruits_.vault": typeof import("./app/routes/fruits_.vault.tsx");
   "routes/good.building": typeof import("./app/routes/good.building.tsx");
   "routes/materials.$id": typeof import("./app/routes/materials.$id.tsx");

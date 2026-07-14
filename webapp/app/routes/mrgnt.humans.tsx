@@ -10,14 +10,13 @@ import {
 } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import {
-  createHuman,
   deleteHuman,
   getHumans,
   updateHuman,
   type Human,
   type Role,
 } from "../data/humans.server";
-import { provisionNewUserVault } from "../data/dailyLog.server";
+import { inviteHuman } from "../data/invites.server";
 import { Input } from "../components/Input";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -34,10 +33,19 @@ export async function action({ request }: ActionFunctionArgs) {
   switch (intent) {
     case "create": {
       try {
+        const actor = await getUser(request);
         const email = formData.get("email") as string;
         const name = formData.get("name") as string;
         const role = formData.get("role") as Role;
-        const result = await createHuman({ email, name, role });
+        const result = await inviteHuman(
+          {
+            email,
+            name,
+            role,
+            invitedByHumanId: actor?._id,
+          },
+          request,
+        );
         if (!result) {
           return {
             ok: false,
@@ -45,8 +53,7 @@ export async function action({ request }: ActionFunctionArgs) {
             intent: "create",
           };
         }
-        // Seed the daily-logs folder + sample entry for the new user
-        await provisionNewUserVault(result._id);
+        // inviteHuman already provisions the vault + sends the welcome email
         return { ok: true, error: null, intent: "create" };
       } catch (err) {
         console.error(err);

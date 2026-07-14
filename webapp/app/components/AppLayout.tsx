@@ -135,13 +135,6 @@ export function AppLayout({ children }: { children?: ReactNode }) {
           >
             Profile
           </NavLink>
-          <Link
-            to="/logout"
-            className="text-sm font-mono px-3 py-2 rounded block purple-light-text"
-            style={{ textDecoration: "none" }}
-          >
-            log out
-          </Link>
         </div>
       </aside>
 
@@ -233,14 +226,6 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             >
               Profile
             </NavLink>
-            <Link
-              to="/logout"
-              className="text-sm font-mono px-3 py-2 rounded block subtle-text"
-              style={{ textDecoration: "none" }}
-              onClick={closeMenu}
-            >
-              log out
-            </Link>
           </div>
         )}
       </div>

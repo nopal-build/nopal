@@ -28,7 +28,8 @@ import {
   getSharedFoldersForHuman,
   getFileRefsByFolderIds,
 } from "../data/vault.server";
-import { getHumans, getHumansById } from "../data/humans.server";
+import { getHumansById } from "../data/humans.server";
+import { getRelatedHumans } from "../data/relationships.server";
 import { AppLayout } from "../components/AppLayout";
 import {
   EditorLoadingFallback,
@@ -90,12 +91,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
 
-  const [myFiles, myFolders, sharedFolders, humansCollection] =
+  const [myFiles, myFolders, sharedFolders, relatedHumans] =
     await Promise.all([
       getFileRefsByHuman(user._id),
       getFoldersByHuman(user._id),
       getSharedFoldersForHuman(user._id),
-      getHumans(),
+      getRelatedHumans(user),
     ]);
 
   const sharedFolderIds = sharedFolders.map((f) => f._id);
@@ -112,10 +113,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ownerHumanId: f.human_id,
   }));
 
-  // All humans except the current user — passed to the client for the share modal
-  const allOtherHumans = (humansCollection?.data ?? []).filter(
-    (h) => h._id !== user._id,
-  );
+  // Humans this user has a relationship with — passed to the client for the share modal
+  const allOtherHumans = relatedHumans;
 
   return {
     user,

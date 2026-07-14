@@ -1,13 +1,15 @@
+import { useState } from "react";
 import { Input } from "../components/Input";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
-import { useLoaderData, useActionData, Form } from "react-router";
+import { useLoaderData, useActionData, useNavigate, Form } from "react-router";
 import {
   data,
   redirect,
   ActionFunctionArgs,
   LoaderFunctionArgs,
 } from "react-router";
+import { startAuthentication } from "@simplewebauthn/browser";
 import {
   authenticator,
   getUser,
@@ -20,7 +22,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (user) return redirect("/fruits");
 
   const authError = getAuthError(request);
-  return data({ authError });
+  const url = new URL(request.url);
+  const prefillEmail = url.searchParams.get("email") ?? "";
+  return data({ authError, prefillEmail });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -40,8 +44,52 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Login() {
-  let { authError } = useLoaderData<typeof loader>();
+  let { authError, prefillEmail } = useLoaderData<typeof loader>();
   let actionData = useActionData<typeof action>();
+  const navigate = useNavigate();
+
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+
+  async function handlePasskeyLogin() {
+    setPasskeyError(null);
+    setPasskeyBusy(true);
+    try {
+      const optionsRes = await fetch("/api/passkeys/login-options", {
+        method: "POST",
+      });
+      const options = await optionsRes.json();
+      if (!optionsRes.ok) {
+        throw new Error(options.error ?? "Failed to start passkey login.");
+      }
+
+      const authResponse = await startAuthentication({ optionsJSON: options });
+
+      const verifyRes = await fetch("/api/passkeys/login-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ response: authResponse }),
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok || !verifyData.verified) {
+        throw new Error(verifyData.error ?? "Could not verify passkey.");
+      }
+
+      navigate("/fruits");
+    } catch (err) {
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        // User cancelled the browser's passkey prompt — not a real error.
+        return;
+      }
+      setPasskeyError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong signing in with your passkey.",
+      );
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
 
   return (
     <Layout>
@@ -52,7 +100,7 @@ export default function Login() {
             <Input
               label="Email"
               name="email"
-              defaultValue=""
+              defaultValue={prefillEmail}
               required
               placeholder="you@nature.yeah"
             />
@@ -63,6 +111,27 @@ export default function Login() {
               </button>
             </div>
           </Form>
+
+          <div
+            className="text-center my-4"
+            style={{ color: "var(--text-subtle)" }}
+          >
+            or
+          </div>
+
+          <div className="flex flex-col gap-2 good-box p-4">
+            {passkeyError && (
+              <div className="red-text text-sm">{passkeyError}</div>
+            )}
+            <button
+              className="btn-secondary"
+              type="button"
+              disabled={passkeyBusy}
+              onClick={handlePasskeyLogin}
+            >
+              {passkeyBusy ? "Signing in…" : "Sign in with a passkey"}
+            </button>
+          </div>
         </div>
       </div>
       <Footer></Footer>

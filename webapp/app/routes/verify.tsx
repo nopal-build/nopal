@@ -52,7 +52,6 @@ export default function Verify() {
                 name="code"
                 required
                 placeholder="123456"
-                className="border border-gray-300 rounded px-2 py-1"
               />
               {authError && !shouldRequestCode && (
                 <div className="red-text">{authError}</div>
