@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { Form, useActionData, useNavigation } from "react-router";
+import {
+  Form,
+  useActionData,
+  useNavigation,
+  useSearchParams,
+} from "react-router";
 import type { ActionFunctionArgs, MetaFunction } from "react-router";
 import { Layout } from "../components/Layout";
 import { generateWaiverPdf } from "../util/waiverPdf.server";
@@ -191,6 +196,9 @@ export default function WcWaiver() {
   const actionData = useActionData<ActionResult>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  const [searchParams] = useSearchParams();
+  const defaultName = searchParams.get("name") ?? "";
+  const defaultEmail = searchParams.get("email") ?? "";
 
   const [hasWcInsurance, setHasWcInsurance] = useState<boolean | null>(null);
 
@@ -282,6 +290,7 @@ export default function WcWaiver() {
                   label="Independent Contractor Name"
                   name="ic_name"
                   placeholder="Your full legal name"
+                  defaultValue={defaultName}
                   required
                   error={errors?.ic_name}
                 />
@@ -312,6 +321,7 @@ export default function WcWaiver() {
                 name="email"
                 type="email"
                 placeholder="you@example.com"
+                defaultValue={defaultEmail}
                 required
                 error={errors?.email}
               />
@@ -541,6 +551,7 @@ function Field({
   name,
   type = "text",
   placeholder,
+  defaultValue,
   required,
   error,
 }: {
@@ -548,6 +559,7 @@ function Field({
   name: string;
   type?: string;
   placeholder?: string;
+  defaultValue?: string;
   required?: boolean;
   error?: string;
 }) {
@@ -570,6 +582,7 @@ function Field({
         name={name}
         type={type}
         placeholder={placeholder}
+        defaultValue={defaultValue}
         className="w-full rounded px-3 py-2 text-sm"
         maxLength={FIELD_MAX_LENGTHS[name]}
         style={{

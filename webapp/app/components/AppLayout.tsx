@@ -127,6 +127,14 @@ export function AppLayout({ children }: { children?: ReactNode }) {
         </nav>
 
         <div style={{ marginTop: "auto" }}>
+          <NavLink
+            to="/fruits/profile"
+            prefetch="intent"
+            className={navLinkClass}
+            style={navLinkStyle}
+          >
+            Profile
+          </NavLink>
           <Link
             to="/logout"
             className="text-sm font-mono px-3 py-2 rounded block purple-light-text"
@@ -216,6 +224,15 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 Styles
               </NavLink>
             )}
+            <NavLink
+              to="/fruits/profile"
+              prefetch="intent"
+              className={navLinkClass}
+              style={navLinkStyle}
+              onClick={closeMenu}
+            >
+              Profile
+            </NavLink>
             <Link
               to="/logout"
               className="text-sm font-mono px-3 py-2 rounded block subtle-text"

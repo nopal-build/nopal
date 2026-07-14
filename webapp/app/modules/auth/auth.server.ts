@@ -48,6 +48,22 @@ export async function getUser(request: Request): Promise<Human | null> {
   return session.get("user") ?? null;
 }
 
+/**
+ * Update the session's stored user (e.g. after editing a profile) so later
+ * requests reflect the change. Returns the `Set-Cookie` header to attach to
+ * the response.
+ */
+export async function updateUserSession(
+  request: Request,
+  user: Human,
+): Promise<string> {
+  const session = await sessionStorage.getSession(
+    request.headers.get("cookie"),
+  );
+  session.set("user", user);
+  return sessionStorage.commitSession(session);
+}
+
 /** Read error message from the _totp cookie (set by TOTPStrategy on failures) */
 export function getAuthError(request: Request): string | null {
   const cookieHeader = request.headers.get("cookie") ?? "";
