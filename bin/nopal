@@ -13,4 +13,4 @@
 # PATH) to just run `nopal login` from anywhere.
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec cargo run --quiet --manifest-path "${SCRIPT_DIR}/../crates/Cargo.toml" --bin cli -- "$@"
+exec cargo run --quiet --manifest-path "${SCRIPT_DIR}/../crates/Cargo.toml" --bin nopal -- "$@"

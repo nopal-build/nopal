@@ -1,12 +1,21 @@
 [package]
-name = "cli"
-version = "0.1.0"
+name = "nopal"
+version = "0.0.1"
 edition = "2021"
 publish = false
+description = "Nopal CLI — video prep and Nopal Vault sync utilities"
+repository = "https://github.com/gwing33/nopal"
+license = "MIT"
+readme = false
 
 [[bin]]
-name = "cli"
+name = "nopal"
 path = "src/main.rs"
+
+# `publish = false` above is about crates.io, not dist — this crate should
+# still be distributed as a downloadable binary via GitHub Releases.
+[package.metadata.dist]
+dist = true
 
 [dependencies]
 # reframed.workspace = true
