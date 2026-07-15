@@ -1,0 +1,16 @@
+#!/bin/sh
+# Thin wrapper for running the nopal CLI during development:
+#
+#   ./bin/nopal login
+#   ./bin/nopal whoami
+#   ./bin/nopal login --host http://localhost:3000 --no-browser
+#
+# Just forwards args straight through to `cargo run`, so there's no
+# `make cli ARGS="..."` quoting to fight with, and it rebuilds automatically
+# whenever the Rust source changes.
+#
+# Tip: add this directory to your PATH (or symlink it somewhere already on
+# PATH) to just run `nopal login` from anywhere.
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec cargo run --quiet --manifest-path "${SCRIPT_DIR}/../crates/Cargo.toml" --bin cli -- "$@"

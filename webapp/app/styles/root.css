@@ -103,6 +103,7 @@ body {
   color: white;
 }
 
+
 .btn-yellow {
   @apply btn;
   background-color: var(--btn-color, var(--farground));

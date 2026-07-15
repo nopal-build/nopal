@@ -1,9 +1,9 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { getUser } from "../modules/auth/auth.server";
+import { getUserFromRequest } from "../modules/auth/auth.server";
 import { createVaultFolder, getFoldersByHuman } from "../data/vault.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await getUser(request);
+  const user = await getUserFromRequest(request);
   if (!user) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
@@ -13,7 +13,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await getUser(request);
+  const user = await getUserFromRequest(request);
   if (!user) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }

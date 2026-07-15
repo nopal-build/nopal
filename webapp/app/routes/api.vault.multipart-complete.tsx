@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getUser } from "../modules/auth/auth.server";
+import { getUserFromRequest } from "../modules/auth/auth.server";
 import { completeMultipartUpload } from "../data/file.server";
 import { createFileRef } from "../data/vault.server";
 
@@ -11,7 +11,7 @@ import { createFileRef } from "../data/vault.server";
  * Completes the S3 multipart upload and registers the file_ref in the database.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await getUser(request);
+  const user = await getUserFromRequest(request);
   if (!user)
     return Response.json({ error: "Not authenticated" }, { status: 401 });
 

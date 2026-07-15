@@ -1,4 +1,4 @@
-.PHONY: dev seed migrate down reset clean deploy restart
+.PHONY: dev seed migrate down reset clean deploy restart cli
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -57,3 +57,9 @@ reset: clean dev migrate seed
 ## Stop all containers and delete all named volumes — all data will be lost.
 clean:
 	docker compose down -v
+
+## Run the nopal CLI (e.g. `make cli ARGS="login"` or `make cli ARGS="whoami"`).
+## Prefer `./bin/nopal <args>` directly during day-to-day testing — same thing,
+## without the ARGS="..." quoting.
+cli:
+	./bin/nopal $(ARGS)

@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getUser } from "../modules/auth/auth.server";
+import { getUserFromRequest } from "../modules/auth/auth.server";
 import { createMultipartUpload } from "../data/file.server";
 
 /**
@@ -11,7 +11,7 @@ import { createMultipartUpload } from "../data/file.server";
  * can reference it in subsequent part and complete requests.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await getUser(request);
+  const user = await getUserFromRequest(request);
   if (!user)
     return Response.json({ error: "Not authenticated" }, { status: 401 });
 

@@ -11,25 +11,30 @@ import {
 } from "react-router";
 import { startAuthentication } from "@simplewebauthn/browser";
 import {
-  authenticator,
+  authenticateWithRedirect,
   getUser,
   getAuthError,
+  isSafeRedirectPath,
 } from "../modules/auth/auth.server";
 import { getHumanByEmail } from "../data/humans.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const redirectToParam = url.searchParams.get("redirectTo");
+  const redirectTo = isSafeRedirectPath(redirectToParam) ? redirectToParam : null;
+
   const user = await getUser(request);
-  if (user) return redirect("/fruits");
+  if (user) return redirect(redirectTo ?? "/fruits");
 
   const authError = getAuthError(request);
-  const url = new URL(request.url);
   const prefillEmail = url.searchParams.get("email") ?? "";
-  return data({ authError, prefillEmail });
+  return data({ authError, prefillEmail, redirectTo });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.clone().formData();
   const email = formData.get("email") as string;
+  const redirectTo = formData.get("redirectTo") as string | null;
 
   const user = await getHumanByEmail(email);
   if (!user) {
@@ -39,12 +44,13 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  // Strategy sends TOTP and throws redirect to /verify
-  await authenticator.authenticate("TOTP", request);
+  // Strategy sends TOTP and throws redirect to /verify (redirectTo, if any,
+  // rides along in a short-lived cookie so /verify's success lands there).
+  await authenticateWithRedirect(request, redirectTo);
 }
 
 export default function Login() {
-  let { authError, prefillEmail } = useLoaderData<typeof loader>();
+  let { authError, prefillEmail, redirectTo } = useLoaderData<typeof loader>();
   let actionData = useActionData<typeof action>();
   const navigate = useNavigate();
 
@@ -75,7 +81,7 @@ export default function Login() {
         throw new Error(verifyData.error ?? "Could not verify passkey.");
       }
 
-      navigate("/fruits");
+      navigate(redirectTo ?? "/fruits");
     } catch (err) {
       if (err instanceof Error && err.name === "NotAllowedError") {
         // User cancelled the browser's passkey prompt — not a real error.
@@ -97,6 +103,9 @@ export default function Login() {
         <div className="w-full max-w-96 mx-auto px-4 py-12">
           <h1 className="text-3xl purple-light-text font-bold mb-4">Login</h1>
           <Form method="POST" className="flex flex-col gap-4 good-box p-4">
+            {redirectTo && (
+              <input type="hidden" name="redirectTo" value={redirectTo} />
+            )}
             <Input
               label="Email"
               name="email"

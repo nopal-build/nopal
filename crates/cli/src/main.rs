@@ -1,15 +1,31 @@
 use clap::{Parser, Subcommand}; // Args, ValueEnum
 use jiff;
-use serialport::SerialPortType;
 use std::fs::File;
 use std::io::Write;
 use std::io::{self, Read};
 use std::time::Duration;
 
+mod auth;
+
+const DEFAULT_HOST: &str = "https://nopal.build";
+
 #[derive(Debug, Subcommand)]
 enum Command {
     Test {},
     RecordLoadCell {},
+    /// Log in via your browser and store a session token for the CLI.
+    Login {
+        /// Nopal host to authenticate against.
+        #[arg(long, default_value = DEFAULT_HOST)]
+        host: String,
+        /// Print the login URL instead of opening a browser automatically.
+        #[arg(long)]
+        no_browser: bool,
+    },
+    /// Remove the locally stored CLI session.
+    Logout {},
+    /// Show who the CLI is currently logged in as.
+    Whoami {},
 }
 
 #[derive(Debug, Parser)]
@@ -30,6 +46,24 @@ fn main() {
             println!("Recording load cell info");
             if let Err(e) = read_serial_port_interactive("DK0HR7JK") {
                 eprintln!("Error: {}", e);
+            }
+        }
+        Command::Login { host, no_browser } => {
+            if let Err(e) = auth::login(&host, no_browser) {
+                eprintln!("Login failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Logout {} => {
+            if let Err(e) = auth::logout() {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Whoami {} => {
+            if let Err(e) = auth::whoami() {
+                eprintln!("{e}");
+                std::process::exit(1);
             }
         }
     }

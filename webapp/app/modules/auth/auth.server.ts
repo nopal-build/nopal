@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Authenticator } from "remix-auth";
 import { TOTPStrategy } from "remix-auth-totp";
 import { redirect } from "react-router";
@@ -6,8 +7,50 @@ import { sendEmail } from "../../util/email.server";
 import { Human, getHumanByEmail, getHumanById } from "../../data/humans.server";
 import { LoginCode } from "../../emails/loginCode";
 import { recordImpersonationEvent } from "../../data/impersonationEvents.server";
+import {
+  getApiTokenByHash,
+  isApiTokenValid,
+  touchApiTokenLastUsed,
+} from "../../data/apiTokens.server";
 
 const IMPERSONATION_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day
+
+// ─── Post-login redirect (used by /cli-login → /login → back to /cli-login) ──
+
+const REDIRECT_COOKIE_NAME = "_redirectTo";
+const REDIRECT_COOKIE_MAX_AGE_SECONDS = 10 * 60; // 10 minutes
+
+/** Only ever redirect to a same-origin relative path — never an absolute/external URL. */
+export function isSafeRedirectPath(path: string | null | undefined): path is string {
+  return (
+    typeof path === "string" &&
+    path.startsWith("/") &&
+    !path.startsWith("//") &&
+    !path.includes("://")
+  );
+}
+
+function buildRedirectCookie(value: string | null): string {
+  const base = `${REDIRECT_COOKIE_NAME}=${value ? encodeURIComponent(value) : ""}; Path=/; HttpOnly; SameSite=Lax`;
+  const maxAge = value ? `; Max-Age=${REDIRECT_COOKIE_MAX_AGE_SECONDS}` : "; Max-Age=0";
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${base}${maxAge}${secure}`;
+}
+
+function getRedirectToCookie(request: Request): string | null {
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const cookie = cookieHeader
+    .split(";")
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${REDIRECT_COOKIE_NAME}=`));
+  if (!cookie) return null;
+  try {
+    const value = decodeURIComponent(cookie.slice(REDIRECT_COOKIE_NAME.length + 1));
+    return isSafeRedirectPath(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 export const authenticator = new Authenticator<Human>();
 
@@ -43,13 +86,50 @@ authenticator.use(
       session.unset("impersonatorEmail");
       session.unset("impersonationExpiresAt");
       session.set("user", human);
-      throw redirect("/fruits", {
-        headers: { "Set-Cookie": await sessionStorage.commitSession(session) },
-      });
+
+      // If `/login` was reached via a `redirectTo` (e.g. from `/cli-login`),
+      // it stashed the target in its own short-lived cookie — honor it here
+      // instead of the default `/fruits`, then clear that cookie.
+      const redirectTo = getRedirectToCookie(request);
+      const headers = new Headers();
+      headers.append("Set-Cookie", await sessionStorage.commitSession(session));
+      if (redirectTo) headers.append("Set-Cookie", buildRedirectCookie(null));
+
+      throw redirect(redirectTo ?? "/fruits", { headers });
     },
   ),
   "TOTP",
 );
+
+/**
+ * Wraps `authenticator.authenticate("TOTP", request)` for the *first* step
+ * of the login flow (`/login`'s action, which sends the code) so that an
+ * optional `redirectTo` survives the multi-step email-to-code round trip:
+ * it's stashed in a short-lived cookie appended to whatever response the
+ * strategy throws (redirecting to `/verify`, or back to `/login` on
+ * failure), and read back out by the success callback above once the code
+ * is confirmed. A no-op when `redirectTo` is absent — existing callers are
+ * unaffected either way.
+ */
+export async function authenticateWithRedirect(
+  request: Request,
+  redirectTo?: string | null,
+): Promise<Human> {
+  try {
+    return await authenticator.authenticate("TOTP", request);
+  } catch (err) {
+    if (err instanceof Response && isSafeRedirectPath(redirectTo)) {
+      try {
+        err.headers.append("Set-Cookie", buildRedirectCookie(redirectTo));
+      } catch (e) {
+        // Headers may be immutable in some runtimes — worst case the
+        // redirectTo is lost and login just lands on /fruits as normal.
+        console.error("Failed to attach redirectTo cookie:", e);
+      }
+    }
+    throw err;
+  }
+}
 
 /** Get authenticated user from session, or null if not logged in */
 export async function getUser(request: Request): Promise<Human | null> {
@@ -77,6 +157,39 @@ export async function getUser(request: Request): Promise<Human | null> {
   }
 
   return user;
+}
+
+/**
+ * Like `getUser`, but also accepts `Authorization: Bearer <token>` — the
+ * only way the `nopal` CLI (which has no browser session cookie) can
+ * authenticate. Falls back to the normal cookie-based session check, so
+ * every existing browser call site is unaffected.
+ *
+ * Deliberately opt-in per route (see the `api.vault.*` routes) rather than
+ * swapped in everywhere — most routes should keep accepting only a real
+ * browser session.
+ */
+export async function getUserFromRequest(request: Request): Promise<Human | null> {
+  const authHeader = request.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const rawToken = authHeader.slice("Bearer ".length).trim();
+    if (!rawToken) return null;
+
+    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const token = await getApiTokenByHash(tokenHash);
+    if (!token || !isApiTokenValid(token)) return null;
+
+    const human = await getHumanById(token.humanId);
+    if (!human) return null;
+
+    // Best-effort — never let a logging failure block the actual request.
+    touchApiTokenLastUsed(token._id).catch((e) =>
+      console.error("Failed to update api token last-used:", e),
+    );
+    return human;
+  }
+
+  return getUser(request);
 }
 
 function canImpersonate(actor: Human, target: Human): string | null {

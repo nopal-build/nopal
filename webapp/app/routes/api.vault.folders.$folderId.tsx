@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getUser } from "../modules/auth/auth.server";
+import { getUserFromRequest } from "../modules/auth/auth.server";
 import {
   getFolderById,
   updateVaultFolder,
@@ -8,7 +8,7 @@ import {
 } from "../data/vault.server";
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const user = await getUser(request);
+  const user = await getUserFromRequest(request);
   if (!user) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }

@@ -55,6 +55,11 @@ import {
   deletePasskey,
   type Passkey,
 } from "../data/passkeys.server";
+import {
+  getApiTokensByHuman,
+  revokeApiToken,
+  type ApiToken,
+} from "../data/apiTokens.server";
 import { AppLayout } from "../components/AppLayout";
 import { Input } from "../components/Input";
 import { Modal } from "../components/Modal";
@@ -74,12 +79,14 @@ function isAdminOrSuper(user: Human): boolean {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  const [waivers, relatedHumans, passkeys, relationships] = await Promise.all([
-    getLegalDocumentsByEmail(user.email),
-    getRelatedHumans(user),
-    getPasskeysByHuman(user._id),
-    getRelationshipsForHuman(user._id),
-  ]);
+  const [waivers, relatedHumans, passkeys, relationships, apiTokens] =
+    await Promise.all([
+      getLegalDocumentsByEmail(user.email),
+      getRelatedHumans(user),
+      getPasskeysByHuman(user._id),
+      getRelationshipsForHuman(user._id),
+      getApiTokensByHuman(user._id),
+    ]);
 
   // Revoked relationships are excluded from `relatedHumans` for regular
   // Human accounts, but Admins/Supers see *everyone* regardless of
@@ -101,6 +108,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     waivers,
     relatedHumans,
     passkeys,
+    apiTokens,
     inviteExpired,
     revokedRelationships,
   };
@@ -584,6 +592,31 @@ async function handleDeletePasskey(request: Request, form: FormData) {
   return data({ intent: "delete-passkey" as const, success: true });
 }
 
+async function handleRevokeApiToken(request: Request, form: FormData) {
+  const user = await getUser(request);
+  if (!user) return redirect("/login");
+
+  const tokenId = String(form.get("tokenId") ?? "");
+  if (!tokenId) {
+    return data(
+      { intent: "revoke-api-token" as const, error: "Missing token id." },
+      { status: 400 },
+    );
+  }
+
+  // `revokeApiToken` itself checks the token belongs to `user._id` before
+  // touching anything — mirrors the passkey/relationship ownership checks.
+  const revoked = await revokeApiToken(tokenId, user._id);
+  if (!revoked) {
+    return data(
+      { intent: "revoke-api-token" as const, error: "Token not found." },
+      { status: 404 },
+    );
+  }
+
+  return data({ intent: "revoke-api-token" as const, success: true });
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "update-name");
@@ -602,6 +635,9 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   if (intent === "delete-passkey") {
     return handleDeletePasskey(request, form);
+  }
+  if (intent === "revoke-api-token") {
+    return handleRevokeApiToken(request, form);
   }
   if (intent === "request-email-change") {
     return handleRequestEmailChange(request, form);
@@ -1086,6 +1122,58 @@ function PasskeyCard({ passkey }: { passkey: Passkey }) {
   );
 }
 
+// ─── CLI sessions ────────────────────────────────────────────────────────────────
+
+function ApiTokenCard({ token }: { token: ApiToken }) {
+  const expired = new Date(token.expiresAt).getTime() < Date.now();
+
+  return (
+    <div className="good-box p-3 flex items-center justify-between gap-4">
+      <div className="text-sm min-w-0">
+        <div className="font-bold truncate">{token.name}</div>
+        <div className="truncate" style={{ color: "var(--text-subtle)" }}>
+          Added {formatSignedAt(token.createdAt)}
+          {" · "}
+          {token.lastUsedAt
+            ? `Last used ${formatSignedAt(token.lastUsedAt)}`
+            : "Never used"}
+          {" · "}
+          <span className={expired ? "red-text" : undefined}>
+            {expired ? "Expired" : `Expires ${formatSignedAt(token.expiresAt)}`}
+          </span>
+        </div>
+      </div>
+      <Form
+        method="post"
+        onSubmit={(e) => {
+          if (
+            !window.confirm(
+              `Revoke "${token.name}"? Any CLI session using it will need to run \`nopal login\` again.`,
+            )
+          ) {
+            e.preventDefault();
+          }
+        }}
+      >
+        <input type="hidden" name="intent" value="revoke-api-token" />
+        <input type="hidden" name="tokenId" value={token._id} />
+        <button
+          type="submit"
+          className="text-sm font-mono red-text shrink-0"
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          Revoke
+        </button>
+      </Form>
+    </div>
+  );
+}
+
 const PROFILE_SECTIONS = [
   { id: "basic", label: "Basic" },
   { id: "relationships", label: "Relationships" },
@@ -1099,6 +1187,7 @@ export default function Profile() {
     waivers,
     relatedHumans,
     passkeys,
+    apiTokens,
     inviteExpired,
     revokedRelationships,
   } = useLoaderData<typeof loader>();
@@ -1310,6 +1399,8 @@ export default function Profile() {
     actionData?.intent === "add-relationship" ? actionData : undefined;
   const passkeyDeleteResult =
     actionData?.intent === "delete-passkey" ? actionData : undefined;
+  const apiTokenRevokeResult =
+    actionData?.intent === "revoke-api-token" ? actionData : undefined;
   const nameResult =
     actionData?.intent === "update-name" ? actionData : undefined;
   const emailResult =
@@ -2051,9 +2142,41 @@ export default function Profile() {
                   {passkeyBusy ? "Creating…" : "+ Create a passkey"}
                 </button>
               </div>
+
+              <h3 className="font-bold mt-6 mb-1">CLI sessions</h3>
+              <p
+                className="text-sm mb-4"
+                style={{ color: "var(--text-subtle)" }}
+              >
+                Devices that have signed in with{" "}
+                <span className="font-mono">nopal login</span>. Revoke any you
+                don't recognize or no longer use — sessions also expire on
+                their own after 30 days.
+              </p>
+
+              {apiTokens.length === 0 ? (
+                <div
+                  className="good-box p-3 text-sm mb-4"
+                  style={{ color: "var(--text-subtle)" }}
+                >
+                  No CLI sessions yet.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 mb-4">
+                  {apiTokens.map((token) => (
+                    <ApiTokenCard key={token._id} token={token} />
+                  ))}
+                </div>
+              )}
+
+              {apiTokenRevokeResult && "error" in apiTokenRevokeResult && (
+                <div className="red-text text-sm mb-4">
+                  {apiTokenRevokeResult.error}
+                </div>
+              )}
             </section>
 
-            {/* ── Waivers ─────────────────────────────────────────────────── */}
+            {/* ── Waivers ────────────────────────────────────────── */}
             <section id="waivers">
               <h2 className="font-bold text-lg mb-1">Waivers</h2>
               <p

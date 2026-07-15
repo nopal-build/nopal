@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getUser } from "../modules/auth/auth.server";
+import { getUserFromRequest } from "../modules/auth/auth.server";
 import { uploadFileToS3 } from "../data/file.server";
 import { createFileRef } from "../data/vault.server";
 
@@ -14,7 +14,7 @@ import { createFileRef } from "../data/vault.server";
  * creates the corresponding file_ref record.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await getUser(request);
+  const user = await getUserFromRequest(request);
   if (!user) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }

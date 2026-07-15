@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { getUser } from "../modules/auth/auth.server";
+import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFileRefById } from "../data/vault.server";
 import { getPresignedDownloadUrl } from "../data/file.server";
 
@@ -13,7 +13,7 @@ import { getPresignedDownloadUrl } from "../data/file.server";
  * Only the file owner may download via this endpoint.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = await getUser(request);
+  const user = await getUserFromRequest(request);
   if (!user) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }

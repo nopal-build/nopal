@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getUser } from "../modules/auth/auth.server";
+import { getUserFromRequest } from "../modules/auth/auth.server";
 import { uploadMultipartPart } from "../data/file.server";
 
 /**
@@ -11,7 +11,7 @@ import { uploadMultipartPart } from "../data/file.server";
  * this request completes quickly and never hits proxy timeouts.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await getUser(request);
+  const user = await getUserFromRequest(request);
   if (!user)
     return Response.json({ error: "Not authenticated" }, { status: 401 });
 
