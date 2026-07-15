@@ -7,6 +7,10 @@ members = ["cargo:crates"]
 cargo-dist-version = "0.32.0"
 # CI backends to support
 ci = "github"
+# Only build the package(s) actually being released, not the whole
+# workspace — nopal-api's build.rs needs `protoc`, which isn't installed
+# on release runners and isn't needed for the CLI anyway.
+precise-builds = true
 # The installers to generate for each app
 installers = ["shell"]
 # Target platforms to build apps for (Rust target-triple syntax)
