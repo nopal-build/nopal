@@ -9,7 +9,23 @@
 const STORAGE_KEY = "nopal:known-accounts";
 const MAX_ACCOUNTS = 8;
 
-export type KnownAccount = { email: string; name: string };
+export type KnownAccount = {
+  email: string;
+  name: string;
+  /**
+   * How this account was reached, so the "switch account" modal knows how
+   * to switch back to it:
+   * - undefined/"passkey" (default): a real account the browser has a
+   *   passkey for — switching re-runs the WebAuthn login flow.
+   * - "impersonation": reached via an admin's "Login as user" tool.
+   *   Switching re-POSTs the impersonation endpoint instead, since the
+   *   admin doesn't hold (and never needs) this account's own passkey.
+   *   Purely a client-side hint — the server independently re-verifies
+   *   the *caller's* admin/super role on every impersonation request, so
+   *   a stale or spoofed flag here can't grant access on its own.
+   */
+  via?: "passkey" | "impersonation";
+};
 
 export function getKnownAccounts(): KnownAccount[] {
   if (typeof window === "undefined") return [];

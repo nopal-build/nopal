@@ -6,7 +6,6 @@
 import { RecordId } from "surrealdb";
 import { getDb } from "../../app/data/db.server";
 import { humansSeed } from "./tables/humans";
-import { projectsSeed } from "./tables/projects";
 import { provisionNewUserVault } from "../../app/data/dailyLog.server";
 
 // ---------------------------------------------------------------------------
@@ -40,7 +39,7 @@ export type SeedTable<T = Record<string, unknown>> = {
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const seeds: SeedTable<any>[] = [humansSeed, projectsSeed];
+const seeds: SeedTable<any>[] = [humansSeed];
 
 // ---------------------------------------------------------------------------
 // Runner

@@ -1,17 +1,31 @@
 import { useState } from "react";
 import {
   Form,
+  Link,
   useActionData,
   useNavigation,
   useSearchParams,
 } from "react-router";
 import type { ActionFunctionArgs, MetaFunction } from "react-router";
 import { Layout } from "../components/Layout";
+import { Footer } from "../components/Footer";
 import { generateWaiverPdf } from "../util/waiverPdf.server";
-import { uploadPublicFileToS3 } from "../data/file.server";
+import { uploadPrivateFileToS3, getPresignedViewUrl } from "../data/file.server";
 import { createLegalDocument } from "../data/legalDocuments.server";
 import { sendEmail } from "../util/email.server";
 import { WaiverComplete } from "../emails/waiverComplete";
+
+// Fallback for contexts with no `Request` available. Any call site with
+// access to the incoming request should pass it in so the link points at
+// the actual host (localhost in dev, nopal.build in prod).
+const FALLBACK_APP_BASE_URL = "https://nopal.build";
+function getAppBaseUrl(request?: Request): string {
+  if (request) {
+    const url = new URL(request.url);
+    return `${url.protocol}//${url.host}`;
+  }
+  return FALLBACK_APP_BASE_URL;
+}
 
 export const meta: MetaFunction = () => [
   {
@@ -109,13 +123,16 @@ export async function action({ request }: ActionFunctionArgs) {
       ipAddress,
     });
 
-    // 2. Upload to S3
+    // 2. Upload to S3 — private (no public ACL). The only ways to view it
+    // afterwards are: the PDF attached to the emails below, the one-time
+    // signed link in this response, and (for the signer's own account or
+    // staff) /api/legal-documents/view/:docId.
     const sanitizedName = icName.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
     const s3Key = `legal-docs/wc-waiver/${Date.now()}-${sanitizedName}.pdf`;
-    const s3Url = await uploadPublicFileToS3(pdfBuffer, s3Key);
+    const s3Url = await uploadPrivateFileToS3(pdfBuffer, s3Key);
 
     // 3. Save to database
-    await createLegalDocument({
+    const doc = await createLegalDocument({
       document_type: "wc_waiver",
       contractor_name: contractorName,
       ic_name: icName,
@@ -140,6 +157,14 @@ export async function action({ request }: ActionFunctionArgs) {
       contentType: "application/pdf" as const,
     };
 
+    // Staff have Nopal accounts, so the admin email can safely link to the
+    // ownership-checked view route. The signer may not have an account at
+    // all, so their email relies solely on the attachment — no link that
+    // could either 404 or (worse) need to be made guessable/public again.
+    const adminPdfUrl = doc
+      ? `${getAppBaseUrl(request)}/api/legal-documents/view/${doc._id}`
+      : undefined;
+
     // 4. Send emails (fire-and-forget errors so we don't fail the response)
     await Promise.allSettled([
       // Admin notification
@@ -150,12 +175,12 @@ export async function action({ request }: ActionFunctionArgs) {
           icName,
           contractorName,
           signedAt,
-          pdfUrl: s3Url,
+          pdfUrl: adminPdfUrl,
           recipientType: "admin",
         }),
         attachments: [pdfAttachment],
       }),
-      // Contractor copy
+      // Contractor copy — no pdfUrl; see note above.
       sendEmail({
         to: [email],
         subject: "Your Signed Workers' Comp Waiver — Nopal Build",
@@ -163,14 +188,19 @@ export async function action({ request }: ActionFunctionArgs) {
           icName,
           contractorName,
           signedAt,
-          pdfUrl: s3Url,
           recipientType: "contractor",
         }),
         attachments: [pdfAttachment],
       }),
     ]);
 
-    return Response.json({ ok: true, pdfUrl: s3Url });
+    // One-time, short-lived signed URL so the person who just submitted the
+    // form (who may have no account) can immediately view/download their
+    // own PDF from the success screen, without making the file permanently
+    // public.
+    const successPdfUrl = await getPresignedViewUrl(s3Key);
+
+    return Response.json({ ok: true, pdfUrl: successPdfUrl });
   } catch (err) {
     console.error("[wc-waiver] submission error:", err);
     return Response.json(
@@ -215,6 +245,7 @@ export default function WcWaiver() {
             <SuccessScreen pdfUrl={actionData.pdfUrl} />
           </div>
         </div>
+        <Footer />
       </Layout>
     );
   }
@@ -463,8 +494,24 @@ export default function WcWaiver() {
               </div>
 
               <p className="mt-4 text-xs subtle-text">
-                Your IP address and the date/time of submission will be recorded
-                as part of the audit trail for this document.
+                <strong>Privacy notice:</strong> the information above (your
+                name, business/license/insurance details, contact info, and
+                signature), along with your IP address and the date/time of
+                signing, is recorded to create and keep a legal record of
+                this acknowledgment, as required for Arizona
+                independent-contractor compliance. A copy of the signed PDF
+                is emailed to you and to Nopal staff. It's otherwise only
+                accessible to Nopal staff and to you, if you view it from a
+                Nopal account under this email address — it is never made
+                public. See our{" "}
+                <Link to="/privacy" className="link" target="_blank">
+                  privacy notice
+                </Link>{" "}
+                for more, or contact{" "}
+                <a href="mailto:human@nopal.build" className="link">
+                  human@nopal.build
+                </a>
+                .
               </p>
             </Section>
 
@@ -484,6 +531,7 @@ export default function WcWaiver() {
           </Form>
         </div>
       </div>
+      <Footer />
     </Layout>
   );
 }

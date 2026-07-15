@@ -1,8 +1,7 @@
-import { upsert, query } from "./generic.server";
+import { RecordId } from "surrealdb";
+import { upsert, query, formatRecord, type Data } from "./generic.server";
 
-export interface LegalDocumentRecord {
-  id?: { tb: string; id: string };
-  _id?: string;
+export interface LegalDocumentRecord extends Data {
   document_type: "wc_waiver";
   // Contractor info
   contractor_name: string;
@@ -36,7 +35,9 @@ export async function createLegalDocument(
   };
   const result = await upsert("legal_documents", record);
   const item = Array.isArray(result) ? result[0] : result;
-  return item as LegalDocumentRecord | undefined;
+  return item
+    ? formatRecord(item as unknown as LegalDocumentRecord)
+    : undefined;
 }
 
 export async function getLegalDocumentsByEmail(
@@ -46,5 +47,16 @@ export async function getLegalDocumentsByEmail(
     `SELECT * FROM legal_documents WHERE email = $email ORDER BY created_at DESC`,
     { email },
   );
-  return result?.[0] ?? [];
+  return (result?.[0] ?? []).map(formatRecord);
+}
+
+export async function getLegalDocumentById(
+  id: string,
+): Promise<LegalDocumentRecord | undefined> {
+  const result = await query<[LegalDocumentRecord[]]>(
+    `SELECT * FROM legal_documents WHERE id = $rid`,
+    { rid: new RecordId("legal_documents", id) },
+  );
+  const record = result?.[0]?.[0];
+  return record ? formatRecord(record) : undefined;
 }

@@ -292,6 +292,13 @@ export async function verifyPasskeyAuthentication(
   );
 
   session.unset("passkeyChallenge");
+  // A fresh, independently-authenticated login always wins over any stale
+  // impersonation state left on this browser's session cookie (see
+  // startImpersonation/stopImpersonation in auth.server.ts).
+  session.unset("impersonatorId");
+  session.unset("impersonatorName");
+  session.unset("impersonatorEmail");
+  session.unset("impersonationExpiresAt");
   session.set("user", human);
   const setCookie = await sessionStorage.commitSession(session);
 

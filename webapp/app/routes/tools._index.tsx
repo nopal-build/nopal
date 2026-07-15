@@ -18,6 +18,12 @@ interface Tool {
   inDevelopment?: boolean;
 }
 
+interface Doc {
+  name: string;
+  description: string;
+  href: string;
+}
+
 const TOOLS: Tool[] = [
   {
     name: "Print a DO NOT USE list",
@@ -67,6 +73,15 @@ const TOOLS: Tool[] = [
   },
 ];
 
+const DOCS: Doc[] = [
+  {
+    name: "AZ Independent Contractor Workers' Comp Acknowledgment",
+    description:
+      "Arizona Independent Contractor Workers' Compensation Acknowledgment and Responsibility form.",
+    href: "/docs/wc-waiver",
+  },
+];
+
 export default function ToolsIndex() {
   return (
     <Layout>
@@ -94,6 +109,27 @@ export default function ToolsIndex() {
                   )}
                 </h2>
                 <p className="mt-2 opacity-80">{tool.description}</p>
+              </Link>
+            ))}
+          </div>
+
+          <h2 className="text-3xl font-bold mt-16">Documents</h2>
+          <p className="purple-light-text text-xl mt-2">
+            Forms and legal documents
+          </p>
+
+          <div className="mt-8 space-y-4">
+            {DOCS.map((doc) => (
+              <Link
+                key={doc.href}
+                to={doc.href}
+                prefetch="intent"
+                className="block border border-gray-300 dark:border-[var(--dark-midground)] rounded-lg p-6 hover:border-[var(--green)] dark:hover:border-[var(--green)] transition-colors"
+              >
+                <h2 className="text-2xl font-semibold green-text">
+                  {doc.name}
+                </h2>
+                <p className="mt-2 opacity-80">{doc.description}</p>
               </Link>
             ))}
           </div>

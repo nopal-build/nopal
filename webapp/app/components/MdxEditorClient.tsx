@@ -52,6 +52,17 @@ const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)(\?.*)?$/i;
 
 const NOPAL_MARKER = "\n\n# Nopal Markdown\nFiles";
 const FILE_LINE_RE = /^\[(\d+)\]\s+(.+)$/;
+
+/**
+ * Whether a stored file-registry value is a real, dereferenceable file
+ * reference rather than an "uploading..." placeholder. Accepts both
+ * legacy absolute URLs (historical documents, uploaded before files were
+ * made private) and the current same-origin `/api/vault/view/:fileId`
+ * route, which redirects to a freshly-signed S3 URL on every request.
+ */
+function isFileUrl(value: string): boolean {
+  return value.startsWith("http") || value.startsWith("/api/vault/view/");
+}
 const STACK_THRESHOLD = 32;
 const PLACEMENT_RE = /^\[nopal-image\]\[(\d+)\]$|^\[(\d+)\]$/;
 
@@ -83,9 +94,12 @@ const VIMEO_RE = /vimeo\.com\/(?:video\/)?(\d+)/;
 function buildVideoEmbed(url: string): string | null {
   const yt = url.match(YOUTUBE_RE);
   if (yt) {
+    // youtube-nocookie.com ("privacy-enhanced mode") doesn't set YouTube's
+    // tracking/ads cookies until the viewer actually presses play, so
+    // embedding it doesn't require a cookie-consent banner.
     return (
       `<iframe width="560" height="315" ` +
-      `src="https://www.youtube.com/embed/${yt[1]}" ` +
+      `src="https://www.youtube-nocookie.com/embed/${yt[1]}" ` +
       `title="YouTube video" frameBorder="0" ` +
       `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" ` +
       `allowFullScreen />`
@@ -93,8 +107,10 @@ function buildVideoEmbed(url: string): string | null {
   }
   const vm = url.match(VIMEO_RE);
   if (vm) {
+    // dnt=1 ("Do Not Track") tells Vimeo's player not to set tracking
+    // cookies or send analytics for this embed.
     return (
-      `<iframe src="https://player.vimeo.com/video/${vm[1]}" ` +
+      `<iframe src="https://player.vimeo.com/video/${vm[1]}?dnt=1" ` +
       `width="560" height="315" frameBorder="0" ` +
       `allow="autoplay; fullscreen; picture-in-picture" ` +
       `allowFullScreen title="Vimeo video" />`
@@ -167,7 +183,7 @@ function parseDocument(raw: string): {
     if (!m) continue;
     const index = parseInt(m[1]);
     const value = m[2].trim();
-    const isUrl = value.startsWith("http");
+    const isUrl = isFileUrl(value);
     files.push({
       index,
       url: isUrl ? value : null,

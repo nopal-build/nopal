@@ -79,6 +79,27 @@ export async function getFileRefById(id: string): Promise<FileRef | undefined> {
   return record ? formatRecord(record) : undefined;
 }
 
+/**
+ * Whether `humanId` is allowed to view (not necessarily download/manage)
+ * `file` — either because they own it, or because it sits in a folder
+ * they've been granted view access to. Mirrors the visibility FileCard
+ * already grants shared-folder viewers (thumbnails/open-link), so this is
+ * the single place that logic should live for server-side checks.
+ */
+export async function canViewFileRef(
+  humanId: string,
+  file: FileRef,
+): Promise<boolean> {
+  if (file.human_id === humanId) return true;
+  if (!file.folder_id) return false;
+  const folder = await getFolderById(file.folder_id);
+  if (!folder) return false;
+  if (folder.shared_with === "everyone") return true;
+  return (
+    Array.isArray(folder.shared_with) && folder.shared_with.includes(humanId)
+  );
+}
+
 export async function updateFileRef(
   id: string,
   updates: Partial<{

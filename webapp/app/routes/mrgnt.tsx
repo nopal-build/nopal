@@ -135,11 +135,7 @@ export default function Mrgnt() {
                   +Humans
                 </Link>
               </li>
-              <li>
-                <Link to="/mrgnt/projects" className="link">
-                  +Projects
-                </Link>
-              </li>
+
             </ul>
           </div>
         </div>

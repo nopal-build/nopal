@@ -3,8 +3,11 @@ import { TOTPStrategy } from "remix-auth-totp";
 import { redirect } from "react-router";
 import { sessionStorage } from "./session.server";
 import { sendEmail } from "../../util/email.server";
-import { Human, getHumanByEmail } from "../../data/humans.server";
+import { Human, getHumanByEmail, getHumanById } from "../../data/humans.server";
 import { LoginCode } from "../../emails/loginCode";
+import { recordImpersonationEvent } from "../../data/impersonationEvents.server";
+
+const IMPERSONATION_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day
 
 export const authenticator = new Authenticator<Human>();
 
@@ -31,6 +34,14 @@ authenticator.use(
       const session = await sessionStorage.getSession(
         request.headers.get("cookie"),
       );
+      // A fresh, independently-authenticated login always wins over any
+      // stale impersonation state left on this browser's session cookie —
+      // otherwise logging in as a third account mid-impersonation could
+      // leave the "viewing as" banner/expiry pointed at the old admin.
+      session.unset("impersonatorId");
+      session.unset("impersonatorName");
+      session.unset("impersonatorEmail");
+      session.unset("impersonationExpiresAt");
       session.set("user", human);
       throw redirect("/fruits", {
         headers: { "Set-Cookie": await sessionStorage.commitSession(session) },
@@ -45,7 +56,200 @@ export async function getUser(request: Request): Promise<Human | null> {
   const session = await sessionStorage.getSession(
     request.headers.get("cookie"),
   );
-  return session.get("user") ?? null;
+  const user = session.get("user") ?? null;
+
+  // If an impersonation session has outlived its window (see
+  // `startImpersonation`), treat the real admin as the authorization
+  // principal immediately rather than waiting for the next request that
+  // can actually rewrite the cookie. `getImpersonationStatus` (polled by
+  // `AppLayout` on every page) is what performs that rewrite and makes the
+  // "viewing as" banner disappear — this is just a defensive fallback so
+  // authorization is never wrong even a moment past expiry.
+  const impersonatorId = session.get("impersonatorId");
+  const expiresAt = session.get("impersonationExpiresAt");
+  if (
+    impersonatorId &&
+    typeof expiresAt === "number" &&
+    Date.now() > expiresAt
+  ) {
+    const admin = await getHumanById(impersonatorId);
+    if (admin) return admin;
+  }
+
+  return user;
+}
+
+function canImpersonate(actor: Human, target: Human): string | null {
+  if (target._id === actor._id) return "You can't log in as yourself.";
+  if (actor.role === "Super") return null; // Supers can impersonate anyone, including other Supers.
+  if (actor.role === "Admin") {
+    if (target.role === "Human") return null;
+    return "Admins can only log in as regular accounts, not other admins.";
+  }
+  return "You don't have permission to do that.";
+}
+
+/**
+ * "Login as user" — lets a signed-in Admin/Super view the app exactly as
+ * another human sees it, for debugging. Deliberately unrelated to the
+ * passkey "switch account" flow: that requires proving possession of the
+ * *target's* own passkey, which an admin debugging someone else's account
+ * will never have. Here, authorization comes entirely from the *caller's*
+ * current session role (re-checked server-side on every call — never
+ * trust the client), not from anything the target account owns.
+ *
+ * The real admin's id/name/email are stashed in the session alongside the
+ * swapped-in `user`, plus a hard expiry (`IMPERSONATION_DURATION_MS`) so a
+ * forgotten tab can't stay "logged in as someone else" indefinitely.
+ * Nesting is disallowed — you must return to your own account (see
+ * `stopImpersonation`) before impersonating anyone else.
+ */
+export async function startImpersonation(
+  request: Request,
+  targetHumanId: string,
+): Promise<{ setCookie: string; error?: string; human?: Human }> {
+  const session = await sessionStorage.getSession(
+    request.headers.get("cookie"),
+  );
+  const actor: Human | null = session.get("user") ?? null;
+
+  if (!actor) {
+    return {
+      setCookie: await sessionStorage.commitSession(session),
+      error: "You must be signed in to do that.",
+    };
+  }
+  if (actor.role !== "Admin" && actor.role !== "Super") {
+    return {
+      setCookie: await sessionStorage.commitSession(session),
+      error: "You don't have permission to do that.",
+    };
+  }
+  if (session.get("impersonatorId")) {
+    return {
+      setCookie: await sessionStorage.commitSession(session),
+      error:
+        "You're already viewing as another account — return to your own account first.",
+    };
+  }
+
+  const target = await getHumanById(targetHumanId);
+  if (!target) {
+    return {
+      setCookie: await sessionStorage.commitSession(session),
+      error: "That account no longer exists.",
+    };
+  }
+
+  const permissionError = canImpersonate(actor, target);
+  if (permissionError) {
+    return {
+      setCookie: await sessionStorage.commitSession(session),
+      error: permissionError,
+    };
+  }
+
+  session.set("user", target);
+  session.set("impersonatorId", actor._id);
+  session.set("impersonatorName", actor.name);
+  session.set("impersonatorEmail", actor.email);
+  session.set("impersonationExpiresAt", Date.now() + IMPERSONATION_DURATION_MS);
+  const setCookie = await sessionStorage.commitSession(session);
+
+  await recordImpersonationEvent({
+    action: "start",
+    adminId: actor._id,
+    adminEmail: actor.email,
+    adminName: actor.name,
+    targetId: target._id,
+    targetEmail: target.email,
+    targetName: target.name,
+  });
+
+  return { setCookie, human: target };
+}
+
+/**
+ * Ends an impersonation session, restoring the real admin as `user`.
+ * `reason` distinguishes a manual "Return to admin" click from an
+ * automatic revert once the 1-day window lapses, purely for the audit log.
+ */
+export async function stopImpersonation(
+  request: Request,
+  reason: "manual" | "expired" = "manual",
+): Promise<{ setCookie: string; error?: string }> {
+  const session = await sessionStorage.getSession(
+    request.headers.get("cookie"),
+  );
+  const impersonatorId = session.get("impersonatorId");
+  if (!impersonatorId) {
+    return {
+      setCookie: await sessionStorage.commitSession(session),
+      error: "You're not currently viewing as another account.",
+    };
+  }
+
+  const impersonatedUser: Human | null = session.get("user") ?? null;
+  const admin = await getHumanById(impersonatorId);
+
+  session.unset("impersonatorId");
+  session.unset("impersonatorName");
+  session.unset("impersonatorEmail");
+  session.unset("impersonationExpiresAt");
+  if (admin) session.set("user", admin);
+
+  const setCookie = await sessionStorage.commitSession(session);
+
+  if (admin && impersonatedUser) {
+    await recordImpersonationEvent({
+      action: reason === "expired" ? "expire" : "stop",
+      adminId: admin._id,
+      adminEmail: admin.email,
+      adminName: admin.name,
+      targetId: impersonatedUser._id,
+      targetEmail: impersonatedUser.email,
+      targetName: impersonatedUser.name,
+    });
+  }
+
+  return {
+    setCookie,
+    error: admin
+      ? undefined
+      : "Could not restore your original account — please log in again.",
+  };
+}
+
+/**
+ * Read-only status check used by `AppLayout`'s "viewing as" banner (polled
+ * on every page load). Also the enforcement point for the 1-day
+ * impersonation window: a GET request is the one place in this flow that
+ * can freely attach a fresh `Set-Cookie` without the admin taking any
+ * action, so the actual auto-revert-and-commit happens here.
+ */
+export async function getImpersonationStatus(request: Request): Promise<{
+  impersonating: boolean;
+  adminName?: string;
+  adminEmail?: string;
+  setCookie?: string;
+}> {
+  const session = await sessionStorage.getSession(
+    request.headers.get("cookie"),
+  );
+  const impersonatorId = session.get("impersonatorId");
+  if (!impersonatorId) return { impersonating: false };
+
+  const expiresAt = session.get("impersonationExpiresAt");
+  if (typeof expiresAt === "number" && Date.now() > expiresAt) {
+    const result = await stopImpersonation(request, "expired");
+    return { impersonating: false, setCookie: result.setCookie };
+  }
+
+  return {
+    impersonating: true,
+    adminName: session.get("impersonatorName"),
+    adminEmail: session.get("impersonatorEmail"),
+  };
 }
 
 /**

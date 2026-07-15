@@ -20,21 +20,21 @@ type Pages = {
   "/api/passkeys/invite-register-verify": {
     params: {};
   };
-  "/fruits/good-building-system/:id": {
+  "/api/legal-documents/view/:docId": {
     params: {
-      "id": string;
+      "docId": string;
     };
   };
-  "/fruits/good-building-system/new": {
+  "/api/admin/impersonation-status": {
     params: {};
   };
   "/api/passkeys/register-options": {
     params: {};
   };
-  "/api/passkeys/register-verify": {
+  "/api/admin/stop-impersonating": {
     params: {};
   };
-  "/fruits/good-building-system": {
+  "/api/passkeys/register-verify": {
     params: {};
   };
   "/api/passkeys/login-options": {
@@ -52,19 +52,14 @@ type Pages = {
   "/tools/building-envelope": {
     params: {};
   };
+  "/api/admin/impersonate": {
+    params: {};
+  };
   "/grandpas-cabin-recipe": {
     params: {};
   };
   "/tools/thermal-inertia": {
     params: {};
-  };
-  "/fruits/all-projects": {
-    params: {};
-  };
-  "/fruits/projects/:id": {
-    params: {
-      "id": string;
-    };
   };
   "/tools/erv-calculator": {
     params: {};
@@ -179,6 +174,11 @@ type Pages = {
   "/api/vault/multipart-part": {
     params: {};
   };
+  "/api/vault/view/:fileId": {
+    params: {
+      "fileId": string;
+    };
+  };
   "/api/vault/:fileId": {
     params: {
       "fileId": string;
@@ -210,6 +210,9 @@ type Pages = {
   "/explore": {
     params: {};
   };
+  "/privacy": {
+    params: {};
+  };
   "/fruits": {
     params: {};
   };
@@ -237,9 +240,6 @@ type Pages = {
     params: {};
   };
   "/mrgnt": {
-    params: {};
-  };
-  "/mrgnt/projects": {
     params: {};
   };
   "/mrgnt/discord": {
@@ -280,7 +280,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/fruits/good-building-system/:id" | "/fruits/good-building-system/new" | "/api/passkeys/register-options" | "/api/passkeys/register-verify" | "/fruits/good-building-system" | "/api/passkeys/login-options" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/tools/building-envelope" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/fruits/all-projects" | "/fruits/projects/:id" | "/tools/erv-calculator" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/tools/do-not-use" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/presign" | "/api/vault/upload" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/projects" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
+    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/api/passkeys/login-options" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/tools/building-envelope" | "/api/admin/impersonate" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/tools/erv-calculator" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/tools/do-not-use" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/presign" | "/api/vault/upload" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
   };
   "routes/api.passkeys.invite-register-options.tsx": {
     id: "routes/api.passkeys.invite-register-options";
@@ -290,25 +290,25 @@ type RouteFiles = {
     id: "routes/api.passkeys.invite-register-verify";
     page: "/api/passkeys/invite-register-verify";
   };
-  "routes/fruits_.good-building-system_.$id.tsx": {
-    id: "routes/fruits_.good-building-system_.$id";
-    page: "/fruits/good-building-system/:id";
+  "routes/api.legal-documents.view.$docId.tsx": {
+    id: "routes/api.legal-documents.view.$docId";
+    page: "/api/legal-documents/view/:docId";
   };
-  "routes/fruits_.good-building-system_.new.tsx": {
-    id: "routes/fruits_.good-building-system_.new";
-    page: "/fruits/good-building-system/new";
+  "routes/api.admin.impersonation-status.tsx": {
+    id: "routes/api.admin.impersonation-status";
+    page: "/api/admin/impersonation-status";
   };
   "routes/api.passkeys.register-options.tsx": {
     id: "routes/api.passkeys.register-options";
     page: "/api/passkeys/register-options";
   };
+  "routes/api.admin.stop-impersonating.tsx": {
+    id: "routes/api.admin.stop-impersonating";
+    page: "/api/admin/stop-impersonating";
+  };
   "routes/api.passkeys.register-verify.tsx": {
     id: "routes/api.passkeys.register-verify";
     page: "/api/passkeys/register-verify";
-  };
-  "routes/fruits_.good-building-system.tsx": {
-    id: "routes/fruits_.good-building-system";
-    page: "/fruits/good-building-system";
   };
   "routes/api.passkeys.login-options.tsx": {
     id: "routes/api.passkeys.login-options";
@@ -330,6 +330,10 @@ type RouteFiles = {
     id: "routes/tools.building-envelope";
     page: "/tools/building-envelope";
   };
+  "routes/api.admin.impersonate.tsx": {
+    id: "routes/api.admin.impersonate";
+    page: "/api/admin/impersonate";
+  };
   "routes/grandpas-cabin-recipe.tsx": {
     id: "routes/grandpas-cabin-recipe";
     page: "/grandpas-cabin-recipe";
@@ -337,14 +341,6 @@ type RouteFiles = {
   "routes/tools.thermal-inertia.tsx": {
     id: "routes/tools.thermal-inertia";
     page: "/tools/thermal-inertia";
-  };
-  "routes/fruits_.all-projects.tsx": {
-    id: "routes/fruits_.all-projects";
-    page: "/fruits/all-projects";
-  };
-  "routes/fruits_.projects.$id.tsx": {
-    id: "routes/fruits_.projects.$id";
-    page: "/fruits/projects/:id";
   };
   "routes/tools.erv-calculator.tsx": {
     id: "routes/tools.erv-calculator";
@@ -452,7 +448,7 @@ type RouteFiles = {
   };
   "routes/api.vault.tsx": {
     id: "routes/api.vault";
-    page: "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/presign" | "/api/vault/upload";
+    page: "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/presign" | "/api/vault/upload";
   };
   "routes/api.vault.multipart-complete.tsx": {
     id: "routes/api.vault.multipart-complete";
@@ -477,6 +473,10 @@ type RouteFiles = {
   "routes/api.vault.multipart-part.tsx": {
     id: "routes/api.vault.multipart-part";
     page: "/api/vault/multipart-part";
+  };
+  "routes/api.vault.view.$fileId.tsx": {
+    id: "routes/api.vault.view.$fileId";
+    page: "/api/vault/view/:fileId";
   };
   "routes/api.vault.$fileId.tsx": {
     id: "routes/api.vault.$fileId";
@@ -513,6 +513,10 @@ type RouteFiles = {
   "routes/explore.tsx": {
     id: "routes/explore";
     page: "/explore";
+  };
+  "routes/privacy.tsx": {
+    id: "routes/privacy";
+    page: "/privacy";
   };
   "routes/_index.tsx": {
     id: "routes/_index";
@@ -552,11 +556,7 @@ type RouteFiles = {
   };
   "routes/mrgnt.tsx": {
     id: "routes/mrgnt";
-    page: "/mrgnt" | "/mrgnt/projects" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs";
-  };
-  "routes/mrgnt.projects.tsx": {
-    id: "routes/mrgnt.projects";
-    page: "/mrgnt/projects";
+    page: "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs";
   };
   "routes/mrgnt.discord.tsx": {
     id: "routes/mrgnt.discord";
@@ -616,20 +616,19 @@ type RouteModules = {
   "root": typeof import("./app/root.tsx");
   "routes/api.passkeys.invite-register-options": typeof import("./app/routes/api.passkeys.invite-register-options.tsx");
   "routes/api.passkeys.invite-register-verify": typeof import("./app/routes/api.passkeys.invite-register-verify.tsx");
-  "routes/fruits_.good-building-system_.$id": typeof import("./app/routes/fruits_.good-building-system_.$id.tsx");
-  "routes/fruits_.good-building-system_.new": typeof import("./app/routes/fruits_.good-building-system_.new.tsx");
+  "routes/api.legal-documents.view.$docId": typeof import("./app/routes/api.legal-documents.view.$docId.tsx");
+  "routes/api.admin.impersonation-status": typeof import("./app/routes/api.admin.impersonation-status.tsx");
   "routes/api.passkeys.register-options": typeof import("./app/routes/api.passkeys.register-options.tsx");
+  "routes/api.admin.stop-impersonating": typeof import("./app/routes/api.admin.stop-impersonating.tsx");
   "routes/api.passkeys.register-verify": typeof import("./app/routes/api.passkeys.register-verify.tsx");
-  "routes/fruits_.good-building-system": typeof import("./app/routes/fruits_.good-building-system.tsx");
   "routes/api.passkeys.login-options": typeof import("./app/routes/api.passkeys.login-options.tsx");
   "routes/api.passkeys.login-verify": typeof import("./app/routes/api.passkeys.login-verify.tsx");
   "routes/tools.frames-volume-calc": typeof import("./app/routes/tools.frames-volume-calc.tsx");
   "routes/tools.grade-differential": typeof import("./app/routes/tools.grade-differential.tsx");
   "routes/tools.building-envelope": typeof import("./app/routes/tools.building-envelope.tsx");
+  "routes/api.admin.impersonate": typeof import("./app/routes/api.admin.impersonate.tsx");
   "routes/grandpas-cabin-recipe": typeof import("./app/routes/grandpas-cabin-recipe.tsx");
   "routes/tools.thermal-inertia": typeof import("./app/routes/tools.thermal-inertia.tsx");
-  "routes/fruits_.all-projects": typeof import("./app/routes/fruits_.all-projects.tsx");
-  "routes/fruits_.projects.$id": typeof import("./app/routes/fruits_.projects.$id.tsx");
   "routes/tools.erv-calculator": typeof import("./app/routes/tools.erv-calculator.tsx");
   "routes/tools.space-layout": typeof import("./app/routes/tools.space-layout.tsx");
   "routes/fruits_.daily-log": typeof import("./app/routes/fruits_.daily-log.tsx");
@@ -663,6 +662,7 @@ type RouteModules = {
   "routes/api.vault.multipart-abort": typeof import("./app/routes/api.vault.multipart-abort.tsx");
   "routes/api.vault.multipart-init": typeof import("./app/routes/api.vault.multipart-init.tsx");
   "routes/api.vault.multipart-part": typeof import("./app/routes/api.vault.multipart-part.tsx");
+  "routes/api.vault.view.$fileId": typeof import("./app/routes/api.vault.view.$fileId.tsx");
   "routes/api.vault.$fileId": typeof import("./app/routes/api.vault.$fileId.tsx");
   "routes/api.vault.folders": typeof import("./app/routes/api.vault.folders.tsx");
   "routes/api.vault.folders.$folderId": typeof import("./app/routes/api.vault.folders.$folderId.tsx");
@@ -672,6 +672,7 @@ type RouteModules = {
   "routes/scc-demo": typeof import("./app/routes/scc-demo.tsx");
   "routes/contact": typeof import("./app/routes/contact.tsx");
   "routes/explore": typeof import("./app/routes/explore.tsx");
+  "routes/privacy": typeof import("./app/routes/privacy.tsx");
   "routes/_index": typeof import("./app/routes/_index.tsx");
   "routes/fruits": typeof import("./app/routes/fruits.tsx");
   "routes/good.s": typeof import("./app/routes/good.s.tsx");
@@ -682,7 +683,6 @@ type RouteModules = {
   "routes/about": typeof import("./app/routes/about.tsx");
   "routes/login": typeof import("./app/routes/login.tsx");
   "routes/mrgnt": typeof import("./app/routes/mrgnt.tsx");
-  "routes/mrgnt.projects": typeof import("./app/routes/mrgnt.projects.tsx");
   "routes/mrgnt.discord": typeof import("./app/routes/mrgnt.discord.tsx");
   "routes/mrgnt._index": typeof import("./app/routes/mrgnt._index.tsx");
   "routes/mrgnt.humans": typeof import("./app/routes/mrgnt.humans.tsx");

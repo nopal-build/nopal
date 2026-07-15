@@ -1,10 +1,98 @@
 // app/components/AppLayout.tsx
 import { Link, NavLink } from "react-router";
-import { ReactNode, useState, useCallback } from "react";
+import { ReactNode, useState, useCallback, useEffect } from "react";
 import { useUser, permissions } from "../hooks/useUser";
 import nopalLogo from "../images/nopal-v2.svg";
 import nopalDarkLogo from "../images/nopal-dark-v2.svg";
 import { useSchemePref } from "../hooks/useSchemePref";
+
+const BANNER_HEIGHT = 40;
+
+type ImpersonationStatus = {
+  impersonating: boolean;
+  adminName?: string;
+  adminEmail?: string;
+};
+
+/**
+ * Persistent notice shown on every page while an Admin/Super is "logged in
+ * as" another human via the profile page's management menu. Deliberately
+ * not wired through any route loader — there's no shared `/fruits` layout
+ * loader, and every leaf route already independently calls `getUser`, so
+ * threading impersonation state through all of them would touch dozens of
+ * files. Instead this polls a tiny status endpoint on mount, which also
+ * happens to be where the 1-day impersonation window actually gets
+ * enforced (see `getImpersonationStatus` in `modules/auth/auth.server.ts`).
+ */
+function ImpersonationBanner({ targetName }: { targetName: string }) {
+  const [status, setStatus] = useState<ImpersonationStatus | null>(null);
+  const [returning, setReturning] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/impersonation-status")
+      .then((res) => res.json())
+      .then((json: ImpersonationStatus) => {
+        if (!cancelled) setStatus(json);
+      })
+      .catch(() => {
+        // Fail closed — no banner rather than a broken one.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!status?.impersonating) return null;
+
+  async function handleReturn() {
+    setReturning(true);
+    try {
+      await fetch("/api/admin/stop-impersonating", { method: "POST" });
+    } finally {
+      window.location.href = "/fruits/profile";
+    }
+  }
+
+  return (
+    <div
+      style={{
+        height: BANNER_HEIGHT,
+        background: "var(--yellow)",
+        color: "var(--purple)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "12px",
+        fontSize: "13px",
+        fontFamily: "monospace",
+        flexShrink: 0,
+      }}
+    >
+      <span>
+        Viewing as <strong>{targetName}</strong> — signed in as{" "}
+        {status.adminName ?? status.adminEmail}
+      </span>
+      <button
+        type="button"
+        onClick={handleReturn}
+        disabled={returning}
+        style={{
+          background: "var(--purple)",
+          color: "var(--yellow)",
+          border: "none",
+          borderRadius: "4px",
+          padding: "2px 10px",
+          fontSize: "12px",
+          fontFamily: "monospace",
+          cursor: returning ? "default" : "pointer",
+        }}
+      >
+        {returning ? "Returning…" : "Return to admin"}
+      </button>
+    </div>
+  );
+}
 
 function HamburgerIcon({ open }: { open: boolean }) {
   return (
@@ -62,7 +150,12 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const closeMenu = useCallback(() => setMenuOpen(false), []);
 
   return (
-    <div className="app-layout">
+    <div className="flex flex-col" style={{ height: "100vh" }}>
+      {user && <ImpersonationBanner targetName={user.name || user.email} />}
+      <div
+        className="app-layout"
+        style={{ height: "auto", flex: 1, minHeight: 0 }}
+      >
       {/* ===== SIDEBAR (desktop ≥860px) ===== */}
       <aside className="app-sidebar">
         <Link to="/" prefetch="intent">
@@ -94,25 +187,6 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             style={navLinkStyle}
           >
             Vault
-          </NavLink>
-          {isAdmin && (
-            <NavLink
-              to="/fruits/all-projects"
-              prefetch="intent"
-              className={navLinkClass}
-              style={navLinkStyle}
-            >
-              All Projects
-            </NavLink>
-          )}
-          <NavLink
-            to="/fruits/good-building-system"
-            prefetch="intent"
-            end
-            className={navLinkClass}
-            style={navLinkStyle}
-          >
-            Good Building
           </NavLink>
           {isSuper && (
             <NavLink
@@ -197,17 +271,6 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             </NavLink>
             {isAdmin && (
               <NavLink
-                to="/fruits/all-projects"
-                prefetch="intent"
-                className={navLinkClass}
-                style={navLinkStyle}
-                onClick={closeMenu}
-              >
-                All Projects
-              </NavLink>
-            )}
-            {isAdmin && (
-              <NavLink
                 to="/fruits/styles"
                 prefetch="intent"
                 className={navLinkClass}
@@ -232,6 +295,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
 
       {/* ===== MAIN ===== */}
       <main className="app-main">{children}</main>
+      </div>
     </div>
   );
 }

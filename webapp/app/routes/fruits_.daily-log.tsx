@@ -343,8 +343,15 @@ function TodayLogEntry({
       const err = (await res.json()) as { error?: string };
       throw new Error(err.error ?? `Upload failed: ${res.status}`);
     }
-    const { url } = (await res.json()) as { url: string };
-    return url;
+    const { fileId } = (await res.json()) as { fileId?: string };
+    if (!fileId) throw new Error("Upload succeeded but no file id was returned");
+    // Route through /api/vault/view so the embedded reference stays valid
+    // (freshly signed + ownership-checked) indefinitely, instead of baking
+    // in a permanent public S3 URL. The `name` query param is just a hint
+    // so the stored reference still ends in a real file extension (needed
+    // for isImage detection + a readable name after a reload) — the route
+    // itself ignores it.
+    return `/api/vault/view/${fileId}?name=${encodeURIComponent(file.name)}`;
   }, []);
 
   // Build "Today — Monday, November 15, 2024"

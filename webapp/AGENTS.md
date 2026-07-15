@@ -26,3 +26,8 @@ Tailwind CSS, TypeScript, SurrealDB. Tests run with `vitest`.
   non-trivial changes to catch type errors.
 - Prefer targeted `diagnostics` checks on the files you changed before a full
   project sweep.
+- After any change touching CSS, colors, or `app/styles/*.css`, use the
+  `dark-mode-review` skill to capture and visually check both light and dark
+  mode screenshots before considering the work done — this app has no
+  in-app theme toggle, so `prefers-color-scheme` bugs are otherwise easy to
+  miss.

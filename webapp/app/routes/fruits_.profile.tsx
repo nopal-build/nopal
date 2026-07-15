@@ -1,5 +1,5 @@
 // app/routes/fruits_.profile.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -28,6 +28,7 @@ import {
   applyPendingEmailChange,
   removeAliasEmail,
   type Human,
+  type Role,
 } from "../data/humans.server";
 import { sendEmail } from "../util/email.server";
 import { ConfirmEmail } from "../emails/confirmEmail";
@@ -637,7 +638,7 @@ function WaiverCard({ doc }: { doc: LegalDocumentRecord }) {
         </div>
       </div>
       <a
-        href={doc.s3_url}
+        href={`/api/legal-documents/view/${doc._id}`}
         target="_blank"
         rel="noreferrer"
         className="text-sm font-mono purple-light-text shrink-0"
@@ -670,16 +671,22 @@ function inviteResendReady(human: Human): boolean {
 function RelationshipCard({
   human,
   viewerId,
+  viewerRole,
   revokedBy,
   background,
+  onImpersonate,
 }: {
   human: Human;
   /** The logged-in user's own id — used to tell "you revoked them" apart from "they revoked you". */
   viewerId: string;
+  /** The logged-in user's own role — governs whether "Login as user" can target this row (Admins can't view as other Admins/Supers; Supers can view as anyone). */
+  viewerRole: Role;
   /** If this pair has a revoked relationship, the id of whoever revoked it. */
   revokedBy?: string;
   /** Overrides `.good-box`'s default background — e.g. white cards inside a colored container. */
   background?: string;
+  /** Present only when the viewer is an Admin/Super — powers the per-row "..." "Login as user" menu. Rejects (rather than navigating away) on failure. */
+  onImpersonate?: (human: Human) => Promise<void>;
 }) {
   const isAutomatic = isAdminOrSuper(human);
   const revoked = Boolean(revokedBy);
@@ -687,6 +694,45 @@ function RelationshipCard({
   const pendingInvite = !isAutomatic && !revoked && hasPendingInvite(human);
   const resendReady = inviteResendReady(human);
   const [confirmRevokeOpen, setConfirmRevokeOpen] = useState(false);
+
+  // Mirrors canImpersonate() server-side: Admins can only log in as regular
+  // accounts, never other admins/supers; Supers can log in as anyone.
+  const canImpersonateRow =
+    Boolean(onImpersonate) && (viewerRole === "Super" || !isAutomatic);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [impersonating, setImpersonating] = useState(false);
+  const [impersonateError, setImpersonateError] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
+  async function handleLoginAsUser() {
+    if (!onImpersonate) return;
+    setMenuOpen(false);
+    setImpersonateError(null);
+    setImpersonating(true);
+    try {
+      await onImpersonate(human);
+    } catch (err) {
+      setImpersonateError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong logging in as that account.",
+      );
+      setImpersonating(false);
+    }
+  }
 
   // A dedicated fetcher (rather than a nested <Form>) — this card can be
   // rendered inside the Relationships section's own outer <Form> (for the
@@ -782,6 +828,9 @@ function RelationshipCard({
         )}
         {rekindleData && "error" in rekindleData && (
           <div className="red-text">{rekindleData.error}</div>
+        )}
+        {impersonateError && (
+          <div className="red-text">{impersonateError}</div>
         )}
       </div>
       <div className="flex items-center gap-3 shrink-0">
@@ -934,6 +983,62 @@ function RelationshipCard({
             </Modal>
           </>
         )}
+
+        {canImpersonateRow && (
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              aria-label={`Manage ${human.name}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              disabled={impersonating}
+              onClick={() => setMenuOpen((o) => !o)}
+              className="text-sm font-mono"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: impersonating ? "default" : "pointer",
+                padding: "0 4px",
+                color: "var(--text-subtle)",
+                fontWeight: 700,
+              }}
+            >
+              {impersonating ? "Logging in…" : "…"}
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                className="good-box"
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  top: "calc(100% + 4px)",
+                  minWidth: "160px",
+                  zIndex: 20,
+                  padding: "4px",
+                }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleLoginAsUser}
+                  className="text-sm text-left purple-text"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "8px 10px",
+                    borderRadius: "4px",
+                  }}
+                >
+                  Login as user
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1037,6 +1142,34 @@ export default function Profile() {
   const [switchEmailInput, setSwitchEmailInput] = useState("");
   const [knownAccounts, setKnownAccounts] = useState<KnownAccount[]>([]);
 
+  // ── Admin/Super "login as user" ──────────────────────────────────────────
+  // Lives as a per-row "..." menu on each RelationshipCard below (Admins and
+  // Supers already see *every* human there via `getRelatedHumans`), rather
+  // than a separate search UI — the Relationships section's own list and
+  // email filter double as the account picker.
+  const isManager = isAdminOrSuper(user);
+
+  async function impersonate(target: Human): Promise<void> {
+    const res = await fetch("/api/admin/impersonate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ humanId: target._id }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error ?? "Could not log in as that account.");
+    }
+    // So this account shows up as a one-click option in "Switch account"
+    // next time — tagged as impersonation so it switches back via this
+    // same endpoint rather than a passkey prompt.
+    rememberAccount({
+      email: target.email,
+      name: target.name,
+      via: "impersonation",
+    });
+    window.location.href = "/fruits";
+  }
+
   // Remember the current account on this device so it shows up as a quick
   // "switch account" option from other accounts later on.
   useEffect(() => {
@@ -1055,13 +1188,35 @@ export default function Profile() {
     setKnownAccounts(getKnownAccounts());
   }
 
-  async function handleSwitchAccount(targetEmail: string) {
+  async function handleSwitchAccount(
+    targetEmail: string,
+    via?: KnownAccount["via"],
+  ) {
     const email = targetEmail.trim();
     if (!email) return;
 
     setSwitchError(null);
     setSwitchBusy(true);
     try {
+      // Accounts reached via "Login as user" never had a passkey handed to
+      // this admin — switching back to them re-runs the impersonation
+      // endpoint instead of a WebAuthn prompt. The server independently
+      // re-checks that *this* session is still Admin/Super, so a stale or
+      // tampered `via` tag can't grant anything on its own.
+      if (via === "impersonation") {
+        const res = await fetch("/api/admin/impersonate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.error ?? "Could not log in as that account.");
+        }
+        window.location.href = "/fruits";
+        return;
+      }
+
       const optionsRes = await fetch("/api/passkeys/login-options", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1287,9 +1442,25 @@ export default function Profile() {
                       type="button"
                       className="text-left text-sm flex-1"
                       disabled={switchBusy}
-                      onClick={() => handleSwitchAccount(account.email)}
+                      onClick={() =>
+                        handleSwitchAccount(account.email, account.via)
+                      }
                     >
-                      <div className="font-bold">{account.name}</div>
+                      <div className="font-bold">
+                        {account.name}
+                        {account.via === "impersonation" && (
+                          <span
+                            className="font-mono"
+                            style={{
+                              color: "var(--text-subtle)",
+                              fontWeight: 400,
+                              marginLeft: "6px",
+                            }}
+                          >
+                            (login as user)
+                          </span>
+                        )}
+                      </div>
                       <div style={{ color: "var(--text-subtle)" }}>
                         {account.email}
                       </div>
@@ -1738,8 +1909,10 @@ export default function Profile() {
                             key={human._id}
                             human={human}
                             viewerId={user._id}
+                            viewerRole={user.role}
                             revokedBy={revokedRelationships[human._id]}
                             background="var(--white)"
+                            onImpersonate={isManager ? impersonate : undefined}
                           />
                         ))}
 
@@ -1756,8 +1929,12 @@ export default function Profile() {
                                 key={human._id}
                                 human={human}
                                 viewerId={user._id}
+                                viewerRole={user.role}
                                 revokedBy={revokedRelationships[human._id]}
                                 background="var(--white)"
+                                onImpersonate={
+                                  isManager ? impersonate : undefined
+                                }
                               />
                             ))}
                           </>
@@ -1891,7 +2068,7 @@ export default function Profile() {
               {waivers.length > 0 && (
                 <div className="flex flex-col gap-2 mb-4">
                   {waivers.map((doc) => (
-                    <WaiverCard key={doc.s3_key} doc={doc} />
+                    <WaiverCard key={doc._id} doc={doc} />
                   ))}
                 </div>
               )}

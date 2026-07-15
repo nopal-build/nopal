@@ -118,5 +118,12 @@ export async function subscribeToNewsletter({
     return;
   }
 
-  await resend.contacts.create({ email, firstName, lastName });
+  const result = await resend.contacts.create({ email, firstName, lastName });
+  if (result.error) {
+    // Resend's contacts API returns { data: null, error } rather than
+    // throwing — surface it as a real error so the caller's try/catch
+    // (and therefore the user-facing form) actually sees the failure
+    // instead of silently treating it as a successful subscription.
+    throw new Error(result.error.message ?? "Failed to subscribe to newsletter");
+  }
 }

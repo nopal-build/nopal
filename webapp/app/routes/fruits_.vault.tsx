@@ -701,9 +701,9 @@ function FileCard({
 
   return (
     <>
-      {previewOpen && file.s3_url && (
+      {previewOpen && file.s3_key && (
         <ImageModal
-          url={file.s3_url}
+          url={`/api/vault/view/${file._id}`}
           name={file.name}
           onClose={() => setPreviewOpen(false)}
         />
@@ -714,13 +714,15 @@ function FileCard({
         onClick={() => {
           onSelect(file);
           if (isMd) onEditMd(file);
-          if (isImage && file.s3_url) setPreviewOpen(true);
+          if (isImage && file.s3_key) setPreviewOpen(true);
         }}
       >
-        {/* Image thumbnail */}
-        {isImage && file.s3_url && (
+        {/* Image thumbnail — routed through /api/vault/view so access is
+            checked (and the underlying S3 URL freshly signed) on every
+            request, instead of embedding a permanent public link. */}
+        {isImage && file.s3_key && (
           <img
-            src={file.s3_url}
+            src={`/api/vault/view/${file._id}`}
             alt={file.name}
             className="vault-image-thumb"
             onClick={(e) => {
@@ -777,9 +779,9 @@ function FileCard({
         </div>
 
         {/* s3 link for non-md */}
-        {!isMd && file.s3_url && (
+        {!isMd && file.s3_key && (
           <a
-            href={file.s3_url}
+            href={`/api/vault/view/${file._id}`}
             target="_blank"
             rel="noreferrer"
             className="text-xs font-mono"
@@ -818,7 +820,7 @@ function FileCard({
         {/* Action buttons (hover) — hidden for locked daily-log files */}
         {isOwned && !isLocked && (
           <div className="vault-file-actions">
-            {isVideo && file.s3_url && onDownload && (
+            {isVideo && file.s3_key && onDownload && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1089,8 +1091,15 @@ function MdEditorModal({
       const err = (await res.json()) as { error?: string };
       throw new Error(err.error ?? `Upload failed: ${res.status}`);
     }
-    const { url } = (await res.json()) as { url: string };
-    return url;
+    const { fileId } = (await res.json()) as { fileId?: string };
+    if (!fileId) throw new Error("Upload succeeded but no file id was returned");
+    // Route through /api/vault/view so the embedded reference stays valid
+    // (freshly signed + ownership-checked) indefinitely, instead of baking
+    // in a permanent public S3 URL. The `name` query param is just a hint
+    // so the stored reference still ends in a real file extension (needed
+    // for isImage detection + a readable name after a reload) — the route
+    // itself ignores it.
+    return `/api/vault/view/${fileId}?name=${encodeURIComponent(file.name)}`;
   }, []);
 
   // ── Project CSV fields (for `[key]` references in the markdown) ────────
@@ -1934,21 +1943,24 @@ export default function VaultPage() {
           kind: "page",
           href: `/fruits/vault?${params.toString()}`,
         });
-      } else if (f.content_type.startsWith("image/") && f.s3_url) {
+      } else if (f.content_type.startsWith("image/") && f.s3_key) {
         items.push({
           id: f._id,
           label: f.name,
           detail,
           kind: "image",
-          url: f.s3_url,
+          // `?name=` keeps the reference recognisable as an image (real
+          // extension) after the doc it's embedded into is saved + reloaded
+          // — see isFileUrl/IMAGE_EXT in nopalMarkdown.ts.
+          url: `/api/vault/view/${f._id}?name=${encodeURIComponent(f.name)}`,
         });
-      } else if (f.s3_url) {
+      } else if (f.s3_key) {
         items.push({
           id: f._id,
           label: f.name,
           detail,
           kind: "file",
-          href: f.s3_url,
+          href: `/api/vault/view/${f._id}`,
         });
       }
     }

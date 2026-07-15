@@ -21,6 +21,17 @@
 const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff|ico)(\?.*)?$/i;
 const NOPAL_MARKER = "\n\n# Nopal Markdown\nFiles";
 const FILE_LINE_RE = /^\[(\d+)\]\s+(.+)$/;
+
+/**
+ * Whether a stored file-registry value is a real, dereferenceable file
+ * reference rather than an "uploading..." placeholder. Accepts both
+ * legacy absolute URLs (historical documents, uploaded before files were
+ * made private) and the current same-origin `/api/vault/view/:fileId`
+ * route, which redirects to a freshly-signed S3 URL on every request.
+ */
+function isFileUrl(value: string): boolean {
+  return value.startsWith("http") || value.startsWith("/api/vault/view/");
+}
 /** Matches a whole paragraph that is purely a placement token (new or legacy format). */
 const PLACEMENT_RE = /^\[nopal-image\]\[(\d+)\]$|^\[(\d+)\]$/;
 
@@ -56,7 +67,7 @@ export function parseNopalDocument(raw: string): {
     if (!m) continue;
     const index = parseInt(m[1]);
     const value = m[2].trim();
-    const isUrl = value.startsWith("http");
+    const isUrl = isFileUrl(value);
     files.push({
       index,
       url: isUrl ? value : null,

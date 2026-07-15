@@ -46,7 +46,7 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const url = await uploadFileToS3(file, s3Key);
 
-    await createFileRef({
+    const fileRef = await createFileRef({
       human_id: user._id,
       name: file.name,
       s3_url: url,
@@ -57,7 +57,10 @@ export async function action({ request }: ActionFunctionArgs) {
       ...(source === "daily_log" ? { source: "daily_log" as const } : {}),
     });
 
-    return Response.json({ url, s3Key, folderId });
+    // The upload is now stored privately — callers should link to
+    // `/api/vault/view/:fileId` (which redirects to a fresh presigned URL
+    // on every request) rather than using `url` directly.
+    return Response.json({ url, s3Key, folderId, fileId: fileRef?._id });
   } catch (err) {
     console.error("S3 upload error:", err);
     return Response.json(

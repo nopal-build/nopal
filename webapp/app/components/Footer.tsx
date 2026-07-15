@@ -66,6 +66,13 @@ export function FooterBase({ children }: { children?: ReactNode }) {
           >
             Contact
           </NavLink>
+          <NavLink
+            prefetch="render"
+            className="ml-4 hover:underline text-nowrap"
+            to="/privacy"
+          >
+            Privacy
+          </NavLink>
         </div>
         <div className="inline-flex mt-4 gap-2 items-center">
           {padSvg}

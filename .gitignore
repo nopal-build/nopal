@@ -19,6 +19,9 @@ remix/build
 .cache/
 build/
 
+# Playwright screenshots from webapp/scripts/visual-check.ts
+webapp/tmp/
+
 # Environment variables
 .env
 

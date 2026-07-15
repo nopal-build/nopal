@@ -2,7 +2,14 @@ type WaiverCompleteProps = {
   icName: string;
   contractorName: string;
   signedAt: string;
-  pdfUrl: string;
+  /**
+   * Link to view/download the PDF online. Only provided for the admin
+   * copy (staff have Nopal accounts, so it can safely point at the
+   * ownership-checked /api/legal-documents/view/:docId route). The
+   * contractor's copy omits this — they may not have an account at all,
+   * so their email relies solely on the attached PDF.
+   */
+  pdfUrl?: string;
   recipientType: "admin" | "contractor";
 };
 
@@ -89,16 +96,22 @@ export function WaiverComplete({
         </p>
 
         <p style={{ margin: "0 0 16px", lineHeight: "1.6" }}>
-          The signed PDF is attached to this email. You can also{" "}
-          <a
-            href={pdfUrl}
-            style={{ color: "#5da06d" }}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            view or download it here
-          </a>
-          .
+          {pdfUrl ? (
+            <>
+              The signed PDF is attached to this email. You can also{" "}
+              <a
+                href={pdfUrl}
+                style={{ color: "#5da06d" }}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                view or download it here
+              </a>
+              .
+            </>
+          ) : (
+            "The signed PDF is attached to this email."
+          )}
         </p>
 
         {recipientType === "contractor" && (

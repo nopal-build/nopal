@@ -60,7 +60,7 @@ export default function SunnyHomeNo1() {
             <iframe
               width="560"
               height="315"
-              src="https://www.youtube.com/embed/vO0STV55gCI?si=p-2WIz-E3J7wPcAv"
+              src="https://www.youtube-nocookie.com/embed/vO0STV55gCI?si=p-2WIz-E3J7wPcAv"
               title="YouTube video player"
               frameBorder="0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
