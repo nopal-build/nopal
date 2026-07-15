@@ -630,9 +630,9 @@ function formatSignedAt(iso: string): string {
 function WaiverCard({ doc }: { doc: LegalDocumentRecord }) {
   return (
     <div className="good-box p-3 flex items-center justify-between gap-4">
-      <div className="text-sm">
-        <div className="font-bold">Signed workers' comp waiver</div>
-        <div style={{ color: "var(--text-subtle)" }}>
+      <div className="text-sm min-w-0">
+        <div className="font-bold truncate">Signed workers' comp waiver</div>
+        <div className="truncate" style={{ color: "var(--text-subtle)" }}>
           Signed {formatSignedAt(doc.signed_at)}
         </div>
       </div>
@@ -762,11 +762,18 @@ function RelationshipCard({
       style={background ? { background } : undefined}
     >
       <div
-        className="text-sm"
+        className="text-sm min-w-0"
         style={revoked ? { opacity: 0.5, filter: "grayscale(0.6)" } : undefined}
       >
-        <div className="font-bold">{human.name}</div>
-        <div style={{ color: "var(--text-subtle)" }}>{human.email}</div>
+        <div
+          className="font-bold truncate"
+          style={background ? { color: "var(--purple)" } : undefined}
+        >
+          {human.name}
+        </div>
+        <div className="truncate" style={{ color: "var(--text-subtle)" }}>
+          {human.email}
+        </div>
         {resendData && "error" in resendData && (
           <div className="red-text">{resendData.error}</div>
         )}
@@ -937,9 +944,9 @@ function RelationshipCard({
 function PasskeyCard({ passkey }: { passkey: Passkey }) {
   return (
     <div className="good-box p-3 flex items-center justify-between gap-4">
-      <div className="text-sm">
-        <div className="font-bold">{passkey.name}</div>
-        <div style={{ color: "var(--text-subtle)" }}>
+      <div className="text-sm min-w-0">
+        <div className="font-bold truncate">{passkey.name}</div>
+        <div className="truncate" style={{ color: "var(--text-subtle)" }}>
           Added {formatSignedAt(passkey.createdAt)}
         </div>
       </div>
@@ -1343,7 +1350,7 @@ export default function Profile() {
           </div>
         )}
 
-        <div className="flex flex-col md:flex-row gap-8 items-start">
+        <div className="flex flex-col md:flex-row gap-8 md:items-start">
           <div className="flex-1 min-w-0 flex flex-col gap-10">
             {/* ── Basic ────────────────────────────────────────────────────── */}
             <section id="basic" className="flex flex-col gap-4">

@@ -588,6 +588,13 @@ body {
   }
 }
 
+.purple-text {
+  color: var(--purple);
+  @media (prefers-color-scheme: dark) {
+    color: white;
+  }
+}
+
 .green-text {
   color: var(--green);
   @media (prefers-color-scheme: dark) {

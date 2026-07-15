@@ -228,19 +228,13 @@ export default function WcWaiver() {
         >
           {/* Header */}
           <div className="mb-6">
-            <p
-              className="text-sm uppercase tracking-widest mb-1"
-              style={{ color: "var(--purple-light)" }}
-            >
+            <p className="text-sm uppercase tracking-widest mb-1 purple-light-text">
               Arizona Independent Contractor
             </p>
-            <h1
-              className="text-2xl font-bold"
-              style={{ color: "var(--purple)" }}
-            >
+            <h1 className="text-2xl font-bold purple-text">
               Workers' Compensation Acknowledgment
             </h1>
-            <p className="mt-2 text-sm" style={{ color: "var(--text-subtle)" }}>
+            <p className="mt-2 text-sm subtle-text">
               Please read and complete all sections below, then sign at the
               bottom. A copy of the signed document will be emailed to you.
             </p>
@@ -263,10 +257,7 @@ export default function WcWaiver() {
             {/* ── Section 1: Party Info ─────────────────────────────── */}
             <Section title="Party Information">
               <div>
-                <p
-                  className="block text-sm font-medium mb-1"
-                  style={{ color: "var(--purple)" }}
-                >
+                <p className="block text-sm font-medium mb-1 purple-text">
                   Contractor
                 </p>
                 <p
@@ -329,10 +320,7 @@ export default function WcWaiver() {
 
             {/* ── Section 2: Acknowledgment Checkboxes ─────────────── */}
             <Section title="Independent Contractor Acknowledgment">
-              <p
-                className="text-sm mb-4"
-                style={{ color: "var(--text-subtle)" }}
-              >
+              <p className="text-sm mb-4 subtle-text">
                 I certify that I am performing work as an independent contractor
                 and not as an employee of the Contractor identified above. I
                 understand and acknowledge the following:
@@ -367,10 +355,7 @@ export default function WcWaiver() {
 
             {/* ── Section 3: WC Coverage ────────────────────────────── */}
             <Section title="Workers' Compensation Coverage">
-              <p
-                className="text-sm mb-4"
-                style={{ color: "var(--text-subtle)" }}
-              >
+              <p className="text-sm mb-4 subtle-text">
                 Please select one:
               </p>
               <div className="space-y-3">
@@ -384,7 +369,7 @@ export default function WcWaiver() {
                     style={{ accentColor: "var(--green)" }}
                     required
                   />
-                  <span className="text-sm" style={{ color: "var(--purple)" }}>
+                  <span className="text-sm purple-text">
                     I maintain workers' compensation insurance.
                   </span>
                 </label>
@@ -397,7 +382,7 @@ export default function WcWaiver() {
                     className="mt-1 shrink-0"
                     style={{ accentColor: "var(--green)" }}
                   />
-                  <span className="text-sm" style={{ color: "var(--purple)" }}>
+                  <span className="text-sm purple-text">
                     I do not maintain workers' compensation insurance because I
                     believe it is not required for my business under Arizona
                     law.
@@ -439,10 +424,7 @@ export default function WcWaiver() {
 
             {/* ── Section 4: Certification & Signature ─────────────── */}
             <Section title="Certification & Electronic Signature">
-              <p
-                className="text-sm mb-4"
-                style={{ color: "var(--text-subtle)" }}
-              >
+              <p className="text-sm mb-4 subtle-text">
                 I certify that the information provided above is true and
                 correct. I understand that providing false information may
                 result in termination of my contract and may subject me to
@@ -465,7 +447,7 @@ export default function WcWaiver() {
                     className="mt-1 shrink-0"
                     style={{ accentColor: "var(--green)" }}
                   />
-                  <span className="text-sm" style={{ color: "var(--purple)" }}>
+                  <span className="text-sm purple-text">
                     By typing my name above and checking this box, I agree that
                     my typed name constitutes my legally binding electronic
                     signature on this document, and I consent to conducting this
@@ -480,10 +462,7 @@ export default function WcWaiver() {
                 )}
               </div>
 
-              <p
-                className="mt-4 text-xs"
-                style={{ color: "var(--text-subtle)" }}
-              >
+              <p className="mt-4 text-xs subtle-text">
                 Your IP address and the date/time of submission will be recorded
                 as part of the audit trail for this document.
               </p>
@@ -521,9 +500,8 @@ function Section({
   return (
     <div>
       <h2
-        className="text-base font-semibold mb-4 pb-2"
+        className="text-base font-semibold mb-4 pb-2 purple-text"
         style={{
-          color: "var(--purple)",
           borderBottom: "1px solid var(--foreground)",
         }}
       >
@@ -567,8 +545,7 @@ function Field({
     <div>
       <label
         htmlFor={name}
-        className="block text-sm font-medium mb-1"
-        style={{ color: "var(--purple)" }}
+        className="block text-sm font-medium mb-1 purple-text"
       >
         {label}
         {required && (
@@ -612,7 +589,7 @@ function AckCheckbox({ name, text }: { name: string; text: string }) {
         className="mt-0.5 shrink-0"
         style={{ accentColor: "var(--green)" }}
       />
-      <span className="text-sm" style={{ color: "var(--purple)" }}>
+      <span className="text-sm purple-text">
         {text}
       </span>
     </label>
@@ -645,16 +622,12 @@ function SuccessScreen({ pdfUrl }: { pdfUrl: string }) {
         </svg>
       </div>
 
-      <h1
-        className="text-2xl font-bold mb-2"
-        style={{ color: "var(--purple)" }}
-      >
+      <h1 className="text-2xl font-bold mb-2 purple-text">
         Waiver Signed Successfully
       </h1>
       <p
-        className="mb-6 text-sm"
+        className="mb-6 text-sm subtle-text"
         style={{
-          color: "var(--text-subtle)",
           maxWidth: 420,
           margin: "0 auto 24px",
         }}
@@ -687,7 +660,7 @@ function SuccessScreen({ pdfUrl }: { pdfUrl: string }) {
         Download Signed PDF
       </a>
 
-      <p className="mt-6 text-xs" style={{ color: "var(--text-subtle)" }}>
+      <p className="mt-6 text-xs subtle-text">
         This document was electronically signed in accordance with the ESIGN Act
         and UETA.
       </p>
