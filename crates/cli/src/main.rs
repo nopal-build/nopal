@@ -3,9 +3,11 @@ use jiff;
 use std::fs::File;
 use std::io::Write;
 use std::io::{self, Read};
+use std::path::PathBuf;
 use std::time::Duration;
 
 mod auth;
+mod video;
 
 const DEFAULT_HOST: &str = "https://nopal.build";
 
@@ -26,6 +28,37 @@ enum Command {
     Logout {},
     /// Show who the CLI is currently logged in as.
     Whoami {},
+    /// Utilities for working with video files (compression, etc). Uploading
+    /// lives under its own separate command.
+    Video {
+        #[command(subcommand)]
+        command: VideoCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum VideoCommand {
+    /// Compress a video (e.g. a screen recording) into a smaller,
+    /// web-friendly H.264 mp4 — a local-only step, run before uploading.
+    Prep {
+        /// Path to the source video.
+        input: PathBuf,
+        /// Output path. Defaults to `<input>.web.mp4` alongside the source.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// H.264 quality (lower = better quality, larger file). Typical range 18-28.
+        #[arg(long, default_value_t = 23)]
+        crf: u8,
+        /// Cap the output height, preserving aspect ratio; never upscales.
+        #[arg(long, default_value_t = 1080)]
+        max_height: u32,
+        /// ffmpeg encoding speed/efficiency tradeoff (e.g. fast, medium, slow).
+        #[arg(long, default_value = "medium")]
+        preset: String,
+        /// Overwrite the output file if it already exists.
+        #[arg(long)]
+        overwrite: bool,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -66,6 +99,28 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Command::Video { command } => match command {
+            VideoCommand::Prep {
+                input,
+                output,
+                crf,
+                max_height,
+                preset,
+                overwrite,
+            } => {
+                let opts = video::PrepOptions {
+                    output,
+                    crf,
+                    max_height,
+                    preset,
+                    overwrite,
+                };
+                if let Err(e) = video::prep(&input, opts) {
+                    eprintln!("video prep failed: {e}");
+                    std::process::exit(1);
+                }
+            }
+        },
     }
 }
 
