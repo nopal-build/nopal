@@ -1,4 +1,4 @@
-.PHONY: dev seed migrate down reset clean deploy restart cli
+.PHONY: dev seed migrate down reset clean deploy restart cli release-cli
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -63,3 +63,28 @@ clean:
 ## without the ARGS="..." quoting.
 cli:
 	./bin/nopal $(ARGS)
+
+# ── nopal CLI releases ────────────────────────────────────────────────────────────────
+
+## Tag and push a new nopal CLI release. First bump `version` in
+## crates/cli/Cargo.toml and commit that, then run `make release-cli` —
+## it reads the version from there, sanity-checks the dist config with
+## `dist plan`, then tags (nopal-vX.Y.Z) and pushes, which triggers
+## .github/workflows/release.yml to build and publish to GitHub Releases.
+release-cli:
+	@command -v dist >/dev/null 2>&1 || { echo "'dist' not found — install with: brew install axodotdev/tap/cargo-dist"; exit 1; }
+	@VERSION=$$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d '"' -f2); \
+	TAG="nopal-v$$VERSION"; \
+	if git rev-parse "$$TAG" >/dev/null 2>&1; then \
+		echo "Tag $$TAG already exists — bump 'version' in crates/cli/Cargo.toml first."; \
+		exit 1; \
+	fi; \
+	echo "Validating dist config for $$TAG..."; \
+	dist plan --tag="$$TAG" || exit 1; \
+	echo ""; \
+	echo "Tagging and pushing $$TAG..."; \
+	git tag "$$TAG" && git push origin "$$TAG"; \
+	echo ""; \
+	echo "  ✓ Pushed $$TAG — GitHub Actions will build and publish the release."; \
+	echo "    Watch:   gh run list --workflow=Release --limit 1"; \
+	echo "    Release: https://github.com/gwing33/nopal/releases/tag/$$TAG"
