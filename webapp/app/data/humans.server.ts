@@ -32,6 +32,12 @@ export type Human = Data & {
   inviteToken?: string;
   inviteTokenExpiresAt?: string;
   /**
+   * When the welcome/invite email was last sent (initial invite or a later
+   * resend). Used to throttle resends — see `canResendInvite` in
+   * invites.server.ts.
+   */
+  inviteSentAt?: string;
+  /**
    * Other email addresses that also sign in to this same account — e.g. if
    * someone was invited under a second address that turned out to belong
    * to an existing human.
@@ -109,7 +115,11 @@ export async function setInviteToken(
   inviteToken: string,
   inviteTokenExpiresAt: string,
 ): Promise<void> {
-  await merge("humans", id, { inviteToken, inviteTokenExpiresAt });
+  await merge("humans", id, {
+    inviteToken,
+    inviteTokenExpiresAt,
+    inviteSentAt: new Date().toISOString(),
+  });
 }
 
 export async function getHumanByInviteToken(

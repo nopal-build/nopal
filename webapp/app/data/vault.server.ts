@@ -246,6 +246,39 @@ async function getAllNestedFolderIds(parentId: string): Promise<string[]> {
   return ids;
 }
 
+/** Strip `removedHumanId` out of every folder `ownerId` owns that lists it in `shared_with`. */
+async function unshareFolderFromHuman(
+  ownerId: string,
+  removedHumanId: string,
+): Promise<void> {
+  const folders = await getFoldersByHuman(ownerId);
+  for (const folder of folders) {
+    if (
+      Array.isArray(folder.shared_with) &&
+      folder.shared_with.includes(removedHumanId)
+    ) {
+      await updateVaultFolder(folder._id, {
+        shared_with: folder.shared_with.filter((id) => id !== removedHumanId),
+      });
+    }
+  }
+}
+
+/**
+ * Clean up any direct folder sharing between two humans (in either
+ * direction) — used when the relationship that granted them visibility into
+ * each other is removed. Folders shared with `"everyone"` are left alone,
+ * since that's a blanket setting rather than something tied to this
+ * specific relationship.
+ */
+export async function removeFolderSharingBetweenHumans(
+  humanAId: string,
+  humanBId: string,
+): Promise<void> {
+  await unshareFolderFromHuman(humanAId, humanBId);
+  await unshareFolderFromHuman(humanBId, humanAId);
+}
+
 /**
  * Find an existing folder matching (humanId + name + parentFolderId) or create it.
  * Useful for auto-provisioning the daily-logs folder tree.

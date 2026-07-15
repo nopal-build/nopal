@@ -7,13 +7,18 @@ import {
   useActionData,
   useLoaderData,
   useRevalidator,
+  useFetcher,
   Form,
   Link,
 } from "react-router";
-import { startRegistration, startAuthentication } from "@simplewebauthn/browser";
+import {
+  startRegistration,
+  startAuthentication,
+} from "@simplewebauthn/browser";
 import { getUser, updateUserSession } from "../modules/auth/auth.server";
 import {
   getHumanByEmail,
+  getHumanById,
   updateHumanName,
   isEmailTakenByAnotherHuman,
   startEmailChange,
@@ -29,9 +34,16 @@ import { ConfirmEmail } from "../emails/confirmEmail";
 import { EmailChangeNotice } from "../emails/emailChangeNotice";
 import {
   createRelationship,
+  revokeRelationship,
+  relationshipExists,
   getRelatedHumans,
+  getRelationshipsForHuman,
 } from "../data/relationships.server";
-import { inviteHuman } from "../data/invites.server";
+import {
+  inviteHuman,
+  canResendInvite,
+  resendInvite,
+} from "../data/invites.server";
 import {
   getLegalDocumentsByEmail,
   type LegalDocumentRecord,
@@ -61,14 +73,36 @@ function isAdminOrSuper(user: Human): boolean {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  const [waivers, relatedHumans, passkeys] = await Promise.all([
+  const [waivers, relatedHumans, passkeys, relationships] = await Promise.all([
     getLegalDocumentsByEmail(user.email),
     getRelatedHumans(user),
     getPasskeysByHuman(user._id),
+    getRelationshipsForHuman(user._id),
   ]);
+
+  // Revoked relationships are excluded from `relatedHumans` for regular
+  // Human accounts, but Admins/Supers see *everyone* regardless of
+  // relationship state — so without this, revoking someone from an
+  // admin account would look like it did nothing. Map otherHumanId ->
+  // whoever revoked it, so the UI can show a distinct "Revoked" state
+  // instead of rendering the row as if nothing had ever happened.
+  const revokedRelationships: Record<string, string> = {};
+  for (const r of relationships) {
+    if (!r.revokedAt || !r.revokedBy) continue;
+    const otherId = r.humanAId === user._id ? r.humanBId : r.humanAId;
+    revokedRelationships[otherId] = r.revokedBy;
+  }
+
   const url = new URL(request.url);
   const inviteExpired = url.searchParams.get("inviteExpired") === "1";
-  return { user, waivers, relatedHumans, passkeys, inviteExpired };
+  return {
+    user,
+    waivers,
+    relatedHumans,
+    passkeys,
+    inviteExpired,
+    revokedRelationships,
+  };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -172,7 +206,11 @@ async function handleRequestEmailChange(request: Request, form: FormData) {
 
   const setCookie = await updateUserSession(request, started.human);
   return data(
-    { intent: "request-email-change" as const, success: true, human: started.human },
+    {
+      intent: "request-email-change" as const,
+      success: true,
+      human: started.human,
+    },
     { headers: { "Set-Cookie": setCookie } },
   );
 }
@@ -329,14 +367,24 @@ async function handleAddRelationship(request: Request, form: FormData) {
   const existing = await getHumanByEmail(email);
 
   if (existing) {
-    const created = await createRelationship(user._id, existing._id, user._id);
-    if (!created) {
+    const result = await createRelationship(user._id, existing._id, user._id);
+    if (result.status === "already-related") {
       return data(
         {
           intent: "add-relationship" as const,
           error: "You already have a relationship with that human.",
         },
         { status: 400 },
+      );
+    }
+    if (result.status === "revoked-by-other") {
+      return data(
+        {
+          intent: "add-relationship" as const,
+          error:
+            "This relationship was revoked. Only the person who revoked it can reconnect.",
+        },
+        { status: 403 },
       );
     }
     return data({
@@ -385,6 +433,132 @@ async function handleAddRelationship(request: Request, form: FormData) {
   });
 }
 
+async function handleResendInvite(request: Request, form: FormData) {
+  const user = await getUser(request);
+  if (!user) return redirect("/login");
+
+  const humanId = String(form.get("humanId") ?? "");
+  if (!humanId) {
+    return data(
+      { intent: "resend-invite" as const, error: "Missing human id.", humanId },
+      { status: 400 },
+    );
+  }
+
+  if (!isAdminOrSuper(user) && !(await relationshipExists(user._id, humanId))) {
+    return data(
+      {
+        intent: "resend-invite" as const,
+        error: "That person could not be found.",
+        humanId,
+      },
+      { status: 404 },
+    );
+  }
+
+  const target = await getHumanById(humanId);
+  if (!target) {
+    return data(
+      {
+        intent: "resend-invite" as const,
+        error: "That person could not be found.",
+        humanId,
+      },
+      { status: 404 },
+    );
+  }
+
+  if (!canResendInvite(target)) {
+    return data(
+      {
+        intent: "resend-invite" as const,
+        error:
+          "An invite was just sent \u2014 please wait a minute before resending.",
+        humanId,
+      },
+      { status: 429 },
+    );
+  }
+
+  const resent = await resendInvite(target, request);
+  if (!resent) {
+    return data(
+      {
+        intent: "resend-invite" as const,
+        error: "Failed to resend the invite.",
+        humanId,
+      },
+      { status: 500 },
+    );
+  }
+
+  return data({
+    intent: "resend-invite" as const,
+    success: true,
+    name: resent.name,
+    humanId,
+  });
+}
+
+async function handleRevokeRelationship(request: Request, form: FormData) {
+  const user = await getUser(request);
+  if (!user) return redirect("/login");
+
+  const humanId = String(form.get("humanId") ?? "");
+  if (!humanId || humanId === user._id) {
+    return data(
+      {
+        intent: "revoke-relationship" as const,
+        error: "Invalid request.",
+        humanId,
+      },
+      { status: 400 },
+    );
+  }
+
+  await revokeRelationship(user._id, humanId, user._id);
+  return data({
+    intent: "revoke-relationship" as const,
+    success: true,
+    humanId,
+  });
+}
+
+async function handleRekindleRelationship(request: Request, form: FormData) {
+  const user = await getUser(request);
+  if (!user) return redirect("/login");
+
+  const humanId = String(form.get("humanId") ?? "");
+  if (!humanId || humanId === user._id) {
+    return data(
+      {
+        intent: "rekindle-relationship" as const,
+        error: "Invalid request.",
+        humanId,
+      },
+      { status: 400 },
+    );
+  }
+
+  const result = await createRelationship(user._id, humanId, user._id);
+  if (result.status === "revoked-by-other") {
+    return data(
+      {
+        intent: "rekindle-relationship" as const,
+        error: "Only the person who revoked this relationship can reconnect.",
+        humanId,
+      },
+      { status: 403 },
+    );
+  }
+
+  return data({
+    intent: "rekindle-relationship" as const,
+    success: true,
+    humanId,
+  });
+}
+
 async function handleDeletePasskey(request: Request, form: FormData) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
@@ -415,6 +589,15 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === "add-relationship") {
     return handleAddRelationship(request, form);
+  }
+  if (intent === "resend-invite") {
+    return handleResendInvite(request, form);
+  }
+  if (intent === "revoke-relationship") {
+    return handleRevokeRelationship(request, form);
+  }
+  if (intent === "rekindle-relationship") {
+    return handleRekindleRelationship(request, form);
   }
   if (intent === "delete-passkey") {
     return handleDeletePasskey(request, form);
@@ -468,26 +651,283 @@ function WaiverCard({ doc }: { doc: LegalDocumentRecord }) {
 
 // ─── Relationships ──────────────────────────────────────────────────────────
 
-function RelationshipCard({ human }: { human: Human }) {
-  const isAutomatic = isAdminOrSuper(human);
+// Mirrors the cooldown in invites.server.ts's `canResendInvite` — used only
+// to disable the button client-side; the server re-validates regardless.
+const INVITE_RESEND_COOLDOWN_MS = 60 * 1000;
+
+function hasPendingInvite(human: Human): boolean {
+  return Boolean(human.inviteToken);
+}
+
+function inviteResendReady(human: Human): boolean {
+  if (!human.inviteSentAt) return true;
   return (
-    <div className="good-box p-3 flex items-center justify-between gap-4">
-      <div className="text-sm">
+    Date.now() - new Date(human.inviteSentAt).getTime() >=
+    INVITE_RESEND_COOLDOWN_MS
+  );
+}
+
+function RelationshipCard({
+  human,
+  viewerId,
+  revokedBy,
+  background,
+}: {
+  human: Human;
+  /** The logged-in user's own id — used to tell "you revoked them" apart from "they revoked you". */
+  viewerId: string;
+  /** If this pair has a revoked relationship, the id of whoever revoked it. */
+  revokedBy?: string;
+  /** Overrides `.good-box`'s default background — e.g. white cards inside a colored container. */
+  background?: string;
+}) {
+  const isAutomatic = isAdminOrSuper(human);
+  const revoked = Boolean(revokedBy);
+  const revokedByViewer = revokedBy === viewerId;
+  const pendingInvite = !isAutomatic && !revoked && hasPendingInvite(human);
+  const resendReady = inviteResendReady(human);
+  const [confirmRevokeOpen, setConfirmRevokeOpen] = useState(false);
+
+  // A dedicated fetcher (rather than a nested <Form>) — this card can be
+  // rendered inside the Relationships section's own outer <Form> (for the
+  // "add by email" flow), and nested <form> elements are invalid HTML that
+  // browsers silently "fix" by misrouting the submission.
+  const resendFetcher = useFetcher<typeof action>();
+  const resendData =
+    resendFetcher.data?.intent === "resend-invite"
+      ? resendFetcher.data
+      : undefined;
+  const resending = resendFetcher.state !== "idle";
+
+  function submitResend() {
+    resendFetcher.submit(
+      { intent: "resend-invite", humanId: human._id },
+      { method: "post" },
+    );
+  }
+
+  // A dedicated fetcher (rather than a nested <Form>) so the revoke submit
+  // button inside the modal doesn't depend on a native form-submit event
+  // bubbling correctly through the modal's own click-handling; it's also
+  // scoped to this card, so its result never needs matching up by id.
+  const revokeFetcher = useFetcher<typeof action>();
+  const revokeData =
+    revokeFetcher.data?.intent === "revoke-relationship"
+      ? revokeFetcher.data
+      : undefined;
+  const revoking = revokeFetcher.state !== "idle";
+  const { revalidate } = useRevalidator();
+
+  useEffect(() => {
+    if (revokeData && "success" in revokeData) {
+      setConfirmRevokeOpen(false);
+      // Fetcher submissions revalidate loaders automatically in most cases,
+      // but force it explicitly so the revoked human reliably disappears
+      // from `relatedHumans` without depending on that default behavior.
+      revalidate();
+    }
+  }, [revokeData, revalidate]);
+
+  function submitRevoke() {
+    revokeFetcher.submit(
+      { intent: "revoke-relationship", humanId: human._id },
+      { method: "post" },
+    );
+  }
+
+  // Lets whoever revoked a relationship reconnect with a single click,
+  // right from the row — rather than having to retype the person's email
+  // into the "Add relationship" form below.
+  const rekindleFetcher = useFetcher<typeof action>();
+  const rekindleData =
+    rekindleFetcher.data?.intent === "rekindle-relationship"
+      ? rekindleFetcher.data
+      : undefined;
+  const rekindling = rekindleFetcher.state !== "idle";
+
+  useEffect(() => {
+    if (rekindleData && "success" in rekindleData) revalidate();
+  }, [rekindleData, revalidate]);
+
+  function submitRekindle() {
+    rekindleFetcher.submit(
+      { intent: "rekindle-relationship", humanId: human._id },
+      { method: "post" },
+    );
+  }
+
+  return (
+    <div
+      className="good-box p-3 flex items-center justify-between gap-4"
+      style={background ? { background } : undefined}
+    >
+      <div
+        className="text-sm"
+        style={revoked ? { opacity: 0.5, filter: "grayscale(0.6)" } : undefined}
+      >
         <div className="font-bold">{human.name}</div>
         <div style={{ color: "var(--text-subtle)" }}>{human.email}</div>
+        {resendData && "error" in resendData && (
+          <div className="red-text">{resendData.error}</div>
+        )}
+        {resendData && "success" in resendData && (
+          <div style={{ color: "var(--green)" }}>Invite resent.</div>
+        )}
+        {rekindleData && "error" in rekindleData && (
+          <div className="red-text">{rekindleData.error}</div>
+        )}
       </div>
-      {isAutomatic && (
-        <span
-          className="text-xs px-2 py-0.5 rounded-full shrink-0"
-          style={{
-            background: "var(--farground)",
-            border: "1px solid var(--midground)",
-            color: "var(--text-subtle)",
-          }}
-        >
-          {human.role}
-        </span>
-      )}
+      <div className="flex items-center gap-3 shrink-0">
+        {isAutomatic && (
+          <span
+            className="text-xs px-2 py-0.5 rounded-full"
+            style={{
+              background: "var(--farground)",
+              border: "1px solid var(--midground)",
+              color: "var(--text-subtle)",
+            }}
+          >
+            {human.role}
+          </span>
+        )}
+
+        {pendingInvite && (
+          <>
+            <span
+              className="text-xs px-2 py-0.5 rounded-full"
+              style={{
+                background: "var(--farground)",
+                border: "1px solid var(--midground)",
+                color: "var(--text-subtle)",
+              }}
+            >
+              Invited
+            </span>
+            <button
+              type="button"
+              disabled={!resendReady || resending}
+              className="text-sm font-mono purple-light-text"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: resendReady && !resending ? "pointer" : "default",
+                padding: 0,
+                opacity: resendReady && !resending ? 1 : 0.5,
+              }}
+              title={
+                resendReady
+                  ? undefined
+                  : "An invite was sent recently — try again shortly."
+              }
+              onClick={submitResend}
+            >
+              {resending ? "Resending…" : "Resend"}
+            </button>
+          </>
+        )}
+
+        {revoked && (
+          <>
+            <span
+              className="text-xs px-2 py-0.5 rounded-full"
+              style={{
+                background: "var(--farground)",
+                border: "1px solid var(--red)",
+                color: "var(--red)",
+                opacity: 0.5,
+                filter: "grayscale(0.6)",
+              }}
+              title={
+                revokedByViewer
+                  ? "You revoked this relationship."
+                  : `${human.name} revoked this relationship — only they can reconnect.`
+              }
+            >
+              {revokedByViewer ? "Revoked" : "Revoked by them"}
+            </span>
+            {revokedByViewer && (
+              <button
+                type="button"
+                disabled={rekindling}
+                className="text-sm font-mono green-text"
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: rekindling ? "default" : "pointer",
+                  padding: 0,
+                  opacity: rekindling ? 0.5 : 1,
+                }}
+                onClick={submitRekindle}
+              >
+                {rekindling ? "Re-kindling…" : "Re-kindle"}
+              </button>
+            )}
+          </>
+        )}
+
+        {!isAutomatic && !revoked && (
+          <>
+            <button
+              type="button"
+              className="text-sm font-mono red-text"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: 0,
+              }}
+              onClick={() => setConfirmRevokeOpen(true)}
+            >
+              Revoke
+            </button>
+
+            <Modal
+              open={confirmRevokeOpen}
+              onClose={() => setConfirmRevokeOpen(false)}
+              title="Revoke relationship"
+            >
+              <div className="flex flex-col gap-4">
+                <p className="text-sm">
+                  Revoke your relationship with <strong>{human.name}</strong>?
+                </p>
+                <p className="text-sm">
+                  This immediately unshares any vault folders you two have
+                  shared with each other. This cannot be undone.
+                </p>
+                <p className="text-sm">
+                  Additionally, neither you nor {human.name} will be able to
+                  share folders with each other in the future, and only you will
+                  be able to re-kindle the relationship.
+                </p>
+                {revokeData && "error" in revokeData && (
+                  <div className="red-text text-sm">{revokeData.error}</div>
+                )}
+                <div className="flex items-center justify-end gap-4">
+                  <button
+                    type="button"
+                    className="link text-sm"
+                    disabled={revoking}
+                    onClick={() => setConfirmRevokeOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={revoking}
+                    style={
+                      { "--btn-color": "var(--red)" } as React.CSSProperties
+                    }
+                    onClick={submitRevoke}
+                  >
+                    {revoking ? "Revoking…" : "Revoke"}
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -520,7 +960,12 @@ function PasskeyCard({ passkey }: { passkey: Passkey }) {
         <button
           type="submit"
           className="text-sm font-mono red-text shrink-0"
-          style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+          }}
         >
           Remove
         </button>
@@ -529,11 +974,52 @@ function PasskeyCard({ passkey }: { passkey: Passkey }) {
   );
 }
 
+const PROFILE_SECTIONS = [
+  { id: "basic", label: "Basic" },
+  { id: "relationships", label: "Relationships" },
+  { id: "security", label: "Security" },
+  { id: "waivers", label: "Waivers" },
+] as const;
+
 export default function Profile() {
-  const { user, waivers, relatedHumans, passkeys, inviteExpired } =
-    useLoaderData<typeof loader>();
+  const {
+    user,
+    waivers,
+    relatedHumans,
+    passkeys,
+    inviteExpired,
+    revokedRelationships,
+  } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const { revalidate } = useRevalidator();
+
+  // The relationships email input does double duty: it filters the visible
+  // cards live as you type, and doubles as the "add relationship" field —
+  // submitting it adds/invites whatever email is currently typed. The
+  // search runs across the whole list (active + revoked) rather than
+  // treating revoked ones as a separate, unsearchable group — they just
+  // always sort to the end, under their own heading.
+  const [emailQuery, setEmailQuery] = useState("");
+  const normalizedEmailQuery = emailQuery.trim().toLowerCase();
+  const filteredRelatedHumans = normalizedEmailQuery
+    ? relatedHumans.filter((human) =>
+        human.email.toLowerCase().includes(normalizedEmailQuery),
+      )
+    : relatedHumans;
+  const filteredActiveRelatedHumans = filteredRelatedHumans.filter(
+    (human) => !revokedRelationships[human._id],
+  );
+  const filteredRevokedRelatedHumans = filteredRelatedHumans.filter(
+    (human) => revokedRelationships[human._id],
+  );
+  const emailQueryLooksValid = EMAIL_RE.test(emailQuery.trim());
+  // A valid, typed-out email with no existing relationship for it at all —
+  // show an "Add" card in place of the (empty) results instead of just a
+  // dead end.
+  const emailQueryHasNoMatch = !relatedHumans.some(
+    (human) => human.email.toLowerCase() === normalizedEmailQuery,
+  );
+  const showAddCard = emailQueryLooksValid && emailQueryHasNoMatch;
 
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
@@ -617,7 +1103,9 @@ export default function Profile() {
       });
       const options = await optionsRes.json();
       if (!optionsRes.ok) {
-        throw new Error(options.error ?? "Failed to start passkey registration.");
+        throw new Error(
+          options.error ?? "Failed to start passkey registration.",
+        );
       }
 
       const registrationResponse = await startRegistration({
@@ -626,7 +1114,7 @@ export default function Profile() {
 
       const name =
         window.prompt(
-          "Name this passkey (e.g. \"MacBook\" or \"iPhone\")",
+          'Name this passkey (e.g. "MacBook" or "iPhone")',
           "Passkey",
         ) || "Passkey";
 
@@ -697,27 +1185,69 @@ export default function Profile() {
     (account) => account.email.toLowerCase() !== user.email.toLowerCase(),
   );
 
+  const [activeSection, setActiveSection] =
+    useState<(typeof PROFILE_SECTIONS)[number]["id"]>("basic");
+
+  // Scroll-spy: highlight whichever section header is currently nearest the
+  // top of the viewport. The shrunk "effective viewport" (via rootMargin)
+  // means a section only counts once it's scrolled up near the top, rather
+  // than as soon as any sliver of it appears at the bottom.
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible.length > 0) {
+          setActiveSection(
+            visible[0].target.id as (typeof PROFILE_SECTIONS)[number]["id"],
+          );
+        }
+      },
+      { rootMargin: "-15% 0px -70% 0px", threshold: 0 },
+    );
+
+    const elements = PROFILE_SECTIONS.map((section) =>
+      document.getElementById(section.id),
+    ).filter((el): el is HTMLElement => el !== null);
+    elements.forEach((el) => observer.observe(el));
+
+    return () => observer.disconnect();
+  }, []);
+
+  function scrollToSection(id: string) {
+    document.getElementById(id)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
   return (
     <AppLayout>
-      <div className="container mx-auto px-4 py-12" style={{ maxWidth: "480px" }}>
-        <div className="flex items-center justify-between gap-2">
-          <h1 className="font-bold text-2xl mb-1">Personal Profile</h1>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className="link text-sm"
-              onClick={() => setSwitchModalOpen(true)}
-            >
-              Switch account
-            </button>
-            <Link to="/logout" className="link text-sm">
-              Log out
-            </Link>
-          </div>
-        </div>
-        <p className="text-sm mb-8" style={{ color: "var(--text-subtle)" }}>
+      <div
+        className="container mx-auto px-4 pt-12 pb-[200px]"
+        style={{ maxWidth: "1100px" }}
+      >
+        <h1 className="font-bold text-2xl mb-1">Personal Profile</h1>
+        <p className="text-sm mb-4" style={{ color: "var(--text-subtle)" }}>
           Manage your name, email, and logins.
         </p>
+
+        {/* Switch account / Logout live together in the section nav on md+
+            screens; that nav is hidden on small screens so the content can
+            use the full width, so they need a fallback here on mobile. */}
+        <div className="flex items-center gap-4 mb-6 md:hidden">
+          <button
+            type="button"
+            className="link text-sm"
+            onClick={() => setSwitchModalOpen(true)}
+          >
+            Switch account
+          </button>
+          <Link to="/logout" className="link text-sm">
+            Logout
+          </Link>
+        </div>
 
         <Modal
           open={switchModalOpen}
@@ -813,373 +1343,619 @@ export default function Profile() {
           </div>
         )}
 
-        {/* ── Name ───────────────────────────────────────────────────────── */}
-        <div className="good-box p-4 flex flex-col gap-2">
-          <label className="purple-text font-bold text-sm">Name</label>
-          {editingName ? (
-            <Form method="post" className="flex items-center gap-2">
-              <input type="hidden" name="intent" value="update-name" />
-              <div className="flex-1">
-                <Input
-                  label="Name"
-                  hideLabel
-                  name="name"
-                  defaultValue={displayUser.name}
-                  required
-                  autoFocus
-                />
-              </div>
-              <button className="btn-secondary" type="submit">
-                Save
-              </button>
-              <button
-                className="link"
-                type="button"
-                onClick={() => setEditingName(false)}
-              >
-                Cancel
-              </button>
-            </Form>
-          ) : (
-            <div className="flex items-center justify-between gap-2">
-              <span>{displayUser.name}</span>
-              <button
-                className="link text-sm"
-                type="button"
-                onClick={() => setEditingName(true)}
-              >
-                Edit
-              </button>
-            </div>
-          )}
-          {nameResult && "error" in nameResult && (
-            <div className="red-text text-sm">{nameResult.error}</div>
-          )}
-        </div>
+        <div className="flex flex-col md:flex-row gap-8 items-start">
+          <div className="flex-1 min-w-0 flex flex-col gap-10">
+            {/* ── Basic ────────────────────────────────────────────────────── */}
+            <section id="basic" className="flex flex-col gap-4">
+              <h2 className="font-bold text-lg">Basic</h2>
 
-        {/* ── Email ──────────────────────────────────────────────────────── */}
-        <div className="good-box p-4 flex flex-col gap-3 mt-4">
-          <label className="purple-text font-bold text-sm">Email</label>
-
-          {displayUser.pendingEmail ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-sm" style={{ color: "var(--text-subtle)" }}>
-                We sent a code to <strong>{displayUser.pendingEmail}</strong>.
-                Enter it below to{" "}
-                {displayUser.pendingEmailType === "primary"
-                  ? "make it your primary email"
-                  : "add it as a login"}
-                .
-              </p>
-              <Form method="post" className="flex items-center gap-2">
-                <input type="hidden" name="intent" value="verify-email-change" />
-                <div className="flex-1">
-                  <Input
-                    label="Verification code"
-                    hideLabel
-                    name="code"
-                    required
-                    autoFocus
-                    placeholder="123456"
-                  />
-                </div>
-                <button className="btn-secondary" type="submit">
-                  Confirm
-                </button>
-              </Form>
-              <div className="flex items-center gap-4 text-sm">
-                <Form method="post">
-                  <input type="hidden" name="intent" value="request-email-change" />
-                  <input type="hidden" name="email" value={displayUser.pendingEmail} />
-                  <input
-                    type="hidden"
-                    name="mode"
-                    value={displayUser.pendingEmailType}
-                  />
-                  <button className="link" type="submit">
-                    Resend code
-                  </button>
-                </Form>
-                <Form method="post">
-                  <input type="hidden" name="intent" value="cancel-email-change" />
-                  <button className="link" type="submit">
-                    Cancel
-                  </button>
-                </Form>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-2">
-                <span>{displayUser.email}</span>
-                <button
-                  className="link text-sm"
-                  type="button"
-                  onClick={() => setEditingPrimaryEmail((v) => !v)}
-                >
-                  Edit
-                </button>
-              </div>
-              {editingPrimaryEmail && (
-                <Form method="post" className="flex items-center gap-2">
-                  <input type="hidden" name="intent" value="request-email-change" />
-                  <input type="hidden" name="mode" value="primary" />
-                  <div className="flex-1">
-                    <Input
-                      label="New email"
-                      hideLabel
-                      name="email"
-                      required
-                      autoFocus
-                      placeholder="new@email.com"
-                    />
-                  </div>
-                  <button className="btn-secondary" type="submit">
-                    Send code
-                  </button>
-                  <button
-                    className="link"
-                    type="button"
-                    onClick={() => setEditingPrimaryEmail(false)}
-                  >
-                    Cancel
-                  </button>
-                </Form>
-              )}
-            </>
-          )}
-
-          {emailResult && "error" in emailResult && (
-            <div className="red-text text-sm">{emailResult.error}</div>
-          )}
-
-          {!displayUser.pendingEmail &&
-            (displayUser.aliasEmails ?? []).length > 0 && (
-              <div className="flex flex-col gap-2">
-                <div className="text-sm font-bold purple-text">
-                  Also signs in with
-                </div>
-                {(displayUser.aliasEmails ?? []).map((aliasEmail) => (
-                  <div
-                    key={aliasEmail}
-                    className="good-box p-2 flex items-center justify-between gap-2 text-sm"
-                  >
-                    <span>{aliasEmail}</span>
-                    <Form
-                      method="post"
-                      onSubmit={(e) => {
-                        if (
-                          !window.confirm(
-                            `Remove ${aliasEmail}? It will no longer sign in to this account.`,
-                          )
-                        ) {
-                          e.preventDefault();
-                        }
-                      }}
-                    >
-                      <input type="hidden" name="intent" value="remove-alias" />
-                      <input type="hidden" name="aliasEmail" value={aliasEmail} />
+              <div className="good-box p-4 flex flex-col gap-4">
+                {/* ── Name ─────────────────────────────────────────────── */}
+                <div className="flex flex-col gap-2">
+                  <label className="purple-text font-bold text-sm">Name</label>
+                  {editingName ? (
+                    <Form method="post" className="flex items-center gap-2">
+                      <input type="hidden" name="intent" value="update-name" />
+                      <div className="flex-1">
+                        <Input
+                          label="Name"
+                          hideLabel
+                          name="name"
+                          defaultValue={displayUser.name}
+                          required
+                          autoFocus
+                        />
+                      </div>
+                      <button className="btn-secondary" type="submit">
+                        Save
+                      </button>
                       <button
-                        type="submit"
-                        className="text-sm font-mono red-text shrink-0"
-                        style={{
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          padding: 0,
-                        }}
+                        className="link"
+                        type="button"
+                        onClick={() => setEditingName(false)}
                       >
-                        Remove
+                        Cancel
                       </button>
                     </Form>
-                  </div>
-                ))}
-              </div>
-            )}
-
-          {!displayUser.pendingEmail &&
-            (addingAlias ? (
-              <Form method="post" className="flex items-center gap-2">
-                <input type="hidden" name="intent" value="request-email-change" />
-                <input type="hidden" name="mode" value="alias" />
-                <div className="flex-1">
-                  <Input
-                    label="Alias email"
-                    hideLabel
-                    name="email"
-                    required
-                    autoFocus
-                    placeholder="alias@email.com"
-                  />
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span>{displayUser.name}</span>
+                      <button
+                        className="link text-sm"
+                        type="button"
+                        onClick={() => setEditingName(true)}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  )}
+                  {nameResult && "error" in nameResult && (
+                    <div className="red-text text-sm">{nameResult.error}</div>
+                  )}
                 </div>
-                <button className="btn-secondary" type="submit">
-                  Send code
-                </button>
-                <button
-                  className="link"
-                  type="button"
-                  onClick={() => setAddingAlias(false)}
+
+                <hr style={{ borderColor: "currentColor", opacity: 0.12 }} />
+
+                {/* ── Email ─────────────────────────────────────────── */}
+                <div className="flex flex-col gap-3">
+                  <label className="purple-text font-bold text-sm">Email</label>
+
+                  {displayUser.pendingEmail ? (
+                    <div className="flex flex-col gap-2">
+                      <p
+                        className="text-sm"
+                        style={{ color: "var(--text-subtle)" }}
+                      >
+                        We sent a code to{" "}
+                        <strong>{displayUser.pendingEmail}</strong>. Enter it
+                        below to{" "}
+                        {displayUser.pendingEmailType === "primary"
+                          ? "make it your primary email"
+                          : "add it as a login"}
+                        .
+                      </p>
+                      <Form method="post" className="flex items-center gap-2">
+                        <input
+                          type="hidden"
+                          name="intent"
+                          value="verify-email-change"
+                        />
+                        <div className="flex-1">
+                          <Input
+                            label="Verification code"
+                            hideLabel
+                            name="code"
+                            required
+                            autoFocus
+                            placeholder="123456"
+                          />
+                        </div>
+                        <button className="btn-secondary" type="submit">
+                          Confirm
+                        </button>
+                      </Form>
+                      <div className="flex items-center gap-4 text-sm">
+                        <Form method="post">
+                          <input
+                            type="hidden"
+                            name="intent"
+                            value="request-email-change"
+                          />
+                          <input
+                            type="hidden"
+                            name="email"
+                            value={displayUser.pendingEmail}
+                          />
+                          <input
+                            type="hidden"
+                            name="mode"
+                            value={displayUser.pendingEmailType}
+                          />
+                          <button className="link" type="submit">
+                            Resend code
+                          </button>
+                        </Form>
+                        <Form method="post">
+                          <input
+                            type="hidden"
+                            name="intent"
+                            value="cancel-email-change"
+                          />
+                          <button className="link" type="submit">
+                            Cancel
+                          </button>
+                        </Form>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span>{displayUser.email}</span>
+                        <button
+                          className="link text-sm"
+                          type="button"
+                          onClick={() => setEditingPrimaryEmail((v) => !v)}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                      {editingPrimaryEmail && (
+                        <Form method="post" className="flex items-center gap-2">
+                          <input
+                            type="hidden"
+                            name="intent"
+                            value="request-email-change"
+                          />
+                          <input type="hidden" name="mode" value="primary" />
+                          <div className="flex-1">
+                            <Input
+                              label="New email"
+                              hideLabel
+                              name="email"
+                              required
+                              autoFocus
+                              placeholder="new@email.com"
+                            />
+                          </div>
+                          <button className="btn-secondary" type="submit">
+                            Send code
+                          </button>
+                          <button
+                            className="link"
+                            type="button"
+                            onClick={() => setEditingPrimaryEmail(false)}
+                          >
+                            Cancel
+                          </button>
+                        </Form>
+                      )}
+                    </>
+                  )}
+
+                  {emailResult && "error" in emailResult && (
+                    <div className="red-text text-sm">{emailResult.error}</div>
+                  )}
+
+                  {!displayUser.pendingEmail &&
+                    (displayUser.aliasEmails ?? []).length > 0 && (
+                      <div className="flex flex-col gap-2">
+                        <div className="text-sm font-bold purple-text">
+                          Also signs in with
+                        </div>
+                        {(displayUser.aliasEmails ?? []).map((aliasEmail) => (
+                          <div
+                            key={aliasEmail}
+                            className="good-box p-2 flex items-center justify-between gap-2 text-sm"
+                          >
+                            <span>{aliasEmail}</span>
+                            <Form
+                              method="post"
+                              onSubmit={(e) => {
+                                if (
+                                  !window.confirm(
+                                    `Remove ${aliasEmail}? It will no longer sign in to this account.`,
+                                  )
+                                ) {
+                                  e.preventDefault();
+                                }
+                              }}
+                            >
+                              <input
+                                type="hidden"
+                                name="intent"
+                                value="remove-alias"
+                              />
+                              <input
+                                type="hidden"
+                                name="aliasEmail"
+                                value={aliasEmail}
+                              />
+                              <button
+                                type="submit"
+                                className="text-sm font-mono red-text shrink-0"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  padding: 0,
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </Form>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                  {!displayUser.pendingEmail &&
+                    (addingAlias ? (
+                      <Form method="post" className="flex items-center gap-2">
+                        <input
+                          type="hidden"
+                          name="intent"
+                          value="request-email-change"
+                        />
+                        <input type="hidden" name="mode" value="alias" />
+                        <div className="flex-1">
+                          <Input
+                            label="Alias email"
+                            hideLabel
+                            name="email"
+                            required
+                            autoFocus
+                            placeholder="alias@email.com"
+                          />
+                        </div>
+                        <button className="btn-secondary" type="submit">
+                          Send code
+                        </button>
+                        <button
+                          className="link"
+                          type="button"
+                          onClick={() => setAddingAlias(false)}
+                        >
+                          Cancel
+                        </button>
+                      </Form>
+                    ) : (
+                      <div>
+                        <button
+                          className="link text-sm"
+                          type="button"
+                          onClick={() => setAddingAlias(true)}
+                        >
+                          + Add alias email
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </section>
+
+            {/* ── Relationships ──────────────────────────────────────── */}
+            <section id="relationships">
+              <h2 className="font-bold text-lg mb-1">Relationships</h2>
+              <p
+                className="text-sm mb-4"
+                style={{ color: "var(--text-subtle)" }}
+              >
+                {isAdminOrSuper(user)
+                  ? "As an Admin/Super, you can see and share vault folders with everyone."
+                  : "Humans you have a relationship with can share vault folders with you, and vice versa. Admins and Supers can always see you."}
+              </p>
+
+              {/* Single visual box: fixed-height scrollable relationship
+                  list on top (active, then revoked), the search/invite
+                  input right below it, separated by a divider. The whole
+                  thing is one <Form> so the "Add" card in the results area
+                  can submit it directly. */}
+              <div className="good-box flex flex-col">
+                <Form
+                  method="post"
+                  key={
+                    relationshipResult
+                      ? JSON.stringify(relationshipResult)
+                      : "new"
+                  }
+                  className="flex flex-col"
                 >
-                  Cancel
-                </button>
-              </Form>
-            ) : (
+                  <input type="hidden" name="intent" value="add-relationship" />
+
+                  <div
+                    className="flex flex-col gap-2 overflow-y-auto p-3"
+                    style={{ height: "380px" }}
+                  >
+                    {showAddCard ? (
+                      needsInviteDetails ? (
+                        <div
+                          className="rounded p-3 flex flex-col gap-3"
+                          style={{
+                            background: "var(--white)",
+                            border: "1px dashed var(--purple-light)",
+                          }}
+                        >
+                          <div
+                            className="text-sm font-bold"
+                            style={{ color: "var(--purple)" }}
+                          >
+                            Add {inviteEmail}
+                          </div>
+                          <Input
+                            label="Name"
+                            name="name"
+                            required
+                            placeholder="Their name"
+                            autoFocus
+                          />
+                          <Input
+                            type="textarea"
+                            label="Invite note (optional)"
+                            name="note"
+                            placeholder="Let them know why you're adding them"
+                          />
+                          <div className="text-right">
+                            <button className="btn-secondary" type="submit">
+                              Send Invite
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="submit"
+                          className="rounded p-3 text-sm text-left"
+                          style={{
+                            background: "var(--white)",
+                            border: "1px dashed var(--purple-light)",
+                            color: "var(--purple)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span className="font-bold">
+                            + Add {emailQuery.trim()}
+                          </span>
+                        </button>
+                      )
+                    ) : filteredActiveRelatedHumans.length === 0 &&
+                      filteredRevokedRelatedHumans.length === 0 ? (
+                      normalizedEmailQuery ? (
+                        <div
+                          className="rounded p-3 text-sm"
+                          style={{
+                            background: "var(--white)",
+                            color: "var(--purple)",
+                            opacity: 0.5,
+                            filter: "grayscale(0.6)",
+                          }}
+                        >
+                          <div className="font-bold">No results</div>
+                          <div>
+                            Keep typing a full email address to invite them.
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className="rounded p-3 text-sm"
+                          style={{
+                            background: "var(--white)",
+                            color: "var(--purple)",
+                          }}
+                        >
+                          No relationships yet.
+                        </div>
+                      )
+                    ) : (
+                      <>
+                        {filteredActiveRelatedHumans.map((human) => (
+                          <RelationshipCard
+                            key={human._id}
+                            human={human}
+                            viewerId={user._id}
+                            revokedBy={revokedRelationships[human._id]}
+                            background="var(--white)"
+                          />
+                        ))}
+
+                        {filteredRevokedRelatedHumans.length > 0 && (
+                          <>
+                            <h3
+                              className="font-bold text-sm mt-2"
+                              style={{ color: "var(--purple)" }}
+                            >
+                              Revoked relationships
+                            </h3>
+                            {filteredRevokedRelatedHumans.map((human) => (
+                              <RelationshipCard
+                                key={human._id}
+                                human={human}
+                                viewerId={user._id}
+                                revokedBy={revokedRelationships[human._id]}
+                                background="var(--white)"
+                              />
+                            ))}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <hr
+                    style={{
+                      borderColor: "currentColor",
+                      opacity: 0.2,
+                      margin: 0,
+                    }}
+                  />
+
+                  <div className="flex flex-col gap-3 p-3">
+                    <div className="relative">
+                      <Input
+                        label="Email"
+                        hideLabel
+                        name="email"
+                        defaultValue={needsInviteDetails ? inviteEmail : ""}
+                        onChange={(e) => setEmailQuery(e.target.value)}
+                        required
+                        placeholder="Search or invite by email"
+                        className="pr-9"
+                      />
+                      <svg
+                        aria-hidden="true"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="absolute pointer-events-none"
+                        style={{
+                          right: "10px",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          color: "var(--text-subtle)",
+                        }}
+                      >
+                        <circle cx="11" cy="11" r="7" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                      </svg>
+                    </div>
+
+                    {relationshipResult && "error" in relationshipResult && (
+                      <div className="red-text text-sm">
+                        {relationshipResult.error}
+                      </div>
+                    )}
+                    {relationshipResult && "success" in relationshipResult && (
+                      <div
+                        className="text-sm"
+                        style={{ color: "var(--green)" }}
+                      >
+                        {relationshipResult.invited
+                          ? `Invited ${relationshipResult.name} and added the relationship.`
+                          : `Added ${relationshipResult.name}.`}
+                      </div>
+                    )}
+                  </div>
+                </Form>
+              </div>
+            </section>
+
+            {/* ── Security (Passkeys) ─────────────────────────────────── */}
+            <section id="security">
+              <h2 className="font-bold text-lg mb-1">Security</h2>
+              <p
+                className="text-sm mb-4"
+                style={{ color: "var(--text-subtle)" }}
+              >
+                Sign in with your device's fingerprint, face, or PIN instead of
+                an email code.
+              </p>
+
+              {passkeys.length === 0 ? (
+                <div
+                  className="good-box p-3 text-sm mb-4"
+                  style={{ color: "var(--text-subtle)" }}
+                >
+                  No passkeys yet.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 mb-4">
+                  {passkeys.map((passkey) => (
+                    <PasskeyCard key={passkey._id} passkey={passkey} />
+                  ))}
+                </div>
+              )}
+
+              {passkeyError && (
+                <div className="red-text text-sm mb-4">{passkeyError}</div>
+              )}
+              {passkeyDeleteResult && "error" in passkeyDeleteResult && (
+                <div className="red-text text-sm mb-4">
+                  {passkeyDeleteResult.error}
+                </div>
+              )}
+
               <div className="text-right">
                 <button
-                  className="link text-sm"
+                  className="btn-secondary"
                   type="button"
-                  onClick={() => setAddingAlias(true)}
+                  disabled={passkeyBusy}
+                  onClick={handleCreatePasskey}
                 >
-                  + Add alias email
+                  {passkeyBusy ? "Creating…" : "+ Create a passkey"}
                 </button>
               </div>
-            ))}
-        </div>
+            </section>
 
-        {/* ── Relationships ─────────────────────────────────────────────── */}
-        <div className="mt-10">
-          <h2 className="font-bold text-lg mb-1">Relationships</h2>
-          <p className="text-sm mb-4" style={{ color: "var(--text-subtle)" }}>
-            {isAdminOrSuper(user)
-              ? "As an Admin/Super, you can see and share vault folders with everyone."
-              : "Humans you have a relationship with can share vault folders with you, and vice versa. Admins and Supers can always see you."}
-          </p>
+            {/* ── Waivers ─────────────────────────────────────────────────── */}
+            <section id="waivers">
+              <h2 className="font-bold text-lg mb-1">Waivers</h2>
+              <p
+                className="text-sm mb-4"
+                style={{ color: "var(--text-subtle)" }}
+              >
+                {waivers.length > 0
+                  ? "Here's your signed waiver. You can sign a new one at any time."
+                  : "You haven't signed a workers' compensation waiver yet."}
+              </p>
 
-          {relatedHumans.length === 0 ? (
-            <div
-              className="good-box p-3 text-sm mb-4"
-              style={{ color: "var(--text-subtle)" }}
-            >
-              No relationships yet.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2 mb-4">
-              {relatedHumans.map((human) => (
-                <RelationshipCard key={human._id} human={human} />
-              ))}
-            </div>
-          )}
+              {waivers.length > 0 && (
+                <div className="flex flex-col gap-2 mb-4">
+                  {waivers.map((doc) => (
+                    <WaiverCard key={doc.s3_key} doc={doc} />
+                  ))}
+                </div>
+              )}
 
-          <Form
-            method="post"
-            key={
-              relationshipResult ? JSON.stringify(relationshipResult) : "new"
-            }
-            className="flex flex-col gap-4 good-box p-4"
+              <Link
+                to={`/docs/wc-waiver?name=${encodeURIComponent(
+                  displayUser.name,
+                )}&email=${encodeURIComponent(displayUser.email)}`}
+                className="text-sm font-mono purple-light-text"
+              >
+                Sign a new waiver →
+              </Link>
+            </section>
+          </div>
+
+          {/* ── Section nav ─────────────────────────────────────────────────
+              Hidden below md so the content can use the full width instead
+              — Switch account/Logout have a fallback under the title for
+              that case. Sticky right-hand column on md+ screens. */}
+          <nav
+            className="hidden md:flex md:flex-col gap-1 w-40 shrink-0 md:sticky"
+            style={{ top: "24px" }}
           >
-            <input type="hidden" name="intent" value="add-relationship" />
-            <Input
-              label="Email"
-              name="email"
-              defaultValue={needsInviteDetails ? inviteEmail : ""}
-              required
-              placeholder="human@example.com"
+            {PROFILE_SECTIONS.map((section) => (
+              <a
+                key={section.id}
+                href={`#${section.id}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  scrollToSection(section.id);
+                }}
+                className="text-sm py-1 whitespace-nowrap"
+                style={{
+                  textDecoration: "none",
+                  fontWeight: activeSection === section.id ? 700 : 400,
+                  color:
+                    activeSection === section.id
+                      ? "var(--purple)"
+                      : "var(--text-subtle)",
+                }}
+              >
+                {section.label}
+              </a>
+            ))}
+
+            <hr
+              className="my-2"
+              style={{ borderColor: "currentColor", opacity: 0.12 }}
             />
 
-            {needsInviteDetails && (
-              <>
-                <p className="text-sm" style={{ color: "var(--text-subtle)" }}>
-                  We don't have an account for that email yet. Give us their
-                  name and we'll invite them.
-                </p>
-                <Input label="Name" name="name" required placeholder="Their name" />
-                <Input
-                  type="textarea"
-                  label="Invite note (optional)"
-                  name="note"
-                  placeholder="Let them know why you're adding them"
-                />
-              </>
-            )}
-
-            {relationshipResult && "error" in relationshipResult && (
-              <div className="red-text text-sm">{relationshipResult.error}</div>
-            )}
-            {relationshipResult && "success" in relationshipResult && (
-              <div className="text-sm" style={{ color: "var(--green)" }}>
-                {relationshipResult.invited
-                  ? `Invited ${relationshipResult.name} and added the relationship.`
-                  : `Added ${relationshipResult.name}.`}
-              </div>
-            )}
-
-            <div className="text-right">
-              <button className="btn-secondary" type="submit">
-                {needsInviteDetails ? "Send Invite" : "Add"}
-              </button>
-            </div>
-          </Form>
-        </div>
-
-        {/* ── Passkeys ──────────────────────────────────────────────────── */}
-        <div className="mt-10">
-          <h2 className="font-bold text-lg mb-1">Passkeys</h2>
-          <p className="text-sm mb-4" style={{ color: "var(--text-subtle)" }}>
-            Sign in with your device's fingerprint, face, or PIN instead of an
-            email code.
-          </p>
-
-          {passkeys.length === 0 ? (
-            <div
-              className="good-box p-3 text-sm mb-4"
-              style={{ color: "var(--text-subtle)" }}
-            >
-              No passkeys yet.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2 mb-4">
-              {passkeys.map((passkey) => (
-                <PasskeyCard key={passkey._id} passkey={passkey} />
-              ))}
-            </div>
-          )}
-
-          {passkeyError && (
-            <div className="red-text text-sm mb-4">{passkeyError}</div>
-          )}
-          {passkeyDeleteResult && "error" in passkeyDeleteResult && (
-            <div className="red-text text-sm mb-4">
-              {passkeyDeleteResult.error}
-            </div>
-          )}
-
-          <div className="text-right">
             <button
-              className="btn-secondary"
               type="button"
-              disabled={passkeyBusy}
-              onClick={handleCreatePasskey}
+              className="text-sm py-1 text-left whitespace-nowrap"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-subtle)",
+              }}
+              onClick={() => setSwitchModalOpen(true)}
             >
-              {passkeyBusy ? "Creating…" : "+ Create a passkey"}
+              Switch account
             </button>
-          </div>
-        </div>
-
-        {/* ── Workers' Comp Waiver ──────────────────────────────────────── */}
-        <div className="mt-10">
-          <h2 className="font-bold text-lg mb-1">Workers' Comp Waiver</h2>
-          <p className="text-sm mb-4" style={{ color: "var(--text-subtle)" }}>
-            {waivers.length > 0
-              ? "Here's your signed waiver. You can sign a new one at any time."
-              : "You haven't signed a workers' compensation waiver yet."}
-          </p>
-
-          {waivers.length > 0 && (
-            <div className="flex flex-col gap-2 mb-4">
-              {waivers.map((doc) => (
-                <WaiverCard key={doc.s3_key} doc={doc} />
-              ))}
-            </div>
-          )}
-
-          <Link
-            to={`/docs/wc-waiver?name=${encodeURIComponent(
-              displayUser.name,
-            )}&email=${encodeURIComponent(displayUser.email)}`}
-            className="text-sm font-mono purple-light-text"
-          >
-            Sign a new waiver →
-          </Link>
+            <Link
+              to="/logout"
+              className="text-sm py-1 whitespace-nowrap"
+              style={{ textDecoration: "none", color: "var(--text-subtle)" }}
+            >
+              Logout
+            </Link>
+          </nav>
         </div>
       </div>
     </AppLayout>

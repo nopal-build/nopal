@@ -1,29 +1,51 @@
-import { query, upsert } from "./generic.server";
+import { query, upsert, merge, formatRecord, type Data } from "./generic.server";
 import { getHumans, type Human } from "./humans.server";
+import { removeFolderSharingBetweenHumans } from "./vault.server";
 
-export type Relationship = {
-  id?: { tb: string; id: string };
-  _id?: string;
+export type Relationship = Data & {
   humanAId: string;
   humanBId: string;
   createdBy: string;
   createdAt: string;
+  /**
+   * Set when this relationship has been revoked — see `revokeRelationship`.
+   * A revoked relationship no longer grants vault visibility, and only the
+   * human who revoked it (`revokedBy`) can re-create it later.
+   */
+  revokedBy?: string;
+  revokedAt?: string;
 };
+
+export type CreateRelationshipResult =
+  | { status: "created"; relationship: Relationship }
+  | { status: "reactivated"; relationship: Relationship }
+  | { status: "already-related" }
+  | { status: "revoked-by-other" };
 
 function isAdminOrSuper(human: Pick<Human, "role">): boolean {
   return human.role === "Admin" || human.role === "Super";
 }
 
-/** True if a relationship already exists between the two humans, in either direction. */
-export async function relationshipExists(
+/** The relationship row between two humans, in either direction — active or revoked — if any. */
+async function getRelationshipBetween(
   humanAId: string,
   humanBId: string,
-): Promise<boolean> {
+): Promise<Relationship | undefined> {
   const result = await query<[Relationship[]]>(
     `SELECT * FROM relationships WHERE (humanAId = $a AND humanBId = $b) OR (humanAId = $b AND humanBId = $a) LIMIT 1;`,
     { a: humanAId, b: humanBId },
   );
-  return (result?.[0]?.length ?? 0) > 0;
+  const record = result?.[0]?.[0];
+  return record ? formatRecord(record) : undefined;
+}
+
+/** True if an *active* (non-revoked) relationship already exists between the two humans, in either direction. */
+export async function relationshipExists(
+  humanAId: string,
+  humanBId: string,
+): Promise<boolean> {
+  const existing = await getRelationshipBetween(humanAId, humanBId);
+  return Boolean(existing && !existing.revokedAt);
 }
 
 /**
@@ -31,14 +53,36 @@ export async function relationshipExists(
  * either direction) or the ids are the same. Relationships are undirected —
  * either human being an Admin/Super already grants mutual visibility, so
  * this is mainly meant for Human ↔ Human connections.
+ *
+ * If the two humans previously had a relationship that was revoked, only
+ * the human who revoked it (`revokedBy`) can re-create it — doing so
+ * reactivates the same underlying record rather than creating a new one.
+ * If the *other* human (the one who was revoked) tries, the request is
+ * rejected with `"revoked-by-other"` so the caller can explain why.
  */
 export async function createRelationship(
   humanAId: string,
   humanBId: string,
   createdBy: string,
-): Promise<Relationship | undefined> {
-  if (humanAId === humanBId) return undefined;
-  if (await relationshipExists(humanAId, humanBId)) return undefined;
+): Promise<CreateRelationshipResult> {
+  if (humanAId === humanBId) return { status: "already-related" };
+
+  const existing = await getRelationshipBetween(humanAId, humanBId);
+  if (existing) {
+    if (!existing.revokedAt) return { status: "already-related" };
+    if (existing.revokedBy !== createdBy) return { status: "revoked-by-other" };
+
+    await merge("relationships", existing._id!, {
+      createdBy,
+      createdAt: new Date().toISOString(),
+      revokedBy: null,
+      revokedAt: null,
+    });
+    const reactivated = await getRelationshipBetween(humanAId, humanBId);
+    return reactivated
+      ? { status: "reactivated", relationship: reactivated }
+      : { status: "already-related" };
+  }
 
   const record = {
     humanAId,
@@ -48,7 +92,12 @@ export async function createRelationship(
   };
   const result = await upsert("relationships", record);
   const item = Array.isArray(result) ? result[0] : result;
-  return item as Relationship | undefined;
+  const relationship = item
+    ? formatRecord(item as unknown as Relationship)
+    : undefined;
+  return relationship
+    ? { status: "created", relationship }
+    : { status: "already-related" };
 }
 
 /**
@@ -86,12 +135,56 @@ export async function getRelationshipsForHuman(
 }
 
 /**
+ * Revoke the relationship between two humans (in either direction) and
+ * permanently strip any direct folder sharing between them. This is a
+ * one-way action, and it's non-reversible for the revoked human: the
+ * relationship is soft-deleted (not removed outright) precisely so we
+ * remember who revoked whom — only `revokedBy` can re-kindle it later via
+ * `createRelationship`. The other human can't reconnect on their own.
+ *
+ * Admins/Supers never need an explicit relationship row for visibility
+ * (see `getRelatedHumans`), so revoking someone they were only ever
+ * automatically visible to — never explicitly connected to — would
+ * otherwise be a complete no-op: there'd be no row to mark revoked, so
+ * nothing would persist and the "Revoked" state could never show up. To
+ * keep revoke meaningful in that case too, create the row straight into
+ * the revoked state when one doesn't already exist.
+ */
+export async function revokeRelationship(
+  humanAId: string,
+  humanBId: string,
+  revokedBy: string,
+): Promise<void> {
+  const existing = await getRelationshipBetween(humanAId, humanBId);
+  const now = new Date().toISOString();
+  if (existing) {
+    if (!existing.revokedAt) {
+      await merge("relationships", existing._id!, {
+        revokedBy,
+        revokedAt: now,
+      });
+    }
+  } else {
+    await upsert("relationships", {
+      humanAId,
+      humanBId,
+      createdBy: revokedBy,
+      createdAt: now,
+      revokedBy,
+      revokedAt: now,
+    });
+  }
+  await removeFolderSharingBetweenHumans(humanAId, humanBId);
+}
+
+/**
  * Humans that `human` has a relationship with — used both for the profile
  * page's relationship list and the vault folder-sharing picker.
  *
  * - Admins/Supers can see, and are visible to, everyone.
  * - Everyone can always see Admins/Supers.
- * - Otherwise two Human-role accounts must have an explicit relationship.
+ * - Otherwise two Human-role accounts must have an explicit, active (i.e.
+ *   not revoked) relationship.
  */
 export async function getRelatedHumans(human: Human): Promise<Human[]> {
   const allHumans = (await getHumans())?.data ?? [];
@@ -105,9 +198,9 @@ export async function getRelatedHumans(human: Human): Promise<Human[]> {
 
   const relationships = await getRelationshipsForHuman(human._id);
   const relatedIds = new Set(
-    relationships.map((r) =>
-      r.humanAId === human._id ? r.humanBId : r.humanAId,
-    ),
+    relationships
+      .filter((r) => !r.revokedAt)
+      .map((r) => (r.humanAId === human._id ? r.humanBId : r.humanAId)),
   );
 
   return others.filter((h) => isAdminOrSuper(h) || relatedIds.has(h._id));
