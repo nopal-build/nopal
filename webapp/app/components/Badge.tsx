@@ -8,30 +8,12 @@ type BadgeProps = {
   className?: string;
 };
 
-const variantStyles: Record<BadgeVariant, React.CSSProperties> = {
-  neutral: {
-    background: "var(--farground)",
-    border: "1px solid var(--midground)",
-    color: "var(--purple-light)",
-  },
-  success: {
-    background: "var(--green-light)",
-    color: "var(--purple)",
-  },
-  warning: {
-    background: "var(--yellow)",
-    color: "var(--purple)",
-  },
-  danger: {
-    background: "var(--red-light)",
-    color: "var(--red)",
-  },
-  accent: {
-    background: "var(--moon)",
-    color: "var(--purple)",
-  },
-};
-
+/**
+ * Semantic status pill (Complete, Overdue, Invited, …). Variant colors live
+ * in root.css (`.badge-*`) so the neutral variant can flip for dark mode —
+ * don't hand-roll pill spans with inline `--farground`/`--midground` colors,
+ * they won't flip (see the status pills in `RelationshipCard` for usage).
+ */
 export function Badge({
   variant = "neutral",
   children,
@@ -39,8 +21,7 @@ export function Badge({
 }: BadgeProps) {
   return (
     <span
-      className={`text-xs px-2 py-0.5 rounded-full font-mono shrink-0 ${className}`.trim()}
-      style={variantStyles[variant]}
+      className={`badge-${variant} text-xs px-2 py-0.5 rounded-full font-mono shrink-0 ${className}`.trim()}
     >
       {children}
     </span>

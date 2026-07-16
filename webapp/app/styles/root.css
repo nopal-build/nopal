@@ -171,20 +171,49 @@ body {
   }
 }
 
-/* Add alongside `.circle-btn` on surfaces that stay light in both schemes
-   (e.g. the profile page's forced-white RelationshipCards) — the dark-mode
-   colors above would wash out there, so this pins the light-scheme colors
-   regardless of the OS scheme. Must come after `.circle-btn` so its
-   equal-specificity rules win. */
-.circle-btn-on-light {
+/* Badge variants (see components/Badge.tsx). The colored variants use
+   light backgrounds + dark text that read fine in both schemes; neutral
+   is built from light-scheme surface tokens, so it needs a dark-mode pair
+   or it would vanish against a dark .good-box card. */
+.badge-neutral {
+  background: var(--farground);
+  border: 1px solid var(--midground);
+  color: var(--purple-light);
   @media (prefers-color-scheme: dark) {
-    color: var(--text-subtle);
-    &:hover,
-    &:focus-visible,
-    &[data-active="true"] {
-      background: var(--foreground);
-      color: var(--purple);
-    }
+    background: var(--dark-midground);
+    border-color: var(--dark-foreground);
+    color: white;
+  }
+}
+.badge-success {
+  background: var(--green-light);
+  color: var(--purple);
+}
+.badge-warning {
+  background: var(--yellow);
+  color: var(--purple);
+}
+.badge-danger {
+  background: var(--red-light);
+  color: var(--red);
+}
+.badge-accent {
+  background: var(--moon);
+  color: var(--purple);
+}
+
+/* The scrollable list area of a SearchCollection (and the profile page's
+   hand-rolled copy of that shell) — a "well" that matches the page
+   background (white light / --purple dark) so rows inside can be plain
+   `.good-box` cards: their backgrounds, text colors, and anything
+   scheme-aware inside them (MoreMenu, subtle-text, …) flip normally.
+   Top radius is 1px inside the good-box's 8px so the well doesn't poke
+   out of the shell's border. */
+.collection-well {
+  background: white;
+  border-radius: 7px 7px 0 0;
+  @media (prefers-color-scheme: dark) {
+    background: var(--purple);
   }
 }
 

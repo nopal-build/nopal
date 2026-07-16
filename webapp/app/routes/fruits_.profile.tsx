@@ -62,6 +62,7 @@ import {
 } from "../data/apiTokens.server";
 import { AppLayout } from "../components/AppLayout";
 import { Input } from "../components/Input";
+import { Badge } from "../components/Badge";
 import { Modal } from "../components/Modal";
 import { MoreMenu } from "../components/MoreMenu";
 import {
@@ -713,7 +714,6 @@ function RelationshipCard({
   viewerId,
   viewerRole,
   revokedBy,
-  background,
   onImpersonate,
 }: {
   human: Human;
@@ -723,8 +723,6 @@ function RelationshipCard({
   viewerRole: Role;
   /** If this pair has a revoked relationship, the id of whoever revoked it. */
   revokedBy?: string;
-  /** Overrides `.good-box`'s default background — e.g. white cards inside a colored container. */
-  background?: string;
   /** Present only when the viewer is an Admin/Super — powers the per-row "..." "Login as user" menu. Rejects (rather than navigating away) on failure. */
   onImpersonate?: (human: Human) => Promise<void>;
 }) {
@@ -829,23 +827,13 @@ function RelationshipCard({
   }
 
   return (
-    <div
-      className="good-box p-3 flex items-center justify-between gap-4"
-      style={background ? { background } : undefined}
-    >
+    <div className="good-box p-3 flex items-center justify-between gap-4">
       <div
         className="text-sm min-w-0"
         style={revoked ? { opacity: 0.5, filter: "grayscale(0.6)" } : undefined}
       >
-        <div
-          className="font-bold truncate"
-          style={background ? { color: "var(--purple)" } : undefined}
-        >
-          {human.name}
-        </div>
-        <div className="truncate" style={{ color: "var(--text-subtle)" }}>
-          {human.email}
-        </div>
+        <div className="font-bold truncate">{human.name}</div>
+        <div className="truncate subtle-text">{human.email}</div>
         {resendData && "error" in resendData && (
           <div className="red-text">{resendData.error}</div>
         )}
@@ -860,31 +848,11 @@ function RelationshipCard({
         )}
       </div>
       <div className="flex items-center gap-3 shrink-0">
-        {isAutomatic && (
-          <span
-            className="text-xs px-2 py-0.5 rounded-full"
-            style={{
-              background: "var(--farground)",
-              border: "1px solid var(--midground)",
-              color: "var(--text-subtle)",
-            }}
-          >
-            {human.role}
-          </span>
-        )}
+        {isAutomatic && <Badge>{human.role}</Badge>}
 
         {pendingInvite && (
           <>
-            <span
-              className="text-xs px-2 py-0.5 rounded-full"
-              style={{
-                background: "var(--farground)",
-                border: "1px solid var(--midground)",
-                color: "var(--text-subtle)",
-              }}
-            >
-              Invited
-            </span>
+            <Badge>Invited</Badge>
             <button
               type="button"
               disabled={!resendReady || resending}
@@ -911,21 +879,17 @@ function RelationshipCard({
         {revoked && (
           <>
             <span
-              className="text-xs px-2 py-0.5 rounded-full"
-              style={{
-                background: "var(--farground)",
-                border: "1px solid var(--red)",
-                color: "var(--red)",
-                opacity: 0.5,
-                filter: "grayscale(0.6)",
-              }}
+              className="shrink-0"
+              style={{ opacity: 0.5, filter: "grayscale(0.6)" }}
               title={
                 revokedByViewer
                   ? "You revoked this relationship."
                   : `${human.name} revoked this relationship — only they can reconnect.`
               }
             >
-              {revokedByViewer ? "Revoked" : "Revoked by them"}
+              <Badge variant="danger">
+                {revokedByViewer ? "Revoked" : "Revoked by them"}
+              </Badge>
             </span>
             {revokedByViewer && (
               <button
@@ -1018,9 +982,6 @@ function RelationshipCard({
           ) : (
             <MoreMenu
               label={`Manage ${human.name}`}
-              // The card's background is forced white in both schemes, so the
-              // trigger must keep its light-scheme colors too.
-              triggerClassName="circle-btn-on-light"
               items={[{ label: "Login as user", onClick: handleLoginAsUser }]}
             />
           ))}
@@ -1874,22 +1835,16 @@ export default function Profile() {
                   <input type="hidden" name="intent" value="add-relationship" />
 
                   <div
-                    className="flex flex-col gap-2 overflow-y-auto p-3"
+                    className="collection-well flex flex-col gap-2 overflow-y-auto p-3"
                     style={{ height: "380px" }}
                   >
                     {showAddCard ? (
                       needsInviteDetails ? (
                         <div
-                          className="rounded p-3 flex flex-col gap-3"
-                          style={{
-                            background: "var(--white)",
-                            border: "1px dashed var(--purple-light)",
-                          }}
+                          className="good-box p-3 flex flex-col gap-3"
+                          style={{ borderStyle: "dashed" }}
                         >
-                          <div
-                            className="text-sm font-bold"
-                            style={{ color: "var(--purple)" }}
-                          >
+                          <div className="text-sm font-bold">
                             Add {inviteEmail}
                           </div>
                           <Input
@@ -1914,13 +1869,8 @@ export default function Profile() {
                       ) : (
                         <button
                           type="submit"
-                          className="rounded p-3 text-sm text-left"
-                          style={{
-                            background: "var(--white)",
-                            border: "1px dashed var(--purple-light)",
-                            color: "var(--purple)",
-                            cursor: "pointer",
-                          }}
+                          className="good-box p-3 text-sm text-left"
+                          style={{ borderStyle: "dashed", cursor: "pointer" }}
                         >
                           <span className="font-bold">
                             + Add {emailQuery.trim()}
@@ -1931,13 +1881,8 @@ export default function Profile() {
                       filteredRevokedRelatedHumans.length === 0 ? (
                       normalizedEmailQuery ? (
                         <div
-                          className="rounded p-3 text-sm"
-                          style={{
-                            background: "var(--white)",
-                            color: "var(--purple)",
-                            opacity: 0.5,
-                            filter: "grayscale(0.6)",
-                          }}
+                          className="good-box p-3 text-sm"
+                          style={{ opacity: 0.5, filter: "grayscale(0.6)" }}
                         >
                           <div className="font-bold">No results</div>
                           <div>
@@ -1945,13 +1890,7 @@ export default function Profile() {
                           </div>
                         </div>
                       ) : (
-                        <div
-                          className="rounded p-3 text-sm"
-                          style={{
-                            background: "var(--white)",
-                            color: "var(--purple)",
-                          }}
-                        >
+                        <div className="good-box p-3 text-sm">
                           No relationships yet.
                         </div>
                       )
@@ -1964,17 +1903,13 @@ export default function Profile() {
                             viewerId={user._id}
                             viewerRole={user.role}
                             revokedBy={revokedRelationships[human._id]}
-                            background="var(--white)"
                             onImpersonate={isManager ? impersonate : undefined}
                           />
                         ))}
 
                         {filteredRevokedRelatedHumans.length > 0 && (
                           <>
-                            <h3
-                              className="font-bold text-sm mt-2"
-                              style={{ color: "var(--purple)" }}
-                            >
+                            <h3 className="font-bold text-sm mt-2">
                               Revoked relationships
                             </h3>
                             {filteredRevokedRelatedHumans.map((human) => (
@@ -1984,7 +1919,6 @@ export default function Profile() {
                                 viewerId={user._id}
                                 viewerRole={user.role}
                                 revokedBy={revokedRelationships[human._id]}
-                                background="var(--white)"
                                 onImpersonate={
                                   isManager ? impersonate : undefined
                                 }

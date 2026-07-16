@@ -50,13 +50,6 @@ type MoreMenuProps = {
   /** Applied to the outer wrapper — e.g. to override the default `inline-block`. */
   className?: string;
   /**
-   * Applied to the default `CircleButton` trigger — e.g. `circle-btn-on-light`
-   * when the menu sits on a surface that stays light in both color schemes
-   * (see `RelationshipCard` in `fruits_.profile.tsx`). Ignored if you pass
-   * your own `trigger`.
-   */
-  triggerClassName?: string;
-  /**
    * Render your own trigger instead of the default `CircleButton` +
    * "•••" — e.g. a `btn-primary` or `btn-outline` button. The menu still
    * owns open/close state, outside-click, and Escape handling either way;
@@ -84,7 +77,6 @@ export function MoreMenu({
   label = "More actions",
   align = "right",
   className = "",
-  triggerClassName,
   trigger,
 }: MoreMenuProps) {
   const [open, setOpen] = useState(false);
@@ -122,7 +114,6 @@ export function MoreMenu({
           aria-haspopup="menu"
           aria-expanded={open}
           active={open}
-          className={triggerClassName}
           onClick={toggle}
         >
           <MoreIcon />

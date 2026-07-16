@@ -1513,21 +1513,12 @@ export default function FruitsStyles() {
                   items={filteredDemoFruits}
                   getKey={(fruit) => fruit}
                   renderItem={(fruit) => (
-                    <div
-                      className="rounded p-3 text-sm"
-                      style={{ background: "var(--white)", color: "var(--purple)" }}
-                    >
-                      {fruit}
-                    </div>
+                    <div className="good-box p-3 text-sm">{fruit}</div>
                   )}
                   emptyState={
                     <div
-                      className="rounded p-3 text-sm"
-                      style={{
-                        background: "var(--white)",
-                        color: "var(--purple)",
-                        opacity: 0.6,
-                      }}
+                      className="good-box p-3 text-sm"
+                      style={{ opacity: 0.6 }}
                     >
                       No fruits match "{fruitQuery}".
                     </div>
@@ -1562,14 +1553,17 @@ export default function FruitsStyles() {
                   color: "var(--purple)",
                 }}
               >
-                <span className="font-bold">Gotcha:</span>{" "}
-                <Code>var(--white)</Code> is always <Code>#fff</Code> — it
-                never flips for dark mode. Rows/cards on that background
-                (as above, and in <Code>RelationshipCard</Code>) must set an{" "}
-                explicit text color like <Code>color: "var(--purple)"</Code>{" "}
-                themselves — don't rely on inherited body text color, which
-                switches to white in dark mode and disappears on a white
-                card.
+                <span className="font-bold">Note:</span> the scrollable list
+                area is a <Code>.collection-well</Code> — it matches the
+                page background (white / <Code>--purple</Code>), so rows
+                inside should just be <Code>.good-box</Code> cards (as
+                above, and <Code>RelationshipCard</Code> in{" "}
+                <Code>fruits_.profile.tsx</Code>). Don't force{" "}
+                <Code>var(--white)</Code> backgrounds with explicit text
+                colors — plain good-box rows flip for dark mode on their
+                own, and so does everything inside them (
+                <Code>MoreMenu</Code>, <Code>Badge</Code>,{" "}
+                <Code>subtle-text</Code>, …).
               </div>
             </div>
           </div>
@@ -1673,33 +1667,7 @@ export default function FruitsStyles() {
                     </svg>
                   </CircleButton>
                 </Tile>
-                <Tile>
-                  <Label>
-                    On an always-light surface — add{" "}
-                    <Code>circle-btn-on-light</Code>
-                  </Label>
-                  <div
-                    className="rounded p-2 inline-block"
-                    style={{ background: "var(--white)" }}
-                  >
-                    <CircleButton
-                      aria-label="More actions"
-                      className="circle-btn-on-light"
-                    >
-                      <MoreIcon />
-                    </CircleButton>
-                  </div>
-                </Tile>
               </Row>
-              <p className="text-xs subtle-text mt-3">
-                The default colors flip for dark mode, which washes out on a
-                surface that's forced light in both schemes (e.g.{" "}
-                <Code>background: var(--white)</Code> cards like{" "}
-                <Code>RelationshipCard</Code>). Add{" "}
-                <Code>circle-btn-on-light</Code> (or{" "}
-                <Code>MoreMenu</Code>'s <Code>triggerClassName</Code>) to pin
-                the light-scheme colors there.
-              </p>
             </div>
 
             <div>

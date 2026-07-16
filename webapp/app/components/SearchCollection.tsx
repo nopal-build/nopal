@@ -54,8 +54,11 @@ export function SearchCollection<T>({
 }: SearchCollectionProps<T>) {
   return (
     <div className="good-box flex flex-col">
+      {/* The list area is a page-background "well" so rows inside can be
+          plain .good-box cards that flip for dark mode on their own — no
+          forced-white backgrounds or explicit text colors needed. */}
       <div
-        className="flex flex-col gap-2 overflow-y-auto p-3"
+        className="collection-well flex flex-col gap-2 overflow-y-auto p-3"
         style={{ height }}
       >
         {resultsSlot !== undefined
