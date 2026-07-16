@@ -14,10 +14,14 @@ precise-builds = true
 # The installers to generate for each app
 installers = ["shell"]
 # Target platforms to build apps for (Rust target-triple syntax)
-# Starting with macOS only for the first release — add Linux targets later
-# (the `keyring` crate needs libdbus-dev on Linux CI runners first).
-targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+
+# The `keyring` crate needs libdbus + pkg-config to build on Linux (its
+# secret-service backend) — not present on GitHub's Linux runners by default.
+[dist.dependencies.apt]
+libdbus-1-dev = '*'
+pkg-config = '*'
