@@ -1,7 +1,11 @@
-.PHONY: dev seed migrate down reset clean deploy restart cli release-cli update-cli-version
+.PHONY: dev seed migrate migrate-prod down reset clean deploy restart cli release-cli update-cli-version
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
+
+# ── Prod database access (for data-migration scripts) ─────────────────────
+DB_APP ?= db-thrumming-water-5938
+PROXY_PORT ?= 8081
 
 # ── Full-stack dev lifecycle ───────────────────────────────────────────────────
 
@@ -40,6 +44,31 @@ seed: migrate
 ## Run database migrations against the running local database.
 migrate:
 	sh db/migrate.sh
+
+## Run a data-migration script from webapp/scripts/ against the PROD database,
+## tunneled through a temporary `fly proxy` (no public DB access required):
+##   make migrate-prod SCRIPT=migrate-vault-root-keys.ts SURREAL_PASS=<prod-pass>
+## SURREAL_USER defaults to root; the proxy is torn down when the script exits.
+## Scripts should be idempotent — safe to re-run if anything goes sideways.
+migrate-prod:
+	@test -n "$(SCRIPT)" || { echo "Usage: make migrate-prod SCRIPT=<file in webapp/scripts/> SURREAL_PASS=<prod-pass>"; exit 1; }
+	@test -f "webapp/scripts/$(SCRIPT)" || { echo "webapp/scripts/$(SCRIPT) not found"; exit 1; }
+	@printf 'Run webapp/scripts/%s against PROD (%s) as %s? [y/N] ' "$(SCRIPT)" "$(DB_APP)" "$(SURREAL_USER)"; \
+	read -r answer; \
+	[ "$$answer" = "y" ] || { echo "Aborted."; exit 1; }; \
+	echo "Opening tunnel to $(DB_APP) on localhost:$(PROXY_PORT)..."; \
+	fly proxy $(PROXY_PORT):8080 -a $(DB_APP) & \
+	PROXY_PID=$$!; \
+	trap 'kill $$PROXY_PID 2>/dev/null' EXIT INT TERM; \
+	for i in $$(seq 1 30); do \
+		curl -s -o /dev/null http://localhost:$(PROXY_PORT)/health && break; \
+		sleep 1; \
+	done; \
+	curl -s -o /dev/null http://localhost:$(PROXY_PORT)/health || { echo "Tunnel never became ready — is 'fly' logged in?"; exit 1; }; \
+	echo "Tunnel ready — running $(SCRIPT) against prod..."; \
+	cd webapp && DATABASE_URL=http://localhost:$(PROXY_PORT)/rpc \
+		DATABASE_USERNAME=$(SURREAL_USER) DATABASE_PASSWORD=$(SURREAL_PASS) \
+		npx vite-node scripts/$(SCRIPT)
 
 ## Restart the webapp container, clearing the Vite dep cache first.
 ## Use this after package changes or whenever the dev server needs a clean reload.
