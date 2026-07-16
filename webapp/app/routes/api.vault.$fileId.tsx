@@ -12,15 +12,26 @@ import { cacheDailyLog, deleteDailyLogCache } from "../data/dailyLog.server";
 import { isFileRefLocked } from "../data/vault.types";
 import { isRootShareable } from "../data/vaultRoots";
 
-export async function loader({ params }: LoaderFunctionArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   const { fileId } = params;
   if (!fileId) {
     return Response.json({ error: "fileId required" }, { status: 400 });
   }
   const file = await getFileRefById(fileId);
-  if (!file || !file.is_public) {
+  if (!file) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
+
+  // Public cards are readable by anyone; otherwise only the owner — via
+  // session OR bearer token (the CLI's read path for `vault cat` / `info`).
+  if (!file.is_public) {
+    const user = await getUserFromRequest(request);
+    if (!user || file.human_id !== user._id) {
+      // 404 (not 403) so non-owners can't probe which ids exist.
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+  }
+
   return Response.json({ file });
 }
 

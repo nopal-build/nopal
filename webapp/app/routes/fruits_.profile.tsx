@@ -1,5 +1,5 @@
 // app/routes/fruits_.profile.tsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -63,6 +63,7 @@ import {
 import { AppLayout } from "../components/AppLayout";
 import { Input } from "../components/Input";
 import { Modal } from "../components/Modal";
+import { MoreMenu } from "../components/MoreMenu";
 import {
   getKnownAccounts,
   rememberAccount,
@@ -738,27 +739,13 @@ function RelationshipCard({
   // accounts, never other admins/supers; Supers can log in as anyone.
   const canImpersonateRow =
     Boolean(onImpersonate) && (viewerRole === "Super" || !isAutomatic);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const [impersonating, setImpersonating] = useState(false);
   const [impersonateError, setImpersonateError] = useState<string | null>(
     null,
   );
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [menuOpen]);
-
   async function handleLoginAsUser() {
     if (!onImpersonate) return;
-    setMenuOpen(false);
     setImpersonateError(null);
     setImpersonating(true);
     try {
@@ -1023,61 +1010,20 @@ function RelationshipCard({
           </>
         )}
 
-        {canImpersonateRow && (
-          <div className="relative" ref={menuRef}>
-            <button
-              type="button"
-              aria-label={`Manage ${human.name}`}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              disabled={impersonating}
-              onClick={() => setMenuOpen((o) => !o)}
-              className="text-sm font-mono"
-              style={{
-                background: "none",
-                border: "none",
-                cursor: impersonating ? "default" : "pointer",
-                padding: "0 4px",
-                color: "var(--text-subtle)",
-                fontWeight: 700,
-              }}
-            >
-              {impersonating ? "Logging in…" : "…"}
-            </button>
-            {menuOpen && (
-              <div
-                role="menu"
-                className="good-box"
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  top: "calc(100% + 4px)",
-                  minWidth: "160px",
-                  zIndex: 20,
-                  padding: "4px",
-                }}
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={handleLoginAsUser}
-                  className="text-sm text-left purple-text"
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: "8px 10px",
-                    borderRadius: "4px",
-                  }}
-                >
-                  Login as user
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        {canImpersonateRow &&
+          (impersonating ? (
+            <span className="text-sm font-mono subtle-text shrink-0">
+              Logging in…
+            </span>
+          ) : (
+            <MoreMenu
+              label={`Manage ${human.name}`}
+              // The card's background is forced white in both schemes, so the
+              // trigger must keep its light-scheme colors too.
+              triggerClassName="circle-btn-on-light"
+              items={[{ label: "Login as user", onClick: handleLoginAsUser }]}
+            />
+          ))}
       </div>
     </div>
   );

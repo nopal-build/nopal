@@ -46,10 +46,28 @@ import "../styles/vault.css";
 import "../styles/vault-v2.css";
 import "../styles/mdxeditor.css";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Upload constants (ported from vault v1 — the flow that “worked well”) ───
+
+const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB per S3 multipart part
+const MULTIPART_THRESHOLD = 100 * 1024 * 1024; // multipart for files ≥ 100 MB
+const MAX_CONCURRENT_UPLOADS = 2; // max files uploading at the same time
+
+// ─── Types ──────────────────────────────────────────────────────────────────────────────
 
 /** One folder's direct children — the unit of lazy tree loading. */
 type FolderChildren = { folders: VaultFolder[]; files: FileRefListing[] };
+
+/** A file waiting in (or moving through) the upload queue. */
+type PendingUpload = {
+  id: string;
+  file: File;
+  name: string;
+  size: number;
+  progress: number; // 0-100
+  status: "queued" | "uploading" | "error";
+  error?: string;
+  targetFolderId: string;
+};
 
 type Current =
   | { kind: "root" }
@@ -779,24 +797,305 @@ export default function VaultV2Page() {
 
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
 
-  const handleUpload = async (file: File) => {
-    if (current.kind !== "folder") return;
-    const folderId = current.folder._id;
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("folderId", folderId);
-      const data = await apiForm("/api/vault/upload", form);
-      if (data) invalidateAndRevalidate([folderId]);
-    } finally {
-      setUploading(false);
+  // ─── Upload queue (ported from vault v1) ──────────────────────────────
+  // Multi-file, max 2 concurrent, XHR byte-progress for small files, and
+  // chunked S3 multipart (no proxy-timeout risk) for files ≥ 100 MB.
+
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  // Uploads claimed by the queue processor — survives re-renders mid-flight.
+  const activeUploadIds = useRef<Set<string>>(new Set());
+
+  const finishUpload = useCallback(
+    (id: string, folderId: string) => {
+      setPendingUploads((prev) => prev.filter((p) => p.id !== id));
+      invalidateAndRevalidate([folderId]);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const failUpload = useCallback((id: string, error: string) => {
+    setPendingUploads((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, status: "error", error } : p)),
+    );
+  }, []);
+
+  const setUploadProgress = useCallback((id: string, progress: number) => {
+    setPendingUploads((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, progress } : p)),
+    );
+  }, []);
+
+  const runMultipartUpload = useCallback(
+    async (upload: PendingUpload) => {
+      const { file, targetFolderId: folderId, id } = upload;
+      const contentType = file.type || "application/octet-stream";
+
+      const initRes = await fetch("/api/vault/multipart-init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType,
+          folderId,
+          originalName: file.name,
+          size: file.size,
+        }),
+      });
+      if (!initRes.ok) {
+        const data = (await initRes.json()) as { error?: string };
+        throw new Error(data.error ?? `Init failed (${initRes.status})`);
+      }
+      const { uploadId, key } = (await initRes.json()) as {
+        uploadId: string;
+        key: string;
+      };
+
+      const numParts = Math.ceil(file.size / CHUNK_SIZE);
+      const parts: Array<{ PartNumber: number; ETag: string }> = [];
+
+      try {
+        for (let i = 0; i < numParts; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const chunk = file.slice(start, end);
+
+          const partForm = new FormData();
+          partForm.append("uploadId", uploadId);
+          partForm.append("key", key);
+          partForm.append("partNumber", String(i + 1));
+          partForm.append("chunk", chunk);
+
+          const partRes = await fetch("/api/vault/multipart-part", {
+            method: "POST",
+            body: partForm,
+          });
+          if (!partRes.ok) {
+            const data = (await partRes.json()) as { error?: string };
+            throw new Error(
+              data.error ?? `Part ${i + 1} failed (${partRes.status})`,
+            );
+          }
+          const { ETag } = (await partRes.json()) as { ETag: string };
+          parts.push({ PartNumber: i + 1, ETag });
+          setUploadProgress(id, Math.round(((i + 1) / numParts) * 100));
+        }
+
+        const completeRes = await fetch("/api/vault/multipart-complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uploadId,
+            key,
+            parts,
+            name: file.name,
+            folderId,
+            contentType,
+            size: file.size,
+          }),
+        });
+        if (!completeRes.ok) {
+          const data = (await completeRes.json()) as { error?: string };
+          throw new Error(
+            data.error ?? `Complete failed (${completeRes.status})`,
+          );
+        }
+
+        finishUpload(id, folderId);
+      } catch (err) {
+        // Best-effort abort so S3 never leaks partial uploads
+        fetch("/api/vault/multipart-abort", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uploadId, key }),
+        }).catch(() => {});
+        throw err;
+      }
+    },
+    [finishUpload, setUploadProgress],
+  );
+
+  const startUpload = useCallback(
+    (upload: PendingUpload) => {
+      const { id, file, targetFolderId: folderId } = upload;
+
+      if (file.size >= MULTIPART_THRESHOLD) {
+        runMultipartUpload(upload)
+          .catch((err) => {
+            failUpload(
+              id,
+              err instanceof Error ? err.message : "Upload failed",
+            );
+          })
+          .finally(() => {
+            activeUploadIds.current.delete(id);
+          });
+        return;
+      }
+
+      // Small file: XHR with byte-level progress
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("folderId", folderId);
+
+      const xhr = new XMLHttpRequest();
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          setUploadProgress(id, Math.round((e.loaded / e.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        activeUploadIds.current.delete(id);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          finishUpload(id, folderId);
+        } else {
+          let error = `Server error (HTTP ${xhr.status})`;
+          try {
+            const data = JSON.parse(xhr.responseText) as { error?: string };
+            if (data.error) error = data.error;
+          } catch {
+            /* non-JSON body */
+          }
+          failUpload(id, error);
+        }
+      };
+
+      xhr.onerror = () => {
+        activeUploadIds.current.delete(id);
+        failUpload(id, "Network error — check your connection and retry.");
+      };
+
+      xhr.ontimeout = () => {
+        activeUploadIds.current.delete(id);
+        failUpload(
+          id,
+          "Upload timed out. Try again or use a smaller file.",
+        );
+      };
+
+      xhr.open("POST", "/api/vault/upload");
+      xhr.send(formData);
+    },
+    [runMultipartUpload, finishUpload, failUpload, setUploadProgress],
+  );
+
+  // Queue processor: starts queued uploads whenever a slot opens (max 2).
+  useEffect(() => {
+    const activeCount = pendingUploads.filter(
+      (p) => p.status === "uploading",
+    ).length;
+    const slots = MAX_CONCURRENT_UPLOADS - activeCount;
+    if (slots <= 0) return;
+
+    const toStart = pendingUploads
+      .filter(
+        (p) => p.status === "queued" && !activeUploadIds.current.has(p.id),
+      )
+      .slice(0, slots);
+    if (!toStart.length) return;
+
+    // Claim slots synchronously so a second effect run can't double-start.
+    for (const p of toStart) activeUploadIds.current.add(p.id);
+
+    const toStartIds = new Set(toStart.map((p) => p.id));
+    setPendingUploads((prev) =>
+      prev.map((p) =>
+        toStartIds.has(p.id) ? { ...p, status: "uploading" } : p,
+      ),
+    );
+    for (const upload of toStart) startUpload(upload);
+  }, [pendingUploads, startUpload]);
+
+  // Keep the screen awake while uploads run so phone auto-lock doesn't kill
+  // long video uploads.
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  useEffect(() => {
+    const isActive = pendingUploads.some(
+      (p) => p.status === "queued" || p.status === "uploading",
+    );
+
+    if (!isActive) {
+      wakeLockRef.current?.release().catch(() => {});
+      wakeLockRef.current = null;
+      return;
     }
+
+    const acquire = () => {
+      if (!("wakeLock" in navigator)) return;
+      if (document.visibilityState !== "visible") return;
+      if (wakeLockRef.current) return;
+      navigator.wakeLock
+        .request("screen")
+        .then((lock) => {
+          wakeLockRef.current = lock;
+          lock.addEventListener("release", () => {
+            wakeLockRef.current = null;
+          });
+        })
+        .catch(() => {});
+    };
+
+    acquire();
+    document.addEventListener("visibilitychange", acquire);
+    return () => document.removeEventListener("visibilitychange", acquire);
+  }, [pendingUploads]);
+
+  // Not memoized — reads the live current folder from render scope so files
+  // land in whichever folder the user has open.
+  const enqueueFiles = (files: File[]) => {
+    if (current.kind !== "folder" || !files.length) return;
+    const folderId = current.folder._id;
+    const existing = mergedCache[folderId]?.files ?? [];
+
+    // Smallest first so quick files clear the queue early.
+    const sorted = [...files].sort((a, b) => a.size - b.size);
+    const newUploads: PendingUpload[] = [];
+    const skipped: string[] = [];
+
+    for (const file of sorted) {
+      if (existing.some((f) => f.name === file.name)) {
+        skipped.push(file.name);
+        continue;
+      }
+      newUploads.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file,
+        name: file.name,
+        size: file.size,
+        progress: 0,
+        status: "queued",
+        targetFolderId: folderId,
+      });
+    }
+
+    if (skipped.length) {
+      window.alert(
+        `Skipped ${skipped.length} file(s) that already exist in this folder:\n${skipped.join("\n")}`,
+      );
+    }
+    if (newUploads.length) {
+      setPendingUploads((prev) => [...prev, ...newUploads]);
+    }
+  };
+
+  const dismissUpload = (id: string) => {
+    setPendingUploads((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const retryUpload = (id: string) => {
+    setPendingUploads((prev) =>
+      prev.map((p) =>
+        p.id === id
+          ? { ...p, status: "queued", progress: 0, error: undefined }
+          : p,
+      ),
+    );
   };
 
   const handleNewFolder = async () => {
@@ -915,6 +1214,13 @@ export default function VaultV2Page() {
   };
 
   // ─── Derived view data ──────────────────────────────────────────────────────
+
+  const pendingForCurrentFolder =
+    current.kind === "folder"
+      ? pendingUploads.filter(
+          (p) => p.targetFolderId === current.folder._id,
+        )
+      : [];
 
   // Folders from the always-complete skeleton; files from the seeded/lazy
   // cache (the loader seeds the current folder on every navigation).
@@ -1098,9 +1404,8 @@ export default function VaultV2Page() {
                 <button
                   className="vault-toolbar-btn"
                   onClick={() => uploadInputRef.current?.click()}
-                  disabled={uploading}
                 >
-                  {uploading ? "Uploading…" : "↑ Upload file"}
+                  ↑ Upload files
                 </button>
                 <button className="vault-toolbar-btn" onClick={handleNewFolder}>
                   + New folder
@@ -1140,11 +1445,12 @@ export default function VaultV2Page() {
                 <input
                   ref={uploadInputRef}
                   type="file"
+                  multiple
                   style={{ display: "none" }}
                   onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleUpload(file);
-                    e.target.value = ""; // allow re-selecting the same file
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length) enqueueFiles(files);
+                    e.target.value = ""; // allow re-selecting the same files
                   }}
                 />
               </div>
@@ -1233,7 +1539,8 @@ export default function VaultV2Page() {
                   <span className="vault-v2-row-date" />
                 </button>
                 {folderChildren.folders.length === 0 &&
-                  folderChildren.files.length === 0 && (
+                  folderChildren.files.length === 0 &&
+                  pendingForCurrentFolder.length === 0 && (
                     <div className="vault-v2-empty">This folder is empty.</div>
                   )}
                 {folderChildren.folders.map((folder) => (
@@ -1271,6 +1578,62 @@ export default function VaultV2Page() {
                       {formatDate(file.updated_at)}
                     </span>
                   </button>
+                ))}
+                {/* In-flight uploads for this folder */}
+                {pendingForCurrentFolder.map((p) => (
+                  <div
+                    key={p.id}
+                    className="vault-v2-row vault-v2-row--pending"
+                  >
+                    <span className="vault-v2-row-icon">
+                      {p.status === "error" ? "⚠️" : "⏳"}
+                    </span>
+                    <span className="vault-v2-row-name">
+                      {p.name}
+                      {p.status === "error" && (
+                        <span className="vault-v2-upload-error">
+                          {" — "}
+                          {p.error}
+                        </span>
+                      )}
+                    </span>
+                    {p.status === "error" ? (
+                      <span className="vault-v2-upload-actions">
+                        <button
+                          className="vault-toolbar-btn"
+                          onClick={() => retryUpload(p.id)}
+                        >
+                          Retry
+                        </button>
+                        <button
+                          className="vault-toolbar-btn"
+                          onClick={() => dismissUpload(p.id)}
+                        >
+                          Dismiss
+                        </button>
+                      </span>
+                    ) : (
+                      <>
+                        <span className="vault-v2-row-size">
+                          {formatSize(p.size)}
+                        </span>
+                        <span className="vault-v2-upload-bar">
+                          {p.status === "queued" ? (
+                            <span className="vault-v2-upload-queued">
+                              queued
+                            </span>
+                          ) : (
+                            <span className="vault-upload-progress">
+                              <span
+                                className="vault-upload-progress-fill"
+                                style={{ width: `${p.progress}%` }}
+                              />
+                            </span>
+                          )}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
 

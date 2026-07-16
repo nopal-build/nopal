@@ -10,6 +10,8 @@ import { Input } from "../components/Input";
 import { Modal } from "../components/Modal";
 import { CopyField } from "../components/CopyField";
 import { SearchCollection } from "../components/SearchCollection";
+import { MoreMenu, MoreIcon } from "../components/MoreMenu";
+import { CircleButton } from "../components/CircleButton";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -206,9 +208,14 @@ export default function FruitsStyles() {
                     "components/Modal.tsx",
                   ],
                   [
-                    "A dropdown menu",
-                    "<Dropdown> / <TextDropdown>",
-                    "components/Dropdown.tsx",
+                    "A round icon-only button (favorite, close, …)",
+                    "<CircleButton>",
+                    "components/CircleButton.tsx",
+                  ],
+                  [
+                    'A "•••" (or any) action menu on a row/card',
+                    "<MoreMenu>",
+                    "components/MoreMenu.tsx",
                   ],
                   [
                     'Search a list, optionally "add new"',
@@ -315,10 +322,6 @@ export default function FruitsStyles() {
                         "NumberInput",
                         "Numeric field with +/− steppers, free-text editing, and inline math expressions (+ − × ÷ ^).",
                       ],
-                      [
-                        "Dropdown / TextDropdown",
-                        "Click-to-open menu button. TextDropdown wraps its content in a good-box panel.",
-                      ],
                     ],
                   },
                   {
@@ -348,11 +351,19 @@ export default function FruitsStyles() {
                     ],
                   },
                   {
-                    group: "Overlays",
+                    group: "Overlays & menus",
                     rows: [
                       [
                         "Modal",
                         "Dependency-free centered dialog — backdrop click / Escape to close.",
+                      ],
+                      [
+                        "CircleButton",
+                        "Round icon-only button — hover/focus/active states only, bring your own icon as children.",
+                      ],
+                      [
+                        "MoreMenu",
+                        "good-box action menu, open/outside-click/Escape handled for you. Defaults to a CircleButton + ••• trigger, but accepts a custom trigger render prop.",
                       ],
                     ],
                   },
@@ -384,6 +395,7 @@ export default function FruitsStyles() {
                       ["FiveFactors / GbScore / GoodProgress / GoodAssets", "\"Good\" scorecard visualizations for marketing pages."],
                       ["AudioFormat", "\"Now available in audio format\" link for blog content."],
                       ["ZoomImg", "Click-to-zoom image viewer."],
+                      ["Dropdown / TextDropdown", ":focus-within CSS dropdown — only used on grandpas-cabin-recipe.tsx, not the Fruits app."],
                     ],
                   },
                 ].map(({ group, rows }) => (
@@ -1568,43 +1580,230 @@ export default function FruitsStyles() {
           </div>
         </Section>
 
-        {/* ── 11. Overlays ────────────────────────────────────────────────── */}
-        <Section id="overlays" title="11 · Overlays">
-          <div className="flex flex-col gap-6">
-            <p className="text-xs font-mono subtle-text">
-              {"<Modal>"} is a dependency-free centered dialog — backdrop and{" "}
-              <Code>Escape</Code> both close it. Use it for confirmations and
-              short forms (e.g. the "Switch account" flow in{" "}
-              <Code>fruits_.profile.tsx</Code>), not for full-page content.
-            </p>
+        {/* ── 11. Overlays & Menus ───────────────────────────────────────── */}
+        <Section id="overlays" title="11 · Overlays & Menus">
+          <div className="flex flex-col gap-8">
             <div>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => setModalOpen(true)}
-              >
-                Open example modal
-              </button>
-              <Modal
-                open={modalOpen}
-                onClose={() => setModalOpen(false)}
-                title="Example modal"
-              >
-                <p className="text-sm subtle-text mb-4">
-                  Modal content goes here — forms, confirmations, short
-                  messages. Keep it under ~400px wide; for anything larger,
-                  use a dedicated page or panel instead.
-                </p>
-                <div className="text-right">
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={() => setModalOpen(false)}
+              <div className="text-xs font-mono mb-3 font-bold purple-text">
+                {"<Modal>"} — centered dialog
+              </div>
+              <p className="text-xs subtle-text mb-3">
+                Dependency-free centered dialog — backdrop and{" "}
+                <Code>Escape</Code> both close it. Use it for confirmations
+                and short forms (e.g. the "Switch account" flow in{" "}
+                <Code>fruits_.profile.tsx</Code>), not for full-page content.
+              </p>
+              <div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setModalOpen(true)}
+                >
+                  Open example modal
+                </button>
+                <Modal
+                  open={modalOpen}
+                  onClose={() => setModalOpen(false)}
+                  title="Example modal"
+                >
+                  <p className="text-sm subtle-text mb-4">
+                    Modal content goes here — forms, confirmations, short
+                    messages. Keep it under ~400px wide; for anything larger,
+                    use a dedicated page or panel instead.
+                  </p>
+                  <div className="text-right">
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => setModalOpen(false)}
+                    >
+                      Done
+                    </button>
+                  </div>
+                </Modal>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs font-mono mb-3 font-bold purple-text">
+                {"<CircleButton>"} — round icon-only button
+              </div>
+              <p className="text-xs subtle-text mb-3">
+                Just the circular hit area + hover/focus/
+                <Code>active</Code> states — no menu, no assumptions about
+                what's inside. Pass any icon as children (an SVG, an emoji,
+                whatever). <Code>MoreMenu</Code> below uses this as its
+                default trigger, but it stands on its own for any
+                icon-only action (favorite, close, expand, …).
+              </p>
+              <Row>
+                <Tile>
+                  <Label>Default</Label>
+                  <CircleButton aria-label="More actions">
+                    <MoreIcon />
+                  </CircleButton>
+                </Tile>
+                <Tile>
+                  <Label>active (e.g. its menu is open)</Label>
+                  <CircleButton aria-label="More actions" active>
+                    <MoreIcon />
+                  </CircleButton>
+                </Tile>
+                <Tile>
+                  <Label>disabled</Label>
+                  <CircleButton aria-label="More actions" disabled>
+                    <MoreIcon />
+                  </CircleButton>
+                </Tile>
+                <Tile>
+                  <Label>Any SVG works — not just MoreIcon</Label>
+                  <CircleButton aria-label="Add item">
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    >
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  </CircleButton>
+                </Tile>
+                <Tile>
+                  <Label>
+                    On an always-light surface — add{" "}
+                    <Code>circle-btn-on-light</Code>
+                  </Label>
+                  <div
+                    className="rounded p-2 inline-block"
+                    style={{ background: "var(--white)" }}
                   >
-                    Done
-                  </button>
+                    <CircleButton
+                      aria-label="More actions"
+                      className="circle-btn-on-light"
+                    >
+                      <MoreIcon />
+                    </CircleButton>
+                  </div>
+                </Tile>
+              </Row>
+              <p className="text-xs subtle-text mt-3">
+                The default colors flip for dark mode, which washes out on a
+                surface that's forced light in both schemes (e.g.{" "}
+                <Code>background: var(--white)</Code> cards like{" "}
+                <Code>RelationshipCard</Code>). Add{" "}
+                <Code>circle-btn-on-light</Code> (or{" "}
+                <Code>MoreMenu</Code>'s <Code>triggerClassName</Code>) to pin
+                the light-scheme colors there.
+              </p>
+            </div>
+
+            <div>
+              <div className="text-xs font-mono mb-3 font-bold purple-text">
+                {"<MoreMenu>"} — action menu, decoupled from its trigger
+              </div>
+              <p className="text-xs subtle-text mb-3">
+                Owns open state, outside-click, and <Code>Escape</Code>{" "}
+                handling — pass <Code>items</Code> and you're done. Defaults
+                to a <Code>{"<CircleButton>"}</Code> with an oversized,
+                SVG-drawn "•••" (not the typed <Code>…</Code> character —
+                that renders too small and too tight to feel tappable), but
+                the trigger is just a default: pass your own{" "}
+                <Code>trigger</Code> render prop to open the same menu from
+                a <Code>btn-primary</Code>, <Code>btn-outline</Code>, or
+                anything else. This replaces the hand-rolled per-row "…"
+                menu in <Code>RelationshipCard</Code> (
+                <Code>fruits_.profile.tsx</Code>).
+              </p>
+
+              <Label>Default trigger (CircleButton + MoreIcon)</Label>
+              <div className="good-box p-4 mb-4" style={{ maxWidth: "480px" }}>
+                <MoreMenu
+                  label="More actions"
+                  items={[
+                    { label: "Edit", onClick: () => {} },
+                    { label: "Duplicate", onClick: () => {} },
+                    { label: "Archive", onClick: () => {} },
+                    { label: "Delete", onClick: () => {}, danger: true },
+                  ]}
+                />
+              </div>
+
+              <Label>In context — as a row's trailing action</Label>
+              <div
+                className="good-box p-3 flex items-center justify-between gap-4 mb-4"
+                style={{ maxWidth: "480px" }}
+              >
+                <div className="text-sm min-w-0">
+                  <div className="font-bold truncate">Smith Residence</div>
+                  <div className="truncate subtle-text">
+                    123 Main St, Portland, OR
+                  </div>
                 </div>
-              </Modal>
+                <MoreMenu
+                  label="Manage Smith Residence"
+                  items={[
+                    { label: "Edit details", onClick: () => {} },
+                    { label: "Share with team", onClick: () => {} },
+                    { label: "Archive project", onClick: () => {}, danger: true },
+                  ]}
+                />
+              </div>
+
+              <Label>
+                Custom trigger — same menu, a <Code>btn-outline</Code> button
+                instead
+              </Label>
+              <div className="good-box p-4 mb-4" style={{ maxWidth: "480px" }}>
+                <MoreMenu
+                  label="Manage project"
+                  items={[
+                    { label: "Edit details", onClick: () => {} },
+                    { label: "Share with team", onClick: () => {} },
+                    { label: "Archive project", onClick: () => {}, danger: true },
+                  ]}
+                  trigger={({ toggle, open, label }) => (
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      style={{ padding: "8px 16px" }}
+                      aria-label={label}
+                      aria-haspopup="menu"
+                      aria-expanded={open}
+                      onClick={toggle}
+                    >
+                      Actions
+                    </button>
+                  )}
+                />
+              </div>
+
+              <div
+                className="good-box p-3 text-xs font-mono"
+                style={{ color: "var(--purple-light)", lineHeight: 1.7 }}
+              >
+                <div>{'<MoreMenu'}</div>
+                <div style={{ paddingLeft: "16px" }}>
+                  {'label="Manage project"'}
+                </div>
+                <div style={{ paddingLeft: "16px" }}>{"items={[...]}"}</div>
+                <div style={{ paddingLeft: "16px" }}>
+                  {"trigger={({ toggle, open, label }) => ("}
+                </div>
+                <div style={{ paddingLeft: "32px" }}>
+                  {'<button className="btn-outline" aria-label={label}'}
+                </div>
+                <div style={{ paddingLeft: "48px" }}>
+                  {'aria-haspopup="menu" aria-expanded={open} onClick={toggle}>'}
+                </div>
+                <div style={{ paddingLeft: "48px" }}>{"Actions"}</div>
+                <div style={{ paddingLeft: "32px" }}>{"</button>"}</div>
+                <div style={{ paddingLeft: "16px" }}>{")}"}</div>
+                <div>{"/>"}</div>
+              </div>
             </div>
           </div>
         </Section>

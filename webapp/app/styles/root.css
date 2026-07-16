@@ -124,6 +124,94 @@ body {
   }
 }
 
+/* Round icon-only button (see components/CircleButton.tsx) — transparent
+   by default, tinted background + purple text on hover/focus/active. The
+   hover background must come from a dedicated dark-mode pair here rather
+   than a bare `var(--foreground)` — that variable doesn't flip itself, so
+   pairing it with dark-mode text (which does flip) would wash out to
+   light-on-light. */
+.circle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-subtle);
+  transition: background 150ms, color 150ms;
+  flex-shrink: 0;
+
+  &:hover,
+  &:focus-visible,
+  &[data-active="true"] {
+    background: var(--foreground);
+    color: var(--purple);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--purple-light);
+    outline-offset: 2px;
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    color: var(--text-subtle-dark);
+    &:hover,
+    &:focus-visible,
+    &[data-active="true"] {
+      background: var(--dark-foreground);
+      color: white;
+    }
+  }
+}
+
+/* Add alongside `.circle-btn` on surfaces that stay light in both schemes
+   (e.g. the profile page's forced-white RelationshipCards) — the dark-mode
+   colors above would wash out there, so this pins the light-scheme colors
+   regardless of the OS scheme. Must come after `.circle-btn` so its
+   equal-specificity rules win. */
+.circle-btn-on-light {
+  @media (prefers-color-scheme: dark) {
+    color: var(--text-subtle);
+    &:hover,
+    &:focus-visible,
+    &[data-active="true"] {
+      background: var(--foreground);
+      color: var(--purple);
+    }
+  }
+}
+
+/* Menu item row inside a dropdown/action-menu panel (e.g. MoreMenu). Text
+   color is left to the caller (`purple-text`/`red-text` etc, which already
+   flip for dark mode) — this class only owns the hover background, which
+   needs its own dark-mode pair for the same reason `.circle-btn` does. */
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border-radius: 4px;
+  padding: 8px 10px;
+  transition: background 150ms;
+
+  &:hover:not(:disabled) {
+    background: var(--foreground);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    &:hover:not(:disabled) {
+      background: var(--dark-foreground);
+    }
+  }
+}
+
 /* Readonly "copy this command" inputs — a nested "well" look inside a
    .good-box, distinct from the box's own background. */
 .code-input {

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 mod auth;
 mod update;
+mod vault;
 mod video;
 
 const DEFAULT_HOST: &str = "https://nopal.build";
@@ -34,6 +35,11 @@ enum Command {
     Video {
         #[command(subcommand)]
         command: VideoCommand,
+    },
+    /// Browse and upload to your Nopal Vault.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
     },
     /// Check for and install a newer version of the nopal CLI.
     #[command(alias = "upgrade")]
@@ -66,6 +72,69 @@ enum VideoCommand {
         /// Overwrite the output file if it already exists.
         #[arg(long)]
         overwrite: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum VaultCommand {
+    /// List a vault folder (the root folders when no path is given).
+    Ls {
+        /// Vault path, e.g. `projects/sunny` (omit for the vault root).
+        #[arg(default_value = "")]
+        path: String,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a tree of folders (and files) under a vault path.
+    Tree {
+        /// Vault path (omit for the vault root).
+        #[arg(default_value = "")]
+        path: String,
+        /// Maximum depth to descend.
+        #[arg(long, default_value_t = 2)]
+        depth: u32,
+        /// Only show folders, not files.
+        #[arg(long)]
+        folders_only: bool,
+    },
+    /// Print a markdown/text card's content to stdout.
+    Cat {
+        /// Vault path to a file, e.g. `projects/sunny/readme.md`.
+        path: String,
+    },
+    /// Download a vault file.
+    Download {
+        /// Vault path to a file.
+        path: String,
+        /// Where to write the file (defaults to the file's name in the
+        /// current directory).
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Show metadata for a vault folder or file.
+    Info {
+        /// Vault path to a folder or file.
+        path: String,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open a vault folder or file in your browser.
+    Open {
+        /// Vault path (omit for the vault root).
+        #[arg(default_value = "")]
+        path: String,
+    },
+    /// Upload local files into a vault folder. Large files upload in
+    /// chunks automatically.
+    Upload {
+        /// Local file(s) to upload.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Destination vault folder, e.g. `personal` or `projects/sunny`.
+        #[arg(long)]
+        to: String,
     },
 }
 
@@ -130,6 +199,25 @@ fn main() {
                 }
             }
         },
+        Command::Vault { command } => {
+            let result = match command {
+                VaultCommand::Ls { path, json } => vault::ls(&path, json),
+                VaultCommand::Tree {
+                    path,
+                    depth,
+                    folders_only,
+                } => vault::tree(&path, depth, folders_only),
+                VaultCommand::Cat { path } => vault::cat(&path),
+                VaultCommand::Download { path, output } => vault::download(&path, output),
+                VaultCommand::Info { path, json } => vault::info(&path, json),
+                VaultCommand::Open { path } => vault::open(&path),
+                VaultCommand::Upload { files, to } => vault::upload(&files, &to),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
         Command::Update { check } => {
             if let Err(e) = update::update(check) {
                 eprintln!("update failed: {e}");
