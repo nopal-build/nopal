@@ -814,6 +814,7 @@ fn push_new(
         },
         vault_root_key: Some("syncs".to_string()),
         shared_with: serde_json::json!([]),
+        is_public: None,
         updated_at: String::new(),
     };
     vault::upload_one(client, abs, &folder)

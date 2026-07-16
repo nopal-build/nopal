@@ -184,6 +184,28 @@ enum VaultCommand {
         #[arg(long = "with", value_name = "EMAIL")]
         with: Vec<String>,
     },
+    /// Publish a folder to a public URL — no login required to view it.
+    Publish {
+        /// Vault path of the folder to publish.
+        path: String,
+        /// Copy the public link to the clipboard.
+        #[arg(long)]
+        copy: bool,
+    },
+    /// Unpublish a folder (see 'nopal vault publish').
+    Unpublish {
+        /// Vault path of the folder to unpublish.
+        path: String,
+    },
+    /// Print the public link for a folder or file, if it's reachable
+    /// (published directly, or inside a published folder).
+    Link {
+        /// Vault path of the folder or file.
+        path: String,
+        /// Copy the link to the clipboard.
+        #[arg(long)]
+        copy: bool,
+    },
     /// Delete a vault file or folder.
     Rm {
         /// Vault path of the file or folder to delete.
@@ -351,6 +373,9 @@ fn main() {
                     private,
                     with,
                 } => vault::share(&path, everyone, private, &with),
+                VaultCommand::Publish { path, copy } => vault::publish(&path, copy),
+                VaultCommand::Unpublish { path } => vault::unpublish(&path),
+                VaultCommand::Link { path, copy } => vault::link(&path, copy),
                 VaultCommand::Rm {
                     path,
                     force,

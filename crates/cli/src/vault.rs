@@ -28,6 +28,12 @@ pub struct Folder {
     pub vault_root_key: Option<String>,
     #[serde(default)]
     pub shared_with: serde_json::Value,
+    /// Published to a public, unauthenticated URL. Only reflects THIS
+    /// folder's own flag — a folder can also be publicly reachable because
+    /// an ancestor is published (see `link`, which checks the live page
+    /// rather than re-deriving that inheritance client-side).
+    #[serde(default)]
+    pub is_public: Option<bool>,
     #[serde(default)]
     pub updated_at: String,
 }
@@ -514,7 +520,8 @@ pub fn info(path: &str, json: bool) -> Result<(), Box<dyn Error>> {
                     serde_json::json!({
                         "kind": "folder", "id": f._id, "name": f.name,
                         "vault_root_key": f.vault_root_key,
-                        "shared": is_shared(&f), "updated_at": f.updated_at,
+                        "shared": is_shared(&f), "public": f.is_public.unwrap_or(false),
+                        "updated_at": f.updated_at,
                     })
                 );
             } else {
@@ -523,6 +530,14 @@ pub fn info(path: &str, json: bool) -> Result<(), Box<dyn Error>> {
                 println!("name:      {}", f.name);
                 println!("root:      {}", f.vault_root_key.as_deref().unwrap_or("-"));
                 println!("shared:    {}", if is_shared(&f) { "yes" } else { "no" });
+                println!(
+                    "public:    {}",
+                    if f.is_public.unwrap_or(false) {
+                        "yes"
+                    } else {
+                        "no (may still be public via a parent folder — see 'nopal vault link')"
+                    }
+                );
                 println!("updated:   {}", format_date(&f.updated_at));
             }
             Ok(())
@@ -910,6 +925,118 @@ pub fn share(
     } else {
         println!("  ✓ shared");
     }
+    Ok(())
+}
+
+// ─── Publish ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+//
+// Publishing is a folder-only, boolean flag (`is_public`), separate from
+// `share` — sharing grants access to specific Nopal humans, publishing
+// makes the folder (and everything in it, including things added later,
+// resolved dynamically server-side) reachable at a public URL with no
+// account at all. Only allowed inside publishable roots (currently
+// projects/, personal/, syncs/ — not daily-logs/); the server rejects
+// anything else.
+
+fn public_url(host: &str, kind: &str, id: &str) -> String {
+    format!("{host}/public/{kind}/{id}")
+}
+
+fn maybe_copy(url: &str, copy: bool) {
+    if !copy {
+        return;
+    }
+    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(url.to_string())) {
+        Ok(()) => println!("(copied to clipboard)"),
+        Err(e) => eprintln!("Couldn't copy to clipboard ({e}) — link printed above."),
+    }
+}
+
+/// Publish a folder — it (and everything inside it, including anything
+/// added later) becomes reachable at a public URL with no login required.
+pub fn publish(path: &str, copy: bool) -> Result<(), Box<dyn Error>> {
+    let client = Client::new()?;
+    let folder = match resolve(&client, path)? {
+        Resolved::Root => return Err("The vault root can't be published".into()),
+        Resolved::File { file } => {
+            return Err(format!(
+                "'{}' is a file — publish the folder it's in, or use \
+                 'nopal vault link' to grab a link to just this file",
+                file.name
+            )
+            .into())
+        }
+        Resolved::Folder(f) => f,
+    };
+
+    let _: serde_json::Value = client.patch_json(
+        &format!("/api/vault/folders/{}", folder._id),
+        &serde_json::json!({ "is_public": true }),
+    )?;
+
+    let url = public_url(&client.host, "folder", &folder._id);
+    println!(
+        "Published {}/ — anyone with this link can view it:",
+        folder.name
+    );
+    println!("{url}");
+    maybe_copy(&url, copy);
+    Ok(())
+}
+
+/// Unpublish a folder that was published directly (not one that's only
+/// public because a parent folder is published — unpublish that parent to
+/// revoke it).
+pub fn unpublish(path: &str) -> Result<(), Box<dyn Error>> {
+    let client = Client::new()?;
+    let folder = match resolve(&client, path)? {
+        Resolved::Root => return Err("The vault root can't be unpublished".into()),
+        Resolved::File { file } => {
+            return Err(format!("'{}' is a file, not a folder", file.name).into())
+        }
+        Resolved::Folder(f) => f,
+    };
+
+    let _: serde_json::Value = client.patch_json(
+        &format!("/api/vault/folders/{}", folder._id),
+        &serde_json::json!({ "is_public": false }),
+    )?;
+    println!("Unpublished {}/", folder.name);
+    Ok(())
+}
+
+/// Prints (and optionally copies) the public link for a folder or file.
+/// Works for anything publicly reachable, not just folders you've directly
+/// published — e.g. a file inside a published folder, or a folder that
+/// inherits publicness from a published ancestor. Rather than re-deriving
+/// that inheritance client-side, this asks the live public page directly
+/// (no auth) and reports what it finds — always authoritative.
+pub fn link(path: &str, copy: bool) -> Result<(), Box<dyn Error>> {
+    let client = Client::new()?;
+    let (kind, id, name) = match resolve(&client, path)? {
+        Resolved::Root => return Err("The vault root doesn't have a public link".into()),
+        Resolved::Folder(f) => ("folder", f._id, f.name),
+        Resolved::File { file } => ("file", file._id, file.name),
+    };
+
+    let url = public_url(&client.host, kind, &id);
+    let reachable = client
+        .http
+        .get(&url)
+        .send()
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
+
+    if !reachable {
+        return Err(format!(
+            "'{name}' isn't published. Publish it (or a parent folder) first:\n  \
+             nopal vault publish {path}"
+        )
+        .into());
+    }
+
+    println!("{url}");
+    maybe_copy(&url, copy);
     Ok(())
 }
 
