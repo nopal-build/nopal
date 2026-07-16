@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { MetaFunction } from "@remix-run/node";
+import type { MetaFunction } from "react-router";
 
 /* ═══════════════════════════════════════════════════════════
    META

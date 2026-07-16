@@ -863,6 +863,17 @@ export default function FruitsStyles() {
               <Code>className</Code> you pass is appended, not replacing the
               default, so you only need it for one-off overrides.
             </p>
+            <p className="text-xs font-mono subtle-text">
+              <span className="font-bold">Gotcha:</span> when placing{" "}
+              <Code>{"<Input>"}</Code> inside a flex row (e.g. side-by-side
+              fields, or a field next to a button), add{" "}
+              <Code>min-w-0</Code> to its flex-item wrapper. Flex children
+              default to <Code>min-width: auto</Code>, and a field's
+              intrinsic content width (a <Code>type="number"</Code> field's
+              native spin buttons are the worst offender) can be wider than
+              its flex-basis, overflowing the row instead of shrinking to
+              fit — see the <Code>type="number"</Code> example below.
+            </p>
 
             <div
               className="good-box p-5 flex flex-col gap-5"
@@ -916,30 +927,45 @@ export default function FruitsStyles() {
 
               <div>
                 <Label>
-                  Date input — <Code>type="date"</Code>
+                  {'<Input type="date" />'} — date field
                 </Label>
                 <div className="flex flex-col">
-                  <label className="text-sm" htmlFor="demo-date">
-                    Start Date
-                  </label>
-                  <input type="date" id="demo-date" />
+                  <Input
+                    type="date"
+                    label="Start Date"
+                    name="demo-date"
+                  />
                 </div>
               </div>
 
               <div>
-                <Label>Inline form row — two fields side by side</Label>
+                <Label>
+                  {'<Input type="number" />'} — inline form row, two fields
+                  side by side
+                </Label>
                 <div className="flex gap-3">
-                  <div className="flex flex-col flex-1">
-                    <label className="text-xs" style={{ opacity: 0.6 }}>
-                      Min ($)
-                    </label>
-                    <input type="number" placeholder="0" />
+                  {/* min-w-0 is required on flex children wrapping an
+                      <Input> — flex items default to min-width:auto, and a
+                      number field's intrinsic width (digits + the native
+                      spin buttons) is wide enough to blow past its
+                      flex-basis and overflow the row otherwise. */}
+                  <div className="flex-1 min-w-0">
+                    <Input
+                      type="number"
+                      label="Min ($)"
+                      name="demo-min"
+                      placeholder="0"
+                      min={0}
+                    />
                   </div>
-                  <div className="flex flex-col flex-1">
-                    <label className="text-xs" style={{ opacity: 0.6 }}>
-                      Max ($)
-                    </label>
-                    <input type="number" placeholder="0" />
+                  <div className="flex-1 min-w-0">
+                    <Input
+                      type="number"
+                      label="Max ($)"
+                      name="demo-max"
+                      placeholder="0"
+                      min={0}
+                    />
                   </div>
                 </div>
               </div>
@@ -955,7 +981,7 @@ export default function FruitsStyles() {
                   <Code>sr-only</Code>, it's just not shown visually.
                 </p>
                 <div className="flex items-center gap-2">
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <Input
                       label="Name"
                       hideLabel
