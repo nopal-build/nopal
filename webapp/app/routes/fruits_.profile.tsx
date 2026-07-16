@@ -2154,6 +2154,32 @@ export default function Profile() {
                 their own after 30 days.
               </p>
 
+              <div className="good-box p-3 text-sm mb-4">
+                <div className="mb-2">
+                  Don't have the CLI yet?{" "}
+                  <a
+                    href="https://github.com/gwing33/nopal/releases/latest"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono purple-light-text"
+                  >
+                    Download nopal →
+                  </a>
+                </div>
+                <code
+                  className="font-mono block"
+                  style={{
+                    color: "var(--text-subtle)",
+                    fontSize: "0.75rem",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  curl --proto '=https' --tlsv1.2 -LsSf
+                  https://github.com/gwing33/nopal/releases/latest/download/nopal-installer.sh
+                  | sh
+                </code>
+              </div>
+
               {apiTokens.length === 0 ? (
                 <div
                   className="good-box p-3 text-sm mb-4"
