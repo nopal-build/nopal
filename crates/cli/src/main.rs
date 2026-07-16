@@ -71,7 +71,8 @@ enum VideoCommand {
 
 #[derive(Debug, Parser)]
 #[command(name = "nopal")]
-#[command(about = "Nopal CLI", long_about = None)]
+#[command(version)]
+#[command(about = concat!("Nopal CLI v", env!("CARGO_PKG_VERSION")), long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
