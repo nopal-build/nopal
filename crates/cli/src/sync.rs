@@ -821,8 +821,10 @@ fn push_new(
 }
 
 fn replace_remote(client: &Client, file_id: &str, abs: &Path) -> Result<(), Box<dyn Error>> {
-    let form = reqwest::blocking::multipart::Form::new().file("file", abs)?;
-    let _: serde_json::Value = client.post_form(&format!("/api/vault/replace/{file_id}"), form)?;
+    let _: serde_json::Value = client
+        .post_form(&format!("/api/vault/replace/{file_id}"), || {
+            Ok(reqwest::blocking::multipart::Form::new().file("file", abs)?)
+        })?;
     Ok(())
 }
 

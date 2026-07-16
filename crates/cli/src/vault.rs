@@ -13,10 +13,28 @@ use std::path::{Path, PathBuf};
 
 use crate::auth;
 
-/// Files larger than this upload via the S3 multipart endpoints.
-const MULTIPART_THRESHOLD: u64 = 32 * 1024 * 1024; // 32 MB
-/// Chunk size for multipart parts (matches the web client's 10 MB parts).
+/// Chunk size for multipart parts (matches the web client's 10 MB parts;
+/// the server route caps parts at 10 MB specifically so each part finishes
+/// quickly and doesn't get killed by an intermediary proxy on a slow
+/// connection).
 const MULTIPART_CHUNK: usize = 10 * 1024 * 1024;
+/// Files larger than this upload via the S3 multipart endpoints instead of
+/// one single POST. Deliberately equal to the chunk size — ANY file that
+/// would need more than one chunk gets the more resilient, independently-
+/// retryable path. A single-shot POST for a large file (e.g. a 30 MB screen
+/// recording over a slow home upload) can take long enough that Fly's
+/// proxy-to-machine backhaul gives up on the still-arriving body
+/// (`unexpected end of file` / error code PU02) — splitting into several
+/// quick 10 MB requests avoids that failure mode entirely.
+const MULTIPART_THRESHOLD: u64 = MULTIPART_CHUNK as u64;
+/// Retries for a request that fails at the transport level (dropped/reset
+/// connection, DNS blip, etc.) — never for a definite HTTP error response,
+/// since retrying a 403/404 changes nothing.
+const MAX_ATTEMPTS: u32 = 4;
+
+fn retry_delay(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_secs(2u64.pow(attempt.min(4))) // 2s, 4s, 8s, 16s
+}
 
 // ─── API types ────────────────────────────────────────────────────────────────
 
@@ -91,20 +109,35 @@ pub(crate) struct Client {
     token: String,
 }
 
+/// A fresh connection per request rather than reqwest's default pooling.
+/// This is a long-running CLI (especially the `--watch` worker) that issues
+/// requests sporadically — a pooled/kept-alive connection can sit idle long
+/// enough that Fly's proxy (or a home router's NAT) silently closes it, and
+/// the next large upload to reuse it fails with an opaque transport error
+/// (`error sending request for url`) partway through sending the body. A
+/// fresh connection costs one extra TLS handshake per request, which is
+/// noise next to an upload that takes seconds anyway.
+fn build_http_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+}
+
 impl Client {
     pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
         // NOPAL_HOST/NOPAL_TOKEN override the stored login — useful for
         // scripts, CI, and pointing at a local dev server.
         if let (Ok(host), Ok(token)) = (std::env::var("NOPAL_HOST"), std::env::var("NOPAL_TOKEN")) {
             return Ok(Client {
-                http: reqwest::blocking::Client::new(),
+                http: build_http_client(),
                 host: host.trim_end_matches('/').to_string(),
                 token,
             });
         }
         let creds = auth::load_credentials().ok_or("Not logged in. Run 'nopal login' first.")?;
         Ok(Client {
-            http: reqwest::blocking::Client::new(),
+            http: build_http_client(),
             host: creds.host,
             token: creds.token,
         })
@@ -117,7 +150,7 @@ impl Client {
         if std::env::var("NOPAL_TOKEN").is_err() {
             if let Some(creds) = auth::load_sync_credentials() {
                 return Ok(Client {
-                    http: reqwest::blocking::Client::new(),
+                    http: build_http_client(),
                     host: creds.host,
                     token: creds.token,
                 });
@@ -130,16 +163,43 @@ impl Client {
         format!("{}{}", self.host, path)
     }
 
+    /// Runs `send_request` up to `MAX_ATTEMPTS` times, retrying ONLY when
+    /// the request fails at the transport level (never received a response
+    /// at all — a dropped connection, DNS blip, etc). A definite HTTP
+    /// response, even an error one, returns immediately: retrying a 403
+    /// changes nothing.
+    fn send_with_retry(
+        &self,
+        mut send_request: impl FnMut() -> reqwest::Result<reqwest::blocking::Response>,
+    ) -> Result<reqwest::blocking::Response, Box<dyn Error>> {
+        let mut last_err: Option<reqwest::Error> = None;
+        for attempt in 0..MAX_ATTEMPTS {
+            if attempt > 0 {
+                eprintln!(
+                    "  network error, retrying ({attempt}/{})...",
+                    MAX_ATTEMPTS - 1
+                );
+                std::thread::sleep(retry_delay(attempt));
+            }
+            match send_request() {
+                Ok(resp) => return Ok(resp),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        Err(Box::new(last_err.expect("MAX_ATTEMPTS > 0")))
+    }
+
     /// GET returning JSON, with a friendly error for non-2xx responses.
     pub(crate) fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
     ) -> Result<T, Box<dyn Error>> {
-        let resp = self
-            .http
-            .get(self.url(path))
-            .bearer_auth(&self.token)
-            .send()?;
+        let resp = self.send_with_retry(|| {
+            self.http
+                .get(self.url(path))
+                .bearer_auth(&self.token)
+                .send()
+        })?;
         Self::parse(resp)
     }
 
@@ -148,27 +208,49 @@ impl Client {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<T, Box<dyn Error>> {
-        let resp = self
-            .http
-            .post(self.url(path))
-            .bearer_auth(&self.token)
-            .json(body)
-            .send()?;
+        let resp = self.send_with_retry(|| {
+            self.http
+                .post(self.url(path))
+                .bearer_auth(&self.token)
+                .json(body)
+                .send()
+        })?;
         Self::parse(resp)
     }
 
+    /// Multipart POST. `build_form` is called fresh on every attempt (not
+    /// passed a pre-built `Form`) so a retry re-reads the file/bytes rather
+    /// than reusing a body that's already been partially consumed.
     pub(crate) fn post_form<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
-        form: reqwest::blocking::multipart::Form,
+        build_form: impl Fn() -> Result<reqwest::blocking::multipart::Form, Box<dyn Error>>,
     ) -> Result<T, Box<dyn Error>> {
-        let resp = self
-            .http
-            .post(self.url(path))
-            .bearer_auth(&self.token)
-            .multipart(form)
-            .send()?;
-        Self::parse(resp)
+        let mut last_err: Option<Box<dyn Error>> = None;
+        for attempt in 0..MAX_ATTEMPTS {
+            if attempt > 0 {
+                eprintln!(
+                    "  network error, retrying ({attempt}/{})...",
+                    MAX_ATTEMPTS - 1
+                );
+                std::thread::sleep(retry_delay(attempt));
+            }
+            let form = match build_form() {
+                Ok(f) => f,
+                Err(e) => return Err(e),
+            };
+            match self
+                .http
+                .post(self.url(path))
+                .bearer_auth(&self.token)
+                .multipart(form)
+                .send()
+            {
+                Ok(resp) => return Self::parse(resp),
+                Err(e) => last_err = Some(Box::new(e)),
+            }
+        }
+        Err(last_err.expect("MAX_ATTEMPTS > 0"))
     }
 
     pub(crate) fn patch_json<T: serde::de::DeserializeOwned>(
@@ -176,12 +258,13 @@ impl Client {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<T, Box<dyn Error>> {
-        let resp = self
-            .http
-            .patch(self.url(path))
-            .bearer_auth(&self.token)
-            .json(body)
-            .send()?;
+        let resp = self.send_with_retry(|| {
+            self.http
+                .patch(self.url(path))
+                .bearer_auth(&self.token)
+                .json(body)
+                .send()
+        })?;
         Self::parse(resp)
     }
 
@@ -189,11 +272,12 @@ impl Client {
         &self,
         path: &str,
     ) -> Result<T, Box<dyn Error>> {
-        let resp = self
-            .http
-            .delete(self.url(path))
-            .bearer_auth(&self.token)
-            .send()?;
+        let resp = self.send_with_retry(|| {
+            self.http
+                .delete(self.url(path))
+                .bearer_auth(&self.token)
+                .send()
+        })?;
         Self::parse(resp)
     }
 
@@ -203,12 +287,13 @@ impl Client {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<(), Box<dyn Error>> {
-        let resp = self
-            .http
-            .delete(self.url(path))
-            .bearer_auth(&self.token)
-            .json(body)
-            .send()?;
+        let resp = self.send_with_retry(|| {
+            self.http
+                .delete(self.url(path))
+                .bearer_auth(&self.token)
+                .json(body)
+                .send()
+        })?;
         let _: serde_json::Value = Self::parse(resp)?;
         Ok(())
     }
@@ -639,10 +724,12 @@ pub(crate) fn upload_one(
     );
 
     let file_id = if size <= MULTIPART_THRESHOLD {
-        let form = reqwest::blocking::multipart::Form::new()
-            .file("file", local)?
-            .text("folderId", folder._id.clone());
-        let resp: serde_json::Value = client.post_form("/api/vault/upload", form)?;
+        let folder_id = folder._id.clone();
+        let resp: serde_json::Value = client.post_form("/api/vault/upload", || {
+            Ok(reqwest::blocking::multipart::Form::new()
+                .file("file", local)?
+                .text("folderId", folder_id.clone()))
+        })?;
         resp["fileRef"]["_id"]
             .as_str()
             .ok_or("Upload did not return a file id")?
@@ -771,9 +858,10 @@ pub fn replace(local: &Path, vault_path: &str) -> Result<(), Box<dyn Error>> {
         local.display(),
         format_size(Some(meta.len()))
     );
-    let form = reqwest::blocking::multipart::Form::new().file("file", local)?;
-    let _: serde_json::Value =
-        client.post_form(&format!("/api/vault/replace/{}", listing._id), form)?;
+    let _: serde_json::Value = client
+        .post_form(&format!("/api/vault/replace/{}", listing._id), || {
+            Ok(reqwest::blocking::multipart::Form::new().file("file", local)?)
+        })?;
     println!("  ✓ {}", listing.name);
     Ok(())
 }
@@ -1122,16 +1210,19 @@ fn upload_parts(
         }
 
         hasher.update(&buf[..filled]);
-        let chunk_part = reqwest::blocking::multipart::Part::bytes(buf[..filled].to_vec())
-            .file_name("chunk")
-            .mime_str("application/octet-stream")?;
-        let form = reqwest::blocking::multipart::Form::new()
-            .text("uploadId", upload_id.to_string())
-            .text("key", key.to_string())
-            .text("partNumber", part_number.to_string())
-            .part("chunk", chunk_part);
-
-        let resp: serde_json::Value = client.post_form("/api/vault/multipart-part", form)?;
+        // Cloned into the closure so a retry re-sends the same bytes rather
+        // than reusing an already-consumed Form/Part (each is single-use).
+        let chunk_bytes = buf[..filled].to_vec();
+        let resp: serde_json::Value = client.post_form("/api/vault/multipart-part", || {
+            let chunk_part = reqwest::blocking::multipart::Part::bytes(chunk_bytes.clone())
+                .file_name("chunk")
+                .mime_str("application/octet-stream")?;
+            Ok(reqwest::blocking::multipart::Form::new()
+                .text("uploadId", upload_id.to_string())
+                .text("key", key.to_string())
+                .text("partNumber", part_number.to_string())
+                .part("chunk", chunk_part))
+        })?;
         let etag = resp["ETag"]
             .as_str()
             .ok_or_else(|| format!("No ETag for part {part_number}"))?;
