@@ -66,33 +66,56 @@ cli:
 
 # ── nopal CLI releases ────────────────────────────────────────────────────────────────
 
-## Bump the nopal CLI version and commit it (e.g. `make update-cli-version VERSION=0.0.6`).
-## Follow with `make release-cli` to tag, push, and publish the release.
+## Bump the nopal CLI's version and commit it — defaults to a PATCH bump:
+##   make update-cli-version         (x.y.z -> x.y.z+1)
+##   make update-cli-version MINOR   (x.y.z -> x.y+1.0)
+##   make update-cli-version MAJOR   (x.y.z -> x+1.0.0)
+## Follow with `make release-cli` to tag, push, and publish the release —
+## or just pass PATCH/MINOR/MAJOR to release-cli directly (see below).
 update-cli-version:
-	@if [ -z "$(VERSION)" ]; then \
-		echo "Usage: make update-cli-version VERSION=0.0.6"; \
-		exit 1; \
+	@CURRENT=$$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d '"' -f2); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	if echo "$(MAKECMDGOALS)" | grep -qw MAJOR; then \
+		MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0; \
+	elif echo "$(MAKECMDGOALS)" | grep -qw MINOR; then \
+		MINOR=$$((MINOR + 1)); PATCH=0; \
+	else \
+		PATCH=$$((PATCH + 1)); \
 	fi; \
-	CURRENT=$$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d '"' -f2); \
-	if [ "$$CURRENT" = "$(VERSION)" ]; then \
-		echo "crates/cli/Cargo.toml is already at version $(VERSION)."; \
-		exit 1; \
-	fi; \
-	perl -i -pe 's/^version = ".*"/version = "$(VERSION)"/' crates/cli/Cargo.toml; \
+	NEW="$$MAJOR.$$MINOR.$$PATCH"; \
+	perl -i -pe "s/^version = \".*\"/version = \"$$NEW\"/" crates/cli/Cargo.toml; \
 	git add crates/cli/Cargo.toml; \
-	git commit -m "Bump nopal CLI to v$(VERSION)"; \
+	git commit -m "Bump nopal CLI to v$$NEW"; \
 	echo ""; \
-	echo "  ✓ Bumped v$$CURRENT -> v$(VERSION) and committed."; \
+	echo "  ✓ Bumped v$$CURRENT -> v$$NEW and committed."; \
 	echo "    Next: make release-cli"
 
-## Tag and push a new nopal CLI release. First bump `version` in
-## crates/cli/Cargo.toml and commit that (or run `make update-cli-version
-## VERSION=x.y.z`), then run `make release-cli` — it reads the version from
-## there, sanity-checks the dist config with `dist plan`, then tags
+## No-op targets so bare-word modifiers (`make update-cli-version MAJOR`,
+## `make release-cli PATCH`, etc.) don't error — the real targets read
+## $(MAKECMDGOALS) instead of treating these as targets to build.
+PATCH MAJOR MINOR:
+	@:
+
+## Tag and push a new nopal CLI release, optionally bumping the version
+## first (via update-cli-version) in the same step:
+##   make release-cli          (release whatever version is currently set)
+##   make release-cli PATCH    (bump patch, then release)
+##   make release-cli MINOR    (bump minor, then release)
+##   make release-cli MAJOR    (bump major, then release)
+## Either way this sanity-checks the dist config with `dist plan`, then tags
 ## (nopal-vX.Y.Z) and pushes, which triggers .github/workflows/release.yml
 ## to build and publish to GitHub Releases.
 release-cli:
 	@command -v dist >/dev/null 2>&1 || { echo "'dist' not found — install with: brew install axodotdev/tap/cargo-dist"; exit 1; }
+	@if echo "$(MAKECMDGOALS)" | grep -qw MAJOR; then \
+		$(MAKE) update-cli-version MAJOR; \
+	elif echo "$(MAKECMDGOALS)" | grep -qw MINOR; then \
+		$(MAKE) update-cli-version MINOR; \
+	elif echo "$(MAKECMDGOALS)" | grep -qw PATCH; then \
+		$(MAKE) update-cli-version; \
+	fi
 	@VERSION=$$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d '"' -f2); \
 	TAG="nopal-v$$VERSION"; \
 	if git rev-parse "$$TAG" >/dev/null 2>&1; then \
