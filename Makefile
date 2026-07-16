@@ -1,4 +1,4 @@
-.PHONY: dev seed migrate down reset clean deploy restart cli release-cli
+.PHONY: dev seed migrate down reset clean deploy restart cli release-cli update-cli-version
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -66,11 +66,31 @@ cli:
 
 # ── nopal CLI releases ────────────────────────────────────────────────────────────────
 
+## Bump the nopal CLI version and commit it (e.g. `make update-cli-version VERSION=0.0.6`).
+## Follow with `make release-cli` to tag, push, and publish the release.
+update-cli-version:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Usage: make update-cli-version VERSION=0.0.6"; \
+		exit 1; \
+	fi; \
+	CURRENT=$$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d '"' -f2); \
+	if [ "$$CURRENT" = "$(VERSION)" ]; then \
+		echo "crates/cli/Cargo.toml is already at version $(VERSION)."; \
+		exit 1; \
+	fi; \
+	perl -i -pe 's/^version = ".*"/version = "$(VERSION)"/' crates/cli/Cargo.toml; \
+	git add crates/cli/Cargo.toml; \
+	git commit -m "Bump nopal CLI to v$(VERSION)"; \
+	echo ""; \
+	echo "  ✓ Bumped v$$CURRENT -> v$(VERSION) and committed."; \
+	echo "    Next: make release-cli"
+
 ## Tag and push a new nopal CLI release. First bump `version` in
-## crates/cli/Cargo.toml and commit that, then run `make release-cli` —
-## it reads the version from there, sanity-checks the dist config with
-## `dist plan`, then tags (nopal-vX.Y.Z) and pushes, which triggers
-## .github/workflows/release.yml to build and publish to GitHub Releases.
+## crates/cli/Cargo.toml and commit that (or run `make update-cli-version
+## VERSION=x.y.z`), then run `make release-cli` — it reads the version from
+## there, sanity-checks the dist config with `dist plan`, then tags
+## (nopal-vX.Y.Z) and pushes, which triggers .github/workflows/release.yml
+## to build and publish to GitHub Releases.
 release-cli:
 	@command -v dist >/dev/null 2>&1 || { echo "'dist' not found — install with: brew install axodotdev/tap/cargo-dist"; exit 1; }
 	@VERSION=$$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d '"' -f2); \
