@@ -2,7 +2,7 @@
 // Public, unauthenticated view of a single vault file — reachable when the
 // file was published individually (the original single-card feature) OR it
 // sits inside a folder that's been Published from the Vault.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, useLoaderData } from "react-router";
 import {
   getFileRefById,
@@ -65,8 +65,64 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   if (!isPublic) throw new Response("Not Found", { status: 404 });
 
-  return { file, crumbs };
+  // Needed to build ABSOLUTE og:image/og:video URLs below — link-preview
+  // crawlers (Discord, Slack, iMessage, etc.) require absolute URLs; a
+  // relative path is silently ignored.
+  const origin = new URL(request.url).origin;
+
+  return { file, crumbs, origin };
 }
+
+/**
+ * Open Graph / Twitter Card tags so pasting a public file link anywhere
+ * (Discord, Slack, iMessage, X...) shows an actual preview instead of a
+ * bare link — and, for videos, an inline player embedded directly in the
+ * chat (Discord reads `og:video` and plays it right there).
+ *
+ * The image/video URL points at our own `/api/vault/public-view/:fileId`
+ * (not the raw S3 URL) so every fetch — including the crawler's — gets a
+ * fresh presigned redirect; nothing here can go stale.
+ */
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  if (!data) return [{ title: "Not found" }];
+  const { file, origin } = data;
+
+  const pageUrl = `${origin}/public/file/${file._id}`;
+  const mediaUrl = `${origin}/api/vault/public-view/${file._id}`;
+  const description = [formatSize(file.size), "Shared from Nopal"]
+    .filter(Boolean)
+    .join(" · ");
+
+  const tags: Array<Record<string, string>> = [
+    { title: file.name },
+    { name: "description", content: description },
+    { property: "og:site_name", content: "Nopal" },
+    { property: "og:title", content: file.name },
+    { property: "og:description", content: description },
+    { property: "og:url", content: pageUrl },
+  ];
+
+  if (file.content_type.startsWith("image/")) {
+    tags.push(
+      { property: "og:type", content: "website" },
+      { property: "og:image", content: mediaUrl },
+      { property: "og:image:secure_url", content: mediaUrl },
+      { property: "og:image:type", content: file.content_type },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:image", content: mediaUrl },
+    );
+  } else if (file.content_type.startsWith("video/")) {
+    tags.push(
+      { property: "og:type", content: "video.other" },
+      { property: "og:video", content: mediaUrl },
+      { property: "og:video:secure_url", content: mediaUrl },
+      { property: "og:video:type", content: file.content_type },
+      { name: "twitter:card", content: "player" },
+    );
+  }
+
+  return tags;
+};
 
 export default function PublicFilePage() {
   const { file, crumbs } = useLoaderData<typeof loader>();

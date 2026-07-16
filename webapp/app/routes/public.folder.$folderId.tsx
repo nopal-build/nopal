@@ -2,7 +2,7 @@
 // Public, unauthenticated folder browser — reachable once a folder (or an
 // ancestor of it) has been Published from the Vault. Read-only: no upload,
 // rename, move, delete, or share affordances exist here.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, useLoaderData } from "react-router";
 import {
   getFolderById,
@@ -74,8 +74,34 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ? ((await getFileRefById(readmeListing._id)) ?? null)
     : null;
 
-  return { crumbs, children, readme };
+  return {
+    crumbs,
+    children,
+    readme,
+    origin: new URL(request.url).origin,
+  };
 }
+
+/** Basic Open Graph tags — title + item count — so a shared folder link
+ * shows more than a bare URL. No preview image: picking a representative
+ * thumbnail out of a folder's contents is future scope, not this change. */
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  if (!data) return [{ title: "Not found" }];
+  const { crumbs, children, origin } = data;
+  const name = crumbs[crumbs.length - 1]?.label ?? "Shared folder";
+  const count = children.folders.length + children.files.length;
+  const description = `${count} item${count === 1 ? "" : "s"} · Shared from Nopal`;
+
+  return [
+    { title: name },
+    { name: "description", content: description },
+    { property: "og:site_name", content: "Nopal" },
+    { property: "og:type", content: "website" },
+    { property: "og:title", content: name },
+    { property: "og:description", content: description },
+    { property: "og:url", content: `${origin}/public/folder/${crumbs[crumbs.length - 1]?.id ?? ""}` },
+  ];
+};
 
 export default function PublicFolderPage() {
   const { crumbs, children, readme } = useLoaderData<typeof loader>();
