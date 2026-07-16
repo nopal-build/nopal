@@ -229,6 +229,34 @@ fn launchctl(args: &[&str]) -> Result<bool, Box<dyn Error>> {
     Ok(status.success())
 }
 
+/// Restarts the watcher (unload + load the SAME plist, same binary path) if
+/// it's currently enabled — a no-op otherwise. Called automatically by
+/// `nopal update` so a freshly-installed binary takes effect immediately
+/// instead of waiting for the process to next crash/reboot.
+///
+/// Deliberately does NOT touch the sync-scoped token (unlike `disable` +
+/// `enable`, which would mint a brand new one and leave the old one
+/// orphaned on the server every time you update). `self_replace` swaps the
+/// binary in place at the same path `ProgramArguments` already points at,
+/// so nothing about the plist needs to change — launchd just needs to be
+/// told to relaunch the job.
+pub fn restart_if_enabled() -> Result<(), Box<dyn Error>> {
+    let plist_path = launch_agent_path();
+    if !plist_path.exists() {
+        return Ok(());
+    }
+
+    println!("Restarting the sync watcher to pick up the new version...");
+    // Best-effort unload — if it wasn't actually loaded (e.g. after a
+    // reboot before login), that's fine, `load` below is what matters.
+    let _ = launchctl(&["unload", &plist_path.to_string_lossy()]);
+    if !launchctl(&["load", &plist_path.to_string_lossy()])? {
+        return Err("launchctl load failed — run 'nopal sync watch enable' manually.".into());
+    }
+    println!("  ✓ watcher restarted");
+    Ok(())
+}
+
 pub fn enable() -> Result<(), Box<dyn Error>> {
     ensure_macos()?;
 

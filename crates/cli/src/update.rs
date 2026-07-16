@@ -15,6 +15,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use crate::watch;
+
 const REPO: &str = "gwing33/nopal";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -111,6 +113,17 @@ pub fn update(check_only: bool) -> Result<(), Box<dyn Error>> {
     result?;
 
     println!("Updated: v{CURRENT_VERSION} -> v{latest}");
+
+    // If the background sync watcher is enabled, restart it so it picks up
+    // this binary right away instead of waiting for it to next
+    // crash/reboot. Non-fatal: the update itself already succeeded above.
+    if let Err(e) = watch::restart_if_enabled() {
+        eprintln!(
+            "Warning: couldn't restart the sync watcher automatically ({e}). \
+             Run 'nopal sync watch enable' to pick it up manually."
+        );
+    }
+
     Ok(())
 }
 
