@@ -10,6 +10,7 @@ export type {
   FileShareType,
   VaultFolder,
 } from "./vault.types";
+export { isFolderShared } from "./vault.types";
 import type {
   MdVersion,
   FileRef,
@@ -372,6 +373,61 @@ export async function getOrCreateVaultFolder(
   });
   if (!created) throw new Error(`Failed to create vault folder: ${name}`);
   return created;
+}
+
+/** Every descendant folder record (BFS) of the given folder. */
+export async function getDescendantFolders(
+  folderId: string,
+): Promise<VaultFolder[]> {
+  const out: VaultFolder[] = [];
+  const queue = [folderId];
+  while (queue.length) {
+    const parentId = queue.shift()!;
+    const result = await query<[VaultFolder[]]>(
+      `SELECT * FROM vault_folders WHERE parent_folder_id = $parentId`,
+      { parentId },
+    );
+    for (const child of (result?.[0] ?? []).map(formatRecord)) {
+      out.push(child);
+      queue.push(child._id);
+    }
+  }
+  return out;
+}
+
+/**
+ * Re-parents a folder under `newParent`, re-stamping `vault_root_key` on the
+ * folder and every descendant (moves may cross root subtrees, e.g.
+ * personal → projects).
+ *
+ * Mechanical only — callers are responsible for policy checks (ownership,
+ * root containers, shared folders, cycles).
+ */
+export async function moveVaultFolder(
+  folder: VaultFolder,
+  newParent: VaultFolder,
+  descendants?: VaultFolder[],
+): Promise<VaultFolder | undefined> {
+  const now = new Date().toISOString();
+  const newKey =
+    newParent.vault_root_key ?? (await resolveVaultRootKey(newParent._id));
+
+  const updated = await merge("vault_folders", folder._id, {
+    parent_folder_id: newParent._id,
+    vault_root_key: newKey,
+    updated_at: now,
+  });
+
+  for (const child of descendants ?? (await getDescendantFolders(folder._id))) {
+    if (child.vault_root_key !== newKey) {
+      await merge("vault_folders", child._id, {
+        vault_root_key: newKey,
+        updated_at: now,
+      });
+    }
+  }
+
+  return updated ? formatRecord(updated as unknown as VaultFolder) : undefined;
 }
 
 /**

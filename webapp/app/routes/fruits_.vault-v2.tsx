@@ -14,7 +14,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
 // Types + shared utils live in a server-free file — safe on client and server.
-import { isVaultRootFolder } from "../data/vault.types";
+import { isFolderShared, isVaultRootFolder } from "../data/vault.types";
 import type {
   FileRef,
   FileRefListing,
@@ -32,6 +32,7 @@ import {
   getFileRefById,
   getFolderAncestry,
   getFolderById,
+  getFoldersByHuman,
   listFolderChildren,
 } from "../data/vault.server";
 import { getRelatedHumans } from "../data/relationships.server";
@@ -64,8 +65,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
 
-  const [roots, relatedHumansRaw] = await Promise.all([
+  const [roots, allFolders, relatedHumansRaw] = await Promise.all([
     ensureVaultRootFolders(user._id),
+    // Every folder the human owns — one cheap query. The left tree renders
+    // its full folder skeleton from this, so expanding never waits on the
+    // network; only per-folder FILE listings load lazily.
+    getFoldersByHuman(user._id),
     getRelatedHumans(user),
   ]);
   const relatedHumans: HumanEntry[] = relatedHumansRaw.map((h) => ({
@@ -78,8 +83,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const fileParam = url.searchParams.get("file");
   const folderParam = url.searchParams.get("folder");
 
-  // Children cache seed for the left tree: the root level plus every folder
-  // on the current item's ancestry path, so deep links render fully expanded.
+  // Children-cache seed. Folder structure comes from `allFolders`, so only
+  // the CURRENT folder's listing (files for the main view) is fetched here —
+  // this doubles as the "refetch on click" freshness pass, since navigating
+  // re-runs the loader. Files for other expanded tree folders load lazily.
   const treeSeed: Record<string, FolderChildren> = {
     root: { folders: roots, files: [] },
   };
@@ -94,13 +101,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const ancestry = file.folder_id
       ? await getFolderAncestry(file.folder_id)
       : [];
-    const seeded = await Promise.all(
-      ancestry.map(
-        async (f) =>
-          [f._id, await listFolderChildren(user._id, f._id)] as const,
-      ),
-    );
-    for (const [id, children] of seeded) treeSeed[id] = children;
     current = { kind: "file", file, ancestry };
   } else if (folderParam) {
     const folder = await getFolderById(folderParam);
@@ -109,15 +109,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
     // Ancestry includes the folder itself (root container → … → folder).
     const ancestry = await getFolderAncestry(folder._id);
-    const seeded = await Promise.all(
-      ancestry.map(
-        async (f) =>
-          [f._id, await listFolderChildren(user._id, f._id)] as const,
-      ),
-    );
-    for (const [id, children] of seeded) treeSeed[id] = children;
+    const children = await listFolderChildren(user._id, folder._id);
+    treeSeed[folder._id] = children;
 
-    const children = treeSeed[folder._id] ?? { folders: [], files: [] };
     const readmeListing = children.files.find(
       (f) => f.name.toLowerCase() === "readme.md",
     );
@@ -127,7 +121,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     current = { kind: "folder", folder, ancestry, readme };
   }
 
-  return { user, roots, treeSeed, current, relatedHumans };
+  return { user, roots, allFolders, treeSeed, current, relatedHumans };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -354,11 +348,171 @@ function ShareModal({
   );
 }
 
-// ─── Sidebar tree ─────────────────────────────────────────────────────────────
+// ─── Move Folder Modal ─────────────────────────────────────────────────────────
+
+/** One selectable folder row in the move-destination picker. The subtree of
+ * the folder being moved is never rendered — you can't move into yourself. */
+function MovePickerNode({
+  folder,
+  depth,
+  movingId,
+  currentParentId,
+  foldersByParent,
+  expanded,
+  onToggle,
+  selectedId,
+  onSelect,
+}: {
+  folder: VaultFolder;
+  depth: number;
+  movingId: string;
+  currentParentId: string | null;
+  foldersByParent: Record<string, VaultFolder[]>;
+  expanded: Set<string>;
+  onToggle: (folderId: string) => void;
+  selectedId: string | null;
+  onSelect: (folderId: string) => void;
+}) {
+  const isMoving = folder._id === movingId;
+  const isCurrentParent = folder._id === currentParentId;
+  const disabled = isMoving || isCurrentParent;
+  const isExpanded = !isMoving && expanded.has(folder._id);
+  const childFolders = foldersByParent[folder._id] ?? [];
+
+  return (
+    <div>
+      <div
+        className={`vault-v2-move-row${
+          selectedId === folder._id ? " vault-v2-move-row--selected" : ""
+        }${disabled ? " vault-v2-move-row--disabled" : ""}`}
+        style={{ paddingLeft: `${8 + depth * 16}px` }}
+      >
+        {isMoving ? (
+          <span className="vault-v2-chevron-spacer" />
+        ) : (
+          <button
+            className="vault-v2-chevron"
+            onClick={() => onToggle(folder._id)}
+            aria-label={isExpanded ? "Collapse" : "Expand"}
+          >
+            {isExpanded ? "▼" : "▶"}
+          </button>
+        )}
+        <button
+          className="vault-v2-tree-name-btn"
+          disabled={disabled}
+          onClick={() => onSelect(folder._id)}
+        >
+          📁 {folderLabel(folder)}
+          {isMoving ? " (moving)" : isCurrentParent ? " (current location)" : ""}
+        </button>
+      </div>
+
+      {isExpanded &&
+        childFolders.map((child) => (
+          <MovePickerNode
+            key={child._id}
+            folder={child}
+            depth={depth + 1}
+            movingId={movingId}
+            currentParentId={currentParentId}
+            foldersByParent={foldersByParent}
+            expanded={expanded}
+            onToggle={onToggle}
+            selectedId={selectedId}
+            onSelect={onSelect}
+          />
+        ))}
+    </div>
+  );
+}
+
+function MoveFolderModal({
+  folder,
+  roots,
+  foldersByParent,
+  onMove,
+  onClose,
+}: {
+  folder: VaultFolder;
+  roots: VaultFolder[];
+  foldersByParent: Record<string, VaultFolder[]>;
+  onMove: (targetFolderId: string) => void;
+  onClose: () => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const toggle = (folderId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      return next;
+    });
+  };
+
+  return (
+    <div className="vault-modal-backdrop" onClick={onClose}>
+      <div className="vault-modal" onClick={(e) => e.stopPropagation()}>
+        <h3 className="vault-modal-title">Move "{folder.name}"</h3>
+
+        <p
+          className="text-xs font-mono"
+          style={{ color: "var(--text-subtle)", margin: "0 0 10px" }}
+        >
+          Pick a destination folder:
+        </p>
+
+        <div className="vault-v2-move-tree">
+          {roots.map((root) => (
+            <MovePickerNode
+              key={root._id}
+              folder={root}
+              depth={0}
+              movingId={folder._id}
+              currentParentId={folder.parent_folder_id}
+              foldersByParent={foldersByParent}
+              expanded={expanded}
+              onToggle={toggle}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+          ))}
+        </div>
+
+        <div
+          style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}
+        >
+          <button
+            onClick={onClose}
+            className="btn-outline text-xs font-mono px-3 py-1.5 rounded"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              if (selectedId) onMove(selectedId);
+              onClose();
+            }}
+            disabled={!selectedId}
+            className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
+            style={!selectedId ? { opacity: 0.5, cursor: "not-allowed" } : {}}
+          >
+            Move here
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sidebar tree ───────────────────────────────────────────────────────────────
 
 function TreeNode({
   folder,
   depth,
+  foldersByParent,
   cache,
   expanded,
   activeFolderId,
@@ -369,6 +523,9 @@ function TreeNode({
 }: {
   folder: VaultFolder;
   depth: number;
+  /** Full folder skeleton (from the loader) — renders instantly. */
+  foldersByParent: Record<string, VaultFolder[]>;
+  /** Lazily-fetched per-folder listings — only used for FILES here. */
   cache: Record<string, FolderChildren>;
   expanded: Set<string>;
   activeFolderId: string | null;
@@ -378,7 +535,8 @@ function TreeNode({
   onSelectFile: (file: FileRefListing) => void;
 }) {
   const isExpanded = expanded.has(folder._id);
-  const children = cache[folder._id];
+  const childFolders = foldersByParent[folder._id] ?? [];
+  const files = cache[folder._id]?.files;
   const isActive = activeFolderId === folder._id;
   const indent = 8 + depth * 14;
 
@@ -405,7 +563,25 @@ function TreeNode({
 
       {isExpanded && (
         <div>
-          {!children ? (
+          {/* Sub-folders — always available from the skeleton, no loading state */}
+          {childFolders.map((child) => (
+            <TreeNode
+              key={child._id}
+              folder={child}
+              depth={depth + 1}
+              foldersByParent={foldersByParent}
+              cache={cache}
+              expanded={expanded}
+              activeFolderId={activeFolderId}
+              activeFileId={activeFileId}
+              onToggleExpand={onToggleExpand}
+              onSelectFolder={onSelectFolder}
+              onSelectFile={onSelectFile}
+            />
+          ))}
+
+          {/* Files — lazily fetched; brief “…” only on first expand */}
+          {!files ? (
             <div
               className="vault-v2-tree-loading"
               style={{ paddingLeft: indent + 22 }}
@@ -413,39 +589,23 @@ function TreeNode({
               …
             </div>
           ) : (
-            <>
-              {children.folders.map((child) => (
-                <TreeNode
-                  key={child._id}
-                  folder={child}
-                  depth={depth + 1}
-                  cache={cache}
-                  expanded={expanded}
-                  activeFolderId={activeFolderId}
-                  activeFileId={activeFileId}
-                  onToggleExpand={onToggleExpand}
-                  onSelectFolder={onSelectFolder}
-                  onSelectFile={onSelectFile}
-                />
-              ))}
-              {children.files.map((file) => (
-                <button
-                  key={file._id}
-                  className={`vault-sidebar-item${activeFileId === file._id ? " vault-sidebar-item--active" : ""}`}
-                  style={{
-                    alignItems: "center",
-                    gap: "4px",
-                    paddingLeft: indent + 14,
-                  }}
-                  onClick={() => onSelectFile(file)}
-                >
-                  <span className="vault-v2-chevron-spacer" />
-                  <span className="vault-v2-tree-name">
-                    {fileIcon(file.content_type)} {file.name}
-                  </span>
-                </button>
-              ))}
-            </>
+            files.map((file) => (
+              <button
+                key={file._id}
+                className={`vault-sidebar-item${activeFileId === file._id ? " vault-sidebar-item--active" : ""}`}
+                style={{
+                  alignItems: "center",
+                  gap: "4px",
+                  paddingLeft: indent + 14,
+                }}
+                onClick={() => onSelectFile(file)}
+              >
+                <span className="vault-v2-chevron-spacer" />
+                <span className="vault-v2-tree-name">
+                  {fileIcon(file.content_type)} {file.name}
+                </span>
+              </button>
+            ))
           )}
         </div>
       )}
@@ -456,7 +616,7 @@ function TreeNode({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function VaultV2Page() {
-  const { roots, treeSeed, current, relatedHumans } =
+  const { roots, allFolders, treeSeed, current, relatedHumans } =
     useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
@@ -474,6 +634,31 @@ export default function VaultV2Page() {
   );
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
 
+  // Full folder skeleton, keyed by parent id — refreshed by every loader run,
+  // so the tree renders (and stays) complete without per-folder fetches.
+  // Children of a root container follow its childSort policy (daily-logs is
+  // latest → oldest); everything else sorts name ASC.
+  const foldersByParent = useMemo(() => {
+    const byId = new Map(allFolders.map((f) => [f._id, f]));
+    const map: Record<string, VaultFolder[]> = {};
+    for (const f of allFolders) {
+      if (!f.parent_folder_id) continue; // root containers come from `roots`
+      (map[f.parent_folder_id] ??= []).push(f);
+    }
+    for (const [parentId, children] of Object.entries(map)) {
+      const parent = byId.get(parentId);
+      const desc =
+        parent &&
+        !parent.parent_folder_id &&
+        isVaultRootKey(parent.vault_root_key) &&
+        VAULT_ROOTS[parent.vault_root_key].childSort === "name-desc";
+      children.sort((a, b) =>
+        desc ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name),
+      );
+    }
+    return map;
+  }, [allFolders]);
+
   const loadChildren = useCallback(async (folderId: string) => {
     setLoadingIds((prev) => new Set(prev).add(folderId));
     try {
@@ -490,12 +675,6 @@ export default function VaultV2Page() {
       });
     }
   }, []);
-
-  const ensureChildren = (folderId: string) => {
-    if (!mergedCache[folderId] && !loadingIds.has(folderId)) {
-      loadChildren(folderId);
-    }
-  };
 
   /** Drop cached children for the given folders, then re-run the loader. */
   const invalidateAndRevalidate = (
@@ -530,6 +709,17 @@ export default function VaultV2Page() {
     });
   }, [ancestryKey]);
 
+  // Fetch file listings for any expanded folder that doesn't have one yet —
+  // covers first expand, deep-link auto-expansion, and post-mutation
+  // invalidation in one place. Folder structure never waits on this.
+  useEffect(() => {
+    for (const id of expanded) {
+      if (id !== "root" && !mergedCache[id] && !loadingIds.has(id)) {
+        loadChildren(id);
+      }
+    }
+  }, [expanded, mergedCache, loadingIds, loadChildren]);
+
   const activeFolderId = current.kind === "folder" ? current.folder._id : null;
   const activeFileId = current.kind === "file" ? current.file._id : null;
 
@@ -547,14 +737,12 @@ export default function VaultV2Page() {
   };
 
   const toggleExpand = (folder: VaultFolder) => {
-    const opening = !expanded.has(folder._id);
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(folder._id)) next.delete(folder._id);
       else next.add(folder._id);
       return next;
     });
-    if (opening) ensureChildren(folder._id);
   };
 
   // ─── Mutations ──────────────────────────────────────────────────────────────
@@ -590,6 +778,7 @@ export default function VaultV2Page() {
   const [uploading, setUploading] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   const handleUpload = async (file: File) => {
     if (current.kind !== "folder") return;
@@ -640,6 +829,17 @@ export default function VaultV2Page() {
     if (data) invalidateAndRevalidate([folder.parent_folder_id]);
   };
 
+  const handleMoveFolder = async (targetFolderId: string) => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    const data = await apiJson(`/api/vault/folders/${folder._id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ parent_folder_id: targetFolderId }),
+    });
+    // Both the old and new parent listings changed.
+    if (data) invalidateAndRevalidate([folder.parent_folder_id, targetFolderId]);
+  };
+
   const handleDownload = async (file: FileRef) => {
     const res = await fetch(`/api/vault/download/${file._id}`);
     const data = await res.json().catch(() => null);
@@ -673,10 +873,14 @@ export default function VaultV2Page() {
 
   // ─── Derived view data ──────────────────────────────────────────────────────
 
-  const rootChildren = mergedCache["root"] ?? { folders: roots, files: [] };
+  // Folders from the always-complete skeleton; files from the seeded/lazy
+  // cache (the loader seeds the current folder on every navigation).
   const folderChildren =
     current.kind === "folder"
-      ? (mergedCache[current.folder._id] ?? { folders: [], files: [] })
+      ? {
+          folders: foldersByParent[current.folder._id] ?? [],
+          files: mergedCache[current.folder._id]?.files ?? [],
+        }
       : null;
 
   const currentIsRootContainer =
@@ -685,6 +889,12 @@ export default function VaultV2Page() {
     current.kind === "folder" &&
     !currentIsRootContainer &&
     isRootShareable(current.folder.vault_root_key);
+  // Any folder can be moved anywhere — except root containers and folders
+  // that are currently shared (the server also rejects shared descendants).
+  const canMoveCurrent =
+    current.kind === "folder" &&
+    !currentIsRootContainer &&
+    !isFolderShared(current.folder);
 
   const fileHasS3 =
     current.kind === "file" &&
@@ -764,11 +974,12 @@ export default function VaultV2Page() {
           </Link>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
-            {rootChildren.folders.map((root) => (
+            {roots.map((root) => (
               <TreeNode
                 key={root._id}
                 folder={root}
                 depth={0}
+                foldersByParent={foldersByParent}
                 cache={mergedCache}
                 expanded={expanded}
                 activeFolderId={activeFolderId}
@@ -855,6 +1066,14 @@ export default function VaultV2Page() {
                     onClick={handleRenameFolder}
                   >
                     Rename
+                  </button>
+                )}
+                {canMoveCurrent && (
+                  <button
+                    className="vault-toolbar-btn"
+                    onClick={() => setMoveOpen(true)}
+                  >
+                    Move
                   </button>
                 )}
                 {canShareCurrent && (
@@ -1049,6 +1268,17 @@ export default function VaultV2Page() {
           allHumans={relatedHumans}
           onClose={() => setShareOpen(false)}
           onSave={handleShareFolder}
+        />
+      )}
+
+      {/* Move modal */}
+      {moveOpen && current.kind === "folder" && (
+        <MoveFolderModal
+          folder={current.folder}
+          roots={roots}
+          foldersByParent={foldersByParent}
+          onMove={handleMoveFolder}
+          onClose={() => setMoveOpen(false)}
         />
       )}
     </AppLayout>

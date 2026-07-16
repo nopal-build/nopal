@@ -105,3 +105,11 @@ export type VaultFolder = {
 export function isVaultRootFolder(folder: VaultFolder): boolean {
   return folder.parent_folder_id === null && !!folder.vault_root_key;
 }
+
+/** Whether a folder is shared with anyone (a specific list or everyone). */
+export function isFolderShared(folder: VaultFolder): boolean {
+  return (
+    folder.shared_with === "everyone" ||
+    (Array.isArray(folder.shared_with) && folder.shared_with.length > 0)
+  );
+}

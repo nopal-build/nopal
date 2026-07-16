@@ -6,6 +6,9 @@ import {
   cascadeShareVaultFolder,
   deleteVaultFolderCascade,
   resolveVaultRootKey,
+  getDescendantFolders,
+  isFolderShared,
+  moveVaultFolder,
 } from "../data/vault.server";
 import { isVaultRootFolder } from "../data/vault.types";
 import { isRootShareable } from "../data/vaultRoots";
@@ -46,6 +49,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const body = (await request.json()) as {
       name?: string;
       shared_with?: string[] | "everyone";
+      /** Move the folder under this parent. Never null — the vault root only
+       * holds the locked root containers. */
+      parent_folder_id?: string;
     };
 
     if (isRoot && body.name !== undefined) {
@@ -53,6 +59,60 @@ export async function action({ request, params }: ActionFunctionArgs) {
         { error: "Vault root folders cannot be renamed" },
         { status: 403 },
       );
+    }
+
+    // ── Move ── handled on its own; not combinable with rename/share.
+    if (body.parent_folder_id !== undefined) {
+      if (isRoot) {
+        return Response.json(
+          { error: "Vault root folders cannot be moved" },
+          { status: 403 },
+        );
+      }
+      if (isFolderShared(folder)) {
+        return Response.json(
+          { error: "Shared folders cannot be moved — unshare it first" },
+          { status: 403 },
+        );
+      }
+
+      const newParent = await getFolderById(body.parent_folder_id);
+      if (!newParent || newParent.human_id !== user._id) {
+        return Response.json(
+          { error: "Destination folder not found" },
+          { status: 404 },
+        );
+      }
+      if (newParent._id === folder._id) {
+        return Response.json(
+          { error: "Cannot move a folder into itself" },
+          { status: 400 },
+        );
+      }
+      if (newParent._id === folder.parent_folder_id) {
+        // No-op move — already there.
+        return Response.json({ folder });
+      }
+
+      const descendants = await getDescendantFolders(folder._id);
+      if (descendants.some((d) => d._id === newParent._id)) {
+        return Response.json(
+          { error: "Cannot move a folder into one of its own sub-folders" },
+          { status: 400 },
+        );
+      }
+      if (descendants.some(isFolderShared)) {
+        return Response.json(
+          {
+            error:
+              "This folder contains shared folders and cannot be moved — unshare them first",
+          },
+          { status: 403 },
+        );
+      }
+
+      const moved = await moveVaultFolder(folder, newParent, descendants);
+      return Response.json({ folder: moved });
     }
 
     if (body.shared_with !== undefined) {

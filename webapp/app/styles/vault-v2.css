@@ -190,7 +190,50 @@
   }
 }
 
-/* ── File view ──────────────────────────────────────────────────────────── */
+/* ── Move-destination picker (inside the Move modal) ─────────────────── */
+
+.vault-v2-move-tree {
+  border: 1px solid var(--midground);
+  border-radius: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 0;
+  margin-bottom: 16px;
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--dark-midground);
+  }
+}
+
+.vault-v2-move-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  color: var(--text-subtle);
+  border-radius: 4px;
+  @media (prefers-color-scheme: dark) {
+    color: var(--text-subtle-dark);
+  }
+}
+.vault-v2-move-row--selected {
+  background: var(--midground);
+  font-weight: bold;
+  @media (prefers-color-scheme: dark) {
+    background: var(--dark-midground);
+  }
+}
+.vault-v2-move-row--disabled {
+  opacity: 0.5;
+}
+.vault-v2-move-row--disabled .vault-v2-tree-name-btn {
+  cursor: not-allowed;
+}
+
+/* ── File view ────────────────────────────────────────────────────────── */
 
 .vault-v2-media {
   max-width: 100%;
