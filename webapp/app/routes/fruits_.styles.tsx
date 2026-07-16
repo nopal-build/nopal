@@ -1,4 +1,5 @@
 // app/routes/fruits_.styles.tsx
+import { useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect, data } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
@@ -6,6 +7,9 @@ import { AppLayout } from "../components/AppLayout";
 import { Badge } from "../components/Badge";
 import { Chip } from "../components/Chip";
 import { Input } from "../components/Input";
+import { Modal } from "../components/Modal";
+import { CopyField } from "../components/CopyField";
+import { SearchCollection } from "../components/SearchCollection";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -106,7 +110,18 @@ function Swatch({
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
+const DEMO_FRUITS = ["Apple", "Banana", "Cherry", "Date", "Elderberry"];
+
 export default function FruitsStyles() {
+  const [fruitQuery, setFruitQuery] = useState("");
+  const filteredDemoFruits = fruitQuery
+    ? DEMO_FRUITS.filter((f) =>
+        f.toLowerCase().includes(fruitQuery.trim().toLowerCase()),
+      )
+    : DEMO_FRUITS;
+
+  const [modalOpen, setModalOpen] = useState(false);
+
   return (
     <AppLayout>
       <div
@@ -127,6 +142,7 @@ export default function FruitsStyles() {
           style={{ fontSize: "0.8rem" }}
         >
           {[
+            ["#component-guide", "Component Guide"],
             ["#colors", "Colors"],
             ["#typography", "Typography"],
             ["#buttons", "Buttons"],
@@ -136,6 +152,8 @@ export default function FruitsStyles() {
             ["#links", "Links"],
             ["#spacing", "Spacing"],
             ["#editor", "Rich Text Editor"],
+            ["#collections", "Collections & Copy"],
+            ["#overlays", "Overlays"],
           ].map(([href, label]) => (
             <a
               key={href}
@@ -148,6 +166,254 @@ export default function FruitsStyles() {
           ))}
         </div>
 
+        {/* ── 0. Component Decision Guide ────────────────────────────────── */}
+        <Section id="component-guide" title="00 · Component Decision Guide">
+          <div className="flex flex-col gap-6">
+            <p className="text-xs font-mono subtle-text">
+              Read this before writing new markup — for humans and agents
+              alike. Most UI needs in the Fruits app are already solved by
+              something in <Code>app/components/</Code>. Reaching for a raw
+              element or a hand-rolled pattern when a shared component
+              already exists is a bug — replace it (see{" "}
+              <Code>AGENTS.md</Code>).
+            </p>
+
+            <div className="good-box p-4">
+              <div className="text-xs font-mono mb-3 font-bold purple-text">
+                &quot;I need to build…&quot; → use this
+              </div>
+              <div className="flex flex-col gap-2">
+                {[
+                  ["A text / textarea field", "<Input>", "components/Input.tsx"],
+                  [
+                    "A numeric field with +/− steppers",
+                    "<NumberInput>",
+                    "components/NumberInput.tsx",
+                  ],
+                  [
+                    "A status pill (Complete, Overdue…)",
+                    '<Badge variant="...">',
+                    "components/Badge.tsx",
+                  ],
+                  [
+                    "A filter / category tag",
+                    "<Chip>",
+                    "components/Chip.tsx",
+                  ],
+                  [
+                    "A centered dialog / confirmation",
+                    "<Modal>",
+                    "components/Modal.tsx",
+                  ],
+                  [
+                    "A dropdown menu",
+                    "<Dropdown> / <TextDropdown>",
+                    "components/Dropdown.tsx",
+                  ],
+                  [
+                    'Search a list, optionally "add new"',
+                    "<SearchCollection>",
+                    "components/SearchCollection.tsx",
+                  ],
+                  [
+                    "A \u201ccopy this value\u201d row",
+                    "<CopyField>",
+                    "components/CopyField.tsx",
+                  ],
+                  [
+                    "The page shell (nav, footer, container)",
+                    "<AppLayout>",
+                    "components/AppLayout.tsx",
+                  ],
+                ].map(([need, use, path]) => (
+                  <div
+                    key={need}
+                    className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs font-mono"
+                  >
+                    <span className="shrink-0" style={{ minWidth: "260px" }}>
+                      {need}
+                    </span>
+                    <span
+                      className="shrink-0 purple-text"
+                      style={{ minWidth: "210px", fontWeight: 600 }}
+                    >
+                      {use}
+                    </span>
+                    <span className="subtle-text">{path}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="good-box p-4">
+              <div className="text-xs font-mono mb-3 font-bold purple-text">
+                When to extract a *new* component
+              </div>
+              <div className="flex flex-col gap-2.5 text-sm subtle-text">
+                <div>
+                  <span className="font-bold purple-text">
+                    1. Used once, on one page
+                  </span>{" "}
+                  → keep it inline. Don&apos;t pre-abstract a pattern that
+                  only exists in one place.
+                </div>
+                <div>
+                  <span className="font-bold purple-text">
+                    2. Repeated 2+ times inside one route file
+                  </span>{" "}
+                  → extract a local, unexported function component in that
+                  same file (e.g. <Code>RelationshipCard</Code>,{" "}
+                  <Code>WaiverCard</Code>, <Code>ApiTokenCard</Code> in{" "}
+                  <Code>fruits_.profile.tsx</Code>). It doesn&apos;t need to
+                  move to <Code>app/components/</Code> yet.
+                </div>
+                <div>
+                  <span className="font-bold purple-text">
+                    3. Needed on a second route, or it wraps a native form
+                    element
+                  </span>{" "}
+                  → promote it to <Code>app/components/</Code>, and add a
+                  live example to this page in the same change (see{" "}
+                  <Code>#collections</Code> below for how{" "}
+                  <Code>SearchCollection</Code> and <Code>CopyField</Code>{" "}
+                  were pulled out of <Code>fruits_.profile.tsx</Code>).
+                </div>
+                <div>
+                  <span className="font-bold purple-text">
+                    4. Adding a prop/variant to an existing shared component
+                  </span>{" "}
+                  → update the component, then update its example here in
+                  the same change. This page must stay accurate, or agents
+                  will copy stale patterns from it.
+                </div>
+              </div>
+            </div>
+
+            <div className="good-box p-4">
+              <div className="text-xs font-mono mb-3 font-bold purple-text">
+                Full component inventory — <Code>app/components/</Code>
+              </div>
+              <div className="flex flex-col gap-4">
+                {[
+                  {
+                    group: "Layout & navigation",
+                    rows: [
+                      [
+                        "AppLayout",
+                        "Fruits app page shell — nav, footer, container. Wrap every Fruits route's default export in it.",
+                      ],
+                    ],
+                  },
+                  {
+                    group: "Form & input",
+                    rows: [
+                      [
+                        "Input",
+                        "Text/textarea field with baked-in label, border, radius, padding. Use hideLabel for compact inline rows.",
+                      ],
+                      [
+                        "NumberInput",
+                        "Numeric field with +/− steppers, free-text editing, and inline math expressions (+ − × ÷ ^).",
+                      ],
+                      [
+                        "Dropdown / TextDropdown",
+                        "Click-to-open menu button. TextDropdown wraps its content in a good-box panel.",
+                      ],
+                    ],
+                  },
+                  {
+                    group: "Status & tags",
+                    rows: [
+                      [
+                        "Badge",
+                        "Semantic status pill — neutral / success / warning / danger / accent variants.",
+                      ],
+                      [
+                        "Chip",
+                        "Neutral outline tag for categories/filters; supports an active state and onClick.",
+                      ],
+                    ],
+                  },
+                  {
+                    group: "Collections & actions",
+                    rows: [
+                      [
+                        "SearchCollection",
+                        "Scrollable searchable list + footer search field, with a resultsSlot escape hatch for custom empty/grouped states.",
+                      ],
+                      [
+                        "CopyField",
+                        "Read-only field + Copy button for install commands, tokens, share links, etc.",
+                      ],
+                    ],
+                  },
+                  {
+                    group: "Overlays",
+                    rows: [
+                      [
+                        "Modal",
+                        "Dependency-free centered dialog — backdrop click / Escape to close.",
+                      ],
+                    ],
+                  },
+                  {
+                    group: "Rich text / MDX / Notion content",
+                    rows: [
+                      [
+                        "MdxEditorClient",
+                        "Lazy-loaded, browser-only rich text editor — see the Rich Text Editor section below.",
+                      ],
+                      [
+                        "MdxEditorView / MdxEditorWorkable",
+                        "Read-only and task-interactive markdown renderers sharing MdxRenderer.",
+                      ],
+                      [
+                        "NotionText / NotionPageDetails",
+                        "Render Notion API rich text/blocks for blog & content pages.",
+                      ],
+                    ],
+                  },
+                  {
+                    group:
+                      "Marketing / content-site components — different app section, not Fruits design-system atoms. Check before reusing here.",
+                    rows: [
+                      ["Layout", "Marketing site header/nav shell (not the Fruits app — use AppLayout there)."],
+                      ["Breadcrumb", "Arrow + link trail used on marketing pages."],
+                      ["Annotation", "Hand-drawn arrow callout for marketing copy."],
+                      ["Carousel", "Generic swipeable slide carousel."],
+                      ["FiveFactors / GbScore / GoodProgress / GoodAssets", "\"Good\" scorecard visualizations for marketing pages."],
+                      ["AudioFormat", "\"Now available in audio format\" link for blog content."],
+                      ["ZoomImg", "Click-to-zoom image viewer."],
+                    ],
+                  },
+                ].map(({ group, rows }) => (
+                  <div key={group}>
+                    <div className="text-xs font-mono font-bold subtle-text mb-2">
+                      {group}
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      {rows.map(([name, desc]) => (
+                        <div
+                          key={name}
+                          className="flex flex-wrap items-baseline gap-x-3 text-xs font-mono"
+                        >
+                          <span
+                            className="purple-text shrink-0"
+                            style={{ minWidth: "220px", fontWeight: 600 }}
+                          >
+                            {name}
+                          </span>
+                          <span className="subtle-text">{desc}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Section>
+
         {/* ── 1. Colors ──────────────────────────────────────────────────── */}
         <Section id="colors" title="01 · Colors">
           <div className="flex flex-col gap-8">
@@ -159,6 +425,7 @@ export default function FruitsStyles() {
                 <Code>style={"{{ color: 'var(--name)' }}"}</Code>.
               </p>
               <div className="flex flex-wrap gap-4 good-white-box p-4">
+                <Swatch varName="--white" hex="#ffffff" />
                 <Swatch varName="--purple" hex="#3f2b46" />
                 <Swatch varName="--purple-light" hex="#7f5b8b" />
                 <Swatch varName="--pink" hex="#d3a0e5" />
@@ -1155,6 +1422,163 @@ export default function FruitsStyles() {
                 <div style={{ paddingLeft: "16px" }}>{"</div>"}</div>
                 <div>{"</Suspense>"}</div>
               </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ── 10. Collections & Copy Actions ─────────────────────────────── */}
+        <Section id="collections" title="10 · Collections & Copy Actions">
+          <div className="flex flex-col gap-8">
+            <p className="text-xs font-mono subtle-text">
+              Two components pulled out of <Code>fruits_.profile.tsx</Code>{" "}
+              per the pattern in <Code>#component-guide</Code> above — a
+              search/add list shell and a copy-to-clipboard field. Both live
+              in <Code>components/</Code>.
+            </p>
+
+            {/* CopyField */}
+            <div>
+              <div className="text-xs font-mono mb-3 font-bold purple-text">
+                {"<CopyField>"} — read-only value + Copy button
+              </div>
+              <p className="text-xs subtle-text mb-3">
+                Use for install commands, API keys, share links — anything
+                the user needs to copy verbatim. It degrades gracefully:
+                the field is <Code>readOnly</Code> and auto-selects on
+                focus/click, so copying by hand still works if{" "}
+                <Code>navigator.clipboard</Code> is unavailable.
+              </p>
+              <div className="good-box p-4" style={{ maxWidth: "480px" }}>
+                <CopyField
+                  value="nopal login --device=cli"
+                  ariaLabel="example CLI command"
+                />
+              </div>
+              <div
+                className="good-box p-3 mt-3 text-xs font-mono"
+                style={{ color: "var(--purple-light)" }}
+              >
+                {'<CopyField value={COMMAND} ariaLabel="..." />'}
+              </div>
+            </div>
+
+            {/* SearchCollection */}
+            <div>
+              <div className="text-xs font-mono mb-3 font-bold purple-text">
+                {"<SearchCollection>"} — searchable, scrollable list + footer
+                search field
+              </div>
+              <p className="text-xs subtle-text mb-3">
+                A <Code>good-box</Code> shell for "search/filter a list, and
+                optionally add a new entry" UI: fixed-height scrollable list
+                on top, divider, search field below. It owns layout only —
+                filtering and submission stay with the caller. Try typing a
+                fruit name (or something that doesn't match) below:
+              </p>
+              <div style={{ maxWidth: "420px" }}>
+                <SearchCollection
+                  items={filteredDemoFruits}
+                  getKey={(fruit) => fruit}
+                  renderItem={(fruit) => (
+                    <div
+                      className="rounded p-3 text-sm"
+                      style={{ background: "var(--white)", color: "var(--purple)" }}
+                    >
+                      {fruit}
+                    </div>
+                  )}
+                  emptyState={
+                    <div
+                      className="rounded p-3 text-sm"
+                      style={{
+                        background: "var(--white)",
+                        color: "var(--purple)",
+                        opacity: 0.6,
+                      }}
+                    >
+                      No fruits match "{fruitQuery}".
+                    </div>
+                  }
+                  searchInputProps={{
+                    label: "Fruit",
+                    hideLabel: true,
+                    name: "fruit-demo-search",
+                    value: fruitQuery,
+                    onChange: (e) => setFruitQuery(e.target.value),
+                    placeholder: "Search fruits…",
+                  }}
+                  height={160}
+                />
+              </div>
+              <p className="text-xs subtle-text mt-3">
+                For anything fancier than a plain filtered list — custom
+                empty states, grouped sections (e.g. active vs. revoked), or
+                a "+ Add {"{query}"}" affordance — pass{" "}
+                <Code>resultsSlot</Code> instead of{" "}
+                <Code>items</Code>/<Code>renderItem</Code> to take over the
+                whole list area. See the Relationships list in{" "}
+                <Code>fruits_.profile.tsx</Code> for the full example: it
+                wraps <Code>{"<SearchCollection>"}</Code> in a{" "}
+                <Code>{"<Form>"}</Code> so the search field doubles as an
+                "add/invite by email" field.
+              </p>
+              <div
+                className="rounded p-3 text-xs font-mono"
+                style={{
+                  background: "var(--yellow)",
+                  color: "var(--purple)",
+                }}
+              >
+                <span className="font-bold">Gotcha:</span>{" "}
+                <Code>var(--white)</Code> is always <Code>#fff</Code> — it
+                never flips for dark mode. Rows/cards on that background
+                (as above, and in <Code>RelationshipCard</Code>) must set an{" "}
+                explicit text color like <Code>color: "var(--purple)"</Code>{" "}
+                themselves — don't rely on inherited body text color, which
+                switches to white in dark mode and disappears on a white
+                card.
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ── 11. Overlays ────────────────────────────────────────────────── */}
+        <Section id="overlays" title="11 · Overlays">
+          <div className="flex flex-col gap-6">
+            <p className="text-xs font-mono subtle-text">
+              {"<Modal>"} is a dependency-free centered dialog — backdrop and{" "}
+              <Code>Escape</Code> both close it. Use it for confirmations and
+              short forms (e.g. the "Switch account" flow in{" "}
+              <Code>fruits_.profile.tsx</Code>), not for full-page content.
+            </p>
+            <div>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setModalOpen(true)}
+              >
+                Open example modal
+              </button>
+              <Modal
+                open={modalOpen}
+                onClose={() => setModalOpen(false)}
+                title="Example modal"
+              >
+                <p className="text-sm subtle-text mb-4">
+                  Modal content goes here — forms, confirmations, short
+                  messages. Keep it under ~400px wide; for anything larger,
+                  use a dedicated page or panel instead.
+                </p>
+                <div className="text-right">
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => setModalOpen(false)}
+                  >
+                    Done
+                  </button>
+                </div>
+              </Modal>
             </div>
           </div>
         </Section>

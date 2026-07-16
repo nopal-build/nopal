@@ -183,10 +183,15 @@ export async function revokeRelationship(
  *
  * - Admins/Supers can see, and are visible to, everyone.
  * - Everyone can always see Admins/Supers.
- * - Otherwise two Human-role accounts must have an explicit, active (i.e.
- *   not revoked) relationship.
+ * - Otherwise two Human-role accounts must have an explicit relationship —
+ *   active only by default, or also revoked ones when `includeRevoked` is
+ *   set (used by the profile page so a revoked relationship still shows up,
+ *   as "Revoked", for the human who didn't do the revoking).
  */
-export async function getRelatedHumans(human: Human): Promise<Human[]> {
+export async function getRelatedHumans(
+  human: Human,
+  { includeRevoked = false }: { includeRevoked?: boolean } = {},
+): Promise<Human[]> {
   const allHumans = (await getHumans())?.data ?? [];
   const others = allHumans.filter(
     (h) =>
@@ -197,9 +202,15 @@ export async function getRelatedHumans(human: Human): Promise<Human[]> {
   if (isAdminOrSuper(human)) return others;
 
   const relationships = await getRelationshipsForHuman(human._id);
+  // By default only active relationships count. The profile page's
+  // relationship list opts into `includeRevoked` so a revoked relationship
+  // still shows up (as "Revoked") for both parties, instead of silently
+  // disappearing for whoever didn't do the revoking. Other consumers (e.g.
+  // the vault folder-sharing picker) must keep excluding revoked partners,
+  // since revoking also strips folder sharing between the two humans.
   const relatedIds = new Set(
     relationships
-      .filter((r) => !r.revokedAt)
+      .filter((r) => includeRevoked || !r.revokedAt)
       .map((r) => (r.humanAId === human._id ? r.humanBId : r.humanAId)),
   );
 

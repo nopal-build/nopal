@@ -85,7 +85,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const [waivers, relatedHumans, passkeys, relationships, apiTokens] =
     await Promise.all([
       getLegalDocumentsByEmail(user.email),
-      getRelatedHumans(user),
+      getRelatedHumans(user, { includeRevoked: true }),
       getPasskeysByHuman(user._id),
       getRelationshipsForHuman(user._id),
       getApiTokensByHuman(user._id),
