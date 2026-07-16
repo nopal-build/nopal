@@ -226,7 +226,49 @@ fn parse_query(url: &str) -> HashMap<String, String> {
     map
 }
 
-// ─── Credential storage ─────────────────────────────────────────────────────
+// ─── Sync-scoped credentials (the watcher's token) ───────────────────────
+//
+// Stored in a 0600 file rather than the keychain ON PURPOSE: the watcher
+// runs as a launchd agent, and background keychain access triggers macOS
+// permission prompts. The token is sync-scoped (syncs/ content only) and
+// revocable from the profile page, which bounds the exposure.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncCredentials {
+    pub host: String,
+    pub token: String,
+    pub token_id: String,
+}
+
+pub fn sync_credentials_path() -> PathBuf {
+    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join("nopal").join("sync-credentials.json")
+}
+
+pub fn save_sync_credentials(creds: &SyncCredentials) -> Result<(), Box<dyn Error>> {
+    let path = sync_credentials_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(creds)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+pub fn load_sync_credentials() -> Option<SyncCredentials> {
+    let contents = fs::read_to_string(sync_credentials_path()).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
+pub fn delete_sync_credentials() -> bool {
+    fs::remove_file(sync_credentials_path()).is_ok()
+}
+
+// ─── Credential storage ─────────────────────────────────────────────
 
 fn save_credentials(creds: &Credentials) -> Result<(), Box<dyn Error>> {
     let json = serde_json::to_string(creds)?;

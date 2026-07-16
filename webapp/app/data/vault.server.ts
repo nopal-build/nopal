@@ -399,6 +399,17 @@ export async function listFilesMetaByFolderIds(
   return (result?.[0] ?? []).map(formatRecord) as unknown as FileRefListing[];
 }
 
+/**
+ * Whether a folder sits inside the syncs/ subtree — the resource check for
+ * sync-scoped tokens. Fails closed on missing folders.
+ */
+export async function isFolderUnderSyncs(
+  folderId: string | null | undefined,
+): Promise<boolean> {
+  if (!folderId) return false;
+  return (await resolveVaultRootKey(folderId)) === "syncs";
+}
+
 /** Every descendant folder record (BFS) of the given folder. */
 export async function getDescendantFolders(
   folderId: string,

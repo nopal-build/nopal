@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import {
   getSyncTargetById,
   touchSyncTarget,
@@ -14,10 +14,11 @@ import {
  *        the folder (`nopal sync rm` vs `--keep-remote`).
  */
 export async function action({ request, params }: ActionFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
+  const { user, syncScoped } = scoped;
 
   const { targetId } = params;
   if (!targetId) {
@@ -30,11 +31,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (request.method === "PATCH") {
+    // lastSyncedAt bump — the watcher needs this, so sync scope is fine.
     const updated = await touchSyncTarget(targetId);
     return Response.json({ target: updated });
   }
 
   if (request.method === "DELETE") {
+    // Destructive + interactive — full auth only.
+    if (syncScoped) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
     await deleteSyncTarget(targetId);
     return Response.json({ success: true });
   }

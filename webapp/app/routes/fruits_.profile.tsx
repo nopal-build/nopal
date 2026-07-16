@@ -1035,7 +1035,11 @@ function PasskeyCard({ passkey }: { passkey: Passkey }) {
 // ─── CLI sessions ────────────────────────────────────────────────────────────────
 
 function ApiTokenCard({ token }: { token: ApiToken }) {
-  const expired = new Date(token.expiresAt).getTime() < Date.now();
+  // Null expiry = never expires (sync-scoped tokens) — revocation is the
+  // kill switch, so surface the scope instead of an expiry date.
+  const neverExpires = !token.expiresAt;
+  const expired =
+    !neverExpires && new Date(token.expiresAt as string).getTime() < Date.now();
 
   return (
     <div className="good-box p-3 flex items-center justify-between gap-4">
@@ -1049,7 +1053,11 @@ function ApiTokenCard({ token }: { token: ApiToken }) {
             : "Never used"}
           {" · "}
           <span className={expired ? "red-text" : undefined}>
-            {expired ? "Expired" : `Expires ${formatSignedAt(token.expiresAt)}`}
+            {neverExpires
+              ? "Never expires (revoke to invalidate)"
+              : expired
+                ? "Expired"
+                : `Expires ${formatSignedAt(token.expiresAt as string)}`}
           </span>
         </div>
       </div>

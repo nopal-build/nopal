@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFileRefById } from "../data/vault.server";
+import { getScopedUserFromRequest } from "../modules/auth/auth.server";
+import { getFileRefById, isFolderUnderSyncs } from "../data/vault.server";
 import { getPresignedDownloadUrl } from "../data/file.server";
 
 /**
@@ -13,10 +13,11 @@ import { getPresignedDownloadUrl } from "../data/file.server";
  * Only the file owner may download via this endpoint.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
+  const { user, syncScoped } = scoped;
 
   const { fileId } = params;
   if (!fileId) {
@@ -29,6 +30,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   if (file.human_id !== user._id) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Sync-scoped tokens may only read files inside syncs/.
+  if (syncScoped && !(await isFolderUnderSyncs(file.folder_id))) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

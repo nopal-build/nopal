@@ -1,8 +1,12 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { uploadFileToS3, deleteFromS3 } from "../data/file.server";
-import { getFileRefById, computeMdUpdate } from "../data/vault.server";
+import {
+  getFileRefById,
+  computeMdUpdate,
+  isFolderUnderSyncs,
+} from "../data/vault.server";
 import { isFileRefLocked } from "../data/vault.types";
 import { merge } from "../data/generic.server";
 import { cacheDailyLog } from "../data/dailyLog.server";
@@ -30,10 +34,11 @@ function sha256(buf: Buffer): string {
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
+  const { user, syncScoped } = scoped;
 
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -49,6 +54,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
   if (existing.human_id !== user._id) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+  // Sync-scoped tokens may only replace files inside syncs/.
+  if (syncScoped && !(await isFolderUnderSyncs(existing.folder_id))) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   if (isFileRefLocked(existing)) {

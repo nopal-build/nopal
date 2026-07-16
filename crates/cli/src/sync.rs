@@ -240,7 +240,7 @@ pub fn add(
     }
 
     // Initial push
-    run_target(&client, &target, &identity)
+    run_target(&client, &target)
 }
 
 pub fn ls() -> Result<(), Box<dyn Error>> {
@@ -308,6 +308,36 @@ pub fn rm(name: &str, keep_remote: bool, force: bool) -> Result<(), Box<dyn Erro
     Ok(())
 }
 
+/// This machine's stable device id (creating it on first use).
+pub fn device_id() -> Result<String, Box<dyn Error>> {
+    Ok(device_identity()?.device_id)
+}
+
+/// One resilient pass over every target on this device — used by the
+/// watcher. Individual target failures are reported but don't stop the
+/// others. Returns (target local paths, errors).
+pub fn run_device_targets(
+    client: &Client,
+    device_id: &str,
+) -> Result<(Vec<PathBuf>, Vec<String>), Box<dyn Error>> {
+    let targets: Vec<SyncTarget> = fetch_targets(client)?
+        .into_iter()
+        .filter(|t| t.device_id == device_id)
+        .collect();
+
+    let mut paths = Vec::new();
+    let mut errors = Vec::new();
+    for target in &targets {
+        if let Err(e) = run_target(client, target) {
+            errors.push(format!("{}: {e}", target.name));
+        }
+        // Watch the directory either way — a transient failure shouldn't
+        // stop us noticing future changes.
+        paths.push(PathBuf::from(&target.local_path));
+    }
+    Ok((paths, errors))
+}
+
 /// Push local changes for one target (by name) or all targets on this device.
 pub fn run(name: Option<String>) -> Result<(), Box<dyn Error>> {
     let client = Client::new()?;
@@ -342,18 +372,14 @@ pub fn run(name: Option<String>) -> Result<(), Box<dyn Error>> {
             )
             .into());
         }
-        run_target(&client, target, &identity)?;
+        run_target(&client, target)?;
     }
     Ok(())
 }
 
 // ─── The push engine ──────────────────────────────────────────────────────────
 
-fn run_target(
-    client: &Client,
-    target: &SyncTarget,
-    _identity: &DeviceIdentity,
-) -> Result<(), Box<dyn Error>> {
+fn run_target(client: &Client, target: &SyncTarget) -> Result<(), Box<dyn Error>> {
     let local_root = PathBuf::from(&target.local_path);
     if !local_root.is_dir() {
         return Err(format!(

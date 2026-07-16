@@ -1,9 +1,13 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import {
+  getScopedUserFromRequest,
+  getUserFromRequest,
+} from "../modules/auth/auth.server";
 import {
   createVaultFolder,
   getFolderById,
   getFoldersByHuman,
+  isFolderUnderSyncs,
 } from "../data/vault.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -17,10 +21,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
+  const { user, syncScoped } = scoped;
 
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -47,6 +52,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const parent = await getFolderById(body.parent_folder_id);
   if (!parent || parent.human_id !== user._id) {
     return Response.json({ error: "Parent folder not found" }, { status: 404 });
+  }
+
+  // Sync-scoped tokens may only create folders inside syncs/.
+  if (syncScoped && !(await isFolderUnderSyncs(parent._id))) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const folder = await createVaultFolder({

@@ -104,6 +104,22 @@ impl Client {
         })
     }
 
+    /// Like `new`, but prefers the sync-scoped token when one is stored —
+    /// used by the watcher so a long-running process never depends on the
+    /// 30-day login session. Falls back to the normal login (or env vars).
+    pub(crate) fn new_sync_preferred() -> Result<Self, Box<dyn Error>> {
+        if std::env::var("NOPAL_TOKEN").is_err() {
+            if let Some(creds) = auth::load_sync_credentials() {
+                return Ok(Client {
+                    http: reqwest::blocking::Client::new(),
+                    host: creds.host,
+                    token: creds.token,
+                });
+            }
+        }
+        Self::new()
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.host, path)
     }
@@ -173,6 +189,22 @@ impl Client {
             .bearer_auth(&self.token)
             .send()?;
         Self::parse(resp)
+    }
+
+    /// DELETE with a JSON body (e.g. revoking a sync token).
+    pub(crate) fn delete_with_body(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<(), Box<dyn Error>> {
+        let resp = self
+            .http
+            .delete(self.url(path))
+            .bearer_auth(&self.token)
+            .json(body)
+            .send()?;
+        let _: serde_json::Value = Self::parse(resp)?;
+        Ok(())
     }
 
     fn parse<T: serde::de::DeserializeOwned>(

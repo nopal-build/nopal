@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { completeMultipartUpload } from "../data/file.server";
-import { createFileRef } from "../data/vault.server";
+import { createFileRef, isFolderUnderSyncs } from "../data/vault.server";
 
 /**
  * POST /api/vault/multipart-complete
@@ -11,9 +11,10 @@ import { createFileRef } from "../data/vault.server";
  * Completes the S3 multipart upload and registers the file_ref in the database.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user)
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped)
     return Response.json({ error: "Not authenticated" }, { status: 401 });
+  const { user, syncScoped } = scoped;
 
   const body = (await request.json()) as {
     uploadId?: string;
@@ -43,6 +44,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // Security: ensure the key belongs to this user
   if (!key.startsWith(`vault/${user._id}/`)) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Sync-scoped tokens may only register files inside syncs/.
+  if (syncScoped && !(await isFolderUnderSyncs(folderId ?? null))) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 

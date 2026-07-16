@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { uploadMultipartPart } from "../data/file.server";
 
 /**
@@ -11,9 +11,12 @@ import { uploadMultipartPart } from "../data/file.server";
  * this request completes quickly and never hits proxy timeouts.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user)
+  // Sync-scope OK: parts can only attach to an upload session whose key was
+  // issued by multipart-init, which enforces the syncs/ restriction.
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped)
     return Response.json({ error: "Not authenticated" }, { status: 401 });
+  const user = scoped.user;
 
   const form = await request.formData();
   const uploadId = form.get("uploadId") as string | null;

@@ -1,5 +1,8 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import {
+  getScopedUserFromRequest,
+  getUserFromRequest,
+} from "../modules/auth/auth.server";
 import {
   createSyncTarget,
   getSyncTargetsByHuman,
@@ -15,11 +18,12 @@ import { getFolderById, resolveVaultRootKey } from "../data/vault.server";
  * supported (this API exists for the CLI).
  */
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
+  // Listing targets is inherently sync-scope — the watcher needs it.
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
-  const targets = await getSyncTargetsByHuman(user._id);
+  const targets = await getSyncTargetsByHuman(scoped.user._id);
   return Response.json({ targets });
 }
 

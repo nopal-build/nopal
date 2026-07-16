@@ -1,11 +1,15 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import {
+  getScopedUserFromRequest,
+  getUserFromRequest,
+} from "../modules/auth/auth.server";
 import {
   getFileRefById,
   updateFileRef,
   deleteFileRef,
   computeMdUpdate,
   getFolderById,
+  isFolderUnderSyncs,
   resolveVaultRootKey,
 } from "../data/vault.server";
 import { cacheDailyLog, deleteDailyLogCache } from "../data/dailyLog.server";
@@ -23,11 +27,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // Public cards are readable by anyone; otherwise only the owner — via
-  // session OR bearer token (the CLI's read path for `vault cat` / `info`).
+  // session OR bearer token (the CLI's read path for `vault cat` / `info`,
+  // and the sync engine's inline-content pulls). Sync-scoped tokens can
+  // only read files under syncs/.
   if (!file.is_public) {
-    const user = await getUserFromRequest(request);
-    if (!user || file.human_id !== user._id) {
+    const scoped = await getScopedUserFromRequest(request);
+    if (!scoped || file.human_id !== scoped.user._id) {
       // 404 (not 403) so non-owners can't probe which ids exist.
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+    if (scoped.syncScoped && !(await isFolderUnderSyncs(file.folder_id))) {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
   }
@@ -36,10 +45,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
+  const { user, syncScoped } = scoped;
 
   const { fileId } = params;
   if (!fileId) {
@@ -49,6 +59,32 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const file = await getFileRefById(fileId);
   if (!file) {
     return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Sync-scoped tokens: owner-only, syncs/-only, and PATCH may touch
+  // nothing but archived_at (how the sync engine propagates local
+  // deletions). Everything else — rename, move, content, sharing,
+  // DELETE — requires full auth.
+  if (syncScoped) {
+    if (
+      file.human_id !== user._id ||
+      !(await isFolderUnderSyncs(file.folder_id)) ||
+      request.method !== "PATCH"
+    ) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const body = (await request.json()) as Record<string, unknown>;
+    const keys = Object.keys(body);
+    if (keys.length !== 1 || keys[0] !== "archived_at") {
+      return Response.json(
+        { error: "Sync tokens may only set archived_at" },
+        { status: 403 },
+      );
+    }
+    const updated = await updateFileRef(fileId, {
+      archived_at: (body.archived_at as string | null) ?? null,
+    });
+    return Response.json({ fileRef: updated });
   }
 
   const isOwner = file.human_id === user._id;

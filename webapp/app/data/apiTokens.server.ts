@@ -16,8 +16,15 @@ export type ApiToken = Data & {
   name: string;
   /** sha256 hex digest of the raw bearer token — the raw value is never stored long-term. */
   tokenHash: string;
+  /**
+   * What the token may do. "full" (default) = everything the human can do.
+   * "sync" = only the sync-engine endpoints, and only content under the
+   * syncs/ vault root — see getScopedUserFromRequest in auth.server.ts.
+   */
+  scope?: "full" | "sync";
   createdAt: string;
-  expiresAt: string;
+  /** Null = never expires (used by revocable sync-scoped tokens). */
+  expiresAt: string | null;
   lastUsedAt?: string | null;
   revokedAt?: string | null;
   // ─── Ephemeral cli-login handoff — set by `createApiTokenWithExchangeCode`,
@@ -94,7 +101,9 @@ export async function consumeExchangeCode(
   return {
     token: token.pendingRawToken,
     humanId: token.humanId,
-    expiresAt: token.expiresAt,
+    // Login-flow tokens always carry an expiry (set above); the null case
+    // only exists for sync-scoped tokens, which never pass through here.
+    expiresAt: token.expiresAt ?? "",
   };
 }
 
@@ -110,7 +119,36 @@ export async function getApiTokenByHash(
 }
 
 export function isApiTokenValid(token: ApiToken): boolean {
-  return !token.revokedAt && new Date(token.expiresAt).getTime() > Date.now();
+  if (token.revokedAt) return false;
+  // expiresAt null/absent = never expires (revocation is the kill switch).
+  if (!token.expiresAt) return true;
+  return new Date(token.expiresAt).getTime() > Date.now();
+}
+
+/**
+ * Mints a sync-scoped token: never expires, revocable, and only accepted by
+ * the sync-engine endpoints (every other route rejects it). Returns the raw
+ * token — shown once, never stored.
+ */
+export async function createSyncScopedToken(
+  humanId: string,
+  name: string,
+): Promise<{ token: string; tokenId: string } | undefined> {
+  const rawToken = crypto.randomBytes(32).toString("base64url");
+  const result = await upsert("api_tokens", {
+    humanId,
+    name,
+    tokenHash: hashToken(rawToken),
+    scope: "sync",
+    createdAt: new Date().toISOString(),
+    expiresAt: null,
+    lastUsedAt: null,
+    revokedAt: null,
+  });
+  const record = Array.isArray(result) ? result[0] : result;
+  if (!record) return undefined;
+  const formatted = formatRecord(record as unknown as ApiToken);
+  return { token: rawToken, tokenId: formatted._id };
 }
 
 /** Best-effort — callers should not let a failure here block a request. */

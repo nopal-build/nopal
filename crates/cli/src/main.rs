@@ -11,6 +11,7 @@ mod sync;
 mod update;
 mod vault;
 mod video;
+mod watch;
 
 const DEFAULT_HOST: &str = "https://nopal.build";
 
@@ -235,6 +236,34 @@ enum SyncCommand {
     Run {
         /// Target name (omit to run all of this device's targets).
         name: Option<String>,
+        /// Keep running: watch the target directories and sync on change
+        /// (plus a periodic remote poll for two-way targets). Foreground —
+        /// Ctrl-C stops it. For a managed background worker that survives
+        /// reboots, use 'nopal sync watch enable'.
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Manage the background sync worker (macOS launchd).
+    Watch {
+        #[command(subcommand)]
+        command: WatchCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum WatchCommand {
+    /// Install + start the worker: runs at login, restarts on crash, and
+    /// authenticates with a sync-scoped (never-expiring, revocable) token.
+    Enable {},
+    /// Stop the worker, remove it from login items, revoke its token.
+    Disable {},
+    /// Is the worker installed/running? When did it last sync?
+    Status {},
+    /// Show the tail of the worker's log file.
+    Logs {
+        /// Number of lines to show.
+        #[arg(long, default_value_t = 40)]
+        lines: usize,
     },
 }
 
@@ -347,7 +376,23 @@ fn main() {
                     keep_remote,
                     force,
                 } => sync::rm(&name, keep_remote, force),
-                SyncCommand::Run { name } => sync::run(name),
+                SyncCommand::Run { name, watch } => {
+                    if watch {
+                        if name.is_some() {
+                            Err("--watch runs every target on this device; drop the name".into())
+                        } else {
+                            watch::run_watch()
+                        }
+                    } else {
+                        sync::run(name)
+                    }
+                }
+                SyncCommand::Watch { command } => match command {
+                    WatchCommand::Enable {} => watch::enable(),
+                    WatchCommand::Disable {} => watch::disable(),
+                    WatchCommand::Status {} => watch::status(),
+                    WatchCommand::Logs { lines } => watch::logs(lines),
+                },
             };
             if let Err(e) = result {
                 eprintln!("{e}");

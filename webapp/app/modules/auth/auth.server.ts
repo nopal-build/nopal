@@ -170,26 +170,67 @@ export async function getUser(request: Request): Promise<Human | null> {
  * browser session.
  */
 export async function getUserFromRequest(request: Request): Promise<Human | null> {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    const rawToken = authHeader.slice("Bearer ".length).trim();
-    if (!rawToken) return null;
-
-    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-    const token = await getApiTokenByHash(tokenHash);
-    if (!token || !isApiTokenValid(token)) return null;
-
-    const human = await getHumanById(token.humanId);
-    if (!human) return null;
-
-    // Best-effort — never let a logging failure block the actual request.
-    touchApiTokenLastUsed(token._id).catch((e) =>
-      console.error("Failed to update api token last-used:", e),
-    );
-    return human;
+  const resolved = await resolveBearerHuman(request);
+  if (resolved !== undefined) {
+    // Bearer path. Sync-scoped tokens are REJECTED here — only the
+    // explicitly allow-listed sync endpoints (via getScopedUserFromRequest)
+    // accept them, so every other route is closed to them by default.
+    if (!resolved || resolved.scope === "sync") return null;
+    return resolved.human;
   }
-
   return getUser(request);
+}
+
+export type ScopedUser = {
+  user: Human;
+  /** True when authenticated with a sync-scoped token — the caller must
+   * then restrict the operation to content under the syncs/ vault root. */
+  syncScoped: boolean;
+};
+
+/**
+ * Like getUserFromRequest, but ALSO accepts sync-scoped bearer tokens,
+ * reporting the scope so the route can apply resource-level checks. Only
+ * the endpoints the sync engine needs should use this.
+ */
+export async function getScopedUserFromRequest(
+  request: Request,
+): Promise<ScopedUser | null> {
+  const resolved = await resolveBearerHuman(request);
+  if (resolved !== undefined) {
+    if (!resolved) return null;
+    return { user: resolved.human, syncScoped: resolved.scope === "sync" };
+  }
+  const user = await getUser(request);
+  return user ? { user, syncScoped: false } : null;
+}
+
+/**
+ * Resolves the Authorization: Bearer header.
+ *   undefined → no bearer header (caller should fall back to the session)
+ *   null      → bearer present but invalid/expired/revoked
+ */
+async function resolveBearerHuman(
+  request: Request,
+): Promise<{ human: Human; scope: "full" | "sync" } | null | undefined> {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) return undefined;
+
+  const rawToken = authHeader.slice("Bearer ".length).trim();
+  if (!rawToken) return null;
+
+  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+  const token = await getApiTokenByHash(tokenHash);
+  if (!token || !isApiTokenValid(token)) return null;
+
+  const human = await getHumanById(token.humanId);
+  if (!human) return null;
+
+  // Best-effort — never let a logging failure block the actual request.
+  touchApiTokenLastUsed(token._id).catch((e) =>
+    console.error("Failed to update api token last-used:", e),
+  );
+  return { human, scope: token.scope === "sync" ? "sync" : "full" };
 }
 
 function canImpersonate(actor: Human, target: Human): string | null {

@@ -90,6 +90,9 @@ type Pages = {
   "/tools/do-not-use": {
     params: {};
   };
+  "/api/sync-tokens": {
+    params: {};
+  };
   "/fruits/profile": {
     params: {};
   };
@@ -310,7 +313,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/api/passkeys/login-options" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/tools/building-envelope" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/tools/erv-calculator" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
+    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/api/passkeys/login-options" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/tools/building-envelope" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/tools/erv-calculator" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
   };
   "routes/api.passkeys.invite-register-options.tsx": {
     id: "routes/api.passkeys.invite-register-options";
@@ -407,6 +410,10 @@ type RouteFiles = {
   "routes/tools.do-not-use.tsx": {
     id: "routes/tools.do-not-use";
     page: "/tools/do-not-use";
+  };
+  "routes/api.sync-tokens.tsx": {
+    id: "routes/api.sync-tokens";
+    page: "/api/sync-tokens";
   };
   "routes/fruits_.profile.tsx": {
     id: "routes/fruits_.profile";
@@ -700,6 +707,7 @@ type RouteModules = {
   "routes/api.sync-targets": typeof import("./app/routes/api.sync-targets.tsx");
   "routes/api.sync-targets.$targetId": typeof import("./app/routes/api.sync-targets.$targetId.tsx");
   "routes/tools.do-not-use": typeof import("./app/routes/tools.do-not-use.tsx");
+  "routes/api.sync-tokens": typeof import("./app/routes/api.sync-tokens.tsx");
   "routes/fruits_.profile": typeof import("./app/routes/fruits_.profile.tsx");
   "routes/good.consulting": typeof import("./app/routes/good.consulting.tsx");
   "routes/assemblies.$id": typeof import("./app/routes/assemblies.$id.tsx");

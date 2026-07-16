@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import {
   getFolderById,
   getDescendantFolders,
@@ -17,10 +17,11 @@ import {
  * Owner-only; bearer-token auth supported.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
+  const { user, syncScoped } = scoped;
 
   const folderId = new URL(request.url).searchParams.get("folderId");
   if (!folderId) {
@@ -29,6 +30,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const root = await getFolderById(folderId);
   if (!root || root.human_id !== user._id) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+  if (syncScoped && root.vault_root_key !== "syncs") {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 

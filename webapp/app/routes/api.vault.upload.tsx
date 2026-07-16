@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { uploadFileToS3 } from "../data/file.server";
-import { createFileRef } from "../data/vault.server";
+import { createFileRef, isFolderUnderSyncs } from "../data/vault.server";
 
 /**
  * POST /api/vault/upload
@@ -15,10 +15,11 @@ import { createFileRef } from "../data/vault.server";
  * creates the corresponding file_ref record.
  */
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) {
+  const scoped = await getScopedUserFromRequest(request);
+  if (!scoped) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
+  const { user, syncScoped } = scoped;
 
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -30,6 +31,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (!(file instanceof File)) {
     return Response.json({ error: "No file provided" }, { status: 400 });
+  }
+
+  // Sync-scoped tokens may only write inside syncs/.
+  if (syncScoped && !(await isFolderUnderSyncs(folderId))) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
