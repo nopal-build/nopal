@@ -14,7 +14,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
 // Types + shared utils live in a server-free file — safe on client and server.
-import { isFolderShared, isVaultRootFolder } from "../data/vault.types";
+import {
+  isFileRefLocked,
+  isFolderShared,
+  isVaultRootFolder,
+} from "../data/vault.types";
 import type {
   FileRef,
   FileRefListing,
@@ -840,6 +844,45 @@ export default function VaultV2Page() {
     if (data) invalidateAndRevalidate([folder.parent_folder_id, targetFolderId]);
   };
 
+  const handleDeleteFolder = async () => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    if (
+      !window.confirm(
+        `Delete "${folder.name}" and everything inside it? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    const data = await apiJson(`/api/vault/folders/${folder._id}`, {
+      method: "DELETE",
+    });
+    if (data) {
+      // The folder is gone — land on its parent (or the vault root).
+      if (folder.parent_folder_id) {
+        setSearchParams({ folder: folder.parent_folder_id });
+      } else {
+        setSearchParams({});
+      }
+      invalidateAndRevalidate([folder.parent_folder_id]);
+    }
+  };
+
+  const handleDeleteFile = async () => {
+    if (current.kind !== "file") return;
+    const file = current.file;
+    if (!window.confirm(`Delete "${file.name}"? This cannot be undone.`)) {
+      return;
+    }
+    const data = await apiJson(`/api/vault/${file._id}`, { method: "DELETE" });
+    if (data) {
+      // The file is gone — land on its containing folder (or the vault root).
+      if (file.folder_id) setSearchParams({ folder: file.folder_id });
+      else setSearchParams({});
+      invalidateAndRevalidate([file.folder_id]);
+    }
+  };
+
   const handleDownload = async (file: FileRef) => {
     const res = await fetch(`/api/vault/download/${file._id}`);
     const data = await res.json().catch(() => null);
@@ -899,6 +942,8 @@ export default function VaultV2Page() {
   const fileHasS3 =
     current.kind === "file" &&
     Boolean(current.file.s3_key || current.file.s3_url);
+  // Past daily-log files are read-only — no Replace/Delete (server enforces too).
+  const fileLocked = current.kind === "file" && isFileRefLocked(current.file);
 
   // Parent for the ".." row — second-to-last ancestor, or the vault root view.
   const parentFolder =
@@ -1084,6 +1129,14 @@ export default function VaultV2Page() {
                     Share
                   </button>
                 )}
+                {!currentIsRootContainer && (
+                  <button
+                    className="vault-toolbar-btn vault-toolbar-btn--danger"
+                    onClick={handleDeleteFolder}
+                  >
+                    Delete
+                  </button>
+                )}
                 <input
                   ref={uploadInputRef}
                   type="file"
@@ -1107,13 +1160,23 @@ export default function VaultV2Page() {
                     ↓ Download
                   </button>
                 )}
-                <button
-                  className="vault-toolbar-btn"
-                  onClick={() => replaceInputRef.current?.click()}
-                  disabled={replacing}
-                >
-                  {replacing ? "Replacing…" : "⇄ Replace"}
-                </button>
+                {!fileLocked && (
+                  <button
+                    className="vault-toolbar-btn"
+                    onClick={() => replaceInputRef.current?.click()}
+                    disabled={replacing}
+                  >
+                    {replacing ? "Replacing…" : "⇄ Replace"}
+                  </button>
+                )}
+                {!fileLocked && (
+                  <button
+                    className="vault-toolbar-btn vault-toolbar-btn--danger"
+                    onClick={handleDeleteFile}
+                  >
+                    Delete
+                  </button>
+                )}
                 <input
                   ref={replaceInputRef}
                   type="file"

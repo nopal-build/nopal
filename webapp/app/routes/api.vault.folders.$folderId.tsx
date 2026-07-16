@@ -7,10 +7,11 @@ import {
   deleteVaultFolderCascade,
   resolveVaultRootKey,
   getDescendantFolders,
+  getFileRefsByFolderIds,
   isFolderShared,
   moveVaultFolder,
 } from "../data/vault.server";
-import { isVaultRootFolder } from "../data/vault.types";
+import { isFileRefLocked, isVaultRootFolder } from "../data/vault.types";
 import { isRootShareable } from "../data/vaultRoots";
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -41,6 +42,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
         { status: 403 },
       );
     }
+
+    // The daily-log lock (past logs are read-only) applies to cascade deletes
+    // too — otherwise deleting a date folder would sidestep the single-file
+    // DELETE guard in api.vault.$fileId.
+    const descendants = await getDescendantFolders(folderId);
+    const files = await getFileRefsByFolderIds([
+      folderId,
+      ...descendants.map((d) => d._id),
+    ]);
+    if (files.some(isFileRefLocked)) {
+      return Response.json(
+        {
+          error:
+            "This folder contains locked daily-log files and cannot be deleted.",
+        },
+        { status: 403 },
+      );
+    }
+
     await deleteVaultFolderCascade(folderId);
     return Response.json({ success: true });
   }

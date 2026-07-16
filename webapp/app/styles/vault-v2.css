@@ -190,6 +190,17 @@
   }
 }
 
+/* ── Destructive toolbar action (Delete) ───────────────────────────── */
+
+.vault-toolbar-btn--danger:hover {
+  border-color: var(--red);
+  color: var(--red);
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--red-light);
+    color: var(--red-light);
+  }
+}
+
 /* ── Move-destination picker (inside the Move modal) ─────────────────── */
 
 .vault-v2-move-tree {
