@@ -20,8 +20,10 @@ install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
 
-# The `keyring` crate needs libdbus + pkg-config to build on Linux (its
-# secret-service backend) — not present on GitHub's Linux runners by default.
+# Not present on GitHub's Linux runners by default:
+# - libdbus-1-dev + pkg-config: keyring's secret-service backend
+# - libudev-dev: serialport's Linux backend (used by record-load-cell)
 [dist.dependencies.apt]
 libdbus-1-dev = '*'
+libudev-dev = '*'
 pkg-config = '*'
