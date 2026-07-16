@@ -38,8 +38,11 @@ export async function action({ request }: ActionFunctionArgs) {
     deviceId?: string;
     deviceLabel?: string;
     localPath?: string;
+    preprocess?: boolean;
+    twoWay?: boolean;
   };
-  const { name, folderId, deviceId, deviceLabel, localPath } = body;
+  const { name, folderId, deviceId, deviceLabel, localPath, preprocess, twoWay } =
+    body;
   if (!name || !folderId || !deviceId || !localPath) {
     return Response.json(
       { error: "name, folderId, deviceId, and localPath are required" },
@@ -76,6 +79,8 @@ export async function action({ request }: ActionFunctionArgs) {
     deviceId,
     deviceLabel: deviceLabel ?? "unknown-device",
     localPath,
+    preprocess: preprocess === true,
+    twoWay: twoWay === true,
   });
   return Response.json({ target }, { status: 201 });
 }

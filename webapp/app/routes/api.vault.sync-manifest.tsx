@@ -33,10 +33,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const descendants = await getDescendantFolders(folderId);
-  const files = await listFilesMetaByFolderIds(user._id, [
+  const allFiles = await listFilesMetaByFolderIds(user._id, [
     folderId,
     ...descendants.map((f) => f._id),
   ]);
+  // Archived files are invisible to sync — a local deletion archives the
+  // remote file, and it must not come back as a "new remote file".
+  const files = allFiles.filter((f) => !f.archived_at);
 
   return Response.json({
     root: { _id: root._id, name: root.name },

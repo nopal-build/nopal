@@ -563,11 +563,13 @@ pub fn upload(local_files: &[PathBuf], to: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Uploads one file, returning the created file_ref's id (used by sync's
+/// state tracking).
 pub(crate) fn upload_one(
     client: &Client,
     local: &Path,
     folder: &Folder,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<String, Box<dyn Error>> {
     let meta = fs::metadata(local).map_err(|e| format!("{}: {e}", local.display()))?;
     if !meta.is_file() {
         return Err(format!("{} is not a file", local.display()).into());
@@ -589,17 +591,21 @@ pub(crate) fn upload_one(
         folder.name
     );
 
-    if size <= MULTIPART_THRESHOLD {
+    let file_id = if size <= MULTIPART_THRESHOLD {
         let form = reqwest::blocking::multipart::Form::new()
             .file("file", local)?
             .text("folderId", folder._id.clone());
-        let _: serde_json::Value = client.post_form("/api/vault/upload", form)?;
+        let resp: serde_json::Value = client.post_form("/api/vault/upload", form)?;
+        resp["fileRef"]["_id"]
+            .as_str()
+            .ok_or("Upload did not return a file id")?
+            .to_string()
     } else {
-        upload_multipart(client, local, folder, &name, &content_type, size)?;
-    }
+        upload_multipart(client, local, folder, &name, &content_type, size)?
+    };
 
     println!("  ✓ {name}");
-    Ok(())
+    Ok(file_id)
 }
 
 /// `mkdir -p` semantics: walks the path from the vault root and creates any
@@ -882,7 +888,7 @@ fn upload_multipart(
     name: &str,
     content_type: &str,
     size: u64,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<String, Box<dyn Error>> {
     let init: serde_json::Value = client.post_json(
         "/api/vault/multipart-init",
         &serde_json::json!({
@@ -932,7 +938,7 @@ fn upload_parts(
     name: &str,
     content_type: &str,
     size: u64,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<String, Box<dyn Error>> {
     use sha2::Digest;
     let mut file = fs::File::open(local)?;
     let mut parts: Vec<serde_json::Value> = Vec::new();
@@ -984,7 +990,7 @@ fn upload_parts(
     println!();
 
     let content_hash = format!("{:x}", hasher.finalize());
-    let _: serde_json::Value = client.post_json(
+    let resp: serde_json::Value = client.post_json(
         "/api/vault/multipart-complete",
         &serde_json::json!({
             "uploadId": upload_id,
@@ -997,5 +1003,8 @@ fn upload_parts(
             "contentHash": content_hash,
         }),
     )?;
-    Ok(())
+    resp["fileRef"]["_id"]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| "multipart-complete did not return a file id".into())
 }

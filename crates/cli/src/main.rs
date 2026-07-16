@@ -206,6 +206,16 @@ enum SyncCommand {
         /// folder name under syncs/ in the vault.
         #[arg(long)]
         name: Option<String>,
+        /// Optimize videos with `nopal video prep` before uploading — the
+        /// smaller .web.mp4 is synced instead of the raw recording.
+        #[arg(long)]
+        preprocess: bool,
+        /// Two-way sync: also pull vault changes down and propagate
+        /// deletions (local deletes archive the vault copy; vault deletes
+        /// remove unchanged local files). Default is push-only — the local
+        /// directory is never modified.
+        #[arg(long)]
+        two_way: bool,
     },
     /// List sync targets (all devices).
     Ls {},
@@ -325,7 +335,12 @@ fn main() {
         }
         Command::Sync { command } => {
             let result = match command {
-                SyncCommand::Add { dir, name } => sync::add(&dir, name),
+                SyncCommand::Add {
+                    dir,
+                    name,
+                    preprocess,
+                    two_way,
+                } => sync::add(&dir, name, preprocess, two_way),
                 SyncCommand::Ls {} => sync::ls(),
                 SyncCommand::Rm {
                     name,

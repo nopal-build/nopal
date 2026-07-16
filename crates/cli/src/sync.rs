@@ -18,6 +18,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::vault::{self, Client, Folder};
+use crate::video;
 
 /// Files/dirs skipped during scans: hidden entries and OS noise.
 fn is_ignored(name: &str) -> bool {
@@ -73,8 +74,36 @@ struct SyncTarget {
     device_label: String,
     #[serde(rename = "localPath")]
     local_path: String,
+    #[serde(default)]
+    preprocess: bool,
+    #[serde(rename = "twoWay", default)]
+    two_way: bool,
     #[serde(rename = "lastSyncedAt")]
     last_synced_at: Option<String>,
+}
+
+/// Raw video extensions eligible for `--preprocess` optimization. Prepped
+/// outputs (`*.web.mp4`) are recognized and never re-prepped.
+const RAW_VIDEO_EXTS: [&str; 5] = ["mov", "mp4", "m4v", "avi", "mkv"];
+
+fn is_prepped_video(rel: &str) -> bool {
+    rel.to_lowercase().ends_with(".web.mp4")
+}
+
+fn is_raw_video(rel: &str) -> bool {
+    if is_prepped_video(rel) {
+        return false;
+    }
+    let lower = rel.to_lowercase();
+    RAW_VIDEO_EXTS
+        .iter()
+        .any(|ext| lower.ends_with(&format!(".{ext}")))
+}
+
+/// The sibling path `nopal video prep` writes for an input: `<stem>.web.mp4`.
+fn prepped_sibling(abs: &Path) -> PathBuf {
+    let stem = abs.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+    abs.with_file_name(format!("{stem}.web.mp4"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +119,15 @@ struct ManifestFile {
     name: String,
     folder_id: Option<String>,
     content_hash: Option<String>,
+    #[serde(default)]
+    has_s3: bool,
+}
+
+/// Owned remote-side view of one file, keyed by relative path.
+struct RemoteEntry {
+    file_id: String,
+    hash: Option<String>,
+    has_s3: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,7 +154,12 @@ fn syncs_root(client: &Client) -> Result<Folder, Box<dyn Error>> {
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 /// Register LOCAL_DIR as a sync target (creating syncs/<name>/) and push.
-pub fn add(local_dir: &Path, name: Option<String>) -> Result<(), Box<dyn Error>> {
+pub fn add(
+    local_dir: &Path,
+    name: Option<String>,
+    preprocess: bool,
+    two_way: bool,
+) -> Result<(), Box<dyn Error>> {
     let local_dir = local_dir
         .canonicalize()
         .map_err(|e| format!("{}: {e}", local_dir.display()))?;
@@ -171,16 +214,30 @@ pub fn add(local_dir: &Path, name: Option<String>) -> Result<(), Box<dyn Error>>
             "deviceId": identity.device_id,
             "deviceLabel": identity.device_label,
             "localPath": local_dir.to_string_lossy(),
+            "preprocess": preprocess,
+            "twoWay": two_way,
         }),
     )?;
     let target: SyncTarget = serde_json::from_value(resp["target"].clone())?;
 
     println!(
-        "Registered '{}' — {} -> syncs/{}/",
+        "Registered '{}' — {} {} syncs/{}/{}",
         target.name,
         local_dir.display(),
-        target.name
+        if target.two_way { "<->" } else { "->" },
+        target.name,
+        if target.preprocess {
+            " (videos optimized before upload)"
+        } else {
+            ""
+        }
     );
+    if target.two_way {
+        println!(
+            "  two-way: vault changes are pulled down; local deletions archive \
+             the vault copy; vault deletions remove unchanged local files."
+        );
+    }
 
     // Initial push
     run_target(&client, &target, &identity)
@@ -201,9 +258,11 @@ pub fn ls() -> Result<(), Box<dyn Error>> {
             " (other device)"
         };
         println!(
-            "{:<24} {:<40} last synced: {}{}",
+            "{:<24} {:<40} {}{}last synced: {}{}",
             t.name,
             t.local_path,
+            if t.two_way { "[two-way] " } else { "" },
+            if t.preprocess { "[preprocess] " } else { "" },
             t.last_synced_at
                 .as_deref()
                 .map(|s| s.split('T').next().unwrap_or(s).to_string())
@@ -236,6 +295,8 @@ pub fn rm(name: &str, keep_remote: bool, force: bool) -> Result<(), Box<dyn Erro
     }
 
     let _: serde_json::Value = client.delete(&format!("/api/sync-targets/{}", target._id))?;
+    // Drop this device's state snapshot for the target, if any.
+    let _ = fs::remove_file(state_file_path(&target._id));
     if !keep_remote {
         let _: serde_json::Value =
             client.delete(&format!("/api/vault/folders/{}", target.folder_id))?;
@@ -308,6 +369,51 @@ fn run_target(
     let mut local_files: Vec<(String, PathBuf)> = Vec::new();
     scan_dir(&local_root, "", &mut local_files)?;
 
+    // 1b. Preprocess: raw videos are optimized into a `.web.mp4` sibling
+    // (once — existing siblings are reused) and the SIBLING is what syncs;
+    // the raw recording never uploads. Because the prepped file is a real
+    // local file, hash diffing stays consistent across runs.
+    if target.preprocess {
+        let mut prepped: Vec<(String, PathBuf)> = Vec::new();
+        for (rel, abs) in &local_files {
+            if !is_raw_video(rel) {
+                continue;
+            }
+            let sibling = prepped_sibling(abs);
+            if !sibling.exists() {
+                println!("  ▶ optimizing {rel}");
+                video::prep(
+                    abs,
+                    video::PrepOptions {
+                        output: Some(sibling.clone()),
+                        crf: 23,
+                        max_height: 1080,
+                        preset: "medium".to_string(),
+                        overwrite: false,
+                    },
+                )?;
+                let sibling_rel = match rel.rsplit_once('/') {
+                    Some((dir, _)) => format!(
+                        "{dir}/{}",
+                        sibling.file_name().unwrap_or_default().to_string_lossy()
+                    ),
+                    None => sibling
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string(),
+                };
+                prepped.push((sibling_rel, sibling));
+            }
+        }
+        // Newly-created siblings weren't in the scan — add them; then drop
+        // every raw video from the push list.
+        local_files.extend(prepped);
+        local_files.retain(|(rel, _)| !is_raw_video(rel));
+        local_files.sort();
+        local_files.dedup_by(|a, b| a.0 == b.0);
+    }
+
     // 2. Remote state in one request.
     let manifest: Manifest = client.get_json(&format!(
         "/api/vault/sync-manifest?folderId={}",
@@ -350,7 +456,7 @@ fn run_target(
         .iter()
         .map(|(rel, id)| (id.clone(), rel.clone()))
         .collect();
-    let mut remote_files: HashMap<String, &ManifestFile> = HashMap::new();
+    let mut remote_files: HashMap<String, RemoteEntry> = HashMap::new();
     for file in &manifest.files {
         let dir_rel = file
             .folder_id
@@ -363,44 +469,40 @@ fn run_target(
         } else {
             format!("{dir_rel}/{}", file.name)
         };
-        remote_files.insert(rel, file);
+        // With preprocess on, raw videos are unmanaged on BOTH sides — a raw
+        // recording uploaded via the web is left alone rather than pulled
+        // down and re-pushed.
+        if target.preprocess && is_raw_video(&rel) {
+            continue;
+        }
+        remote_files.insert(
+            rel,
+            RemoteEntry {
+                file_id: file._id.clone(),
+                hash: file.content_hash.clone(),
+                has_s3: file.has_s3,
+            },
+        );
     }
 
-    // 3. Diff + push.
-    let (mut uploaded, mut replaced, mut unchanged) = (0u32, 0u32, 0u32);
-    for (rel, abs) in &local_files {
-        let local_hash = sha256_file(abs)?;
-        match remote_files.get(rel) {
-            Some(remote) if remote.content_hash.as_deref() == Some(local_hash.as_str()) => {
-                unchanged += 1;
-            }
-            Some(remote) => {
-                // Changed: replace in place (same file id).
-                println!("  ~ {rel}");
-                let form = reqwest::blocking::multipart::Form::new().file("file", abs)?;
-                let _: serde_json::Value =
-                    client.post_form(&format!("/api/vault/replace/{}", remote._id), form)?;
-                replaced += 1;
-            }
-            None => {
-                // New: ensure the folder chain exists, then upload.
-                println!("  + {rel}");
-                let dir_rel = match rel.rsplit_once('/') {
-                    Some((dir, _)) => dir.to_string(),
-                    None => String::new(),
-                };
-                let folder_id = ensure_remote_dir(client, target, &mut folder_paths, &dir_rel)?;
-                let folder = Folder {
-                    _id: folder_id,
-                    name: dir_rel.clone(),
-                    vault_root_key: Some("syncs".to_string()),
-                    shared_with: serde_json::json!([]),
-                    updated_at: String::new(),
-                };
-                vault::upload_one(client, abs, &folder)?;
-                uploaded += 1;
-            }
-        }
+    // 3. Diff + apply.
+    if target.two_way {
+        run_two_way(
+            client,
+            target,
+            &local_root,
+            &local_files,
+            &remote_files,
+            &mut folder_paths,
+        )?;
+    } else {
+        run_push_only(
+            client,
+            target,
+            &local_files,
+            &remote_files,
+            &mut folder_paths,
+        )?;
     }
 
     // 4. Mark the run.
@@ -408,26 +510,394 @@ fn run_target(
         &format!("/api/sync-targets/{}", target._id),
         &serde_json::json!({}),
     )?;
+    Ok(())
+}
+
+/// The original push-only engine: local is truth, the vault never loses a
+/// file, no state needed.
+fn run_push_only(
+    client: &Client,
+    target: &SyncTarget,
+    local_files: &[(String, PathBuf)],
+    remote_files: &HashMap<String, RemoteEntry>,
+    folder_paths: &mut HashMap<String, String>,
+) -> Result<(), Box<dyn Error>> {
+    let (mut uploaded, mut replaced, mut unchanged) = (0u32, 0u32, 0u32);
+    for (rel, abs) in local_files {
+        let local_hash = sha256_file(abs)?;
+        match remote_files.get(rel) {
+            Some(remote) if remote.hash.as_deref() == Some(local_hash.as_str()) => {
+                unchanged += 1;
+            }
+            Some(remote) => {
+                println!("  ~ {rel}");
+                replace_remote(client, &remote.file_id, abs)?;
+                replaced += 1;
+            }
+            None => {
+                println!("  + {rel}");
+                push_new(client, target, folder_paths, rel, abs)?;
+                uploaded += 1;
+            }
+        }
+    }
 
     println!(
         "  done: {uploaded} new, {replaced} updated, {unchanged} unchanged \
          ({} local file(s))",
         local_files.len()
     );
-    if !remote_files.is_empty() {
-        let local_set: std::collections::HashSet<&String> =
-            local_files.iter().map(|(rel, _)| rel).collect();
-        let remote_only = remote_files
-            .keys()
-            .filter(|rel| !local_set.contains(rel))
-            .count();
-        if remote_only > 0 {
-            println!(
-                "  note: {remote_only} vault file(s) have no local counterpart — \
-                 push never deletes (two-way sync is a later phase)"
-            );
+    let local_set: std::collections::HashSet<&String> =
+        local_files.iter().map(|(rel, _)| rel).collect();
+    let remote_only = remote_files
+        .keys()
+        .filter(|rel| !local_set.contains(rel))
+        .count();
+    if remote_only > 0 {
+        println!(
+            "  note: {remote_only} vault file(s) have no local counterpart — \
+             push-only sync never deletes (register with --two-way to pull)"
+        );
+    }
+    Ok(())
+}
+
+// ─── Two-way engine ──────────────────────────────────────────────────────────
+//
+// Three-way diff per path: local now (L) vs last-synced state (S) vs remote
+// now (R). The state file is this device's memory of "what both sides agreed
+// on last time" — without it, a missing file is ambiguous (never-synced vs
+// deleted).
+//
+//   L==R                      → in sync (adopt into state)
+//   L!=R, S==L                → remote changed  → pull
+//   L!=R, S==R                → local changed   → push (replace)
+//   L!=R, S neither/absent    → conflict        → save remote copy, local wins
+//   L only, S absent          → new local       → push (upload)
+//   L only, S==L              → remote deleted  → delete local
+//   L only, S!=L              → remote deleted but local changed → re-upload
+//   R only, S absent          → new remote      → pull
+//   R only, S==R              → local deleted   → archive remote
+//   R only, S!=R              → local deleted but remote changed → pull
+//
+// Remote hash null (legacy/web-multipart files) can't signal remote change:
+// those files only push when local differs from state.
+
+fn run_two_way(
+    client: &Client,
+    target: &SyncTarget,
+    local_root: &Path,
+    local_files: &[(String, PathBuf)],
+    remote_files: &HashMap<String, RemoteEntry>,
+    folder_paths: &mut HashMap<String, String>,
+) -> Result<(), Box<dyn Error>> {
+    let mut state = load_state(&target._id);
+    let local_map: HashMap<&String, &PathBuf> =
+        local_files.iter().map(|(rel, abs)| (rel, abs)).collect();
+
+    // Union of every path any side knows about.
+    let mut all_rels: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    all_rels.extend(local_files.iter().map(|(rel, _)| rel.clone()));
+    all_rels.extend(remote_files.keys().cloned());
+    all_rels.extend(state.files.keys().cloned());
+
+    let (mut pushed, mut pulled, mut unchanged, mut archived, mut deleted_local, mut conflicts) =
+        (0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+
+    for rel in all_rels {
+        let local_abs = local_map.get(&rel).cloned();
+        let remote = remote_files.get(&rel);
+        let state_entry = state.files.get(&rel).cloned();
+
+        match (local_abs, remote) {
+            // ── Present on both sides ────────────────────────────────────
+            (Some(abs), Some(remote)) => {
+                let l = sha256_file(abs)?;
+                match &remote.hash {
+                    Some(r) if *r == l => {
+                        unchanged += 1;
+                        state.files.insert(
+                            rel.clone(),
+                            StateEntry {
+                                hash: l,
+                                file_id: remote.file_id.clone(),
+                            },
+                        );
+                    }
+                    Some(r) => {
+                        let s = state_entry.as_ref().map(|e| e.hash.as_str());
+                        if s == Some(l.as_str()) {
+                            // Local unchanged since last sync → remote changed.
+                            println!("  ↓ {rel}");
+                            let new_hash = pull_file(client, remote, abs)?;
+                            state.files.insert(
+                                rel.clone(),
+                                StateEntry {
+                                    hash: new_hash,
+                                    file_id: remote.file_id.clone(),
+                                },
+                            );
+                            pulled += 1;
+                        } else if s == Some(r.as_str()) {
+                            // Remote unchanged since last sync → local changed.
+                            println!("  ↑ {rel}");
+                            replace_remote(client, &remote.file_id, abs)?;
+                            state.files.insert(
+                                rel.clone(),
+                                StateEntry {
+                                    hash: l,
+                                    file_id: remote.file_id.clone(),
+                                },
+                            );
+                            pushed += 1;
+                        } else {
+                            // Both changed (or first two-way run on diverged
+                            // content): preserve the remote copy locally,
+                            // then local wins.
+                            let conflict_rel = conflict_rel_name(&rel);
+                            println!("  ! {rel} — conflict; remote saved as {conflict_rel}");
+                            let conflict_abs = local_root.join(&conflict_rel);
+                            pull_file(client, remote, &conflict_abs)?;
+                            replace_remote(client, &remote.file_id, abs)?;
+                            state.files.insert(
+                                rel.clone(),
+                                StateEntry {
+                                    hash: l,
+                                    file_id: remote.file_id.clone(),
+                                },
+                            );
+                            conflicts += 1;
+                        }
+                    }
+                    None => {
+                        // No remote hash to compare — push only if local
+                        // moved since last sync; replacing sets the hash.
+                        if state_entry.as_ref().map(|e| e.hash.as_str()) != Some(l.as_str()) {
+                            println!("  ↑ {rel}");
+                            replace_remote(client, &remote.file_id, abs)?;
+                            pushed += 1;
+                        } else {
+                            unchanged += 1;
+                        }
+                        state.files.insert(
+                            rel.clone(),
+                            StateEntry {
+                                hash: l,
+                                file_id: remote.file_id.clone(),
+                            },
+                        );
+                    }
+                }
+            }
+
+            // ── Local only ─────────────────────────────────────────────────
+            (Some(abs), None) => {
+                let l = sha256_file(abs)?;
+                match state_entry {
+                    Some(entry) if entry.hash == l => {
+                        // Was synced, unchanged locally, gone remotely → the
+                        // deletion happened in the vault; honor it.
+                        println!("  ✗ {rel} (deleted in vault)");
+                        fs::remove_file(abs)?;
+                        state.files.remove(&rel);
+                        deleted_local += 1;
+                    }
+                    _ => {
+                        // Never synced, or changed since — (re-)upload.
+                        println!("  + {rel}");
+                        let file_id = push_new(client, target, folder_paths, &rel, abs)?;
+                        state
+                            .files
+                            .insert(rel.clone(), StateEntry { hash: l, file_id });
+                        pushed += 1;
+                    }
+                }
+            }
+
+            // ── Remote only ───────────────────────────────────────────────
+            (None, Some(remote)) => {
+                match &state_entry {
+                    Some(entry)
+                        if remote.hash.is_none()
+                            || remote.hash.as_deref() == Some(entry.hash.as_str()) =>
+                    {
+                        // Was synced, unchanged remotely, gone locally → the
+                        // deletion happened here; archive in the vault
+                        // (recoverable) rather than hard-deleting.
+                        println!("  ✗ {rel} (archived in vault — deleted locally)");
+                        archive_remote(client, &remote.file_id)?;
+                        state.files.remove(&rel);
+                        archived += 1;
+                    }
+                    _ => {
+                        // New remote file — or deleted locally but changed
+                        // remotely since (remote wins; nothing local to lose).
+                        println!("  ↓ {rel}");
+                        let abs = local_root.join(&rel);
+                        let new_hash = pull_file(client, remote, &abs)?;
+                        state.files.insert(
+                            rel.clone(),
+                            StateEntry {
+                                hash: new_hash,
+                                file_id: remote.file_id.clone(),
+                            },
+                        );
+                        pulled += 1;
+                    }
+                }
+            }
+
+            // ── In state only: both sides gone — forget it ───────────────────
+            (None, None) => {
+                state.files.remove(&rel);
+            }
         }
     }
+
+    save_state(&target._id, &state)?;
+
+    println!(
+        "  done: {pushed} pushed, {pulled} pulled, {unchanged} unchanged, \
+         {archived} archived, {deleted_local} deleted locally, {conflicts} conflict(s)"
+    );
+    Ok(())
+}
+
+// ─── Shared apply helpers ──────────────────────────────────────────────────
+
+/// Upload a brand-new file, creating remote folders as needed. Returns the
+/// new file_ref id.
+fn push_new(
+    client: &Client,
+    target: &SyncTarget,
+    folder_paths: &mut HashMap<String, String>,
+    rel: &str,
+    abs: &Path,
+) -> Result<String, Box<dyn Error>> {
+    let dir_rel = match rel.rsplit_once('/') {
+        Some((dir, _)) => dir.to_string(),
+        None => String::new(),
+    };
+    let folder_id = ensure_remote_dir(client, target, folder_paths, &dir_rel)?;
+    let folder = Folder {
+        _id: folder_id,
+        name: if dir_rel.is_empty() {
+            target.name.clone()
+        } else {
+            dir_rel.clone()
+        },
+        vault_root_key: Some("syncs".to_string()),
+        shared_with: serde_json::json!([]),
+        updated_at: String::new(),
+    };
+    vault::upload_one(client, abs, &folder)
+}
+
+fn replace_remote(client: &Client, file_id: &str, abs: &Path) -> Result<(), Box<dyn Error>> {
+    let form = reqwest::blocking::multipart::Form::new().file("file", abs)?;
+    let _: serde_json::Value = client.post_form(&format!("/api/vault/replace/{file_id}"), form)?;
+    Ok(())
+}
+
+/// Archive (not delete) a vault file — recoverable for ~30 days via the
+/// existing archive cleanup.
+fn archive_remote(client: &Client, file_id: &str) -> Result<(), Box<dyn Error>> {
+    let now = jiff::Timestamp::now().to_string();
+    let _: serde_json::Value = client.patch_json(
+        &format!("/api/vault/{file_id}"),
+        &serde_json::json!({ "archived_at": now }),
+    )?;
+    Ok(())
+}
+
+/// Download a remote file to `abs` (temp file + rename, parents created).
+/// Returns the sha256 of what was written.
+fn pull_file(client: &Client, remote: &RemoteEntry, abs: &Path) -> Result<String, Box<dyn Error>> {
+    if let Some(parent) = abs.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = abs.with_file_name(format!(
+        ".{}.nopal-tmp",
+        abs.file_name().unwrap_or_default().to_string_lossy()
+    ));
+
+    if remote.has_s3 {
+        let resp: serde_json::Value =
+            client.get_json(&format!("/api/vault/download/{}", remote.file_id))?;
+        let url = resp["url"]
+            .as_str()
+            .ok_or("Server did not return a download URL")?;
+        let mut s3_resp = reqwest::blocking::get(url)?;
+        if !s3_resp.status().is_success() {
+            return Err(format!("Download failed ({})", s3_resp.status()).into());
+        }
+        let mut file = fs::File::create(&tmp)?;
+        s3_resp.copy_to(&mut file)?;
+    } else {
+        // Inline content (e.g. a markdown card created in the web UI).
+        let resp: serde_json::Value = client.get_json(&format!("/api/vault/{}", remote.file_id))?;
+        let content = resp["file"]["content"]
+            .as_str()
+            .ok_or("Remote file has no downloadable content")?
+            .to_string();
+        fs::write(&tmp, content)?;
+    }
+
+    fs::rename(&tmp, abs)?;
+    sha256_file(abs)
+}
+
+/// `report.md` → `report.conflict-20260716-104502.md`
+fn conflict_rel_name(rel: &str) -> String {
+    let ts = jiff::Zoned::now().strftime("%Y%m%d-%H%M%S").to_string();
+    let (dir, name) = match rel.rsplit_once('/') {
+        Some((d, n)) => (Some(d), n),
+        None => (None, rel),
+    };
+    let renamed = match name.rsplit_once('.') {
+        Some((stem, ext)) => format!("{stem}.conflict-{ts}.{ext}"),
+        None => format!("{name}.conflict-{ts}"),
+    };
+    match dir {
+        Some(d) => format!("{d}/{renamed}"),
+        None => renamed,
+    }
+}
+
+// ─── Per-target sync state (this device's "last agreed" snapshot) ───────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StateEntry {
+    hash: String,
+    file_id: String,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SyncState {
+    #[serde(default)]
+    files: HashMap<String, StateEntry>,
+}
+
+fn state_file_path(target_id: &str) -> PathBuf {
+    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join("nopal")
+        .join("sync-state")
+        .join(format!("{target_id}.json"))
+}
+
+fn load_state(target_id: &str) -> SyncState {
+    fs::read_to_string(state_file_path(target_id))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_state(target_id: &str, state: &SyncState) -> Result<(), Box<dyn Error>> {
+    let path = state_file_path(target_id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(state)?)?;
     Ok(())
 }
 

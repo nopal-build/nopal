@@ -23,6 +23,12 @@ export type SyncTarget = Data & {
   deviceLabel: string;
   /** Absolute local path on that device — informational/display only. */
   localPath: string;
+  /** Run `nopal video prep` on raw videos before uploading — the optimized
+   * .web.mp4 sibling is synced instead of the original recording. */
+  preprocess?: boolean;
+  /** Pull remote changes down as well as pushing local ones. Off by
+   * default — push-only targets never modify the local directory. */
+  twoWay?: boolean;
   createdAt: string;
   lastSyncedAt: string | null;
 };
@@ -34,9 +40,13 @@ export async function createSyncTarget(data: {
   deviceId: string;
   deviceLabel: string;
   localPath: string;
+  preprocess?: boolean;
+  twoWay?: boolean;
 }): Promise<SyncTarget | undefined> {
   const result = await upsert("sync_targets", {
     ...data,
+    preprocess: data.preprocess ?? false,
+    twoWay: data.twoWay ?? false,
     createdAt: new Date().toISOString(),
     lastSyncedAt: null,
   });
