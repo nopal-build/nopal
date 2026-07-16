@@ -72,6 +72,9 @@ import {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const NOPAL_CLI_INSTALL_COMMAND =
+  "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/gwing33/nopal/releases/latest/download/nopal-installer.sh | sh";
+
 function isAdminOrSuper(user: Human): boolean {
   return user.role === "Admin" || user.role === "Super";
 }
@@ -1225,6 +1228,19 @@ export default function Profile() {
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
 
+  const [cliInstallCopied, setCliInstallCopied] = useState(false);
+  async function handleCopyCliInstallCommand() {
+    try {
+      await navigator.clipboard.writeText(NOPAL_CLI_INSTALL_COMMAND);
+      setCliInstallCopied(true);
+      setTimeout(() => setCliInstallCopied(false), 2000);
+    } catch {
+      // Clipboard API can be unavailable (older browser, non-secure context) —
+      // the input itself is still readonly + auto-selecting on focus/click, so
+      // manual copy always works as a fallback.
+    }
+  }
+
   const [switchModalOpen, setSwitchModalOpen] = useState(false);
   const [switchBusy, setSwitchBusy] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
@@ -2163,21 +2179,28 @@ export default function Profile() {
                     rel="noreferrer"
                     className="font-mono purple-light-text"
                   >
-                    Download nopal →
+                    Download nopal cli →
                   </a>
                 </div>
-                <code
-                  className="font-mono block"
-                  style={{
-                    color: "var(--text-subtle)",
-                    fontSize: "0.75rem",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  curl --proto '=https' --tlsv1.2 -LsSf
-                  https://github.com/gwing33/nopal/releases/latest/download/nopal-installer.sh
-                  | sh
-                </code>
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={NOPAL_CLI_INSTALL_COMMAND}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onClick={(e) => e.currentTarget.select()}
+                    aria-label="nopal CLI install command"
+                    className="font-mono flex-1 min-w-0 code-input"
+                    style={{ fontSize: "0.75rem", padding: "6px 8px" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCopyCliInstallCommand}
+                    className="btn-secondary shrink-0"
+                    style={{ padding: "6px 12px", fontSize: "0.75rem" }}
+                  >
+                    {cliInstallCopied ? "Copied!" : "Copy"}
+                  </button>
+                </div>
               </div>
 
               {apiTokens.length === 0 ? (

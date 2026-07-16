@@ -124,6 +124,20 @@ body {
   }
 }
 
+/* Readonly "copy this command" inputs — a nested "well" look inside a
+   .good-box, distinct from the box's own background. */
+.code-input {
+  background: var(--midground);
+  border: 1px solid var(--foreground);
+  border-radius: 6px;
+  color: var(--text-subtle);
+  @media (prefers-color-scheme: dark) {
+    background: var(--dark-midground);
+    border-color: var(--dark-foreground);
+    color: var(--text-subtle-dark);
+  }
+}
+
 .good-box-boarder {
   border: 1px solid var(--foreground);
   border-radius: 8px;
