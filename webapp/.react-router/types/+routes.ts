@@ -67,6 +67,9 @@ type Pages = {
   "/tools/erv-calculator": {
     params: {};
   };
+  "/api/humans/related": {
+    params: {};
+  };
   "/tools/space-layout": {
     params: {};
   };
@@ -296,7 +299,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/api/passkeys/login-options" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/tools/building-envelope" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/tools/erv-calculator" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/tools/do-not-use" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
+    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/api/passkeys/login-options" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/tools/building-envelope" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/tools/erv-calculator" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/tools/do-not-use" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
   };
   "routes/api.passkeys.invite-register-options.tsx": {
     id: "routes/api.passkeys.invite-register-options";
@@ -365,6 +368,10 @@ type RouteFiles = {
   "routes/tools.erv-calculator.tsx": {
     id: "routes/tools.erv-calculator";
     page: "/tools/erv-calculator";
+  };
+  "routes/api.humans.related.tsx": {
+    id: "routes/api.humans.related";
+    page: "/api/humans/related";
   };
   "routes/tools.space-layout.tsx": {
     id: "routes/tools.space-layout";
@@ -663,6 +670,7 @@ type RouteModules = {
   "routes/grandpas-cabin-recipe": typeof import("./app/routes/grandpas-cabin-recipe.tsx");
   "routes/tools.thermal-inertia": typeof import("./app/routes/tools.thermal-inertia.tsx");
   "routes/tools.erv-calculator": typeof import("./app/routes/tools.erv-calculator.tsx");
+  "routes/api.humans.related": typeof import("./app/routes/api.humans.related.tsx");
   "routes/tools.space-layout": typeof import("./app/routes/tools.space-layout.tsx");
   "routes/fruits_.daily-log": typeof import("./app/routes/fruits_.daily-log.tsx");
   "routes/good.architecture": typeof import("./app/routes/good.architecture.tsx");

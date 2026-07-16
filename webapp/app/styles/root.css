@@ -119,6 +119,9 @@ body {
 
 .btn-outline {
   border: 1px solid var(--midground);
+  /* Every call site was already adding 4px rounding (`rounded` /
+     inline borderRadius) — bake it in so forgetting it isn't possible. */
+  border-radius: 4px;
   @media (prefers-color-scheme: dark) {
     border-color: var(--dark-midground);
   }
@@ -223,6 +226,16 @@ body {
     background: var(--dark-midground);
     border-color: var(--dark-foreground);
     color: var(--text-subtle-dark);
+  }
+}
+
+/* Multi-line usage-snippet blocks (see the styles guide) — accent purple in
+   light mode; plain white in dark, where --purple-light is too dim against a
+   dark .good-box. */
+.code-block {
+  color: var(--purple-light);
+  @media (prefers-color-scheme: dark) {
+    color: white;
   }
 }
 

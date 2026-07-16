@@ -146,6 +146,29 @@ impl Client {
         Self::parse(resp)
     }
 
+    fn patch_json<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<T, Box<dyn Error>> {
+        let resp = self
+            .http
+            .patch(self.url(path))
+            .bearer_auth(&self.token)
+            .json(body)
+            .send()?;
+        Self::parse(resp)
+    }
+
+    fn delete<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, Box<dyn Error>> {
+        let resp = self
+            .http
+            .delete(self.url(path))
+            .bearer_auth(&self.token)
+            .send()?;
+        Self::parse(resp)
+    }
+
     fn parse<T: serde::de::DeserializeOwned>(
         resp: reqwest::blocking::Response,
     ) -> Result<T, Box<dyn Error>> {
@@ -265,6 +288,18 @@ fn format_size(size: Option<u64>) -> String {
 
 fn format_date(iso: &str) -> String {
     iso.split('T').next().unwrap_or(iso).to_string()
+}
+
+/// Interactive y/N prompt — anything but y/yes is a no.
+fn confirm(prompt: &str) -> bool {
+    use std::io::Write;
+    print!("{prompt}");
+    std::io::stdout().flush().ok();
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).is_err() {
+        return false;
+    }
+    matches!(line.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
 fn is_shared(folder: &Folder) -> bool {
@@ -554,6 +589,279 @@ fn upload_one(client: &Client, local: &Path, folder: &Folder) -> Result<(), Box<
     }
 
     println!("  ✓ {name}");
+    Ok(())
+}
+
+/// `mkdir -p` semantics: walks the path from the vault root and creates any
+/// missing folders. The first segment must be an existing Vault Root Folder
+/// (daily-logs / projects / personal) — the root itself is locked.
+pub fn mkdir(path: &str) -> Result<(), Box<dyn Error>> {
+    let client = Client::new()?;
+    let segments = split_path(path);
+    if segments.is_empty() {
+        return Err("Provide a folder path to create, e.g. projects/greenhouse".into());
+    }
+
+    let mut children = client.children("root")?;
+    let mut current: Option<Folder> = None;
+    let mut created_any = false;
+
+    for (i, segment) in segments.iter().enumerate() {
+        if let Some(folder) = children
+            .folders
+            .iter()
+            .find(|f| segment_matches(segment, &f.name))
+            .cloned()
+        {
+            children = client.children(&folder._id)?;
+            current = Some(folder);
+            continue;
+        }
+        if children
+            .files
+            .iter()
+            .any(|f| segment_matches(segment, &f.name))
+        {
+            return Err(format!("'{segment}' already exists as a file").into());
+        }
+        let parent = current.as_ref().ok_or_else(|| {
+            format!(
+                "'{segment}' can't be created at the vault root — folders live inside \
+                 daily-logs/, projects/, or personal/"
+            )
+        })?;
+
+        let resp: serde_json::Value = client.post_json(
+            "/api/vault/folders",
+            &serde_json::json!({ "name": segment, "parent_folder_id": parent._id }),
+        )?;
+        let folder: Folder = serde_json::from_value(resp["folder"].clone())?;
+        println!("Created {}/", segments[..=i].join("/"));
+        created_any = true;
+        children = Children {
+            folders: vec![],
+            files: vec![],
+        };
+        current = Some(folder);
+    }
+
+    if !created_any {
+        println!("Folder already exists.");
+    }
+    Ok(())
+}
+
+/// Move a folder into another folder (possibly across vault roots — e.g.
+/// personal → projects). Shared folders, cycles, and root containers are
+/// rejected server-side.
+pub fn mv(src: &str, dest: &str) -> Result<(), Box<dyn Error>> {
+    let client = Client::new()?;
+    let folder = resolve_folder(&client, src)?.ok_or("The vault root can't be moved")?;
+    let dest_folder = resolve_folder(&client, dest)?
+        .ok_or("Folders can't be moved to the vault root — pick a destination like projects/")?;
+    let _: serde_json::Value = client.patch_json(
+        &format!("/api/vault/folders/{}", folder._id),
+        &serde_json::json!({ "parent_folder_id": dest_folder._id }),
+    )?;
+    println!("Moved {}/ -> {}/", folder.name, dest_folder.name);
+    Ok(())
+}
+
+/// Rename a folder. (Files can't be renamed — matching the web UI.)
+pub fn rename(path: &str, new_name: &str) -> Result<(), Box<dyn Error>> {
+    let new_name = new_name.trim();
+    if new_name.is_empty() || new_name.contains('/') {
+        return Err("NEW_NAME must be a plain folder name (no '/')".into());
+    }
+    let client = Client::new()?;
+    match resolve(&client, path)? {
+        Resolved::Root => Err("The vault root can't be renamed".into()),
+        Resolved::File { file } => Err(format!(
+            "'{}' is a file — only folders can be renamed right now",
+            file.name
+        )
+        .into()),
+        Resolved::Folder(folder) => {
+            let _: serde_json::Value = client.patch_json(
+                &format!("/api/vault/folders/{}", folder._id),
+                &serde_json::json!({ "name": new_name }),
+            )?;
+            println!("Renamed {}/ -> {new_name}/", folder.name);
+            Ok(())
+        }
+    }
+}
+
+/// Replace a vault file's bytes in place — same file id, so links keep
+/// working. Locked daily-log files are rejected server-side.
+pub fn replace(local: &Path, vault_path: &str) -> Result<(), Box<dyn Error>> {
+    let meta = fs::metadata(local).map_err(|e| format!("{}: {e}", local.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{} is not a file", local.display()).into());
+    }
+    let client = Client::new()?;
+    let listing = resolve_file(&client, vault_path)?;
+
+    println!(
+        "Replacing {} with {} ({}) ...",
+        listing.name,
+        local.display(),
+        format_size(Some(meta.len()))
+    );
+    let form = reqwest::blocking::multipart::Form::new().file("file", local)?;
+    let _: serde_json::Value =
+        client.post_form(&format!("/api/vault/replace/{}", listing._id), form)?;
+    println!("  ✓ {}", listing.name);
+    Ok(())
+}
+
+/// Delete a vault file or folder. Non-empty folders need --recursive;
+/// everything asks for confirmation unless --force. Root containers and
+/// locked daily-log content are rejected server-side.
+pub fn rm(path: &str, force: bool, recursive: bool) -> Result<(), Box<dyn Error>> {
+    let client = Client::new()?;
+    match resolve(&client, path)? {
+        Resolved::Root => Err("Provide a folder or file path to delete".into()),
+        Resolved::File { file } => {
+            if !force && !confirm(&format!("Delete '{}'? [y/N] ", file.name)) {
+                println!("Aborted.");
+                return Ok(());
+            }
+            let _: serde_json::Value = client.delete(&format!("/api/vault/{}", file._id))?;
+            println!("Deleted {}", file.name);
+            Ok(())
+        }
+        Resolved::Folder(folder) => {
+            let children = client.children(&folder._id)?;
+            let (n_folders, n_files) = (children.folders.len(), children.files.len());
+            if (n_folders + n_files) > 0 && !recursive {
+                return Err(format!(
+                    "'{}' is not empty ({n_folders} folder(s), {n_files} file(s)) — \
+                     pass --recursive to delete everything inside",
+                    folder.name
+                )
+                .into());
+            }
+            if !force
+                && !confirm(&format!(
+                    "Delete '{}/' and everything inside it? [y/N] ",
+                    folder.name
+                ))
+            {
+                println!("Aborted.");
+                return Ok(());
+            }
+            let _: serde_json::Value =
+                client.delete(&format!("/api/vault/folders/{}", folder._id))?;
+            println!("Deleted {}/", folder.name);
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RelatedHuman {
+    _id: String,
+    name: String,
+    email: String,
+}
+
+fn related_humans(client: &Client) -> Result<Vec<RelatedHuman>, Box<dyn Error>> {
+    let resp: serde_json::Value = client.get_json("/api/humans/related")?;
+    Ok(serde_json::from_value(resp["humans"].clone())?)
+}
+
+/// Show or change a folder's sharing. With no mode flags this prints the
+/// current sharing state. `--with` REPLACES the audience list (it doesn't
+/// add to it). Sharing is only allowed inside `projects/` — the server
+/// rejects everything else.
+pub fn share(
+    path: &str,
+    everyone: bool,
+    private: bool,
+    with: &[String],
+) -> Result<(), Box<dyn Error>> {
+    let client = Client::new()?;
+    let folder = match resolve(&client, path)? {
+        Resolved::Root => return Err("The vault root can't be shared".into()),
+        Resolved::File { file } => {
+            return Err(format!("'{}' is a file — sharing works on folders", file.name).into())
+        }
+        Resolved::Folder(f) => f,
+    };
+
+    // ── No flags: show the current state ────────────────────────────────
+    if !everyone && !private && with.is_empty() {
+        match &folder.shared_with {
+            serde_json::Value::String(s) if s == "everyone" => {
+                println!("{}/ is shared with everyone", folder.name);
+            }
+            serde_json::Value::Array(ids) if !ids.is_empty() => {
+                let humans = related_humans(&client).unwrap_or_default();
+                println!("{}/ is shared with:", folder.name);
+                for id in ids {
+                    let id = id.as_str().unwrap_or_default();
+                    match humans.iter().find(|h| h._id == id) {
+                        Some(h) => println!("  {} <{}>", h.name, h.email),
+                        None => println!("  {id}"),
+                    }
+                }
+            }
+            _ => println!("{}/ is private (only you)", folder.name),
+        }
+        return Ok(());
+    }
+
+    // ── Build the new shared_with value ─────────────────────────────────
+    let shared_with: serde_json::Value = if everyone {
+        serde_json::Value::String("everyone".to_string())
+    } else if private {
+        serde_json::json!([])
+    } else {
+        let humans = related_humans(&client)?;
+        let mut ids = Vec::new();
+        let mut matched = Vec::new();
+        let mut unknown = Vec::new();
+        for email in with {
+            let want = email.trim().to_lowercase();
+            match humans
+                .iter()
+                .find(|h| h.email.trim().to_lowercase() == want)
+            {
+                Some(h) => {
+                    ids.push(h._id.clone());
+                    matched.push(format!("{} <{}>", h.name, h.email));
+                }
+                None => unknown.push(email.clone()),
+            }
+        }
+        if !unknown.is_empty() {
+            return Err(format!(
+                "No shareable human found for: {}\n(They need an account and a \
+                 relationship with you — see who's available on your profile page.)",
+                unknown.join(", ")
+            )
+            .into());
+        }
+        println!("Sharing {}/ with:", folder.name);
+        for m in &matched {
+            println!("  {m}");
+        }
+        serde_json::json!(ids)
+    };
+
+    let _: serde_json::Value = client.patch_json(
+        &format!("/api/vault/folders/{}", folder._id),
+        &serde_json::json!({ "shared_with": shared_with }),
+    )?;
+
+    if everyone {
+        println!("{}/ is now shared with everyone", folder.name);
+    } else if private {
+        println!("{}/ is now private", folder.name);
+    } else {
+        println!("  ✓ shared");
+    }
     Ok(())
 }
 

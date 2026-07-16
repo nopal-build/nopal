@@ -154,8 +154,10 @@ export default function FruitsStyles() {
             ["#links", "Links"],
             ["#spacing", "Spacing"],
             ["#editor", "Rich Text Editor"],
-            ["#collections", "Collections & Copy"],
+            ["#copy", "Copy Actions"],
+            ["#collections", "Collections"],
             ["#overlays", "Overlays"],
+            ["#menus", "Menus"],
           ].map(([href, label]) => (
             <a
               key={href}
@@ -556,7 +558,9 @@ export default function FruitsStyles() {
           <div className="flex flex-col gap-6">
             <p className="text-xs font-mono subtle-text">
               All button classes extend the base <Code>.btn</Code> class (
-              <Code>border-radius: 4px; display: inline-flex;</Code>).
+              <Code>border-radius: 8px; display: inline-flex;</Code>) —
+              except <Code>.btn-outline</Code>, which stands alone with a
+              1px border and a tighter <Code>4px</Code> radius.
             </p>
 
             <Row>
@@ -579,10 +583,10 @@ export default function FruitsStyles() {
                 <button className="btn-yellow">Soft Action</button>
               </Tile>
               <Tile>
-                <Label>.btn-outline — border only</Label>
+                <Label>.btn-outline — border + 4px radius, bring your own padding</Label>
                 <button
                   className="btn-outline"
-                  style={{ padding: "8px 16px", borderRadius: "4px" }}
+                  style={{ padding: "8px 16px" }}
                 >
                   Outline
                 </button>
@@ -1306,11 +1310,8 @@ export default function FruitsStyles() {
                           {token}
                         </span>
                         <span
-                          className="shrink-0"
-                          style={{
-                            minWidth: "160px",
-                            color: "var(--purple-light)",
-                          }}
+                          className="shrink-0 purple-light-text"
+                          style={{ minWidth: "160px" }}
                         >
                           {value}
                         </span>
@@ -1365,11 +1366,8 @@ export default function FruitsStyles() {
                           {token}
                         </span>
                         <span
-                          className="shrink-0"
-                          style={{
-                            minWidth: "160px",
-                            color: "var(--purple-light)",
-                          }}
+                          className="shrink-0 purple-light-text"
+                          style={{ minWidth: "160px" }}
                         >
                           {value}
                         </span>
@@ -1425,8 +1423,8 @@ export default function FruitsStyles() {
             <div>
               <Label>Usage in a page (admin-only, client-only)</Label>
               <div
-                className="good-box p-4 text-xs font-mono"
-                style={{ color: "var(--purple-light)", lineHeight: 1.7 }}
+                className="good-box p-4 text-xs font-mono code-block"
+                style={{ lineHeight: 1.7 }}
               >
                 <div>
                   <span className="subtle-text">
@@ -1464,23 +1462,17 @@ export default function FruitsStyles() {
           </div>
         </Section>
 
-        {/* ── 10. Collections & Copy Actions ─────────────────────────────── */}
-        <Section id="collections" title="10 · Collections & Copy Actions">
+        {/* ── 10. Copy Actions ────────────────────────────────── */}
+        <Section id="copy" title="10 · Copy Actions">
           <div className="flex flex-col gap-8">
-            <p className="text-xs font-mono subtle-text">
-              Two components pulled out of <Code>fruits_.profile.tsx</Code>{" "}
-              per the pattern in <Code>#component-guide</Code> above — a
-              search/add list shell and a copy-to-clipboard field. Both live
-              in <Code>components/</Code>.
-            </p>
-
-            {/* CopyField */}
             <div>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 {"<CopyField>"} — read-only value + Copy button
               </div>
               <p className="text-xs subtle-text mb-3">
-                Use for install commands, API keys, share links — anything
+                Pulled out of <Code>fruits_.profile.tsx</Code> per the
+                pattern in <Code>#component-guide</Code> above. Use for
+                install commands, API keys, share links — anything
                 the user needs to copy verbatim. It degrades gracefully:
                 the field is <Code>readOnly</Code> and auto-selects on
                 focus/click, so copying by hand still works if{" "}
@@ -1492,21 +1484,24 @@ export default function FruitsStyles() {
                   ariaLabel="example CLI command"
                 />
               </div>
-              <div
-                className="good-box p-3 mt-3 text-xs font-mono"
-                style={{ color: "var(--purple-light)" }}
-              >
+              <div className="good-box p-3 mt-3 text-xs font-mono code-block">
                 {'<CopyField value={COMMAND} ariaLabel="..." />'}
               </div>
             </div>
+          </div>
+        </Section>
 
-            {/* SearchCollection */}
+        {/* ── 11. Collections ─────────────────────────────────── */}
+        <Section id="collections" title="11 · Collections">
+          <div className="flex flex-col gap-8">
             <div>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 {"<SearchCollection>"} — searchable, scrollable list + footer
                 search field
               </div>
               <p className="text-xs subtle-text mb-3">
+                Pulled out of <Code>fruits_.profile.tsx</Code> per the
+                pattern in <Code>#component-guide</Code> above.{" "}
                 A <Code>good-box</Code> shell for "search/filter a list, and
                 optionally add a new entry" UI: fixed-height scrollable list
                 on top, divider, search field below. It owns layout only —
@@ -1581,7 +1576,8 @@ export default function FruitsStyles() {
         </Section>
 
         {/* ── 11. Overlays & Menus ───────────────────────────────────────── */}
-        <Section id="overlays" title="11 · Overlays & Menus">
+        {/* ── 12. Overlays ───────────────────────────────────── */}
+        <Section id="overlays" title="12 · Overlays">
           <div className="flex flex-col gap-8">
             <div>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
@@ -1623,7 +1619,12 @@ export default function FruitsStyles() {
                 </Modal>
               </div>
             </div>
+          </div>
+        </Section>
 
+        {/* ── 13. Menus ──────────────────────────────────────── */}
+        <Section id="menus" title="13 · Menus">
+          <div className="flex flex-col gap-8">
             <div>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 {"<CircleButton>"} — round icon-only button
@@ -1782,8 +1783,8 @@ export default function FruitsStyles() {
               </div>
 
               <div
-                className="good-box p-3 text-xs font-mono"
-                style={{ color: "var(--purple-light)", lineHeight: 1.7 }}
+                className="good-box p-3 text-xs font-mono code-block"
+                style={{ lineHeight: 1.7 }}
               >
                 <div>{'<MoreMenu'}</div>
                 <div style={{ paddingLeft: "16px" }}>

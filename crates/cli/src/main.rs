@@ -136,6 +136,58 @@ enum VaultCommand {
         #[arg(long)]
         to: String,
     },
+    /// Create a vault folder (creates missing intermediate folders too).
+    Mkdir {
+        /// Vault path to create, e.g. `projects/greenhouse/photos`.
+        path: String,
+    },
+    /// Move a folder into another folder (works across vault roots).
+    Mv {
+        /// Vault path of the folder to move.
+        src: String,
+        /// Vault path of the destination folder.
+        dest: String,
+    },
+    /// Rename a folder.
+    Rename {
+        /// Vault path of the folder to rename.
+        path: String,
+        /// The new folder name (not a path).
+        new_name: String,
+    },
+    /// Replace a vault file's contents in place (same file, new bytes).
+    Replace {
+        /// Local file with the new contents.
+        local: PathBuf,
+        /// Vault path of the file to replace.
+        path: String,
+    },
+    /// Show or change who a folder is shared with (projects/ only).
+    Share {
+        /// Vault path of the folder (no flags → show current sharing).
+        path: String,
+        /// Share with everyone in the app.
+        #[arg(long, conflicts_with_all = ["private", "with"])]
+        everyone: bool,
+        /// Stop sharing — only you can see it.
+        #[arg(long, conflicts_with_all = ["everyone", "with"])]
+        private: bool,
+        /// Share with specific people by email (repeatable). Replaces the
+        /// current list rather than adding to it.
+        #[arg(long = "with", value_name = "EMAIL")]
+        with: Vec<String>,
+    },
+    /// Delete a vault file or folder.
+    Rm {
+        /// Vault path of the file or folder to delete.
+        path: String,
+        /// Skip the confirmation prompt.
+        #[arg(long, short = 'f')]
+        force: bool,
+        /// Required to delete a folder that isn't empty.
+        #[arg(long, short = 'r')]
+        recursive: bool,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -212,6 +264,21 @@ fn main() {
                 VaultCommand::Info { path, json } => vault::info(&path, json),
                 VaultCommand::Open { path } => vault::open(&path),
                 VaultCommand::Upload { files, to } => vault::upload(&files, &to),
+                VaultCommand::Mkdir { path } => vault::mkdir(&path),
+                VaultCommand::Mv { src, dest } => vault::mv(&src, &dest),
+                VaultCommand::Rename { path, new_name } => vault::rename(&path, &new_name),
+                VaultCommand::Replace { local, path } => vault::replace(&local, &path),
+                VaultCommand::Share {
+                    path,
+                    everyone,
+                    private,
+                    with,
+                } => vault::share(&path, everyone, private, &with),
+                VaultCommand::Rm {
+                    path,
+                    force,
+                    recursive,
+                } => vault::rm(&path, force, recursive),
             };
             if let Err(e) = result {
                 eprintln!("{e}");
