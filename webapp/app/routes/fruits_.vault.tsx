@@ -26,6 +26,7 @@ import type {
 } from "../data/vault.types";
 import {
   VAULT_ROOTS,
+  isRootPublishable,
   isRootShareable,
   isVaultRootKey,
 } from "../data/vaultRoots";
@@ -210,7 +211,77 @@ function ListingHeader() {
   );
 }
 
-// ─── Share Modal ──────────────────────────────────────────────────────────────
+/**
+ * Standalone icon button for copying a /public/... link — deliberately
+ * NOT buried in the More Actions menu, since "grab the link" is the most
+ * common thing to do with published content. Shows a checkmark + "Copied"
+ * inline for a moment instead of a window.alert.
+ */
+function CopyLinkButton({ path }: { path: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleClick = async () => {
+    // Built at click time (client-only) rather than render time — `window`
+    // doesn't exist during SSR.
+    const url = `${window.location.origin}${path}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Clipboard API unavailable (older browser, non-HTTPS, etc).
+      window.prompt("Copy this public link:", url);
+      return;
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <button
+      type="button"
+      className="vault-toolbar-btn"
+      onClick={handleClick}
+      title="Copy public link"
+      aria-label="Copy public link"
+      style={{ display: "flex", alignItems: "center", gap: "5px" }}
+    >
+      {copied ? (
+        <>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 12l5 5l10 -10" />
+          </svg>
+          Copied
+        </>
+      ) : (
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+          <path d="M9 15l6 -6" />
+          <path d="M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464" />
+          <path d="M13 18l-.463 .536a5 5 0 0 1 -7.072 -7.072l.534 -.464" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+// ─── Share Modal ───────────────────────────────────────────────────────────────────────────────
 
 function ShareModal({
   folder,
@@ -1182,6 +1253,18 @@ export default function VaultV2Page() {
     }
   };
 
+  const handleTogglePublish = async (nextIsPublic: boolean) => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    const data = await apiJson(`/api/vault/folders/${folder._id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_public: nextIsPublic }),
+    });
+    if (data) invalidateAndRevalidate([folder.parent_folder_id]);
+  };
+
+
+
   const handleDownload = async (file: FileRef) => {
     const res = await fetch(`/api/vault/download/${file._id}`);
     const data = await res.json().catch(() => null);
@@ -1238,6 +1321,25 @@ export default function VaultV2Page() {
     current.kind === "folder" &&
     !currentIsRootContainer &&
     isRootShareable(current.folder.vault_root_key);
+  const canPublishCurrent =
+    current.kind === "folder" &&
+    !currentIsRootContainer &&
+    isRootPublishable(current.folder.vault_root_key);
+  // A folder is publicly reachable either because it was Published itself,
+  // or because an ancestor was — Publish is resolved dynamically (see
+  // resolvePublicRootFolder), not cascaded onto descendants at publish time,
+  // so newly added sub-folders/files stay published with nothing to re-run.
+  const folderOwnPublic =
+    current.kind === "folder" && current.folder.is_public === true;
+  const folderPublicViaAncestor =
+    current.kind === "folder" &&
+    current.ancestry.slice(0, -1).some((f) => f.is_public);
+  const folderEffectivelyPublic = folderOwnPublic || folderPublicViaAncestor;
+  const filePublicViaAncestor =
+    current.kind === "file" && current.ancestry.some((f) => f.is_public);
+  const fileEffectivelyPublic =
+    current.kind === "file" &&
+    (current.file.is_public === true || filePublicViaAncestor);
   // Any folder can be moved anywhere — except root containers and folders
   // that are currently shared (the server also rejects shared descendants).
   const canMoveCurrent =
@@ -1266,6 +1368,22 @@ export default function VaultV2Page() {
     if (canShareCurrent) {
       moreActions.push({ label: "Share", onClick: () => setShareOpen(true) });
     }
+    if (canPublishCurrent) {
+      if (folderOwnPublic) {
+        moreActions.push({
+          label: "Unpublish",
+          onClick: () => handleTogglePublish(false),
+        });
+      } else if (!folderPublicViaAncestor) {
+        // Publicity inherited from an ancestor has no toggle here — unpublish
+        // the ancestor folder to revoke it. The link icon button still
+        // works either way.
+        moreActions.push({
+          label: "Publish",
+          onClick: () => handleTogglePublish(true),
+        });
+      }
+    }
     if (!currentIsRootContainer) {
       moreActions.push({
         label: "Delete",
@@ -1273,17 +1391,19 @@ export default function VaultV2Page() {
         danger: true,
       });
     }
-  } else if (current.kind === "file" && !fileLocked) {
-    moreActions.push({
-      label: "Replace",
-      onClick: () => replaceInputRef.current?.click(),
-      disabled: replacing,
-    });
-    moreActions.push({
-      label: "Delete",
-      onClick: handleDeleteFile,
-      danger: true,
-    });
+  } else if (current.kind === "file") {
+    if (!fileLocked) {
+      moreActions.push({
+        label: "Replace",
+        onClick: () => replaceInputRef.current?.click(),
+        disabled: replacing,
+      });
+      moreActions.push({
+        label: "Delete",
+        onClick: handleDeleteFile,
+        danger: true,
+      });
+    }
   }
 
   const moreActionsTrigger = ({
@@ -1455,6 +1575,19 @@ export default function VaultV2Page() {
               ))}
             </h2>
 
+            {(folderEffectivelyPublic || fileEffectivelyPublic) && (
+              <span
+                className="text-xs font-mono"
+                style={{
+                  color: "var(--purple-light)",
+                  whiteSpace: "nowrap",
+                }}
+                title="Anyone with the link can view this"
+              >
+                Published
+              </span>
+            )}
+
             {/* Actions */}
             {current.kind === "folder" && (
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
@@ -1467,6 +1600,9 @@ export default function VaultV2Page() {
                 <button className="vault-toolbar-btn" onClick={handleNewFolder}>
                   + New folder
                 </button>
+                {folderEffectivelyPublic && (
+                  <CopyLinkButton path={`/public/folder/${current.folder._id}`} />
+                )}
                 <MoreMenu
                   label="More actions"
                   items={moreActions}
@@ -1495,6 +1631,9 @@ export default function VaultV2Page() {
                   >
                     ↓ Download
                   </button>
+                )}
+                {fileEffectivelyPublic && (
+                  <CopyLinkButton path={`/public/file/${current.file._id}`} />
                 )}
                 <MoreMenu
                   label="More actions"

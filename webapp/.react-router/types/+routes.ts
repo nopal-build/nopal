@@ -49,6 +49,11 @@ type Pages = {
   "/tools/grade-differential": {
     params: {};
   };
+  "/public/folder/:folderId": {
+    params: {
+      "folderId": string;
+    };
+  };
   "/tools/building-envelope": {
     params: {};
   };
@@ -66,6 +71,11 @@ type Pages = {
   };
   "/tools/erv-calculator": {
     params: {};
+  };
+  "/public/file/:fileId": {
+    params: {
+      "fileId": string;
+    };
   };
   "/api/humans/related": {
     params: {};
@@ -170,6 +180,16 @@ type Pages = {
   };
   "/api/vault": {
     params: {};
+  };
+  "/api/vault/public-download/:fileId": {
+    params: {
+      "fileId": string;
+    };
+  };
+  "/api/vault/public-view/:fileId": {
+    params: {
+      "fileId": string;
+    };
   };
   "/api/vault/multipart-complete": {
     params: {};
@@ -313,7 +333,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/api/passkeys/login-options" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/tools/building-envelope" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/tools/erv-calculator" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
+    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/api/passkeys/login-options" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/tools/erv-calculator" | "/public/file/:fileId" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
   };
   "routes/api.passkeys.invite-register-options.tsx": {
     id: "routes/api.passkeys.invite-register-options";
@@ -359,6 +379,10 @@ type RouteFiles = {
     id: "routes/tools.grade-differential";
     page: "/tools/grade-differential";
   };
+  "routes/public.folder.$folderId.tsx": {
+    id: "routes/public.folder.$folderId";
+    page: "/public/folder/:folderId";
+  };
   "routes/tools.building-envelope.tsx": {
     id: "routes/tools.building-envelope";
     page: "/tools/building-envelope";
@@ -382,6 +406,10 @@ type RouteFiles = {
   "routes/tools.erv-calculator.tsx": {
     id: "routes/tools.erv-calculator";
     page: "/tools/erv-calculator";
+  };
+  "routes/public.file.$fileId.tsx": {
+    id: "routes/public.file.$fileId";
+    page: "/public/file/:fileId";
   };
   "routes/api.humans.related.tsx": {
     id: "routes/api.humans.related";
@@ -501,7 +529,15 @@ type RouteFiles = {
   };
   "routes/api.vault.tsx": {
     id: "routes/api.vault";
-    page: "/api/vault" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload";
+    page: "/api/vault" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/view/:fileId" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload";
+  };
+  "routes/api.vault.public-download.$fileId.tsx": {
+    id: "routes/api.vault.public-download.$fileId";
+    page: "/api/vault/public-download/:fileId";
+  };
+  "routes/api.vault.public-view.$fileId.tsx": {
+    id: "routes/api.vault.public-view.$fileId";
+    page: "/api/vault/public-view/:fileId";
   };
   "routes/api.vault.multipart-complete.tsx": {
     id: "routes/api.vault.multipart-complete";
@@ -694,12 +730,14 @@ type RouteModules = {
   "routes/api.passkeys.login-verify": typeof import("./app/routes/api.passkeys.login-verify.tsx");
   "routes/tools.frames-volume-calc": typeof import("./app/routes/tools.frames-volume-calc.tsx");
   "routes/tools.grade-differential": typeof import("./app/routes/tools.grade-differential.tsx");
+  "routes/public.folder.$folderId": typeof import("./app/routes/public.folder.$folderId.tsx");
   "routes/tools.building-envelope": typeof import("./app/routes/tools.building-envelope.tsx");
   "routes/api.admin.impersonate": typeof import("./app/routes/api.admin.impersonate.tsx");
   "routes/api.cli-auth.exchange": typeof import("./app/routes/api.cli-auth.exchange.tsx");
   "routes/grandpas-cabin-recipe": typeof import("./app/routes/grandpas-cabin-recipe.tsx");
   "routes/tools.thermal-inertia": typeof import("./app/routes/tools.thermal-inertia.tsx");
   "routes/tools.erv-calculator": typeof import("./app/routes/tools.erv-calculator.tsx");
+  "routes/public.file.$fileId": typeof import("./app/routes/public.file.$fileId.tsx");
   "routes/api.humans.related": typeof import("./app/routes/api.humans.related.tsx");
   "routes/tools.space-layout": typeof import("./app/routes/tools.space-layout.tsx");
   "routes/fruits_.daily-log": typeof import("./app/routes/fruits_.daily-log.tsx");
@@ -730,6 +768,8 @@ type RouteModules = {
   "routes/api.upload.presign": typeof import("./app/routes/api.upload.presign.tsx");
   "routes/magic-link": typeof import("./app/routes/magic-link.tsx");
   "routes/api.vault": typeof import("./app/routes/api.vault.tsx");
+  "routes/api.vault.public-download.$fileId": typeof import("./app/routes/api.vault.public-download.$fileId.tsx");
+  "routes/api.vault.public-view.$fileId": typeof import("./app/routes/api.vault.public-view.$fileId.tsx");
   "routes/api.vault.multipart-complete": typeof import("./app/routes/api.vault.multipart-complete.tsx");
   "routes/api.vault.download.$fileId": typeof import("./app/routes/api.vault.download.$fileId.tsx");
   "routes/api.vault.archive-cleanup": typeof import("./app/routes/api.vault.archive-cleanup.tsx");

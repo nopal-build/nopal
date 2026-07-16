@@ -12,7 +12,7 @@ import {
   moveVaultFolder,
 } from "../data/vault.server";
 import { isFileRefLocked, isVaultRootFolder } from "../data/vault.types";
-import { isRootShareable } from "../data/vaultRoots";
+import { isRootPublishable, isRootShareable } from "../data/vaultRoots";
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -72,6 +72,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
       /** Move the folder under this parent. Never null — the vault root only
        * holds the locked root containers. */
       parent_folder_id?: string;
+      /** Publish/unpublish — this folder and everything inside it become
+       * reachable at a public, unauthenticated URL. */
+      is_public?: boolean;
     };
 
     if (isRoot && body.name !== undefined) {
@@ -133,6 +136,28 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
       const moved = await moveVaultFolder(folder, newParent, descendants);
       return Response.json({ folder: moved });
+    }
+
+    // ── Publish ── handled on its own; not combinable with rename/share/move.
+    if (body.is_public !== undefined) {
+      if (isRoot) {
+        return Response.json(
+          { error: "Vault root folders cannot be published" },
+          { status: 403 },
+        );
+      }
+      const rootKey =
+        folder.vault_root_key ?? (await resolveVaultRootKey(folder._id));
+      if (!isRootPublishable(rootKey)) {
+        return Response.json(
+          { error: "Folders in this part of the vault cannot be published" },
+          { status: 403 },
+        );
+      }
+      const updated = await updateVaultFolder(folderId, {
+        is_public: body.is_public,
+      });
+      return Response.json({ folder: updated });
     }
 
     if (body.shared_with !== undefined) {

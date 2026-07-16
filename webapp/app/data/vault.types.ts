@@ -100,6 +100,10 @@ export type VaultFolder = {
    * Null/absent only on legacy records that predate root folders.
    */
   vault_root_key?: VaultRootKey | null;
+  /** Whether THIS folder (and everything inside it, recursively — resolved
+   * dynamically, not cascaded onto descendants) is published to a public,
+   * unauthenticated URL. See resolvePublicRootFolder in vault.server.ts. */
+  is_public?: boolean;
   created_at: string;
   updated_at: string;
 };

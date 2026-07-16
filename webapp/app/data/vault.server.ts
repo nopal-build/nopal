@@ -258,6 +258,7 @@ export async function updateVaultFolder(
   updates: Partial<{
     name: string;
     shared_with: string[] | "everyone";
+    is_public: boolean;
   }>,
 ): Promise<VaultFolder | undefined> {
   const result = await merge("vault_folders", id, {
@@ -397,6 +398,40 @@ export async function listFilesMetaByFolderIds(
     { humanId, folderIds },
   );
   return (result?.[0] ?? []).map(formatRecord) as unknown as FileRefListing[];
+}
+
+/**
+ * Resolves the nearest "published" folder in `folderId`'s own chain —
+ * itself or an ancestor with `is_public === true`. Returns null when
+ * nothing in the chain is published.
+ *
+ * Deliberately dynamic rather than cascaded onto descendants at publish
+ * time (unlike `shared_with`): a published sync folder keeps publishing
+ * new files/sub-folders added long after the Publish action, with nothing
+ * to re-cascade.
+ */
+export async function resolvePublicRootFolder(
+  folderId: string,
+): Promise<VaultFolder | null> {
+  let currentId: string | null = folderId;
+  for (let depth = 0; currentId && depth < 50; depth++) {
+    const folder: VaultFolder | undefined = await getFolderById(currentId);
+    if (!folder) return null;
+    if (folder.is_public === true) return folder;
+    currentId = folder.parent_folder_id;
+  }
+  return null;
+}
+
+/**
+ * Whether a file is publicly viewable — either it was published
+ * individually (`is_public`, the original single-card feature), or it sits
+ * inside a published folder subtree.
+ */
+export async function isFileEffectivelyPublic(file: FileRef): Promise<boolean> {
+  if (file.is_public === true) return true;
+  if (!file.folder_id) return false;
+  return (await resolvePublicRootFolder(file.folder_id)) !== null;
 }
 
 /**

@@ -24,6 +24,11 @@ export type VaultRootPolicy = {
   /** Whether folders *within* this root subtree may be shared with other
    * humans. The root container itself is never shareable. */
   shareable: boolean;
+  /** Whether folders *within* this root subtree may be published to a
+   * public, unauthenticated URL. The root container itself is never
+   * publishable. Distinct from `shareable` — sharing grants access to
+   * specific Nopal humans; publishing is fully public, no account needed. */
+  publishable: boolean;
   /** Default sort for the root folder's direct children. */
   childSort: "name-asc" | "name-desc";
 };
@@ -32,22 +37,27 @@ export const VAULT_ROOTS: Record<VaultRootKey, VaultRootPolicy> = {
   "daily-logs": {
     label: "Daily Logs",
     shareable: false,
+    // Personal journal entries — not publishable by default.
+    publishable: false,
     // Date-named folders (YYYY-MM-DD): latest → oldest.
     childSort: "name-desc",
   },
   projects: {
     label: "Projects",
     shareable: true,
+    publishable: true,
     childSort: "name-asc",
   },
   personal: {
     label: "Personal",
     shareable: false,
+    publishable: true,
     childSort: "name-asc",
   },
   syncs: {
     label: "Syncs",
     shareable: false,
+    publishable: true,
     childSort: "name-asc",
   },
 };
@@ -62,4 +72,10 @@ export function isVaultRootKey(value: unknown): value is VaultRootKey {
  * are treated as NOT shareable — fail closed. */
 export function isRootShareable(key: string | null | undefined): boolean {
   return isVaultRootKey(key) ? VAULT_ROOTS[key].shareable : false;
+}
+
+/** Whether content under the given root may be published publicly. Unknown/
+ * missing keys are treated as NOT publishable — fail closed. */
+export function isRootPublishable(key: string | null | undefined): boolean {
+  return isVaultRootKey(key) ? VAULT_ROOTS[key].publishable : false;
 }
