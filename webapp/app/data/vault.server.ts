@@ -6,15 +6,23 @@ import { deleteFromS3 } from "./file.server";
 export type {
   MdVersion,
   FileRef,
+  FileRefListing,
   FileShareType,
   VaultFolder,
 } from "./vault.types";
 import type {
   MdVersion,
   FileRef,
+  FileRefListing,
   FileShareType,
   VaultFolder,
 } from "./vault.types";
+import {
+  VAULT_ROOT_KEYS,
+  VAULT_ROOTS,
+  isVaultRootKey,
+  type VaultRootKey,
+} from "./vaultRoots";
 
 // ─── FileRef CRUD ─────────────────────────────────────────────────────────────
 
@@ -160,18 +168,51 @@ export async function createVaultFolder(data: {
   name: string;
   parent_folder_id?: string | null;
   shared_with?: string[] | "everyone";
+  vault_root_key?: VaultRootKey | null;
 }): Promise<VaultFolder | undefined> {
   const now = new Date().toISOString();
+
+  // Inherit the root key from the parent folder when not given explicitly,
+  // so every folder carries its Vault Root subtree key (see vaultRoots.ts).
+  let rootKey = data.vault_root_key ?? null;
+  if (!rootKey && data.parent_folder_id) {
+    rootKey = await resolveVaultRootKey(data.parent_folder_id);
+  }
+
   const result = await upsert("vault_folders", {
     human_id: data.human_id,
     name: data.name,
     parent_folder_id: data.parent_folder_id ?? null,
     shared_with: data.shared_with ?? [],
+    vault_root_key: rootKey,
     created_at: now,
     updated_at: now,
   });
   const record = Array.isArray(result) ? result[0] : result;
   return record ? formatRecord(record as unknown as VaultFolder) : undefined;
+}
+
+/**
+ * Resolves which Vault Root subtree a folder belongs to.
+ * Reads the denormalized `vault_root_key` when present; walks the parent
+ * chain as a fallback for legacy records that predate root keys.
+ */
+export async function resolveVaultRootKey(
+  folderId: string,
+): Promise<VaultRootKey | null> {
+  let currentId: string | null = folderId;
+  // Bounded walk — protects against accidental parent cycles.
+  for (let depth = 0; currentId && depth < 50; depth++) {
+    const folder: VaultFolder | undefined = await getFolderById(currentId);
+    if (!folder) return null;
+    if (isVaultRootKey(folder.vault_root_key)) return folder.vault_root_key;
+    if (!folder.parent_folder_id && isVaultRootKey(folder.name)) {
+      // Legacy root container created by name before root keys existed.
+      return folder.name;
+    }
+    currentId = folder.parent_folder_id;
+  }
+  return null;
 }
 
 export async function getFoldersByHuman(
@@ -324,9 +365,132 @@ export async function getOrCreateVaultFolder(
     human_id: humanId,
     name,
     parent_folder_id: parentFolderId,
+    // Root-level folders created through this path are the system containers
+    // themselves (e.g. "daily-logs" from the daily-log write path).
+    vault_root_key:
+      parentFolderId === null && isVaultRootKey(name) ? name : undefined,
   });
   if (!created) throw new Error(`Failed to create vault folder: ${name}`);
   return created;
+}
+
+/**
+ * Ensures the human has every Vault Root container (daily-logs, projects,
+ * personal, …), tagging pre-existing name-matched root folders with their
+ * `vault_root_key` when the tag is missing. Returns the containers ordered
+ * as declared in VAULT_ROOTS.
+ */
+export async function ensureVaultRootFolders(
+  humanId: string,
+): Promise<VaultFolder[]> {
+  const roots: VaultFolder[] = [];
+  for (const key of VAULT_ROOT_KEYS) {
+    const result = await query<[VaultFolder[]]>(
+      `SELECT * FROM vault_folders
+       WHERE human_id = $humanId
+         AND parent_folder_id = null
+         AND name = $name
+       LIMIT 1`,
+      { humanId, name: key },
+    );
+    const existing = result?.[0]?.[0] ? formatRecord(result[0][0]) : null;
+
+    if (existing) {
+      if (existing.vault_root_key !== key) {
+        const updated = await merge("vault_folders", existing._id, {
+          vault_root_key: key,
+          updated_at: new Date().toISOString(),
+        });
+        roots.push(
+          updated
+            ? formatRecord(updated as unknown as VaultFolder)
+            : { ...existing, vault_root_key: key },
+        );
+      } else {
+        roots.push(existing);
+      }
+      continue;
+    }
+
+    const created = await createVaultFolder({
+      human_id: humanId,
+      name: key,
+      parent_folder_id: null,
+      vault_root_key: key,
+    });
+    if (!created) throw new Error(`Failed to create vault root folder: ${key}`);
+    roots.push(created);
+  }
+  return roots;
+}
+
+/**
+ * Ancestor chain for a folder, ordered root container → … → the folder
+ * itself. Used for breadcrumbs and revealing the tree path on deep links.
+ */
+export async function getFolderAncestry(
+  folderId: string,
+): Promise<VaultFolder[]> {
+  const chain: VaultFolder[] = [];
+  let currentId: string | null = folderId;
+  for (let depth = 0; currentId && depth < 50; depth++) {
+    const folder: VaultFolder | undefined = await getFolderById(currentId);
+    if (!folder) break;
+    chain.unshift(folder);
+    currentId = folder.parent_folder_id;
+  }
+  return chain;
+}
+
+/**
+ * Direct children (sub-folders + file metadata) of one folder — the unit of
+ * lazy tree/folder-view loading in vault v2. Never returns file content.
+ *
+ * Sub-folder sort follows the root policy (e.g. daily-logs date folders are
+ * listed latest → oldest); files are always name ASC.
+ */
+export async function listFolderChildren(
+  humanId: string,
+  folderId: string | null,
+): Promise<{ folders: VaultFolder[]; files: FileRefListing[] }> {
+  const [foldersResult, filesResult] = await Promise.all([
+    query<[VaultFolder[]]>(
+      `SELECT * FROM vault_folders
+       WHERE human_id = $humanId AND parent_folder_id = $folderId
+       ORDER BY name ASC`,
+      { humanId, folderId },
+    ),
+    folderId
+      ? query<[FileRef[]]>(
+          `SELECT id, human_id, name, content_type, folder_id, size, source,
+                  date, created_at, updated_at, archived_at,
+                  (s3_key != NONE AND s3_key != null) AS has_s3
+           FROM file_refs
+           WHERE human_id = $humanId AND folder_id = $folderId
+           ORDER BY name ASC`,
+          { humanId, folderId },
+        )
+      : Promise.resolve([[]] as [FileRef[]]),
+  ]);
+
+  let folders = (foldersResult?.[0] ?? []).map(formatRecord);
+  const files = (filesResult?.[0] ?? []).map(formatRecord) as unknown as
+    FileRefListing[];
+
+  // Root-policy child sort (only applies to a root container's own children).
+  if (folderId) {
+    const parent = await getFolderById(folderId);
+    if (
+      parent &&
+      parent.parent_folder_id === null &&
+      isVaultRootKey(parent.vault_root_key) &&
+      VAULT_ROOTS[parent.vault_root_key].childSort === "name-desc"
+    ) {
+      folders = folders.reverse();
+    }
+  }
+
+  return { folders, files };
 }
 
 export async function deleteVaultFolderCascade(

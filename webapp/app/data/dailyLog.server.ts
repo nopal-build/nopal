@@ -4,6 +4,7 @@ import {
   upsertDailyLogReadme,
   updateFileRef,
   getOrCreateVaultFolder,
+  ensureVaultRootFolders,
 } from "./vault.server";
 import type { FileRef } from "./vault.types";
 
@@ -249,6 +250,8 @@ Happy logging! ✨
  */
 export async function provisionNewUserVault(humanId: string): Promise<void> {
   try {
+    // Locked Vault Root Folders (daily-logs, projects, personal, …)
+    await ensureVaultRootFolders(humanId);
     // "Yesterday" in local wall-clock time — one day before account creation.
     // Deliberately avoids UTC methods: the seed runs on the host machine and
     // toISOString() always outputs UTC, so late-evening runs in US timezones

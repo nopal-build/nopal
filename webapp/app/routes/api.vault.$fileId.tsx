@@ -6,9 +6,11 @@ import {
   deleteFileRef,
   computeMdUpdate,
   getFolderById,
+  resolveVaultRootKey,
 } from "../data/vault.server";
 import { cacheDailyLog, deleteDailyLogCache } from "../data/dailyLog.server";
 import { isFileRefLocked } from "../data/vault.types";
+import { isRootShareable } from "../data/vaultRoots";
 
 export async function loader({ params }: LoaderFunctionArgs) {
   const { fileId } = params;
@@ -114,6 +116,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
       shared_type?: "view" | "workable" | "editable";
       archived_at?: string | null;
     };
+
+    // Making a file public (or granting shared write access) follows the same
+    // per-root policy as folder sharing — e.g. daily-logs/personal files can
+    // never be shared, even directly.
+    if (body.is_public === true || body.shared_type !== undefined) {
+      const rootKey = file.folder_id
+        ? await resolveVaultRootKey(file.folder_id)
+        : null;
+      if (!isRootShareable(rootKey)) {
+        return Response.json(
+          { error: "Files in this part of the vault cannot be shared" },
+          { status: 403 },
+        );
+      }
+    }
 
     const updates: Parameters<typeof updateFileRef>[1] = {};
 

@@ -5,6 +5,8 @@
  * route loaders (server) and React components (client).
  */
 
+import type { VaultRootKey } from "./vaultRoots";
+
 export type FileShareType = "view" | "workable" | "editable";
 
 export type MdVersion = {
@@ -61,6 +63,25 @@ export function isFileRefLocked(file: FileRef): boolean {
   return diffDays > 2;
 }
 
+/** Listing-only view of a FileRef — no markdown content or version history,
+ * so folder/tree listings stay light. `has_s3` says whether bytes exist in S3
+ * (i.e. the file is viewable/downloadable). */
+export type FileRefListing = Pick<
+  FileRef,
+  | "id"
+  | "_id"
+  | "human_id"
+  | "name"
+  | "content_type"
+  | "folder_id"
+  | "size"
+  | "source"
+  | "date"
+  | "created_at"
+  | "updated_at"
+  | "archived_at"
+> & { has_s3: boolean };
+
 export type VaultFolder = {
   id: { tb: string; id: string };
   _id: string;
@@ -68,6 +89,19 @@ export type VaultFolder = {
   name: string;
   parent_folder_id: string | null;
   shared_with: string[] | "everyone";
+  /**
+   * Which Vault Root Folder subtree this folder belongs to (see vaultRoots.ts).
+   * Set on the root containers themselves AND denormalized onto every
+   * descendant folder so policy checks never walk the parent chain.
+   * Null/absent only on legacy records that predate root folders.
+   */
+  vault_root_key?: VaultRootKey | null;
   created_at: string;
   updated_at: string;
 };
+
+/** A folder is a locked Vault Root container when it sits at the true root
+ * with a root key. These cannot be renamed, deleted, or shared. */
+export function isVaultRootFolder(folder: VaultFolder): boolean {
+  return folder.parent_folder_id === null && !!folder.vault_root_key;
+}

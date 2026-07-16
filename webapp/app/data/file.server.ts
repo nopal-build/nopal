@@ -66,6 +66,46 @@ function createS3Client(): S3Client {
 }
 
 /**
+ * S3 client for generating *presigned URLs the browser will fetch*.
+ *
+ * The Host header is part of the SigV4 signature, so presigned URLs must be
+ * signed against the endpoint the BROWSER reaches — not the server-side
+ * endpoint. Locally these differ: the app talks to MinIO at
+ * `http://minio:9000` (Docker service name) while the browser can only reach
+ * `localhost:9000`. Rewriting the hostname after signing would invalidate
+ * the signature, so we sign with the public endpoint from the start.
+ *
+ * In production (Tigris) `S3_PUBLIC_HOSTNAME` matches the endpoint host, so
+ * this is equivalent to `createS3Client`. Falls back to the server endpoint
+ * when `S3_PUBLIC_HOSTNAME` is unset.
+ *
+ * Only use this for presigning; actual server-side operations
+ * (`client.send(...)`) must keep using `createS3Client`.
+ */
+function createPresignS3Client(): S3Client {
+  const hostname = process.env.S3_PUBLIC_HOSTNAME;
+  if (!hostname) return createS3Client();
+
+  const protocol =
+    hostname.startsWith("localhost") || hostname.startsWith("127.")
+      ? "http"
+      : "https";
+
+  return new S3Client({
+    endpoint: `${protocol}://${hostname}`,
+    region: AWS_REGION,
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+    },
+    // Same checksum reasoning as createS3Client above.
+    requestChecksumCalculation: "when_required",
+    responseChecksumValidation: "when_required",
+  } as unknown as S3ClientConfig);
+}
+
+/**
  * Generate a short-lived presigned PUT URL so the browser can upload a file
  * directly to S3 without routing the bytes through the server.
  *
@@ -79,7 +119,7 @@ export async function getPresignedUploadUrl(
   contentType: string,
   expiresIn = 300,
 ): Promise<{ presignedUrl: string; publicUrl: string }> {
-  const client = createS3Client();
+  const client = createPresignS3Client();
 
   // No ACL — private by default. This URL is only ever meant to be used
   // as-is by the uploading user; everyone else (including the uploader,
@@ -115,7 +155,7 @@ export async function getPresignedDownloadUrl(
   filename: string,
   expiresIn = 300,
 ): Promise<string> {
-  const client = createS3Client();
+  const client = createPresignS3Client();
   const cmd = new GetObjectCommand({
     Bucket: process.env.BUCKET_NAME,
     Key: s3Key,
@@ -139,7 +179,7 @@ export async function getPresignedViewUrl(
   s3Key: string,
   expiresIn = 900,
 ): Promise<string> {
-  const client = createS3Client();
+  const client = createPresignS3Client();
   const cmd = new GetObjectCommand({
     Bucket: process.env.BUCKET_NAME,
     Key: s3Key,

@@ -5,7 +5,10 @@ import {
   updateVaultFolder,
   cascadeShareVaultFolder,
   deleteVaultFolderCascade,
+  resolveVaultRootKey,
 } from "../data/vault.server";
+import { isVaultRootFolder } from "../data/vault.types";
+import { isRootShareable } from "../data/vaultRoots";
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -26,7 +29,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  const isRoot = isVaultRootFolder(folder);
+
   if (request.method === "DELETE") {
+    if (isRoot) {
+      return Response.json(
+        { error: "Vault root folders cannot be deleted" },
+        { status: 403 },
+      );
+    }
     await deleteVaultFolderCascade(folderId);
     return Response.json({ success: true });
   }
@@ -36,6 +47,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
       name?: string;
       shared_with?: string[] | "everyone";
     };
+
+    if (isRoot && body.name !== undefined) {
+      return Response.json(
+        { error: "Vault root folders cannot be renamed" },
+        { status: 403 },
+      );
+    }
+
+    if (body.shared_with !== undefined) {
+      // Sharing is a per-root policy (see vaultRoots.ts). The root container
+      // itself is never shareable; nested folders only when the policy allows.
+      const rootKey = isRoot
+        ? null
+        : (folder.vault_root_key ?? (await resolveVaultRootKey(folder._id)));
+      if (!isRootShareable(rootKey)) {
+        return Response.json(
+          { error: "Folders in this part of the vault cannot be shared" },
+          { status: 403 },
+        );
+      }
+    }
 
     let updated;
 
