@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 mod auth;
+mod update;
 mod video;
 
 const DEFAULT_HOST: &str = "https://nopal.build";
@@ -33,6 +34,13 @@ enum Command {
     Video {
         #[command(subcommand)]
         command: VideoCommand,
+    },
+    /// Check for and install a newer version of the nopal CLI.
+    #[command(alias = "upgrade")]
+    Update {
+        /// Only check whether a newer version is available; don't install it.
+        #[arg(long)]
+        check: bool,
     },
 }
 
@@ -121,6 +129,12 @@ fn main() {
                 }
             }
         },
+        Command::Update { check } => {
+            if let Err(e) = update::update(check) {
+                eprintln!("update failed: {e}");
+                std::process::exit(1);
+            }
+        }
     }
 }
 
