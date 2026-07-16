@@ -191,6 +191,35 @@ fn ensure_macos() -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// The PATH to run the worker with: whatever this process inherited (i.e.
+/// the shell PATH at the moment `enable` was run) unioned with the standard
+/// locations launchd's own minimal PATH omits — Homebrew's bin dirs on both
+/// Apple Silicon and Intel, plus the usual system paths. launchd agents
+/// never source .zshrc/.bash_profile, so without this ffmpeg (and anything
+/// else installed via Homebrew) is invisible to the watcher even though
+/// it's on PATH in every terminal.
+fn launchd_path_env() -> String {
+    let inherited = std::env::var("PATH").unwrap_or_default();
+    let mut dirs: Vec<String> = inherited.split(':').map(|s| s.to_string()).collect();
+
+    for extra in [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ] {
+        if !dirs.iter().any(|d| d == extra) {
+            dirs.push(extra.to_string());
+        }
+    }
+    dirs.retain(|d| !d.is_empty());
+    dirs.join(":")
+}
+
 fn launchctl(args: &[&str]) -> Result<bool, Box<dyn Error>> {
     let status = Command::new("launchctl")
         .args(args)
@@ -237,6 +266,7 @@ pub fn enable() -> Result<(), Box<dyn Error>> {
     if let Some(parent) = log.parent() {
         fs::create_dir_all(parent)?;
     }
+    let path_env = launchd_path_env();
     let plist = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -251,6 +281,11 @@ pub fn enable() -> Result<(), Box<dyn Error>> {
     <string>run</string>
     <string>--watch</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>{path_env}</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>

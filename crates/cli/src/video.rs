@@ -20,7 +20,7 @@ pub struct PrepOptions {
 }
 
 pub fn prep(input: &Path, opts: PrepOptions) -> Result<(), Box<dyn Error>> {
-    ensure_ffmpeg_available()?;
+    let ffmpeg = resolve_ffmpeg()?;
 
     if !input.is_file() {
         return Err(format!("No such file: {}", input.display()).into());
@@ -54,7 +54,7 @@ pub fn prep(input: &Path, opts: PrepOptions) -> Result<(), Box<dyn Error>> {
         output_path.display()
     );
 
-    let mut cmd = Command::new("ffmpeg");
+    let mut cmd = Command::new(&ffmpeg);
     cmd.arg(if opts.overwrite { "-y" } else { "-n" })
         .arg("-i")
         .arg(input)
@@ -93,23 +93,39 @@ pub fn prep(input: &Path, opts: PrepOptions) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn ensure_ffmpeg_available() -> Result<(), Box<dyn Error>> {
-    let found = Command::new("ffmpeg")
+/// Finds ffmpeg: PATH first, then common install locations that a
+/// non-login process (e.g. a launchd agent, whose PATH is minimal and never
+/// sources .zshrc/.bash_profile) might not have on PATH — notably
+/// Homebrew's bin dirs on both Apple Silicon and Intel.
+fn resolve_ffmpeg() -> Result<String, Box<dyn Error>> {
+    if command_works("ffmpeg") {
+        return Ok("ffmpeg".to_string());
+    }
+    for candidate in [
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+    ] {
+        if command_works(candidate) {
+            return Ok(candidate.to_string());
+        }
+    }
+    Err(
+        "ffmpeg not found. Install it first (e.g. `brew install ffmpeg` on macOS), \
+         then run 'nopal sync watch enable' again so the background worker \
+         picks up your PATH."
+            .into(),
+    )
+}
+
+fn command_works(program: &str) -> bool {
+    Command::new(program)
         .arg("-version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
-        .unwrap_or(false);
-
-    if found {
-        Ok(())
-    } else {
-        Err(
-            "ffmpeg not found on PATH. Install it first (e.g. `brew install ffmpeg` on macOS)."
-                .into(),
-        )
-    }
+        .unwrap_or(false)
 }
 
 fn default_output_path(input: &Path) -> PathBuf {
