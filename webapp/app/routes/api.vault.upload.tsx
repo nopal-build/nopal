@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { uploadFileToS3 } from "../data/file.server";
@@ -38,12 +39,20 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const url = await uploadFileToS3(file, s3Key);
 
+    // The multipart form is already buffered in memory, so hashing here
+    // costs one pass over bytes we already hold. Basis for sync diffing.
+    const contentHash = crypto
+      .createHash("sha256")
+      .update(Buffer.from(await file.arrayBuffer()))
+      .digest("hex");
+
     const fileRef = await createFileRef({
       human_id: user._id,
       name: file.name,
       s3_url: url,
       s3_key: s3Key,
       content_type: file.type || "application/octet-stream",
+      content_hash: contentHash,
       size: file.size,
       folder_id: folderId,
     });

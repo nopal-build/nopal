@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { uploadFileToS3, deleteFromS3 } from "../data/file.server";
@@ -24,6 +25,10 @@ import { cacheDailyLog } from "../data/dailyLog.server";
  *
  * Owner-only. Locked daily-log files cannot be replaced.
  */
+function sha256(buf: Buffer): string {
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
   if (!user) {
@@ -72,6 +77,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const updated = await merge("file_refs", fileId, {
         content,
         md_versions,
+        content_hash: sha256(Buffer.from(content, "utf8")),
         size: file.size,
         updated_at: now,
       });
@@ -91,6 +97,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       s3_url: url,
       s3_key: s3Key,
       content_type: file.type || existing.content_type,
+      content_hash: sha256(Buffer.from(await file.arrayBuffer())),
       size: file.size,
       updated_at: now,
     });

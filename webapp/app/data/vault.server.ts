@@ -34,6 +34,7 @@ export async function createFileRef(data: {
   s3_key?: string | null;
   content?: string | null;
   content_type: string;
+  content_hash?: string | null;
   folder_id?: string | null;
   size?: number | null;
   source?: "daily_log";
@@ -49,6 +50,7 @@ export async function createFileRef(data: {
     content: data.content ?? null,
     md_versions: [],
     content_type: data.content_type,
+    content_hash: data.content_hash ?? null,
     folder_id: data.folder_id ?? null,
     size: data.size ?? null,
     ...(data.source ? { source: data.source } : {}),
@@ -115,6 +117,7 @@ export async function updateFileRef(
     name: string;
     folder_id: string | null;
     content: string;
+    content_hash: string | null;
     md_versions: MdVersion[];
     shared_type: FileShareType;
     is_public: boolean;
@@ -375,6 +378,27 @@ export async function getOrCreateVaultFolder(
   return created;
 }
 
+/**
+ * File metadata (no content) for every file in the given folders — the
+ * manifest half of sync. One query regardless of tree size.
+ */
+export async function listFilesMetaByFolderIds(
+  humanId: string,
+  folderIds: string[],
+): Promise<FileRefListing[]> {
+  if (!folderIds.length) return [];
+  const result = await query<[FileRef[]]>(
+    `SELECT id, human_id, name, content_type, content_hash, folder_id,
+            size, source, date, created_at, updated_at, archived_at,
+            (s3_key != NONE AND s3_key != null) AS has_s3
+     FROM file_refs
+     WHERE human_id = $humanId AND folder_id IN $folderIds
+     ORDER BY name ASC`,
+    { humanId, folderIds },
+  );
+  return (result?.[0] ?? []).map(formatRecord) as unknown as FileRefListing[];
+}
+
 /** Every descendant folder record (BFS) of the given folder. */
 export async function getDescendantFolders(
   folderId: string,
@@ -518,8 +542,8 @@ export async function listFolderChildren(
     ),
     folderId
       ? query<[FileRef[]]>(
-          `SELECT id, human_id, name, content_type, folder_id, size, source,
-                  date, created_at, updated_at, archived_at,
+          `SELECT id, human_id, name, content_type, content_hash, folder_id,
+                  size, source, date, created_at, updated_at, archived_at,
                   (s3_key != NONE AND s3_key != null) AS has_s3
            FROM file_refs
            WHERE human_id = $humanId AND folder_id = $folderId

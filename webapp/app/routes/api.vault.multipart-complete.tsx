@@ -23,9 +23,13 @@ export async function action({ request }: ActionFunctionArgs) {
     folderId?: string | null;
     contentType?: string;
     size?: number;
+    /** Client-computed sha256 hex — the server never held the whole file,
+     * so this is the only place the hash can come from. */
+    contentHash?: string;
   };
 
-  const { uploadId, key, parts, name, folderId, contentType, size } = body;
+  const { uploadId, key, parts, name, folderId, contentType, size, contentHash } =
+    body;
 
   if (!uploadId || !key || !parts?.length || !name || !contentType) {
     return Response.json(
@@ -51,6 +55,8 @@ export async function action({ request }: ActionFunctionArgs) {
       s3_url: url,
       s3_key: key,
       content_type: contentType,
+      content_hash:
+        contentHash && /^[0-9a-f]{64}$/.test(contentHash) ? contentHash : null,
       size: size ?? null,
       folder_id: folderId ?? null,
     });

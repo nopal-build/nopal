@@ -41,9 +41,9 @@ import {
 } from "../data/vault.server";
 import { getRelatedHumans } from "../data/relationships.server";
 import { AppLayout } from "../components/AppLayout";
+import { MoreMenu, type MoreMenuItem } from "../components/MoreMenu";
 import MdxEditorView from "../components/MdxEditorView";
 import "../styles/vault.css";
-import "../styles/vault-v2.css";
 import "../styles/mdxeditor.css";
 
 // ─── Upload constants (ported from vault v1 — the flow that “worked well”) ───
@@ -1251,6 +1251,63 @@ export default function VaultV2Page() {
   // Past daily-log files are read-only — no Replace/Delete (server enforces too).
   const fileLocked = current.kind === "file" && isFileRefLocked(current.file);
 
+  // "More Actions" dropdown — management actions, gated by the same
+  // policies that previously hid the standalone buttons. Unavailable actions
+  // are omitted; when nothing is available the trigger renders disabled.
+  // Upload / New folder / Download stay as standalone toolbar buttons.
+  const moreActions: MoreMenuItem[] = [];
+  if (current.kind === "folder") {
+    if (!currentIsRootContainer) {
+      moreActions.push({ label: "Rename", onClick: handleRenameFolder });
+    }
+    if (canMoveCurrent) {
+      moreActions.push({ label: "Move", onClick: () => setMoveOpen(true) });
+    }
+    if (canShareCurrent) {
+      moreActions.push({ label: "Share", onClick: () => setShareOpen(true) });
+    }
+    if (!currentIsRootContainer) {
+      moreActions.push({
+        label: "Delete",
+        onClick: handleDeleteFolder,
+        danger: true,
+      });
+    }
+  } else if (current.kind === "file" && !fileLocked) {
+    moreActions.push({
+      label: "Replace",
+      onClick: () => replaceInputRef.current?.click(),
+      disabled: replacing,
+    });
+    moreActions.push({
+      label: "Delete",
+      onClick: handleDeleteFile,
+      danger: true,
+    });
+  }
+
+  const moreActionsTrigger = ({
+    toggle,
+    open,
+    label,
+  }: {
+    toggle: () => void;
+    open: boolean;
+    label: string;
+  }) => (
+    <button
+      type="button"
+      className="vault-toolbar-btn"
+      disabled={moreActions.length === 0 || replacing}
+      aria-label={label}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      onClick={toggle}
+    >
+      {replacing ? "Replacing…" : "More Actions ▾"}
+    </button>
+  );
+
   // Parent for the ".." row — second-to-last ancestor, or the vault root view.
   const parentFolder =
     current.kind === "folder"
@@ -1410,38 +1467,11 @@ export default function VaultV2Page() {
                 <button className="vault-toolbar-btn" onClick={handleNewFolder}>
                   + New folder
                 </button>
-                {!currentIsRootContainer && (
-                  <button
-                    className="vault-toolbar-btn"
-                    onClick={handleRenameFolder}
-                  >
-                    Rename
-                  </button>
-                )}
-                {canMoveCurrent && (
-                  <button
-                    className="vault-toolbar-btn"
-                    onClick={() => setMoveOpen(true)}
-                  >
-                    Move
-                  </button>
-                )}
-                {canShareCurrent && (
-                  <button
-                    className="vault-toolbar-btn"
-                    onClick={() => setShareOpen(true)}
-                  >
-                    Share
-                  </button>
-                )}
-                {!currentIsRootContainer && (
-                  <button
-                    className="vault-toolbar-btn vault-toolbar-btn--danger"
-                    onClick={handleDeleteFolder}
-                  >
-                    Delete
-                  </button>
-                )}
+                <MoreMenu
+                  label="More actions"
+                  items={moreActions}
+                  trigger={moreActionsTrigger}
+                />
                 <input
                   ref={uploadInputRef}
                   type="file"
@@ -1466,23 +1496,11 @@ export default function VaultV2Page() {
                     ↓ Download
                   </button>
                 )}
-                {!fileLocked && (
-                  <button
-                    className="vault-toolbar-btn"
-                    onClick={() => replaceInputRef.current?.click()}
-                    disabled={replacing}
-                  >
-                    {replacing ? "Replacing…" : "⇄ Replace"}
-                  </button>
-                )}
-                {!fileLocked && (
-                  <button
-                    className="vault-toolbar-btn vault-toolbar-btn--danger"
-                    onClick={handleDeleteFile}
-                  >
-                    Delete
-                  </button>
-                )}
+                <MoreMenu
+                  label="More actions"
+                  items={moreActions}
+                  trigger={moreActionsTrigger}
+                />
                 <input
                   ref={replaceInputRef}
                   type="file"

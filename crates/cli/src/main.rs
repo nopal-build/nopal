@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 mod auth;
+mod sync;
 mod update;
 mod vault;
 mod video;
@@ -40,6 +41,11 @@ enum Command {
     Vault {
         #[command(subcommand)]
         command: VaultCommand,
+    },
+    /// Mirror local directories into the vault's syncs/ folder (push-only).
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommand,
     },
     /// Check for and install a newer version of the nopal CLI.
     #[command(alias = "upgrade")]
@@ -190,6 +196,38 @@ enum VaultCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum SyncCommand {
+    /// Register a local directory as a sync target and push it.
+    Add {
+        /// The local directory to sync.
+        dir: PathBuf,
+        /// Name for the target (defaults to the directory name). Also the
+        /// folder name under syncs/ in the vault.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// List sync targets (all devices).
+    Ls {},
+    /// Unregister a sync target.
+    Rm {
+        /// The target's name (see 'nopal sync ls').
+        name: String,
+        /// Keep the synced folder in the vault (only stop syncing).
+        #[arg(long)]
+        keep_remote: bool,
+        /// Skip the confirmation prompt.
+        #[arg(long, short = 'f')]
+        force: bool,
+    },
+    /// Push local changes to the vault — one target by name, or every
+    /// target registered on this device.
+    Run {
+        /// Target name (omit to run all of this device's targets).
+        name: Option<String>,
+    },
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "nopal")]
 #[command(version)]
@@ -279,6 +317,22 @@ fn main() {
                     force,
                     recursive,
                 } => vault::rm(&path, force, recursive),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Sync { command } => {
+            let result = match command {
+                SyncCommand::Add { dir, name } => sync::add(&dir, name),
+                SyncCommand::Ls {} => sync::ls(),
+                SyncCommand::Rm {
+                    name,
+                    keep_remote,
+                    force,
+                } => sync::rm(&name, keep_remote, force),
+                SyncCommand::Run { name } => sync::run(name),
             };
             if let Err(e) = result {
                 eprintln!("{e}");

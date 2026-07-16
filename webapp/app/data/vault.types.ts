@@ -23,6 +23,9 @@ export type FileRef = {
   s3_key: string | null;
   content: string | null;
   md_versions: MdVersion[];
+  /** sha256 hex of the file's bytes — set on upload/replace; the basis for
+   * sync change detection. Null on records that predate hashing. */
+  content_hash?: string | null;
   content_type: string;
   folder_id: string | null;
   size: number | null;
@@ -73,6 +76,7 @@ export type FileRefListing = Pick<
   | "human_id"
   | "name"
   | "content_type"
+  | "content_hash"
   | "folder_id"
   | "size"
   | "source"

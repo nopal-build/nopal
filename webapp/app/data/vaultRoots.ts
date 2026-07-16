@@ -16,7 +16,7 @@
  * This file has NO server-only imports — safe on both client and server.
  */
 
-export type VaultRootKey = "daily-logs" | "projects" | "personal";
+export type VaultRootKey = "daily-logs" | "projects" | "personal" | "syncs";
 
 export type VaultRootPolicy = {
   /** Display name in the UI. */
@@ -42,6 +42,11 @@ export const VAULT_ROOTS: Record<VaultRootKey, VaultRootPolicy> = {
   },
   personal: {
     label: "Personal",
+    shareable: false,
+    childSort: "name-asc",
+  },
+  syncs: {
+    label: "Syncs",
     shareable: false,
     childSort: "name-asc",
   },

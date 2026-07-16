@@ -46,9 +46,9 @@ pub struct FileListing {
 }
 
 #[derive(Debug, Deserialize)]
-struct Children {
-    folders: Vec<Folder>,
-    files: Vec<FileListing>,
+pub(crate) struct Children {
+    pub(crate) folders: Vec<Folder>,
+    pub(crate) files: Vec<FileListing>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,14 +79,14 @@ enum Resolved {
 
 // ─── HTTP client ──────────────────────────────────────────────────────────────
 
-struct Client {
+pub(crate) struct Client {
     http: reqwest::blocking::Client,
-    host: String,
+    pub(crate) host: String,
     token: String,
 }
 
 impl Client {
-    fn new() -> Result<Self, Box<dyn Error>> {
+    pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
         // NOPAL_HOST/NOPAL_TOKEN override the stored login — useful for
         // scripts, CI, and pointing at a local dev server.
         if let (Ok(host), Ok(token)) = (std::env::var("NOPAL_HOST"), std::env::var("NOPAL_TOKEN")) {
@@ -109,7 +109,10 @@ impl Client {
     }
 
     /// GET returning JSON, with a friendly error for non-2xx responses.
-    fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, Box<dyn Error>> {
+    pub(crate) fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<T, Box<dyn Error>> {
         let resp = self
             .http
             .get(self.url(path))
@@ -118,7 +121,7 @@ impl Client {
         Self::parse(resp)
     }
 
-    fn post_json<T: serde::de::DeserializeOwned>(
+    pub(crate) fn post_json<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         body: &serde_json::Value,
@@ -132,7 +135,7 @@ impl Client {
         Self::parse(resp)
     }
 
-    fn post_form<T: serde::de::DeserializeOwned>(
+    pub(crate) fn post_form<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         form: reqwest::blocking::multipart::Form,
@@ -146,7 +149,7 @@ impl Client {
         Self::parse(resp)
     }
 
-    fn patch_json<T: serde::de::DeserializeOwned>(
+    pub(crate) fn patch_json<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         body: &serde_json::Value,
@@ -160,7 +163,10 @@ impl Client {
         Self::parse(resp)
     }
 
-    fn delete<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, Box<dyn Error>> {
+    pub(crate) fn delete<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<T, Box<dyn Error>> {
         let resp = self
             .http
             .delete(self.url(path))
@@ -188,7 +194,7 @@ impl Client {
         Ok(serde_json::from_str(&text)?)
     }
 
-    fn children(&self, folder_id: &str) -> Result<Children, Box<dyn Error>> {
+    pub(crate) fn children(&self, folder_id: &str) -> Result<Children, Box<dyn Error>> {
         self.get_json(&format!("/api/vault/folders/{folder_id}/children"))
     }
 }
@@ -274,7 +280,7 @@ fn resolve_file(client: &Client, path: &str) -> Result<FileListing, Box<dyn Erro
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
 
-fn format_size(size: Option<u64>) -> String {
+pub(crate) fn format_size(size: Option<u64>) -> String {
     match size {
         None => String::new(),
         Some(b) if b < 1024 => format!("{b} B"),
@@ -291,7 +297,7 @@ fn format_date(iso: &str) -> String {
 }
 
 /// Interactive y/N prompt — anything but y/yes is a no.
-fn confirm(prompt: &str) -> bool {
+pub(crate) fn confirm(prompt: &str) -> bool {
     use std::io::Write;
     print!("{prompt}");
     std::io::stdout().flush().ok();
@@ -557,7 +563,11 @@ pub fn upload(local_files: &[PathBuf], to: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn upload_one(client: &Client, local: &Path, folder: &Folder) -> Result<(), Box<dyn Error>> {
+pub(crate) fn upload_one(
+    client: &Client,
+    local: &Path,
+    folder: &Folder,
+) -> Result<(), Box<dyn Error>> {
     let meta = fs::metadata(local).map_err(|e| format!("{}: {e}", local.display()))?;
     if !meta.is_file() {
         return Err(format!("{} is not a file", local.display()).into());
@@ -923,11 +933,15 @@ fn upload_parts(
     content_type: &str,
     size: u64,
 ) -> Result<(), Box<dyn Error>> {
+    use sha2::Digest;
     let mut file = fs::File::open(local)?;
     let mut parts: Vec<serde_json::Value> = Vec::new();
     let total_parts = size.div_ceil(MULTIPART_CHUNK as u64);
     let mut part_number: u32 = 1;
     let mut buf = vec![0u8; MULTIPART_CHUNK];
+    // Hash while chunking — the server never holds the whole file during a
+    // multipart upload, so the content hash must come from us.
+    let mut hasher = sha2::Sha256::new();
 
     loop {
         let mut filled = 0;
@@ -942,6 +956,7 @@ fn upload_parts(
             break;
         }
 
+        hasher.update(&buf[..filled]);
         let chunk_part = reqwest::blocking::multipart::Part::bytes(buf[..filled].to_vec())
             .file_name("chunk")
             .mime_str("application/octet-stream")?;
@@ -968,6 +983,7 @@ fn upload_parts(
     }
     println!();
 
+    let content_hash = format!("{:x}", hasher.finalize());
     let _: serde_json::Value = client.post_json(
         "/api/vault/multipart-complete",
         &serde_json::json!({
@@ -978,6 +994,7 @@ fn upload_parts(
             "folderId": folder._id,
             "contentType": content_type,
             "size": size,
+            "contentHash": content_hash,
         }),
     )?;
     Ok(())
