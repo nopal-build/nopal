@@ -1,5 +1,5 @@
 /**
- * OxMarkdown — `.ox-content`
+ * OxMarkdown — `.ox-content` + `.ox-tokens`
  *
  * Modeled off the MdxEditor design language (`mdxeditor.css` /
  * `.nopal-content`) — same dot-grid rhythm, same gutter-marker idea — but
@@ -10,6 +10,15 @@
  *     Those old tokens only ever appear on the RIGHT-hand side, as this
  *     file's own defaults — so the default theme happens to be nopal's
  *     existing palette, but nothing here is hard-coded to it.
+ *   - The tokens themselves live in `.ox-tokens`, separate from
+ *     `.ox-content`'s visual styles — apply BOTH classes together
+ *     (`className="ox-content ox-tokens"`) anywhere real content renders.
+ *     They're split because custom properties inherit through the real DOM
+ *     tree, not the React tree: a portaled element (the directive attribute
+ *     popover, rendered straight into `document.body` — see
+ *     `components/OxRenderer.tsx`) sits entirely outside `.ox-content`'s
+ *     subtree, so it needs its own `.ox-tokens` to see these variables at
+ *     all. `.ox-popover` already carries it for exactly this reason.
  *   - One dark-mode block redefines the same custom properties; no
  *     per-component `@media` duplication.
  *   - The whole vertical rhythm derives from one variable, `--ox-grid`
@@ -23,8 +32,15 @@
  * this file at all. See that module for the full token list.
  */
 
-.ox-content {
-  /* ── Theme tokens — defaults are nopal's current palette ──────────────── */
+/* Design tokens only — split out from `.ox-content` so anything that needs
+   them but can't rely on DOM-tree inheritance can pull them in too.
+   Custom properties inherit through the REAL DOM tree, not the React tree;
+   a portaled popover (see OxRenderer.tsx) ends up as a child of
+   `document.body`, outside `.ox-content`'s subtree entirely, and silently
+   loses every one of these otherwise. Apply `.ox-tokens` anywhere that can
+   happen — it defines variables only, no visual styles of its own, so it's
+   safe to stack onto something that already has its own look. */
+.ox-tokens {
   --ox-font-family: -apple-system, BlinkMacSystemFont, sans-serif;
   --ox-font-weight: 267;
   --ox-letter-spacing: 0.5px;
@@ -37,11 +53,28 @@
   --ox-color-grid-dot: var(--moon, #c4c6fc);
   --ox-color-code-bg: var(--midground, #ece7f3);
   --ox-color-border: rgba(0, 0, 0, 0.12);
-  --ox-color-selected-bg: color-mix(in srgb, var(--ox-color-accent) 16%, transparent);
+  --ox-color-selected-bg: color-mix(in srgb, var(--ox-color-accent) 8%, transparent);
   --ox-color-selected-border: var(--ox-color-accent);
   --ox-color-unknown: var(--red, #a63b31);
+}
 
-  /* ── Base ───────────────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  .ox-tokens {
+    --ox-color-text: var(--dark-text, #e8ddd4);
+    --ox-color-heading: var(--dark-text, #e8ddd4);
+    --ox-color-accent: var(--purple-light, #a78bfa);
+    --ox-color-subtle: var(--text-subtle-dark, #c8b8ce);
+    --ox-color-grid-dot: var(--dark-midground, #2a2030);
+    --ox-color-code-bg: var(--dark-midground, #2a2030);
+    --ox-color-border: rgba(255, 255, 255, 0.14);
+    --ox-color-unknown: var(--red-light, #f6c8c3);
+  }
+}
+
+/* `.ox-content` now carries only visual base styles — always pair it with
+   `.ox-tokens` in markup (`className="ox-content ox-tokens"`), the same way
+   `.ox-popover` does. */
+.ox-content {
   /* Left padding is deliberately `--ox-grid`, not an arbitrary number: the
      gutter markers/bullets/ordered-list numbers below all sit at negative
      left offsets (they hang in the margin next to their content), and
@@ -61,19 +94,6 @@
   background-image: radial-gradient(var(--ox-color-grid-dot) 1px, transparent 0);
   background-size: var(--ox-grid) var(--ox-grid);
   background-position: -22px -12px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .ox-content {
-    --ox-color-text: var(--dark-text, #e8ddd4);
-    --ox-color-heading: var(--dark-text, #e8ddd4);
-    --ox-color-accent: var(--purple-light, #a78bfa);
-    --ox-color-subtle: var(--text-subtle-dark, #c8b8ce);
-    --ox-color-grid-dot: var(--dark-midground, #2a2030);
-    --ox-color-code-bg: var(--dark-midground, #2a2030);
-    --ox-color-border: rgba(255, 255, 255, 0.14);
-    --ox-color-unknown: var(--red-light, #f6c8c3);
-  }
 }
 
 /* ── Gutter markers (# / ## / ### / >) ─────────────────────────────────── */
@@ -359,15 +379,95 @@
   margin: 0;
 }
 
+/* A grid-aligned inline pill/badge. Two layers on purpose:
+   `.ox-pill` is an invisible "slot" exactly one grid row tall, so the
+   surrounding rhythm stays correct; `.ox-pill-chip` is the actual small
+   visible capsule, sized for its content and vertically centered inside
+   the slot. Without the split, making the visible chip look right forces
+   the chip itself to be a full 41px tall, which reads as oversized. */
+.ox-pill {
+  display: inline-flex;
+  align-items: center;
+  /* `line-height` does nothing for a flex container's own sizing — flex
+     boxes size from content, not leading — which is why this needs an
+     explicit `height` instead. That was the actual bug: the slot was
+     silently collapsing to the chip's ~30px content height rather than
+     reserving the full grid row. */
+  height: var(--ox-grid);
+}
+.ox-pill-chip {
+  display: inline-block;
+  line-height: 1.4;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--ox-color-selected-bg);
+  box-shadow: inset 0 0 0 1px var(--ox-color-selected-border);
+}
+
 /* ── Selected interactable ──────────────────────────────────────────── */
-/* New in OxMarkdown — no old-system equivalent. Applied by OxEditor (not
-   yet built) when an interactable is selected — see the oxmarkdown skill's
-   "Interactables" section. Defined here now so the token exists and any
-   future interactable component can just add this class. */
+/* New in OxMarkdown — no old-system equivalent. Applied by OxEditor when an
+   interactable is selected — see the oxmarkdown skill's "Interactables"
+   section. Outline, not a border, so it doesn't shift layout on select. */
 
 .ox-selected {
-  outline: 2px solid var(--ox-color-selected-border);
-  outline-offset: 1px;
   background: var(--ox-color-selected-bg);
+}
+
+/* ── Directive attribute popover ───────────────────────────────────────── */
+/* The generic "adjust attributes without hand-editing the directive text"
+   affordance — see OxEditor.tsx / oxmarkdown/interactive.ts. Works for any
+   directive since it only lists whatever flat attrs the node already has. */
+
+/* Positioned via inline style (computed from the trigger's real screen
+   position — see InteractiveDirective in OxRenderer.tsx), not `top`/`left`
+   here, and rendered through a portal straight into `document.body`. A
+   popover living inside whatever scroll container its trigger happens to
+   sit in will get clipped the moment that container scrolls — `position:
+   fixed` inside the actual DOM tree doesn't save you from that; it has to
+   not be inside there at all. z-index is deliberately way above anything
+   else in the app (Modal.tsx's overlay is 1000). */
+.ox-popover {
+  position: fixed;
+  z-index: 2000;
+  min-width: 220px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--ox-color-code-bg);
+  border: 1px solid var(--ox-color-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--ox-color-text);
+}
+
+.ox-popover-title {
+  font-weight: 700;
+  color: var(--ox-color-accent);
+  margin-bottom: 6px;
+}
+
+.ox-popover-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.ox-popover-field span {
+  opacity: 0.6;
+}
+
+.ox-popover-field input {
+  font-family: inherit;
+  font-size: inherit;
+  padding: 3px 6px;
   border-radius: 4px;
+  border: 1px solid var(--ox-color-border);
+  background: transparent;
+  color: inherit;
+}
+
+.ox-popover-field:last-child {
+  margin-bottom: 0;
 }

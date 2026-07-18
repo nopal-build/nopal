@@ -1,19 +1,26 @@
 /**
- * OxRenderer — static rendering of an OxMarkdown document.
+ * OxRenderer — rendering of an OxMarkdown document, static by default.
  *
  * Walks the real mdast tree from `oxmarkdown/document.ts` directly (no
  * regex placeholders, no per-paragraph independent parses — see the
- * `oxmarkdown` skill's "Build plan" step 1). Pure display only: no
- * selection, no click/backspace/act behavior yet — that's `OxEditor`
- * (step 2), built on top of this.
+ * `oxmarkdown` skill's "Build plan" step 1).
+ *
+ * Pass `interactive` (see `oxmarkdown/interactive.ts`) to turn on
+ * Interacting-mode affordances — task checkboxes and directives become
+ * real interactables (selectable, actionable) instead of plain markup.
+ * `OxEditor` is the stateful wrapper that owns selection/mutation and
+ * supplies this; nothing here changes when `interactive` is omitted, which
+ * is what every step-1 caller (including this file's own callers so far)
+ * still does.
  *
  * Visual output is intentionally NOT a port of `.nopal-content` — see
  * `styles/oxmarkdown.css` for the themable `.ox-content` system this uses
  * instead, modeled off the same design language.
  */
 
-import { Fragment, useMemo } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { Definition, RootContent } from "mdast";
 import {
   parseOxDocument,
@@ -24,6 +31,7 @@ import {
 } from "../oxmarkdown/document";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
+import type { OxInteractive } from "../oxmarkdown/interactive";
 import "../styles/oxmarkdown.css";
 
 export interface OxRendererProps {
@@ -35,6 +43,9 @@ export interface OxRendererProps {
   /** Override specific theme tokens (a font, an accent color, ...) without
    * touching `oxmarkdown.css` — see `oxmarkdown/theme.ts`. */
   theme?: OxTheme;
+  /** Turns on Interacting-mode rendering for checkboxes/directives — see
+   * `oxmarkdown/interactive.ts`. Supplied by `OxEditor`. */
+  interactive?: OxInteractive;
   className?: string;
 }
 
@@ -42,25 +53,44 @@ export default function OxRenderer({
   markdown,
   directives,
   theme,
+  interactive,
   className,
 }: OxRendererProps) {
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
-  const definitions = useMemo(() => collectDefinitions(doc), [doc]);
   const style = theme ? (themeToStyle(theme) as CSSProperties) : undefined;
 
   return (
     <div
-      className={`ox-content${className ? ` ${className}` : ""}`}
+      className={`ox-content ox-tokens${className ? ` ${className}` : ""}`}
       style={style}
     >
-      {renderNodes(doc.children, { directives, definitions })}
+      <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} />
     </div>
   );
+}
+
+export interface OxTreeRendererProps {
+  /** An already-parsed document — not raw markdown. `OxEditor` uses this
+   * directly (instead of `OxRenderer`) so it can hold on to the exact same
+   * tree it renders, mutate a node in place on an interaction, and
+   * re-serialize that same tree — rather than this component parsing its
+   * own private copy that nothing outside it could reach. */
+  doc: OxDocument;
+  directives?: DirectiveRegistry;
+  interactive?: OxInteractive;
+}
+
+/** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
+ * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
+export function OxTreeRenderer({ doc, directives, interactive }: OxTreeRendererProps) {
+  const definitions = useMemo(() => collectDefinitions(doc), [doc]);
+  return <>{renderNodes(doc.children, { directives, definitions, interactive })}</>;
 }
 
 interface RenderCtx {
   directives?: DirectiveRegistry;
   definitions: Map<string, Definition>;
+  interactive?: OxInteractive;
 }
 
 function collectDefinitions(doc: OxDocument): Map<string, Definition> {
@@ -216,16 +246,53 @@ function renderListItem(node: any, key: number, ctx: RenderCtx): ReactNode {
 
   return (
     <li key={key} className="ox-task-item">
-      <span
-        className={`ox-task-checkbox${node.checked ? " checked" : ""}`}
-        role="checkbox"
-        aria-checked={node.checked}
-      />
+      {ctx.interactive ? (
+        <TaskCheckbox node={node} interactive={ctx.interactive} />
+      ) : (
+        <span
+          className={`ox-task-checkbox${node.checked ? " checked" : ""}`}
+          role="checkbox"
+          aria-checked={node.checked}
+        />
+      )}
       <span className={`ox-task-text${node.checked ? " ox-task-text--checked" : ""}`}>
         {renderNodes(labelChildren, ctx)}
       </span>
       {rest.length > 0 && renderNodes(rest, ctx)}
     </li>
+  );
+}
+
+// ── Interactive: task checkbox ──────────────────────────────────────────────
+// Select-then-act, per the oxmarkdown skill: a click both selects AND
+// toggles in one motion (matching an ordinary HTML checkbox); once selected
+// by ANY method (focus via Tab, or click), Space or Tab also toggles it as
+// a separate step. Tab deliberately isn't prevented — it both toggles AND
+// still moves focus to the next interactable, per the skill's explicit call.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function TaskCheckbox({ node, interactive }: { node: any; interactive: OxInteractive }) {
+  const selected = interactive.isSelected(node);
+  const checked = !!node.checked;
+
+  return (
+    <span
+      className={`ox-task-checkbox${checked ? " checked" : ""}${selected ? " ox-selected" : ""}`}
+      role="checkbox"
+      aria-checked={checked}
+      tabIndex={0}
+      onFocus={() => interactive.select(node)}
+      onBlur={() => interactive.select(null)}
+      onClick={() => interactive.toggleTask(node)}
+      onKeyDown={(e) => {
+        if (e.key === " ") {
+          e.preventDefault();
+          interactive.toggleTask(node);
+        } else if (e.key === "Tab" && !e.shiftKey) {
+          interactive.toggleTask(node);
+        }
+      }}
+    />
   );
 }
 
@@ -273,23 +340,140 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     // Unregistered container name: still show the content, just without
     // whatever wrapper the registry would have added — matches how an
     // unrecognized HTML element degrades to its children in the browser.
+    // Not interactive yet — nested-interactable selection inside a container
+    // is TODO 5 in the oxmarkdown skill, deferred until Editing mode exists.
     if (!renderer) return <Fragment key={key}>{rendered}</Fragment>;
     return <Fragment key={key}>{renderer({ attrs, label: null, children: rendered })}</Fragment>;
   }
 
-  if (!renderer) {
-    return node.type === "leafDirective" ? (
-      <div key={key} className="ox-directive-unknown ox-directive-unknown--block">
-        Unknown block: ::{node.name}
-      </div>
-    ) : (
-      <span key={key} className="ox-directive-unknown">
-        :{node.name}
-      </span>
+  const content = renderer ? (
+    renderer({ attrs, label: null })
+  ) : node.type === "leafDirective" ? (
+    <div className="ox-directive-unknown ox-directive-unknown--block">
+      Unknown block: ::{node.name}
+    </div>
+  ) : (
+    <span className="ox-directive-unknown">:{node.name}</span>
+  );
+
+  if (ctx.interactive) {
+    return (
+      <InteractiveDirective key={key} node={node} attrs={attrs} interactive={ctx.interactive}>
+        {content}
+      </InteractiveDirective>
     );
   }
+  return <Fragment key={key}>{content}</Fragment>;
+}
 
-  return <Fragment key={key}>{renderer({ attrs, label: null })}</Fragment>;
+// ── Interactive: directive (text/leaf) ──────────────────────────────
+// Click/focus selects; while selected, a popover lists its attributes as
+// editable fields — the generic "adjust attributes without hand-editing the
+// directive text" affordance from the oxmarkdown skill. Works for any
+// directive name/kind since it only depends on the attrs being a flat
+// key/value map, not on what a specific directive means.
+
+function InteractiveDirective({
+  node,
+  attrs,
+  interactive,
+  children,
+}: {
+  node: DirectiveNode;
+  attrs: Record<string, string>;
+  interactive: OxInteractive;
+  children: ReactNode;
+}) {
+  const selected = interactive.isSelected(node);
+  const isBlock = node.type === "leafDirective";
+  const Tag = isBlock ? "div" : "span";
+  const attrEntries = Object.entries(attrs);
+  const hasPopover = selected && attrEntries.length > 0;
+
+  // The popover is portaled straight to `document.body` (see below) — once
+  // it's there it's no longer a DOM descendant of the wrapper, so the usual
+  // "did focus leave this element" check via `relatedTarget`/`contains`
+  // can't see it. Track both elements by ref instead, and on blur from
+  // EITHER, check on the next tick whether focus landed inside the other.
+  const wrapperRef = useRef<HTMLElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!hasPopover) {
+      setPopoverPos(null);
+      return;
+    }
+    const updatePosition = () => {
+      const rect = wrapperRef.current?.getBoundingClientRect();
+      if (rect) setPopoverPos({ top: rect.bottom + 4, left: rect.left });
+    };
+    updatePosition();
+    // Capture phase so scrolling ANY ancestor scroll container repositions
+    // this, not just the window — scroll events don't bubble, but they do
+    // pass through the capture phase on their way down to the real target.
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [hasPopover]);
+
+  function handleBlur() {
+    setTimeout(() => {
+      const active = document.activeElement;
+      const stillInside =
+        (wrapperRef.current && wrapperRef.current.contains(active)) ||
+        (popoverRef.current && popoverRef.current.contains(active));
+      if (!stillInside) interactive.select(null);
+    }, 0);
+  }
+
+  return (
+    <Tag
+      ref={wrapperRef as React.Ref<never>}
+      className={selected ? "ox-selected" : undefined}
+      // Always shrink-to-fit, even for a leaf directive's `<div>` —
+      // otherwise a block-level wrapper defaults to full row width, and the
+      // `.ox-selected` highlight ends up covering the whole row instead of
+      // just the directive's own content. A future full-width leaf
+      // directive (a real table/gallery) can still stretch itself via its
+      // OWN rendered content; this wrapper just shouldn't do it by default.
+      style={{ display: "inline-block" }}
+      tabIndex={0}
+      onFocus={() => interactive.select(node)}
+      onBlur={handleBlur}
+      onClick={() => interactive.select(node)}
+    >
+      {children}
+      {hasPopover &&
+        popoverPos &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            className="ox-popover ox-tokens"
+            style={{ top: popoverPos.top, left: popoverPos.left }}
+            onBlur={handleBlur}
+          >
+            <div className="ox-popover-title">::{node.name}</div>
+            {attrEntries.map(([attrKey, attrValue]) => (
+              <label key={attrKey} className="ox-popover-field">
+                <span>{attrKey}</span>
+                <input
+                  defaultValue={attrValue}
+                  onBlur={(e) => interactive.editDirectiveAttr(node, attrKey, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  }}
+                />
+              </label>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </Tag>
+  );
 }
 
 // Re-exported so callers can check a node's type without importing from

@@ -494,21 +494,34 @@ directives, mentions, checkboxes, and the whole select-then-act
 interactables model can all be built and shipped for real, in Interacting
 mode, before TODO 1 needs an answer.
 
-1. **Real document model (`OxRenderer`)** — replace the `\n\n`-split
-   `nopalEditorState.ts` approach with a real mdast parse
-   (`mdast-util-from-markdown` + micromark, with directive/frontmatter/
-   GFM-task-list extensions — see TODO 3). Resolves TODO 3 and makes TODO 5
-   fall out for free. Output should be visually identical to today's
-   `.nopal-content` rendering — no design-language changes yet, just a
-   different parser underneath. This alone is a shippable, low-risk win:
-   it fixes multi-paragraph containers even before any interaction work.
-2. **Interactables + Interacting-mode `OxEditor`, on `OxRenderer`** — no
-   Lexical needed. Build: selection (click/tap, Tab/Shift+Tab per TODO 8,
-   arrow-key entry per TODO 7), and the per-kind "act" behaviors (checkbox
-   toggle → reserialize markdown, `@mention` tooltip, directive popover for
-   adjusting attributes). Range-selection-deletes-flatly (see above) applies
-   here too. This is a full, real replacement for today's `MdxEditorWorkable`
-   — shippable on its own, independent of TODO 1.
+1. **DONE — Real document model (`OxRenderer`)**. `oxmarkdown/document.ts`
+   (parse/serialize, no React import) + `OxRenderer`/`OxTreeRenderer`
+   (`components/OxRenderer.tsx`) + a themable `.ox-content` stylesheet
+   (`styles/oxmarkdown.css`, tokens in `oxmarkdown/theme.ts`). Verified live:
+   a container directive wrapping a blank line round-trips correctly (the
+   exact case that broke the old regex bridge). Found and fixed a real bug
+   along the way — gutter markers/bullets/list-numbers need `.ox-content`
+   to reserve its own left padding, not borrow a wrapper's. One confirmed
+   regression, deliberately deferred: extra blank lines between paragraphs
+   don't produce extra space (CommonMark discards the count) — see the
+   decision log at `/fruits/styles/oxmarkdown` for the fix path. Demo/decision
+   log: `routes/fruits_.styles_.oxmarkdown.tsx`, updated every step since.
+2. **DONE — Interactables + Interacting-mode `OxEditor`, on `OxRenderer`**.
+   No Lexical needed, as predicted. Built: `oxmarkdown/interactive.ts` (the
+   `OxInteractive` contract), `OxTreeRenderer` (extracted from `OxRenderer`
+   so `OxEditor` can mutate the exact tree it renders, not a fresh
+   re-parse), and `components/OxEditor.tsx`. Shipped: task checkboxes
+   (click selects+toggles in one motion; Tab/Space toggles once focused,
+   Tab also still advances focus per the skill's explicit call) and a
+   generic directive-attribute popover (click selects, shows editable
+   fields for whatever attrs the node has, commits on blur/Enter) — both
+   verified end-to-end via real clicks/keypresses, not just typechecked.
+   Deliberately deferred, not blocking: `@`-mention tooltips (mentions
+   aren't parsed yet at all), arrow-key entry (needs a roaming caret, which
+   only exists once Editing mode's typing surface does), and interactive
+   selection inside container directives (TODO 5's default behavior, not
+   needed by any real directive yet). Range-selection-deletes-flatly is
+   also N/A until there's a text caret to make a range with.
 3. **Foundation spike for Editing mode** — now informed by a real
    interactables engine from step 2 to test against, not a toy example.
    Prototype both directions from TODO 1 (trimmed Lexical config vs.

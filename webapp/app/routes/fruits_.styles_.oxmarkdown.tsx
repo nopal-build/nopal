@@ -24,6 +24,7 @@ import { Link, redirect } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import OxRenderer from "../components/OxRenderer";
+import OxEditor from "../components/OxEditor";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -60,7 +61,24 @@ function Label({ children }: { children: React.ReactNode }) {
   return <div className="text-xs font-mono mb-1 subtle-text">{children}</div>;
 }
 
-// ─── Decision log ─────────────────────────────────────────────────────────
+/** A single labeled, static preview of one interactable state — hand-built
+ * markup (same classes OxRenderer/OxEditor actually produce), not the live
+ * components, so a state that only exists transiently (focused, mid-edit)
+ * can sit still long enough to look at and compare against its neighbors.
+ * `.ox-tokens` alongside `.ox-content` because that's the pairing every
+ * real usage needs now — see `styles/oxmarkdown.css`. */
+function StateSwatch({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2 items-start">
+      <Label>{label}</Label>
+      <div className="good-box ox-content ox-tokens p-3" style={{ minWidth: "140px" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Decision log ──────────────────────────────────────────────────
 // Newest last. Keep each entry to a couple of sentences — link to the
 // oxmarkdown skill (mentioned once in the page header) for full detail.
 
@@ -140,6 +158,21 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
     ),
   },
   {
+    title: "Step 2: interactables, built on OxRenderer, no Lexical needed",
+    body: (
+      <>
+        <code>OxEditor</code> is one component covering both modes via a{" "}
+        <code>mode</code> prop — only <code>"interacting"</code> is implemented so
+        far. It reuses OxRenderer's tree walk directly (a new <code>OxTreeRenderer</code>{" "}
+        export) rather than re-parsing, so a click can mutate the exact node object a
+        render already produced and re-serialize that same tree — see the
+        Interactables demo below. Confirms the build plan's bet: Interacting mode
+        needed zero progress on the Lexical-vs-custom question (TODO 1) to ship for
+        real.
+      </>
+    ),
+  },
+  {
     title: "Found (not yet fixed): extra blank lines between paragraphs are lost",
     body: (
       <>
@@ -152,6 +185,77 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
         using each node's `position.start.line`/`end.line` to detect a gap bigger
         than the minimum and render spacer paragraphs for the difference. Not done
         yet — noted for a follow-up pass, not blocking step 2.
+      </>
+    ),
+  },
+  {
+    title: "Found (and fixed): popovers need to portal out, not just have a big z-index",
+    body: (
+      <>
+        A high `z-index` alone doesn't save a popover from a scrolling ancestor —
+        `position: fixed` computed relative to a container that's inside a scroll
+        region still scrolls away with it. `.ox-popover` is now rendered via a real
+        portal straight into `document.body`, with its position computed from the
+        trigger's `getBoundingClientRect()` and recomputed on scroll/resize (capture
+        phase, so it catches scrolling on any nested container, not just the
+        window). Side effect worth knowing: once portaled, the usual
+        `relatedTarget`/`contains` check for "did focus leave this widget" stops
+        working, since the popover's DOM parent is `body`, not the trigger — fixed
+        by tracking both elements by ref and checking `document.activeElement`
+        against both on a deferred tick after blur.
+      </>
+    ),
+  },
+  {
+    title: "Selected state: lighter, no border, hugs its content",
+    body: (
+      <>
+        `.ox-selected` dropped its `outline` entirely and the tint went from 16% to
+        8%. Separately, a leaf directive's wrapper defaulted to `display: block`
+        (an ordinary `&lt;div&gt;`), so the highlight stretched across the full row
+        instead of just the pill — forced to `inline-block` so it always hugs
+        whatever width the content actually needs.
+      </>
+    ),
+  },
+  {
+    title: "Found (and fixed): a portaled popover loses its CSS variables",
+    body: (
+      <>
+        The `--ox-*` tokens lived only on `.ox-content` — custom properties
+        inherit through the real DOM tree, not the React tree, so once the popover
+        portals to `document.body` (outside `.ox-content`'s subtree entirely) it
+        couldn't see any of them: transparent background, unreadable text. Split
+        the tokens into their own `.ox-tokens` class, paired with `.ox-content`
+        everywhere real content renders, and added to `.ox-popover` directly so it
+        always carries its own copy regardless of where it ends up in the DOM.
+      </>
+    ),
+  },
+  {
+    title: "Found (and fixed): a grid-aligned pill still shouldn't look 41px tall",
+    body: (
+      <>
+        First pass made <code>.ox-pill</code> itself 41px tall via `line-height` so it
+        wouldn't throw off the grid — correct for alignment, but it visually read as an
+        oversized capsule. Split it into two layers: `.ox-pill` is an invisible slot
+        exactly one grid row tall (for rhythm), `.ox-pill-chip` is the actual small
+        visible capsule, centered inside it. Same idea as the mobile tap-target sizing
+        already decided in the skill's TODO 2 — the *hit/visual* area and the *grid*
+        area don't have to be the same box, as long as something reserves the grid
+        space.
+      </>
+    ),
+  },
+  {
+    title: "Static states gallery, alongside the live demo",
+    body: (
+      <>
+        Several interactable states (focused, mid-edit, an open popover) are
+        transient by nature — easy to trigger, hard to hold still and actually look
+        at. Added a states section below using the exact same classes
+        OxRenderer/OxEditor produce, applied directly rather than through real
+        focus/click, so every state sits still side by side for comparison.
       </>
     ),
   },
@@ -203,26 +307,26 @@ const DEMO_DIRECTIVES: DirectiveRegistry = {
     </div>
   ),
   badge: ({ attrs }) => (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 10px",
-        borderRadius: 999,
-        background: "var(--ox-color-selected-bg)",
-        border: "1px solid var(--ox-color-selected-border)",
-      }}
-    >
-      {attrs.label}
+    <span className="ox-pill">
+      <span className="ox-pill-chip">{attrs.label}</span>
     </span>
   ),
 };
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
+const INTERACTABLES_SAMPLE = `::badge{label="Try me" size="half"}
+
+- [ ] Click to check
+- [x] Click to uncheck
+- Plain bullet, not a task
+`;
+
 export default function OxMarkdownStyles() {
   const [markdown, setMarkdown] = useState(DEFAULT_SAMPLE);
   const [fontFamily, setFontFamily] = useState("");
   const [colorAccent, setColorAccent] = useState("");
+  const [interactiveMarkdown, setInteractiveMarkdown] = useState(INTERACTABLES_SAMPLE);
 
   return (
     <AppLayout>
@@ -247,11 +351,12 @@ export default function OxMarkdownStyles() {
 
         <Section id="status" title="Status">
           <p className="text-sm mb-2">
-            <strong>Build plan step 1 done</strong> — real document model
-            (<code>oxmarkdown/document.ts</code>) + themable renderer
-            (<code>OxRenderer</code>, <code>oxmarkdown.css</code>). Step 2
-            (interactables + Interacting-mode <code>OxEditor</code>) is next — this
-            page is currently read-only/static, no selection or editing yet.
+            <strong>Build plan steps 1–2 done</strong> — real document model
+            (<code>oxmarkdown/document.ts</code>), themable renderer
+            (<code>OxRenderer</code>, <code>oxmarkdown.css</code>), and Interacting-mode{" "}
+            <code>OxEditor</code> (task checkboxes, directive attribute popovers — try
+            the Interactables section below). Step 3 (a foundation spike for typing/
+            Editing mode) is next.
           </p>
         </Section>
 
@@ -310,6 +415,103 @@ export default function OxMarkdownStyles() {
                 colorAccent: colorAccent || undefined,
               }}
             />
+          </div>
+        </Section>
+
+        <Section id="interactables" title="Interactables (Interacting mode)">
+          <p className="text-sm subtle-text mb-4">
+            <code>OxEditor</code> with <code>mode="interacting"</code>. Click a
+            checkbox to select-and-toggle in one motion; Tab to it and press Space or
+            Tab to toggle without a mouse. Click a directive to select it and open a
+            popover listing its attributes — editing a value there rewrites the
+            directive's markdown directly. No free-form typing yet (that's Editing
+            mode, step 4) — everything else here is read-only prose.
+          </p>
+          <Label>OxEditor (mode="interacting")</Label>
+          <div className="good-box p-4 mb-3">
+            <OxEditor
+              mode="interacting"
+              markdown={interactiveMarkdown}
+              onChange={setInteractiveMarkdown}
+              directives={DEMO_DIRECTIVES}
+            />
+          </div>
+          <Label>Resulting markdown (re-serialized after each toggle/edit)</Label>
+          <pre
+            className="text-xs font-mono p-3 rounded"
+            style={{ background: "var(--midground)", color: "var(--purple)", whiteSpace: "pre-wrap" }}
+          >
+            {interactiveMarkdown}
+          </pre>
+        </Section>
+
+        <Section id="states" title="Interactable states (static)">
+          <p className="text-sm subtle-text mb-4">
+            The demo above is live — fine for trying things, but several of these
+            states are transient (focus, an open popover) and hard to hold still
+            long enough to actually look at. These are the same classes
+            OxRenderer/OxEditor produce, applied directly, side by side.
+          </p>
+
+          <Label>Task checkbox</Label>
+          <div className="flex flex-wrap gap-4 mb-6">
+            <StateSwatch label="Unchecked">
+              <span className="ox-task-checkbox" role="checkbox" aria-checked={false} />
+            </StateSwatch>
+            <StateSwatch label="Checked">
+              <span className="ox-task-checkbox checked" role="checkbox" aria-checked={true} />
+            </StateSwatch>
+            <StateSwatch label="Selected, unchecked">
+              <span
+                className="ox-task-checkbox ox-selected"
+                role="checkbox"
+                aria-checked={false}
+              />
+            </StateSwatch>
+            <StateSwatch label="Selected, checked">
+              <span
+                className="ox-task-checkbox checked ox-selected"
+                role="checkbox"
+                aria-checked={true}
+              />
+            </StateSwatch>
+          </div>
+
+          <Label>Directive (leaf)</Label>
+          <div className="flex flex-wrap gap-4">
+            <StateSwatch label="Default">
+              <span className="ox-pill">
+                <span className="ox-pill-chip">Try me</span>
+              </span>
+            </StateSwatch>
+            <StateSwatch label="Selected (popover open)">
+              <div className="ox-selected" style={{ position: "relative", display: "inline-block" }}>
+                <span className="ox-pill">
+                  <span className="ox-pill-chip">Try me</span>
+                </span>
+                {/* .ox-popover is `position: fixed` + JS-computed inset by
+                    default (see OxRenderer.tsx) so it can escape any scroll
+                    container in the real interactive component — this static
+                    swatch has no trigger element to compute a position from,
+                    so it overrides back to a plain relative placement. */}
+                <div className="ox-popover" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0 }}>
+                  <div className="ox-popover-title">::badge</div>
+                  <label className="ox-popover-field">
+                    <span>label</span>
+                    <input defaultValue="Try me" />
+                  </label>
+                  <label className="ox-popover-field">
+                    <span>size</span>
+                    <input defaultValue="half" />
+                  </label>
+                </div>
+              </div>
+            </StateSwatch>
+            <StateSwatch label="Unknown name">
+              <div className="ox-directive-unknown ox-directive-unknown--block">
+                Unknown block: ::mystery
+              </div>
+            </StateSwatch>
           </div>
         </Section>
 
