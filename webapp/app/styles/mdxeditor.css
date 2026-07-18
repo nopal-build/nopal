@@ -1378,6 +1378,61 @@
     color-mix(in srgb, var(--purple-light, #a78bfa) 25%, transparent);
 }
 
+/* ── Project grid layout (`layout: grid` in a project manifest) ───────────────
+   Every DIRECT child of `.nopal-content` is one rendered paragraph/heading/
+   directive block (see MdxRenderer.tsx — each ProseNode is its own
+   <ReactMarkdown> call, so its output lands as siblings, not one wrapped
+   root). Default every child to full width; a directive block opts into a
+   narrower span via its own wrapper class (see ProjectView.tsx). Mobile
+   stays plain block flow — no grid at all — so a bad size choice can only
+   ever affect desktop. */
+.nopal-content--grid {
+  display: block;
+}
+@media (min-width: 768px) {
+  .nopal-content--grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px 24px;
+    align-items: start;
+  }
+  .nopal-content--grid > * {
+    grid-column: 1 / -1;
+  }
+  .nopal-content--grid .nopal-block-half {
+    grid-column: span 3 / span 3;
+  }
+  .nopal-content--grid .nopal-block-third {
+    grid-column: span 2 / span 2;
+  }
+}
+
+/* Shown when a `::name{...}`/`:name{...}` directive has no matching entry in
+   the renderer's `directives` registry — visible on purpose (typos, human
+   or AI-authored, should be easy to spot instead of silently vanishing). */
+.nopal-directive-unknown {
+  display: inline-block;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.85em;
+  color: var(--red, #a63b31);
+  border: 1px dashed color-mix(in srgb, var(--red, #a63b31) 45%, transparent);
+  background: color-mix(in srgb, var(--red, #a63b31) 8%, transparent);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+
+.nopal-directive-unknown--block {
+  display: block;
+  padding: 8px 12px;
+  line-height: 1.4;
+}
+
+@media (prefers-color-scheme: dark) {
+  .nopal-directive-unknown {
+    color: var(--red-light, #f6c8c3);
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   .csv-ref-chip {
     background: color-mix(

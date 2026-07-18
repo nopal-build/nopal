@@ -34,6 +34,11 @@ import rehypeRaw from "rehype-raw";
 import { useState, useMemo } from "react";
 import type { VaultRefItem } from "./refPopoverPlugin";
 import { decodeMarkdownEntities } from "../util/decodeMarkdownEntities";
+import {
+  preprocessDirectives,
+  type DirectiveAttrs,
+  type DirectiveRegistry,
+} from "../util/nopalDirectives";
 
 // ── Public props interface ─────────────────────────────────────────────────────
 
@@ -50,24 +55,19 @@ export interface MdxRendererProps {
   wikiItems?: VaultRefItem[];
   /** Called when the user clicks an unresolved [[wiki-link]] to create the page. */
   onWikiLinkCreate?: (label: string) => void;
+  /** Renderers for `::name{...}` / `:::name{...}` / `:name{...}` directives —
+   * see `util/nopalDirectives.ts`. MdxRenderer only knows how to *parse*
+   * directives; what a given name means (csv-table, gallery, ...) is up to
+   * the caller. Unregistered names render a small visible "unknown
+   * directive" marker rather than silently vanishing, so typos (human or
+   * AI) are easy to spot. The one built-in exception is `csv-key`, which
+   * resolves directly against `csvFields` (see the `span` override below) —
+   * it's a low-level primitive in the same spirit as `csvFields` itself,
+   * not a project-specific block kind. */
+  directives?: DirectiveRegistry;
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
-
-/**
- * Replace known `[key]` patterns with an HTML span placeholder that rehype-raw
- * will keep as-is.  Our custom `span` renderer converts them to CsvChip nodes.
- */
-function preprocessCsvRefs(
-  text: string,
-  csvFields: Record<string, string>,
-): string {
-  return text.replace(/(?<!\[)\[([^\[\]\n]+)\](?!\])/g, (match, key) => {
-    if (key in csvFields)
-      return `<span class="nopal-csv-placeholder" data-csv-key="${encodeURIComponent(key)}"></span>`;
-    return match;
-  });
-}
 
 /**
  * Replace [[label]] and ![[label]] with HTML span placeholders that rehype-raw
@@ -262,6 +262,23 @@ function CsvChip({ csvKey, value, editable, onChange }: CsvChipProps) {
       {empty ? csvKey : value}
     </button>
   );
+}
+
+// ── UnknownDirective ────────────────────────────────────────────────────
+// Rendered when a directive's name has no matching entry in the `directives`
+// registry (or isn't the built-in `csv-key`) — visible on purpose, so a typo
+// (human or AI-authored) shows up as a small marker instead of silently
+// deleting content.
+
+function UnknownDirective({ name, block }: { name: string; block: boolean }) {
+  if (block) {
+    return (
+      <div className="nopal-directive-unknown nopal-directive-unknown--block">
+        Unknown block: ::{name}
+      </div>
+    );
+  }
+  return <span className="nopal-directive-unknown">:{name}</span>;
 }
 
 // ── ImageBlock ─────────────────────────────────────────────────────────────────
@@ -591,6 +608,7 @@ export default function MdxRenderer({
   className,
   wikiItems,
   onWikiLinkCreate,
+  directives,
 }: MdxRendererProps) {
   // ── Build render segments ──────────────────────────────────────────────────
   const renderSegments = useMemo((): RenderSegment[] => {
@@ -633,27 +651,112 @@ export default function MdxRenderer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const components = useMemo(
     () => ({
-      // ── Suppress native GFM checkbox — TaskItemView renders its own ──────────
+      // ── Suppress native GFM checkbox — TaskItemView renders its own ──────
       input({ type, ...rest }: any) {
         if (type === "checkbox") return null;
         return <input type={type} {...rest} />;
       },
 
-      // ── Inline span — intercept CSV ref placeholders and wiki-link placeholders
+      // ── Block-level div — intercept leaf/container directive placeholders ───
+      div({ node, className, children, ...rest }: any) {
+        if (
+          className === "nopal-directive-leaf" ||
+          className === "nopal-directive-container"
+        ) {
+          const props = (node as any)?.properties ?? {};
+          const name = decodeURIComponent(String(props.dataDirectiveName ?? ""));
+          const rawLabel = decodeURIComponent(String(props.dataDirectiveLabel ?? ""));
+          const label = rawLabel || null;
+          let attrs: DirectiveAttrs = {};
+          try {
+            attrs = JSON.parse(
+              decodeURIComponent(String(props.dataDirectiveAttrs ?? "")) || "{}",
+            );
+          } catch {
+            attrs = {};
+          }
+          const renderer = directives?.[name];
+
+          if (className === "nopal-directive-container") {
+            const rawContent = decodeURIComponent(
+              String(props.dataDirectiveContent ?? ""),
+            );
+            const inner = preprocessDirectives(
+              preprocessWikiLinks(decodeMarkdownEntities(rawContent)),
+            );
+            const rendered = (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw]}
+                components={components as any}
+              >
+                {inner}
+              </ReactMarkdown>
+            );
+            // Unregistered container name: still show the content, just
+            // without whatever wrapper the registry would have added —
+            // matches how an unrecognized HTML element degrades to its
+            // children in the browser.
+            return renderer ? (
+              <>{renderer({ attrs, label, children: rendered })}</>
+            ) : (
+              rendered
+            );
+          }
+
+          // Leaf directive — no children to fall back to, so an unknown name
+          // needs its own visible marker rather than vanishing silently.
+          return renderer ? (
+            <>{renderer({ attrs, label })}</>
+          ) : (
+            <UnknownDirective name={name} block />
+          );
+        }
+        return (
+          <div className={className} {...rest}>
+            {children}
+          </div>
+        );
+      },
+
+      // ── Inline span — intercept directive text placeholders and wiki-link placeholders
       span({ node, className, children, ...rest }: any) {
-        if (className === "nopal-csv-placeholder") {
-          // hast converts data-csv-key → dataCsvKey in properties
-          const encoded = (node as any)?.properties?.dataCsvKey ?? "";
-          const csvKey = encoded ? decodeURIComponent(String(encoded)) : "";
-          if (!csvKey || !csvFields) return null;
-          const value = csvFields[csvKey] ?? "";
-          return (
-            <CsvChip
-              csvKey={csvKey}
-              value={value}
-              editable={dispatch !== undefined && !!onCsvFieldChange}
-              onChange={onCsvFieldChange}
-            />
+        if (className === "nopal-directive-text") {
+          const props = (node as any)?.properties ?? {};
+          const name = decodeURIComponent(String(props.dataDirectiveName ?? ""));
+          const rawLabel = decodeURIComponent(String(props.dataDirectiveLabel ?? ""));
+          const label = rawLabel || null;
+          let attrs: DirectiveAttrs = {};
+          try {
+            attrs = JSON.parse(
+              decodeURIComponent(String(props.dataDirectiveAttrs ?? "")) || "{}",
+            );
+          } catch {
+            attrs = {};
+          }
+
+          // Built-in: `:csv-key{key="..."}` resolves directly against
+          // `csvFields`, same low-level primitive `csvFields` already was —
+          // not a project-specific block kind, so it doesn't go through the
+          // `directives` registry.
+          if (name === "csv-key") {
+            const csvKey = attrs.key ?? "";
+            if (!csvKey || !csvFields) return null;
+            return (
+              <CsvChip
+                csvKey={csvKey}
+                value={csvFields[csvKey] ?? ""}
+                editable={dispatch !== undefined && !!onCsvFieldChange}
+                onChange={onCsvFieldChange}
+              />
+            );
+          }
+
+          const renderer = directives?.[name];
+          return renderer ? (
+            <>{renderer({ attrs, label })}</>
+          ) : (
+            <UnknownDirective name={name} block={false} />
           );
         }
         if (className === "nopal-wiki-ref") {
@@ -720,7 +823,7 @@ export default function MdxRenderer({
       },
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }),
-    [dispatch, csvFields, onCsvFieldChange, wikiItems, onWikiLinkCreate],
+    [dispatch, csvFields, onCsvFieldChange, wikiItems, onWikiLinkCreate, directives],
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -757,9 +860,7 @@ export default function MdxRenderer({
         }
         const decoded = decodeMarkdownEntities(node.content);
         const withWiki = preprocessWikiLinks(decoded);
-        const text = csvFields
-          ? preprocessCsvRefs(withWiki, csvFields)
-          : withWiki;
+        const text = preprocessDirectives(withWiki);
         return (
           <ReactMarkdown
             key={seg.key}
