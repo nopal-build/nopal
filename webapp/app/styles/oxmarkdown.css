@@ -106,7 +106,44 @@
   background-position: -22px -12px;
 }
 
-/* ── Gutter markers (# / ## / ### / >) ─────────────────────────────────── */
+/* An ordinary single blank line in the source should produce ONE visible
+   grid row of separation — the normal, expected "paragraph break" look
+   basically every markdown renderer has. Paragraphs/lists intentionally
+   have `margin: 0` below (each block's own `line-height` already handles
+   its OWN internal rhythm) — this rule is what gives adjacent SIBLING
+   blocks a gap at all. `*:not(:first-child)` (not the equivalent, lower-
+   specificity `* + *`) is deliberate — paragraphs/lists' own `margin: 0`
+   below is MORE specific than a plain `* + *` would be (a class plus a
+   type selector beats a class plus only universal selectors), so it would
+   silently win and this rule would do nothing (confirmed directly: checked
+   computed `margin-top`, got `0px`, before switching to this form).
+   `:not(:first-child)` carries the same specificity weight as a class,
+   which is enough to override that. More specific rules (headings' own
+   margin-top) still win over this by specificity, so they're unaffected.
+   Extra blank lines beyond this
+   first one stack MORE space on top, via real spacer elements/nodes — see
+   `renderBlockNodes` in `OxRenderer.tsx` and `OxBlankLinesNode` in
+   `editingNodes.tsx` — rather than a bigger margin, so an arbitrary
+   blank-line count can be represented (CSS margin can't stack per extra
+   line the way a repeated element naturally can).
+   Scoped to `.ox-content`'s own direct children, a blockquote's direct
+   children (nested block content one level deep), AND `.ox-editing-surface`
+   specifically — Editing mode's actual content sits two real DOM levels
+   below `.ox-content` (through a plain positioning wrapper `OxEditor.tsx`
+   adds and Lexical's own contentEditable), not as `.ox-content`'s direct
+   child, so the first selector alone doesn't reach it (confirmed directly:
+   checked computed `margin-top` there too, got `0px`, before adding this).
+   A container directive's own children still rely on whatever wrapper its
+   registry renderer provides, which doesn't get this automatically (known
+   gap, not fixed here — there's no single reliable selector for
+   caller-authored markup). */
+.ox-content > *:not(:first-child),
+.ox-content blockquote > *:not(:first-child),
+.ox-editing-surface > *:not(:first-child) {
+  margin-top: var(--ox-grid);
+}
+
+/* ── Gutter markers (# / ## / ### / >) ──────────────────────────── */
 
 .ox-content :is(h1, h2, h3, blockquote) {
   position: relative;
@@ -186,6 +223,14 @@
 .ox-content p {
   line-height: var(--ox-grid);
   margin: 0;
+}
+
+/* One per blank line BEYOND the single one CommonMark already requires to
+   separate two blocks — see `renderBlockNodes` in `OxRenderer.tsx`. Exactly
+   one grid row tall so extra intentional spacing still lines up with the
+   dot grid, the same rhythm rule every other element here follows. */
+.ox-blank-line-spacer {
+  height: var(--ox-grid);
 }
 
 .ox-content :is(ul, ol) {

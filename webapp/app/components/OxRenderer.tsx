@@ -24,6 +24,7 @@ import { createPortal } from "react-dom";
 import type { Definition, RootContent } from "mdast";
 import {
   parseOxDocument,
+  countExtraBlankLines,
   directiveAttrs,
   isDirectiveNode,
   type OxDocument,
@@ -90,7 +91,7 @@ export function OxStaticNodes({
   nodes: readonly unknown[];
   directives?: DirectiveRegistry;
 }) {
-  return <>{renderNodes(nodes, { directives, definitions: new Map() })}</>;
+  return <>{renderBlockNodes(nodes, { directives, definitions: new Map() })}</>;
 }
 
 export interface OxTreeRendererProps {
@@ -108,7 +109,7 @@ export interface OxTreeRendererProps {
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
 export function OxTreeRenderer({ doc, directives, interactive }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
-  return <>{renderNodes(doc.children, { directives, definitions, interactive })}</>;
+  return <>{renderBlockNodes(doc.children, { directives, definitions, interactive })}</>;
 }
 
 interface RenderCtx {
@@ -129,6 +130,32 @@ function collectDefinitions(doc: OxDocument): Map<string, Definition> {
 
 function renderNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode {
   return (nodes as RootContent[]).map((node, i) => renderNode(node, i, ctx));
+}
+
+/** Same as `renderNodes`, but for BLOCK-level sibling lists specifically —
+ * inserts a spacer for each blank line beyond the one CommonMark already
+ * requires to separate two blocks (`countExtraBlankLines`, shared with
+ * `OxEditor`'s Editing-mode import so both surfaces agree). Without this,
+ * "1 blank line" and "5 blank lines" between two paragraphs render byte-
+ * identically — confirmed regression, see the oxmarkdown skill's TODO 10.
+ * Only meaningful for block content (root children, a blockquote's/
+ * container directive's children, ...) — inline phrasing content (a
+ * paragraph's own children) doesn't have this concept and should keep
+ * using plain `renderNodes`. */
+function renderBlockNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode {
+  const list = nodes as RootContent[];
+  const out: ReactNode[] = [];
+  for (let i = 0; i < list.length; i++) {
+    const node = list[i];
+    if (i > 0) {
+      const extra = countExtraBlankLines(list[i - 1], node);
+      for (let s = 0; s < extra; s++) {
+        out.push(<div key={`spacer-${i}-${s}`} className="ox-blank-line-spacer" aria-hidden="true" />);
+      }
+    }
+    out.push(renderNode(node, i, ctx));
+  }
+  return out;
 }
 
 const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
@@ -214,7 +241,7 @@ function renderNode(node: any, key: number, ctx: RenderCtx): ReactNode {
     }
 
     case "blockquote":
-      return <blockquote key={key}>{renderNodes(node.children, ctx)}</blockquote>;
+      return <blockquote key={key}>{renderBlockNodes(node.children, ctx)}</blockquote>;
 
     case "list":
       return renderList(node, key, ctx);
@@ -259,7 +286,7 @@ function renderList(node: any, key: number, ctx: RenderCtx): ReactNode {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderListItem(node: any, key: number, ctx: RenderCtx): ReactNode {
   if (node.checked == null) {
-    return <li key={key}>{renderNodes(node.children, ctx)}</li>;
+    return <li key={key}>{renderBlockNodes(node.children, ctx)}</li>;
   }
 
   // Task item: unwrap the first paragraph's inline content into the label
@@ -282,7 +309,7 @@ function renderListItem(node: any, key: number, ctx: RenderCtx): ReactNode {
       <span className={`ox-task-text${node.checked ? " ox-task-text--checked" : ""}`}>
         {renderNodes(labelChildren, ctx)}
       </span>
-      {rest.length > 0 && renderNodes(rest, ctx)}
+      {rest.length > 0 && renderBlockNodes(rest, ctx)}
     </li>
   );
 }
@@ -360,7 +387,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
   const renderer = ctx.directives?.[node.name];
 
   if (node.type === "containerDirective") {
-    const rendered = <Fragment key="inner">{renderNodes(node.children, ctx)}</Fragment>;
+    const rendered = <Fragment key="inner">{renderBlockNodes(node.children, ctx)}</Fragment>;
     // Unregistered container name: still show the content, just without
     // whatever wrapper the registry would have added — matches how an
     // unrecognized HTML element degrades to its children in the browser.

@@ -26,7 +26,7 @@
  * plugin code required.
  */
 
-import { createElement, useContext, useEffect, useMemo, type ReactElement } from "react";
+import { createElement, Fragment, useContext, useEffect, useMemo, type ReactElement } from "react";
 import {
   DecoratorNode,
   $getNodeByKey,
@@ -319,5 +319,78 @@ function OxOpaqueDecorator({
       <OxStaticNodes nodes={[mdastNode]} />
     </span>
   );
+}
+
+// ── OxBlankLinesNode ──────────────────────────────────────────
+// Represents "N extra blank lines were here" as ONE atomic unit —
+// deliberately NOT as N empty `ParagraphNode`s. A real Lexical element
+// always gets its own default blank-line join on EACH side when exported,
+// so a single empty paragraph between two real blocks serializes to 3
+// blank lines, not 1 (confirmed directly) — representing a gap as a
+// discrete node it always inherits that overhead, twice. This node instead
+// carries the count as plain data and is consumed specially by
+// `exportOxDocument` (`editingTransforms.ts`), which never emits it as a
+// real mdast node — it turns the count into a custom `join` passed to
+// `serializeOxDocument`, `mdast-util-to-markdown`'s own real mechanism for
+// controlling exactly how many blank lines separate two specific siblings.
+
+export type SerializedOxBlankLinesNode = Spread<{ count: number }, SerializedLexicalNode>;
+
+export class OxBlankLinesNode extends DecoratorNode<ReactElement> {
+  __count: number;
+
+  static getType(): string {
+    return "ox-blank-lines";
+  }
+  static clone(node: OxBlankLinesNode): OxBlankLinesNode {
+    return new OxBlankLinesNode(node.__count, node.__key);
+  }
+  constructor(count: number, key?: NodeKey) {
+    super(key);
+    this.__count = count;
+  }
+
+  isInline(): boolean {
+    return false;
+  }
+
+  createDOM(_config: EditorConfig): HTMLElement {
+    const el = document.createElement("div");
+    el.contentEditable = "false";
+    return el;
+  }
+  updateDOM(): false {
+    return false;
+  }
+
+  getCount(): number {
+    return this.__count;
+  }
+
+  decorate(): ReactElement {
+    return createElement(
+      Fragment,
+      null,
+      ...Array.from({ length: this.__count }, (_unused, i) =>
+        createElement("div", { key: i, className: "ox-blank-line-spacer", "aria-hidden": true }),
+      ),
+    );
+  }
+
+  exportJSON(): SerializedOxBlankLinesNode {
+    return { type: "ox-blank-lines", version: 1, count: this.__count };
+  }
+  static importJSON(serialized: SerializedOxBlankLinesNode): OxBlankLinesNode {
+    return new OxBlankLinesNode(serialized.count);
+  }
+}
+
+export function $createOxBlankLinesNode(count: number): OxBlankLinesNode {
+  return new OxBlankLinesNode(count);
+}
+export function $isOxBlankLinesNode(
+  node: LexicalNode | null | undefined,
+): node is OxBlankLinesNode {
+  return node instanceof OxBlankLinesNode;
 }
 

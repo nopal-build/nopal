@@ -47,6 +47,7 @@ import {
   $createHorizontalRuleNode,
   $isHorizontalRuleNode,
 } from "@lexical/react/LexicalHorizontalRuleNode";
+import type { Join } from "mdast-util-to-markdown";
 import type {
   BlockContent,
   Definition,
@@ -57,8 +58,15 @@ import type {
   RootContent,
   Yaml,
 } from "mdast";
-import { getFrontmatterNode, type OxDocument } from "./document";
-import { $createOxDirectiveNode, $createOxOpaqueNode, $isOxDirectiveNode, $isOxOpaqueNode } from "./editingNodes";
+import { countExtraBlankLines, getFrontmatterNode, type OxDocument } from "./document";
+import {
+  $createOxBlankLinesNode,
+  $createOxDirectiveNode,
+  $createOxOpaqueNode,
+  $isOxBlankLinesNode,
+  $isOxDirectiveNode,
+  $isOxOpaqueNode,
+} from "./editingNodes";
 
 // ── Import: mdast -> Lexical ────────────────────────────────────────────────
 
@@ -86,14 +94,32 @@ export function importOxDocument(doc: OxDocument): ImportResult {
   const bodyChildren = doc.children.filter(
     (c) => c.type !== "yaml" && c.type !== "definition",
   );
-  const lexicalNodes = bodyChildren
-    .map((c) => convertBlock(c, defsByIdentifier))
-    .filter((n): n is LexicalNode => n != null);
+  const lexicalNodes = convertBlockList(bodyChildren, defsByIdentifier);
 
   return { lexicalNodes, aside: { frontmatter, definitions } };
 }
 
 type DefMap = Map<string, Definition>;
+
+/** Converts a BLOCK-level sibling list, inserting an `OxBlankLinesNode` for
+ * each gap that has more than the one blank line CommonMark already
+ * requires to separate two blocks — see `countExtraBlankLines` and
+ * `editingNodes.tsx`'s header for why that's a dedicated node instead of
+ * empty `ParagraphNode`s. Used for root-level content and any other block-
+ * level children list (a blockquote's, ...). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function convertBlockList(nodes: readonly any[], defs: DefMap): LexicalNode[] {
+  const out: LexicalNode[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    if (i > 0) {
+      const extra = countExtraBlankLines(nodes[i - 1], nodes[i]);
+      if (extra > 0) out.push($createOxBlankLinesNode(extra));
+    }
+    const converted = convertBlock(nodes[i], defs);
+    if (converted) out.push(converted);
+  }
+  return out;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function convertBlock(node: any, defs: DefMap): LexicalNode | null {
@@ -106,14 +132,8 @@ function convertBlock(node: any, defs: DefMap): LexicalNode | null {
       return $createHeadingNode(tag).append(...convertInline(node.children, defs));
     }
 
-    case "blockquote": {
-      const quote = $createQuoteNode();
-      for (const child of node.children) {
-        const converted = convertBlock(child, defs);
-        if (converted) quote.append(converted);
-      }
-      return quote;
-    }
+    case "blockquote":
+      return $createQuoteNode().append(...convertBlockList(node.children, defs));
 
     case "code": {
       const code = $createCodeNode(node.lang ?? undefined);
@@ -248,14 +268,25 @@ function applyMarks(textNode: TextNode, marks: readonly TextFormatType[]): TextN
   return node;
 }
 
-// ── Export: Lexical -> mdast ────────────────────────────────────────────────
+// ── Export: Lexical -> mdast ──────────────────────────────────────────
+// `OxBlankLinesNode` is deliberately never emitted as a real mdast node
+// here (see `editingNodes.tsx`'s header for why) — it's stripped out and
+// recorded in `gapMap` instead (keyed by the mdast node that ends up
+// AFTER the gap), which becomes a custom `join` passed to
+// `serializeOxDocument`. That's `mdast-util-to-markdown`'s own real
+// mechanism for controlling exactly how many blank lines separate two
+// specific siblings — the only thing that can actually produce an even
+// blank-line count, which no arrangement of real empty nodes can.
 
-export function exportOxDocument(root: RootNode, aside: AsideContent): OxDocument {
-  const body = root
-    .getChildren()
-    .map((n) => exportBlock(n))
-    .filter((n): n is BlockContent => n != null);
-  return {
+export interface ExportResult {
+  doc: OxDocument;
+  join: Join;
+}
+
+export function exportOxDocument(root: RootNode, aside: AsideContent): ExportResult {
+  const gapMap = new WeakMap<object, number>();
+  const body = exportBlockList(root.getChildren(), gapMap);
+  const doc: OxDocument = {
     type: "root",
     children: [
       ...(aside.frontmatter ? [aside.frontmatter] : []),
@@ -263,10 +294,35 @@ export function exportOxDocument(root: RootNode, aside: AsideContent): OxDocumen
       ...aside.definitions,
     ],
   };
+  const join: Join = (_left, right) => gapMap.get(right as object);
+  return { doc, join };
+}
+
+/** Exports a BLOCK-level sibling list, consuming any `OxBlankLinesNode`s
+ * along the way into `gapMap` instead of emitting them — see this
+ * section's header. Used for root-level content and any other block-level
+ * children list (a blockquote's, ...), mirroring `convertBlockList` on
+ * the import side. */
+function exportBlockList(nodes: LexicalNode[], gapMap: WeakMap<object, number>): BlockContent[] {
+  const out: BlockContent[] = [];
+  let pendingExtra = 0;
+  for (const node of nodes) {
+    if ($isOxBlankLinesNode(node)) {
+      pendingExtra += node.getCount();
+      continue;
+    }
+    const exported = exportBlock(node, gapMap);
+    if (exported) {
+      if (pendingExtra > 0) gapMap.set(exported, 1 + pendingExtra);
+      pendingExtra = 0;
+      out.push(exported);
+    }
+  }
+  return out;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function exportBlock(node: LexicalNode): any {
+function exportBlock(node: LexicalNode, gapMap: WeakMap<object, number>): any {
   if ($isOxDirectiveNode(node) && !node.isInline()) return node.getMdastNode();
   if ($isOxOpaqueNode(node) && !node.isInline()) return node.getMdastNode();
   if ($isHorizontalRuleNode(node)) return { type: "thematicBreak" };
@@ -283,10 +339,7 @@ function exportBlock(node: LexicalNode): any {
   if ($isQuoteNode(node)) {
     return {
       type: "blockquote",
-      children: node
-        .getChildren()
-        .map((c) => exportBlock(c))
-        .filter(Boolean),
+      children: exportBlockList(node.getChildren(), gapMap),
     };
   }
   if ($isListNode(node)) {
@@ -295,7 +348,7 @@ function exportBlock(node: LexicalNode): any {
       ordered: node.getListType() === "number",
       start: node.getListType() === "number" ? node.getStart() : null,
       spread: false,
-      children: node.getChildren().map((li) => exportListItem(li)),
+      children: node.getChildren().map((li) => exportListItem(li, gapMap)),
     };
   }
   if ($isElementNode(node) && !node.isInline()) {
@@ -307,7 +360,7 @@ function exportBlock(node: LexicalNode): any {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function exportListItem(li: any): MdastListItem {
+function exportListItem(li: any, gapMap: WeakMap<object, number>): MdastListItem {
   const checked = li.getChecked() ?? null;
   const children = li.getChildren() as LexicalNode[];
   const inlineChildren: LexicalNode[] = [];
@@ -324,7 +377,7 @@ function exportListItem(li: any): MdastListItem {
     itemChildren.push({ type: "paragraph", children: exportInline(inlineChildren) } as BlockContent);
   }
   for (const block of blockChildren) {
-    const exported = exportBlock(block);
+    const exported = exportBlock(block, gapMap);
     if (exported) itemChildren.push(exported);
   }
   return { type: "listItem", checked, spread: false, children: itemChildren };

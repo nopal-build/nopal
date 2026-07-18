@@ -22,7 +22,7 @@
  */
 
 import { fromMarkdown } from "mdast-util-from-markdown";
-import { toMarkdown } from "mdast-util-to-markdown";
+import { toMarkdown, type Join } from "mdast-util-to-markdown";
 import { directive } from "micromark-extension-directive";
 import {
   directiveFromMarkdown,
@@ -111,7 +111,7 @@ export function parseOxDocument(markdown: string): OxDocument {
   });
 }
 
-export function serializeOxDocument(doc: OxDocument): string {
+export function serializeOxDocument(doc: OxDocument, extraJoin?: Join): string {
   return toMarkdown(doc, {
     extensions: [
       directiveToMarkdown(),
@@ -122,5 +122,32 @@ export function serializeOxDocument(doc: OxDocument): string {
     fences: true,
     incrementListMarker: false,
     listItemIndent: "one",
+    // `OxEditor`'s Editing mode passes a custom join to restore extra
+    // blank-line gaps it tracked separately (see `editingTransforms.ts`) —
+    // see `countExtraBlankLines` below for why representing a gap as a real
+    // empty node (an empty paragraph) doesn't work: every block-level mdast
+    // node still gets its own default 1-blank-line join on each side, so a
+    // single empty paragraph between two real blocks serializes to 3 blank
+    // lines, not 1 (confirmed directly, not assumed).
+    join: extraJoin ? [extraJoin] : undefined,
   });
+}
+
+/** How many blank lines BEYOND the one CommonMark already requires to
+ * separate two blocks sat between them in the original source — using each
+ * node's real `position` (line numbers survive parsing even though the AST
+ * itself has no "blank line" node type; see the oxmarkdown skill's TODO 10).
+ * Shared by `OxRenderer`'s static spacer rendering and `OxEditor`'s Editing-
+ * mode import, so both surfaces treat "how many blank lines were here" the
+ * same way. Returns 0 (not negative) when nodes are missing position info
+ * or the gap is at/under the ordinary minimum. */
+export function countExtraBlankLines(
+  prev: { position?: { end: { line: number } } },
+  next: { position?: { start: { line: number } } },
+): number {
+  const prevPos = prev.position;
+  const nextPos = next.position;
+  if (!prevPos || !nextPos) return 0;
+  const blankLines = nextPos.start.line - prevPos.end.line - 1;
+  return Math.max(0, blankLines - 1);
 }

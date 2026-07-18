@@ -494,17 +494,59 @@ text sizes) before committing.
      CodeMirror 6's and ProseMirror's history modules are open-source
      references too if a fully custom editor is ever built) — came for
      free by wiring up `<HistoryPlugin />` in step 4, not a separate build.
-10. **Extra blank lines between paragraphs are lost — confirmed regression,
-    not yet fixed.** Standard CommonMark parsing treats "1 blank line" and
-    "5 blank lines" between two blocks identically, discarding the count
-    before `OxRenderer` ever sees it (verified directly: filling the
-    playground textarea with 1 vs. 3 blank lines produces byte-identical
-    rendered layout). The old `nopalEditorState.ts` special-cased this (an
-    empty `ProseNode` per extra blank line); the mdast model needs the same
-    idea, using each node's `position.start.line`/`end.line` to detect a gap
-    larger than the minimum and render spacer paragraphs for the
-    difference. Deferred — doesn't block step 2, but real and worth fixing
-    before this replaces the old system for real editing.
+10. **Extra blank lines between paragraphs — DONE, in two real passes, not
+    one.** First pass only fixed `OxRenderer`'s static path (spacer `<div>`s
+    inserted via `renderBlockNodes`, using `position.start.line`/`end.line`
+    gaps — `oxmarkdown/document.ts`'s `countExtraBlankLines`, shared so
+    every consumer agrees). That turned out to be incomplete — caught by
+    Gerald testing Editing mode directly, not by us finding it first:
+    - **Editing-mode import needed the same fix independently** — the
+      static-renderer fix never touched `importOxDocument`, so opening ANY
+      existing markdown in Editing mode still collapsed every gap to zero,
+      regardless of source. Fixed with `convertBlockList` (import) and
+      `exportBlockList` (export), both in `editingTransforms.ts`, mirroring
+      the static renderer's gap detection.
+    - **Found something deeper while fixing that: representing a gap as an
+      empty `ParagraphNode` is the WRONG data model, not just unfinished.**
+      CommonMark has no "blank line" node type at all — blank lines are
+      pure whitespace between blocks, nothing more. A real Lexical element
+      always gets its own default 1-blank-line join on EACH side when
+      serialized, so one empty paragraph between two real blocks came out
+      as 3 blank lines, not 1 (confirmed directly) — and no arrangement of
+      empty paragraphs can ever produce an EVEN blank-line count (always
+      2K+1 for K empty paragraphs). Fixed properly with a dedicated
+      `OxBlankLinesNode` (`editingNodes.tsx`) that carries the count as
+      plain data and is never emitted as a real mdast node — export turns
+      it into a custom `join` function passed to `serializeOxDocument`,
+      `mdast-util-to-markdown`'s own real mechanism for controlling exactly
+      how many blank lines separate two specific siblings. Verified with
+      exact round-trips (3 blank lines in → 3 out, including nested inside
+      a blockquote), not just "looks right."
+    - **Found a THIRD thing while verifying the fix visually: an ordinary
+      SINGLE blank line showed zero visual gap, everywhere, always.**
+      `oxmarkdown.css` gives paragraphs/lists `margin: 0` deliberately (each
+      block's own `line-height` was assumed to carry rhythm on its own) —
+      but that means the spacer mechanism above (which only ever adds
+      space for EXTRA blank lines beyond the default one) had nothing to
+      build on for the ordinary, default case. Every other markdown
+      renderer shows SOME gap for a plain one-blank-line paragraph break;
+      this one showed none. Fixed with a CSS rule giving every block-level
+      sibling (past the first) one grid unit of margin-top by default —
+      `.ox-content > *:not(:first-child)`, plus the same for a blockquote's
+      children and for `.ox-editing-surface` specifically (Editing mode's
+      real content sits two DOM levels below `.ox-content`, not as its
+      direct child, so the first selector alone didn't reach it — confirmed
+      by checking computed `margin-top`, not assumed). `:not(:first-child)`
+      instead of the equivalent `* + *` on purpose: a plain `* + *` has
+      LOWER specificity than the existing `margin: 0` rules and silently
+      lost to them (confirmed directly — computed `margin-top` was still
+      `0px` before this fix); `:not(:first-child)` carries a class's worth
+      of specificity, enough to win.
+    - **Known, deliberate gap, not fixed**: a container directive's own
+      children still rely on whatever wrapper its registry renderer
+      provides for this default margin — there's no single reliable CSS
+      selector for arbitrary caller-authored markup. Revisit if a real
+      directive with multi-block content actually needs it.
 
 ## Build plan — where to start
 

@@ -235,8 +235,8 @@ function MarkdownSyncPlugin({
       // changed.
       if (dirtyElements.size === 0 && dirtyLeaves.size === 0) return;
       editorState.read(() => {
-        const doc = exportOxDocument($getRoot(), asideRef.current);
-        const next = serializeOxDocument(doc);
+        const { doc, join } = exportOxDocument($getRoot(), asideRef.current);
+        const next = serializeOxDocument(doc, join);
         lastEmittedRef.current = next;
         onChange(next);
       });
