@@ -375,6 +375,30 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "Blank lines: three real bugs deep, not one — found by Gerald testing, not by us",
+    body: (
+      <>
+        Reported as "collapsing new lines" while testing Editing mode directly — turned out
+        to be three separate bugs stacked on top of each other. (1) The static-renderer spacer
+        fix from the last decision-log entry never touched <strong>Editing-mode import</strong>{" "}
+        at all, so opening existing markdown there still collapsed every gap to zero regardless
+        of source. (2) Fixing that surfaced something deeper: an empty <code>ParagraphNode</code>{" "}
+        is the WRONG way to represent "N blank lines" — CommonMark has no blank-line node type,
+        and a real Lexical element always gets its own default join on EACH side, so one empty
+        paragraph between two blocks serialized as 3 blank lines, not 1 (confirmed directly).
+        Fixed with a dedicated <code>OxBlankLinesNode</code> that's never emitted as a real mdast
+        node — export turns its count into a custom <code>join</code> function,{" "}
+        <code>mdast-util-to-markdown</code>'s own real mechanism for exact gaps between two
+        specific siblings. Verified
+        with exact round-trips this time, not eyeballing. (3) Still didn't look right after all
+        that — a single ordinary blank line showed ZERO visual gap, everywhere, always, because
+        paragraphs/lists have <code>margin: 0</code> by design. Every other markdown renderer
+        shows some gap for a plain paragraph break; fixed with a CSS rule giving every block
+        sibling one grid unit of margin by default, with extra blank lines stacking more on top.
+      </>
+    ),
+  },
 ];
 
 // ─── Sample content for the playground ────────────────────────────────────────────────
