@@ -158,6 +158,7 @@ export default function FruitsStyles() {
             ["#collections", "Collections"],
             ["#overlays", "Overlays"],
             ["#menus", "Menus"],
+            ["/fruits/styles/oxmarkdown", "OxMarkdown →"],
           ].map(([href, label]) => (
             <a
               key={href}

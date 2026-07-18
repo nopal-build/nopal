@@ -467,6 +467,17 @@ text sizes) before committing.
    ProseMirror's history modules are open-source references too if we go
    fully custom). Bounded, known work, not a research problem — treat it as
    part of whichever foundation gets picked in TODO 1, not a separate build.
+10. **Extra blank lines between paragraphs are lost — confirmed regression,
+    not yet fixed.** Standard CommonMark parsing treats "1 blank line" and
+    "5 blank lines" between two blocks identically, discarding the count
+    before `OxRenderer` ever sees it (verified directly: filling the
+    playground textarea with 1 vs. 3 blank lines produces byte-identical
+    rendered layout). The old `nopalEditorState.ts` special-cased this (an
+    empty `ProseNode` per extra blank line); the mdast model needs the same
+    idea, using each node's `position.start.line`/`end.line` to detect a gap
+    larger than the minimum and render spacer paragraphs for the
+    difference. Deferred — doesn't block step 2, but real and worth fixing
+    before this replaces the old system for real editing.
 
 ## Build plan — where to start
 
