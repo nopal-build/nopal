@@ -65,7 +65,17 @@
     --ox-color-accent: var(--purple-light, #a78bfa);
     --ox-color-subtle: var(--text-subtle-dark, #c8b8ce);
     --ox-color-grid-dot: var(--dark-midground, #2a2030);
-    --ox-color-code-bg: var(--dark-midground, #2a2030);
+    /* NOT `--dark-midground` (#6d6e99) — found by checking actual computed
+       colors, not just eyeballing a screenshot: nopal's real `--purple-light`
+       (#7f5b8b, this file's own `--ox-color-accent`) and `--dark-midground`
+       are two similarly-toned mid purples. That's an unrelated, harmless
+       coincidence almost everywhere `--ox-color-code-bg` is used (plain
+       `--ox-color-text` on it reads fine) — except `.ox-popover-title`,
+       which deliberately renders IN `--ox-color-accent` ON this background,
+       where the near-identical tone collapses to low contrast. Genuinely
+       darker fixes it for that one case without touching anything else
+       that depends on `--ox-color-code-bg`. */
+    --ox-color-code-bg: var(--dark-farground, #221a28);
     --ox-color-border: rgba(255, 255, 255, 0.14);
     --ox-color-unknown: var(--red-light, #f6c8c3);
   }
@@ -410,6 +420,143 @@
    section. Outline, not a border, so it doesn't shift layout on select. */
 
 .ox-selected {
+  background: var(--ox-color-selected-bg);
+}
+
+/* ── Editing mode: the contentEditable surface itself ──────────────────── */
+/* `OxEditor` (`mode="editing"`) renders Lexical's real contentEditable
+   inside the SAME `.ox-content` wrapper Interacting/static rendering uses,
+   so headings/lists/blockquotes/links above all apply unmodified — Lexical
+   produces the same tag shapes (`<h1>`, `<ul><li>`, ...) for those. Only
+   things with no static-rendering equivalent (the caret surface itself, the
+   checklist's native DOM shape, code blocks) need rules here. */
+
+.ox-editing-surface {
+  outline: none;
+  min-height: calc(var(--ox-grid) * 3);
+}
+.ox-editing-placeholder {
+  position: absolute;
+  top: 8px;
+  left: var(--ox-grid);
+  color: var(--ox-color-subtle);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── Editing mode: checklist ───────────────────────────────────────────── */
+/* `@lexical/list`'s native checklist shape differs from Interacting mode's
+   static markup: there's no separate `.ox-task-checkbox` glyph element —
+   the `<li role="checkbox">` itself IS the checkbox (see `registerCheckList`
+   in `@lexical/list`), with the label as its direct text content. Visually
+   matched to the static glyph (same size/border/checkmark), not a literal
+   DOM reuse. Both classes below also satisfy `.ox-task-item`, so the plain
+   bullet-marker rule above (`ul > li:not(.ox-task-item)::before`) correctly
+   skips checklist items — see `OxEditor.tsx`'s Lexical theme config, which
+   is what actually assigns these classes. */
+.ox-content .ox-task-item-editing--checked,
+.ox-content .ox-task-item-editing--unchecked {
+  position: relative;
+  padding-left: var(--ox-grid);
+  line-height: var(--ox-grid);
+  outline: none;
+}
+/* `left: 0` (not centered in the grid cell, unlike the static
+   `.ox-task-checkbox`) on purpose: `@lexical/list`'s own click-to-toggle
+   hit-test (`handleCheckItemEvent` in `@lexical/list`) reads THIS
+   pseudo-element's computed `width` and checks the click's x-position
+   against `[li.left, li.left + width]` — if the glyph doesn't actually
+   start at the `<li>`'s left edge, clicks land outside where Lexical
+   thinks the checkbox is and silently do nothing (found by testing a real
+   click, not assumed). */
+.ox-content .ox-task-item-editing--checked::before,
+.ox-content .ox-task-item-editing--unchecked::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 23px;
+  height: 23px;
+  border-radius: 5px;
+  border: 2.5px solid var(--ox-color-accent);
+  box-sizing: border-box;
+}
+.ox-content .ox-task-item-editing--checked::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 23px;
+  height: 23px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-size: calc(100% - 3px);
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.ox-content .ox-task-item-editing--checked {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.ox-content .ox-task-item-editing--checked:focus,
+.ox-content .ox-task-item-editing--unchecked:focus {
+  background: var(--ox-color-selected-bg);
+}
+
+/* ── Editing mode: code blocks ─────────────────────────────────────────── */
+/* `@lexical/code`'s `CodeNode` always renders a `<code>` element, even for
+   a block — this class (set via the Lexical theme's `code` key) overrides
+   the plain inline-`code` rule above with block padding/background,
+   matching `.ox-code-block`'s static look. No syntax highlighting on
+   purpose — that's what pulled in a full CodeMirror/Prism dependency in
+   the old system; see the oxmarkdown skill's TODO 1. */
+.ox-content code.ox-code-block-editing {
+  display: block;
+  background: var(--ox-color-code-bg);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 8px 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+}
+
+/* ── Editing mode: opaque passthrough (tables, raw HTML, ...) ──────────── */
+/* See `oxmarkdown/editingNodes.ts` — content with no rich editing UI yet,
+   shown read-only (via the same static renderer `OxRenderer` uses) rather
+   than silently dropped. */
+.ox-opaque {
+  cursor: default;
+}
+.ox-opaque--block {
+  display: block;
+}
+
+/* ── Editing mode: slash-command menu ──────────────────────────────────── */
+/* Reuses `.ox-popover`'s box styling (position/portal handled the same
+   way — see `SlashCommandPlugin.tsx`) with its own list-of-buttons layout. */
+.ox-slash-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  padding: 4px;
+}
+.ox-slash-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ox-slash-menu-item:hover {
   background: var(--ox-color-selected-bg);
 }
 

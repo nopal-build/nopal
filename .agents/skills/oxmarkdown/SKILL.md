@@ -288,63 +288,79 @@ text sizes) before committing.
 
 ## Open TODOs — deliberately unresolved, review before building
 
-1. **Foundation review** — now backed by real measurements, not just
-   theory:
+1. **Foundation for Editing mode — RESOLVED: trimmed Lexical.** Backed by
+   two real spikes (both built, verified with real clicks/keypresses, then
+   deleted per the temp-code convention — findings below are what survive):
    - **Lexical isn't used everywhere today.** Only the full Editing surface
      (`MdxEditorClient`/`MdxEditorEditable`) is built on `@mdxeditor/editor`
-     (Lexical). Interacting — today's View + Workable — is *already*
-     entirely hand-rolled (`nopalEditorState.ts` + `MdxRenderer.tsx`, zero
-     Lexical). So "roll our own" isn't hypothetical for half the system —
-     it's already the shipped approach there. The genuinely open question
-     is narrower: for *Editing* specifically (typing, caret, structural
-     edits), keep Lexical or go custom?
-   - **Real bundle cost, measured** (production build, `npm run build`): the
-     lazy-loaded Editing chunk (`MdxEditorEditable`) is **1.12 MB raw /
-     361.56 KB gzipped** — versus the render/interact path (`MdxRenderer`,
-     loaded far more often across the app) at 364.72 KB raw / 101.66 KB
-     gzipped. The gap is real, not negligible.
-   - **Why it's that big**: `@mdxeditor/editor`'s transitive dependencies
-     include a full CodeMirror 6 (`@codemirror/language-data` alone bundles
-     grammars for dozens of languages), `@codesandbox/sandpack-react` (a
-     live code-sandbox library), most of Radix UI (for MDXEditor's own
-     toolbar/dialogs, which nopal doesn't use visually — it restyles/hides
-     them), a table plugin, `react-hook-form` + `js-yaml` (link dialog +
-     frontmatter UI), and `unidiff` (a diff/merge view). Most of this isn't
-     earning its keep for nopal's actual feature set.
-   - **Already-proven extension points — real signal, mixed verdict**:
-     nopal has already written custom Lexical node plugins
-     (`wikiLinkPlugin.tsx`, `csvRefPlugin.tsx`, `refPopoverPlugin.tsx`) to
-     hook `[[wiki-links]]` and CSV chips into the Editing surface. Per
-     Gerald: building them **wasn't hard** — the Lexical plugin API itself
-     isn't the blocker — but the *results* are **imperfect**, which gives
-     pause. Open follow-up, not yet answered: is the imperfection coming
-     from Lexical's plugin model itself (hard to get the last 20% right,
-     even though the first 80% is easy), or from other factors — time/
-     polish, or the unevenness of mixing real Lexical nodes (wiki-links)
-     with regex-based interactables (csv-key, directives) in the same
-     document? Worth digging into *why* it's imperfect before deciding
-     whether that's a Lexical problem or a "we didn't finish polishing it"
-     problem — those point to very different conclusions for `OxEditor`.
-   - **Working hypothesis, not a decision**: a *trimmed* Lexical config
-     (drop CodeMirror/Sandpack/table/link-dialog, keep only
-     `@lexical/react` + rich-text + list + link + selection + utils + our
-     own plugins) would likely shrink that 361 KB substantially — plausibly
-     to a fraction of it — without giving up Lexical's mobile/IME/selection
-     handling, which is the genuinely hard part to rebuild from scratch
-     (contentEditable across iOS Safari/Android Chrome is a well-known
-     minefield — the actual reason mature editor frameworks like
-     Lexical/ProseMirror/Slate exist at all). A fully custom contentEditable
-     implementation carries real, ongoing risk there regardless of how
-     well-scoped our interactables model is.
-   - **Next step, not a conclusion**: prototype the interactables model
-     (select-as-unit, backspace-to-revert) two ways — (a) a trimmed Lexical
-     config with custom decorator-like nodes, (b) a from-scratch surface,
-     possibly `<textarea>`-based rather than contentEditable-based, to get
-     native mobile text input for free and only hand-build the "selection
-     skips over/selects interactables as units" logic on top of
-     `selectionStart`/`selectionEnd`. Compare real bundle size AND
-     implementation pain from both spikes before deciding — we now have a
-     concrete way to measure this instead of deciding from theory alone.
+     (Lexical). Interacting — today's View + Workable, and now OxEditor's
+     Interacting mode too — is entirely hand-rolled, zero Lexical. So this
+     decision only ever affected Editing mode specifically.
+   - **Prototype A — trimmed Lexical, real measurement.** Built one
+     interactable (a decorator node checkbox) with select-as-unit and
+     backspace-to-revert on a minimal config (`@lexical/react` plain-text +
+     history + node-selection only — no rich-text, list, link, CodeMirror,
+     Sandpack, Radix, or table plugin). Production build showed the shared
+     Lexical-core-plus-React-bindings chunk
+     (`useLexicalNodeSelection.prod-*.js`) at **144 KB raw / 47.9 KB
+     gzipped**, with the spike's *own* custom-node code on top of it at just
+     **7.4 KB raw / 2.9 KB gzipped**. That core chunk is already shared with
+     today's `MdxEditorEditable` — it's not new weight during migration, and
+     it's the *only* Lexical weight `OxEditor` would carry once the old fat
+     config is fully retired.
+   - **Where the old 361 KB (now measured at 287 KB gzip, build has since
+     changed) actually goes**: confirmed directly — `MdxEditorEditable`'s own
+     chunk bundles CodeMirror 6, Sandpack, Radix, the table plugin, and the
+     link-dialog/frontmatter form libraries *inline*, separately from the
+     144 KB core-chunk above. None of that is Lexical-the-engine's cost; it's
+     all plugins/UI nopal doesn't visually use. A trimmed config sheds it
+     entirely rather than needing to "shrink" it.
+   - **Prototype B — from-scratch `<textarea>`, real measurement.**
+     Implemented the identical interactable's behavior — arrow-key-onto
+     selects a `[ ]`/`[x]` token as a unit, arrow-past lands the caret
+     cleanly on the far side, first Backspace-approaching-from-the-right
+     selects instead of deleting a character, second Backspace deletes the
+     selected token — entirely via `selectionStart`/`selectionEnd`
+     manipulation in a `keydown` handler, no library. Verified live with
+     Playwright: every step worked exactly as designed. **This part of the
+     interactables model is not hard to hand-roll.**
+   - **Where Prototype B breaks down — the actual deciding factor**: a
+     `<textarea>` can only ever display its own literal text content. There
+     is no way to render an actual checkbox glyph, bold/italic, a directive
+     pill, or the dot grid *inside* the input itself — `[ ]` shown selected
+     is still literally the three characters `[`, ` `, `]`, in the textarea's
+     one uniform font. "Revert to raw text" has no distinct meaning here
+     either, because raw text is all that's ever shown — the two-step
+     Backspace model degrades to plain select-then-delete. Getting real
+     rich rendering on top of a textarea would require a second, absolutely-
+     positioned overlay layer, kept pixel-perfectly in sync with the
+     textarea's scroll position, line-wrapping, and selection on every
+     keystroke — which is not a shortcut around contentEditable's hard
+     parts, it's a *reimplementation* of them, split awkwardly across two
+     DOM layers that both have to agree. That's more risk than
+     contentEditable directly, not less.
+   - **Conclusion: trimmed Lexical.** The interactables model itself is easy
+     either way — that was never the deciding factor. What decides it is
+     that OxMarkdown's whole design language (real checkbox glyphs,
+     directive pills/badges, the dot grid, inline formatting) requires
+     actually rendering non-text UI inline with text, which is precisely
+     what contentEditable-based editors exist to do and precisely what a
+     textarea structurally cannot do. Lexical's mobile/IME/selection
+     handling for contentEditable is the genuinely hard, well-trodden
+     problem (why Lexical/ProseMirror/Slate exist at all) — a trimmed
+     config gets that for a real, now-measured ~48 KB gzip, not the ~287 KB
+     the fat config implied.
+   - **Follow-up on "imperfect" existing plugins — still open, not blocking**:
+     Gerald's read after this spike is that the existing custom Lexical
+     plugins (`wikiLinkPlugin.tsx`, `csvRefPlugin.tsx`, `refPopoverPlugin.tsx`)
+     weren't hard to build, just imperfect — consistent with what the spike
+     found too (getting a decorator node's happy path working was quick;
+     getting Backspace to *fully* suppress native contentEditable behavior
+     needed `event.preventDefault()` plus `COMMAND_PRIORITY_CRITICAL`, or
+     text silently corrupted). Read as "easy to get 80% working, real care
+     needed for the last 20%" rather than a Lexical-specific flaw — worth
+     keeping in mind as a real, recurring cost while building step 4 (full
+     Editing mode), not a one-time toll paid by this spike alone.
 2. **Mobile UX** — some decisions made below, but explicitly flagged for
    active review once real development starts: this is true of the whole
    interactables model to some degree, but mobile specifically is worth
@@ -451,22 +467,33 @@ text sizes) before committing.
    between enabled interactables via Tab/Shift+Tab, standard focus-order
    navigation. Matches ordinary web accessibility expectations (tabbing
    between links/controls on a page you can't edit).
-9. **Undo/revert granularity — decided: atomic units, word-level for typed
-   text.** Reverting an interactable is always one atomic undo step (it's
-   one syntactic unit — a directive's `{attrs}` isn't going to partially
-   revert). For ordinary typed text, undo should coalesce by natural units
-   (word boundaries) rather than one step per keystroke, the way Zed's
-   undo already feels. This is genuinely the standard approach, not an
-   unusual choice: essentially every mature editor (VS Code, Sublime,
-   IntelliJ, Zed, Google Docs, even modern browser `<textarea>`s) groups
-   contiguous typing into undo "runs" and starts a new group on a word/
-   punctuation boundary, a pause, or a non-typing action (arrow key, click,
-   paste). Implementation-wise it's a solved problem with real prior art to
-   copy from (Lexical's own `@lexical/history` package — already a
-   transitive dependency here — implements exactly this; CodeMirror 6's and
-   ProseMirror's history modules are open-source references too if we go
-   fully custom). Bounded, known work, not a research problem — treat it as
-   part of whichever foundation gets picked in TODO 1, not a separate build.
+9. **Undo/revert granularity — DONE, verified against real behavior, one
+   claim corrected.** Reverting an interactable is always one atomic undo
+   step (confirmed in step 4: a directive's Backspace-revert undoes in a
+   single press). For ordinary typed text, `@lexical/history` (already
+   wired in via `<HistoryPlugin />`) handles coalescing automatically —
+   verified directly with real keystrokes, not assumed:
+   - **A continuous typing burst is one undo step, including across word
+     and punctuation boundaries** — typing `"FOO BAR"` or `"foo. bar"`
+     with no pause undoes FULLY in a single press, not one press per word.
+     This corrects the original claim above (word/punctuation boundaries
+     alone do NOT split a group) — the actual mechanism is time/pause-
+     based, not boundary-based, at least for Lexical's default history.
+   - **A real pause, or a non-typing action, DOES start a new group** —
+     confirmed separately: typing `"ABC"`, pausing over a second, then
+     typing `"DEF"` undoes as two steps (DEF first, then ABC); typing
+     `"AAA"`, pressing an arrow key, then typing `"BBB"` with NO pause
+     still undoes as two steps (arrow-key navigation alone breaks the
+     group, same as a real pause would).
+   - **Verdict: no further work needed.** One continuous typing burst as
+     one undo step is standard, expected editor behavior (matches Zed,
+     VS Code, and others closely enough) — the original design intent
+     ("don't undo one keystroke at a time") is fully met; the doc just had
+     the specific mechanism half-wrong. Implementation-wise this remains a
+     solved problem via real prior art (Lexical's own `@lexical/history`;
+     CodeMirror 6's and ProseMirror's history modules are open-source
+     references too if a fully custom editor is ever built) — came for
+     free by wiring up `<HistoryPlugin />` in step 4, not a separate build.
 10. **Extra blank lines between paragraphs are lost — confirmed regression,
     not yet fixed.** Standard CommonMark parsing treats "1 blank line" and
     "5 blank lines" between two blocks identically, discarding the count
@@ -522,16 +549,138 @@ mode, before TODO 1 needs an answer.
    selection inside container directives (TODO 5's default behavior, not
    needed by any real directive yet). Range-selection-deletes-flatly is
    also N/A until there's a text caret to make a range with.
-3. **Foundation spike for Editing mode** — now informed by a real
-   interactables engine from step 2 to test against, not a toy example.
-   Prototype both directions from TODO 1 (trimmed Lexical config vs.
-   from-scratch/textarea-based) implementing the same one real interactable
-   end-to-end, and compare bundle size + how naturally select/revert/act
-   falls out of each. Answer TODO 1 for real, from evidence.
-4. **Full Editing mode** on the chosen foundation — free-form typing,
-   Backspace-revert (TODO 6/9), slash-command insertion, undo coalescing
-   (TODO 9). Should reuse the *same* document model from step 1 — Editing
-   is a strict superset of Interacting, not a parallel implementation.
+3. **DONE — Foundation spike for Editing mode, TODO 1 resolved: trimmed
+   Lexical.** Built and measured both prototypes for real (see TODO 1
+   above for the full write-up), then deleted the spike code per the
+   temp-code convention — findings are preserved in the skill doc and the
+   decision log page, not in leftover throwaway routes. Net result: the
+   select-as-unit/backspace-to-revert mechanics are easy to hand-roll
+   either way, but only a contentEditable-based approach (Lexical) can
+   actually render OxMarkdown's rich inline UI (checkboxes, pills, the dot
+   grid) — a `<textarea>` is permanently limited to showing raw text. A
+   trimmed Lexical config measures at ~48 KB gzip for the engine itself
+   (already-shared, not new weight), a small fraction of the old fat
+   361 KB/287 KB gzip `MdxEditorEditable` chunk, which is almost entirely
+   CodeMirror/Sandpack/Radix/table-plugin weight nopal doesn't visually use
+   — not Lexical's own cost.
+4. **DONE — Full Editing mode**, built on trimmed Lexical
+   (`@lexical/rich-text` + `list` + `link` + `code` + our own nodes).
+   `oxmarkdown/editingTransforms.ts` converts real mdast (from
+   `oxmarkdown/document.ts`, step 1's model) to/from real Lexical nodes —
+   deliberately NOT `@lexical/markdown`'s own parser, so Editing mode
+   reuses the same document model rather than forking it (that package's
+   `TRANSFORMERS` ARE used, but only for live-typing convenience — typing
+   `**x**`/`# `/`> ` auto-formats, same as Notion/Obsidian — since that only
+   ever touches Lexical's own node tree, which the transform layer has to
+   handle regardless of how a node was produced). `oxmarkdown/
+   editingNodes.tsx` adds two decorator classes: `OxDirectiveNode` (reuses
+   `InteractiveDirective` from `OxRenderer.tsx` directly — Interacting and
+   Editing modes render directives through the literal same component) and
+   `OxOpaqueNode`, a lossless passthrough for anything this bridge doesn't
+   map yet (tables, raw HTML, any future mdast node type) — shown read-only
+   via the static renderer rather than silently dropped, and still
+   Backspace-revertible/Delete-removable like a directive. `oxmarkdown/
+   InteractablesPlugin.tsx` implements select-as-unit/Backspace-revert/
+   Delete-remove ONCE, generically, against a small `getRevertText()` duck
+   type both node classes implement — a future `@mention` node gets this
+   for free. `oxmarkdown/SlashCommandPlugin.tsx` adds a minimal `/`
+   command menu (headings, list types, divider, one example directive).
+   Task checklists deliberately use `@lexical/list`'s NATIVE checklist
+   support (`ListItemNode.setChecked`/`CheckListPlugin`) rather than a
+   custom decorator — real Lexical state, not inline text, so Backspace at
+   a checklist item's start correctly falls through to ordinary list-
+   outdent/merge instead of a revert-to-text step that wouldn't mean
+   anything there.
+   - **Verified end-to-end with real clicks/keypresses/round-trips, not
+     just typechecked**: free-form typing and re-serialization; the
+     `**bold**` live shortcut; checklist click-to-toggle; a directive's
+     click-to-select, Backspace-revert, and Delete-remove; undo restoring
+     a reverted directive; arrow-key selecting a block-level directive
+     approached from an adjacent paragraph (crossing a block boundary, not
+     just within one inline run); the `/` slash menu inserting a heading;
+     and a table round-tripping losslessly through `OxOpaqueNode` with zero
+     real Lexical table support.
+   - **Found and fixed, real bugs, not hypothetical**: (1) a plain React
+     `onClick` on a decorator selects it for one render, then Lexical's own
+     click-driven selection sync silently overwrites it back — fixed by
+     intercepting Lexical's own `CLICK_COMMAND` (dispatched through the
+     same pipeline that sync runs in, so returning `true` actually
+     suppresses it) instead of relying on a bare DOM listener. (2)
+     Reverting a BLOCK-level decorator (a leaf/container directive, or an
+     opaque table) to a bare `TextNode` throws — "Only element or decorator
+     nodes can be inserted into the root node" — since its parent (often
+     the root) doesn't accept inline content; fixed by wrapping the
+     reverted text in a paragraph specifically for block-level nodes,
+     inline ones unaffected. (3) The checklist glyph's CSS position has to
+     agree with `@lexical/list`'s own click hit-test (it measures the
+     `::before` pseudo-element's computed width from the `<li>`'s left
+     edge to decide what counts as "clicked the checkbox") — a centered
+     glyph (matching the static mode's visual) silently ate clicks.
+   - **Bundle cost, measured for real** (not the TODO 1 spike's isolated
+     estimate): the demo route's own new code (`OxEditor` + `editingNodes`
+     + `editingTransforms` + both new plugins + the demo page itself) is
+     71 KB raw / **22.7 KB gzip**. The shared Lexical rich-text/list/link/
+     code/markdown vendor chunk it pulls in is 346 KB raw / 107.5 KB gzip
+     — but that chunk is ALREADY shared with the OLD `MdxEditorEditable`
+     too (confirmed by checking its own import graph), so it's not new
+     weight while both systems coexist. Once MdxEditor is fully retired,
+     `OxEditor`'s total realistic cost is roughly 107.5 + 22.7 ≈ **130 KB
+     gzip** — well under half of the old fat `MdxEditorEditable` chunk's
+     287 KB gzip on its own (which didn't even include this shared cost).
+   - **Known, deliberate limitations, not oversights**: a container
+     directive's nested content isn't independently editable in Editing
+     mode yet (renders read-only via the static renderer — same scope line
+     `editingNodes.tsx`'s header calls out); `TabIndentationPlugin` trades
+     away standard Tab-key focus-escape for list-indent convenience (its
+     own doc comment flags the accessibility tradeoff — worth revisiting
+     in the mobile/accessibility pass); checklist visuals are matched, not
+     pixel-identical, to Interacting mode's static rendering (native
+     `@lexical/list` DOM shape genuinely differs from the static markup).
+   - **Refinement pass, before starting step 5** — deliberately paused after
+     step 4 to verify a few claims and sweep for loose ends rather than
+     build straight through on an unreviewed foundation:
+     - **TODO 9 (undo coalescing) verified, one claim corrected**: a
+       continuous typing burst is ONE undo step even across word/
+       punctuation boundaries (typing `"FOO BAR"` or `"foo. bar"` with no
+       pause undoes fully in one press) — `@lexical/history`'s real
+       grouping is time/pause-based and non-typing-action-based, not
+       boundary-based as the original TODO 9 text claimed. A real pause, or
+       any non-typing action (an arrow key), does start a new group. Net
+       effect matches the original design intent either way — no code
+       change, just a corrected mechanism description.
+     - **Found and fixed (dark mode): a popover's own title text was low-
+       contrast against its own background.** `.ox-popover-title` reads
+       `--ox-color-accent`; nopal's real `--purple-light` (accent) and
+       `--dark-midground` (this token's old dark value for
+       `--ox-color-code-bg`) are two similarly-toned mid purples — fine
+       almost everywhere `--ox-color-code-bg` is used (plain text on it
+       reads fine), but exactly wrong for accent-colored text ON it. Found
+       by reading actual computed colors, not eyeballing a screenshot.
+       Fixed by switching `--ox-color-code-bg`'s dark value to the
+       genuinely-darker `--dark-farground`; verified no regression on
+       inline code/code blocks, which also use this token.
+     - **Found and fixed: `OxOpaqueNode` had the exact click-selection bug
+       already fixed on `OxDirectiveNode`, just missed.** Both decorators
+       need the same `CLICK_COMMAND` interception (see the bug write-up
+       above) — it was only applied to one. Extracted into a shared
+       `useSelectDecoratorOnClick` hook so a third decorator can't repeat
+       the same miss. Verified by adding a real table to the live demo
+       (`EDITING_SAMPLE`) and clicking it — which also means the demo now
+       demonstrates `OxOpaqueNode` live, not just via a headless test.
+     - **Found and fixed: the "Divider"/"Note" slash commands left the
+       caret in a dead spot.** They inserted the new block but never moved
+       selection there, so Lexical's default behavior left the caret in
+       whatever empty paragraph the `/` was typed into — ABOVE the newly
+       inserted block, not below it, and typing continued there instead of
+       flowing naturally after the new content. Fixed by always adding a
+       fresh paragraph immediately after the inserted node and selecting
+       it. (The heading/list commands never had this problem —
+       `$setBlocksType`/`$insertList` naturally continue selection in the
+       transformed block itself.)
+     - **Minor cleanup, no behavior change**: removed a dead re-export
+       block in `editingTransforms.ts` (nothing imported it — `OxEditor.tsx`
+       and `SlashCommandPlugin.tsx` both import the node classes/factories
+       directly from `editingNodes.tsx`) and an unnecessary `as never` cast.
 5. **Mobile UX pass** — quick-actions bar, bottom-sheet popovers, grid-sized
    tap targets (see TODO 2). Deliberately last and explicitly a hands-on
    review/iterate pass on real devices, not a spec to implement blind —

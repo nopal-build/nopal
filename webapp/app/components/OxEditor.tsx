@@ -1,27 +1,47 @@
 /**
- * OxEditor — the Interacting-mode (and, eventually, Editing-mode) surface
- * for an OxMarkdown document.
+ * OxEditor — the Interacting-mode AND Editing-mode surface for an
+ * OxMarkdown document, per the `oxmarkdown` skill's "Naming" section (one
+ * component covering both modes via `mode`, replacing the old three
+ * separate MdxEditorClient/Workable/Editable components).
  *
- * One component covering both modes via `mode`, per the `oxmarkdown`
- * skill's "Naming" section — replacing the old three separate
- * MdxEditorClient/Workable/Editable components with one. Only
- * `mode="interacting"` is implemented so far (this is build-plan step 2);
- * `mode="editing"` needs a typing/caret surface, which is step 4, gated
- * behind the Lexical-vs-custom foundation decision (TODO 1). Accepted now
- * for forward API compatibility so call sites don't need to change again
- * when step 4 lands.
+ * `mode="interacting"` (build plan step 2, done first): owns selection +
+ * mutates the exact tree `OxTreeRenderer` renders, entirely hand-rolled,
+ * zero Lexical — see `oxmarkdown/interactive.ts` for why.
  *
- * Owns exactly two pieces of state: which interactable is selected, and the
- * parsed document those interactables mutate. Mutating and re-serializing
- * happens against the SAME parsed tree a render produced — not a fresh
- * re-parse — which is why this renders via `OxTreeRenderer` directly rather
- * than through `OxRenderer` (which parses its own private, unreachable
- * copy). See `oxmarkdown/interactive.ts` for why selection intentionally
- * clears after every mutation.
+ * `mode="editing"` (build plan step 4): a trimmed Lexical config — see the
+ * `oxmarkdown` skill's TODO 1 for why Lexical, and why trimmed (no
+ * CodeMirror/Sandpack/Radix/table-plugin bloat, just rich-text + list +
+ * link + code + our own nodes). Reuses the SAME document model as step 1 —
+ * `oxmarkdown/editingTransforms.ts` converts real mdast to/from real
+ * Lexical nodes; it never uses `@lexical/markdown`'s own parser as the
+ * source of truth (see that file's header for why that distinction
+ * matters). `@lexical/markdown`'s `TRANSFORMERS` ARE used, but only for
+ * their live "typing `**x**` formats it as bold" convenience — that only
+ * ever touches Lexical's own node tree, which `editingTransforms.ts` has
+ * to handle regardless of how a node was produced.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { LexicalComposer, type InitialConfigType } from "@lexical/react/LexicalComposer";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
+import { ContentEditable } from "@lexical/react/LexicalContentEditable";
+import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
+import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
+import { ListPlugin } from "@lexical/react/LexicalListPlugin";
+import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
+import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
+import { HorizontalRulePlugin } from "@lexical/react/LexicalHorizontalRulePlugin";
+import { HorizontalRuleNode } from "@lexical/react/LexicalHorizontalRuleNode";
+import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
+import { MarkdownShortcutPlugin } from "@lexical/react/LexicalMarkdownShortcutPlugin";
+import { TRANSFORMERS } from "@lexical/markdown";
+import { HeadingNode, QuoteNode } from "@lexical/rich-text";
+import { ListNode, ListItemNode } from "@lexical/list";
+import { LinkNode } from "@lexical/link";
+import { CodeNode } from "@lexical/code";
+import { $createParagraphNode, $getRoot } from "lexical";
 import {
   parseOxDocument,
   serializeOxDocument,
@@ -30,24 +50,36 @@ import {
 import type { OxInteractive } from "../oxmarkdown/interactive";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
-import { OxTreeRenderer } from "./OxRenderer";
+import { OxTreeRenderer, DirectiveRegistryContext } from "./OxRenderer";
+import { OxDirectiveNode, OxOpaqueNode } from "../oxmarkdown/editingNodes";
+import {
+  exportOxDocument,
+  importOxDocument,
+  type AsideContent,
+} from "../oxmarkdown/editingTransforms";
+import InteractablesPlugin from "../oxmarkdown/InteractablesPlugin";
+import SlashCommandPlugin from "../oxmarkdown/SlashCommandPlugin";
 import "../styles/oxmarkdown.css";
 
 export interface OxEditorProps {
   markdown: string;
   onChange: (markdown: string) => void;
-  /** See this file's header comment — only "interacting" actually does
-   * anything today. */
   mode: "interacting" | "editing";
   directives?: DirectiveRegistry;
   theme?: OxTheme;
   className?: string;
 }
 
-export default function OxEditor({
+export default function OxEditor(props: OxEditorProps) {
+  if (props.mode === "editing") return <OxEditingSurface {...props} />;
+  return <OxInteractingSurface {...props} />;
+}
+
+// ── Interacting mode ─────────────────────────────────────────────────────
+
+function OxInteractingSurface({
   markdown,
   onChange,
-  mode,
   directives,
   theme,
   className,
@@ -55,14 +87,6 @@ export default function OxEditor({
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
   const [selected, setSelected] = useState<object | null>(null);
   const style = theme ? (themeToStyle(theme) as CSSProperties) : undefined;
-
-  if (mode === "editing" && process.env.NODE_ENV !== "production") {
-    // eslint-disable-next-line no-console
-    console.warn(
-      '[OxEditor] mode="editing" isn\'t implemented yet (oxmarkdown skill, ' +
-        'build plan step 4) — behaving as "interacting".',
-    );
-  }
 
   /** Every mutation follows the same shape: change the tree this render
    * already parsed, serialize THAT tree (not a fresh parse), hand the new
@@ -92,4 +116,132 @@ export default function OxEditor({
       <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} />
     </div>
   );
+}
+
+// ── Editing mode ─────────────────────────────────────────────────────────
+
+/** Maps `@lexical/list`'s checklist classes onto the editing-mode CSS in
+ * `oxmarkdown.css` — see that file's "Editing mode: checklist" section for
+ * why these are visually-matched, not literally the same DOM shape as
+ * Interacting mode's static `.ox-task-checkbox`. Both checked/unchecked
+ * also carry `ox-task-item` so the plain bullet-marker rule's
+ * `:not(.ox-task-item)` exclusion still skips checklist items. */
+const OX_LEXICAL_THEME = {
+  code: "ox-code-block-editing",
+  list: {
+    listitemChecked: "ox-task-item ox-task-item-editing--checked",
+    listitemUnchecked: "ox-task-item ox-task-item-editing--unchecked",
+  },
+};
+
+function OxEditingSurface({
+  markdown,
+  onChange,
+  directives,
+  theme,
+  className,
+}: OxEditorProps) {
+  const initialConfig = useMemo<InitialConfigType>(
+    () => ({
+      namespace: "OxEditor",
+      nodes: [
+        HeadingNode,
+        QuoteNode,
+        ListNode,
+        ListItemNode,
+        LinkNode,
+        CodeNode,
+        HorizontalRuleNode,
+        OxDirectiveNode,
+        OxOpaqueNode,
+      ],
+      theme: OX_LEXICAL_THEME,
+      onError(error: Error) {
+        throw error;
+      },
+    }),
+    [],
+  );
+  const style = theme ? (themeToStyle(theme) as CSSProperties) : undefined;
+
+  return (
+    <div className={`ox-content ox-tokens${className ? ` ${className}` : ""}`} style={style}>
+      <DirectiveRegistryContext.Provider value={directives}>
+        <LexicalComposer initialConfig={initialConfig}>
+          <div style={{ position: "relative" }}>
+            <RichTextPlugin
+              contentEditable={<ContentEditable className="ox-editing-surface" />}
+              placeholder={
+                <div className="ox-editing-placeholder">Start typing — try “/” for commands…</div>
+              }
+              ErrorBoundary={LexicalErrorBoundary}
+            />
+          </div>
+          <HistoryPlugin />
+          <ListPlugin />
+          <CheckListPlugin />
+          <LinkPlugin />
+          <TabIndentationPlugin />
+          <HorizontalRulePlugin />
+          <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
+          <MarkdownSyncPlugin markdown={markdown} onChange={onChange} />
+          <InteractablesPlugin />
+          <SlashCommandPlugin />
+        </LexicalComposer>
+      </DirectiveRegistryContext.Provider>
+    </div>
+  );
+}
+
+/** Bridges the controlled `markdown` string prop to/from Lexical's internal
+ * node tree, via `oxmarkdown/editingTransforms.ts` (real mdast, not
+ * `@lexical/markdown`'s parser — see this file's header). Seeds on mount
+ * and whenever `markdown` changes from OUTSIDE this component; skips
+ * re-seeding when the change is this component's OWN `onChange` echoing
+ * back in (a controlled-input pattern — re-seeding on every keystroke would
+ * blow away Lexical's live selection on each character typed). */
+function MarkdownSyncPlugin({
+  markdown,
+  onChange,
+}: {
+  markdown: string;
+  onChange: (markdown: string) => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+  const asideRef = useRef<AsideContent>({ frontmatter: null, definitions: [] });
+  const lastEmittedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (markdown === lastEmittedRef.current) return;
+    editor.update(() => {
+      const root = $getRoot();
+      root.clear();
+      const doc = parseOxDocument(markdown);
+      const { lexicalNodes, aside } = importOxDocument(doc);
+      asideRef.current = aside;
+      root.append(...(lexicalNodes.length > 0 ? lexicalNodes : [$createParagraphNode()]));
+    });
+    // Only re-seed in response to the `markdown` PROP actually changing
+    // (including the very first mount) — `editor` is stable for the
+    // component's lifetime, so it's safe to omit without masking a real
+    // dependency change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markdown]);
+
+  useEffect(() => {
+    return editor.registerUpdateListener(({ editorState, dirtyElements, dirtyLeaves }) => {
+      // Lexical's update listener also fires for pure selection changes —
+      // only re-serialize (and notify the caller) when content actually
+      // changed.
+      if (dirtyElements.size === 0 && dirtyLeaves.size === 0) return;
+      editorState.read(() => {
+        const doc = exportOxDocument($getRoot(), asideRef.current);
+        const next = serializeOxDocument(doc);
+        lastEmittedRef.current = next;
+        onChange(next);
+      });
+    });
+  }, [editor, onChange]);
+
+  return null;
 }

@@ -18,7 +18,7 @@
  * instead, modeled off the same design language.
  */
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { Definition, RootContent } from "mdast";
@@ -67,6 +67,30 @@ export default function OxRenderer({
       <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} />
     </div>
   );
+}
+
+/** Ambient directive registry for content rendered OUTSIDE `OxTreeRenderer`'s
+ * own render pass — specifically, `OxEditor`'s Editing-mode decorator nodes
+ * (`oxmarkdown/editingNodes.tsx`), which render through Lexical's own tree,
+ * not this file's `renderNodes` walk. Provided once by whichever surface
+ * owns the registry; consumed by anything that needs it without a prop
+ * threaded through Lexical's node model (which only holds plain data, not
+ * arbitrary React props). */
+export const DirectiveRegistryContext = createContext<DirectiveRegistry | undefined>(undefined);
+
+/** Renders a plain list of mdast nodes with the same static logic as
+ * `OxRenderer`/`OxTreeRenderer`, but with no `interactive` — used where
+ * content needs to be visible but isn't (yet) independently editable: a
+ * container directive's children in Editing mode, or an `OxOpaqueNode`'s
+ * passthrough content (see `oxmarkdown/editingNodes.tsx`). */
+export function OxStaticNodes({
+  nodes,
+  directives,
+}: {
+  nodes: readonly unknown[];
+  directives?: DirectiveRegistry;
+}) {
+  return <>{renderNodes(nodes, { directives, definitions: new Map() })}</>;
 }
 
 export interface OxTreeRendererProps {
@@ -373,7 +397,13 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
 // directive name/kind since it only depends on the attrs being a flat
 // key/value map, not on what a specific directive means.
 
-function InteractiveDirective({
+/** Exported so `oxmarkdown/editingNodes.tsx` can reuse the exact same
+ * select/popover UI for Editing-mode directive decorators, instead of a
+ * second implementation — both modes render identically because they share
+ * this one component; only the `interactive` adapter behind it differs
+ * (React state here in `OxEditor`'s Interacting mode, a Lexical node update
+ * there). */
+export function InteractiveDirective({
   node,
   attrs,
   interactive,

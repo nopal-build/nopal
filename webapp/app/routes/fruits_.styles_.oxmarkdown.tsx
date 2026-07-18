@@ -273,9 +273,111 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "Step 3: trimmed Lexical wins, decided from two real spikes",
+    body: (
+      <>
+        Built the same one interactable (a <code>[ ]</code>/<code>[x]</code> checkbox,
+        with select-as-unit + backspace-to-revert) two ways, measured both, then
+        deleted the throwaway routes. A plain <code>&lt;textarea&gt;</code> can hand-roll
+        the selection mechanics fine — arrow-onto/backspace-approaching genuinely work
+        via <code>selectionStart</code>/<code>selectionEnd</code> alone — but it can
+        never render an actual checkbox glyph, a pill, or the dot grid; it only ever
+        shows raw characters. That's disqualifying on its own, so: trimmed Lexical.
+        Measured cost is small — the shared Lexical-core chunk is ~48&nbsp;KB gzip
+        (already shared with today's MdxEditor, not new weight), versus ~287&nbsp;KB
+        gzip for the old fat chunk, almost all of which is CodeMirror/Sandpack/Radix
+        nopal doesn't visually use, not Lexical itself.
+      </>
+    ),
+  },
+  {
+    title: "Step 4: Editing mode lands — same document model, new node classes",
+    body: (
+      <>
+        <code>editingTransforms.ts</code> converts real mdast to/from real Lexical
+        nodes — deliberately not <code>@lexical/markdown</code>'s own parser, so
+        Editing mode reuses step 1's document model instead of forking it. Two new
+        decorator classes cover what plain rich-text can't: <code>OxDirectiveNode</code>{" "}
+        (reuses <code>InteractiveDirective</code> from <code>OxRenderer</code> directly —
+        both modes render directives through the literal same component) and{" "}
+        <code>OxOpaqueNode</code>, a lossless passthrough for anything not mapped yet
+        (tables, raw HTML) — shown read-only rather than silently dropped, verified by
+        round-tripping a real table through it with zero data loss. Checklists
+        deliberately use <code>@lexical/list</code>'s native checkbox support rather
+        than a custom decorator — real node state, not inline text, so there's nothing
+        to "revert to raw text" there.
+      </>
+    ),
+  },
+  {
+    title: "Found (and fixed): a decorator's own onClick isn't enough",
+    body: (
+      <>
+        A plain React <code>onClick</code> on a decorator set its selection for one
+        render, then Lexical's own click-driven selection sync silently overwrote it
+        back a beat later — verified directly (isSelected flips true, then false, with
+        no focus/blur involved at all). Fixed by intercepting Lexical's own{" "}
+        <code>CLICK_COMMAND</code> instead — it's dispatched through the same pipeline
+        that sync runs in, so returning <code>true</code> actually suppresses it, unlike
+        a bare DOM listener racing against it.
+      </>
+    ),
+  },
+  {
+    title: "Found (and fixed): reverting a block-level directive threw",
+    body: (
+      <>
+        Backspace-reverting a <code>::directive</code> or a table to raw text by
+        replacing it with a bare <code>TextNode</code> threw "Only element or decorator
+        nodes can be inserted into the root node" — its parent (often the document
+        root) doesn't accept inline content directly. Fixed by wrapping the reverted
+        text in a paragraph specifically when the node being reverted is block-level;
+        an inline directive (<code>:name</code>) still reverts to a bare text node,
+        which is correct there.
+      </>
+    ),
+  },
+  {
+    title: "Bundle cost, measured again: ~130 KB gzip once MdxEditor retires",
+    body: (
+      <>
+        This page's own new code (OxEditor + editingNodes + editingTransforms + both
+        plugins) is 71&nbsp;KB raw / 22.7&nbsp;KB gzip. The shared Lexical rich-text/
+        list/link/code chunk it needs is 107.5&nbsp;KB gzip — but that chunk is
+        already shared with today's <em>old</em> MdxEditorEditable too, so it's not
+        new weight while both systems coexist. Once MdxEditor is fully retired,
+        OxEditor's total cost lands around 130&nbsp;KB gzip — under half the old fat
+        chunk's 287&nbsp;KB gzip on its own.
+      </>
+    ),
+  },
+  {
+    title: "Refinement pass, before starting mobile UX: undo verified, a real dark-mode contrast bug, two real bugs from a code sweep",
+    body: (
+      <>
+        Paused after step 4 rather than building straight through. <strong>Undo</strong>{" "}
+        coalescing verified with real keystrokes — a continuous typing burst is one undo
+        step even across word/punctuation boundaries; only a real pause or a non-typing
+        action starts a new group (corrects TODO 9's original "splits on word boundaries"
+        claim — no code change, the actual behavior already matches the design intent).{" "}
+        <strong>Dark mode</strong>: the directive popover's own title text was low-contrast
+        against its own background — found by reading computed colors, not eyeballing a
+        screenshot: nopal's real <code>--purple-light</code> (accent) and{" "}
+        <code>--dark-midground</code> (this token's old dark background) are two
+        similarly-toned mid purples, fine almost everywhere except accent-colored text
+        directly on it. Fixed with a genuinely darker background token.{" "}
+        <strong>Code sweep</strong> caught two real bugs: <code>OxOpaqueNode</code> (the
+        table/raw-HTML passthrough) had the exact click-selection race already fixed on{" "}
+        <code>OxDirectiveNode</code>, just never applied there — now a shared hook so a
+        third decorator can't repeat the miss; and the "Divider"/"Note" slash commands left
+        the caret in a dead spot above the inserted block instead of a fresh line below it.
+      </>
+    ),
+  },
 ];
 
-// ─── Sample content for the playground ─────────────────────────────────────
+// ─── Sample content for the playground ────────────────────────────────────────────────
 
 const DEFAULT_SAMPLE = `# Try editing this
 
@@ -322,11 +424,34 @@ const INTERACTABLES_SAMPLE = `::badge{label="Try me" size="half"}
 - Plain bullet, not a task
 `;
 
+const EDITING_SAMPLE = `# Try typing here
+
+Free-form text, **bold**, *italic*, and a [link](https://example.com) all work
+as real typing — try \`/\` at the start of a line for the slash-command menu.
+
+- [ ] A real checklist (native @lexical/list, click or Tab+Space to toggle)
+- [x] Already checked
+
+::badge{label="Directive"}
+
+Arrow onto the badge above, or click it — Backspace reverts it to raw text,
+Delete removes it outright.
+
+No real table-editing UI exists yet, but a table still round-trips losslessly
+— click it to select, Backspace to see its raw markdown, undo to bring it back.
+
+| Fruit | Qty |
+| ----- | --- |
+| Apple | 3   |
+| Pear  | 5   |
+`;
+
 export default function OxMarkdownStyles() {
   const [markdown, setMarkdown] = useState(DEFAULT_SAMPLE);
   const [fontFamily, setFontFamily] = useState("");
   const [colorAccent, setColorAccent] = useState("");
   const [interactiveMarkdown, setInteractiveMarkdown] = useState(INTERACTABLES_SAMPLE);
+  const [editingMarkdown, setEditingMarkdown] = useState(EDITING_SAMPLE);
 
   return (
     <AppLayout>
@@ -351,12 +476,17 @@ export default function OxMarkdownStyles() {
 
         <Section id="status" title="Status">
           <p className="text-sm mb-2">
-            <strong>Build plan steps 1–2 done</strong> — real document model
+            <strong>Build plan steps 1–4 done</strong> — real document model
             (<code>oxmarkdown/document.ts</code>), themable renderer
-            (<code>OxRenderer</code>, <code>oxmarkdown.css</code>), and Interacting-mode{" "}
+            (<code>OxRenderer</code>, <code>oxmarkdown.css</code>), Interacting-mode{" "}
             <code>OxEditor</code> (task checkboxes, directive attribute popovers — try
-            the Interactables section below). Step 3 (a foundation spike for typing/
-            Editing mode) is next.
+            the Interactables section below), and now full Editing mode on a trimmed
+            Lexical foundation — free-form typing, live markdown shortcuts, a native
+            checklist, directive select/revert/remove, undo, and a <code>/</code>{" "}
+            slash-command menu (try the Editing mode section below), plus a refinement
+            pass (undo coalescing verified, a dark-mode contrast bug fixed, two real bugs
+            caught by a deliberate code sweep — see the decision log). Step 5 (a hands-on
+            mobile UX pass) is next.
           </p>
         </Section>
 
@@ -442,6 +572,40 @@ export default function OxMarkdownStyles() {
             style={{ background: "var(--midground)", color: "var(--purple)", whiteSpace: "pre-wrap" }}
           >
             {interactiveMarkdown}
+          </pre>
+        </Section>
+
+        <Section id="editing" title="Editing mode (build plan step 4)">
+          <p className="text-sm subtle-text mb-4">
+            <code>OxEditor</code> with <code>mode="editing"</code> — a trimmed Lexical
+            config (see TODO 1 in the decision log). Free-form typing, real headings/
+            lists/links/code via <code>@lexical/rich-text</code>/<code>list</code>/
+            <code>link</code>/<code>code</code>, live markdown shortcuts (type{" "}
+            <code>**bold**</code>, <code># heading</code>, <code>&gt; quote</code>, ...),
+            a native checklist, undo/redo, and the same select-then-act model as
+            Interacting mode for directives — arrow onto one or click it, Backspace
+            reverts it to raw text, Delete removes it outright. Try <code>/</code> at
+            the start of a line for the slash-command menu (heading, list, divider,
+            note). Known gap: a container directive's nested content isn't
+            independently editable yet (renders read-only) — and anything this bridge
+            doesn't have a real mapping for yet (tables, raw HTML) shows as a
+            read-only passthrough rather than being silently dropped.
+          </p>
+          <Label>OxEditor (mode="editing")</Label>
+          <div className="good-box p-4 mb-3">
+            <OxEditor
+              mode="editing"
+              markdown={editingMarkdown}
+              onChange={setEditingMarkdown}
+              directives={DEMO_DIRECTIVES}
+            />
+          </div>
+          <Label>Resulting markdown (re-serialized on every content change)</Label>
+          <pre
+            className="text-xs font-mono p-3 rounded"
+            style={{ background: "var(--midground)", color: "var(--purple)", whiteSpace: "pre-wrap" }}
+          >
+            {editingMarkdown}
           </pre>
         </Section>
 
