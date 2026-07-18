@@ -81,9 +81,11 @@ export function isDirectiveNode(node: { type: string }): node is DirectiveNode {
   );
 }
 
+export type DirectiveAttrs = Record<string, string>;
+
 /** Directive attributes, always a plain object (never `null`) for callers —
  * `mdast-util-directive` allows `null` when a directive has no `{...}` at all. */
-export function directiveAttrs(node: DirectiveNode): Record<string, string> {
+export function directiveAttrs(node: DirectiveNode): DirectiveAttrs {
   return node.attributes ?? {};
 }
 

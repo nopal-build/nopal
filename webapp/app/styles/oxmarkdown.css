@@ -1,0 +1,373 @@
+/**
+ * OxMarkdown — `.ox-content`
+ *
+ * Modeled off the MdxEditor design language (`mdxeditor.css` /
+ * `.nopal-content`) — same dot-grid rhythm, same gutter-marker idea — but
+ * organized as its own themable system rather than a literal port:
+ *
+ *   - Every rule reads from an `--ox-*` custom property, never a raw
+ *     value and never nopal's `--purple`/`--moon`/etc. tokens directly.
+ *     Those old tokens only ever appear on the RIGHT-hand side, as this
+ *     file's own defaults — so the default theme happens to be nopal's
+ *     existing palette, but nothing here is hard-coded to it.
+ *   - One dark-mode block redefines the same custom properties; no
+ *     per-component `@media` duplication.
+ *   - The whole vertical rhythm derives from one variable, `--ox-grid`
+ *     (41px) — see the "typewriter font" TODO in the oxmarkdown skill for
+ *     why this matters (a fixed character width might want a different
+ *     grid size someday).
+ *
+ * Runtime overrides: `oxmarkdown/theme.ts`'s `themeToStyle()` produces
+ * inline versions of these same custom properties, so a caller can
+ * override individual tokens (a font, an accent color) without touching
+ * this file at all. See that module for the full token list.
+ */
+
+.ox-content {
+  /* ── Theme tokens — defaults are nopal's current palette ──────────────── */
+  --ox-font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  --ox-font-weight: 267;
+  --ox-letter-spacing: 0.5px;
+  --ox-grid: 41px;
+
+  --ox-color-text: var(--purple, #3f2b46);
+  --ox-color-heading: black;
+  --ox-color-accent: var(--purple-light, #7f5b8b);
+  --ox-color-subtle: var(--text-subtle, #817186);
+  --ox-color-grid-dot: var(--moon, #c4c6fc);
+  --ox-color-code-bg: var(--midground, #ece7f3);
+  --ox-color-border: rgba(0, 0, 0, 0.12);
+  --ox-color-selected-bg: color-mix(in srgb, var(--ox-color-accent) 16%, transparent);
+  --ox-color-selected-border: var(--ox-color-accent);
+  --ox-color-unknown: var(--red, #a63b31);
+
+  /* ── Base ───────────────────────────────────────────────────────────── */
+  /* Left padding is deliberately `--ox-grid`, not an arbitrary number: the
+     gutter markers/bullets/ordered-list numbers below all sit at negative
+     left offsets (they hang in the margin next to their content), and
+     `overflow-x: hidden` clips relative to THIS element's own box no matter
+     how much space a caller's wrapper provides around it — so this element
+     has to reserve its own room, not rely on one. One grid cell is enough
+     for all of them (the widest, the h1 marker, sits at -38px). */
+  padding: 8px 8px 16px var(--ox-grid);
+  font-family: var(--ox-font-family);
+  font-size: 1.2rem;
+  font-weight: var(--ox-font-weight);
+  line-height: 1.2;
+  letter-spacing: var(--ox-letter-spacing);
+  color: var(--ox-color-text);
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  background-image: radial-gradient(var(--ox-color-grid-dot) 1px, transparent 0);
+  background-size: var(--ox-grid) var(--ox-grid);
+  background-position: -22px -12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ox-content {
+    --ox-color-text: var(--dark-text, #e8ddd4);
+    --ox-color-heading: var(--dark-text, #e8ddd4);
+    --ox-color-accent: var(--purple-light, #a78bfa);
+    --ox-color-subtle: var(--text-subtle-dark, #c8b8ce);
+    --ox-color-grid-dot: var(--dark-midground, #2a2030);
+    --ox-color-code-bg: var(--dark-midground, #2a2030);
+    --ox-color-border: rgba(255, 255, 255, 0.14);
+    --ox-color-unknown: var(--red-light, #f6c8c3);
+  }
+}
+
+/* ── Gutter markers (# / ## / ### / >) ─────────────────────────────────── */
+
+.ox-content :is(h1, h2, h3, blockquote) {
+  position: relative;
+}
+.ox-content :is(h1, h2, h3, blockquote)::before {
+  position: absolute;
+  top: 4px;
+  left: -38px;
+  width: 32px;
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-weight: 400;
+  color: var(--ox-color-accent);
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+  line-height: inherit;
+}
+.ox-content h1::before {
+  content: "#";
+  font-size: 24px;
+}
+.ox-content h2::before {
+  content: "##";
+  font-size: 17px;
+}
+.ox-content h3::before {
+  content: "###";
+  font-size: 11px;
+}
+.ox-content blockquote::before {
+  content: ">";
+  font-size: 15px;
+  padding-right: 3px;
+  line-height: 10px;
+}
+
+/* ── Headings ───────────────────────────────────────────────────────────── */
+
+.ox-content :is(h1, h2, h3) {
+  line-height: var(--ox-grid);
+  padding: 0;
+  font-weight: 700;
+}
+.ox-content h1 {
+  font-size: 34px;
+  color: var(--ox-color-heading);
+  letter-spacing: 1px;
+  margin-top: calc(var(--ox-grid) * 2);
+}
+.ox-content h2 {
+  font-size: 28px;
+  color: var(--ox-color-accent);
+  margin-top: calc(var(--ox-grid) * 2);
+}
+.ox-content h3 {
+  font-size: 22px;
+  color: var(--ox-color-accent);
+  margin-top: var(--ox-grid);
+}
+.ox-content :is(h1, h2, h3):first-child {
+  margin-top: 0;
+}
+
+/* ── Blockquote ─────────────────────────────────────────────────────────── */
+
+.ox-content blockquote {
+  border-left: 3px solid var(--ox-color-accent);
+  padding-left: 16px;
+  color: var(--ox-color-subtle);
+  font-style: italic;
+  line-height: var(--ox-grid);
+}
+
+/* ── Paragraphs / lists ─────────────────────────────────────────────────── */
+
+.ox-content p {
+  line-height: var(--ox-grid);
+  margin: 0;
+}
+
+.ox-content :is(ul, ol) {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  line-height: var(--ox-grid);
+}
+.ox-content ul > li:not(.ox-task-item) {
+  position: relative;
+}
+.ox-content ul > li:not(.ox-task-item)::before {
+  content: "—";
+  position: absolute;
+  left: -18px;
+  font-size: 14px;
+  color: var(--ox-color-accent);
+  pointer-events: none;
+  user-select: none;
+  line-height: inherit;
+}
+.ox-content ul ul > li:not(.ox-task-item)::before {
+  content: "–";
+}
+.ox-content ol {
+  counter-reset: ox-ol;
+}
+.ox-content ol > li {
+  position: relative;
+  counter-increment: ox-ol;
+}
+.ox-content ol > li::before {
+  content: counter(ox-ol) ".";
+  position: absolute;
+  top: 2px;
+  left: -1.8em;
+  width: 1.5em;
+  text-align: right;
+  font-size: 0.78rem;
+  font-family: ui-monospace, "SF Mono", monospace;
+  color: var(--ox-color-accent);
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+  line-height: inherit;
+}
+
+/* ── Task lists ─────────────────────────────────────────────────────────── */
+/* .ox-task-list — the <ul> wrapping a checklist
+   .ox-task-item — each <li>
+   .ox-task-checkbox — the styled checkbox
+   .ox-task-text — the label */
+
+.ox-content .ox-task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 3px;
+  line-height: var(--ox-grid);
+  padding: 0;
+}
+.ox-content .ox-task-item::before {
+  content: none;
+}
+.ox-task-checkbox {
+  flex-shrink: 0;
+  width: var(--ox-grid);
+  height: var(--ox-grid);
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: default;
+  position: relative;
+  box-sizing: border-box;
+  appearance: none;
+  display: inline-block;
+}
+.ox-task-checkbox::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 23px;
+  height: 23px;
+  border-radius: 5px;
+  border: 2.5px solid var(--ox-color-accent);
+  background: transparent;
+  box-sizing: border-box;
+}
+.ox-task-checkbox.checked::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 23px;
+  height: 23px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-size: calc(100% - 3px);
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.ox-task-text--checked {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* ── Code ───────────────────────────────────────────────────────────────── */
+
+.ox-content code {
+  background: var(--ox-color-code-bg);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.875em;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+}
+.ox-code-block {
+  background: var(--ox-color-code-bg);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 8px 0;
+  line-height: 1.6;
+}
+.ox-code-block code {
+  background: none;
+  padding: 0;
+  font-size: 0.875em;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  color: var(--ox-color-text);
+  border-radius: 0;
+}
+
+/* ── Links / images / thematic break ───────────────────────────────────── */
+
+.ox-content a {
+  color: var(--ox-color-accent);
+  text-decoration: underline;
+}
+.ox-content img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+.ox-content hr {
+  border: none;
+  border-top: 1px solid var(--ox-color-border);
+  margin: calc(var(--ox-grid) / 2) 0;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+
+.ox-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  border: 1px solid var(--ox-color-border);
+}
+.ox-content th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--ox-color-border);
+  color: var(--ox-color-accent);
+  font-weight: 700;
+}
+.ox-content td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--ox-color-border);
+}
+
+/* ── Directives: unknown-name fallback ─────────────────────────────────── */
+/* Shown when a directive's name has no matching registry entry — visible
+   on purpose, so typos (human or AI-authored) are easy to spot. */
+
+.ox-directive-unknown {
+  display: inline-block;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.85em;
+  color: var(--ox-color-unknown);
+  border: 1px dashed color-mix(in srgb, var(--ox-color-unknown) 45%, transparent);
+  background: color-mix(in srgb, var(--ox-color-unknown) 8%, transparent);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+.ox-directive-unknown--block {
+  display: block;
+  padding: 8px 12px;
+  line-height: 1.4;
+}
+
+/* ── Directive-authoring utilities ────────────────────────────── */
+/* A directive's registry renderer (see `oxmarkdown/directiveRegistry.ts`)
+   often needs a small "title" line above its content (a gallery caption, a
+   callout heading). Anything NOT grid-aligned breaks the dot-grid rhythm
+   for every element after it, permanently, because the background dots are
+   a fixed, un-scrolling pattern — there's no self-correcting later. Reach
+   for this class for that line instead of ad hoc inline styles, so getting
+   the rhythm right is the easy default, not something to remember. */
+.ox-directive-title {
+  font-weight: 700;
+  line-height: var(--ox-grid);
+  margin: 0;
+}
+
+/* ── Selected interactable ──────────────────────────────────────────── */
+/* New in OxMarkdown — no old-system equivalent. Applied by OxEditor (not
+   yet built) when an interactable is selected — see the oxmarkdown skill's
+   "Interactables" section. Defined here now so the token exists and any
+   future interactable component can just add this class. */
+
+.ox-selected {
+  outline: 2px solid var(--ox-color-selected-border);
+  outline-offset: 1px;
+  background: var(--ox-color-selected-bg);
+  border-radius: 4px;
+}
