@@ -42,7 +42,7 @@ import {
 import { $createHeadingNode, $createQuoteNode, $isHeadingNode, $isQuoteNode } from "@lexical/rich-text";
 import { $createCodeNode, $isCodeNode } from "@lexical/code";
 import { $createLinkNode, $isLinkNode } from "@lexical/link";
-import { $createListNode, $createListItemNode, $isListNode, $isListItemNode } from "@lexical/list";
+import { $createListNode, $isListNode, $isListItemNode } from "@lexical/list";
 import {
   $createHorizontalRuleNode,
   $isHorizontalRuleNode,
@@ -58,15 +58,14 @@ import type {
   RootContent,
   Yaml,
 } from "mdast";
-import { countExtraBlankLines, getFrontmatterNode, type OxDocument } from "./document";
+import { countBlankLines, getFrontmatterNode, type OxDocument } from "./document";
 import {
-  $createOxBlankLinesNode,
   $createOxDirectiveNode,
   $createOxOpaqueNode,
-  $isOxBlankLinesNode,
   $isOxDirectiveNode,
   $isOxOpaqueNode,
 } from "./editingNodes";
+import { $createOxListItemNode, $isOxListItemNode, type OxListItemNode } from "./OxListItemNode";
 
 // ── Import: mdast -> Lexical ────────────────────────────────────────────────
 
@@ -101,19 +100,21 @@ export function importOxDocument(doc: OxDocument): ImportResult {
 
 type DefMap = Map<string, Definition>;
 
-/** Converts a BLOCK-level sibling list, inserting an `OxBlankLinesNode` for
- * each gap that has more than the one blank line CommonMark already
- * requires to separate two blocks — see `countExtraBlankLines` and
- * `editingNodes.tsx`'s header for why that's a dedicated node instead of
- * empty `ParagraphNode`s. Used for root-level content and any other block-
- * level children list (a blockquote's, ...). */
+/** Converts a BLOCK-level sibling list, inserting one ordinary, empty
+ * `ParagraphNode` per blank line in the source (`countBlankLines`) between
+ * two blocks — NOT a custom decorator node (see `editingNodes.tsx`'s header
+ * for why: an empty paragraph gets 100% standard Lexical editing behavior
+ * for free — clickable, focusable, Backspace/Enter/arrows/undo all just
+ * work — and "1 markdown line = 1 editor line" wants blank lines to be
+ * real, ordinary rows anyway, not a decorative spacer). Used for root-level
+ * content and any other block-level children list (a blockquote's, ...). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function convertBlockList(nodes: readonly any[], defs: DefMap): LexicalNode[] {
   const out: LexicalNode[] = [];
   for (let i = 0; i < nodes.length; i++) {
     if (i > 0) {
-      const extra = countExtraBlankLines(nodes[i - 1], nodes[i]);
-      if (extra > 0) out.push($createOxBlankLinesNode(extra));
+      const blanks = countBlankLines(nodes[i - 1], nodes[i]);
+      for (let b = 0; b < blanks; b++) out.push($createParagraphNode());
     }
     const converted = convertBlock(nodes[i], defs);
     if (converted) out.push(converted);
@@ -163,9 +164,32 @@ function convertBlock(node: any, defs: DefMap): LexicalNode | null {
   }
 }
 
+/** GFM cannot serialize `[ ]`/`[x]` for a list item with literally no
+ * text at all (confirmed directly against `mdast-util-gfm-task-list-
+ * item`'s source) — its checkbox injection needs a real paragraph child,
+ * and the underlying parser separately requires real, non-whitespace
+ * content after the checkbox to even recognize one on the way back in.
+ * A lone zero-width space satisfies both without being visible to anyone
+ * reading the file (confirmed directly: `- [ ] \u200b` round-trips through
+ * parse -> serialize -> reparse byte-for-byte stable). `exportListItem`
+ * injects this ONLY when an item has a real checkbox but no real text;
+ * `convertListItem` recognizes and strips it back out on the way in, so
+ * it never becomes real, persistent, or typeable content in the live
+ * document — the placeholder exists purely in the serialized text. */
+const CHECKBOX_PLACEHOLDER = "\u200b";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isCheckboxPlaceholderParagraph(node: any): boolean {
+  const children = node?.children ?? [];
+  return children.length === 1 && children[0]?.type === "text" && children[0]?.value === CHECKBOX_PLACEHOLDER;
+}
+
 function convertList(node: MdastList, defs: DefMap) {
-  const isTaskList = node.children.some((c) => c.checked != null);
-  const listType = node.ordered ? "number" : isTaskList ? "check" : "bullet";
+  // Never `"check"` — see `OxListItemNode.ts`'s header. Whether an
+  // individual ITEM has a checkbox is `OxListItemNode`'s own field,
+  // entirely independent of the list's type, so a checklist and a plain
+  // bullet list are structurally identical here; only the items differ.
+  const listType = node.ordered ? "number" : "bullet";
   const list = $createListNode(listType, node.ordered ? node.start ?? 1 : 1);
   for (const item of node.children) {
     list.append(convertListItem(item, defs));
@@ -174,12 +198,16 @@ function convertList(node: MdastList, defs: DefMap) {
 }
 
 function convertListItem(node: MdastListItem, defs: DefMap) {
-  const li = $createListItemNode(node.checked ?? undefined);
+  const li = $createOxListItemNode(node.checked ?? undefined);
   const [first, ...rest] = node.children;
   if (first) {
-    if (first.type === "paragraph") {
+    // A lone `CHECKBOX_PLACEHOLDER` paragraph is `exportListItem`'s own
+    // synthetic stand-in for "empty, but GFM needed SOME content to keep
+    // the checkbox" — recognized and stripped back out here so it never
+    // becomes real, visible, or typeable content in the live document.
+    if (first.type === "paragraph" && !isCheckboxPlaceholderParagraph(first)) {
       li.append(...convertInline(first.children, defs));
-    } else {
+    } else if (first.type !== "paragraph") {
       const converted = convertBlock(first, defs);
       if (converted) li.append(converted);
     }
@@ -269,23 +297,37 @@ function applyMarks(textNode: TextNode, marks: readonly TextFormatType[]): TextN
 }
 
 // ── Export: Lexical -> mdast ──────────────────────────────────────────
-// `OxBlankLinesNode` is deliberately never emitted as a real mdast node
-// here (see `editingNodes.tsx`'s header for why) — it's stripped out and
-// recorded in `gapMap` instead (keyed by the mdast node that ends up
-// AFTER the gap), which becomes a custom `join` passed to
-// `serializeOxDocument`. That's `mdast-util-to-markdown`'s own real
-// mechanism for controlling exactly how many blank lines separate two
-// specific siblings — the only thing that can actually produce an even
-// blank-line count, which no arrangement of real empty nodes can.
+// A blank line is just an ordinary, empty `ParagraphNode` on the Lexical
+// side (see `editingNodes.tsx`'s header) — it's exported like any other
+// paragraph, via the SAME generic fallback below, no special-casing
+// needed. The one thing that DOES need help: `mdast-util-to-markdown`
+// gives every block-level sibling pair its own default one-blank-line
+// join UNLESS told otherwise — which would add an extra, unwanted blank
+// line on top of the one an empty paragraph already represents just by
+// existing in the flow. `blankLineJoin` (passed to `serializeOxDocument`)
+// forces that default off specifically around empty paragraphs; every
+// other pair is untouched. Confirmed directly, not assumed: N consecutive
+// empty paragraphs with the surrounding joins forced to 0 serialize to
+// exactly N blank lines, not the 2K+1 an earlier, less careful attempt at
+// this produced (see the oxmarkdown skill's TODO 10 for that history).
 
 export interface ExportResult {
   doc: OxDocument;
   join: Join;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isBlankLineNode(node: any): boolean {
+  return node?.type === "paragraph" && (!node.children || node.children.length === 0);
+}
+
+const blankLineJoin: Join = (left, right) => {
+  if (isBlankLineNode(left) || isBlankLineNode(right)) return 0;
+  return undefined; // no opinion — defer to the library's own default (one blank line)
+};
+
 export function exportOxDocument(root: RootNode, aside: AsideContent): ExportResult {
-  const gapMap = new WeakMap<object, number>();
-  const body = exportBlockList(root.getChildren(), gapMap);
+  const body = exportBlockList(root.getChildren());
   const doc: OxDocument = {
     type: "root",
     children: [
@@ -294,35 +336,23 @@ export function exportOxDocument(root: RootNode, aside: AsideContent): ExportRes
       ...aside.definitions,
     ],
   };
-  const join: Join = (_left, right) => gapMap.get(right as object);
-  return { doc, join };
+  return { doc, join: blankLineJoin };
 }
 
-/** Exports a BLOCK-level sibling list, consuming any `OxBlankLinesNode`s
- * along the way into `gapMap` instead of emitting them — see this
- * section's header. Used for root-level content and any other block-level
- * children list (a blockquote's, ...), mirroring `convertBlockList` on
- * the import side. */
-function exportBlockList(nodes: LexicalNode[], gapMap: WeakMap<object, number>): BlockContent[] {
+/** Exports a BLOCK-level sibling list. Used for root-level content and any
+ * other block-level children list (a blockquote's, ...), mirroring
+ * `convertBlockList` on the import side. */
+function exportBlockList(nodes: LexicalNode[]): BlockContent[] {
   const out: BlockContent[] = [];
-  let pendingExtra = 0;
   for (const node of nodes) {
-    if ($isOxBlankLinesNode(node)) {
-      pendingExtra += node.getCount();
-      continue;
-    }
-    const exported = exportBlock(node, gapMap);
-    if (exported) {
-      if (pendingExtra > 0) gapMap.set(exported, 1 + pendingExtra);
-      pendingExtra = 0;
-      out.push(exported);
-    }
+    const exported = exportBlock(node);
+    if (exported) out.push(exported);
   }
   return out;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function exportBlock(node: LexicalNode, gapMap: WeakMap<object, number>): any {
+function exportBlock(node: LexicalNode): any {
   if ($isOxDirectiveNode(node) && !node.isInline()) return node.getMdastNode();
   if ($isOxOpaqueNode(node) && !node.isInline()) return node.getMdastNode();
   if ($isHorizontalRuleNode(node)) return { type: "thematicBreak" };
@@ -339,7 +369,7 @@ function exportBlock(node: LexicalNode, gapMap: WeakMap<object, number>): any {
   if ($isQuoteNode(node)) {
     return {
       type: "blockquote",
-      children: exportBlockList(node.getChildren(), gapMap),
+      children: exportBlockList(node.getChildren()),
     };
   }
   if ($isListNode(node)) {
@@ -348,20 +378,28 @@ function exportBlock(node: LexicalNode, gapMap: WeakMap<object, number>): any {
       ordered: node.getListType() === "number",
       start: node.getListType() === "number" ? node.getStart() : null,
       spread: false,
-      children: node.getChildren().map((li) => exportListItem(li, gapMap)),
+      children: node.getChildren().filter($isOxListItemNode).map((li) => exportListItem(li)),
     };
   }
   if ($isElementNode(node) && !node.isInline()) {
     // Plain paragraph (also the fallback shape for anything ElementNode-like
-    // we don't special-case above — safer than dropping it).
+    // we don't special-case above — safer than dropping it). An EMPTY one
+    // (no children) is exactly a blank line — see this section's header.
     return { type: "paragraph", children: exportInline(node.getChildren()) };
   }
   return null;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function exportListItem(li: any, gapMap: WeakMap<object, number>): MdastListItem {
-  const checked = li.getChecked() ?? null;
+/** `checked` is `null` (not exported as a checkbox at all) unless
+ * `isRealCheckbox()` says so — the SAME predicate rendering uses
+ * (`OxListItemNode.ts`), so the exported markdown and the rendered glyph
+ * can never disagree about whether a given item has a checkbox, in
+ * either direction: an item with no checkbox never gets `[ ]`/`[x]`
+ * conjured up, and one WITH a checkbox always gets it, even with no real
+ * text (via `CHECKBOX_PLACEHOLDER`, above), so the render is never
+ * showing something the file can't actually contain. */
+function exportListItem(li: OxListItemNode): MdastListItem {
+  const hasCheckbox = li.isRealCheckbox();
   const children = li.getChildren() as LexicalNode[];
   const inlineChildren: LexicalNode[] = [];
   const blockChildren: LexicalNode[] = [];
@@ -373,14 +411,20 @@ function exportListItem(li: any, gapMap: WeakMap<object, number>): MdastListItem
     }
   }
   const itemChildren: (BlockContent | DefinitionContent)[] = [];
-  if (inlineChildren.length > 0) {
-    itemChildren.push({ type: "paragraph", children: exportInline(inlineChildren) } as BlockContent);
+  const exportedInline = exportInline(inlineChildren);
+  if (exportedInline.length > 0) {
+    itemChildren.push({ type: "paragraph", children: exportedInline } as BlockContent);
+  } else if (hasCheckbox) {
+    itemChildren.push({
+      type: "paragraph",
+      children: [{ type: "text", value: CHECKBOX_PLACEHOLDER }],
+    } as BlockContent);
   }
   for (const block of blockChildren) {
-    const exported = exportBlock(block, gapMap);
+    const exported = exportBlock(block);
     if (exported) itemChildren.push(exported);
   }
-  return { type: "listItem", checked, spread: false, children: itemChildren };
+  return { type: "listItem", checked: hasCheckbox ? (li.getChecked() as boolean) : null, spread: false, children: itemChildren };
 }
 
 function exportInline(nodes: LexicalNode[]): PhrasingContent[] {

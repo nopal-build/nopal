@@ -399,9 +399,215 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "Empty checklist items: a real upstream limitation, not a bug we could fully fix",
+    body: (
+      <>
+        Pressing Enter inside a checklist item renders a fresh checkbox glyph regardless of
+        that item's own content, then exports as a bare <code>-</code> with no{" "}
+        <code>[ ]</code> once it's empty. Root cause: <code>mdast-util-gfm-task-list-item</code>{" "}
+        genuinely cannot represent a checkbox on a list item with no text at all — its{" "}
+        <code>[ ]</code>/<code>[x]</code> injection is a regex anchored on the bullet's trailing
+        separator space, which an empty item's rendered <code>-</code> never has (confirmed
+        directly against its source, not assumed). An empty item ALWAYS exports as a bare{" "}
+        <code>-</code>, full stop — not something fixable in our own code. Rather than fight
+        that with an invisible sentinel character (a zero-width space works and round-trips,
+        confirmed directly, but adds ongoing fragility for a cosmetic win), the glyph fell back to
+        looking like a plain bullet whenever empty — <strong>this specific fix was itself wrong
+        and got reworked two rounds later</strong>, see below.
+      </>
+    ),
+  },
+  {
+    title: "Reframed around one rule: 1 markdown line = 1 editor line, no margins standing in",
+    body: (
+      <>
+        Gerald's framing, verbatim: this should function more like a code editor where one
+        line in the markdown must equal one line in the editor, each line the exact same
+        height. That directly contradicted two earlier decisions above (margin standing in for
+        blank lines; a CSS fallback that silently changed a checkbox's glyph based on incidental
+        emptiness). Both got reworked this round, for Editing mode specifically — the static{" "}
+        <code>OxRenderer</code> keeps margin-based prose rhythm as-is, since that's normal for
+        read-only reading. See the next two entries for what actually changed.
+      </>
+    ),
+  },
+  {
+    title: "Blank lines are ordinary empty paragraphs now, not a decorator node",
+    body: (
+      <>
+        The custom <code>OxBlankLinesNode</code> is gone. Each blank line is now a literal,
+        empty <code>ParagraphNode</code> — completely standard, so clicking, arrowing, typing,
+        Backspace, and undo all just work with zero custom code (this also fixes a real bug: the
+        old decorator's wrapper was non-editable, so clicking a blank line did nothing at all).
+        The earlier "an empty paragraph always doubles blank lines" finding was real but
+        incomplete: it was a limitation of the library's default spacing, not of empty paragraphs
+        themselves. Once every sibling pair gets an explicit opinion via a stateless{" "}
+        <code>join</code> function (checking the two real nodes directly — 0 if either side is a
+        blank placeholder, otherwise the library's own default), N empty paragraphs serialize to
+        exactly N blank lines, confirmed directly. Editing mode's default per-block margin is
+        gone too, for the same reason — verified with real geometry: every row, blank or not,
+        lands at an exact 41px/82px grid multiple, back to back.
+      </>
+    ),
+  },
+  {
+    title: "Checklists rebuilt on our own node, after a real render/markdown mismatch caught live",
+    body: (
+      <>
+        The "split the downgraded item into a second list" fix (previous entry) looked correct,
+        seamless, zero visual gap, and was still wrong. Fed the exact structure it produces
+        straight to a markdown serializer in isolation: two adjacent bullet lists serialize with a
+        real extra blank line and a bullet character switched to an asterisk, invisible in the
+        rendered editor the whole time. Exactly the rule this violated: the editor should almost
+        always represent the markdown it will produce, now the standing testing convention for
+        every check going forward.
+      </>
+    ),
+  },
+  {
+    title: "OxListItemNode: checkbox-ness is now a real per-item field, not tied to list type",
+    body: (
+      <>
+        The actual fix: a real <code>ListItemNode</code> subclass, checklists never use{" "}
+        <code>@lexical/list</code>'s <code>&quot;check&quot;</code> list type at all anymore, every
+        list is a plain bullet list, and whether one ITEM has a checkbox is this class's own
+        field. One predicate, <code>isRealCheckbox()</code>, is called by both rendering and
+        export, so they cannot disagree. Two real traps found and fixed along the way, both
+        confirmed by direct testing: the base node's own modern config API silently clears
+        checked state whenever the parent list is not check-type, which is now always, worked
+        around with a separate field the base logic never touches; and calling the older
+        editor-state read API from a raw click handler threw a real runtime error until an
+        explicit editor reference was passed. Click-to-toggle, Space-to-toggle, and Escape/Arrow
+        checklist-focus behavior were all rebuilt from scratch to match, replacing the native
+        checklist plugin entirely. Every priority case reverified end to end with the three-way
+        protocol, including the case where dropping the checkbox is genuinely invisible in both
+        the render and the markdown, because the item is empty.
+      </>
+    ),
+  },
+  {
+    title: "A separate finding, not caused by this work: undo looked broken via automation",
+    body: (
+      <>
+        Plain typing in a fresh paragraph, no lists involved at all, did not revert on Ctrl+Z when
+        driven through Playwright. Checked against the unmodified, last-committed baseline before
+        concluding anything: identical result there too. Whatever this is, it predates this
+        session and is not specific to checklists, flagged for separate investigation rather than
+        chased down in this pass.
+      </>
+    ),
+  },
+  {
+    title: "Briefly un-fixed, then actually fixed: an empty checkbox item now really has one",
+    body: (
+      <>
+        First tried showing the checkbox glyph for an empty item again (matching most other
+        editors) without changing what gets exported — caught immediately: that's the exact
+        mismatch this whole rewrite exists to eliminate, and reverted right away. The real
+        question was the productive one: why not make the exported markdown capable of actually
+        containing <code>[ ]</code>, instead of choosing which side has to lie? Verified in
+        isolation first, before touching any code: a lone zero-width space after the checkbox
+        satisfies GFM's real requirement for non-whitespace content and round-trips exactly.
+        Implemented on both sides — export injects it only when a checkbox item has no real text,
+        import recognizes and strips it back out so it never becomes visible or typeable — and
+        verified with a full headless round-trip (import a file containing it, confirm the live
+        node is genuinely empty, re-export, confirm it's stable). The render and the file now
+        agree completely, with no exception on either side of it.
+      </>
+    ),
+  },
+  {
+    title: "Found a real Firefox-only bug from a screenshot, not reproducible in Chromium",
+    body: (
+      <>
+        An empty checkbox row looked visibly mispositioned in a screenshot, but measured
+        byte-identical to every other row in Chromium, repeatedly. Installed Playwright's actual
+        Firefox engine and reproduced it on the first try: a real, confirmed{" "}
+        <code>height: 0px</code>. Root cause: the checklist item's shared class also sets{" "}
+        <code>display: flex</code>, correct for the static renderer's real two-element checkbox
+        layout, meaningless for Editing mode's single-element structure. Flex containers size
+        from their items, not <code>line-height</code> — an empty item's bare line break
+        contributes zero height as a flex item in Firefox specifically; Chromium quietly tolerates
+        the same mismatch. Fixed with a targeted <code>display: block</code> override, reverified
+        in both engines afterward, including that click-to-toggle still works in both. Chromium-only
+        testing missed a real, user-visible bug entirely.
+      </>
+    ),
+  },
+  {
+    title: "A vague report got misread at first: checkboxes should show a dash TOO, not never",
+    body: (
+      <>
+        First read as "plain bullets should show a dash, real checkboxes shouldn't" (matching the
+        design at the time) — corrected directly afterward: a checkbox is still a list item, and
+        the markdown still starts with the same <code>-</code> marker (<code>- [ ] text</code>),
+        so hiding the dash specifically for checkboxes was visually claiming they're a different
+        kind of list than they actually are. Fixed by swapping which pseudo-element holds what —
+        the dash moves to <code>::before</code> (matching every other list item exactly), the
+        checkbox box and its checkmark both move to <code>::after</code>. That moved a real
+        dependency: the click-to-toggle hit-test reads a pseudo-element's width to know where the
+        clickable glyph is, updated to match, reverified in both Chromium and Firefox afterward
+        (click-to-toggle still works in both; clicking the dash itself deliberately does not).
+      </>
+    ),
+  },
+  {
+    title: "That misread still surfaced a real bug: a stray dash from how @lexical/list wraps nesting",
+    body: (
+      <>
+        Investigating the (initially wrong) reading led to a real, separate bug that needed fixing
+        regardless: a mixed list and a fresh single-item list both rendered correctly, ruling out
+        the obvious theories first. The actual cause only showed up testing a NESTED checkbox
+        specifically: <code>@lexical/list</code> wraps a nested list inside a parent{" "}
+        <code>&lt;li&gt;</code> with no text and no checkbox class of its own, so it matched the
+        plain-bullet marker rule and picked up a dash that had nothing to do with its own
+        (nonexistent) content — confirmed with a screenshot showing the stray dash floating right
+        next to the nested checkbox's own glyph. Fixed by suppressing the marker specifically for
+        a list item whose SOLE content is a nested list, verified not to affect a real
+        parent-with-text-and-nested-sublist case, and confirmed the static renderer (a completely
+        different DOM shape for nesting) was never affected by either the bug or the fix.
+      </>
+    ),
+  },
+  {
+    title: "Delete no longer has a soft ‘revert to text’ step",
+    body: (
+      <>
+        Selecting a directive and pressing Backspace used to revert it to its raw,
+        re-editable markdown text (a second Backspace then deleted it); Delete instead
+        removed it outright, no revert. Removed the revert step entirely — retyping a
+        directive via <code>/</code> is simple enough that the extra machinery (including
+        escaping a reverted directive's raw text on export, so it wouldn't be mistaken for a
+        live directive again) wasn't earning its complexity. Backspace and Delete are now
+        byte-for-byte identical once something is selected: both fully remove, relying on
+        ordinary undo to bring something back.
+      </>
+    ),
+  },
+  {
+    title: "Typing [ ] and ::name{…} now live-convert, and paste re-parses through the real pipeline",
+    body: (
+      <>
+        Typing <code>[ ] </code>/<code>[x] </code> at the start of a line now live-converts into
+        a real checkbox the same way <code>**bold**</code> does (a hand-written transformer, not
+        <code>@lexical/markdown</code>'s own <code>CHECK_LIST</code> — that one creates a native
+        <code>"check"</code>-type list, which this codebase never uses). Typing a leaf directive
+        (<code>::badge{'{label="x"}'}</code>) alone on a line and pressing Enter does the same for
+        directives — built as its own Enter handler rather than a live-typing transformer, since
+        that mechanism only fires right after a space, which a directive's closing{" "}
+        <code>{"}"}</code> doesn't have. Pasting plain text now re-parses the whole clipboard
+        through the real parser too (container directives, tables, <code>- [ ] </code> with its
+        dash — anything live-typing doesn't reach), instead of inserting literal characters. Rich
+        (HTML) paste is untouched. Verified with the three-way protocol in both Chromium and
+        Firefox; one real finding along the way turned out to be a Playwright/Firefox synthetic-
+        event testing quirk, not a bug — see the skill doc's build-plan entry for the full trail.
+      </>
+    ),
+  },
 ];
 
-// ─── Sample content for the playground ────────────────────────────────────────────────
+// ─── Sample content for the playground ────────────────────────────────────────────────────────
 
 const DEFAULT_SAMPLE = `# Try editing this
 
@@ -458,8 +664,8 @@ as real typing — try \`/\` at the start of a line for the slash-command menu.
 
 ::badge{label="Directive"}
 
-Arrow onto the badge above, or click it — Backspace reverts it to raw text,
-Delete removes it outright.
+Arrow onto the badge above, or click it — either Backspace or Delete then
+removes it outright.
 
 No real table-editing UI exists yet, but a table still round-trips losslessly
 — click it to select, Backspace to see its raw markdown, undo to bring it back.
@@ -506,11 +712,18 @@ export default function OxMarkdownStyles() {
             <code>OxEditor</code> (task checkboxes, directive attribute popovers — try
             the Interactables section below), and now full Editing mode on a trimmed
             Lexical foundation — free-form typing, live markdown shortcuts, a native
-            checklist, directive select/revert/remove, undo, and a <code>/</code>{" "}
+            checklist, directive select/remove, undo, and a <code>/</code>{" "}
             slash-command menu (try the Editing mode section below), plus a refinement
             pass (undo coalescing verified, a dark-mode contrast bug fixed, two real bugs
-            caught by a deliberate code sweep — see the decision log). Step 5 (a hands-on
-            mobile UX pass) is next.
+            caught by a deliberate code sweep), plus a hands-on editing-behavior pass driven
+            entirely by Gerald testing the live surface — blank lines reworked into ordinary
+            empty paragraphs (no more decorator node, no more margin standing in for a real
+            line), checklists rebuilt on a real <code>OxListItemNode</code> after a live-
+            caught render/markdown mismatch showed the previous fix wasn't good enough, delete
+            simplified to always fully remove (no more soft revert-to-text step), and typing{" "}
+            <code>[ ] </code>/<code>::name{'{attrs}'}</code>/pasting plain text now all live-convert
+            through the real parser instead of landing as literal text (see the decision log for
+            the full arc on all of these). Step 5 (a hands-on mobile UX pass) is next.
           </p>
         </Section>
 
@@ -607,13 +820,17 @@ export default function OxMarkdownStyles() {
             <code>link</code>/<code>code</code>, live markdown shortcuts (type{" "}
             <code>**bold**</code>, <code># heading</code>, <code>&gt; quote</code>, ...),
             a native checklist, undo/redo, and the same select-then-act model as
-            Interacting mode for directives — arrow onto one or click it, Backspace
-            reverts it to raw text, Delete removes it outright. Try <code>/</code> at
+            Interacting mode for directives — arrow onto one or click it, then either
+            key (Backspace or Delete) removes it outright. Try <code>/</code> at
             the start of a line for the slash-command menu (heading, list, divider,
-            note). Known gap: a container directive's nested content isn't
-            independently editable yet (renders read-only) — and anything this bridge
-            doesn't have a real mapping for yet (tables, raw HTML) shows as a
-            read-only passthrough rather than being silently dropped.
+            note) — or just type <code>[ ] </code> for a live checkbox, or type a
+            leaf directive (<code>::badge{'{label="x"}'}</code>) and press Enter. Pasting
+            plain text (a checklist, a directive, a whole snippet) re-parses it through
+            the real parser too, not just literal characters. Known gap: a container
+            directive's nested content isn't independently editable yet (renders
+            read-only) — and anything this bridge doesn't have a real mapping for yet
+            (tables, raw HTML) shows as a read-only passthrough rather than being
+            silently dropped.
           </p>
           <Label>OxEditor (mode="editing")</Label>
           <div className="good-box p-4 mb-3">

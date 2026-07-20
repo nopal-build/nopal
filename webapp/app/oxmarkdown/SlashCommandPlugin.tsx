@@ -42,6 +42,7 @@ import {
 import { $createHeadingNode } from "@lexical/rich-text";
 import { $setBlocksType } from "@lexical/selection";
 import { $insertList } from "@lexical/list";
+import { $getNearestOxListItemNode } from "./OxListItemNode";
 import { $createHorizontalRuleNode } from "@lexical/react/LexicalHorizontalRuleNode";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $createOxDirectiveNode } from "./editingNodes";
@@ -106,7 +107,20 @@ const COMMANDS: SlashCommand[] = [
   { label: "Heading 3", keywords: ["h3", "heading3", "heading"], run: (key) => runOnClearedNode(key, (sel) => $setBlocksType(sel, () => $createHeadingNode("h3"))) },
   { label: "Bulleted list", keywords: ["bullet", "ul", "list"], run: (key) => runOnClearedNode(key, () => $insertList("bullet")) },
   { label: "Numbered list", keywords: ["number", "ol", "ordered", "list"], run: (key) => runOnClearedNode(key, () => $insertList("number")) },
-  { label: "Task list", keywords: ["task", "todo", "check", "checkbox"], run: (key) => runOnClearedNode(key, () => $insertList("check")) },
+  {
+    label: "Task list",
+    keywords: ["task", "todo", "check", "checkbox"],
+    run: (key) =>
+      runOnClearedNode(key, (sel) => {
+        // Always a plain "bullet" list, never "check" — see
+        // `OxListItemNode.ts`'s header. Whether the item that ends up
+        // holding the selection has a checkbox is OUR OWN field, set
+        // explicitly right after `$insertList` creates it.
+        $insertList("bullet");
+        const listItem = $getNearestOxListItemNode(sel.anchor.getNode());
+        listItem?.setChecked(false);
+      }),
+  },
   {
     label: "Divider",
     keywords: ["divider", "hr", "rule", "separator"],

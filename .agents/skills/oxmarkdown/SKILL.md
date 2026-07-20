@@ -122,25 +122,20 @@ they never also act:
      or a full popover of options to adjust its attributes — e.g. a
      `::gallery{...}` block's popover might let you change
      `folder`/`title`/`size` without hand-editing the directive text.
-   - **Backspace again**, once already selected (Editing mode only) —
-     *reverts* the interactable to the raw source text it came from, in
-     place, as plain editable text. This is un-rendering, not deletion — a
-     further backspace after that behaves like ordinary character
-     deletion, because by then it's just text again. This always works,
-     for any interactable, because markdown is the only source of truth
-     (see below): every interactable's rendered form has an exact
-     corresponding raw-text span to fall back to, regardless of whether it
-     was typed, pasted, inserted via a slash command, or loaded from a file
-     that was never "typed" in this editing session at all. If nothing
-     changes before deselecting, it simply re-parses back into the same
-     interactable — no functional round-trip loss.
-   - **Delete (forward-delete), once already selected** — fully removes
-     the interactable outright. Unlike Backspace, there's no intermediate
-     "revert to raw text" step; recovering from an accidental delete relies
-     on ordinary undo. Deliberately asymmetric with Backspace — Delete
-     already reads as more final/decisive in ordinary text editing, so this
-     matches that expectation rather than forcing the two keys to mirror
-     each other.
+   - **Backspace or Delete again, once already selected** (Editing mode
+     only) — fully removes the interactable outright. Both keys behave
+     identically here; recovering from an accidental delete relies on
+     ordinary undo, same as any other deletion. (REVISED: an earlier
+     version had Backspace *revert* to the interactable's raw source text
+     in place instead of deleting, kept separately editable, deliberately
+     asymmetric with Delete's outright removal. Reversed directly — not
+     an oversight: reverting needed real, ongoing machinery for a marginal
+     benefit — e.g. a reverted directive's raw text had to be escaped on
+     export so a bare `::name{...}` at the start of a line wouldn't be
+     mistaken for a live directive again on reparse — and retyping a
+     directive from scratch via `/` is simple enough that the soft-revert
+     step wasn't earning its complexity. Both keys now match the simpler,
+     more predictable expectation: selected, then gone.)
 
 ### Range selection is not the same as single-interactable selection
 
@@ -444,15 +439,23 @@ text sizes) before committing.
    (opaque, select-all-or-nothing) is left as a per-kind exception to add
    later, only if a real use case actually needs it — not designed for
    preemptively.
-6. **Forward-Delete vs. Backspace — decided: NOT symmetric.** Backspace
-   (approaching from the right) selects, then *reverts to raw text* on the
-   second press — a soft, reversible step. Delete (approaching from the
-   left) selects, then *fully removes* the interactable on the second
-   press — no revert-to-text step. Reasoning: a full delete can always be
-   recovered with ordinary undo, and that feels like the more natural
-   behavior for the Delete key specifically — Delete already reads as more
-   decisive/final than Backspace in ordinary text editing, so matching that
-   expectation beats forcing artificial symmetry between the two keys.
+6. **Forward-Delete vs. Backspace — REVISED: symmetric after all, both
+   fully remove.** Originally decided NOT symmetric (Backspace reverting
+   to raw markdown text on a second press, kept separately editable;
+   Delete removing outright with no revert step) — built, shipped, then
+   reversed directly: reverting to text was more machinery than it was
+   worth for a marginal benefit, including needing to escape a reverted
+   directive's raw text on export (a bare `::name{...}` at the start of a
+   line would otherwise be mistaken for a live directive again on
+   reparse). Retyping a directive from scratch via `/` is simple enough
+   that the soft-revert step wasn't earning its complexity. Both keys now
+   select-then-fully-remove identically; a full delete relies on ordinary
+   undo to bring something back, same as any other deletion.
+   `InteractablesPlugin.tsx` also dropped the `getRevertText()` duck-typed
+   contract entirely in favor of checking `$isDecoratorNode` directly
+   (Lexical's own generic type guard) — simpler, and it means a future
+   decorator (an `@mention` node) needs to implement nothing at all to get
+   this behavior, not even a method.
 7. **Block-level vs. inline interactable entry — decided: no distinction.**
    Entering an interactable selects it as a whole unit regardless of how
    the cursor arrives — Up, Down, Left, Right, or any other navigation
@@ -494,8 +497,10 @@ text sizes) before committing.
      CodeMirror 6's and ProseMirror's history modules are open-source
      references too if a fully custom editor is ever built) — came for
      free by wiring up `<HistoryPlugin />` in step 4, not a separate build.
-10. **Extra blank lines between paragraphs — DONE, in two real passes, not
-    one.** First pass only fixed `OxRenderer`'s static path (spacer `<div>`s
+10. **Extra blank lines between paragraphs — DONE, in four real passes, not
+    one (the fourth SUPERSEDES the second and third for Editing mode
+    specifically — see that bullet below for why).** First pass only fixed
+    `OxRenderer`'s static path (spacer `<div>`s
     inserted via `renderBlockNodes`, using `position.start.line`/`end.line`
     gaps — `oxmarkdown/document.ts`'s `countExtraBlankLines`, shared so
     every consumer agrees). That turned out to be incomplete — caught by
@@ -547,6 +552,67 @@ text sizes) before committing.
       provides for this default margin — there's no single reliable CSS
       selector for arbitrary caller-authored markup. Revisit if a real
       directive with multi-block content actually needs it.
+    - **SUPERSEDED for Editing mode, in a fourth pass: margin (the third
+      bullet above) and `OxBlankLinesNode` (the second) were both the
+      wrong call for a live-EDITABLE surface, even though the reasoning
+      for each was sound at the time.** Prompted by Gerald re-framing the
+      whole editor's design principle explicitly: "this should function
+      more like a code editor where 1 line in the markdown MUST equal one
+      line in the editor... each line should be the exact same height" —
+      no margins standing in for lines that should just exist. Under that
+      principle, a blank markdown line should be a real ROW in the editor,
+      not spacing bolted onto whatever comes after it. Concretely, for
+      Editing mode ONLY (the static `OxRenderer` keeps the margin-based
+      approach above — margin-based paragraph rhythm is completely normal
+      for read-only prose, this principle is specifically about a live-
+      editable surface):
+      - `OxBlankLinesNode` (the custom decorator node) is GONE. Blank lines
+        are now literal, ordinary, empty `ParagraphNode`s — `convertBlockList`
+        (`editingTransforms.ts`) inserts one per source blank line, via a
+        new `countBlankLines` (`document.ts`, returns the TOTAL gap,
+        unlike `countExtraBlankLines`'s "beyond the mandatory one"). An
+        ordinary empty paragraph gets 100% standard Lexical text-editing
+        behavior for free — clickable, focusable, Backspace/Enter/arrows/
+        undo all just work — which directly fixed a SEPARATE real bug
+        found in the same session: clicking in the visual gap the old
+        decorator rendered did nothing, because its wrapper was
+        `contentEditable="false"` and nothing redirected the click
+        anywhere useful. A hand-rolled `onMouseDown` click-redirect was
+        briefly added to patch that (each spacer div jumping selection to
+        the nearest real sibling) — and then deleted again once the real
+        fix (just use ordinary paragraphs) made it unnecessary entirely.
+      - **The earlier "2K+1, never exact" finding was real but incomplete
+        — it was a limitation of relying on the DEFAULT join, not of empty
+        paragraphs themselves.** `mdast-util-to-markdown` gives every
+        block-sibling pair its own default one-blank-line join unless a
+        custom `join` function says otherwise. Once EVERY pair explicitly
+        gets a said opinion — not just the "extra beyond one" gaps the old
+        `gapMap` tracked — the doubling disappears completely. Confirmed
+        directly (not assumed): 3 empty paragraphs with every surrounding
+        join forced to `0` serialize to EXACTLY 3 blank lines; a heading
+        directly followed by a paragraph with join forced to `0` serializes
+        with EXACTLY zero blank lines between them. This let the entire
+        `gapMap`/`WeakMap` bookkeeping in `exportOxDocument` be deleted in
+        favor of one small, fully STATELESS `blankLineJoin` function
+        (`editingTransforms.ts`) that just inspects the two actual mdast
+        nodes it's handed (`type === "paragraph" && children.length === 0`)
+        — exactly the intended, idiomatic use of `Join`'s signature
+        (`(left, right, parent, state)`, the real nodes, not indices).
+      - **The margin CSS rule is now split in two, not just narrowed**:
+        `.ox-content > *:not(:first-child)` / `.ox-content blockquote > ...`
+        (static, unchanged) stays exactly as before; the THIRD selector
+        that used to also cover `.ox-editing-surface` is gone entirely.
+        Verified directly, not assumed: real Playwright geometry check
+        showed every row in Editing mode — a wrapped 2-line paragraph, a
+        blank line, a directive pill, a checklist `<ul>` — landing at
+        EXACT 41px/82px grid multiples, back-to-back, zero gap anywhere
+        that wasn't a real row.
+      - **Also re-verified export fidelity end-to-end after all of this**:
+        typed a new line directly into a live blank line in the demo page
+        and confirmed (a) the click landed exactly where clicked, not
+        elsewhere, and (b) the raw markdown `<pre>` preview came back with
+        every other blank line in the sample completely unchanged — single
+        blank lines still single, nothing doubled or dropped.
 
 ## Build plan — where to start
 
@@ -621,12 +687,14 @@ mode, before TODO 1 needs an answer.
    `OxOpaqueNode`, a lossless passthrough for anything this bridge doesn't
    map yet (tables, raw HTML, any future mdast node type) — shown read-only
    via the static renderer rather than silently dropped, and still
-   Backspace-revertible/Delete-removable like a directive. `oxmarkdown/
-   InteractablesPlugin.tsx` implements select-as-unit/Backspace-revert/
-   Delete-remove ONCE, generically, against a small `getRevertText()` duck
-   type both node classes implement — a future `@mention` node gets this
-   for free. `oxmarkdown/SlashCommandPlugin.tsx` adds a minimal `/`
-   command menu (headings, list types, divider, one example directive).
+   Backspace/Delete-removable like a directive (see TODO 6 — REVISED:
+   both keys select-then-fully-remove now, no revert-to-text step).
+   `oxmarkdown/InteractablesPlugin.tsx` implements select-as-unit and
+   select-then-remove ONCE, generically, against Lexical's own
+   `$isDecoratorNode` — a future `@mention` node gets this for free with
+   no contract to implement at all. `oxmarkdown/SlashCommandPlugin.tsx`
+   adds a minimal `/` command menu (headings, list types, divider, one
+   example directive).
    Task checklists deliberately use `@lexical/list`'s NATIVE checklist
    support (`ListItemNode.setChecked`/`CheckListPlugin`) rather than a
    custom decorator — real Lexical state, not inline text, so Backspace at
@@ -723,6 +791,434 @@ mode, before TODO 1 needs an answer.
        block in `editingTransforms.ts` (nothing imported it — `OxEditor.tsx`
        and `SlashCommandPlugin.tsx` both import the node classes/factories
        directly from `editingNodes.tsx`) and an unnecessary `as never` cast.
+     - **Blank lines: DONE, in three real passes, not one — see TODO 10 for
+       the full write-up.** Reported as "collapsing new lines" while
+       testing Editing mode directly, not found by us first. Root-caused
+       to three separate, stacked issues: Editing-mode import never having
+       been fixed at all (the earlier fix only touched the static
+       renderer); representing a gap as an empty `ParagraphNode` being the
+       wrong data model entirely (CommonMark has no blank-line node type;
+       fixed with a dedicated `OxBlankLinesNode` and `mdast-util-to-
+       markdown`'s real `join` mechanism, verified with exact round-trips);
+       and an ordinary single blank line showing zero visual gap
+       everywhere by design (`margin: 0` on paragraphs/lists), fixed with a
+       default one-grid-unit margin on block siblings.
+     - **Found and fixed: a new checklist item's `checked` state and its
+       visual glyph could disagree, AND markdown itself can't always
+       represent what the glyph showed.** Pressing Enter inside a checklist
+       item (or the slash command's initial "Task list" item) renders an
+       unchecked checkbox glyph regardless of the item's own content —
+       `@lexical/list`'s own theme-class logic only checks "is the parent
+       list check-type", not the item's defined-ness (`ChecklistPlugin.tsx`
+       normalizes `checked` defensively, though in practice it was already
+       a real boolean by the time this runs, not `undefined` as first
+       assumed). The actual, deeper cause: `mdast-util-gfm-task-list-item`
+       cannot represent `[ ]`/`[x]` for an item with NO text at all — its
+       checkbox injection is a regex anchored on the bullet's trailing
+       separator space, which an empty item's rendered `-` never has
+       (confirmed directly against its source). An empty checklist item
+       therefore ALWAYS exports as a bare `-`, no matter what — a genuine
+       upstream constraint, not something fixable in our own code. Fixed
+       by making the VISUAL glyph match that reality instead of fighting
+       it: an empty item (CSS `:has(> br:only-child)`, Lexical's own "no
+       content" DOM shape) falls back to looking like an ordinary plain
+       bullet, and the checkbox glyph reappears the instant real text
+       exists (verified directly: typing into a previously-empty item
+       flips its own `::before` content from the dash back to the
+       checkbox box). Deliberately NOT solved with an invisible sentinel
+       character (a zero-width space satisfies GFM's regex and round-trips,
+       confirmed directly) — that would work but adds real, ongoing
+       fragility (a persistent hidden character in every empty item's
+       "empty" state, with import-side special-casing needed to recognize
+       and strip it back out) for a purely cosmetic win over the plain-
+       bullet fallback.
+     - **The Enter-key outdent model itself was redefined from scratch,
+       after a real "is this a library limitation?" investigation — not
+       resolved by more CSS.** Gerald reframed the request precisely:
+       checkbox-ness should behave like one more indent level, peeled off
+       LAST, with this exact priority order — (1) a real indent level, if
+       any, outdents FIRST; only once at indent level 0 does (2) the
+       checkbox itself get removed (still the same list, same line, no
+       structural split); only then does (3) a further Enter exit the list
+       entirely ("`- [ ] ^`" + Enter → "`- ^`" + Enter → "`^`", indented
+       items un-indent before any of that starts). A first implementation
+       (splitting the checked-off item into a brand new, separate `<ul>`)
+       visibly broke this — it showed up as a stray gap and a differently-
+       styled bullet between the checklist and the item after it.
+       - **Real "eject the library?" discussion, not skipped**: `@lexical/
+         list` ties checkbox-ness to the LIST's declared type, not the
+         item's — confirmed directly reading its source, not assumed — so
+         "one item in a checklist renders as a plain bullet, its siblings
+         stay checkboxes" has no supported native path. Spiked a thin
+         `OxListItemNode extends ListItemNode` (own field for "forced
+         plain bullet", independent of parent-list type) registered via
+         Lexical's `{replace, with, withKlass}` node-override config — and,
+         critically, EMPIRICALLY CONFIRMED (headless `createEditor`, no
+         browser needed) that this override transparently intercepts
+         node creation on EVERY path, including `@lexical/list`'s OWN
+         internal `$createListItemNode()` calls inside its Enter-key
+         splitting logic (`ListItemNode.prototype.insertNewAfter`) — not
+         just our own code's calls. This means a full subclass IS a safe,
+         real option if ever needed — not a hack, and not a foundation
+         that would fight the library's own internals.
+       - **Turned out NOT to be needed.** The visible gap/stray-bullet bug
+         causing this investigation was actually caused by something else
+         entirely — the SAME editing-surface margin CSS rule just removed
+         in the blank-lines redesign above. Once that margin was gone, the
+         original, much simpler fix (`ChecklistOutdentPlugin.tsx`,
+         splitting the downgraded item into a genuinely separate "bullet"-
+         type list, mirroring `@lexical/list`'s OWN trailing-siblings-
+         split technique from its default `INSERT_PARAGRAPH_COMMAND`
+         handler) rendered perfectly seamlessly — confirmed with real
+         Playwright geometry (adjacent rows measured back-to-back, zero
+         gap, exact 41px grid heights) — with a genuine, real bonus: a
+         separate "bullet"-type list gets `@lexical/list`'s OWN correct
+         click-to-toggle SUPPRESSION (it checks the LIST's type) and its
+         OWN correct second-Enter-exits-the-list behavior FOR FREE, no
+         custom code fighting the library needed at all. Left as a real,
+         reusable finding for later, not dead-end work: if a future need
+         genuinely requires DIFFERENT-typed items within the exact same
+         `<ul>` (not achievable by splitting lists), the `OxListItemNode`
+         approach is verified, ready, and known to work.
+       - **All four priority rules verified directly, not assumed** (fresh
+         items via slash commands to sidestep click-position pitfalls,
+         real DOM geometry checks, not just HTML string inspection): a
+         nested empty checkbox item's Enter outdents one real indent level
+         and STAYS a checkbox (confirmed via `@lexical/list`'s own default
+         nested-outdent path, untouched); a non-empty checked item's Enter
+         splits in-list into a fresh unchecked checkbox item, zero gap; an
+         empty checkbox item's Enter downgrades in place to a plain bullet
+         (separate list, zero visual gap); a further Enter on that empty
+         plain bullet exits to an ordinary paragraph.
+       - **SUPERSEDED AGAIN, immediately — the "separate list" approach
+         directly above was itself wrong, for a reason worse than a visual
+         gap.** Caught by Gerald live-testing again, not found by us first:
+         the two-adjacent-lists structure was a real markdown/render
+         MISMATCH, not just a visual one — confirmed directly by feeding
+         the exact structure to `mdast-util-to-markdown` in isolation:
+         `- [x] Already checked` followed by a second, separate bullet
+         list serializes to `- [x] Already checked\n\n*\n` — a real extra
+         blank line AND a bullet character switched to `*`, because two
+         adjacent lists of the same type need to stay disambiguated on
+         reparse (confirmed against the library's own real behavior, not a
+         guess). The rendered editor showed neither the gap nor the `*` —
+         it looked seamless while the actual exported markdown genuinely
+         differed. This is exactly what Gerald's stated core rule forbids:
+         "the editor should almost always represent the markdown it will
+         produce" — restated afterward as the standing testing convention
+         below (input markdown / rendered editor / output markdown, all
+         three checked together, every time).
+       - **Actually built this time: `OxListItemNode extends ListItemNode`**
+         (`oxmarkdown/OxListItemNode.ts`), registered via Lexical's real
+         `{replace, with, withKlass}` node-override config (the exact
+         mechanism spiked and confirmed above — that spike's finding held
+         up under real use, not just headless construction checks).
+         Checklists never use `@lexical/list`'s `"check"` list type at all
+         now — every list is plain `"bullet"`; whether an ITEM has a
+         checkbox is this class's own field, so a checklist can freely mix
+         checkbox and plain-bullet items in ONE continuous `<ul>`, no
+         splitting, ever. `isRealCheckbox()` (checked is defined AND the
+         item has real text — the GFM floor) is the ONE predicate both
+         rendering and `editingTransforms.ts`'s export call, so they
+         literally cannot disagree. Two real, non-obvious traps hit and
+         fixed while building it, both confirmed by direct testing, not
+         guessed:
+         - `ListItemNode`'s modern `$config()` API registers a `$transform`
+           that unconditionally clears `checked` whenever the parent list
+           isn't `"check"`-type — correct for the base class, actively
+           destructive for a model where NO list is ever `"check"`-type.
+           Overriding `$config()` to omit it did NOT stop it from running
+           (confirmed directly with real logging — `$config()`'s exact
+           inheritance/merge behavior across a subclass chain isn't
+           something to rely on without deeper certainty than the type
+           definitions gave). Fixed more robustly: an entirely separate
+           field (`__oxChecked`) the base transform has no reason to
+           touch, and the constructor never lets a real value reach the
+           base's own `__checked` field in the first place — so that
+           transform's own guard clause makes it a permanent no-op for
+           this class, regardless of how `$config()` inheritance actually
+           works under the hood.
+         - `editor.getEditorState().read(fn)`, called from a raw DOM event
+           handler (the click-to-toggle listener), threw "Unable to find
+           an active editor" — confirmed directly, not assumed. Fixed by
+           passing the required `{ editor }` option explicitly
+           (`.read(fn, { editor })`), which a standalone `EditorState`
+           snapshot needs to know which editor it belongs to outside an
+           already-active update/read cycle. `editor.update(fn)` (used
+           elsewhere in the same file) never needed this — it's always
+           called ON a specific editor instance directly, no ambiguity.
+       - **Click-to-toggle, Space-to-toggle, Escape, and Arrow-Left/Up/Down
+         checklist-focus behavior all rebuilt from scratch** in a new
+         `OxChecklistPlugin.tsx`, replacing `<CheckListPlugin />` entirely
+         (its own gating is ALSO keyed on `"check"`-type lists, so it would
+         never fire for anything here) — read directly from `@lexical/
+         list`'s actual source for each one (the exact click hit-test math
+         including the touch-padding/RTL cases, not a simplified version).
+         One deliberate, documented behavior change from the original:
+         click-to-toggle no longer calls `.focus()` on the clicked `<li>`
+         afterward — confirmed directly that doing so left the editor in a
+         state where ordinary typing right after stopped registering.
+         Traded a minor affordance (a just-clicked checkbox isn't
+         immediately "active" for Arrow-Up/Down navigation) for not
+         breaking typing, a clearly worse regression.
+       - **A separate, real finding while testing all of this, confirmed
+         against an unmodified baseline, NOT a regression from this work**:
+         `Ctrl+Z` immediately after typing plain text in a fresh paragraph
+         — no lists, no checkboxes, nothing this session touched — did not
+         revert the change, tested via Playwright. Stashed every change
+         from this whole session and re-ran the identical check against
+         the last real commit: identical result. Whatever this is, it
+         predates this work and isn't specific to checklists — flagged
+         here for future investigation, deliberately not chased further
+         in this pass (out of scope for what was being fixed, and TODO 9
+         already covers undo/history at the design level).
+       - **All of the above reverified end-to-end with the three-way
+         protocol** (see "Testing convention" below, which this exact
+         back-and-forth is what prompted): the original reported sequence
+         (`- [x] Already checked` + Enter + Enter + Enter) now produces,
+         at every single step, a rendered view and an exported markdown
+         that agree exactly — including the subtle case where step 2 (the
+         checkbox actually being dropped) is invisible in BOTH the render
+         AND the markdown, because the item is empty and GFM/our own glyph
+         rule both treat that identically either way.
+       - **That "invisible step" then went through two more real rounds
+         before landing on the actual right answer — worth recording the
+         full arc, not just the ending.** Round A: Gerald asked for the
+         new empty item to visibly show a checkbox (matching most other
+         editors, and making the outdent's middle step visually distinct)
+         — tried it by dropping `isRealCheckbox()`'s text-length check,
+         shipped it. Immediately caught and reverted: showing a checkbox
+         the exported markdown genuinely cannot contain is precisely the
+         bug being fixed here, and "the item happens to be empty" is not a
+         rare exception — pressing Enter to continue a checklist is the
+         single most common action there is. Round B: Gerald then asked
+         the actually-productive question directly — "why can't we put in
+         the `- [ ]` when pressing enter" — i.e. don't remove the glyph,
+         make the MARKDOWN capable of containing it instead. Verified
+         directly before touching any code (learned that lesson already):
+         does a lone zero-width space (`\u200b`) after `[ ]` actually
+         satisfy GFM's real requirement for non-whitespace content, and
+         does it round-trip parse -> serialize -> reparse byte-for-byte
+         stable? Confirmed yes, in isolation, before shipping anything.
+         **Landed fix**: `isRealCheckbox()` is back to just
+         `checked !== undefined` (no text requirement) — but now paired
+         with real changes on both sides of `editingTransforms.ts`, not
+         just the render: `exportListItem` injects a lone
+         `CHECKBOX_PLACEHOLDER` (`\u200b`) paragraph specifically when a
+         checkbox item has no real text, so the exported file gets an
+         ACTUAL `[ ]`/`[x]`, not a lie the render is telling on its own;
+         `convertListItem` recognizes that exact pattern on the way back
+         in and strips it, so the placeholder never becomes real, visible,
+         or typeable content in the live document — confirmed directly,
+         not assumed, with a full headless round-trip: importing a saved
+         file containing the placeholder produces a genuinely empty node
+         (`textContent: ""`, not containing the ZWSP), and re-exporting it
+         reproduces the identical placeholder pattern, stably. This is
+         the first version of this feature where NEITHER side has to give
+         up anything — the render shows a checkbox, and the file actually
+         has one, always, with no exception on either side. This rejects
+         the EARLIER "invisible sentinel character adds ongoing fragility
+         for a purely cosmetic win" reasoning (TODO 10) directly: it was
+         framed as cosmetic because the render/text mismatch wasn't yet
+         understood as the actual problem needing solved — once the goal
+         is real consistency (not a cosmetic preference), the same
+         mechanism stops being a workaround and becomes the correct fix.
+         Click-to-toggle,
+         the slash-command "Task list" (now creates a plain bullet list
+         with `checked: false` set explicitly, never `"check"`-type), and
+         the nested-item-outdents-first priority rule were each reverified
+         the same way.
+       - **A genuine, confirmed Firefox-only bug found right after, from a
+         real screenshot Gerald sent — not reproducible in Chromium at
+         all, so worth recording the actual diagnostic path.** An empty
+         checkbox row rendered with the glyph mispositioned, looking like
+         it occupied "half a row." Playwright's default Chromium showed
+         byte-identical geometry to every other row, repeatedly, across
+         several different reproduction attempts — the bug genuinely
+         didn't exist there. Gerald mentioned using a Firefox-based
+         browser; installed Playwright's actual Firefox engine
+         (`npx playwright install firefox`) and reproduced it immediately,
+         first try: computed `height: 0px` on the empty item, confirmed
+         directly via `getComputedStyle`, not guessed. Root cause: shared
+         `.ox-task-item` sets `display: flex` — correct and necessary for
+         the STATIC renderer's real two-element structure (a
+         `.ox-task-checkbox` button laid out next to a `.ox-task-text`
+         span), completely wrong for Editing mode, which has no second
+         element to lay out at all (the checkbox there is a `::before`
+         pseudo-element; the item's own children are just its ordinary
+         text). A flex container's height comes from its flex items' own
+         sizes — `line-height` has no effect there — so an EMPTY item
+         (Lexical's "no content" shape, a bare `<br>`) contributes zero
+         height as a flex item in Firefox specifically; Chromium tolerates
+         the same mismatch without collapsing, papering over a real bug
+         instead of catching it. Fixed with a targeted, correctly-scoped
+         override: `display: block` on the more-specific editing-mode
+         selector (`.ox-task-item-editing--checked`/`--unchecked`),
+         restoring the exact mechanism blank-line paragraphs already rely
+         on (plain `line-height` reliably sizing an empty block — verified
+         earlier this session). Reverified in BOTH engines afterward, not
+         just Firefox: `height: 41px` and correctly centered in both, and
+         click-to-toggle (which a nearby CSS comment specifically warns
+         is sensitive to this exact selector, for its hit-test math) still
+         works in both too. **Worth generalizing**: Chromium-only testing
+         missed a real, user-visible bug entirely — cross-browser checks
+         (at minimum Firefox, given it's now confirmed to disagree with
+         Chromium on flex-sizing edge cases in this exact codebase) are
+         worth doing for any future layout-sensitive CSS change here, not
+         just as a one-off reaction to a bug report.
+       - **A second, real, related bug found immediately after, from a
+         vague report that got MISREAD on the first pass — worth recording
+         precisely because the wrong reading still led to a real, correct
+         fix, just not the one actually being asked for.** First read as
+         "plain bullets should show a dash, real checkboxes shouldn't"
+         (matching the THEN-current design); Gerald corrected this
+         directly afterward: checkboxes should ALSO show the same gutter
+         dash every other list item gets — a checkbox is still a list
+         item, and the markdown still starts with the same `-` marker
+         (`- [ ] text`), so hiding the dash specifically for checkboxes
+         was visually claiming they're a different kind of list than they
+         actually are. That reframing is itself a small but real
+         instance of the standing "editor reflects markdown" rule, applied
+         somewhere new: not just "don't show a checkbox the markdown can't
+         contain," but "don't hide a marker the markdown DOES contain,"
+         either. Implemented by swapping which pseudo-element holds what
+         — `::before` becomes the dash (identical selector/positioning to
+         every other list item's own dash, just written for the checklist
+         classes specifically, since checklist items were never actually
+         EXCLUDED from needing a marker, only from the ONE shared rule);
+         `::after` becomes the checkbox box, with the checkmark folded
+         into the SAME `::after` as a conditional `background-image`
+         instead of its own separate layer (a real element only has two
+         pseudo-elements available). This moved a real, load-bearing
+         dependency: `OxChecklistPlugin.tsx`'s click-to-toggle hit-test
+         reads a specific pseudo-element's computed `width` to know where
+         the clickable glyph is (see that file's `handleCheckItemEvent`)
+         — updated to read `::after` instead of `::before`, reverified
+         directly in BOTH engines afterward (click-to-toggle still works
+         in both; clicking the DASH itself, deliberately, does NOT toggle
+         it — confirmed, not assumed). The dead-end investigation from the
+         MISREAD pass (below) still stands as a real, separate bug that
+         needed fixing regardless of which reading was correct — the
+         wrapper-`<li>` stray-dash issue was real either way.
+       - **The misread pass's investigation, preserved as-is — the bug it
+         found was real and still needed fixing.** Several plausible-
+         sounding theories were tried and
+         DISPROVEN by direct testing before finding the actual cause —
+         worth recording the dead ends, not just the answer, since each
+         disproof genuinely narrowed things down: a mixed list (checkbox
+         AND plain-bullet items in ONE `<ul>`) rendered correctly in both
+         Interacting and Editing mode, marker-wise; a fresh single-item
+         list rendered correctly too. The actual cause only showed up when
+         testing a NESTED checkbox item specifically: `@lexical/list`'s
+         own convention for nesting wraps the nested `<ul>` inside a
+         PARENT `<li>` (`<li><ul><li>...`), and that wrapper `<li>` has no
+         text and no `.ox-task-item` class of its own — so it satisfied
+         the plain-bullet marker rule's `:not(.ox-task-item)` exclusion
+         and picked up a dash marker that had nothing to do with its own
+         (nonexistent) content, rendering directly in front of whatever
+         the nested list's first real item actually was. Confirmed with a
+         real screenshot showing a nested checkbox with a stray dash
+         floating right next to its own glyph — exactly matching the
+         original vague report once translated into a concrete DOM cause.
+         Fixed with `:has(> ul:only-child)` (deliberately NOT
+         `:first-child` — a real parent item with BOTH its own text and a
+         nested sublist must keep its own marker; only a `<li>` whose SOLE
+         content is the nested list, no text at all, is this wrapper
+         case) suppressing the marker specifically for that shape.
+         Reverified directly: the nested checkbox now shows only its own
+         glyph; a genuine parent-with-text-and-nested-sublist case still
+         keeps its marker; the STATIC renderer (a completely different DOM
+         shape for nesting — the nested `<ul>` sits INSIDE the same `<li>`
+         as the parent's own content, no separate wrapper at all) was
+         never affected by either the bug or the fix, confirmed directly
+         rather than assumed from the shared `.ox-content` class alone.
+         Noted, NOT fixed (separate, pre-existing, out of scope for this
+         pass): the static renderer's own nested checklist rendering
+         visually renders inline next to the parent's text rather than
+         indented on its own line — a real, different bug worth a future
+         pass, not touched here.
+     - **Revert-to-text removed entirely; both delete keys now fully remove
+       (see TODO 6's REVISION for the full reasoning)** — `editingNodes.tsx`
+       dropped `getRevertText()`/`isRevertibleOxNode()` from both
+       `OxDirectiveNode` and `OxOpaqueNode`; `InteractablesPlugin.tsx`
+       checks Lexical's own generic `$isDecoratorNode` instead of a
+       duck-typed contract, so a future decorator (an `@mention` node) gets
+       select-then-delete for free with nothing to implement at all.
+     - **Live-typing for checkboxes and directives, plus a real paste
+       pipeline — the three asks from "this also goes for the remark
+       syntax"/"same applies for pasting".** Verified end-to-end with the
+       three-way protocol (typed/pasted input, rendered editor, exported
+       markdown, all three checked together), in both Chromium and
+       Firefox for the live-typing paths.
+       - **`checklistTransformer.ts`** — a hand-written `ElementTransformer`
+         (NOT `@lexical/markdown`'s own exported `CHECK_LIST` — confirmed
+         directly, reading `LexicalMarkdown.dev.mjs`, that it calls
+         `$createListNode('check')`, which this codebase never uses at all,
+         see `OxListItemNode.ts`) so typing `[ ] `/`[x] ` live-converts into
+         a real `OxListItemNode` checkbox, merging into an adjacent bullet
+         list exactly like typing `- ` already does. Reuses
+         `CHECK_LIST.regExp` directly rather than hand-copying the pattern.
+         **A real, confirmed scope limit, not introduced by this work**:
+         `registerMarkdownShortcuts`'s own per-keystroke matching means
+         typing the FULL `- [ ] ` sequence character-by-character converts
+         to a plain bullet after `- ` (matching `UNORDERED_LIST`'s regex)
+         BEFORE `[ ] ` is ever reached — live-typing conversion in practice
+         only reaches a checkbox when typed WITHOUT the leading dash (the
+         regex's dash prefix is optional for exactly this reason upstream
+         too). Typing `- [ ] ` with the dash still works via paste.
+       - **`DirectiveShortcutPlugin.tsx`** — deliberately NOT an
+         `ElementTransformer` like the checkbox one, because that mechanism
+         only ever fires right after typing a SPACE (confirmed directly:
+         `textContent[anchorOffset - 1] !== ' '` bails out otherwise, in
+         `registerMarkdownShortcuts`'s update listener) — fine for `- [ ] `/
+         `# `, which always have a natural trailing space, wrong for a
+         directive's closing `}`, which doesn't. Built instead as a
+         dedicated `KEY_ENTER_COMMAND` handler: typing a LEAF directive
+         (`::name{attrs}`, exactly two colons) alone on a top-level line,
+         then pressing Enter, converts it into a real `OxDirectiveNode` —
+         a cheap regex decides candidacy only, the REAL parser
+         (`parseOxDocument`) decides validity, same principle as everywhere
+         else in this codebase (never a hand-rolled attribute parser).
+         Deliberately out of scope for this pass, not an oversight: text
+         directives (`:name{attrs}`, inline/mid-sentence) and container
+         directives (`:::name{attrs} ... :::`, structurally multi-line —
+         doesn't fit a single-Enter conversion) — paste covers both.
+       - **`MarkdownPastePlugin.tsx`** — intercepts plain-text paste
+         (`PASTE_COMMAND`, `COMMAND_PRIORITY_HIGH`, confirmed above
+         `@lexical/rich-text`'s own default handler's
+         `COMMAND_PRIORITY_EDITOR`) and routes it through the exact same
+         `parseOxDocument` + `importOxDocument` pipeline
+         `MarkdownSyncPlugin` already uses for whole-document loads, then
+         `$insertNodes` at the current selection — the one mechanism that
+         gets full fidelity for anything live-typing doesn't reach
+         (container directives, `- [ ] ` WITH its dash, tables, ...),
+         since it re-parses the whole pasted text at once. Rich (HTML)
+         paste is left completely untouched (this plugin bails out
+         whenever the clipboard offers `text/html`).
+       - **A real, confirmed Firefox-specific finding while testing paste —
+         a TEST-TOOLING limitation, not a functional bug, worth recording
+         precisely so it isn't re-investigated later.** Simulating a paste
+         in headless Playwright turned out to have two failure modes,
+         neither in this codebase's own logic: (1) `Ctrl+V` alone, even
+         with clipboard permissions granted and real OS clipboard content
+         written first, never reached `PASTE_COMMAND` at all in headless
+         Chromium (confirmed directly — an unconditional log at the top of
+         the handler never fired) — a known class of headless-automation
+         limitation, not something real user paste hits. (2) Dispatching a
+         synthetic `ClipboardEvent` directly (`document.activeElement.
+         dispatchEvent(...)`) DID reach the handler and worked perfectly in
+         Chromium (confirmed: correct text extracted, correct node count,
+         correct final render AND markdown) — but Firefox returned an EMPTY
+         string from `event.clipboardData.getData("text/plain")` on that
+         same synthetic event, confirmed directly by logging the exact
+         value. This matches Firefox's documented, deliberate restriction
+         on reading clipboard data from non-trusted (script-dispatched)
+         events, for privacy/security reasons — it does NOT apply to a real
+         user's actual `Cmd/Ctrl+V`, which is always a fully-trusted native
+         event with fully-accessible `clipboardData`, the exact same
+         standard W3C Clipboard API this plugin already uses. No code
+         changed in response to this — there was nothing to fix, only
+         something to not mistake for a real gap later.
 5. **Mobile UX pass** — quick-actions bar, bottom-sheet popovers, grid-sized
    tap targets (see TODO 2). Deliberately last and explicitly a hands-on
    review/iterate pass on real devices, not a spec to implement blind —
@@ -735,7 +1231,37 @@ mode, before TODO 1 needs an answer.
    `MdxEditorClient`/`MdxEditorEditable` (real typing) in place for actual
    text editing until step 4 lands, then retire them.
 
+## Testing convention — verify three things together, never one alone
+
+Established after the SAME class of bug (checklist checkbox rendering vs.
+what the markdown actually says) slipped through TWICE, caught only
+because Gerald tested by hand — both times, verification had checked
+"does the rendered HTML look right" without ever checking "does the
+EXPORTED markdown match what's rendered," which is the actual invariant
+that matters. The core principle, stated directly: **the editor should
+almost always represent the markdown it will produce.** Little should be
+held as UI-only state that renders differently from what's exported —
+when an action (a click, a popover field, a toggle) changes something,
+that's writing straight to the markdown-backed model, not layering
+display-only state on top of it that could drift from it.
+
+So every check, from here on, verifies all three legs together, in this
+order:
+
+1. **Input markdown** — the exact source being loaded/edited.
+2. **Rendered editor** — what it actually looks like/produces as DOM.
+3. **Output markdown** — what re-serializing the live document produces.
+
+For an edit-in-place check (type something, press a key, click a glyph):
+input markdown -> interact -> does the rendered view change the way you'd
+expect, AND does the output markdown match that rendered view exactly?
+Checking only 1 vs. 2, or only 2 vs. 3, is exactly the gap that let both
+checklist bugs above slip through — a decorator/glyph can render something
+plausible-looking that the export can't actually produce (or vice versa),
+and nothing catches it unless both are checked side by side, every time.
+
 ## Related skills
+
 
 - `mdx-editor` — the current, live system this replaces. Keep both skills
   in sync as work progresses; concepts move from "current" to "carried

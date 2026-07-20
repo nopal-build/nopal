@@ -106,40 +106,35 @@
   background-position: -22px -12px;
 }
 
-/* An ordinary single blank line in the source should produce ONE visible
-   grid row of separation — the normal, expected "paragraph break" look
-   basically every markdown renderer has. Paragraphs/lists intentionally
-   have `margin: 0` below (each block's own `line-height` already handles
-   its OWN internal rhythm) — this rule is what gives adjacent SIBLING
-   blocks a gap at all. `*:not(:first-child)` (not the equivalent, lower-
-   specificity `* + *`) is deliberate — paragraphs/lists' own `margin: 0`
-   below is MORE specific than a plain `* + *` would be (a class plus a
-   type selector beats a class plus only universal selectors), so it would
-   silently win and this rule would do nothing (confirmed directly: checked
-   computed `margin-top`, got `0px`, before switching to this form).
-   `:not(:first-child)` carries the same specificity weight as a class,
-   which is enough to override that. More specific rules (headings' own
-   margin-top) still win over this by specificity, so they're unaffected.
-   Extra blank lines beyond this
-   first one stack MORE space on top, via real spacer elements/nodes — see
-   `renderBlockNodes` in `OxRenderer.tsx` and `OxBlankLinesNode` in
-   `editingNodes.tsx` — rather than a bigger margin, so an arbitrary
-   blank-line count can be represented (CSS margin can't stack per extra
-   line the way a repeated element naturally can).
-   Scoped to `.ox-content`'s own direct children, a blockquote's direct
-   children (nested block content one level deep), AND `.ox-editing-surface`
-   specifically — Editing mode's actual content sits two real DOM levels
-   below `.ox-content` (through a plain positioning wrapper `OxEditor.tsx`
-   adds and Lexical's own contentEditable), not as `.ox-content`'s direct
-   child, so the first selector alone doesn't reach it (confirmed directly:
-   checked computed `margin-top` there too, got `0px`, before adding this).
-   A container directive's own children still rely on whatever wrapper its
-   registry renderer provides, which doesn't get this automatically (known
-   gap, not fixed here — there's no single reliable selector for
-   caller-authored markup). */
+/* STATIC/READ-ONLY display only (`OxRenderer`'s output — `.ox-content`'s
+   own direct children, and a blockquote's direct children, one level
+   deep). An ordinary single blank line in the source produces ONE visible
+   grid row of separation via margin here — fine for read-only prose,
+   where paragraph rhythm via margin is a completely normal, expected
+   look. `*:not(:first-child)` (not the equivalent, lower-specificity
+   `* + *`) is deliberate — paragraphs/lists' own `margin: 0` below is
+   MORE specific than a plain `* + *` would be (a class plus a type
+   selector beats a class plus only universal selectors), so it would
+   silently win and this rule would do nothing (confirmed directly:
+   checked computed `margin-top`, got `0px`, before switching to this
+   form). Extra blank lines beyond this first one stack MORE space on top
+   via real spacer elements (`renderBlockNodes` in `OxRenderer.tsx`),
+   rather than a bigger margin, so an arbitrary blank-line count can be
+   represented. A container directive's own children still rely on
+   whatever wrapper its registry renderer provides, which doesn't get this
+   automatically (known gap, not fixed here — there's no single reliable
+   selector for caller-authored markup).
+
+   Deliberately NOT scoped to `.ox-editing-surface` — Editing mode
+   represents every blank line as a real, ordinary empty `ParagraphNode`
+   (see `editingTransforms.ts`'s header) instead of margin, satisfying
+   "1 markdown line = 1 editor line" literally: every row, blank or not,
+   is exactly one grid unit tall, with nothing added on top. A margin rule
+   here would double up on top of that real row and break the uniform
+   grid the live editing surface is required to keep — this is a real,
+   deliberate difference from the static renderer, not an oversight. */
 .ox-content > *:not(:first-child),
-.ox-content blockquote > *:not(:first-child),
-.ox-editing-surface > *:not(:first-child) {
+.ox-content blockquote > *:not(:first-child) {
   margin-top: var(--ox-grid);
 }
 
@@ -254,6 +249,25 @@
 }
 .ox-content ul ul > li:not(.ox-task-item)::before {
   content: "–";
+}
+/* A nested list (`@lexical/list`'s own structure, not ours) wraps the
+   nested `<ul>` inside a PARENT `<li>` (e.g. `<li><ul><li>...`), and that
+   wrapper carries no text and no `.ox-task-item` class of its own, so it
+   satisfies `:not(.ox-task-item)` above and picked up a bullet marker
+   that had nothing to do with its own (nonexistent) content: a stray dash
+   rendering directly in front of whatever the nested list's first item
+   actually is, checkbox or not (found from a real screenshot, not
+   assumed — a nested checkbox item showed both a dash AND its own glyph,
+   which is the exact case a real markdown export never produces: nesting
+   never adds an extra bullet level of its own). `:only-child` on the
+   nested list itself is the correct check, not `:first-child` — a real
+   parent item with BOTH its own text and a nested sublist ("parent" text
+   followed by an indented "child" item) must keep its own marker; only a
+   li whose SOLE content is the nested list (no text at all) is this
+   wrapper case. */
+.ox-content ul > li:has(> ul:only-child)::before,
+.ox-content ul > li:has(> ol:only-child)::before {
+  content: none;
 }
 .ox-content ol {
   counter-reset: ox-ol;
@@ -495,27 +509,79 @@
    the `<li role="checkbox">` itself IS the checkbox (see `registerCheckList`
    in `@lexical/list`), with the label as its direct text content. Visually
    matched to the static glyph (same size/border/checkmark), not a literal
-   DOM reuse. Both classes below also satisfy `.ox-task-item`, so the plain
-   bullet-marker rule above (`ul > li:not(.ox-task-item)::before`) correctly
-   skips checklist items — see `OxEditor.tsx`'s Lexical theme config, which
-   is what actually assigns these classes. */
+   DOM reuse. Both classes below also satisfy `.ox-task-item`.
+
+   Checklist items DELIBERATELY keep the same gutter dash every other list
+   item gets (`::before`, below) — a checkbox is still a list item, and the
+   markdown still starts with the same `-` marker every other bullet does
+   (`- [ ] text`, not just `[ ] text`); hiding the dash specifically for
+   checkboxes would visually claim they're a different kind of list than
+   they actually are. Because of that, this class pair is DELIBERATELY
+   `:not(.ox-task-item)`-EXCLUDED from nothing — the shared
+   `ul > li:not(.ox-task-item)::before` rule above only ever applied to
+   plain bullets to begin with; checklist items get their OWN, separate
+   `::before` rule right below instead, producing the identical dash via a
+   different selector, not a shared one. This means the checkbox glyph
+   itself has to move to `::after` (a real element only has two pseudo-
+   elements to work with) — the checkmark that used to live on `::after`
+   is now folded into the SAME `::after` as a conditional background-image
+   on top of the box, rather than a separate layer.
+
+   `display: block` (NOT the `display: flex` that shared `.ox-task-item`
+   rule above sets) is a real, deliberate override, not redundant — found
+   via a genuine cross-browser bug, not assumed: that `display: flex` was
+   written for the STATIC renderer's OWN structure (a real
+   `.ox-task-checkbox` button laid out next to a `.ox-task-text` span),
+   which Editing mode doesn't have at all (the checkbox here is a
+   pseudo-element with nothing to lay out alongside — the item's own
+   children are just its ordinary text). Chrome tolerates the mismatch;
+   Firefox does not: a flex container's height comes from its flex items'
+   own sizes, and `line-height` has no effect there (it's an inline-
+   formatting-context property) — so an EMPTY item (Lexical's "no content"
+   shape is a bare `<br>`, which contributes zero height as a flex item)
+   collapsed to a real, confirmed `0px` computed height in Firefox
+   specifically (reproduced directly via Playwright's Firefox engine, not
+   assumed from a screenshot), with the checkbox glyph's `top: 50%`
+   centering math resolving against that collapsed 0px instead of the
+   intended 41px. Reverting to normal block layout here restores the exact
+   same mechanism the blank-line paragraphs already rely on (plain
+   `line-height` reliably sizing an empty block, verified earlier this
+   session) — Editing mode's checklist items never needed flex at all. */
 .ox-content .ox-task-item-editing--checked,
 .ox-content .ox-task-item-editing--unchecked {
+  display: block;
   position: relative;
   padding-left: var(--ox-grid);
   line-height: var(--ox-grid);
   outline: none;
 }
-/* `left: 0` (not centered in the grid cell, unlike the static
-   `.ox-task-checkbox`) on purpose: `@lexical/list`'s own click-to-toggle
-   hit-test (`handleCheckItemEvent` in `@lexical/list`) reads THIS
-   pseudo-element's computed `width` and checks the click's x-position
-   against `[li.left, li.left + width]` — if the glyph doesn't actually
-   start at the `<li>`'s left edge, clicks land outside where Lexical
-   thinks the checkbox is and silently do nothing (found by testing a real
-   click, not assumed). */
 .ox-content .ox-task-item-editing--checked::before,
 .ox-content .ox-task-item-editing--unchecked::before {
+  content: "—";
+  position: absolute;
+  left: -18px;
+  font-size: 14px;
+  color: var(--ox-color-accent);
+  pointer-events: none;
+  user-select: none;
+  line-height: inherit;
+}
+.ox-content ul ul .ox-task-item-editing--checked::before,
+.ox-content ul ul .ox-task-item-editing--unchecked::before {
+  content: "–";
+}
+/* `left: 0` (not centered in the grid cell, unlike the static
+   `.ox-task-checkbox`) on purpose: `OxChecklistPlugin.tsx`'s click-to-
+   toggle hit-test reads THIS pseudo-element's computed `width` (see that
+   file's `handleCheckItemEvent`) and checks the click's x-position
+   against `[li.left, li.left + width]` — if the glyph doesn't actually
+   start at the `<li>`'s left edge, clicks land outside where the code
+   thinks the checkbox is and silently do nothing (found by testing a real
+   click, not assumed — the same reasoning that used to apply to
+   `::before`, before the checkbox moved to `::after` to free `::before`
+   for the gutter dash above, applies identically here now). */
+.ox-content .ox-task-item-editing--checked::after,
+.ox-content .ox-task-item-editing--unchecked::after {
   content: "";
   position: absolute;
   top: 50%;
@@ -526,19 +592,12 @@
   border-radius: 5px;
   border: 2.5px solid var(--ox-color-accent);
   box-sizing: border-box;
-}
-.ox-content .ox-task-item-editing--checked::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 0;
-  transform: translateY(-50%);
-  width: 23px;
-  height: 23px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-size: calc(100% - 3px);
   background-repeat: no-repeat;
   background-position: center;
+  background-size: calc(100% - 3px);
+}
+.ox-content .ox-task-item-editing--checked::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 .ox-content .ox-task-item-editing--checked {
   text-decoration: line-through;
@@ -548,6 +607,31 @@
 .ox-content .ox-task-item-editing--unchecked:focus {
   background: var(--ox-color-selected-bg);
 }
+
+/* An EMPTY checklist item (freshly inserted, or the new one Enter creates)
+   ALWAYS keeps showing the checkbox glyph, even with no text yet — a
+   previous version of this rule made an empty item fall back to a plain
+   bullet (reasoning: GFM's serializer can't represent `[ ]`/`[x]` for an
+   item with no text at all, so the live glyph would be "lying" about what
+   it can export as). That turned out to be the wrong tradeoff in practice:
+   it broke the ordinary "press Enter to continue a checklist" flow — the
+   fresh item would flash to a plain bullet the instant it was created,
+   before there was ever a chance to type into it. The GFM limitation is
+   real (confirmed directly against `mdast-util-gfm-task-list-item` AND
+   `micromark-extension-gfm-task-list-item`'s source — an empty checkbox
+   item is fundamentally unparseable/unserializable in GFM, full stop, not
+   a bug in either library), but it only matters if the document is
+   actually serialized while the item is STILL empty — a rare, transient
+   edge case, not the common case this rule was optimizing for. Left
+   empty, it exports as a bare `-`; `ChecklistPlugin.tsx`'s normalization
+   transform then self-heals it back to an unchecked checkbox on reimport
+   (parent list is still check-type, so `checked` gets reset to `false`),
+   so the only real cost is losing a checked/unchecked distinction on an
+   item that was never given any content anyway. See
+   `oxmarkdown/ChecklistOutdentPlugin.tsx` for the actual fix to the
+   related "Enter on an empty item" concern: graduated outdent
+   (checkbox → plain bullet → exit) instead of a glyph that changes shape
+   out from under you. */
 
 /* ── Editing mode: code blocks ─────────────────────────────────────────── */
 /* `@lexical/code`'s `CodeNode` always renders a `<code>` element, even for

@@ -1,17 +1,16 @@
 /**
- * Generic select-then-act keyboard behavior for Editing mode, per the
- * oxmarkdown skill's Interactables model — implemented ONCE, against the
- * small `getRevertText()` duck type (see `editingNodes.tsx`), so it works
- * for `OxDirectiveNode` and `OxOpaqueNode` today and any future decorator
- * (an `@mention` node) for free, with no new plugin code.
+ * Generic select-then-delete keyboard behavior for Editing mode, per the
+ * oxmarkdown skill's Interactables model — implemented ONCE, against
+ * Lexical's own generic `$isDecoratorNode`, so it works for
+ * `OxDirectiveNode` and `OxOpaqueNode` today and any future decorator (an
+ * `@mention` node) for free, with no new plugin code and no special
+ * contract to implement.
  *
  * Deliberately NOT involved in task-checkbox behavior — a checklist item's
  * `checked` flag is real `ListItemNode` state, not inline text (see
- * `@lexical/list`'s `registerCheckList`), so there's nothing to "revert to
- * raw text": Backspace at the start of a checklist item's label falls
- * through to Lexical's ordinary list-outdent/merge behavior instead. TODO 6
- * (Backspace-reverts / Delete-removes, not symmetric) only ever applied to
- * directives and opaque passthrough content.
+ * `@lexical/list`'s `registerCheckList`), so Backspace at the start of a
+ * checklist item's label falls through to Lexical's ordinary
+ * list-outdent/merge behavior instead.
  *
  * Behavior implemented here (see the skill's "Interactables" section):
  *   - Arrow-key approaching a decorator (collapsed caret, next/previous
@@ -19,11 +18,17 @@
  *     caret inside/through it.
  *   - Arrow-key away from an already-selected decorator moves the caret to
  *     just outside it, rather than re-selecting or getting stuck.
- *   - Backspace approaching one selects it first (1st press), then reverts
- *     it to its raw markdown text as an ordinary, further-editable TextNode
- *     (2nd press) — soft, undoable by continuing to edit.
- *   - Delete (forward) approaching one selects it first, then removes it
- *     outright (2nd press) — no revert step; relies on ordinary undo.
+ *   - Backspace or Delete approaching a decorator selects it first (1st
+ *     press); a SECOND press of either key deletes it outright. Both keys
+ *     behave identically once something is selected — an earlier version
+ *     had Backspace revert to raw markdown text instead of deleting, kept
+ *     separately editable; removed deliberately, not as an oversight (see
+ *     `editingNodes.tsx`'s header for why: retyping a directive from
+ *     scratch via `/` is simple enough that the extra machinery a soft
+ *     revert step needed — including escaping a reverted directive's raw
+ *     text on export so it wouldn't be mistaken for a live directive again
+ *     — wasn't worth it). Deleting relies on ordinary undo to bring
+ *     something back, same as any other deletion.
  *
  * `event.preventDefault()` is called explicitly in every branch that
  * returns `true`, at `COMMAND_PRIORITY_CRITICAL` for Backspace/Delete —
@@ -36,9 +41,8 @@
 import { useEffect } from "react";
 import {
   $createNodeSelection,
-  $createParagraphNode,
-  $createTextNode,
   $getSelection,
+  $isDecoratorNode,
   $isElementNode,
   $isNodeSelection,
   $isRangeSelection,
@@ -54,7 +58,6 @@ import {
   type RangeSelection,
 } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { isRevertibleOxNode } from "./editingNodes";
 
 /** Walks up through ancestors while there's no previous sibling at the
  * current level, so a caret at the very START of a block (e.g. a fresh
@@ -120,29 +123,6 @@ function selectNodeAsUnit(node: LexicalNode): void {
   $setSelection(selection);
 }
 
-/** A block-level decorator (a leaf/container directive, or an opaque
- * passthrough for something like a table) sits directly among block
- * siblings — often a direct child of the root, which only accepts
- * element/decorator nodes. Reverting it to a bare `TextNode` in place
- * would violate that and throw ("Only element or decorator nodes can be
- * inserted into the root node" — hit for real, not a hypothetical). An
- * inline decorator, by contrast, sits among ordinary inline siblings and a
- * bare `TextNode` there is exactly right. */
-function isInlineNode(node: LexicalNode): boolean {
-  const withIsInline = node as unknown as { isInline?: () => boolean };
-  return typeof withIsInline.isInline === "function" ? withIsInline.isInline() : true;
-}
-
-function revertNodeToText(node: LexicalNode & { getRevertText(): string }): void {
-  const text = $createTextNode(node.getRevertText());
-  if (isInlineNode(node)) {
-    node.replace(text);
-  } else {
-    node.replace($createParagraphNode().append(text));
-  }
-  text.select();
-}
-
 export default function InteractablesPlugin(): null {
   const [editor] = useLexicalComposerContext();
 
@@ -154,15 +134,15 @@ export default function InteractablesPlugin(): null {
 
         if ($isNodeSelection(selection)) {
           const nodes = selection.getNodes();
-          if (nodes.length !== 1 || !isRevertibleOxNode(nodes[0])) return false;
+          if (nodes.length !== 1 || !$isDecoratorNode(nodes[0])) return false;
           event?.preventDefault();
-          revertNodeToText(nodes[0]);
+          nodes[0].remove();
           return true;
         }
 
         if ($isRangeSelection(selection) && selection.isCollapsed()) {
           const sibling = siblingBeforeCollapsedCaret(selection);
-          if (isRevertibleOxNode(sibling)) {
+          if ($isDecoratorNode(sibling)) {
             event?.preventDefault();
             selectNodeAsUnit(sibling);
             return true;
@@ -180,7 +160,7 @@ export default function InteractablesPlugin(): null {
 
         if ($isNodeSelection(selection)) {
           const nodes = selection.getNodes();
-          if (nodes.length !== 1 || !isRevertibleOxNode(nodes[0])) return false;
+          if (nodes.length !== 1 || !$isDecoratorNode(nodes[0])) return false;
           event?.preventDefault();
           nodes[0].remove();
           return true;
@@ -188,7 +168,7 @@ export default function InteractablesPlugin(): null {
 
         if ($isRangeSelection(selection) && selection.isCollapsed()) {
           const sibling = siblingAfterCollapsedCaret(selection);
-          if (isRevertibleOxNode(sibling)) {
+          if ($isDecoratorNode(sibling)) {
             event?.preventDefault();
             selectNodeAsUnit(sibling);
             return true;
@@ -204,7 +184,7 @@ export default function InteractablesPlugin(): null {
 
       if ($isNodeSelection(selection)) {
         const nodes = selection.getNodes();
-        if (nodes.length !== 1 || !isRevertibleOxNode(nodes[0])) return false;
+        if (nodes.length !== 1 || !$isDecoratorNode(nodes[0])) return false;
         event?.preventDefault();
         const node = nodes[0];
         if (direction === "right") node.selectNext(0, 0);
@@ -217,7 +197,7 @@ export default function InteractablesPlugin(): null {
           direction === "right"
             ? siblingAfterCollapsedCaret(selection)
             : siblingBeforeCollapsedCaret(selection);
-        if (isRevertibleOxNode(sibling)) {
+        if ($isDecoratorNode(sibling)) {
           event?.preventDefault();
           selectNodeAsUnit(sibling);
           return true;

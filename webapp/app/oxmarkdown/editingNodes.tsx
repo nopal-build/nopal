@@ -19,14 +19,19 @@
  *     `OxStaticNodes` (the same static renderer `OxRenderer` uses) so it's
  *     still visible, not blank.
  *
- * Both implement `getRevertText()` — a small duck-typed contract (see
- * `isRevertibleOxNode` below) that `InteractablesPlugin` uses generically,
- * so a future interactable (an `@mention` node) gets Backspace-revert /
- * Delete-remove for free just by implementing the same method, no new
- * plugin code required.
- */
+ * Both are plain `DecoratorNode`s — `InteractablesPlugin` handles select-
+ * then-delete for ANY decorator generically (via `$isDecoratorNode`), so a
+ * future interactable (an `@mention` node) gets that for free just by
+ * being a decorator, no new plugin code and no special contract to
+ * implement. (An earlier version of this had each decorator implement a
+ * `getRevertText()` method, reverting to raw markdown text on a first
+ * Backspace/Delete instead of deleting outright — removed as unwanted
+ * complexity for a marginal benefit: retyping a directive from scratch
+ * via `/` is simple enough that a soft revert step wasn't worth the extra
+ * machinery, including the escaping a reverted directive's raw text
+ * needed on export to avoid being mistaken for a live directive again.) */
 
-import { createElement, Fragment, useContext, useEffect, useMemo, type ReactElement } from "react";
+import { createElement, useContext, useEffect, useMemo, type ReactElement } from "react";
 import {
   DecoratorNode,
   $getNodeByKey,
@@ -43,7 +48,6 @@ import { useLexicalNodeSelection } from "@lexical/react/useLexicalNodeSelection"
 import type { RootContent } from "mdast";
 import {
   directiveAttrs,
-  serializeOxDocument,
   type DirectiveNode as OxMdastDirectiveNode,
 } from "./document";
 import type { OxInteractive } from "./interactive";
@@ -52,18 +56,6 @@ import {
   InteractiveDirective,
   OxStaticNodes,
 } from "../components/OxRenderer";
-
-/** Any Lexical node that can be reverted to its raw markdown text on a
- * second Backspace. Duck-typed on purpose — see this file's header. */
-export interface OxRevertibleDecorator {
-  getRevertText(): string;
-}
-
-export function isRevertibleOxNode(
-  node: LexicalNode | null | undefined,
-): node is LexicalNode & OxRevertibleDecorator {
-  return !!node && typeof (node as unknown as OxRevertibleDecorator).getRevertText === "function";
-}
 
 /** Shared by every decorator's own click handling below (`OxDirectiveNode`
  * and `OxOpaqueNode` today). A plain React `onClick` fires independently of
@@ -138,11 +130,6 @@ export class OxDirectiveNode extends DecoratorNode<ReactElement> {
       ...writable.__mdastNode,
       attributes: { ...(writable.__mdastNode.attributes ?? {}), [key]: value },
     } as OxMdastDirectiveNode;
-  }
-
-  /** Duck-typed by `InteractablesPlugin` — see `OxRevertibleDecorator`. */
-  getRevertText(): string {
-    return serializeOxDocument({ type: "root", children: [this.__mdastNode] }).trimEnd();
   }
 
   decorate(): ReactElement {
@@ -270,10 +257,6 @@ export class OxOpaqueNode extends DecoratorNode<ReactElement> {
     return this.__mdastNode;
   }
 
-  getRevertText(): string {
-    return serializeOxDocument({ type: "root", children: [this.__mdastNode] }).trimEnd();
-  }
-
   decorate(): ReactElement {
     return createElement(OxOpaqueDecorator, {
       nodeKey: this.getKey(),
@@ -321,76 +304,14 @@ function OxOpaqueDecorator({
   );
 }
 
-// ── OxBlankLinesNode ──────────────────────────────────────────
-// Represents "N extra blank lines were here" as ONE atomic unit —
-// deliberately NOT as N empty `ParagraphNode`s. A real Lexical element
-// always gets its own default blank-line join on EACH side when exported,
-// so a single empty paragraph between two real blocks serializes to 3
-// blank lines, not 1 (confirmed directly) — representing a gap as a
-// discrete node it always inherits that overhead, twice. This node instead
-// carries the count as plain data and is consumed specially by
-// `exportOxDocument` (`editingTransforms.ts`), which never emits it as a
-// real mdast node — it turns the count into a custom `join` passed to
-// `serializeOxDocument`, `mdast-util-to-markdown`'s own real mechanism for
-// controlling exactly how many blank lines separate two specific siblings.
-
-export type SerializedOxBlankLinesNode = Spread<{ count: number }, SerializedLexicalNode>;
-
-export class OxBlankLinesNode extends DecoratorNode<ReactElement> {
-  __count: number;
-
-  static getType(): string {
-    return "ox-blank-lines";
-  }
-  static clone(node: OxBlankLinesNode): OxBlankLinesNode {
-    return new OxBlankLinesNode(node.__count, node.__key);
-  }
-  constructor(count: number, key?: NodeKey) {
-    super(key);
-    this.__count = count;
-  }
-
-  isInline(): boolean {
-    return false;
-  }
-
-  createDOM(_config: EditorConfig): HTMLElement {
-    const el = document.createElement("div");
-    el.contentEditable = "false";
-    return el;
-  }
-  updateDOM(): false {
-    return false;
-  }
-
-  getCount(): number {
-    return this.__count;
-  }
-
-  decorate(): ReactElement {
-    return createElement(
-      Fragment,
-      null,
-      ...Array.from({ length: this.__count }, (_unused, i) =>
-        createElement("div", { key: i, className: "ox-blank-line-spacer", "aria-hidden": true }),
-      ),
-    );
-  }
-
-  exportJSON(): SerializedOxBlankLinesNode {
-    return { type: "ox-blank-lines", version: 1, count: this.__count };
-  }
-  static importJSON(serialized: SerializedOxBlankLinesNode): OxBlankLinesNode {
-    return new OxBlankLinesNode(serialized.count);
-  }
-}
-
-export function $createOxBlankLinesNode(count: number): OxBlankLinesNode {
-  return new OxBlankLinesNode(count);
-}
-export function $isOxBlankLinesNode(
-  node: LexicalNode | null | undefined,
-): node is OxBlankLinesNode {
-  return node instanceof OxBlankLinesNode;
-}
+// Blank lines between blocks are represented as ordinary, empty
+// `ParagraphNode`s in Editing mode now — NOT a custom decorator node (see
+// `editingTransforms.ts`'s header for the full reasoning, and the
+// oxmarkdown skill's TODO 10 for the "1 markdown line = 1 editor line"
+// principle this satisfies directly). A plain empty paragraph gets 100%
+// standard Lexical text-editing behavior for free — clickable, focusable,
+// Backspace/Enter/arrow/undo all just work — which a decorator node never
+// gets without hand-building each one (as the previous `OxBlankLinesNode`
+// here had to, including a click-redirect hack that's no longer needed at
+// all now that there's real, ordinary text-editable content to click on).
 

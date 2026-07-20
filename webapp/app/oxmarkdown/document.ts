@@ -122,13 +122,14 @@ export function serializeOxDocument(doc: OxDocument, extraJoin?: Join): string {
     fences: true,
     incrementListMarker: false,
     listItemIndent: "one",
-    // `OxEditor`'s Editing mode passes a custom join to restore extra
-    // blank-line gaps it tracked separately (see `editingTransforms.ts`) —
-    // see `countExtraBlankLines` below for why representing a gap as a real
-    // empty node (an empty paragraph) doesn't work: every block-level mdast
-    // node still gets its own default 1-blank-line join on each side, so a
-    // single empty paragraph between two real blocks serializes to 3 blank
-    // lines, not 1 (confirmed directly, not assumed).
+    // `OxEditor`'s Editing mode passes a custom join (`editingTransforms.ts`'s
+    // `blankLineJoin`) that forces ZERO blank lines around any empty-
+    // paragraph node specifically — each one already represents exactly one
+    // real blank line by sitting in the flow with nothing else added around
+    // it, so the library's own default join (which would otherwise ALSO add
+    // its usual blank line on top) has to be turned off for those specific
+    // pairs. Confirmed directly, not assumed: N empty paragraphs with every
+    // surrounding join forced to 0 serializes to exactly N blank lines.
     join: extraJoin ? [extraJoin] : undefined,
   });
 }
@@ -145,9 +146,24 @@ export function countExtraBlankLines(
   prev: { position?: { end: { line: number } } },
   next: { position?: { start: { line: number } } },
 ): number {
+  return Math.max(0, countBlankLines(prev, next) - 1);
+}
+
+/** The TOTAL number of blank lines between two blocks in the original
+ * source (0 or more) — unlike `countExtraBlankLines` above, not reduced by
+ * the one CommonMark already requires. Used by `OxEditor`'s Editing-mode
+ * import (`editingTransforms.ts`) to materialize each blank line as a real,
+ * ordinary empty `ParagraphNode` — one editor row per source line, per the
+ * oxmarkdown skill's "1 markdown line = 1 editor line" principle — rather
+ * than the static renderer's approach (one default-margin gap, plus a
+ * spacer per line beyond that), which is fine for read-only display but
+ * isn't what a live-editable surface needs. */
+export function countBlankLines(
+  prev: { position?: { end: { line: number } } },
+  next: { position?: { start: { line: number } } },
+): number {
   const prevPos = prev.position;
   const nextPos = next.position;
   if (!prevPos || !nextPos) return 0;
-  const blankLines = nextPos.start.line - prevPos.end.line - 1;
-  return Math.max(0, blankLines - 1);
+  return Math.max(0, nextPos.start.line - prevPos.end.line - 1);
 }

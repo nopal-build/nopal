@@ -18,7 +18,16 @@
  * matters). `@lexical/markdown`'s `TRANSFORMERS` ARE used, but only for
  * their live "typing `**x**` formats it as bold" convenience — that only
  * ever touches Lexical's own node tree, which `editingTransforms.ts` has
- * to handle regardless of how a node was produced.
+ * to handle regardless of how a node was produced. `OX_TRANSFORMERS`
+ * extends that default set with our own `OX_CHECK_LIST`
+ * (`oxmarkdown/checklistTransformer.ts`) so typing `[ ] `/`[x] ` live-
+ * converts into a real checkbox the same way `**bold**` or `# ` do.
+ * `DirectiveShortcutPlugin` (Enter-triggered, not an `ElementTransformer` —
+ * see its own header for why) covers the same live-conversion idea for our
+ * `::name{attrs}` directive syntax. `MarkdownPastePlugin` covers plain-text
+ * PASTE for both, plus anything live-typing doesn't reach (container
+ * directives, `- [ ] ` with its dash, tables, ...) by re-parsing the whole
+ * pasted text through the real parser at once.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -30,16 +39,17 @@ import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
-import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { HorizontalRulePlugin } from "@lexical/react/LexicalHorizontalRulePlugin";
 import { HorizontalRuleNode } from "@lexical/react/LexicalHorizontalRuleNode";
 import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
 import { MarkdownShortcutPlugin } from "@lexical/react/LexicalMarkdownShortcutPlugin";
 import { TRANSFORMERS } from "@lexical/markdown";
+import { OX_CHECK_LIST } from "../oxmarkdown/checklistTransformer";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { ListNode, ListItemNode } from "@lexical/list";
 import { LinkNode } from "@lexical/link";
+import { OxListItemNode } from "../oxmarkdown/OxListItemNode";
 import { CodeNode } from "@lexical/code";
 import { $createParagraphNode, $getRoot } from "lexical";
 import {
@@ -57,9 +67,19 @@ import {
   importOxDocument,
   type AsideContent,
 } from "../oxmarkdown/editingTransforms";
+import OxChecklistPlugin from "../oxmarkdown/OxChecklistPlugin";
 import InteractablesPlugin from "../oxmarkdown/InteractablesPlugin";
 import SlashCommandPlugin from "../oxmarkdown/SlashCommandPlugin";
+import DirectiveShortcutPlugin from "../oxmarkdown/DirectiveShortcutPlugin";
+import MarkdownPastePlugin from "../oxmarkdown/MarkdownPastePlugin";
 import "../styles/oxmarkdown.css";
+
+// `OX_CHECK_LIST` first — see that file's header for why order matters in
+// theory (it doesn't in practice today, since the two regexes trigger at
+// disjoint keystroke positions, but listing the more specific one first
+// matches the convention `@lexical/markdown`'s own docs imply for transformer
+// ordering) — the rest is the library's own default set, unchanged.
+const OX_TRANSFORMERS = [OX_CHECK_LIST, ...TRANSFORMERS];
 
 export interface OxEditorProps {
   markdown: string;
@@ -148,7 +168,18 @@ function OxEditingSurface({
         HeadingNode,
         QuoteNode,
         ListNode,
-        ListItemNode,
+        OxListItemNode,
+        {
+          replace: ListItemNode,
+          // `node.getChecked()` is the wrong thing to read here — it's
+          // gated on the PARENT list's type (see `OxListItemNode.ts`'s
+          // header), and a node passed into this callback is freshly
+          // constructed, not yet attached to any parent. `__checked`/
+          // `__value` are the real underlying fields (confirmed accessible
+          // — declared as plain, not JS-private, class fields).
+          with: (node: ListItemNode) => new OxListItemNode(node.__value, node.__checked),
+          withKlass: OxListItemNode,
+        },
         LinkNode,
         CodeNode,
         HorizontalRuleNode,
@@ -179,14 +210,16 @@ function OxEditingSurface({
           </div>
           <HistoryPlugin />
           <ListPlugin />
-          <CheckListPlugin />
+          <OxChecklistPlugin />
           <LinkPlugin />
           <TabIndentationPlugin />
           <HorizontalRulePlugin />
-          <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
+          <MarkdownShortcutPlugin transformers={OX_TRANSFORMERS} />
           <MarkdownSyncPlugin markdown={markdown} onChange={onChange} />
           <InteractablesPlugin />
           <SlashCommandPlugin />
+          <DirectiveShortcutPlugin />
+          <MarkdownPastePlugin />
         </LexicalComposer>
       </DirectiveRegistryContext.Provider>
     </div>
