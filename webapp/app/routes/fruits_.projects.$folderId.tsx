@@ -11,6 +11,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { Link, redirect, useLoaderData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
+import { canViewFolder } from "../data/vault.types";
 import { getFolderById } from "../data/vault.server";
 import { resolveProjectManifest } from "../data/project.server";
 import { AppLayout } from "../components/AppLayout";
@@ -25,11 +26,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!folderId) throw new Response("Not found", { status: 404 });
 
   const folder = await getFolderById(folderId);
-  if (!folder || folder.human_id !== user._id) {
+  if (!folder || !canViewFolder(user._id, folder)) {
     throw new Response("Not found", { status: 404 });
   }
 
-  const project = await resolveProjectManifest(user._id, folder);
+  // Children/README belong to the folder's OWNER, not necessarily the viewer
+  // (this folder may only be reachable because it's shared with them).
+  const project = await resolveProjectManifest(folder.human_id, folder);
   if (!project) {
     return redirect(`/fruits/vault?folder=${folderId}`);
   }

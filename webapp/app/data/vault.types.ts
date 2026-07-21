@@ -121,3 +121,17 @@ export function isFolderShared(folder: VaultFolder): boolean {
     (Array.isArray(folder.shared_with) && folder.shared_with.length > 0)
   );
 }
+
+/**
+ * Whether `humanId` is allowed to view (not necessarily manage) `folder` —
+ * either because they own it, or because it (or an ancestor, since sharing
+ * cascades `shared_with` onto every descendant at share-time) was shared
+ * with them. Mirrors `canViewFileRef` in vault.server.ts.
+ */
+export function canViewFolder(humanId: string, folder: VaultFolder): boolean {
+  if (folder.human_id === humanId) return true;
+  if (folder.shared_with === "everyone") return true;
+  return (
+    Array.isArray(folder.shared_with) && folder.shared_with.includes(humanId)
+  );
+}

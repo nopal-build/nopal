@@ -10,7 +10,7 @@ export type {
   FileShareType,
   VaultFolder,
 } from "./vault.types";
-export { isFolderShared } from "./vault.types";
+export { isFolderShared, canViewFolder } from "./vault.types";
 import type {
   MdVersion,
   FileRef,
@@ -251,6 +251,26 @@ export async function getSharedFoldersForHuman(
     { humanId },
   );
   return (result?.[0] ?? []).map(formatRecord);
+}
+
+/**
+ * Top-level shared folders visible to `humanId` — the entry points the
+ * Vault sidebar's "Shared with me" section renders. `getSharedFoldersForHuman`
+ * returns the ENTIRE shared subtree (sharing cascades `shared_with` onto
+ * every descendant at share-time), so this filters that flat list down to
+ * folders whose parent isn't itself in the set — i.e. the folder that was
+ * actually shared, not one of its descendants (which will render nested
+ * under it via the normal folder-tree machinery once its folder skeleton
+ * is merged in).
+ */
+export async function getTopLevelSharedFolders(
+  humanId: string,
+): Promise<VaultFolder[]> {
+  const shared = await getSharedFoldersForHuman(humanId);
+  const sharedIds = new Set(shared.map((f) => f._id));
+  return shared.filter(
+    (f) => !f.parent_folder_id || !sharedIds.has(f.parent_folder_id),
+  );
 }
 
 export async function updateVaultFolder(

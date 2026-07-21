@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import {
+  canViewFolder,
   getFolderById,
   listFolderChildren,
   ensureVaultRootFolders,
@@ -32,10 +33,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const folder = await getFolderById(folderId);
-  if (!folder || folder.human_id !== user._id) {
+  if (!folder || !canViewFolder(user._id, folder)) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  const { folders, files } = await listFolderChildren(user._id, folderId);
+  // Children belong to the folder's OWNER, not necessarily the viewer.
+  const { folders, files } = await listFolderChildren(
+    folder.human_id,
+    folderId,
+  );
   return Response.json({ folders, files });
 }

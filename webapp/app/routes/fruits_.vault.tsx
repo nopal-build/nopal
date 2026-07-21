@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
 // Types + shared utils live in a server-free file — safe on client and server.
 import {
+  canViewFolder,
   isFileRefLocked,
   isFolderShared,
   isVaultRootFolder,
@@ -33,13 +34,16 @@ import {
 // Server functions are only used inside `loader`; React Router strips them
 // from the client bundle automatically.
 import {
+  canViewFileRef,
   ensureVaultRootFolders,
   getFileRefById,
   getFolderAncestry,
   getFolderById,
   getFoldersByHuman,
+  getSharedFoldersForHuman,
   listFolderChildren,
 } from "../data/vault.server";
+import { getHumansById } from "../data/humans.server";
 import { getRelatedHumans } from "../data/relationships.server";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "../components/MoreMenu";
@@ -88,19 +92,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
 
-  const [roots, allFolders, relatedHumansRaw] = await Promise.all([
-    ensureVaultRootFolders(user._id),
-    // Every folder the human owns — one cheap query. The left tree renders
-    // its full folder skeleton from this, so expanding never waits on the
-    // network; only per-folder FILE listings load lazily.
-    getFoldersByHuman(user._id),
-    getRelatedHumans(user),
+  const [roots, ownFolders, sharedFolders, relatedHumansRaw] =
+    await Promise.all([
+      ensureVaultRootFolders(user._id),
+      // Every folder the human owns — one cheap query. The left tree renders
+      // its full folder skeleton from this, so expanding never waits on the
+      // network; only per-folder FILE listings load lazily.
+      getFoldersByHuman(user._id),
+      // Every folder shared with the human, anywhere in the vault — sharing
+      // cascades `shared_with` onto every descendant at share-time, so this
+      // already includes the full subtree of each shared folder, not just
+      // its top level.
+      getSharedFoldersForHuman(user._id),
+      getRelatedHumans(user),
+    ]);
+  // Sorted alphabetically — the Share modal's checklist previously showed
+  // humans in raw DB order, which made it easy to miscount/misclick on a
+  // longer, scrollable list.
+  const relatedHumans: HumanEntry[] = relatedHumansRaw
+    .map((h) => ({ _id: h._id, name: h.name, email: h.email }))
+    .sort((x, y) => (x.name || x.email).localeCompare(y.name || y.email));
+
+  // The left tree's folder skeleton needs BOTH the human's own folders and
+  // every folder shared with them, so shared subtrees render/expand the same
+  // way owned ones do (see `foldersByParent` in the component).
+  const allFolders = [...ownFolders, ...sharedFolders];
+
+  // Top-level shared folders — the entry points rendered under "Shared with
+  // me" (root view + sidebar). Descendants of an already-shared folder are
+  // filtered out; they render nested under it instead.
+  const sharedIds = new Set(sharedFolders.map((f) => f._id));
+  const topLevelSharedFolders = sharedFolders.filter(
+    (f) => !f.parent_folder_id || !sharedIds.has(f.parent_folder_id),
+  );
+  const sharedOwners = await getHumansById([
+    ...new Set(topLevelSharedFolders.map((f) => f.human_id)),
   ]);
-  const relatedHumans: HumanEntry[] = relatedHumansRaw.map((h) => ({
-    _id: h._id,
-    name: h.name,
-    email: h.email,
-  }));
+  const sharedFolderOwners: Record<string, string> = Object.fromEntries(
+    sharedOwners.map((o) => [o._id, o.name || o.email]),
+  );
 
   const url = new URL(request.url);
   const fileParam = url.searchParams.get("file");
@@ -118,21 +148,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (fileParam) {
     const file = await getFileRefById(fileParam);
-    if (!file || file.human_id !== user._id) {
+    if (!file || !(await canViewFileRef(user._id, file))) {
       throw new Response("File not found", { status: 404 });
     }
-    const ancestry = file.folder_id
-      ? await getFolderAncestry(file.folder_id)
-      : [];
+    let ancestry = file.folder_id ? await getFolderAncestry(file.folder_id) : [];
+    // Not the owner: this file is only reachable via a shared folder —
+    // anchor the ancestry under the viewer's OWN matching root container
+    // (always "projects" today) so it reads/navigates as if nested inside
+    // the viewer's own Projects folder, instead of walking up into the
+    // owner's private tree above the shared folder.
+    if (file.human_id !== user._id) {
+      ancestry = anchorSharedAncestry(ancestry, user._id, roots);
+    }
     current = { kind: "file", file, ancestry };
   } else if (folderParam) {
     const folder = await getFolderById(folderParam);
-    if (!folder || folder.human_id !== user._id) {
+    if (!folder || !canViewFolder(user._id, folder)) {
       throw new Response("Folder not found", { status: 404 });
     }
     // Ancestry includes the folder itself (root container → … → folder).
-    const ancestry = await getFolderAncestry(folder._id);
-    const children = await listFolderChildren(user._id, folder._id);
+    let ancestry = await getFolderAncestry(folder._id);
+    if (folder.human_id !== user._id) {
+      ancestry = anchorSharedAncestry(ancestry, user._id, roots);
+    }
+    // Children belong to the folder's OWNER, not necessarily the viewer.
+    const children = await listFolderChildren(folder.human_id, folder._id);
     treeSeed[folder._id] = children;
 
     const readmeListing = children.files.find(
@@ -144,10 +184,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
     current = { kind: "folder", folder, ancestry, readme };
   }
 
-  return { user, roots, allFolders, treeSeed, current, relatedHumans };
+  return {
+    user,
+    roots,
+    allFolders,
+    treeSeed,
+    current,
+    relatedHumans,
+    topLevelSharedFolders,
+    sharedFolderOwners,
+  };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Drops the leading (owner-private) ancestors that the viewer can't open,
+ * then re-anchors the remaining shared-visible chain under the viewer's OWN
+ * root container of the same kind (always "projects" today — the only
+ * shareable root). This is what makes a shared project read/navigate as if
+ * it lives right inside the viewer's own Projects folder (breadcrumbs,
+ * "..", and the sidebar tree all agree), rather than floating in some
+ * separate "shared" area or 404ing when walking into the real owner's
+ * private tree above it.
+ */
+function anchorSharedAncestry(
+  ancestry: VaultFolder[],
+  humanId: string,
+  roots: VaultFolder[],
+): VaultFolder[] {
+  const cutoff = ancestry.findIndex((f) => !canViewFolder(humanId, f));
+  const trimmed = cutoff === -1 ? ancestry : ancestry.slice(cutoff + 1);
+  const rootKey = trimmed[0]?.vault_root_key;
+  const viewerRoot = rootKey
+    ? roots.find((r) => r.vault_root_key === rootKey)
+    : undefined;
+  return viewerRoot ? [viewerRoot, ...trimmed] : trimmed;
+}
 
 function fileIcon(contentType: string): string {
   if (contentType.startsWith("image/")) return "🖼️";
@@ -420,6 +493,21 @@ function ShareModal({
           </div>
         )}
 
+        {/* Explicit confirmation of who's about to get access — catches
+            misclicks on a long/scrollable checklist before they're saved. */}
+        {mode === "specific" && selectedIds.size > 0 && (
+          <p
+            className="text-xs font-mono"
+            style={{ color: "var(--text-subtle)", marginTop: "-8px", marginBottom: "16px" }}
+          >
+            Sharing with:{" "}
+            {allHumans
+              .filter((h) => selectedIds.has(h._id))
+              .map((h) => h.name || h.email)
+              .join(", ")}
+          </p>
+        )}
+
         <div
           style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}
         >
@@ -613,6 +701,8 @@ function TreeNode({
   onToggleExpand,
   onSelectFolder,
   onSelectFile,
+  sharedEntryIds,
+  ownerNames = {},
 }: {
   folder: VaultFolder;
   depth: number;
@@ -626,6 +716,11 @@ function TreeNode({
   onToggleExpand: (folder: VaultFolder) => void;
   onSelectFolder: (folder: VaultFolder) => void;
   onSelectFile: (file: FileRefListing) => void;
+  /** ids of top-level shared folders — only these (not their descendants)
+   * get the "shared by …" annotation, wherever they're nested. */
+  sharedEntryIds?: Set<string>;
+  /** human_id → display name, for annotating shared folders with their owner. */
+  ownerNames?: Record<string, string>;
 }) {
   const isExpanded = expanded.has(folder._id);
   const childFolders = foldersByParent[folder._id] ?? [];
@@ -652,6 +747,11 @@ function TreeNode({
         >
           {folderIcon(folder.shared_with)} {folderLabel(folder)}
         </button>
+        {sharedEntryIds?.has(folder._id) && ownerNames[folder.human_id] && (
+          <span className="vault-v2-tree-owner">
+            shared by {ownerNames[folder.human_id]}
+          </span>
+        )}
       </div>
 
       {isExpanded && (
@@ -670,6 +770,8 @@ function TreeNode({
               onToggleExpand={onToggleExpand}
               onSelectFolder={onSelectFolder}
               onSelectFile={onSelectFile}
+              sharedEntryIds={sharedEntryIds}
+              ownerNames={ownerNames}
             />
           ))}
 
@@ -709,8 +811,16 @@ function TreeNode({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function VaultV2Page() {
-  const { roots, allFolders, treeSeed, current, relatedHumans } =
-    useLoaderData<typeof loader>();
+  const {
+    user,
+    roots,
+    allFolders,
+    treeSeed,
+    current,
+    relatedHumans,
+    topLevelSharedFolders,
+    sharedFolderOwners,
+  } = useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
   const [, setSearchParams] = useSearchParams();
@@ -727,6 +837,17 @@ export default function VaultV2Page() {
   );
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
 
+  // The viewer's OWN "projects" root — folders shared with them are nested
+  // as if they live right inside it (see `foldersByParent` below), since
+  // "projects" is the only shareable root today.
+  const projectsRootId = roots.find((r) => r.vault_root_key === "projects")?._id;
+  // Only the entry points get the "shared by …" annotation — not every
+  // descendant, which would otherwise repeat it at every depth.
+  const sharedEntryIds = useMemo(
+    () => new Set(topLevelSharedFolders.map((f) => f._id)),
+    [topLevelSharedFolders],
+  );
+
   // Full folder skeleton, keyed by parent id — refreshed by every loader run,
   // so the tree renders (and stays) complete without per-folder fetches.
   // Children of a root container follow its childSort policy (daily-logs is
@@ -738,8 +859,15 @@ export default function VaultV2Page() {
       if (!f.parent_folder_id) continue; // root containers come from `roots`
       (map[f.parent_folder_id] ??= []).push(f);
     }
+    // Top-level shared folders don't actually live under the viewer's
+    // "projects" root (their real parent is the owner's own, invisible to
+    // this viewer) — graft them in here so they render/expand exactly like
+    // an owned project.
+    if (projectsRootId && topLevelSharedFolders.length > 0) {
+      (map[projectsRootId] ??= []).push(...topLevelSharedFolders);
+    }
     for (const [parentId, children] of Object.entries(map)) {
-      const parent = byId.get(parentId);
+      const parent = byId.get(parentId) ?? roots.find((r) => r._id === parentId);
       const desc =
         parent &&
         !parent.parent_folder_id &&
@@ -750,7 +878,7 @@ export default function VaultV2Page() {
       );
     }
     return map;
-  }, [allFolders]);
+  }, [allFolders, projectsRootId, topLevelSharedFolders, roots]);
 
   const loadChildren = useCallback(async (folderId: string) => {
     setLoadingIds((prev) => new Set(prev).add(folderId));
@@ -1315,13 +1443,24 @@ export default function VaultV2Page() {
         }
       : null;
 
+  // Shared (non-owned) folders/files are view-only in this UI — all
+  // mutation actions below (rename/move/share/publish/delete/upload/replace)
+  // are gated on ownership; the server enforces this too.
+  const isOwnedByViewer =
+    current.kind === "root" ||
+    (current.kind === "folder"
+      ? current.folder.human_id === user._id
+      : current.file.human_id === user._id);
+
   const currentIsRootContainer =
     current.kind === "folder" && isVaultRootFolder(current.folder);
   const canShareCurrent =
+    isOwnedByViewer &&
     current.kind === "folder" &&
     !currentIsRootContainer &&
     isRootShareable(current.folder.vault_root_key);
   const canPublishCurrent =
+    isOwnedByViewer &&
     current.kind === "folder" &&
     !currentIsRootContainer &&
     isRootPublishable(current.folder.vault_root_key);
@@ -1343,6 +1482,7 @@ export default function VaultV2Page() {
   // Any folder can be moved anywhere — except root containers and folders
   // that are currently shared (the server also rejects shared descendants).
   const canMoveCurrent =
+    isOwnedByViewer &&
     current.kind === "folder" &&
     !currentIsRootContainer &&
     !isFolderShared(current.folder);
@@ -1358,7 +1498,7 @@ export default function VaultV2Page() {
   // are omitted; when nothing is available the trigger renders disabled.
   // Upload / New folder / Download stay as standalone toolbar buttons.
   const moreActions: MoreMenuItem[] = [];
-  if (current.kind === "folder") {
+  if (current.kind === "folder" && isOwnedByViewer) {
     if (!currentIsRootContainer) {
       moreActions.push({ label: "Rename", onClick: handleRenameFolder });
     }
@@ -1391,7 +1531,7 @@ export default function VaultV2Page() {
         danger: true,
       });
     }
-  } else if (current.kind === "file") {
+  } else if (current.kind === "file" && isOwnedByViewer) {
     if (!fileLocked) {
       moreActions.push({
         label: "Replace",
@@ -1515,6 +1655,8 @@ export default function VaultV2Page() {
                 onToggleExpand={toggleExpand}
                 onSelectFolder={selectFolder}
                 onSelectFile={selectFile}
+                sharedEntryIds={sharedEntryIds}
+                ownerNames={sharedFolderOwners}
               />
             ))}
           </div>
@@ -1524,6 +1666,7 @@ export default function VaultV2Page() {
         <div className="vault-main">
           {/* Breadcrumb + actions */}
           <div className="vault-panel-header">
+            <div className="flex items-center gap-2">
             {/* Mobile: open drawer button (close btn lives in the sidebar) */}
             {!sidebarOpen && (
               <button
@@ -1574,6 +1717,7 @@ export default function VaultV2Page() {
                 </span>
               ))}
             </h2>
+            </div>
 
             {(folderEffectivelyPublic || fileEffectivelyPublic) && (
               <span
@@ -1591,15 +1735,22 @@ export default function VaultV2Page() {
             {/* Actions */}
             {current.kind === "folder" && (
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                <button
-                  className="vault-toolbar-btn"
-                  onClick={() => uploadInputRef.current?.click()}
-                >
-                  ↑ Upload files
-                </button>
-                <button className="vault-toolbar-btn" onClick={handleNewFolder}>
-                  + New folder
-                </button>
+                {isOwnedByViewer && (
+                  <button
+                    className="vault-toolbar-btn"
+                    onClick={() => uploadInputRef.current?.click()}
+                  >
+                    ↑ Upload files
+                  </button>
+                )}
+                {isOwnedByViewer && (
+                  <button
+                    className="vault-toolbar-btn"
+                    onClick={handleNewFolder}
+                  >
+                    + New folder
+                  </button>
+                )}
                 {folderEffectivelyPublic && (
                   <CopyLinkButton path={`/public/folder/${current.folder._id}`} />
                 )}
@@ -1711,6 +1862,13 @@ export default function VaultV2Page() {
                     </span>
                     <span className="vault-v2-row-name">
                       {folderLabel(folder)}
+                      {sharedEntryIds.has(folder._id) &&
+                        sharedFolderOwners[folder.human_id] && (
+                          <span className="vault-v2-tree-owner">
+                            {" "}
+                            — shared by {sharedFolderOwners[folder.human_id]}
+                          </span>
+                        )}
                     </span>
                     <span className="vault-v2-row-size" />
                     <span className="vault-v2-row-date">
