@@ -1165,7 +1165,9 @@ mode, before TODO 1 needs an answer.
          BEFORE `[ ] ` is ever reached — live-typing conversion in practice
          only reaches a checkbox when typed WITHOUT the leading dash (the
          regex's dash prefix is optional for exactly this reason upstream
-         too). Typing `- [ ] ` with the dash still works via paste.
+         too). `ChecklistUpgradePlugin.tsx`, below, closes that gap with a
+         second, complementary mechanism, so `- [ ] ` now live-converts too
+         — paste (`MarkdownPastePlugin.tsx`, also below) covers it as well.
        - **`DirectiveShortcutPlugin.tsx`** — deliberately NOT an
          `ElementTransformer` like the checkbox one, because that mechanism
          only ever fires right after typing a SPACE (confirmed directly:
@@ -1190,11 +1192,34 @@ mode, before TODO 1 needs an answer.
          `parseOxDocument` + `importOxDocument` pipeline
          `MarkdownSyncPlugin` already uses for whole-document loads, then
          `$insertNodes` at the current selection — the one mechanism that
-         gets full fidelity for anything live-typing doesn't reach
-         (container directives, `- [ ] ` WITH its dash, tables, ...),
-         since it re-parses the whole pasted text at once. Rich (HTML)
-         paste is left completely untouched (this plugin bails out
-         whenever the clipboard offers `text/html`).
+         gets full fidelity for anything live-typing doesn't reach at all
+         (container directives, tables, ...), since it re-parses the whole
+         pasted text at once. Rich (HTML) paste is left completely
+         untouched (this plugin bails out whenever the clipboard offers
+         `text/html`).
+       - **`ChecklistUpgradePlugin.tsx` — closes the `- [ ] ` (WITH the
+         dash) live-typing gap `checklistTransformer.ts`'s header
+         documents but doesn't solve.** Typing the full sequence
+         character-by-character converts to a PLAIN bullet after `- `
+         (matching `UNORDERED_LIST`'s regex) before `[ ] ` is ever reached
+         — by then, the text is inside a list item, structurally out of
+         reach for any `ElementTransformer` (confirmed: they require the
+         anchor's grandparent to be root). Solved with its OWN
+         `registerUpdateListener`, mirroring `registerMarkdownShortcuts`'s
+         exact gating conditions (single-keystroke typing only, no
+         paste/undo/collaboration) but watching a PLAIN list item's own
+         leading text instead of a root-level paragraph: the moment it
+         matches `[ ] `/`[x] `, strips those characters and flips that SAME
+         item into a real checkbox via `setChecked`, regardless of how the
+         item was created (typed `- `, continued via Enter, the slash
+         command, ...). Verified directly, with the three-way protocol in
+         both Chromium and Firefox: `- [ ] text` and `- [x] text` both
+         convert correctly; an item that inherits checkbox-ness by
+         continuing an EXISTING checklist via Enter (already real, per
+         `OxListItemNode.insertNewAfter`) is correctly left alone by this
+         plugin (nothing to "upgrade" — it's already a checkbox); and an
+         ordinary `- text` bullet with no brackets at all stays a plain
+         bullet, not mistakenly converted.
        - **A real, confirmed Firefox-specific finding while testing paste —
          a TEST-TOOLING limitation, not a functional bug, worth recording
          precisely so it isn't re-investigated later.** Simulating a paste

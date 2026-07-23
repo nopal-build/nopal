@@ -24,12 +24,16 @@
  * text ending at the just-typed space, typing the full sequence `- [ ] `
  * character by character converts to a PLAIN bullet after the second
  * character (`- `, matching `UNORDERED_LIST`'s regex) before `[ ] ` is ever
- * reached — so live-typing conversion in practice only reaches a checkbox
- * when `[ ] `/`[x] ` is typed WITHOUT a leading dash (the regex's dash
- * prefix is optional for exactly this reason upstream). Typing `- [ ] `
- * (with the dash) still works for pasted content, via the separate
- * paste-handling plugin, which routes through the real mdast parser
- * instead of this per-keystroke mechanism.
+ * reached — so THIS transformer, on its own, only reaches a checkbox when
+ * `[ ] `/`[x] ` is typed WITHOUT a leading dash (the regex's dash prefix is
+ * optional for exactly this reason upstream). `ChecklistUpgradePlugin.tsx`
+ * closes that gap separately: it watches a PLAIN list item's own leading
+ * text (the item `UNORDERED_LIST` just created) and upgrades it into a
+ * real checkbox the moment `[ ] `/`[x] ` appears there — so `- [ ] ` now
+ * works live too, just via a second, complementary mechanism rather than
+ * this one. Paste (`MarkdownPastePlugin.tsx`) also handles the full
+ * sequence, via the real mdast parser instead of either per-keystroke
+ * mechanism.
  */
 
 import { CHECK_LIST, type ElementTransformer } from "@lexical/markdown";

@@ -605,9 +605,27 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "- [ ] (with the dash) now live-converts too, via a second mechanism",
+    body: (
+      <>
+        The transformer above only ever reached <code>[ ] </code> typed WITHOUT a leading dash —
+        typing the full <code>- [ ] </code> sequence character-by-character converts to a plain
+        bullet right after <code>- </code> (matching <code>@lexical/markdown</code>'s own
+        <code>UNORDERED_LIST</code>), before <code>[ ] </code> is ever reached — by then the text is
+        inside a list item, structurally out of reach for any <code>ElementTransformer</code>.
+        Closed with a second, complementary plugin (<code>ChecklistUpgradePlugin</code>) that
+        watches a plain list item's own leading text and upgrades it into a real checkbox the
+        moment <code>[ ] </code>/<code>[x] </code> appears there — works regardless of how the item
+        was created (typed, continued via Enter, the slash command). Verified directly: an item
+        that inherits checkbox-ness by continuing an existing checklist is correctly left alone
+        (nothing to upgrade), and a plain <code>- text</code> bullet with no brackets stays plain.
+      </>
+    ),
+  },
 ];
 
-// ─── Sample content for the playground ────────────────────────────────────────────────────────
+// ─── Sample content for the playground ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_SAMPLE = `# Try editing this
 
@@ -823,7 +841,8 @@ export default function OxMarkdownStyles() {
             Interacting mode for directives — arrow onto one or click it, then either
             key (Backspace or Delete) removes it outright. Try <code>/</code> at
             the start of a line for the slash-command menu (heading, list, divider,
-            note) — or just type <code>[ ] </code> for a live checkbox, or type a
+            note) — or just type <code>[ ] </code> (with or without a leading <code>- </code>)
+            for a live checkbox, or type a
             leaf directive (<code>::badge{'{label="x"}'}</code>) and press Enter. Pasting
             plain text (a checklist, a directive, a whole snippet) re-parses it through
             the real parser too, not just literal characters. Known gap: a container

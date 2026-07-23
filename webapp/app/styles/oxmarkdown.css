@@ -585,7 +585,7 @@
   content: "";
   position: absolute;
   top: 50%;
-  left: 0;
+  left: 9px;
   transform: translateY(-50%);
   width: 23px;
   height: 23px;

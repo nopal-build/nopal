@@ -24,10 +24,15 @@
  * converts into a real checkbox the same way `**bold**` or `# ` do.
  * `DirectiveShortcutPlugin` (Enter-triggered, not an `ElementTransformer` —
  * see its own header for why) covers the same live-conversion idea for our
- * `::name{attrs}` directive syntax. `MarkdownPastePlugin` covers plain-text
- * PASTE for both, plus anything live-typing doesn't reach (container
- * directives, `- [ ] ` with its dash, tables, ...) by re-parsing the whole
- * pasted text through the real parser at once.
+ * `::name{attrs}` directive syntax. `ChecklistUpgradePlugin` closes the one
+ * gap `OX_CHECK_LIST` can't reach on its own: typing `- [ ] ` (WITH the
+ * dash) character-by-character converts to a plain bullet after `- ` before
+ * `[ ] ` is ever typed (see that file's header) — this plugin watches an
+ * existing plain list item's own leading text and upgrades it into a real
+ * checkbox in place the moment `[ ] `/`[x] ` appears there. `MarkdownPastePlugin`
+ * covers plain-text PASTE for all of the above, plus anything live-typing
+ * doesn't reach at all (container directives, tables, ...) by re-parsing
+ * the whole pasted text through the real parser at once.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -72,6 +77,7 @@ import InteractablesPlugin from "../oxmarkdown/InteractablesPlugin";
 import SlashCommandPlugin from "../oxmarkdown/SlashCommandPlugin";
 import DirectiveShortcutPlugin from "../oxmarkdown/DirectiveShortcutPlugin";
 import MarkdownPastePlugin from "../oxmarkdown/MarkdownPastePlugin";
+import ChecklistUpgradePlugin from "../oxmarkdown/ChecklistUpgradePlugin";
 import "../styles/oxmarkdown.css";
 
 // `OX_CHECK_LIST` first — see that file's header for why order matters in
@@ -220,6 +226,7 @@ function OxEditingSurface({
           <SlashCommandPlugin />
           <DirectiveShortcutPlugin />
           <MarkdownPastePlugin />
+          <ChecklistUpgradePlugin />
         </LexicalComposer>
       </DirectiveRegistryContext.Provider>
     </div>
