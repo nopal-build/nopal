@@ -580,7 +580,12 @@
    click, not assumed — the same reasoning that used to apply to
    `::before`, before the checkbox moved to `::after` to free `::before`
    for the gutter dash above, applies identically here now). */
-.ox-content .ox-task-item-editing--checked::after,
+   .ox-content .ox-task-item-editing--checked:hover::after,
+   .ox-content .ox-task-item-editing--unchecked:hover::after {
+     cursor: pointer;
+   }
+
+   .ox-content .ox-task-item-editing--checked::after,
 .ox-content .ox-task-item-editing--unchecked::after {
   content: "";
   position: absolute;

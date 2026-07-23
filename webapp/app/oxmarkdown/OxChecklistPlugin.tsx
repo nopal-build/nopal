@@ -176,7 +176,7 @@ export default function OxChecklistPlugin(): null {
       const afterStyles = window.getComputedStyle(target, "::after");
       const afterWidthInPixels = parseFloat(afterStyles.width) || 0;
       const isTouch = (event as PointerEvent).pointerType === "touch";
-      const padding = isTouch ? 32 : 0;
+      const padding = isTouch ? 32 : 10;
 
       const withinGlyph =
         target.dir === "rtl"
