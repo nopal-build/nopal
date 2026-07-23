@@ -623,6 +623,25 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "First real route migrated: Daily Log, rebuilt fresh on OxEditor",
+    body: (
+      <>
+        Today's entry now uses <code>OxEditor mode="editing"</code> (was
+        <code>MdxEditorEditable</code>); past entries use <code>mode="interacting"</code> (was
+        <code>MdxEditorWorkable</code>) — same split as before, since it maps directly onto
+        OxEditor's two real modes. Deliberately NOT a careful, compatibility-preserving migration —
+        rebuilt fresh, on the call that there's essentially no real content at stake yet (a real
+        audit found one seed template repeated across empty accounts, nothing more). Also removed,
+        as a product decision, not a side effect: carrying a previous day's unchecked tasks into a
+        fresh entry — confusing in practice, gone entirely; today now always starts genuinely
+        blank. Known, deliberate drops: file/image upload and the mobile upload tray (no OxMarkdown
+        equivalent yet), and <code>[[wiki-link]]</code> creation (superseded by the not-yet-built{" "}
+        <code>@</code> mention). Also dropped the old SSR-gating dance entirely — confirmed directly
+        that OxEditor server-renders cleanly with no special handling needed.
+      </>
+    ),
+  },
 ];
 
 // ─── Sample content for the playground ──────────────────────────────────────────────────────────────────

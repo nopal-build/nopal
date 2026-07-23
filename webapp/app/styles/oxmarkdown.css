@@ -497,7 +497,6 @@
 .ox-editing-placeholder {
   position: absolute;
   top: 8px;
-  left: var(--ox-grid);
   color: var(--ox-color-subtle);
   pointer-events: none;
   user-select: none;

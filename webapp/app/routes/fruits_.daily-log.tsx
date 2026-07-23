@@ -1,7 +1,6 @@
 import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
-  LinksFunction,
 } from "react-router";
 import {
   redirect,
@@ -10,77 +9,19 @@ import {
   useRevalidator,
   useRouteError,
   isRouteErrorResponse,
-  useNavigate,
 } from "react-router";
-import {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-  lazy,
-  Suspense,
-} from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
-import {
-  EditorLoadingFallback,
-  EditorErrorBoundary,
-} from "../components/MdxEditorFallback";
+import OxEditor from "../components/OxEditor";
 import {
   getDailyLogs,
   saveDailyLog,
   workableSaveDailyLog,
   type DailyLog,
 } from "../data/dailyLog.server";
-import { getFileRefsByHuman } from "../data/vault.server";
-import type { VaultRefItem } from "../components/refPopoverPlugin";
-import {
-  importFromMarkdown,
-  getTaskItems,
-  type RootNode,
-  type TaskGroupNode,
-} from "../util/nopalEditorState";
-
-import projectStyles from "../styles/project.css?url";
-import mdxEditorStyles from "../styles/mdxeditor.css?url";
-
-// Lazy-load editor components — client only, never run on the server.
-const MdxEditorEditable = lazy(() => import("../components/MdxEditorEditable"));
-const MdxEditorWorkable = lazy(() => import("../components/MdxEditorWorkable"));
-
-export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: projectStyles },
-  { rel: "stylesheet", href: mdxEditorStyles },
-];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Parse `prevContent` and collect all unchecked task texts.
- * Returns a `# Tasks` markdown block with each task carrying a [[prevDate]] ref,
- * or null when there are no unchecked tasks to carry over.
- */
-function buildCarryoverContent(
-  prevDate: string,
-  prevContent: string,
-): string | null {
-  const state = importFromMarkdown(prevContent);
-  const root = state.nodes.get("root") as RootNode | undefined;
-  if (!root) return null;
-
-  const lines: string[] = [];
-  for (const key of root.children) {
-    const node = state.nodes.get(key);
-    if (node?.type !== "task-group") continue;
-    for (const task of getTaskItems(state, node as TaskGroupNode)) {
-      if (!task.checked) lines.push(`[ ] ${task.text} [[${prevDate}]]`);
-    }
-  }
-
-  if (lines.length === 0) return null;
-  return `# Tasks\n\n${lines.join("\n")}`;
-}
 
 function localDateString(): string {
   const d = new Date();
@@ -114,8 +55,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!user) return redirect("/login");
   // Load all entries newest-first; 500 is a generous ceiling for any user
   const { entries } = await getDailyLogs(user._id, { limit: 500 });
-  const vaultFiles = await getFileRefsByHuman(user._id);
-  return { user, entries, vaultFiles };
+  return { user, entries };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -144,10 +84,8 @@ export async function action({ request }: ActionFunctionArgs) {
     return { success: true, entry };
   }
 
-  // ── Multipart: file upload OR form save ──────────────────────────────────
+  // ── Multipart: form save ──────────────────────────────────────────────────
   const form = await request.formData();
-
-  // ── Regular form save ─────────────────────────────────────────────────────────
   const date = String(form.get("date") ?? "");
   const content = String(form.get("content") ?? "");
   if (!date || typeof content !== "string") return { error: "Invalid request" };
@@ -156,18 +94,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 // ─── PastLogEntry ─────────────────────────────────────────────────────────────
+// Read-mostly: main content is static prose, task checkboxes stay
+// interactive (click to check off leftover items) — OxEditor's Interacting
+// mode, the direct successor to the old Workable mode. Saves via
+// `mode: "workable"` so ticking a box doesn't spam the version history.
 
-function PastLogEntry({
-  entry,
-  today,
-  wikiItems,
-  onWikiLinkNavigate,
-}: {
-  entry: DailyLog;
-  today: string;
-  wikiItems?: VaultRefItem[];
-  onWikiLinkNavigate?: (href: string) => void;
-}) {
+function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
   const [content, setContent] = useState(entry.content);
 
   const saveFetcher = useFetcher<typeof action>();
@@ -203,157 +135,36 @@ function PastLogEntry({
           fontWeight: "100",
           color: "var(--text-subtle)",
           borderBottom: "1px solid var(--midground)",
+          marginBottom: "12px",
         }}
       >
         {formatEntryDate(entry.date, today)}
       </div>
 
-      <EditorErrorBoundary>
-        <Suspense fallback={<EditorLoadingFallback hasTray={false} />}>
-          <MdxEditorWorkable
-            markdown={content}
-            onChange={handleChange}
-            wikiItems={wikiItems}
-            onWikiLinkCreate={
-              onWikiLinkNavigate
-                ? () => onWikiLinkNavigate("/fruits/vault")
-                : undefined
-            }
-          />
-        </Suspense>
-      </EditorErrorBoundary>
+      <div className="good-box p-4">
+        <OxEditor mode="interacting" markdown={content} onChange={handleChange} />
+      </div>
     </div>
   );
 }
 
 // ─── TodayLogEntry ────────────────────────────────────────────────────────────
+// Free-form typing — OxEditor's Editing mode, the direct successor to the
+// old MdxEditorEditable. `key={date}` forces a clean remount once the real
+// device date is known after hydration (see the `today`/`todayContent`
+// comment in DailyLogPage), rather than relying on prop-diffing to reseed.
 
 function TodayLogEntry({
   date,
   today,
   content,
   onChange,
-  onEditorMounted,
-  refItems,
-  onWikiLinkNavigate,
-  onWikiLinkCreate,
 }: {
   date: string;
   today: string;
   content: string;
   onChange: (v: string) => void;
-  onEditorMounted?: () => void;
-  refItems?: VaultRefItem[];
-  onWikiLinkNavigate?: (href: string) => void;
-  onWikiLinkCreate?: (label: string) => void;
 }) {
-  const [isClient, setIsClient] = useState(false);
-
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  // ── Tray positioning (mobile only) ────────────────────────────────────
-  // Sets CSS custom properties on the section element so the fixed tray:
-  //   --tray-x / --tray-w  bound it to the editor's horizontal footprint
-  //   --topnav-h           offsets the sticky editor header below the topnav
-  const sectionRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const section = sectionRef.current;
-    const sentinel = sentinelRef.current;
-    if (!section || !sentinel) return;
-
-    // ── CSS custom properties: tray bounds + topnav height ────────────────
-    const sync = () => {
-      // Measure the wrapper's inner content bounds (inside its 1px border)
-      // so the fixed tray's content aligns pixel-perfectly with natural flow.
-      const wrapper = section.querySelector<HTMLElement>(".mdx-editor-wrapper");
-      const wr = wrapper?.getBoundingClientRect();
-      if (wr) {
-        section.style.setProperty("--tray-x", `${wr.left + 1}px`);
-        section.style.setProperty("--tray-w", `${wr.width - 2}px`);
-      }
-      const topnav = document.querySelector<HTMLElement>(".app-topnav");
-      section.style.setProperty(
-        "--topnav-h",
-        `${topnav?.offsetHeight ?? 60}px`,
-      );
-    };
-
-    const ro = new ResizeObserver(sync);
-    ro.observe(section);
-    window.addEventListener("resize", sync, { passive: true });
-    sync();
-
-    // ── Two observers: sentinel (bottom edge) + section (whole editor) ─────
-    //
-    // tray-fixed is applied only when BOTH conditions hold:
-    //   1. sentinel is off-screen  → tray's natural position is above the fold
-    //   2. section is still in view → at least part of the editor is visible
-    //
-    // When the entire section scrolls above the viewport condition 2 becomes
-    // false and the class is removed, hiding the fixed tray.
-    let sentinelVisible = true;
-    let sectionVisible = true;
-
-    const updateTray = () => {
-      const shouldFix = !sentinelVisible && sectionVisible;
-      // Measure tray height while it's still in normal flow (before fixing).
-      if (shouldFix && !section.classList.contains("tray-fixed")) {
-        const tray = section.querySelector<HTMLElement>(".nopal-tray");
-        section.style.setProperty("--tray-h", `${tray?.offsetHeight ?? 48}px`);
-      }
-      section.classList.toggle("tray-fixed", shouldFix);
-    };
-
-    const sentinelObs = new IntersectionObserver(
-      ([entry]) => {
-        sentinelVisible = entry.isIntersecting;
-        updateTray();
-      },
-      { threshold: 0 },
-    );
-    sentinelObs.observe(sentinel);
-
-    const sectionObs = new IntersectionObserver(
-      ([entry]) => {
-        sectionVisible = entry.isIntersecting;
-        updateTray();
-      },
-      { threshold: 0 },
-    );
-    sectionObs.observe(section);
-
-    return () => {
-      ro.disconnect();
-      sentinelObs.disconnect();
-      sectionObs.disconnect();
-      window.removeEventListener("resize", sync);
-    };
-  }, []);
-
-  const uploadFile = useCallback(async (file: File): Promise<string> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("source", "daily-log");
-    const res = await fetch("/api/upload", { method: "POST", body: formData });
-    if (!res.ok) {
-      const err = (await res.json()) as { error?: string };
-      throw new Error(err.error ?? `Upload failed: ${res.status}`);
-    }
-    const { fileId } = (await res.json()) as { fileId?: string };
-    if (!fileId) throw new Error("Upload succeeded but no file id was returned");
-    // Route through /api/vault/view so the embedded reference stays valid
-    // (freshly signed + ownership-checked) indefinitely, instead of baking
-    // in a permanent public S3 URL. The `name` query param is just a hint
-    // so the stored reference still ends in a real file extension (needed
-    // for isImage detection + a readable name after a reload) — the route
-    // itself ignores it.
-    return `/api/vault/view/${fileId}?name=${encodeURIComponent(file.name)}`;
-  }, []);
-
   // Build "Today — Monday, November 15, 2024"
   const [y, m, d] = date.split("-").map(Number);
   const fullDate = new Date(y, m - 1, d).toLocaleDateString("en-US", {
@@ -366,59 +177,16 @@ function TodayLogEntry({
   const heading = dateLabel === "Today" ? `Today — ${fullDate}` : dateLabel;
 
   return (
-    <div
-      ref={sectionRef}
-      className="nopal-today-editor"
-      style={{ marginBottom: "12px" }}
-    >
-      <div className="nopal-editor-sticky-header">
-        <span
-          className="purple-light-text"
-          style={{
-            fontFamily: "monospace",
-            fontSize: "16px",
-          }}
-        >
+    <div style={{ marginBottom: "12px" }}>
+      <div style={{ marginBottom: "8px" }}>
+        <span className="purple-light-text" style={{ fontFamily: "monospace", fontSize: "16px" }}>
           {heading}
         </span>
       </div>
 
-      <div className="mdx-editor-wrapper">
-        {isClient && date ? (
-          <EditorErrorBoundary>
-            <Suspense fallback={<EditorLoadingFallback />}>
-              <MdxEditorEditable
-                key={date}
-                markdown={content}
-                onChange={onChange}
-                uploadFile={uploadFile}
-                refItems={refItems}
-                onWikiLinkNavigate={onWikiLinkNavigate}
-                onWikiLinkCreate={onWikiLinkCreate}
-                onEditorReady={
-                  onEditorMounted ? () => onEditorMounted() : undefined
-                }
-              />
-            </Suspense>
-          </EditorErrorBoundary>
-        ) : (
-          <EditorLoadingFallback />
-        )}
+      <div className="good-box p-4">
+        <OxEditor key={date} mode="editing" markdown={content} onChange={onChange} />
       </div>
-
-      {/* Sentinel: sits at the natural bottom of the editor (just below the
-          wrapper). While visible the tray stays in normal flow; once it
-          scrolls off screen the tray becomes position:fixed. */}
-      <div
-        ref={sentinelRef}
-        style={{
-          height: 1,
-          marginTop: -1,
-          visibility: "hidden",
-          pointerEvents: "none",
-        }}
-        aria-hidden="true"
-      />
     </div>
   );
 }
@@ -498,28 +266,8 @@ export function ErrorBoundary() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DailyLogPage() {
-  const {
-    user,
-    entries: serverEntries,
-    vaultFiles,
-  } = useLoaderData<typeof loader>();
-  const navigate = useNavigate();
+  const { entries: serverEntries } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
-
-  const refItems = useMemo<VaultRefItem[]>(
-    () =>
-      vaultFiles
-        .filter((f) => f.content_type === "text/markdown")
-        .map((f) => ({
-          id: f._id,
-          // Daily-log entries are all named "readme.md"; use the date as the
-          // label so that [[YYYY-MM-DD]] wiki links resolve to the right day.
-          label: f.source === "daily_log" && f.date ? f.date : f.name,
-          kind: "page" as const,
-          href: `/fruits/vault?file=${f._id}`,
-        })),
-    [vaultFiles],
-  );
 
   // ── today + todayContent ──────────────────────────────────────────────────
   // Both start as "" so the server render and the initial client render
@@ -538,25 +286,11 @@ export default function DailyLogPage() {
       // Today already has saved content — use it as-is.
       setTodayContent(serverEntry.content);
       lastSavedRef.current = serverEntry.content;
-      return;
     }
-
-    // No entry for today yet: carry over unchecked tasks from the most recent
-    // previous log so the user can continue working on open items.
-    const prevEntry = serverEntries.find(
-      (e) => e.date !== d && e.content?.trim(),
-    );
-    if (prevEntry) {
-      const carryover = buildCarryoverContent(
-        prevEntry.date,
-        prevEntry.content,
-      );
-      if (carryover) {
-        setTodayContent(carryover);
-        // Intentionally NOT updating lastSavedRef — the pre-populated content
-        // is unsaved scaffolding; the first real edit triggers the save.
-      }
-    }
+    // No entry for today yet: start blank. (Carrying over unchecked tasks
+    // from a previous day used to happen here — removed. It made today's
+    // entry start with content the user didn't write and hadn't saved yet,
+    // which was more confusing than useful in practice.)
   }, []); // intentionally empty — run exactly once after hydration
 
   // ── Derived values (gated on today being resolved) ───────────────────────
@@ -628,39 +362,7 @@ export default function DailyLogPage() {
       setTodayContent(content);
       scheduleSave(content);
     },
-    [today, scheduleSave],
-  );
-
-  // Create a vault page from a [[wiki-link]] and open it in the editor.
-  const createMdFileFromWikiLink = useCallback(
-    async (label: string) => {
-      const fullName = label.endsWith(".md") ? label : `${label}.md`;
-
-      // If a matching file already exists, navigate directly to it.
-      const existing = vaultFiles.find(
-        (f) => f.content_type === "text/markdown" && f.name === fullName,
-      );
-      if (existing) {
-        navigate(`/fruits/vault?file=${existing._id}`);
-        return;
-      }
-
-      // Create at root level (no folder) and open immediately.
-      const res = await fetch("/api/vault", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: fullName,
-          content: "",
-          content_type: "text/markdown",
-          folder_id: null,
-        }),
-      });
-      if (!res.ok) return;
-      const { fileRef } = (await res.json()) as { fileRef: { _id: string } };
-      navigate(`/fruits/vault?file=${fileRef._id}`);
-    },
-    [vaultFiles, navigate],
+    [scheduleSave],
   );
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -680,21 +382,12 @@ export default function DailyLogPage() {
           today={today}
           content={todayContent}
           onChange={handleChange}
-          refItems={refItems}
-          onWikiLinkNavigate={(href) => navigate(href)}
-          onWikiLinkCreate={createMdFileFromWikiLink}
         />
 
         {/* Past entries: newest first */}
         <div style={{ marginTop: "60px" }}>
           {pastEntries.map((entry) => (
-            <PastLogEntry
-              key={entry.date}
-              entry={entry}
-              today={today}
-              wikiItems={refItems}
-              onWikiLinkNavigate={(href) => navigate(href)}
-            />
+            <PastLogEntry key={entry.date} entry={entry} today={today} />
           ))}
         </div>
       </div>

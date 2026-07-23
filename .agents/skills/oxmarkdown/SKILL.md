@@ -1255,6 +1255,87 @@ mode, before TODO 1 needs an answer.
    that alone covers everything View and Workable do today. Keep
    `MdxEditorClient`/`MdxEditorEditable` (real typing) in place for actual
    text editing until step 4 lands, then retire them.
+   - **DONE — Daily Log (`routes/fruits_.daily-log.tsx`), the first real
+     route migrated, and the first to use Editing mode for real, live user
+     content, not just the demo page.** Deliberately NOT a careful,
+     compatibility-preserving migration — Gerald's explicit call: rebuild
+     the page fresh on OxEditor, assume it's simply better going forward,
+     don't worry about whether existing content (there's almost none in
+     practice — a real content audit found exactly one seed template
+     repeated across a handful of empty accounts, no real user data at
+     risk) renders identically to before. Today's entry now uses
+     `OxEditor mode="editing"` (was `MdxEditorEditable`); past entries use
+     `mode="interacting"` (was `MdxEditorWorkable`) — the same today/past
+     split as before, since it maps directly onto OxEditor's two real
+     modes and the `mode: "workable"` save path (skips a version-history
+     snapshot for a mere checkbox toggle) is a real, independent piece of
+     product behavior worth keeping regardless of editor engine.
+     - **Also removed, as an explicit product decision, not a technical
+       side effect**: carrying over a previous day's unchecked tasks into
+       a fresh day's entry (`buildCarryoverContent`, gone entirely). Gerald
+       called this out directly as confusing in practice — today's entry
+       now always starts genuinely blank when there's no saved content for
+       it yet, full stop.
+     - **Real, known, DELIBERATE feature drops, not oversights** — none of
+       these have an OxMarkdown equivalent built yet, and none were
+       silently patched around: file/image upload (`uploadFile`, the
+       floating mobile "tray" UI, `.nopal-tray`/`.mdx-editor-wrapper`/the
+       `ResizeObserver`/`IntersectionObserver` positioning code that went
+       with it — all removed, not ported); `[[wiki-link]]` creation/
+       navigation (`onWikiLinkCreate`/`refItems`/`vaultFiles`, all removed
+       — OxMarkdown's own answer to this, `@` mentions, is TODO 4/the
+       "What's new and NOT yet implemented" section, not yet built).
+       Revisit this route again once either of those lands for real.
+     - **Verified directly, live, not just typechecked**: today's entry
+       starts genuinely empty (no carryover text) when no entry exists yet
+       for the day; typing into it autosaves (confirmed via a direct DB
+       read after the debounce) through the same JSON action as before; a
+       past entry's checkbox is clickable and toggles (confirmed via a
+       direct DB read that the persisted markdown flips `- [ ]` to
+       `- [x]`, through the `workable` no-snapshot save path specifically);
+       a real seed entry (headings, bold/italic, blockquote, ordered/
+       unordered/task lists, inline/block code, a table, a link) renders
+       cleanly end-to-end through `OxRenderer`'s tree walk with no special
+       casing needed.
+     - **Simplified along the way, not just swapped**: dropped the
+       `isClient` SSR-gating dance and `EditorLoadingFallback`/
+       `EditorErrorBoundary`/`lazy()`/`Suspense` entirely — confirmed
+       directly that `OxEditor` server-renders cleanly with no special
+       handling needed (its portal-based UI, e.g. `SlashCommandPlugin`'s
+       menu, only ever calls `createPortal` from inside a click-driven
+       state update, never during the initial/server render), unlike the
+       old heavyweight `MdxEditorEditable` which needed all of that. Also
+       dropped the `mdxeditor.css`/`project.css` route-level `<link>` tags
+       (nothing on the new page uses either stylesheet's classes anymore —
+       `OxEditor` imports its own `oxmarkdown.css`) and wrapped each entry
+       in a plain `.good-box` card instead of the old tray-specific markup.
+     - **A real, reusable process bug found and fixed while writing THIS
+       session's own verification script, not part of the app itself**:
+       `getHumans()` returns `Collection<Human>` — `{ data: Human[],
+       metadata }` — but an earlier session's throwaway test scripts (this
+       one included, at first) grabbed a test user via
+       `Object.values(humans)[0]`, which actually returns the whole `data`
+       ARRAY (object key order: `data` before `metadata`), not a `Human`.
+       This silently "worked" for earlier tests only because they never
+       touched `user._id` (a static demo page's loader just checks
+       `if (!user)`, and a truthy array passes that check) — caught here
+       because this route's loader genuinely needs `user._id` for a real
+       DB query, which surfaced as a TypeScript error
+       (`Property '_id' does not exist`) the moment a stricter script
+       tried to use it. Fixed to `humans?.data?.[0]`. Worth remembering:
+       any earlier session's script/finding that used the old pattern and
+       happened to rely on `user._id` for something real should be treated
+       as unverified, not re-trusted retroactively.
+     - **Not done in this pass, on purpose**: `ProjectView.tsx` and the
+       Vault file-view page (`routes/fruits_.vault.tsx`) are still on
+       `MdxEditorView`. Both are real, working View-mode usages with a
+       real, non-trivial directive registry (`ProjectView.tsx`'s
+       `csv-table`/`gallery`/`svg`/`note`, exercised today by exactly one
+       real project's README) — worth their own careful pass, confirming
+       directive-registry compatibility and content parity first, rather
+       than the "rebuild fresh, don't worry about old content" approach
+       that was the right call for the daily log specifically (near-zero
+       real content, and no directive usage there at all).
 
 ## Testing convention — verify three things together, never one alone
 
