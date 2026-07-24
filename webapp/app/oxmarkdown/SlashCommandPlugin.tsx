@@ -18,10 +18,24 @@
  * the menu is a portal the user never focuses (focus stays in the
  * contentEditable the whole time), so a DOM listener on it would never
  * fire for the keystrokes that matter.
+ *
+ * Positioning/portal/directionality/max-height/mobile-sheet-layout are all
+ * delegated to `OxPopover` (`oxmarkdown/OxPopover.tsx`) rather than a
+ * hand-rolled `rect.bottom + 4` calculation — the old version of this file
+ * computed the anchor rect once per Lexical update and never recomputed it
+ * on scroll, so the menu visibly stayed pinned to the window while the
+ * editor content (and the `/` trigger it's supposed to sit next to)
+ * scrolled away underneath it. `OxPopover`'s `anchorEl`-based `autoUpdate`
+ * fixes that for free. Escape is still handled as a real Lexical command
+ * (see above) rather than `OxPopover`'s own built-in Escape/outside-press
+ * dismissal, specifically so it can also record `dismissed` (don't
+ * reopen for the SAME `/query` until it changes) — `OxPopover`'s
+ * `onDismiss` is still wired up too, for outside-press (clicking away)
+ * and, on mobile, the sheet's backdrop.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import OxPopover from "./OxPopover";
 import {
   $createParagraphNode,
   $createRangeSelection,
@@ -151,7 +165,7 @@ const COMMANDS: SlashCommand[] = [
 interface SlashMenuState {
   query: string;
   anchorKey: string;
-  rect: DOMRect;
+  anchorEl: HTMLElement;
 }
 
 export default function SlashCommandPlugin(): React.ReactElement | null {
@@ -201,12 +215,11 @@ export default function SlashCommandPlugin(): React.ReactElement | null {
           return;
         }
         const dom = editor.getElementByKey(textNode.getKey());
-        const rect = dom?.getBoundingClientRect();
-        if (!rect) {
+        if (!dom) {
           setMenu(null);
           return;
         }
-        setMenu({ query, anchorKey: textNode.getKey(), rect });
+        setMenu({ query, anchorKey: textNode.getKey(), anchorEl: dom });
       });
     });
 
@@ -244,11 +257,19 @@ export default function SlashCommandPlugin(): React.ReactElement | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, dismissed]);
 
-  if (!menu) return null;
-  const matches = matchesFor(menu);
+  const matches = menu ? matchesFor(menu) : [];
 
-  return createPortal(
-    <div className="ox-popover ox-tokens ox-slash-menu" style={{ top: menu.rect.bottom + 4, left: menu.rect.left }}>
+  return (
+    <OxPopover
+      anchorEl={menu?.anchorEl ?? null}
+      open={menu != null}
+      className="ox-slash-menu"
+      onDismiss={() => {
+        const state = menuRef.current;
+        if (state) setDismissed(`${state.anchorKey}:/${state.query}`);
+        setMenu(null);
+      }}
+    >
       {matches.length === 0 ? (
         <div className="ox-popover-field">
           <span>No matches</span>
@@ -263,14 +284,13 @@ export default function SlashCommandPlugin(): React.ReactElement | null {
             // otherwise blur and collapse the selection this depends on.
             onMouseDown={(e) => {
               e.preventDefault();
-              runCommand(menu, c);
+              if (menu) runCommand(menu, c);
             }}
           >
             {c.label}
           </button>
         ))
       )}
-    </div>,
-    document.body,
+    </OxPopover>
   );
 }

@@ -668,8 +668,10 @@
 }
 
 /* ── Editing mode: slash-command menu ──────────────────────────────────── */
-/* Reuses `.ox-popover`'s box styling (position/portal handled the same
-   way — see `SlashCommandPlugin.tsx`) with its own list-of-buttons layout. */
+/* Reuses `.ox-popover`'s box styling (position/portal/directionality/
+   mobile-sheet layout all handled by the shared `OxPopover` component —
+   see `oxmarkdown/OxPopover.tsx` and `SlashCommandPlugin.tsx`) with its
+   own list-of-buttons layout. */
 .ox-slash-menu {
   display: flex;
   flex-direction: column;
@@ -698,18 +700,26 @@
    affordance — see OxEditor.tsx / oxmarkdown/interactive.ts. Works for any
    directive since it only lists whatever flat attrs the node already has. */
 
-/* Positioned via inline style (computed from the trigger's real screen
-   position — see InteractiveDirective in OxRenderer.tsx), not `top`/`left`
-   here, and rendered through a portal straight into `document.body`. A
-   popover living inside whatever scroll container its trigger happens to
-   sit in will get clipped the moment that container scrolls — `position:
-   fixed` inside the actual DOM tree doesn't save you from that; it has to
-   not be inside there at all. z-index is deliberately way above anything
+/* Positioned/portaled/sized by the shared `OxPopover` component
+   (`oxmarkdown/OxPopover.tsx`, built on `@floating-ui/react`) — not by CSS
+   `top`/`left` here. `position: fixed` below is just the resting default;
+   `OxPopover` supplies the real `top`/`left`/`transform`/`max-height` as an
+   inline style on top of it (flipped/shifted to stay on-screen, capped to
+   whatever vertical space is actually available). Rendered through a
+   portal straight into `document.body` regardless — a popover living
+   inside whatever scroll container its trigger happens to sit in will get
+   clipped the moment that container scrolls; `position: fixed` inside the
+   actual DOM tree doesn't save you from that, it has to not be inside
+   there at all. `overflow-y: auto` pairs with that inline `max-height` so
+   content that doesn't fit scrolls WITHIN the popover instead of
+   overflowing the viewport. z-index is deliberately way above anything
    else in the app (Modal.tsx's overlay is 1000). */
 .ox-popover {
   position: fixed;
   z-index: 2000;
   min-width: 220px;
+  max-height: min(60vh, 400px);
+  overflow-y: auto;
   padding: 8px;
   border-radius: 8px;
   background: var(--ox-color-code-bg);
@@ -719,6 +729,44 @@
   font-size: 0.8rem;
   line-height: 1.4;
   color: var(--ox-color-text);
+}
+
+/* ── Mobile: full-width bottom sheet, not a floating box ─────────────────
+   Below the `640px` breakpoint (`OxPopover`'s `useIsMobileViewport`), ANY
+   `.ox-popover` renders here instead of at a computed floating position —
+   see the oxmarkdown skill's "Mobile UX" TODO: one predictable location
+   beats a contextually-positioned box that risks getting clipped by, or
+   fighting with, the on-screen keyboard. */
+.ox-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 1999;
+}
+
+.ox-popover--sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  width: 100%;
+  min-width: 0;
+  max-height: min(70vh, 480px);
+  border-radius: 12px 12px 0 0;
+  padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+  font-size: 0.95rem;
+}
+
+/* Purely a visual "this is a sheet" affordance — not draggable, just a
+   familiar signal borrowed from native bottom sheets. */
+.ox-popover-sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ox-color-border);
+  margin: 0 auto 10px;
 }
 
 .ox-popover-title {
@@ -750,4 +798,64 @@
 
 .ox-popover-field:last-child {
   margin-bottom: 0;
+}
+
+/* ── @ mention menu (MentionPlugin.tsx) ────────────────────────── */
+/* Deliberately NOT `.ox-popover` — that class sets its OWN `position:
+   fixed`, which would fight the positioning `LexicalTypeaheadMenuPlugin`
+   already computes for the anchor element this gets portaled into (see
+   MentionPlugin.tsx's header for why that's still safe against the same
+   scroll-clipping bug `.ox-popover` exists to avoid). Same visual chrome,
+   no position/top/left of its own. */
+.ox-mention-menu {
+  z-index: 2000;
+  min-width: 200px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--ox-color-code-bg);
+  border: 1px solid var(--ox-color-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--ox-color-text);
+  list-style: none;
+  margin: 0;
+}
+.ox-mention-menu-item {
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ox-mention-menu-item--active {
+  background: var(--ox-color-selected-bg);
+}
+
+/* Mobile: same full-width bottom-sheet treatment as `.ox-popover--sheet`
+   (see there for the rationale), applied via a plain media query rather
+   than `OxPopover`/`useIsMobileViewport` — this menu is portaled into
+   `LexicalTypeaheadMenuPlugin`'s OWN anchor div (see the header comment
+   above), not `OxPopover`, so there's no JS hook here to key off of.
+   `position: fixed` on the `<ul>` itself escapes that anchor div's
+   `position: absolute` cleanly (fixed positioning is relative to the
+   viewport regardless of an ancestor's `position`, as long as nothing
+   between them sets a `transform`/`filter`/`perspective` — confirmed
+   `LexicalTypeaheadMenuPlugin`'s anchor div sets none of those). */
+@media (max-width: 640px) {
+  .ox-mention-menu {
+    position: fixed;
+    inset: auto 0 0 0;
+    width: 100%;
+    min-width: 0;
+    max-height: min(70vh, 480px);
+    border-radius: 12px 12px 0 0;
+    padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+    font-size: 0.95rem;
+  }
 }

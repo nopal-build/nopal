@@ -18,9 +18,8 @@
  * instead, modeled off the same design language.
  */
 
-import { createContext, Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { createPortal } from "react-dom";
 import type { Definition, RootContent } from "mdast";
 import {
   parseOxDocument,
@@ -33,6 +32,7 @@ import {
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
 import type { OxInteractive } from "../oxmarkdown/interactive";
+import OxPopover from "../oxmarkdown/OxPopover";
 import "../styles/oxmarkdown.css";
 
 export interface OxRendererProps {
@@ -447,49 +447,14 @@ export function InteractiveDirective({
   const attrEntries = Object.entries(attrs);
   const hasPopover = selected && attrEntries.length > 0;
 
-  // The popover is portaled straight to `document.body` (see below) — once
-  // it's there it's no longer a DOM descendant of the wrapper, so the usual
-  // "did focus leave this element" check via `relatedTarget`/`contains`
-  // can't see it. Track both elements by ref instead, and on blur from
-  // EITHER, check on the next tick whether focus landed inside the other.
-  const wrapperRef = useRef<HTMLElement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
-
-  useEffect(() => {
-    if (!hasPopover) {
-      setPopoverPos(null);
-      return;
-    }
-    const updatePosition = () => {
-      const rect = wrapperRef.current?.getBoundingClientRect();
-      if (rect) setPopoverPos({ top: rect.bottom + 4, left: rect.left });
-    };
-    updatePosition();
-    // Capture phase so scrolling ANY ancestor scroll container repositions
-    // this, not just the window — scroll events don't bubble, but they do
-    // pass through the capture phase on their way down to the real target.
-    window.addEventListener("scroll", updatePosition, true);
-    window.addEventListener("resize", updatePosition);
-    return () => {
-      window.removeEventListener("scroll", updatePosition, true);
-      window.removeEventListener("resize", updatePosition);
-    };
-  }, [hasPopover]);
-
-  function handleBlur() {
-    setTimeout(() => {
-      const active = document.activeElement;
-      const stillInside =
-        (wrapperRef.current && wrapperRef.current.contains(active)) ||
-        (popoverRef.current && popoverRef.current.contains(active));
-      if (!stillInside) interactive.select(null);
-    }, 0);
-  }
+  // Held in state, not a plain ref — `OxPopover` takes this as an external
+  // floating-ui "reference" element (see its own header), which needs a
+  // value it can react to as soon as the wrapper actually mounts.
+  const [wrapperEl, setWrapperEl] = useState<HTMLElement | null>(null);
 
   return (
     <Tag
-      ref={wrapperRef as React.Ref<never>}
+      ref={setWrapperEl as React.Ref<never>}
       className={selected ? "ox-selected" : undefined}
       // Always shrink-to-fit, even for a leaf directive's `<div>` —
       // otherwise a block-level wrapper defaults to full row width, and the
@@ -500,35 +465,24 @@ export function InteractiveDirective({
       style={{ display: "inline-block" }}
       tabIndex={0}
       onFocus={() => interactive.select(node)}
-      onBlur={handleBlur}
       onClick={() => interactive.select(node)}
     >
       {children}
-      {hasPopover &&
-        popoverPos &&
-        createPortal(
-          <div
-            ref={popoverRef}
-            className="ox-popover ox-tokens"
-            style={{ top: popoverPos.top, left: popoverPos.left }}
-            onBlur={handleBlur}
-          >
-            <div className="ox-popover-title">::{node.name}</div>
-            {attrEntries.map(([attrKey, attrValue]) => (
-              <label key={attrKey} className="ox-popover-field">
-                <span>{attrKey}</span>
-                <input
-                  defaultValue={attrValue}
-                  onBlur={(e) => interactive.editDirectiveAttr(node, attrKey, e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                  }}
-                />
-              </label>
-            ))}
-          </div>,
-          document.body,
-        )}
+      <OxPopover anchorEl={wrapperEl} open={hasPopover} onDismiss={() => interactive.select(null)}>
+        <div className="ox-popover-title">::{node.name}</div>
+        {attrEntries.map(([attrKey, attrValue]) => (
+          <label key={attrKey} className="ox-popover-field">
+            <span>{attrKey}</span>
+            <input
+              defaultValue={attrValue}
+              onBlur={(e) => interactive.editDirectiveAttr(node, attrKey, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+            />
+          </label>
+        ))}
+      </OxPopover>
     </Tag>
   );
 }

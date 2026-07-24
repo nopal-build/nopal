@@ -14,12 +14,38 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import OxEditor from "../components/OxEditor";
+import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
 import {
   getDailyLogs,
   saveDailyLog,
   workableSaveDailyLog,
   type DailyLog,
 } from "../data/dailyLog.server";
+
+// ─── @ mentions ───────────────────────────────────────────────────────────────────────────────────
+// Module-level (not defined inside the component) since neither closes
+// over any route-specific state — a stable function reference also means
+// `MentionPlugin`'s search-effect never re-runs needlessly. Real search
+// logic (empty → recent-or-projects, query → closest match) lives
+// server-side in `data/mentionSearch.server.ts`; this is just the fetch.
+
+const dailyLogMentionSearch: MentionSearch = async (query) => {
+  const res = await fetch(`/api/mentions/search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) return [];
+  const body = (await res.json()) as { items?: MentionItem[] };
+  return body.items ?? [];
+};
+
+// Fire-and-forget — a failed recording only means the "recently mentioned"
+// list doesn't update; the mention link itself is already inserted by the
+// time this runs, so there's nothing to roll back or retry here.
+function recordMentionSelected(item: MentionItem) {
+  fetch("/api/mentions/select", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: item.name, path: item.path }),
+  }).catch(() => {});
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -185,7 +211,14 @@ function TodayLogEntry({
       </div>
 
       <div className="good-box p-4">
-        <OxEditor key={date} mode="editing" markdown={content} onChange={onChange} />
+        <OxEditor
+          key={date}
+          mode="editing"
+          markdown={content}
+          onChange={onChange}
+          mentionSearch={dailyLogMentionSearch}
+          onMentionSelect={recordMentionSelected}
+        />
       </div>
     </div>
   );

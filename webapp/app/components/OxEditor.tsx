@@ -30,9 +30,11 @@
  * `[ ] ` is ever typed (see that file's header) — this plugin watches an
  * existing plain list item's own leading text and upgrades it into a real
  * checkbox in place the moment `[ ] `/`[x] ` appears there. `MarkdownPastePlugin`
- * covers plain-text PASTE for all of the above, plus anything live-typing
- * doesn't reach at all (container directives, tables, ...) by re-parsing
- * the whole pasted text through the real parser at once.
+ * covers ALL paste — plain-text AND rich/HTML alike, always stripped down
+ * to plain text first (paste never carries a source's own formatting in) —
+ * for all of the above, plus anything live-typing doesn't reach at all
+ * (container directives, tables, ...) by re-parsing the whole pasted text
+ * through the real parser at once.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -78,6 +80,9 @@ import SlashCommandPlugin from "../oxmarkdown/SlashCommandPlugin";
 import DirectiveShortcutPlugin from "../oxmarkdown/DirectiveShortcutPlugin";
 import MarkdownPastePlugin from "../oxmarkdown/MarkdownPastePlugin";
 import ChecklistUpgradePlugin from "../oxmarkdown/ChecklistUpgradePlugin";
+import MentionPlugin from "../oxmarkdown/MentionPlugin";
+import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
+import CrossEditorArrowPlugin from "../oxmarkdown/CrossEditorArrowPlugin";
 import "../styles/oxmarkdown.css";
 
 // `OX_CHECK_LIST` first — see that file's header for why order matters in
@@ -94,6 +99,20 @@ export interface OxEditorProps {
   directives?: DirectiveRegistry;
   theme?: OxTheme;
   className?: string;
+  /** Enables `@` mentions in Editing mode — see `oxmarkdown/mention.ts`.
+   * Ignored in Interacting mode (no typing happens there, nothing to
+   * trigger). Omit entirely to leave `@` as plain, inert text. */
+  mentionSearch?: MentionSearch;
+  /** Fires when a mention search result is actually selected — see
+   * `oxmarkdown/mention.ts`'s header for what this is for (recording
+   * recency, performing a deferred "create"). Ignored if `mentionSearch`
+   * isn't also supplied. */
+  onMentionSelect?: (item: MentionItem) => void;
+  /** Opts into cross-editor ArrowUp/ArrowDown navigation — see
+   * `oxmarkdown/OxEditorGroup.tsx`. Requires an ancestor `<OxEditorGroup>`
+   * and a stable id for this editor, unique within that group's `order`.
+   * Ignored in Interacting mode (no roaming caret there to move). */
+  groupId?: string;
 }
 
 export default function OxEditor(props: OxEditorProps) {
@@ -166,6 +185,9 @@ function OxEditingSurface({
   directives,
   theme,
   className,
+  mentionSearch,
+  onMentionSelect,
+  groupId,
 }: OxEditorProps) {
   const initialConfig = useMemo<InitialConfigType>(
     () => ({
@@ -227,6 +249,10 @@ function OxEditingSurface({
           <DirectiveShortcutPlugin />
           <MarkdownPastePlugin />
           <ChecklistUpgradePlugin />
+          {mentionSearch && (
+            <MentionPlugin search={mentionSearch} onSelect={onMentionSelect} />
+          )}
+          {groupId && <CrossEditorArrowPlugin groupId={groupId} />}
         </LexicalComposer>
       </DirectiveRegistryContext.Provider>
     </div>

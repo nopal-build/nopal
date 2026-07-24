@@ -18,14 +18,15 @@
 // whatever the step actually added (a new directive example, an
 // interactable demo, ...). Keep entries short — this page is for a quick
 // visual reminder, not the full rationale (that's the skill file).
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
-import { Link, redirect } from "react-router";
+import { Link, redirect, useLoaderData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import OxRenderer from "../components/OxRenderer";
 import OxEditor from "../components/OxEditor";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
+import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -642,6 +643,27 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "@ mentions: a plain markdown link, not a directive — and its demo lives here now",
+    body: (
+      <>
+        Selecting a search result inserts an ordinary <code>[@Name](path)</code> link, not the
+        directive-based <code>:mention[Name]{'{ref="..."}'}</code> originally sketched — Gerald's
+        call, favoring a human-readable path over an opaque id. The path is
+        <code>/humanId:root/.../Name</code>, scoped to a specific human's vault tree since
+        folders/files can be shared between humans. Needed zero new parsing/rendering work —
+        plain links already round-trip through the existing <code>LinkNode</code>/
+        <code>OxRenderer</code> machinery. Search is just a function the editor is handed
+        (<code>mentionSearch</code>) — "create a page" isn't a feature of the plugin at all, an
+        implementation can just return a synthetic result for it. Built on
+        <code>@lexical/react</code>'s own <code>LexicalTypeaheadMenuPlugin</code>, not hand-rolled
+        like the slash menu — a better fit since this genuinely needed arrow-key navigation
+        between multiple results. First built on the general Design System page
+        (<code>/fruits/styles</code>) as a quick, standalone mock; moved here once working, since
+        it's an OxMarkdown feature, not a general design-system pattern.
+      </>
+    ),
+  },
 ];
 
 // ─── Sample content for the playground ──────────────────────────────────────────────────────────────────
@@ -713,7 +735,64 @@ No real table-editing UI exists yet, but a table still round-trips losslessly
 | Pear  | 5   |
 `;
 
+// ─── @ mention demo ─────────────────────────────────────────────────────────────────────
+// A small in-memory stand-in for a real vault search — same `MentionSearch`
+// shape (`oxmarkdown/mention.ts`) a real page (Daily Log, ...) would
+// implement against actual vault folders/files. Paths follow the agreed
+// `/humanId:root/.../name` shape; the human id here is the real logged-in
+// user's, so the inserted links look exactly like the real thing would.
+
+interface MockVaultEntry {
+  name: string;
+  path: string; // e.g. "projects/Casa Verde Remodel" — no leading slash, no human id yet
+}
+
+const MOCK_VAULT_ENTRIES: MockVaultEntry[] = [
+  { name: "Casa Verde Remodel", path: "projects/Casa Verde Remodel" },
+  { name: "budget.csv", path: "projects/Casa Verde Remodel/budget.csv" },
+  { name: "floorplan.svg", path: "projects/Casa Verde Remodel/floorplan.svg" },
+  { name: "Lakeside Cabin Reno", path: "projects/Lakeside Cabin Reno" },
+  { name: "2026-07-13", path: "daily-logs/2026-07-13" },
+  { name: "2026-07-20", path: "daily-logs/2026-07-20" },
+  { name: "Reading List", path: "personal/Reading List" },
+];
+
+/** `search` is a plain function call, per the design: the editor has no
+ * idea what a "vault" is, only that typing `@query` should call this and
+ * show whatever comes back. "Create a page" is deliberately NOT a feature
+ * of the mention plugin itself — it's just another result an
+ * implementation can choose to include, demonstrated here (a real
+ * implementation would actually create the page, or defer creation until
+ * the link is first opened; this mock only shows the mechanism). */
+function createMockMentionSearch(humanId: string): MentionSearch {
+  return (query: string): MentionItem[] => {
+    const q = query.trim().toLowerCase();
+    const matches = MOCK_VAULT_ENTRIES.filter(
+      (e) => !q || e.name.toLowerCase().includes(q),
+    )
+      .slice(0, 8)
+      .map((e) => ({ name: e.name, path: `/${humanId}:${e.path}` }));
+
+    if (q && !matches.some((m) => m.name.toLowerCase() === q)) {
+      matches.push({ name: `Create "${query}"`, path: `/${humanId}:personal/${query}` });
+    }
+
+    return matches;
+  };
+}
+
+// The `@` trigger only fires at the start of a word (same as Slack/GitHub
+// — so `user@example.com` never opens the menu) — clicking mid-sentence
+// and typing `@` correctly does nothing. This sample gives an actual
+// blank line to click into, where typing `@` is guaranteed to trigger.
+const DEFAULT_MENTION_SAMPLE =
+  '# Try it\n\nType `@` to search — try "casa", "2026", or a query with no matches at all.\n\nClick the blank line below, then type @:\n\n\nMentioned so far: nothing yet.\n';
+
 export default function OxMarkdownStyles() {
+  const { user } = useLoaderData<typeof loader>();
+  const mentionSearch = useMemo(() => createMockMentionSearch(user._id), [user._id]);
+  const [mentionMarkdown, setMentionMarkdown] = useState(DEFAULT_MENTION_SAMPLE);
+
   const [markdown, setMarkdown] = useState(DEFAULT_SAMPLE);
   const [fontFamily, setFontFamily] = useState("");
   const [colorAccent, setColorAccent] = useState("");
@@ -885,6 +964,37 @@ export default function OxMarkdownStyles() {
             style={{ background: "var(--midground)", color: "var(--purple)", whiteSpace: "pre-wrap" }}
           >
             {editingMarkdown}
+          </pre>
+        </Section>
+
+        <Section id="mentions" title="Mentions (@)">
+          <p className="text-sm subtle-text mb-4">
+            Replaces the old <code>[[wiki-link]]</code> syntax. Typing <code>@</code> at the
+            start of a word opens a search popover — arrow keys to move, Enter to select.
+            Selecting a result inserts an ordinary markdown link, nothing custom:{" "}
+            <code>{'[@Name](/humanId:root/.../Name)'}</code>. The search itself is just a
+            plain function call the editor is handed (<code>mentionSearch</code> on{" "}
+            <code>OxEditor</code>) — below is a small in-memory mock; a real page (Daily
+            Log, ...) would search the actual vault instead. "Create a page" isn't a
+            separate feature of the mention plugin at all — it's just another result an
+            implementation can choose to return, demonstrated below by searching for
+            something with no real match.
+          </p>
+          <Label>OxEditor (mode="editing") with mentionSearch</Label>
+          <div className="good-box p-4 mb-3">
+            <OxEditor
+              mode="editing"
+              markdown={mentionMarkdown}
+              onChange={setMentionMarkdown}
+              mentionSearch={mentionSearch}
+            />
+          </div>
+          <Label>Resulting markdown</Label>
+          <pre
+            className="text-xs font-mono p-3 rounded"
+            style={{ background: "var(--midground)", color: "var(--purple)", whiteSpace: "pre-wrap" }}
+          >
+            {mentionMarkdown}
           </pre>
         </Section>
 

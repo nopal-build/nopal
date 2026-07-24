@@ -97,7 +97,7 @@ pub fn prep(input: &Path, opts: PrepOptions) -> Result<(), Box<dyn Error>> {
 /// non-login process (e.g. a launchd agent, whose PATH is minimal and never
 /// sources .zshrc/.bash_profile) might not have on PATH — notably
 /// Homebrew's bin dirs on both Apple Silicon and Intel.
-fn resolve_ffmpeg() -> Result<String, Box<dyn Error>> {
+pub(crate) fn resolve_ffmpeg() -> Result<String, Box<dyn Error>> {
     if command_works("ffmpeg") {
         return Ok("ffmpeg".to_string());
     }

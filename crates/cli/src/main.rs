@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 mod auth;
+mod image;
 mod sync;
 mod update;
 mod vault;
@@ -37,6 +38,11 @@ enum Command {
     Video {
         #[command(subcommand)]
         command: VideoCommand,
+    },
+    /// Utilities for working with image files (OCR text extraction, etc).
+    Image {
+        #[command(subcommand)]
+        command: ImageCommand,
     },
     /// Browse and upload to your Nopal Vault.
     Vault {
@@ -79,6 +85,34 @@ enum VideoCommand {
         /// Overwrite the output file if it already exists.
         #[arg(long)]
         overwrite: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ImageCommand {
+    /// Extract text from an image via OCR. Runs entirely locally via
+    /// Tesseract — no network access or API key required.
+    Ocr {
+        /// Path to the source image.
+        input: PathBuf,
+        /// Write extracted text to this file instead of printing to stdout.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Tesseract language code(s), e.g. `eng`, `eng+fra`.
+        #[arg(long, default_value = "eng")]
+        lang: String,
+        /// Tesseract page segmentation mode. Defaults to 1 (automatic
+        /// layout with orientation/script detection), which corrects
+        /// sideways or upside-down photos automatically. See `tesseract
+        /// --help-psm` for other modes.
+        #[arg(long, default_value_t = 1)]
+        psm: u8,
+        /// Write output as Markdown-safe text (escapes stray #/-/>/etc. so
+        /// it renders as plain paragraphs). Without --output, defaults to
+        /// writing `<input-stem>.md` alongside the source instead of
+        /// printing to stdout.
+        #[arg(long)]
+        markdown: bool,
     },
 }
 
@@ -346,6 +380,26 @@ fn main() {
                 };
                 if let Err(e) = video::prep(&input, opts) {
                     eprintln!("video prep failed: {e}");
+                    std::process::exit(1);
+                }
+            }
+        },
+        Command::Image { command } => match command {
+            ImageCommand::Ocr {
+                input,
+                output,
+                lang,
+                psm,
+                markdown,
+            } => {
+                let opts = image::OcrOptions {
+                    output,
+                    lang,
+                    psm,
+                    markdown,
+                };
+                if let Err(e) = image::ocr(&input, opts) {
+                    eprintln!("image ocr failed: {e}");
                     std::process::exit(1);
                 }
             }

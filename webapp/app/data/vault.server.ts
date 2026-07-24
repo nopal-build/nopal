@@ -588,6 +588,118 @@ export async function getFolderAncestry(
   return chain;
 }
 
+/** The human's most recently updated top-level project folders (direct
+ * children of the "projects" vault root) — the fallback `mentionSearch.
+ * server.ts` uses for an empty `@` search when there's no selection
+ * history yet. Excludes the "projects" root container itself. */
+export async function getRecentProjectFolders(
+  humanId: string,
+  limit = 5,
+): Promise<VaultFolder[]> {
+  const rootResult = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders
+     WHERE human_id = $humanId AND parent_folder_id = null AND vault_root_key = 'projects'
+     LIMIT 1;`,
+    { humanId },
+  );
+  const root = rootResult?.[0]?.[0] ? formatRecord(rootResult[0][0]) : null;
+  if (!root) return [];
+
+  const result = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders
+     WHERE human_id = $humanId AND parent_folder_id = $rootId
+     ORDER BY updated_at DESC
+     LIMIT $limit;`,
+    { humanId, rootId: root._id, limit },
+  );
+  return (result?.[0] ?? []).map(formatRecord);
+}
+
+/** Builds a folder's full path as an array of names, root container →
+ * … → the folder itself, WITHOUT any DB round-trips beyond the one that
+ * already fetched every candidate folder — `foldersById` is expected to
+ * already contain the human's entire folder set (see `searchVaultEntries`,
+ * its one caller), so this is a pure in-memory parent-chain walk, not a
+ * repeated `getFolderAncestry` per result. */
+function buildFolderPathParts(
+  folderId: string,
+  foldersById: Map<string, VaultFolder>,
+): string[] {
+  const parts: string[] = [];
+  let current = foldersById.get(folderId);
+  for (let depth = 0; current && depth < 50; depth++) {
+    parts.unshift(current.name);
+    current = current.parent_folder_id
+      ? foldersById.get(current.parent_folder_id)
+      : undefined;
+  }
+  return parts;
+}
+
+export interface VaultSearchResult {
+  name: string;
+  /** Slash-joined path relative to the human's own vault root, e.g.
+   * "projects/Casa Verde Remodel" — no leading slash, no human id (that
+   * prefix is `mentionSearch.server.ts`'s job, not this function's). */
+  path: string;
+}
+
+/** Searches a human's own folders and files by name — case-insensitive
+ * substring match, ranked with prefix matches first (the same "starts
+ * with the query wins" tiebreak the old `[[wiki-link]]` popover used).
+ * Deliberately fetches the human's full folder/file set and filters/ranks
+ * in memory rather than hand-writing SurrealQL string-matching — simpler,
+ * and reuses `getFoldersByHuman`/`getFileRefsByHuman` (already real,
+ * already correct) instead of a second, parallel query path. Fine at this
+ * app's real scale; revisit if a human's vault ever gets large enough for
+ * that to matter. */
+export async function searchVaultEntries(
+  humanId: string,
+  searchQuery: string,
+  limit = 8,
+): Promise<VaultSearchResult[]> {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) return [];
+
+  const [folders, files] = await Promise.all([
+    getFoldersByHuman(humanId),
+    getFileRefsByHuman(humanId),
+  ]);
+  const foldersById = new Map(folders.map((f) => [f._id, f]));
+
+  const matches: { name: string; path: string; startsWith: boolean }[] = [];
+
+  for (const folder of folders) {
+    // Root containers ("projects", "daily-logs", …) are organizational, not
+    // real mentionable content.
+    if (folder.parent_folder_id === null) continue;
+    const lower = folder.name.toLowerCase();
+    if (!lower.includes(q)) continue;
+    matches.push({
+      name: folder.name,
+      path: buildFolderPathParts(folder._id, foldersById).join("/"),
+      startsWith: lower.startsWith(q),
+    });
+  }
+
+  for (const file of files) {
+    if (file.archived_at) continue;
+    const lower = file.name.toLowerCase();
+    if (!lower.includes(q)) continue;
+    const folderParts = file.folder_id
+      ? buildFolderPathParts(file.folder_id, foldersById)
+      : [];
+    matches.push({
+      name: file.name,
+      path: [...folderParts, file.name].join("/"),
+      startsWith: lower.startsWith(q),
+    });
+  }
+
+  matches.sort((a, b) => Number(b.startsWith) - Number(a.startsWith));
+  return matches.slice(0, limit).map(({ name, path }) => ({ name, path }));
+}
+
 /**
  * Direct children (sub-folders + file metadata) of one folder — the unit of
  * lazy tree/folder-view loading in vault v2. Never returns file content.

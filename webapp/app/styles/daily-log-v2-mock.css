@@ -1,0 +1,35 @@
+/* Mockup-only styles for /fruits/daily-log-v2 — not part of the shared
+   oxmarkdown design system yet. `--foreground`/`--midground` and their
+   `--dark-*` counterparts don't auto-swap by themselves (see root.css),
+   so anything using them needs its own light/dark pair like this. */
+
+.dlv2-container {
+  border: 1px solid var(--midground);
+  border-radius: 8px;
+  background: transparent;
+}
+@media (prefers-color-scheme: dark) {
+  .dlv2-container {
+    border-color: var(--dark-midground);
+  }
+}
+
+.dlv2-thumb {
+  background: var(--midground);
+}
+@media (prefers-color-scheme: dark) {
+  .dlv2-thumb {
+    background: var(--dark-midground);
+  }
+}
+
+.dlv2-thumb-badge {
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--purple);
+}
+@media (prefers-color-scheme: dark) {
+  .dlv2-thumb-badge {
+    background: rgba(0, 0, 0, 0.55);
+    color: white;
+  }
+}
