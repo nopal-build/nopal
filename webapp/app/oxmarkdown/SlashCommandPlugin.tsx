@@ -61,7 +61,7 @@ import { $createHorizontalRuleNode } from "@lexical/react/LexicalHorizontalRuleN
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { useMemo } from "react";
 import { $createOxDirectiveNode } from "./editingNodes";
-import { pickFilesAndInsertAtBlock } from "./fileDirective";
+import { pickFilesAndInsertAtBlock, type UploadFileFn } from "./fileDirective";
 
 /** Exported for `fileDirective.ts` — the `/files` command's insertion
  * point needs the exact same "which top-level block is this trigger text
@@ -175,12 +175,16 @@ interface SlashMenuState {
 
 export default function SlashCommandPlugin({
   allowFileAttachments = false,
+  onUploadFile,
 }: {
   /** Adds "Add file(s)" to the menu — see `oxmarkdown/fileDirective.ts`.
    * Off by default so a directive's OWN nested caption editor (which also
    * renders a `SlashCommandPlugin`) doesn't recursively offer file
    * attachments inside a file's caption. */
   allowFileAttachments?: boolean;
+  /** Forwarded to `pickFilesAndInsertAtBlock` — see `fileDirective.ts`'s
+   * `UploadFileFn`. Omit for a browser-only preview with no upload. */
+  onUploadFile?: UploadFileFn;
 } = {}): React.ReactElement | null {
   const [editor] = useLexicalComposerContext();
   const [menu, setMenu] = useState<SlashMenuState | null>(null);
@@ -195,10 +199,10 @@ export default function SlashCommandPlugin({
       {
         label: "Add file(s)",
         keywords: ["file", "files", "attachment", "upload", "photo", "image"],
-        run: (key) => pickFilesAndInsertAtBlock(editor, key),
+        run: (key) => pickFilesAndInsertAtBlock(editor, key, onUploadFile),
       },
     ];
-  }, [allowFileAttachments, editor]);
+  }, [allowFileAttachments, editor, onUploadFile]);
 
   function matchesFor(state: SlashMenuState): SlashCommand[] {
     const q = state.query.toLowerCase();

@@ -478,16 +478,44 @@ function RemoveFileIcon() {
  * see the oxmarkdown skill). */
 export function FileDirectiveLayout({
   name,
+  fileId,
+  contentType,
+  uploadError,
   caption,
   onRemove,
 }: {
   name: string;
+  /** The uploaded vault file's id, once known — undefined while an
+   * upload is still in flight (or if this content came from a caller
+   * that never wired up real uploads at all, e.g. the visual mockup). */
+  fileId?: string;
+  contentType?: string;
+  /** Set once `onUploadFile` rejects — see `oxmarkdown/fileDirective.ts`.
+   * Shown as a plain placeholder with a title explaining what happened,
+   * rather than looking identical to "still uploading" forever. */
+  uploadError?: boolean;
   caption: ReactNode;
   onRemove?: () => void;
 }) {
+  const isImage = !!fileId && !!contentType?.startsWith("image/");
   return (
     <div className="ox-file-directive" contentEditable={false}>
-      <div className="ox-file-thumb" title={name} aria-hidden="true" />
+      {isImage ? (
+        <img
+          className="ox-file-thumb"
+          src={`/api/vault/view/${fileId}`}
+          alt={name}
+          title={name}
+          draggable={false}
+        />
+      ) : (
+        <div
+          className="ox-file-thumb"
+          title={uploadError ? `${name} — upload failed` : name}
+          data-upload-error={uploadError ? "true" : undefined}
+          aria-hidden="true"
+        />
+      )}
       <div className="ox-file-caption">{caption}</div>
       {onRemove && (
         // A dedicated `--ox-grid`-wide (41px) slot, centering the 36px
@@ -526,6 +554,9 @@ function FileDirectiveStatic({
   return (
     <FileDirectiveLayout
       name={attrs.name ?? "file"}
+      fileId={attrs.fileId}
+      contentType={attrs.contentType}
+      uploadError={attrs.uploadError === "1"}
       caption={
         captionDoc ? <OxStaticNodes nodes={captionDoc.children} directives={directives} /> : null
       }

@@ -393,8 +393,17 @@ Interacting mode first, without needing that decision resolved.
      uses `mode="editing"`, past entries use `mode="interacting"`. `@`
      mentions are wired to a REAL, vault-backed search now (see step 7) —
      the one real feature drop from the old `[[wiki-link]]` flow that's
-     since been properly replaced, not just left dropped. Feature drops
-     still not ported: file/image upload (no OxMarkdown equivalent yet).
+     since been properly replaced, not just left dropped. File/image
+     upload is ALSO now real (see step 10) — `TodayLogEntry` passes
+     `allowFileAttachments` + an `onUploadFile` that posts to a new
+     `POST /api/daily-log/upload` endpoint, which resolves that day's own
+     vault folder (the exact same `daily-logs/YYYY-MM-DD/` tree
+     `readme.md` itself lives in) and marks the resulting `file_ref`
+     `source: "daily_log"`/`date` — the same convention `isFileRefLocked`
+     already uses, so an attachment added today automatically becomes
+     read-only once the day is over. Not yet ported: Cards/`::card{...}`
+     itself (still mockup-only — see step 10's own note and the `vault`
+     skill's Daily Log section).
    - **Not started**: `ProjectView.tsx` and the Vault file-view page
      (`routes/fruits_.vault.tsx`) — still on `MdxEditorView`. These have a
      real, non-trivial directive registry (`csv-table`/`gallery`/`svg`/
@@ -446,15 +455,76 @@ Interacting mode first, without needing that decision resolved.
 10. **Done — the `::file{...}` interactable**, a built-in leaf directive
     (own row, no children — same "mount point, not nested markdown" shape
     already planned for `::card{file=...}`) representing an attached
-    file: a fixed 79×79px placeholder thumbnail (no real preview — there's
-    no real vault upload wired up yet, a tracked, separate gap; see the
-    `vault` skill) offset left by one grid cell via `margin-left:
-    calc(-1 * var(--ox-grid))` so it sits IN the gutter (the same column
-    heading/list markers use) instead of the normal text-indent position,
-    plus a caption alongside it. `oxmarkdown/fileDirective.ts` holds the
-    shared insertion logic (pure Lexical-tree code, no React) and the
-    native-file-picker wrapper; reachable two ways, both landing on the
-    same code:
+    file: a fixed 74×74px thumbnail offset left by one grid cell via
+    `margin-left: calc(-1 * var(--ox-grid))` so it sits IN the gutter (the
+    same column heading/list markers use) instead of the normal
+    text-indent position, plus a caption alongside it.
+    `oxmarkdown/fileDirective.ts` holds the shared insertion logic (pure
+    Lexical-tree code, no React) and the native-file-picker wrapper;
+    reachable two ways, both landing on the same code:
+    - **A block-level decorator (this directive; any future one) can
+      never be the FIRST row of the document** — enforced generically,
+      not just on insert, by `oxmarkdown/LeadingBlockGuardPlugin.tsx`: a
+      `RootNode` transform (same pattern as `MinRowsPlugin`) that splices
+      a plain paragraph in ahead of the first child whenever it's a
+      block decorator (`$isDecoratorNode(first) && !first.isInline()`).
+      Reruns on every root mutation (including initial load, since
+      `registerNodeTransform` marks existing nodes dirty the moment it's
+      registered), so this holds even for a document that already
+      starts with one when loaded/pasted/undone into that state, not
+      just newly-typed ones. Why: there's nothing above a leading block
+      decorator to ArrowUp FROM, so this guarantees a real, clickable
+      row always precedes it — which is also what lets
+      `fileCaptionFlow.ts`'s cross-editor ArrowUp treat "there's a
+      landing spot one level up" as the common case rather than needing
+      its own fabricate-one-on-the-fly fallback for this specific
+      direction (it still has one anyway, defensively — see below).
+    - **Upload is real** — `OxEditor`'s `onUploadFile` prop (a
+      `(file: File) => Promise<{fileId, contentType}>`, `UploadFileFn` in
+      `fileDirective.ts`) is threaded through both trigger paths below.
+      `OxEditor` itself stays ignorant of vault/folder specifics — it only
+      knows how to call this and write the result back onto the SAME
+      node (found again by KEY, since real async time passes between
+      insertion and the upload resolving). The Daily Log route
+      (`routes/fruits_.daily-log.tsx`) supplies one that posts to
+      `POST /api/daily-log/upload`, which resolves that day's own vault
+      folder and marks the file `source: "daily_log"`/`date` — the same
+      convention `isFileRefLocked` already uses. A caller that omits
+      `onUploadFile` entirely (e.g. the `daily-log-v2` visual mockup)
+      gets the old browser-only behavior — just a filename, no bytes
+      ever leave the browser, no error. On a real upload failure, the
+      node is marked `uploadError="1"` (shown as a plain placeholder with
+      an explanatory `title`) rather than looking like it's stuck
+      uploading forever.
+    - Once `fileId`/`contentType` land on the directive, the thumbnail
+      renders as a real `<img src="/api/vault/view/:fileId">`
+      (`FileDirectiveLayout` in `components/OxRenderer.tsx`) for image
+      content types; anything else (non-image, or still mid-upload)
+      keeps the plain placeholder box. This is the ONE part of the file
+      pipeline that reaches real vault storage today — the caption text
+      itself still lives only in the directive's own `caption` attribute
+      (see below), and OCR/transcript extraction from the uploaded bytes
+      is still parked behind the separate media-processing spike (see
+      the project handoff notes) — this only covers upload + display.
+    - The `/files` slash command (also matches `/file`) — gated by
+      `OxEditor`'s `allowFileAttachments` prop, on for both plain prose
+      and cards. Inserts at the current cursor's block.
+    - The persistent "add file" link below the editor
+      (`oxmarkdown/AddFileLinkPlugin.tsx`, gated by a SEPARATE
+      `showAddFileLink` prop — on for cards only, off for plain prose,
+      which still gets `/files` without the link) — always appends at
+      the document's END regardless of cursor position.
+    - Both call `pickFilesAndInsertAtBlock`/`pickFilesAndAppend`
+      respectively; found and fixed a real bug building this: a nested
+      `editor.update()` call (one made while `editor._updating` is
+      already true, e.g. from INSIDE `SlashCommandPlugin`'s own
+      `runCommand` wrapper) doesn't run its function immediately — it
+      QUEUES it for after the current update finishes (confirmed directly
+      in Lexical's own source) — which silently broke opening the file
+      dialog synchronously within the original trusted click. Fixed by
+      calling the needed `$`-prefixed functions directly, relying on
+      already being inside the caller's active update, instead of
+      wrapping them in a second one.
     - The `/files` slash command (also matches `/file`) — gated by
       `OxEditor`'s `allowFileAttachments` prop, on for both plain prose
       and cards. Inserts at the current cursor's block.
@@ -499,11 +569,86 @@ Interacting mode first, without needing that decision resolved.
       externally-supplied flat `order`; here the members are decorator
       nodes already ordered by the outer tree itself, so this walks that
       tree directly instead, skipping blank-line paragraphs but stopping
-      at any other real content). Scope note: only connects captions to
-      EACH OTHER — entering the first caption from the prose above it, or
-      exiting the last one back into the prose below, still falls through
-      to Lexical's own default decorator-adjacency behavior (jumping PAST
-      the whole decorator), not handled here.
+      at any other real content).
+    - **The caption feels like a fully integrated part of the outer
+      document, not a separate little box** — three more pieces:
+      - ArrowUp/ArrowDown at a caption's own true start/end, once a
+        sibling caption search comes up empty, falls through to
+        `focusOuterEditorAcrossBoundary` instead of stopping there: it
+        lands the caret in the nearest real OUTER content immediately
+        before/after the file directive (a paragraph, heading, list,
+        ...), or fabricates a fresh blank paragraph to land in if
+        there's truly nothing there. The one case left deliberately
+        unhandled: the adjacent outer sibling is some OTHER kind of block
+        decorator (not a file — that's already caught by the sibling-
+        caption search) — e.g. a table; Lexical's default jump-past-the-
+        decorator behavior still applies there.
+      - **Enter on an already-empty caption line "escapes"** to the outer
+        editor instead of padding the caption with yet another blank
+        row — hitting Enter twice (once to end the line you were on, once
+        more on the now-empty line) reads as "I'm done with this
+        caption," landing the caret right after the image in the OUTER
+        document (reusing an existing following paragraph if there is
+        one, same as the ArrowDown fallback above) and removing the now-
+        redundant blank line from the caption. Deliberately keyed off
+        "the current line is already empty," not document-boundary —
+        simpler, and matches what "hit Enter twice" actually means
+        char-by-char. Left alone (falls through to ordinary Enter) when
+        the empty line has no siblings at all yet — that's just the
+        caption's normal untouched starting state, not an escape signal.
+      - **The OTHER direction — outer editor into a caption — is a
+        separate plugin, `oxmarkdown/FileDirectiveArrowPlugin.tsx`**,
+        mounted unconditionally on every Editing-mode `OxEditor` (like
+        `InteractablesPlugin`). ArrowDown approaching a `::file{...}`
+        row from above, or ArrowUp approaching one from below, lands the
+        caret directly in that file's caption (start/end respectively)
+        instead of the browser's default "jump straight past the whole
+        non-editable decorator" behavior, which otherwise made a file
+        directive's caption unreachable by vertical arrow keys alone.
+        Reuses `InteractablesPlugin.tsx`'s own
+        `siblingBeforeCollapsedCaret`/`siblingAfterCollapsedCaret`
+        (exported for this) — the same ancestor-climbing "what's
+        immediately adjacent to a collapsed caret" check that plugin
+        already uses for Left/Right, so the two agree on what "adjacent"
+        means. Looks up the caption via `getFileCaptionMember(editor,
+        nodeKey)` — `editor` here already IS the outer editor the
+        caption registered itself against, so no extra wiring is needed
+        beyond mounting the plugin. The SAME plugin also handles
+        Backspace approaching a file directive from below (the row right
+        after it): lands the caret at the caption's END, matching how
+        backspacing at the start of an ordinary line merges into the end
+        of the PREVIOUS line, rather than `InteractablesPlugin`'s usual
+        select-then-delete treatment for decorators —
+        `InteractablesPlugin.tsx`'s own `isFileDirective` check steps its
+        higher-priority (`COMMAND_PRIORITY_CRITICAL`) Backspace handler
+        aside specifically for file directives so this one gets a
+        chance to run at all. A file directive can still be removed via
+        its own remove button, or Delete approaching it from the other
+        side (deliberately left unchanged — only this one Backspace case
+        moved).
+      - **Real pitfall, confirmed by direct testing, not just
+        theorized**: whichever editor is handing focus OFF to the other
+        one (either direction) MUST clear its OWN recorded selection
+        first, via `$setSelection(null)`, or the very NEXT keystroke
+        typed in the editor that just gained focus bounces straight back
+        to whichever editor still has a stale selection. Root cause: a
+        caption's `onChange` round-trips into `editingNodes.tsx`'s
+        `editDirectiveAttr`, which mutates the OUTER editor's own
+        `OxDirectiveNode` and commits an ordinary update THERE — and if
+        the outer editor still has an old `RangeSelection` recorded from
+        before focus moved away (nothing had ever changed it), Lexical's
+        reconciliation for that unrelated commit re-asserts it into the
+        native DOM, which visibly steals focus back since the caption's
+        contenteditable is a DOM DESCENDANT of the outer editor's own
+        root, not a sibling. A plain deferred focus-shift (a microtask,
+        or `fileDirective.ts`'s own rAF-polling pattern) does NOT fix
+        this — tested directly, confirmed still broken — so this isn't a
+        timing/ordering issue; the stale selection has to be explicitly
+        cleared. Both directions need this fix independently: outer ->
+        caption in `FileDirectiveArrowPlugin.tsx`, caption -> outer in
+        `FileCaptionArrowPlugin.tsx`. Relevant to any FUTURE nested-editor
+        flow too (e.g. `::card`'s own planned nested `OxEditor`) —
+        clearing the handoff side's selection isn't specific to files.
     - The static/Interacting-mode path (`components/OxRenderer.tsx`'s
       `FileDirectiveLayout`/`FileDirectiveStatic`) renders the same
       caption as plain read-only markdown instead — Interacting mode
@@ -530,7 +675,7 @@ Interacting mode first, without needing that decision resolved.
       Any other OxEditor/OxRenderer instance can reuse this the same way.
     - `placeholder` is now a real `OxEditorProps` prop (default: the
       usual "Start typing…" hint) — the caption editor passes
-      `"image info"` instead.
+      `"add words"` instead.
     - After inserting, the FIRST newly-added file's caption gets focus
       automatically, so typing a caption needs no extra click
       (`focusFileCaptionOnceMounted` in `fileDirective.ts`). Needs to

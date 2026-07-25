@@ -588,9 +588,18 @@
   height: 74px;
   margin: 4px 3px 4px calc(-1 * var(--ox-grid) + 2px);
   flex-shrink: 0;
+  display: block;
   border-radius: 4px;
   background: var(--ox-color-code-bg);
   border: 1px solid var(--ox-color-border);
+  /* Only affects the real `<img>` case (a placeholder `<div>` while an
+     upload is still pending, or when there's no `onUploadFile` wired up
+     at all, ignores it harmlessly) — crops rather than distorts a
+     non-square photo within the fixed 74x74 box. */
+  object-fit: cover;
+}
+.ox-file-thumb[data-upload-error="true"] {
+  border-color: var(--red, #a63b31);
 }
 
 .ox-file-caption {
@@ -614,13 +623,9 @@
    of flow). `.circle-btn-red` itself (root.css) owns the button's
    actual look.
 
-   NOTE: `.ox-content` (the ancestor `overflow-x: hidden` lives on) only
-   reserves a full `--ox-grid` on its LEFT (`padding-left`) — its own
-   `padding-right` is just 8px, so this may get visually clipped
-   depending on how much room a caller's own layout leaves to the right
-   of `.ox-content`'s box. Not addressed here — widening `.ox-content`'s
-   padding-right to match would be a bigger, shared change affecting
-   every consumer of this system, not just this one directive. */
+   `.ox-content` (the ancestor `overflow-x: hidden` lives on) reserves a
+   full `--ox-grid` on BOTH sides for exactly this reason — see that
+   rule's own comment. */
 .ox-file-remove-slot {
   position: absolute;
   top: 3px;

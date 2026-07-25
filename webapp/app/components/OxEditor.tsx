@@ -84,8 +84,11 @@ import MentionPlugin from "../oxmarkdown/MentionPlugin";
 import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
 import CrossEditorArrowPlugin from "../oxmarkdown/CrossEditorArrowPlugin";
 import MinRowsPlugin, { DEFAULT_MIN_EDITOR_ROWS, normalizeMinRows } from "../oxmarkdown/MinRowsPlugin";
+import LeadingBlockGuardPlugin from "../oxmarkdown/LeadingBlockGuardPlugin";
+import FileDirectiveArrowPlugin from "../oxmarkdown/FileDirectiveArrowPlugin";
 import AddFileLinkPlugin from "../oxmarkdown/AddFileLinkPlugin";
 import FileCaptionArrowPlugin from "../oxmarkdown/FileCaptionArrowPlugin";
+import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import "../styles/oxmarkdown.css";
 
@@ -129,6 +132,13 @@ export interface OxEditorProps {
    * `allowFileAttachments`; on for cards, off for plain prose (which
    * still gets `/files`, just not the persistent link). */
   showAddFileLink?: boolean;
+  /** Uploads a picked file to real storage before it's attached — see
+   * `oxmarkdown/fileDirective.ts`'s `UploadFileFn`. Threaded through to
+   * both the `/files` slash command and the persistent "add file" link.
+   * `OxEditor` itself stays ignorant of vault/folder specifics; the
+   * caller (e.g. the Daily Log route) owns where bytes actually go. Omit
+   * for a browser-only preview with no server persistence. */
+  onUploadFile?: UploadFileFn;
   /** How many rows tall this editor's minimum clickable canvas is — see
    * `oxmarkdown/MinRowsPlugin.tsx`. Defaults to a full 4-row canvas (a
    * card/prose editor); a `::file{...}` directive's caption editor passes
@@ -224,6 +234,7 @@ function OxEditingSurface({
   groupId,
   allowFileAttachments,
   showAddFileLink,
+  onUploadFile,
   minRows,
   fileCaptionFlow,
   placeholder = "Start typing — try “/” for commands…",
@@ -298,7 +309,11 @@ function OxEditingSurface({
             <MarkdownShortcutPlugin transformers={OX_TRANSFORMERS} />
             <MarkdownSyncPlugin markdown={markdown} onChange={onChange} />
             <InteractablesPlugin />
-            <SlashCommandPlugin allowFileAttachments={allowFileAttachments} />
+            <FileDirectiveArrowPlugin />
+            <SlashCommandPlugin
+              allowFileAttachments={allowFileAttachments}
+              onUploadFile={onUploadFile}
+            />
             <DirectiveShortcutPlugin />
             <MarkdownPastePlugin />
             <ChecklistUpgradePlugin />
@@ -313,7 +328,10 @@ function OxEditingSurface({
               />
             )}
             <MinRowsPlugin minRows={minRows} />
-            {allowFileAttachments && showAddFileLink && <AddFileLinkPlugin />}
+            <LeadingBlockGuardPlugin />
+            {allowFileAttachments && showAddFileLink && (
+              <AddFileLinkPlugin onUploadFile={onUploadFile} />
+            )}
           </LexicalComposer>
         </OxEditorContext.Provider>
       </DirectiveRegistryContext.Provider>

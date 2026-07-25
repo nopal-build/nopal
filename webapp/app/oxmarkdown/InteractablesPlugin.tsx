@@ -29,6 +29,14 @@
  *     text on export so it wouldn't be mistaken for a live directive again
  *     — wasn't worth it). Deleting relies on ordinary undo to bring
  *     something back, same as any other deletion.
+ *   - EXCEPTION: Backspace approaching a `::file{...}` directive
+ *     specifically does NOT select it as a unit — `isFileDirective`
+ *     steps this handler aside so `FileDirectiveArrowPlugin.tsx` can
+ *     land the caret in its caption's END instead, matching how
+ *     backspacing at the start of a line ordinarily merges into the end
+ *     of the PREVIOUS line's content. A file directive can still be
+ *     removed via its own remove button, or Delete approaching it from
+ *     the OTHER side (unaffected — only this one Backspace case changes).
  *
  * `event.preventDefault()` is called explicitly in every branch that
  * returns `true`, at `COMMAND_PRIORITY_CRITICAL` for Backspace/Delete —
@@ -36,6 +44,12 @@
  * suppress the native contentEditable behavior running in parallel; the
  * Lexical-vs-custom foundation spike (oxmarkdown skill, TODO 1) hit exactly
  * this as a silent text-corruption bug before adding both.
+ *
+ * `siblingBeforeCollapsedCaret`/`siblingAfterCollapsedCaret` are exported
+ * for `FileDirectiveArrowPlugin.tsx` — the exact same "what's immediately
+ * adjacent to a collapsed caret, climbing up through ancestors as needed"
+ * check is also what that plugin needs to detect "the next/previous row
+ * IS a `::file{...}` directive" for ArrowDown/ArrowUp, not just Left/Right.
  */
 
 import { useEffect } from "react";
@@ -58,6 +72,18 @@ import {
   type RangeSelection,
 } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { $isOxDirectiveNode } from "./editingNodes";
+
+/** `::file{...}` gets its own, more specific Backspace behavior
+ * (`FileDirectiveArrowPlugin.tsx` — lands the caret in its caption's
+ * END, like backspacing into the end of a normal previous line, rather
+ * than select-then-delete) so this generic handler has to recognize and
+ * step aside for it specifically — otherwise, being registered at
+ * `COMMAND_PRIORITY_CRITICAL`, it would always win first and a file
+ * directive could never be reached that way. */
+function isFileDirective(node: LexicalNode | null): boolean {
+  return $isOxDirectiveNode(node) && node.getMdastNode().name === "file";
+}
 
 /** Walks up through ancestors while there's no previous sibling at the
  * current level, so a caret at the very START of a block (e.g. a fresh
@@ -69,7 +95,7 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
  * root/shadow-root boundary (found by testing: without this walk-up, an
  * arrow-key approaching a block-level directive from an adjacent paragraph
  * silently did nothing). */
-function siblingBeforeCollapsedCaret(selection: RangeSelection): LexicalNode | null {
+export function siblingBeforeCollapsedCaret(selection: RangeSelection): LexicalNode | null {
   const anchor = selection.anchor;
   let current: LexicalNode | null;
   if (anchor.type === "text") {
@@ -94,7 +120,7 @@ function siblingBeforeCollapsedCaret(selection: RangeSelection): LexicalNode | n
   return null;
 }
 
-function siblingAfterCollapsedCaret(selection: RangeSelection): LexicalNode | null {
+export function siblingAfterCollapsedCaret(selection: RangeSelection): LexicalNode | null {
   const anchor = selection.anchor;
   let current: LexicalNode | null;
   if (anchor.type === "text") {
@@ -142,7 +168,7 @@ export default function InteractablesPlugin(): null {
 
         if ($isRangeSelection(selection) && selection.isCollapsed()) {
           const sibling = siblingBeforeCollapsedCaret(selection);
-          if ($isDecoratorNode(sibling)) {
+          if ($isDecoratorNode(sibling) && !isFileDirective(sibling)) {
             event?.preventDefault();
             selectNodeAsUnit(sibling);
             return true;

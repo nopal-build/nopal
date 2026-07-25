@@ -13,7 +13,7 @@
  */
 
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { pickFilesAndAppend } from "./fileDirective";
+import { pickFilesAndAppend, type UploadFileFn } from "./fileDirective";
 
 /** The exact SVG the design gave, with one adaptation: `stroke="currentColor"`
  * instead of the original hardcoded `#7F5B8B` (which is `--purple-light`'s
@@ -32,13 +32,19 @@ function AddFileIcon() {
   );
 }
 
-export default function AddFileLinkPlugin() {
+export default function AddFileLinkPlugin({
+  onUploadFile,
+}: {
+  /** Forwarded to `pickFilesAndAppend` — see `fileDirective.ts`'s
+   * `UploadFileFn`. Omit for a browser-only preview with no upload. */
+  onUploadFile?: UploadFileFn;
+} = {}) {
   const [editor] = useLexicalComposerContext();
   return (
     <button
       type="button"
       className="ox-add-file-link"
-      onClick={() => pickFilesAndAppend(editor)}
+      onClick={() => pickFilesAndAppend(editor, onUploadFile)}
     >
       <AddFileIcon />
       add file

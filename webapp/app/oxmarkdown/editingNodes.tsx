@@ -210,6 +210,9 @@ function OxDirectiveDecorator({
     return (
       <FileDirectiveLayout
         name={attrs.name ?? "file"}
+        fileId={attrs.fileId}
+        contentType={attrs.contentType}
+        uploadError={attrs.uploadError === "1"}
         onRemove={() => {
           editor.update(() => {
             const node = $getNodeByKey(nodeKey);

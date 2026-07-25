@@ -15,6 +15,7 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import OxEditor from "../components/OxEditor";
 import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
+import type { UploadedFileInfo, UploadFileFn } from "../oxmarkdown/fileDirective";
 import {
   getDailyLogs,
   saveDailyLog,
@@ -45,6 +46,24 @@ function recordMentionSelected(item: MentionItem) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: item.name, path: item.path }),
   }).catch(() => {});
+}
+
+// ─── File attachments ───────────────────────────────────────────────────────
+// The Daily Log's `onUploadFile` (see `oxmarkdown/fileDirective.ts`'s
+// `UploadFileFn`) — uploads into THAT day's own vault folder
+// (`daily-logs/YYYY-MM-DD/`), mirroring where `readme.md` itself lives.
+// `OxEditor` stays ignorant of vault/folder specifics; this is the one
+// place that knows the file belongs to a particular day.
+
+function uploadDailyLogFile(date: string, file: File): Promise<UploadedFileInfo> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("date", date);
+  return fetch("/api/daily-log/upload", { method: "POST", body: form }).then(async (res) => {
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body?.error ?? "Upload failed");
+    return body as UploadedFileInfo;
+  });
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -202,6 +221,12 @@ function TodayLogEntry({
   const dateLabel = formatEntryDate(date, today);
   const heading = dateLabel === "Today" ? `Today — ${fullDate}` : dateLabel;
 
+  // Stable per-date reference (not re-created every render) so `OxEditor`
+  // doesn't see it as a changing prop — `date` is only ever the CURRENT
+  // day here anyway (this component always renders "today"), so a plain
+  // closure is enough without needing useCallback's dependency dance.
+  const onUploadFile: UploadFileFn = (file) => uploadDailyLogFile(date, file);
+
   return (
     <div style={{ marginBottom: "12px" }}>
       <div style={{ marginBottom: "8px" }}>
@@ -218,6 +243,8 @@ function TodayLogEntry({
           onChange={onChange}
           mentionSearch={dailyLogMentionSearch}
           onMentionSelect={recordMentionSelected}
+          allowFileAttachments
+          onUploadFile={onUploadFile}
         />
       </div>
     </div>

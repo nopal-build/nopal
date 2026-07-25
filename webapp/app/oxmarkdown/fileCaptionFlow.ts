@@ -25,14 +25,31 @@
  * direct reference to that outer editor passed down explicitly (see
  * `editingNodes.tsx`), with no separate provider needed.
  *
- * Scope note: this only connects captions to EACH OTHER. Entering the
- * first caption from the surrounding prose above it, or exiting the last
- * caption back into the prose below it, isn't handled here — Lexical's
- * own default decorator-adjacency behavior (jumping PAST a block
- * decorator entirely) still applies at those two edges.
- */
+ * ALSO handles the two edges `focusSiblingFileCaption` explicitly leaves
+ * alone above — entering the caption stack from the surrounding OUTER
+ * prose, and exiting back into it — via `focusOuterEditorAcrossBoundary`,
+ * below. Between the two, a caption's ArrowUp/ArrowDown at its own true
+ * start/end always lands SOMEWHERE sensible in the outer document: a
+ * sibling caption if one is consecutively adjacent, otherwise the nearest
+ * real content (a paragraph, heading, list, ...) immediately before/after
+ * the file directive in the outer tree, or — if there's truly nothing
+ * there at all — a freshly created blank paragraph to land in, rather
+ * than falling through to Lexical's own default decorator-adjacency
+ * behavior (silently jumping PAST the whole decorator). The one case
+ * deliberately left unhandled: the adjacent outer sibling is some OTHER
+ * kind of block decorator (not a file directive — that's already caught
+ * by `focusSiblingFileCaption` — e.g. a table). That's rare enough, and
+ * decorator-to-decorator caret placement ambiguous enough, that it isn't
+ * worth solving here; the old jump-past behavior applies there instead. */
 
-import { $getNodeByKey, $isParagraphNode, type LexicalEditor } from "lexical";
+import {
+  $createParagraphNode,
+  $getNodeByKey,
+  $isElementNode,
+  $isParagraphNode,
+  type ElementNode,
+  type LexicalEditor,
+} from "lexical";
 import { $isOxDirectiveNode } from "./editingNodes";
 import type { OxEditorGroupMember } from "./OxEditorGroup";
 
@@ -107,5 +124,63 @@ export function getFileCaptionMember(
   nodeKey: string,
 ): OxEditorGroupMember | null {
   return getRegistry(outerEditor).get(nodeKey) ?? null;
+}
+
+/** Lands the caret in the OUTER editor's own content immediately before
+ * (`direction: -1`) or after (`direction: 1`) the file directive
+ * `nodeKey` — the fallback `FileCaptionArrowPlugin` uses once
+ * `focusSiblingFileCaption` has already ruled out a consecutively
+ * adjacent file caption. Also used directly by the caption's own
+ * double-Enter "escape" gesture (always `direction: 1`, from
+ * `FileCaptionArrowPlugin`'s Enter handling) — landing "in the nearest
+ * real content after the image, creating a blank line if there isn't
+ * any yet" is the exact same operation either way.
+ *
+ * - If a real sibling element (paragraph, heading, list, ...) already
+ *   sits there, the caret lands inside it — at its START when arriving
+ *   from above (`direction: 1`), or its END when arriving from below
+ *   (`direction: -1`) — mirroring `CrossEditorArrowPlugin`'s own
+ *   `focusStart`/`focusEnd` convention for entering a neighbor.
+ * - If there's truly nothing there (the true edge of the outer
+ *   document), a fresh blank paragraph is created and focused instead of
+ *   leaving nowhere to go — the ArrowUp-at-the-very-first-row case is
+ *   normally already prevented from ever occurring by
+ *   `LeadingBlockGuardPlugin` (a leading block decorator always gets a
+ *   paragraph spliced in ahead of it), so this mainly matters for
+ *   ArrowDown/double-Enter past the LAST row, which has no such
+ *   standing guarantee.
+ * - If the adjacent sibling is some other kind of block decorator (not a
+ *   file directive — `focusSiblingFileCaption` already handles that
+ *   case before this function is ever reached), this returns `false` and
+ *   does nothing, leaving Lexical's own default jump-past-the-decorator
+ *   behavior to apply — see this file's header. */
+export function focusOuterEditorAcrossBoundary(
+  outerEditor: LexicalEditor,
+  nodeKey: string,
+  direction: 1 | -1,
+): boolean {
+  let handled = false;
+  outerEditor.update(() => {
+    const node = $getNodeByKey(nodeKey);
+    if (!node) return;
+    const sibling = direction === 1 ? node.getNextSibling() : node.getPreviousSibling();
+    if (sibling) {
+      if (!$isElementNode(sibling)) return; // some other decorator — leave unhandled
+      focusEdge(sibling, direction);
+      handled = true;
+      return;
+    }
+    const blank = $createParagraphNode();
+    if (direction === 1) node.insertAfter(blank);
+    else node.insertBefore(blank);
+    blank.selectStart();
+    handled = true;
+  });
+  return handled;
+}
+
+function focusEdge(element: ElementNode, direction: 1 | -1): void {
+  if (direction === 1) element.selectStart();
+  else element.selectEnd();
 }
 
