@@ -8,6 +8,8 @@ use std::time::Duration;
 
 mod auth;
 mod image;
+mod skills;
+mod sort;
 mod sync;
 mod update;
 mod vault;
@@ -53,6 +55,19 @@ enum Command {
     Sync {
         #[command(subcommand)]
         command: SyncCommand,
+    },
+    /// Trigger the daily-log Sorter (mentions → project backlinks,
+    /// completed Card tasks, Card file attachments → Release Log entries).
+    /// Runs automatically once a day; this is for triggering it on demand.
+    Sort {
+        #[command(subcommand)]
+        command: SortCommand,
+    },
+    /// Reference docs for how to write things in Nopal (OxMarkdown syntax,
+    /// the Vault, etc). Lists available skills by default.
+    Skills {
+        #[command(subcommand)]
+        command: Option<SkillsCommand>,
     },
     /// Check for and install a newer version of the nopal CLI.
     #[command(alias = "upgrade")]
@@ -307,6 +322,31 @@ enum SyncCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum SortCommand {
+    /// Sort one day (yours) — defaults to yesterday (UTC) if --date is omitted.
+    Run {
+        /// YYYY-MM-DD. Defaults to yesterday (UTC).
+        #[arg(long)]
+        date: Option<String>,
+        /// Re-run even if this day was already sorted.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillsCommand {
+    /// List available skill references. (default)
+    List {},
+    /// Print a skill's full reference doc.
+    #[command(alias = "cat")]
+    Show {
+        /// Skill name, e.g. `oxmarkdown`.
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum WatchCommand {
     /// Install + start the worker: runs at login, restarts on crash, and
     /// authenticates with a sync-scoped (never-expiring, revocable) token.
@@ -478,6 +518,24 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Command::Sort { command } => {
+            let result = match command {
+                SortCommand::Run { date, force } => sort::run(date, force),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Skills { command } => match command.unwrap_or(SkillsCommand::List {}) {
+            SkillsCommand::List {} => skills::list(),
+            SkillsCommand::Show { name } => {
+                if let Err(e) = skills::show(&name) {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+        },
         Command::Update { check } => {
             if let Err(e) = update::update(check) {
                 eprintln!("update failed: {e}");

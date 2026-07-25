@@ -51,8 +51,10 @@ import { HorizontalRulePlugin } from "@lexical/react/LexicalHorizontalRulePlugin
 import { HorizontalRuleNode } from "@lexical/react/LexicalHorizontalRuleNode";
 import { TabIndentationPlugin } from "@lexical/react/LexicalTabIndentationPlugin";
 import { MarkdownShortcutPlugin } from "@lexical/react/LexicalMarkdownShortcutPlugin";
-import { TRANSFORMERS } from "@lexical/markdown";
+import { QUOTE, TRANSFORMERS } from "@lexical/markdown";
 import { OX_CHECK_LIST } from "../oxmarkdown/checklistTransformer";
+import { OX_QUOTE } from "../oxmarkdown/quoteTransformer";
+import { OX_TOGGLE } from "../oxmarkdown/toggleTransformer";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { ListNode, ListItemNode } from "@lexical/list";
 import { LinkNode } from "@lexical/link";
@@ -85,25 +87,38 @@ import SlashCommandPlugin from "../oxmarkdown/SlashCommandPlugin";
 import DirectiveShortcutPlugin from "../oxmarkdown/DirectiveShortcutPlugin";
 import MarkdownPastePlugin from "../oxmarkdown/MarkdownPastePlugin";
 import ChecklistUpgradePlugin from "../oxmarkdown/ChecklistUpgradePlugin";
+import ToggleListPlugin from "../oxmarkdown/ToggleListPlugin";
 import MentionPlugin from "../oxmarkdown/MentionPlugin";
 import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
 import CrossEditorArrowPlugin from "../oxmarkdown/CrossEditorArrowPlugin";
 import MinRowsPlugin, { DEFAULT_MIN_EDITOR_ROWS, normalizeMinRows } from "../oxmarkdown/MinRowsPlugin";
 import LeadingBlockGuardPlugin from "../oxmarkdown/LeadingBlockGuardPlugin";
+import OxTogglePlugin from "../oxmarkdown/OxTogglePlugin";
+import { OxToggleNode, OxToggleSummaryNode } from "../oxmarkdown/OxToggleNode";
 import FileDirectiveArrowPlugin from "../oxmarkdown/FileDirectiveArrowPlugin";
 import AddFileLinkPlugin from "../oxmarkdown/AddFileLinkPlugin";
 import FileCaptionArrowPlugin from "../oxmarkdown/FileCaptionArrowPlugin";
+import CardDirectiveArrowPlugin from "../oxmarkdown/CardDirectiveArrowPlugin";
+import CardEditorArrowPlugin from "../oxmarkdown/CardEditorArrowPlugin";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import type { CardResolver } from "../oxmarkdown/cardDirective";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import "../styles/oxmarkdown.css";
 
-// `OX_CHECK_LIST` first — see that file's header for why order matters in
-// theory (it doesn't in practice today, since the two regexes trigger at
-// disjoint keystroke positions, but listing the more specific one first
-// matches the convention `@lexical/markdown`'s own docs imply for transformer
-// ordering) — the rest is the library's own default set, unchanged.
-const OX_TRANSFORMERS = [OX_CHECK_LIST, ...TRANSFORMERS];
+// `OX_CHECK_LIST`/`OX_QUOTE`/`OX_TOGGLE` first — see that file's header for
+// why order matters in theory (it doesn't in practice today, since the
+// regexes trigger at disjoint keystroke positions, but listing the more
+// specific ones first matches the convention `@lexical/markdown`'s own
+// docs imply for transformer ordering). The default `QUOTE` (keyed on
+// `> `) is filtered OUT of the library's own default set — `> ` now
+// triggers a Toggle List instead (`OX_TOGGLE`); blockquotes moved to `"`
+// (`OX_QUOTE`) — see both transformers' own headers.
+const OX_TRANSFORMERS = [
+  OX_CHECK_LIST,
+  OX_QUOTE,
+  OX_TOGGLE,
+  ...TRANSFORMERS.filter((t) => t !== QUOTE),
+];
 
 export interface OxEditorProps {
   markdown: string;
@@ -165,6 +180,12 @@ export interface OxEditorProps {
    * document (see `oxmarkdown/fileCaptionFlow.ts`). Not meant to be
    * passed by ordinary callers. */
   fileCaptionFlow?: { outerEditor: LexicalEditor; nodeKey: string };
+  /** Internal use only, set by `editingNodes.tsx` when mounting a
+   * `::card{...}` directive's own nested editor — lets ArrowUp/ArrowDown
+   * flow INTO the card from the surrounding outer document (see
+   * `oxmarkdown/cardFlow.ts`). Not meant to be passed by ordinary
+   * callers. */
+  cardFlow?: { outerEditor: LexicalEditor; nodeKey: string };
   /** Editing-mode empty-state placeholder text. Defaults to the usual
    * "Start typing…" hint; a `::file{...}` directive's caption editor
    * passes `"image info"` instead — a short annotation field reads
@@ -217,6 +238,7 @@ function OxInteractingSurface({
 
   return (
     <div className={`ox-content ox-tokens${className ? ` ${className}` : ""}`} style={style}>
+      <div className="ox-dot-grid">
       {/* Interacting mode ALSO provides both contexts (not just Editing
           mode) — a `::card{...}` directive rendered here (`CardDirectiveStatic`
           in `OxRenderer.tsx`) may need to mount a REAL nested
@@ -229,7 +251,8 @@ function OxInteractingSurface({
             <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} resolveCard={resolveCard} />
           </OxEditorContext.Provider>
         </CardResolverContext.Provider>
-      </DirectiveRegistryContext.Provider>
+        </DirectiveRegistryContext.Provider>
+      </div>
     </div>
   );
 }
@@ -265,6 +288,7 @@ function OxEditingSurface({
   resolveCard,
   minRows,
   fileCaptionFlow,
+  cardFlow,
   placeholder = "Start typing — try “/” for commands…",
 }: OxEditorProps) {
   const initialConfig = useMemo<InitialConfigType>(
@@ -291,6 +315,8 @@ function OxEditingSurface({
         HorizontalRuleNode,
         OxDirectiveNode,
         OxOpaqueNode,
+        OxToggleNode,
+        OxToggleSummaryNode,
       ],
       theme: OX_LEXICAL_THEME,
       onError(error: Error) {
@@ -307,67 +333,78 @@ function OxEditingSurface({
 
   return (
     <div className={`ox-content ox-tokens${className ? ` ${className}` : ""}`} style={style}>
-      <DirectiveRegistryContext.Provider value={directives}>
-        {/* Provides itself (`OxEditor`, this module's own default export) so
-            `editingNodes.tsx` can mount a nested `<OxEditor>` for a
-            `::file{...}` directive's caption, or a `::card{...}`
-            directive's own content, without a circular import — see
-            `oxmarkdown/OxEditorContext.tsx`. */}
-        <CardResolverContext.Provider value={resolveCard}>
-        <UploadFileContext.Provider value={onUploadFile}>
-        <OxEditorContext.Provider value={OxEditor}>
-          <LexicalComposer initialConfig={initialConfig}>
-            <div
-              style={
-                {
-                  position: "relative",
-                  "--ox-min-rows": cssMinRows,
-                } as CSSProperties
-              }
-            >
-              <RichTextPlugin
-                contentEditable={<ContentEditable className="ox-editing-surface" />}
-                placeholder={<div className="ox-editing-placeholder">{placeholder}</div>}
-                ErrorBoundary={LexicalErrorBoundary}
+      <div className="ox-dot-grid">
+        <DirectiveRegistryContext.Provider value={directives}>
+          {/* Provides itself (`OxEditor`, this module's own default export) so
+              `editingNodes.tsx` can mount a nested `<OxEditor>` for a
+              `::file{...}` directive's caption, or a `::card{...}`
+              directive's own content, without a circular import — see
+              `oxmarkdown/OxEditorContext.tsx`. */}
+          <CardResolverContext.Provider value={resolveCard}>
+          <UploadFileContext.Provider value={onUploadFile}>
+          <OxEditorContext.Provider value={OxEditor}>
+            <LexicalComposer initialConfig={initialConfig}>
+              <div
+                style={
+                  {
+                    position: "relative",
+                    "--ox-min-rows": cssMinRows,
+                  } as CSSProperties
+                }
+              >
+                <RichTextPlugin
+                  contentEditable={<ContentEditable className="ox-editing-surface" />}
+                  placeholder={<div className="ox-editing-placeholder">{placeholder}</div>}
+                  ErrorBoundary={LexicalErrorBoundary}
+                />
+              </div>
+              <HistoryPlugin />
+              <ListPlugin />
+              <OxChecklistPlugin />
+              <OxTogglePlugin />
+              <LinkPlugin />
+              <TabIndentationPlugin />
+              <HorizontalRulePlugin />
+              <MarkdownShortcutPlugin transformers={OX_TRANSFORMERS} />
+              <MarkdownSyncPlugin markdown={markdown} onChange={onChange} />
+              <InteractablesPlugin />
+              <FileDirectiveArrowPlugin />
+              <CardDirectiveArrowPlugin />
+              <SlashCommandPlugin
+                allowFileAttachments={allowFileAttachments}
+                onUploadFile={onUploadFile}
               />
-            </div>
-            <HistoryPlugin />
-            <ListPlugin />
-            <OxChecklistPlugin />
-            <LinkPlugin />
-            <TabIndentationPlugin />
-            <HorizontalRulePlugin />
-            <MarkdownShortcutPlugin transformers={OX_TRANSFORMERS} />
-            <MarkdownSyncPlugin markdown={markdown} onChange={onChange} />
-            <InteractablesPlugin />
-            <FileDirectiveArrowPlugin />
-            <SlashCommandPlugin
-              allowFileAttachments={allowFileAttachments}
-              onUploadFile={onUploadFile}
-            />
-            <DirectiveShortcutPlugin />
-            <MarkdownPastePlugin />
-            <ChecklistUpgradePlugin />
-            {mentionSearch && (
-              <MentionPlugin search={mentionSearch} onSelect={onMentionSelect} />
-            )}
-            {groupId && <CrossEditorArrowPlugin groupId={groupId} />}
-            {fileCaptionFlow && (
-              <FileCaptionArrowPlugin
-                outerEditor={fileCaptionFlow.outerEditor}
-                nodeKey={fileCaptionFlow.nodeKey}
-              />
-            )}
-            <MinRowsPlugin minRows={minRows} />
-            <LeadingBlockGuardPlugin />
-            {allowFileAttachments && showAddFileLink && (
-              <AddFileLinkPlugin onUploadFile={onUploadFile} />
-            )}
-          </LexicalComposer>
-        </OxEditorContext.Provider>
-        </UploadFileContext.Provider>
-        </CardResolverContext.Provider>
-      </DirectiveRegistryContext.Provider>
+              <DirectiveShortcutPlugin />
+              <MarkdownPastePlugin />
+              <ChecklistUpgradePlugin />
+              <ToggleListPlugin />
+              {mentionSearch && (
+                <MentionPlugin search={mentionSearch} onSelect={onMentionSelect} />
+              )}
+              {groupId && <CrossEditorArrowPlugin groupId={groupId} />}
+              {fileCaptionFlow && (
+                <FileCaptionArrowPlugin
+                  outerEditor={fileCaptionFlow.outerEditor}
+                  nodeKey={fileCaptionFlow.nodeKey}
+                />
+              )}
+              {cardFlow && (
+                <CardEditorArrowPlugin
+                  outerEditor={cardFlow.outerEditor}
+                  nodeKey={cardFlow.nodeKey}
+                />
+              )}
+              <MinRowsPlugin minRows={minRows} />
+              <LeadingBlockGuardPlugin />
+              {allowFileAttachments && showAddFileLink && (
+                <AddFileLinkPlugin onUploadFile={onUploadFile} />
+              )}
+            </LexicalComposer>
+          </OxEditorContext.Provider>
+          </UploadFileContext.Provider>
+          </CardResolverContext.Provider>
+        </DirectiveRegistryContext.Provider>
+      </div>
     </div>
   );
 }

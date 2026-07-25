@@ -8,7 +8,9 @@ import {
   getFolderById,
   getFoldersByHuman,
   isFolderUnderSyncs,
+  resolveVaultRootKey,
 } from "../data/vault.server";
+import { canWriteToRoot } from "../data/vaultRoots";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -57,6 +59,16 @@ export async function action({ request }: ActionFunctionArgs) {
   // Sync-scoped tokens may only create folders inside syncs/.
   if (syncScoped && !(await isFolderUnderSyncs(parent._id))) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
+  // even inside the OWNING human's own vault — see `vaultRoots.ts`.
+  const parentRootKey = parent.vault_root_key ?? (await resolveVaultRootKey(parent._id));
+  if (!canWriteToRoot(parentRootKey, user.role)) {
+    return Response.json(
+      { error: "You don't have permission to create folders here" },
+      { status: 403 },
+    );
   }
 
   const folder = await createVaultFolder({

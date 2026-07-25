@@ -2,7 +2,12 @@
  * Enforces a general invariant for every Editing-mode `OxEditor`: a
  * block-level decorator (a `::file{...}` directive today; any future
  * block-level interactable — `::card{...}`, a table via `OxOpaqueNode`,
- * etc. — for free) can never be the FIRST child of the document.
+ * etc. — for free) OR a Toggle List (`OxToggleNode` — see
+ * `OxToggleNode.ts`) can never be the FIRST child of the document. A
+ * Toggle List isn't a decorator at all (it's a real `ElementNode`
+ * container, precisely so its body gets ordinary Lexical editing for
+ * free — see that file's header), so it needs its own explicit check
+ * here rather than falling out of the `$isDecoratorNode` test below.
  *
  * Why: a block decorator can't itself be arrow-key'd "into" from above —
  * there's nothing above it to arrow down FROM. Guaranteeing a real,
@@ -34,6 +39,7 @@
 import { useEffect } from "react";
 import { $createParagraphNode, $isDecoratorNode, RootNode } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { $isOxToggleNode } from "./OxToggleNode";
 
 export default function LeadingBlockGuardPlugin(): null {
   const [editor] = useLexicalComposerContext();
@@ -41,7 +47,9 @@ export default function LeadingBlockGuardPlugin(): null {
   useEffect(() => {
     return editor.registerNodeTransform(RootNode, (root) => {
       const first = root.getFirstChild();
-      if (first && $isDecoratorNode(first) && !first.isInline()) {
+      const isGuardedBlock =
+        first && (($isDecoratorNode(first) && !first.isInline()) || $isOxToggleNode(first));
+      if (isGuardedBlock) {
         first.insertBefore($createParagraphNode());
       }
     });

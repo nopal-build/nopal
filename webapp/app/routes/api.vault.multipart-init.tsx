@@ -1,7 +1,8 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { createMultipartUpload } from "../data/file.server";
-import { isFolderUnderSyncs } from "../data/vault.server";
+import { isFolderUnderSyncs, resolveVaultRootKey } from "../data/vault.server";
+import { canWriteToRoot } from "../data/vaultRoots";
 
 /**
  * POST /api/vault/multipart-init
@@ -35,6 +36,16 @@ export async function action({ request }: ActionFunctionArgs) {
   // Sync-scoped tokens may only write inside syncs/.
   if (syncScoped && !(await isFolderUnderSyncs(folderId))) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
+  // even inside the OWNING human's own vault — see `vaultRoots.ts`.
+  const rootKey = folderId ? await resolveVaultRootKey(folderId) : null;
+  if (!canWriteToRoot(rootKey, user.role)) {
+    return Response.json(
+      { error: "You don't have permission to upload files here" },
+      { status: 403 },
+    );
   }
 
   const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");

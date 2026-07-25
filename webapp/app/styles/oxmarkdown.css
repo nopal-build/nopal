@@ -49,10 +49,18 @@
   --ox-color-text: var(--purple, #3f2b46);
   --ox-color-heading: black;
   --ox-color-accent: var(--purple-light, #7f5b8b);
+  /* Links specifically (`<a>`, the "add file" trigger, a Card's "open
+     project" link) — a SEPARATE token from `--ox-color-accent` on
+     purpose, even though they're the same color in light mode today, so
+     an actionable link can be retuned independently from purely
+     decorative accents (headings, blockquote border, checkbox border,
+     bullets, ...) without touching both. See this file's dark-mode block
+     below for why this split actually matters. */
+  --ox-color-link: var(--purple-light, #7f5b8b);
   --ox-color-subtle: var(--text-subtle, #817186);
   --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 60%, transparent);
   --ox-color-code-bg: var(--midground, #ece7f3);
-  --ox-color-border: rgba(0, 0, 0, 0.12);
+  --ox-color-border: var(--midground, #ece7f3);
   --ox-color-selected-bg: color-mix(in srgb, var(--ox-color-accent) 8%, transparent);
   --ox-color-selected-border: var(--ox-color-accent);
   --ox-color-unknown: var(--red, #a63b31);
@@ -61,8 +69,34 @@
 @media (prefers-color-scheme: dark) {
   .ox-tokens {
     --ox-color-text: var(--dark-text, #e8ddd4);
-    --ox-color-heading: var(--dark-text, #e8ddd4);
-    --ox-color-accent: var(--purple-light, #a78bfa);
+    /* Every heading (h1-h4) converges on `--moon` in dark mode — h1 reads
+       this token directly; h2/h3/h4 read `--ox-color-accent` (below),
+       which is ALSO `--moon`, so the whole heading hierarchy agrees
+       without needing a third token. REAL BUG fixed here, found by
+       checking actual computed colors (not just eyeballing): this used
+       to read `var(--dark-text, #e8ddd4)` (h1 only, before headings
+       converged) and, separately, `--ox-color-accent` used to read
+       `var(--purple-light, #a78bfa)` — trying to sneak in a dark-mode-
+       only lighter purple via the custom-property FALLBACK syntax. That
+       fallback only ever applies when `--purple-light` is UNDEFINED,
+       which it never is (nopal defines it once, unconditionally, in
+       `:root` — confirmed directly in `root.css`); so headings/
+       checkboxes/bullets/table-headers silently rendered the EXACT SAME
+       purple in both color schemes. Fixed by swapping to an actually-
+       different real token instead of trying to override `--purple-light`
+       itself — matches nopal's OWN established convention for this exact
+       problem (see `.purple-light-text`/`.purple-light-stroke`/
+       `.purple-light-fill` in root.css, all of which swap to `--moon` in
+       dark mode rather than attempting to redefine `--purple-light`). */
+    --ox-color-heading: var(--moon, #c4c6fc);
+    --ox-color-accent: var(--moon, #c4c6fc);
+    /* Links read `white` in dark mode — a THIRD distinct value from the
+       heading/accent `--moon` above, so a link never blends into
+       surrounding heading text. Still its own separate token from
+       `--ox-color-accent` (see this variable's light-mode comment) even
+       though light mode's value happens to equal `--ox-color-accent`
+       today — swap independently to taste. */
+    --ox-color-link: white;
     --ox-color-subtle: var(--text-subtle-dark, #c8b8ce);
     --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 60%, transparent);
     /* NOT `--dark-midground` (#6d6e99) — found by checking actual computed
@@ -76,7 +110,7 @@
        darker fixes it for that one case without touching anything else
        that depends on `--ox-color-code-bg`. */
     --ox-color-code-bg: var(--dark-farground, #221a28);
-    --ox-color-border: rgba(255, 255, 255, 0.14);
+    --ox-color-border: var(--dark-midground, #6d6e99);
     --ox-color-unknown: var(--red-light, #f6c8c3);
   }
 }
@@ -114,53 +148,14 @@
   color: var(--ox-color-text);
   overflow-x: hidden;
   overflow-wrap: break-word;
+}
+
+.ox-dot-grid {
   background-image: radial-gradient(var(--ox-color-grid-dot) 1px, transparent 0);
   background-size: var(--ox-grid) var(--ox-grid);
-  background-position: -22px -20px;
+  background-position: -20px -20px;
 }
-/*.ox-content > div {
-  margin-top: 8px;
-}*/
 
-/* STATIC/READ-ONLY display only (`OxRenderer`'s output — `.ox-content`'s
-   own direct children, and a blockquote's direct children, one level
-   deep). An ordinary single blank line in the source produces ONE visible
-   grid row of separation via margin here — fine for read-only prose,
-   where paragraph rhythm via margin is a completely normal, expected
-   look. `*:not(:first-child)` (not the equivalent, lower-specificity
-   `* + *`) is deliberate — paragraphs/lists' own `margin: 0` below is
-   MORE specific than a plain `* + *` would be (a class plus a type
-   selector beats a class plus only universal selectors), so it would
-   silently win and this rule would do nothing (confirmed directly:
-   checked computed `margin-top`, got `0px`, before switching to this
-   form). Extra blank lines beyond this first one stack MORE space on top
-   via real spacer elements (`renderBlockNodes` in `OxRenderer.tsx`),
-   rather than a bigger margin, so an arbitrary blank-line count can be
-   represented. A container directive's own children still rely on
-   whatever wrapper its registry renderer provides, which doesn't get this
-   automatically (known gap, not fixed here — there's no single reliable
-   selector for caller-authored markup).
-
-   Deliberately NOT scoped to `.ox-editing-surface` — Editing mode
-   represents every blank line as a real, ordinary empty `ParagraphNode`
-   (see `editingTransforms.ts`'s header) instead of margin, satisfying
-   "1 markdown line = 1 editor line" literally: every row, blank or not,
-   is exactly one grid unit tall, with nothing added on top. A margin rule
-   here would double up on top of that real row and break the uniform
-   grid the live editing surface is required to keep — this is a real,
-   deliberate difference from the static renderer, not an oversight.
-
-   :not(.ox-add-file-link) excludes the persistent "add file" link
-   (AddFileLinkPlugin.tsx) - it IS a direct child of .ox-content in
-   Editing mode (every other plugin here renders null, so it is not
-   competing with any other real sibling), but it is UI chrome, not
-   document content, and already sets its own smaller margin-top - this
-   rule's higher specificity was silently overriding that back up to a
-   full 41px gap above it. */
-.ox-content > *:not(:first-child):not(.ox-add-file-link),
-.ox-content blockquote > *:not(:first-child) {
-  margin-top: var(--ox-grid);
-}
 
 /* General modifier — disables the left AND right gutters (both are now
    `--ox-grid` — see `.ox-content` above) and any marker glyph that hangs
@@ -223,7 +218,7 @@
   font-size: 11px;
 }
 .ox-content blockquote::before {
-  content: ">";
+  content: '"';
   font-size: 15px;
   padding-right: 3px;
   line-height: 10px;
@@ -231,7 +226,7 @@
 
 /* ── Headings ───────────────────────────────────────────────────────────── */
 
-.ox-content :is(h1, h2, h3) {
+.ox-content :is(h1, h2, h3, h4, h5, h6) {
   line-height: var(--ox-grid);
   padding: 0;
   font-weight: 700;
@@ -240,20 +235,23 @@
   font-size: 34px;
   color: var(--ox-color-heading);
   letter-spacing: 1px;
-  margin-top: calc(var(--ox-grid) * 2);
 }
 .ox-content h2 {
   font-size: 28px;
   color: var(--ox-color-accent);
-  margin-top: calc(var(--ox-grid) * 2);
 }
 .ox-content h3 {
   font-size: 22px;
   color: var(--ox-color-accent);
-  margin-top: var(--ox-grid);
 }
-.ox-content :is(h1, h2, h3):first-child {
-  margin-top: 0;
+/* h4 never had an explicit color rule before — it silently fell through
+   to `.ox-content`'s own base `--ox-color-text`, which meant it read as
+   plain body text, not a heading, and didn't converge on `--moon` with
+   the rest of the heading hierarchy in dark mode. `--ox-color-accent`
+   (not `--ox-color-heading`) to match h2/h3's lighter-weight treatment
+   in light mode — h4 is a minor heading, not h1's bold treatment. */
+.ox-content h4 {
+  color: var(--ox-color-accent);
 }
 
 /* ── Blockquote ─────────────────────────────────────────────────────────── */
@@ -416,11 +414,11 @@
 }
 .ox-code-block {
   background: var(--ox-color-code-bg);
-  border-radius: 6px;
-  padding: 12px 16px;
+  border-radius: 8px;
+  padding: 0 16px;
   overflow-x: auto;
-  margin: 8px 0;
-  line-height: 1.6;
+  margin: 0;
+  line-height: calc(var(--ox-grid) - 2px);
 }
 .ox-code-block code {
   background: none;
@@ -434,7 +432,7 @@
 /* ── Links / images / thematic break ───────────────────────────────────── */
 
 .ox-content a {
-  color: var(--ox-color-accent);
+  color: var(--ox-color-link);
   text-decoration: underline;
 }
 .ox-content img {
@@ -444,7 +442,7 @@
 .ox-content hr {
   border: none;
   border-top: 1px solid var(--ox-color-border);
-  margin: calc(var(--ox-grid) / 2) 0;
+  margin: calc(var(--ox-grid) / 2 - 0.5px) 0;
 }
 
 /* ── Tables ─────────────────────────────────────────────────────────────── */
@@ -452,19 +450,22 @@
 .ox-content table {
   border-collapse: collapse;
   width: 100%;
-  margin: 8px 0;
+  margin: 0;
   border: 1px solid var(--ox-color-border);
+  border-radius: 8px;
 }
 .ox-content th {
   text-align: left;
-  padding: 6px 10px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--ox-color-border);
   color: var(--ox-color-accent);
   font-weight: 700;
+  line-height: calc(var(--ox-grid) - 2px);
 }
 .ox-content td {
-  padding: 6px 10px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--ox-color-border);
+  line-height: calc(var(--ox-grid) - 1px);
 }
 
 /* ── Directives: unknown-name fallback ─────────────────────────────────── */
@@ -660,7 +661,7 @@
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--ox-color-accent);
+  color: var(--ox-color-link);
   text-decoration: underline;
   font-family: var(--ox-font-family);
   font-size: 14px;
@@ -716,7 +717,7 @@
   justify-content: space-between;
   gap: 8px;
   margin: 0 var(--ox-grid) 8px var(--ox-grid);
-  border-bottom: 1px solid var(--midground);
+  border-bottom: 1px solid var(--ox-color-border);
   padding-bottom: 10px;
 }
 .ox-card-header-info {
@@ -726,7 +727,12 @@
   min-width: 0;
   overflow: hidden;
 }
+/* Deliberately its OWN color rule, not `.subtle-text` (which this used
+   to rely on for color, per its className in `OxRenderer.tsx`) — a link
+   should read as a link (the same `--ox-color-link` every other one in
+   this system uses), not blend into muted secondary text. */
 .ox-card-open-link {
+  color: var(--ox-color-link);
   text-decoration: underline;
   white-space: nowrap;
 }
@@ -1094,4 +1100,97 @@
     box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
     font-size: 0.95rem;
   }
+}
+
+/* ── Toggle List (`:::toggle{...}`) ──────────────────────────────────── */
+/* A Notion-style collapsible block — see `oxmarkdown/OxToggleNode.ts`'s
+   header for the markdown shape and why it's a real container, not a
+   directive/decorator. `.ox-toggle-summary` is shared by BOTH rendering
+   paths (the live Lexical `OxToggleSummaryNode` in Editing mode, and
+   `OxRenderer.tsx`'s static/Interacting-mode markup) — both produce the
+   exact same `<div class="ox-toggle-summary">` shape, so one set of rules
+   covers both, unlike the checklist (whose two modes genuinely differ in
+   DOM shape — see "Editing mode: checklist", above).
+
+   The caret glyph is a `::before` pseudo-element living WITHIN the
+   summary's own reserved `padding-left` (`left: 0`, matching the
+   checkbox glyph's own convention below — see that section's comment on
+   why: `OxTogglePlugin.tsx`'s click-to-toggle hit-test reads this
+   pseudo's computed `width` and checks the click's x-position against
+   `[rect.left, rect.left + width]`, which only agrees with what's
+   actually rendered if the glyph starts flush at the element's own left
+   edge, not centered or offset). Rotates via a plain CSS transform keyed
+   off `.ox-toggle--collapsed` on the ANCESTOR `.ox-toggle` — collapsed
+   points right, expanded points down, the same convention Notion and
+   most other collapsible-block UIs use.
+
+   Collapsing hides body content two different ways depending on which
+   rendering path produced the DOM: Editing mode's live Lexical tree MUST
+   keep the summary and every body node as flat, direct siblings of
+   `.ox-toggle` (Lexical's own children reconciliation requires this —
+   see `OxToggleNode.ts`), so collapsing there hides every sibling after
+   the first via `:not(:first-child)`. The static/Interacting renderer has
+   no such constraint and wraps body content in its own `.ox-toggle-body`
+   div instead (simpler to conditionally render/hide) — one rule below
+   covers both shapes. */
+
+.ox-toggle-summary {
+  position: relative;
+  font-weight: 700;
+  line-height: var(--ox-grid);
+  cursor: default;
+  /* The static renderer's `.ox-toggle-summary` IS a real `<summary>`
+     element (see `OxRenderer.tsx`'s `<details>`/`<summary>` toggle) —
+     browsers give that a native disclosure marker by default (Chrome/
+     Safari via `::-webkit-details-marker`, Firefox via `::marker`), which
+     would otherwise show up ALONGSIDE our own custom `::before` caret
+     below. Editing mode's `.ox-toggle-summary` is a plain `<div>`, so
+     these are harmless no-ops there. */
+  list-style: none;
+}
+.ox-toggle-summary::-webkit-details-marker {
+  display: none;
+}
+.ox-toggle-summary::marker {
+  content: none;
+}
+/* The caret lives IN THE GUTTER (a negative `left` offset, same
+   convention as the `#`/`##`/`###`/`>` markers above), NOT in reserved
+   inline padding the way the checkbox glyph is — the title text itself
+   stays flush with the rest of the document's column, matching how a
+   Card's own title has no icon marker pushing its text sideways either.
+   `OxTogglePlugin.tsx`'s click-to-toggle hit-test reads this pseudo's
+   OWN computed `left`/`width` directly rather than assuming a fixed
+   offset, so this can move without needing a matching JS change. */
+.ox-toggle-summary::before {
+  content: "";
+  position: absolute;
+  left: -38px;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translateY(-50%) rotate(90deg);
+  transition: transform 0.12s ease-out;
+  background-color: var(--ox-color-accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l8 7-8 7z'/%3E%3C/svg%3E") center / 14px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l8 7-8 7z'/%3E%3C/svg%3E") center / 14px no-repeat;
+  cursor: pointer;
+}
+.ox-toggle--collapsed > .ox-toggle-summary::before {
+  transform: translateY(-50%) rotate(0deg);
+}
+.ox-toggle-body {
+  padding-left: var(--ox-grid);
+}
+.ox-toggle--collapsed > :not(:first-child),
+.ox-toggle--collapsed > .ox-toggle-body {
+  display: none;
+}
+/* Editing mode's body children are flat siblings of the summary (see this
+   section's header) — indent them to match the static renderer's
+   `.ox-toggle-body` wrapper, and give the FIRST of them (right after the
+   summary) no extra top margin of its own, matching how a heading's
+   first following paragraph doesn't either. */
+.ox-toggle > *:not(.ox-toggle-summary) {
+  padding-left: var(--ox-grid);
 }

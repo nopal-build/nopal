@@ -67,6 +67,13 @@ import {
   $isOxOpaqueNode,
 } from "./editingNodes";
 import { $createOxListItemNode, $isOxListItemNode, type OxListItemNode } from "./OxListItemNode";
+import {
+  $createOxToggleNode,
+  $createOxToggleSummaryNode,
+  $isOxToggleNode,
+  $isOxToggleSummaryNode,
+} from "./OxToggleNode";
+import { directiveAttrs, type DirectiveNode } from "./document";
 
 // ── Import: mdast -> Lexical ────────────────────────────────────────────────
 
@@ -156,13 +163,42 @@ function convertBlock(node: any, defs: DefMap): LexicalNode | null {
     case "html":
       return $createOxOpaqueNode(node, "block");
 
-    case "leafDirective":
     case "containerDirective":
+      if ((node as DirectiveNode).name === "toggle") return convertToggle(node, defs);
+      return $createOxDirectiveNode(node);
+
+    case "leafDirective":
       return $createOxDirectiveNode(node);
 
     default:
       return $createOxOpaqueNode(node, "block");
   }
+}
+
+/** `:::toggle{collapsed="true"}` → `OxToggleNode` — see `OxToggleNode.ts`'s
+ * header for the markdown shape. The directive's OWN first child is
+ * always the title (any inline markdown, same as a paragraph's); the
+ * rest is body content. Degrades gracefully for hand-edited/foreign
+ * markdown that doesn't follow this convention (e.g. a toggle whose
+ * first child isn't a plain paragraph) by treating the WHOLE thing as
+ * body with a blank title, rather than losing content. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function convertToggle(node: any, defs: DefMap): LexicalNode {
+  const attrs = directiveAttrs(node as DirectiveNode);
+  const children: readonly unknown[] = node.children ?? [];
+  const first = children[0] as { type?: string; children?: unknown[] } | undefined;
+  const isTitleParagraph = first?.type === "paragraph";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const titleInline = isTitleParagraph ? convertInline((first!.children ?? []) as any[], defs) : [];
+  const bodySource = isTitleParagraph ? children.slice(1) : children;
+
+  const summary = $createOxToggleSummaryNode().append(...titleInline);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = convertBlockList(bodySource as any[], defs);
+
+  const toggle = $createOxToggleNode(attrs.collapsed === "true");
+  toggle.append(summary, ...(body.length > 0 ? body : [$createParagraphNode()]));
+  return toggle;
 }
 
 /** GFM cannot serialize `[ ]`/`[x]` for a list item with literally no
@@ -388,6 +424,16 @@ function exportBlock(node: LexicalNode): any {
     return {
       type: "blockquote",
       children: exportBlockList(node.getChildren()),
+    };
+  }
+  if ($isOxToggleNode(node)) {
+    const [summary, ...body] = node.getChildren();
+    const titleInline = $isOxToggleSummaryNode(summary) ? exportInline(summary.getChildren()) : [];
+    return {
+      type: "containerDirective",
+      name: "toggle",
+      attributes: node.getCollapsed() ? { collapsed: "true" } : null,
+      children: [{ type: "paragraph", children: titleInline }, ...exportBlockList(body)],
     };
   }
   if ($isListNode(node)) {

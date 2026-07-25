@@ -74,7 +74,9 @@ export default function OxRenderer({
       className={`ox-content ox-tokens${className ? ` ${className}` : ""}`}
       style={style}
     >
-      <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} resolveCard={resolveCard} />
+      <div className="ox-dot-grid">
+        <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} resolveCard={resolveCard} />
+      </div>
     </div>
   );
 }
@@ -431,6 +433,33 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     );
   }
 
+  // `:::toggle{collapsed="true"}` — same built-in category as `::file`/
+  // `::card` above, see `oxmarkdown/OxToggleNode.ts`'s header. Native
+  // `<details>`/`<summary>` gives real click-to-collapse/expand for free,
+  // with zero JS dependency — unlike checkbox toggling, this works even
+  // in a fully passive/non-interactive render (no `ctx.interactive`
+  // needed at all). The directive's OWN first child is always the title
+  // (see `convertToggle`/`convertBlock`'s mirror in `editingTransforms.ts`);
+  // collapse state here is deliberately EPHEMERAL (native `<details>`'s own
+  // browser-managed `open` state, seeded from the saved `collapsed`
+  // attribute) — NOT re-saved back to the markdown the way Editing mode's
+  // own toggle persists, matching how a native disclosure widget's open/
+  // closed state is ordinarily per-view, not part of a document's content.
+  if (node.type === "containerDirective" && node.name === "toggle") {
+    const [titleNode, ...bodyNodes] = node.children;
+    const isTitleParagraph = (titleNode as { type?: string } | undefined)?.type === "paragraph";
+    const titleChildren = isTitleParagraph
+      ? ((titleNode as { children?: unknown[] }).children ?? [])
+      : [];
+    const bodySource = isTitleParagraph ? bodyNodes : node.children;
+    return (
+      <details key={key} className="ox-toggle" open={directiveAttrs(node).collapsed !== "true"}>
+        <summary className="ox-toggle-summary">{renderNodes(titleChildren, ctx)}</summary>
+        <div className="ox-toggle-body">{renderBlockNodes(bodySource, ctx)}</div>
+      </details>
+    );
+  }
+
   const attrs = directiveAttrs(node);
   const renderer = ctx.directives?.[node.name];
 
@@ -634,7 +663,7 @@ export function CardDirectiveLayout({
       <div className="ox-card-header">
         <div className="ox-card-header-info">
           <span className="font-bold purple-light-text truncate">{projectName}</span>
-          <a href={projectHref} className="text-xs subtle-text ox-card-open-link">
+          <a href={projectHref} className="text-xs ox-card-open-link">
             open project →
           </a>
         </div>

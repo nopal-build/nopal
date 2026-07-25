@@ -21,8 +21,24 @@ The root of the vault holds only locked, system-provisioned folders — humans c
 - `daily-logs`: one folder per day, sorted latest → oldest. Written by the Daily Log page (`fruits_.daily-log.tsx`), but humans can add files/folders inside too.
 - `projects`: each folder inside is a "project". The only shareable subtree.
 - `personal`: general catch-all for the human's own files.
+- `syncs`: the CLI/sync engine's own subtree — sync-scoped API tokens may only read/write here (see `isFolderUnderSyncs`).
+- `skills`: instructions steering an eventual sorting agent (mentions→backlinks, Card→project filing, etc.). Every human still gets their OWN `skills` root folder, same as every other root — this one is just locked down to platform-curated content: writing here requires the ACTING human to hold the `Admin` or `Super` role, not merely ownership of the vault. Convention (not yet enforced by code, just a naming/placement pattern): a project gets a `SKILL.md` file sitting right next to its `README.md`, mirroring this very repo's `.agents/skills/*/SKILL.md` layout — project-local instructions vs. this vault-wide `skills` root's global ones.
 
-Every folder carries a denormalized `vault_root_key` identifying which root subtree it belongs to (re-stamped on move). Per-root policy (shareable, child sort order) lives in `VAULT_ROOTS`. Root containers are provisioned by `ensureVaultRootFolders` (called from the vault loader and new-user provisioning).
+Every folder carries a denormalized `vault_root_key` identifying which root subtree it belongs to (re-stamped on move). Per-root policy (shareable, publishable, child sort order, and now **writable**) lives in `VAULT_ROOTS`. Root containers are provisioned by `ensureVaultRootFolders` (called from the vault loader and new-user provisioning) — it iterates `VAULT_ROOT_KEYS` generically, so any new root added to that list is automatically provisioned for every human, existing or new, with no other code changes.
+
+### Root write policy (`writable: "owner" | "admin"`)
+
+Most roots use `"owner"` — the ordinary rule that the owning human may write to their own vault (still gated by all the usual folder/file checks — locked daily logs, shared-folder move restrictions, etc.). `skills` uses `"admin"`: writing anywhere under a human's OWN `skills` root ALSO requires that human's `role` to be `Admin` or `Super`. This is layered ON TOP of the ownership check, never a replacement for it.
+
+`canWriteToRoot(rootKey, role)` (`vaultRoots.ts`) is the single helper both directions of policy funnel through — fail-closed (an unrecognized root key requires Admin/Super, never silently allows a plain `Human` write). It's enforced SERVER-SIDE, in every route that can create/rename/move/delete a folder or file, or upload/replace file bytes:
+
+- `api.vault.folders.tsx` — create (checks the PARENT folder's root key).
+- `api.vault.folders.$folderId.tsx` — rename/delete (checks the folder's own root key) and move (checks BOTH the folder's own root key and the DESTINATION's root key — moving into a restricted root needs the same role as creating directly inside it would).
+- `api.vault.$fileId.tsx` — PATCH/DELETE (checks the file's own root key) and move-via-`folder_id`-change (checks the destination's root key, same as folder move).
+- `api.vault.upload.tsx` / `api.vault.multipart-init.tsx` — checks the target folder's root key.
+- `api.vault.replace.$fileId.tsx` — checks the file's own root key.
+
+Client-side, `fruits_.vault.tsx` hides the write-triggering UI (Upload/New Folder toolbar buttons, Rename/Move/Delete/Replace menu entries) when `canWriteToRoot` says no — this is a UX nicety layered on top, never a substitute for the server checks above (see "Enforcement" below).
 
 ## Data model
 
@@ -61,3 +77,27 @@ A Card (`::card{file="..."}` — see the `oxmarkdown` skill's Build status) is a
 - `saveDailyLogCard(fileId, content)` — a plain content overwrite, no `md_versions` snapshotting (a Card's own history is naturally scoped by the day it belongs to).
 
 File attachments inside a Card use the exact same `::file{...}` upload path as the day's own prose (`POST /api/daily-log/upload`) — a Card is just another place in the SAME day's document that can hold one.
+
+### The Sorter and the Release Log
+
+The Sorter (`sorter.server.ts`) turns EXPLICIT signals already present in a CLOSED daily log into Release Log entries — deliberately zero-inference (an unlabeled daily-log paragraph is left untouched forever; nothing is force-filed into a "personal" catch-all). It only ever acts on:
+
+- An `@mention` link in the day's own prose (`readme.md`) that resolves to one of the human's OWN project folders (`/humanId:projects/<Name>[...]` — cross-human mentions aren't yet actionable, same scope line `getProjectFolders` already draws for Cards) — logged as a backlink ("this project was mentioned today").
+- A completed task (`[x]`) inside a Card — the Card itself is already an explicit, project-scoped section, so no inference is needed to know which project a task inside it belongs to.
+- A file attachment (`::file{...}`) inside a Card — same reasoning.
+
+Runs once per closed day per human, idempotently: `DailyLog.sortedAt` (`dailyLog.server.ts`) short-circuits a re-run unless `force` is passed, and `appendReleaseLogEntries` additionally skips any exact-duplicate line as cheap insurance. A day with no `daily_logs` cache row at all (never had a `readme.md` saved) is left alone entirely — deliberately NOT marked sorted, since `sortedAt` lives on that same cache row and marking a nonexistent row would corrupt it (a `merge` onto a missing record creates a malformed one, findable by nothing since it wouldn't carry `humanId`/`date`).
+
+Triggered two ways, both landing on the exact same `sortDailyLog(humanId, date)` function:
+
+- **The once-a-day cron** — `POST /api/daily-log/sort-all`, protected by the same `CRON_SECRET` env var `archive-cleanup` uses, wired into `server.js` right alongside it (staggered a little, not simultaneous). Calls `sortAllDueDailyLogs()`, which finds every human's `daily_logs` rows strictly before today's UTC date with no `sortedAt` yet (`getUnsortedDailyLogsBefore`) and sorts each — self-healing if a run is ever missed, same robustness `archive-cleanup` already has.
+- **On demand** — `POST /api/daily-log/sort` (session or bearer auth; any non-`"sync"` token scope, including the new `"sorter"` scope — see `apiTokens.server.ts`), and `nopal sort run [--date YYYY-MM-DD] [--force]` in the CLI (`crates/cli/src/sort.rs`), a thin client over that same endpoint. This is the "CLI/API is the agent's tool surface" design point: one real implementation, usable by a human via the CLI today and an eventual sorting agent later, with no separate code path for either.
+
+**Release Log entries are plain markdown bullets today** (`releaseLog.server.ts`), not yet the `::release-item{...}` directive the original design sketched for per-viewer conditional rendering (an entry authored by someone else would render as plain "by Jane" text; your own as a real link back to your own daily log). Every entry the Sorter can produce today is necessarily self-authored — mentions/Cards only ever reach a human's OWN projects, no sharing yet — so that nuance has no observable effect yet; tracked as a follow-up once shared-project filing exists, not forgotten.
+
+Every entry is written to BOTH places on purpose (same data, two views — context for the day, access for the project):
+
+- `daily-logs/YYYY-MM-DD/release-log.md` — that human's own receipt for the day, grouped by project (`## <Project Name>`), resolved fresh every time (never cached), same convention `getDailyLogCards`'s `projectName` already uses.
+- `projects/<name>/release-log.md` — everyone with project access, grouped by date (`## YYYY-MM-DD`). Lives directly inside the project's own folder, right alongside its `README.md`/`SKILL.md` — one file per project; manual overflow (a hand-created `release-log-p2.md`) only if one ever becomes unwieldy, no pre-emptive partitioning.
+
+Both are ordinary `file_refs` (get-or-created on first entry, plain content overwrite thereafter — no `md_versions` snapshotting, same reasoning Cards already use: per-day/per-project granularity is its own natural history). `appendReleaseLogEntries`'s heading-insert is a deliberately dumb line-based text scan (find `## <heading>`, insert before the next heading or EOF) rather than a full mdast round-trip — headings here are simple, unique markers, so this keeps every OTHER section's exact formatting (blank lines, nested-bullet indentation) completely untouched by an append to one section.

@@ -279,6 +279,9 @@ function OxDirectiveDecorator({
               allowFileAttachments
               showAddFileLink
               onUploadFile={onUploadFile}
+              // Lets ArrowUp/ArrowDown in the OUTER editor land directly
+              // inside THIS card — see `oxmarkdown/cardFlow.ts`.
+              cardFlow={{ outerEditor: editor, nodeKey }}
             />
           ) : (
             <span className="subtle-text">Loading card…</span>

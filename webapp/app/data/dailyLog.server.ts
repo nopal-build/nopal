@@ -1,5 +1,5 @@
 import { RecordId } from "surrealdb";
-import { Data, query, formatRecord, upsert, remove } from "./generic.server";
+import { Data, query, formatRecord, upsert, remove, merge } from "./generic.server";
 import {
   upsertDailyLogReadme,
   updateFileRef,
@@ -16,6 +16,12 @@ export type DailyLog = Data & {
   content: string;
   createdAt: string;
   updatedAt: string;
+  /** ISO timestamp set once the Sorter has processed this day (mentions →
+   * project backlinks, completed Card tasks, Card file attachments — see
+   * `sorter.server.ts`) — null/absent means not yet sorted. Lets the daily
+   * cron run be idempotent (skip days already sorted) without needing
+   * per-entry dedup; `force` on `sortDailyLog` re-runs anyway. */
+  sortedAt?: string | null;
 };
 
 // Stable record ID: "daily_logs:${humanId}_${date}"
@@ -149,10 +155,74 @@ export async function cacheDailyLog(
     content,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+    // Preserved across ordinary re-caches (e.g. a card edit re-saving the
+    // readme's own cache entry) so an unrelated write can't silently
+    // un-sort an already-sorted day.
+    sortedAt: existing?.sortedAt ?? null,
   });
 
   const record = Array.isArray(result) ? result[0] : result;
   return record ? formatRecord(record as unknown as DailyLog) : undefined;
+}
+
+/**
+ * Marks `date` as sorted (or resets it back to unsorted when passed
+ * `null`) — see `DailyLog.sortedAt`'s own doc comment. Cache-only; the
+ * vault's own readme.md file is untouched by this.
+ */
+export async function setDailyLogSorted(
+  humanId: string,
+  date: string,
+  sortedAt: string | null,
+): Promise<void> {
+  await merge("daily_logs", `${humanId}_${date}`, { sortedAt });
+}
+
+/**
+ * Every `daily_logs` row strictly before `beforeDate` (a day that's
+ * definitely closed) that hasn't been sorted yet — across ALL humans.
+ * Used by the once-a-day cron (`api.daily-log.sort-all.tsx`) to catch up
+ * every human's backlog in one pass rather than needing per-human
+ * scheduling.
+ */
+export async function getUnsortedDailyLogsBefore(
+  beforeDate: string,
+): Promise<DailyLog[]> {
+  const result = await query<[DailyLog[]]>(
+    `SELECT * FROM daily_logs
+     WHERE date < $beforeDate
+       AND (sortedAt = NONE OR sortedAt = null)
+     ORDER BY humanId, date ASC;`,
+    { beforeDate },
+  );
+  return (result?.[0] ?? []).map(formatRecord);
+}
+
+/**
+ * Resolves the vault ids around a day's own `readme.md` — the date
+ * folder itself (where that day's own `release-log.md` lives, right
+ * alongside `readme.md` — see `releaseLog.server.ts`) and the readme
+ * file's own id (used to build a real "View" link back to that day's
+ * entry). Read-only in spirit — `getOrCreateVaultFolder` only creates the
+ * folder shell if it's somehow missing, which shouldn't happen for a date
+ * that already has a `daily_logs` cache row.
+ */
+export async function getDailyLogFolderAndReadmeId(
+  humanId: string,
+  date: string,
+): Promise<{ dateFolderId: string; readmeFileId: string | null }> {
+  const rootFolder = await getOrCreateVaultFolder(humanId, "daily-logs", null);
+  const dateFolder = await getOrCreateVaultFolder(humanId, date, rootFolder._id);
+  const result = await query<[FileRef[]]>(
+    `SELECT * FROM file_refs
+     WHERE human_id = $humanId AND folder_id = $folderId AND name = 'readme.md'
+     LIMIT 1`,
+    { humanId, folderId: dateFolder._id },
+  );
+  const readme = result?.[0]?.[0]
+    ? formatRecord(result[0][0] as unknown as FileRef)
+    : null;
+  return { dateFolderId: dateFolder._id, readmeFileId: readme?._id ?? null };
 }
 
 /**
@@ -313,8 +383,11 @@ This is a sample entry so you can see all the markdown you can use. Delete it wh
 ## Headings
 
 # H1
+
 ## H2
+
 ### H3
+
 #### H4
 
 ---

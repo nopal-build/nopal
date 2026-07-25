@@ -200,6 +200,40 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
   text), `--purple-light` (accents/headings), `--moon` (light-mode dot
   color), `--text-subtle`; full dark-mode counterparts via
   `prefers-color-scheme`, no in-app toggle.
+- **Three separate color tokens in `.ox-tokens` (`oxmarkdown.css`) for
+  headings/decorative accents/links** — `--ox-color-heading` (h1, and h2/
+  h3/h4 via `--ox-color-accent` below — the whole heading hierarchy
+  agrees), `--ox-color-accent` (h2/h3/h4, blockquote border, checkbox
+  border, bullets, table headers, popover title), and `--ox-color-link`
+  (`<a>`, the "add file" trigger, a Card's "open project" link). All
+  three happen to share light-mode values today (`black` for heading,
+  `--purple-light` for accent/link) but are genuinely independent, split
+  apart specifically so dark mode can give each its own distinct color
+  without conflating them. Current dark-mode values: `--ox-color-heading`/
+  `--ox-color-accent` → `--moon` (`#c4c6fc`, the whole heading hierarchy
+  converges here), `--ox-color-link` → plain `white` — chosen specifically
+  so a link never blends into surrounding heading text. Swap any one
+  token's dark value to taste (e.g. `--pink`, `#d3a0e5`, was tried for
+  links first and is a reasonable alternative to white); nothing else
+  needs to change since every consumer reads through these three custom
+  properties, never a raw color. `h4` previously had NO explicit color
+  rule at all (silently fell through to plain body text, `--ox-color-text`)
+  — now reads `--ox-color-accent` like h2/h3, matching a minor heading's
+  lighter-weight treatment rather than h1's bold black. **A real,
+  confirmed bug lived here before this pass**: the dark-mode block used
+  to read `--ox-color-accent: var(--purple-light, #a78bfa)`, trying to
+  use the CSS custom-property FALLBACK to sneak in a dark-mode-only
+  lighter purple — except that fallback only applies when `--purple-light`
+  is UNDEFINED, which it never is (nopal defines it once, unconditionally,
+  in `:root`). So that line was a complete no-op versus light mode: every
+  heading/link/checkbox/bullet/table-header rendered the EXACT SAME
+  purple in both color schemes, confirmed directly by reading computed
+  styles (not assumed from a screenshot). The general lesson: nopal's OWN
+  convention for "this token needs a different value in dark mode" is to
+  swap to a DIFFERENT named token at the point of use (`var(--moon)`,
+  `white`, ...), never to try overriding a token nopal itself already
+  defines unconditionally — a fallback on an always-defined variable is
+  dead code.
 - **Editing mode specifically must act like a code editor**: one line in
   the markdown = one row in the editor, every row the same height off the
   41px grid — no margins standing in for blank lines that should just be
@@ -899,22 +933,219 @@ Interacting mode first, without needing that decision resolved.
       `/fruits/vault?folder=<projectFolderId>`, plus a remove button) and
       a content slot below. Ported directly from the `daily-log-v2`
       visual mockup's `CardBox`.
-    - **Known, deliberate scope line**: unlike `::file`, a Card's nested
-      editor does NOT (yet) get its own arrow-key/Backspace flow into/out
-      of the surrounding document (no `FileCaptionArrowPlugin`/
-      `FileDirectiveArrowPlugin` equivalent) — entering one is mouse-click
-      only for now. Deferred deliberately rather than built blind: `::file`'s
-      OWN keyboard-flow niceties (double-Enter escape, Backspace-into,
-      outer↔caption arrow flow) were each built incrementally across
-      several rounds of hands-on iteration, and a Card's nested editor is
-      a full document rather than a short caption, so the same treatment
-      deserves its own dedicated pass rather than a rushed first guess.
+    - **Done — a fully symmetric arrow-key flow in and out of a card**,
+      the SAME job `fileCaptionFlow.ts`/`FileDirectiveArrowPlugin.tsx`/
+      `FileCaptionArrowPlugin.tsx` do together for a file's caption, via a
+      new, independent registry (`oxmarkdown/cardFlow.ts`) and plugin
+      pair: `CardDirectiveArrowPlugin.tsx` (mounted unconditionally on
+      every Editing-mode `OxEditor` — outer editor → card) and
+      `CardEditorArrowPlugin.tsx` (mounted INSIDE a card's own nested
+      editor via the `cardFlow={{ outerEditor, nodeKey }}` `OxEditor`
+      prop, wired in `editingNodes.tsx` — registration AND card → outer
+      editor). Both directions reuse the SAME `$setSelection(null)`-
+      before-handoff fix `FileDirectiveArrowPlugin.tsx`'s header documents
+      in full — confirmed still necessary here too, not re-derived from
+      scratch.
+      **Known, deliberate scope line**: unlike the file caption's pair,
+      no sibling-card-to-sibling-card flow and no double-Enter escape
+      gesture — neither was asked for; `::file`'s own full keyboard-flow
+      niceties were built incrementally across several rounds of
+      hands-on iteration, so the same treatment for a Card (a full
+      document, not a short caption) can grow the same way if a real need
+      for it shows up, rather than guessing at it blind.
     - **Also deliberately out of scope**: cross-human projects (Cards can
       only target projects the human OWNS — see the `vault` skill's
       `getProjectFolders`) and nested cards (a `::card{...}` rendered
       inside another Card's own content resolves to nothing, since
       `resolveCard` isn't threaded to that depth — an accepted, not
       actively guarded-against, degenerate case).
+12. **Done — the Toggle List** (`:::toggle{collapsed="true"}`), a
+    Notion-style collapsible title + body block. Motivating case: a more
+    generic replacement for a bespoke "release-item" directive — the
+    Release Log (see the `vault` skill's Daily Log section) can just use a
+    Toggle List directly (title = the short one-line summary, body = the
+    expanded detail/cascading effects) instead of a special-purpose
+    directive of its own. Triggered by typing `> ` at the start of a line
+    (repurposed FROM blockquotes — see below).
+    - **Architecturally a REAL container `ElementNode`
+      (`oxmarkdown/OxToggleNode.ts`), NOT a directive/decorator** — the
+      one deliberate exception to "leaf directive, own row, no children"
+      every other built-in interactable (`::file`, `::card`) follows.
+      Sidesteps the OxDirectiveNode/decorator system's own known
+      limitation ("a container directive's nested content isn't
+      independently editable yet") entirely for this ONE proven, real
+      need, the same way checklists got their own dedicated
+      `OxListItemNode` instead of a generic fix to `@lexical/list`. Proven
+      safe by the SAME pattern blockquotes already use
+      (`editingTransforms.ts`'s `blockquote` case: `$createQuoteNode().append(
+      ...convertBlockList(node.children, defs))`) — a real, multi-block,
+      natively-editable container was already shipped and working before
+      this, just never generalized into its own primitive until now.
+    - **Markdown shape**: the directive's OWN first child is always the
+      title (any inline markdown — bold, links, ... — same as a
+      paragraph's, NOT a `title="..."` attribute string, which could only
+      ever hold plain text and would lossy-round-trip a formatted title);
+      everything after it is body content:
+      ```
+      :::toggle
+      Release: **Sunny**
+
+      - fence-line.jpg file put in [./gallery/fence-line.jpg](...)
+      :::
+      ```
+      `collapsed="true"` is added only when true — keeps the common
+      (expanded) case's markdown clean. Degrades gracefully for hand-
+      edited/foreign markdown that doesn't follow the "first child is the
+      title" convention (treats the whole thing as body with a blank
+      title, never loses content).
+    - **`OxToggleNode`'s children are ALWAYS `[OxToggleSummaryNode, ...body
+      block nodes]`** — the summary (title) is a thin `ElementNode`
+      sibling-shaped subclass (not a plain `ParagraphNode`) purely so
+      rendering/CSS/keyboard behavior can target it specifically; always
+      exactly the first child, always present, same "always a real
+      clickable row" invariant `MinRowsPlugin`/`LeadingBlockGuardPlugin`
+      already use elsewhere — `convertToggle` (`editingTransforms.ts`)
+      synthesizes an empty body paragraph on import if the source had
+      none, matching the live-typing shortcut's own behavior
+      (`toggleTransformer.ts`).
+    - **`> ` deliberately repurposed FROM blockquotes onto the Toggle
+      List** — a product decision (reads more like Notion's own toggle
+      mnemonic), not a limitation. Blockquotes moved to `"` (a literal
+      double-quote, then a space) instead — `oxmarkdown/quoteTransformer.ts`
+      (`OX_QUOTE`) is a copy of `@lexical/markdown`'s own default `QUOTE`
+      transformer with only the trigger `regExp` changed; `OxEditor.tsx`'s
+      `OX_TRANSFORMERS` filters the library's own default `QUOTE` out of
+      `TRANSFORMERS` (`.filter((t) => t !== QUOTE)`) so `> ` and `"` don't
+      both create blockquotes. `oxmarkdown/toggleTransformer.ts`
+      (`OX_TOGGLE`) is modeled the same way, building an `OxToggleNode`
+      instead: whatever was already typed on the line becomes the title,
+      and a fresh empty paragraph becomes the initial body.
+    - **Click-to-collapse/expand, two totally different mechanisms per
+      rendering path, on purpose**:
+      - Editing mode (`oxmarkdown/OxTogglePlugin.tsx`): the caret is a CSS
+        `::before` pseudo-element on `.ox-toggle-summary` (same "gutter
+        marker" convention as `#`/`##`/`###`/`>`/the checkbox glyph), so a
+        root-level click listener does hit-test math against the
+        pseudo's OWN computed width (`getComputedStyle(el, "::before")`)
+        rather than attaching a handler to a real DOM child — copied
+        directly from `OxChecklistPlugin.tsx`'s own established pattern
+        for exactly this problem, mirrored to the LEFT side (the toggle
+        caret sits in the gutter BEFORE the title, unlike the checkbox
+        glyph's `::after`, to the right of the dash) with the hit region
+        starting AT the element's own left edge (`left: 0` in CSS, not a
+        negative/outside offset) so the math and the paint agree.
+      - Static/Interacting mode (`OxRenderer.tsx`): a REAL native
+        `<details>`/`<summary>` pair — zero JS needed for the toggle
+        itself, works even in a fully passive/non-interactive render (no
+        `ctx.interactive` required at all, unlike checkbox toggling).
+        Collapse state here is deliberately EPHEMERAL (the browser's own
+        managed `open` state, seeded from the saved `collapsed` attribute
+        on mount) — NOT re-saved back to the markdown the way Editing
+        mode's own toggle persists (`OxToggleNode.__collapsed` is a real
+        Lexical field, exported on every save). This asymmetry is
+        deliberate, matching how a native disclosure widget's open/closed
+        state is ordinarily per-view, not part of a document's content —
+        not yet wired through `OxInteractive`'s mutate-and-persist
+        contract the way checkbox toggling is, which would be the natural
+        next step if a real need for it shows up.
+      - Both paths needed the SAME native browser default disclosure
+        marker suppressed (`list-style: none` +
+        `::-webkit-details-marker { display: none }` + `::marker {
+        content: none }` on `.ox-toggle-summary`) — only the STATIC path's
+        `.ox-toggle-summary` is a real `<summary>` element (Editing
+        mode's is a plain `<div>`, so these rules are harmless no-ops
+        there), and a real `<summary>` gets a native marker by default
+        that would otherwise show up ALONGSIDE the custom `::before`
+        caret. Confirmed via a minimal isolated repro (not just the real
+        page) that suppressing the native marker this way does NOT also
+        hide the custom one — they're independent pseudo-elements; an
+        earlier attempt at this fix looked broken only because the
+        resulting icon is legitimately small (14px within a 24px box) and
+        subtle against the dot-grid background at normal screenshot
+        resolution, confirmed by a tight zoomed crop, not because
+        anything was actually wrong.
+    - **Done — full keyboard-flow parity, all in `OxTogglePlugin.tsx`
+      unless noted**:
+      - **Never the first line of the document**: `LeadingBlockGuardPlugin.tsx`
+        (previously decorator-only) now ALSO guards `OxToggleNode` even
+        though a toggle isn't a decorator at all — the same underlying
+        reason still applies (a real block needs SOMETHING above it to
+        arrow/click into, and a toggle sitting first would make it
+        impossible to ever add content before it by typing alone).
+      - **Double-Enter on the body's last (empty) line escapes** to the
+        outer document right after the toggle, reusing an existing
+        following paragraph if there is one or creating a fresh one
+        otherwise — the same idea `FileCaptionArrowPlugin.tsx` already
+        uses for a file's caption, adapted for a body that holds several
+        real paragraphs rather than just one line: the toggle's OWN
+        initial construction-time empty paragraph doesn't count as
+        escape-worthy by itself (its previous sibling is the SUMMARY, not
+        a real body line) — only once a genuine Enter has created a
+        SECOND empty paragraph (real previous sibling exists) does
+        pressing Enter again escape, which is what makes it feel like
+        "press Enter twice" regardless of how much real content came
+        before it.
+      - **Backspace on a wholly EMPTY toggle** (blank title, single blank
+        body paragraph, nothing ever typed) removes it outright rather
+        than merging its two empty parts together — cleanly undoes the
+        `> ` conversion when nothing was added.
+      - **Real bug found and fixed by testing, not assumed**:
+        `OxToggleSummaryNode.insertNewAfter` (Enter on the title) used to
+        UNCONDITIONALLY create a fresh paragraph — wrong, because a
+        toggle ALREADY has its own construction-time empty body paragraph
+        as the summary's next sibling from the moment `> ` converts it
+        (see `toggleTransformer.ts`'s own "always a real clickable row"
+        invariant). Always inserting another one there left TWO
+        indistinguishable empty paragraphs side by side, which silently
+        broke the double-Enter escape check above (it requires the
+        current empty paragraph to be the toggle's LAST child, and it
+        no longer was). Fixed to REUSE the existing next sibling when it's
+        already an empty paragraph, only falling back to creating a new
+        one when there genuinely isn't one, or it already has real
+        content (Enter fired mid-title with real body text already
+        typed) — that narrower case can still mis-place split-off
+        trailing title text at the END of existing content rather than
+        ahead of it, left as a known, much rarer limitation rather than
+        solved here.
+    - **The caret lives IN THE GUTTER** (`left: -38px` on
+      `.ox-toggle-summary::before`, same convention as the `#`/`>`
+      markers), NOT in reserved inline padding the way the checkbox glyph
+      is — the title text itself stays flush with the rest of the
+      document's column, matching how a Card's own title has no icon
+      pushing its text sideways either. `OxTogglePlugin.tsx`'s click
+      hit-test reads this pseudo's OWN computed `left`/`width` directly
+      (not a hardcoded offset), so the two can't drift out of sync.
+    - **Done — lists (`- `/`* `/`+ `/`1. `) work inside a toggle's own
+      body**, via a new `oxmarkdown/ToggleListPlugin.tsx`. Needed because
+      `registerMarkdownShortcuts`'s `ElementTransformer` dispatch
+      (confirmed directly reading `runElementTransformers`'s source in
+      `@lexical/markdown`) REQUIRES a paragraph's own PARENT to be the
+      root/a shadow root before ANY live-typing shortcut fires — the
+      SAME restriction `checklistTransformer.ts`'s own header already
+      documents for checkboxes, just newly relevant because a toggle
+      body paragraph's parent is the `OxToggleNode`, never root. A
+      `RootNode`-shaped fix (overriding `OxToggleNode.isShadowRoot()` to
+      return `true`, which WOULD satisfy that check) was considered and
+      rejected — `isShadowRoot` has a much wider blast radius across
+      Lexical's own core (caret-boundary lookups, `canBeEmpty`
+      exemptions, indent/outdent and select-all boundary checks, ...—
+      confirmed by reading every call site in `Lexical.dev.mjs`, not
+      assumed), too speculative a change for the specific, narrow gap
+      actually asked for. Instead mirrors `ChecklistUpgradePlugin.tsx`'s
+      OWN proven workaround for the identical restriction: a plain
+      `registerUpdateListener` matching single-keystroke typing against
+      `UNORDERED_LIST.regExp`/`ORDERED_LIST.regExp` (reused directly from
+      `@lexical/markdown`, not hand-copied) and performing the same
+      conversion `listReplace()` does internally, by hand, entirely
+      outside `MarkdownShortcutPlugin`'s constrained dispatch. Builds
+      `OxListItemNode` specifically (not `@lexical/list`'s plain
+      `ListItemNode`) — required, not stylistic: `editingTransforms.ts`'s
+      export path only recognizes `OxListItemNode` children when
+      serializing a list, so a plain `ListItemNode` here would be
+      silently DROPPED on save. Scoped specifically to a toggle's own
+      body (not generalized to "any non-root paragraph," e.g.
+      blockquotes) — that's the concrete, requested gap; broadening
+      further can follow if a real need shows up elsewhere.
 
 ## Testing convention — verify three things together, never one alone
 

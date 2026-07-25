@@ -934,7 +934,7 @@ export default function OxMarkdownStyles() {
             config (see TODO 1 in the decision log). Free-form typing, real headings/
             lists/links/code via <code>@lexical/rich-text</code>/<code>list</code>/
             <code>link</code>/<code>code</code>, live markdown shortcuts (type{" "}
-            <code>**bold**</code>, <code># heading</code>, <code>&gt; quote</code>, ...),
+            <code>**bold**</code>, <code># heading</code>, <code>" quote</code>, <code>&gt; toggle</code>, ...),
             a native checklist, undo/redo, and the same select-then-act model as
             Interacting mode for directives — arrow onto one or click it, then either
             key (Backspace or Delete) removes it outright. Try <code>/</code> at

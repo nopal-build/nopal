@@ -12,7 +12,7 @@ import {
   moveVaultFolder,
 } from "../data/vault.server";
 import { isFileRefLocked, isVaultRootFolder } from "../data/vault.types";
-import { isRootPublishable, isRootShareable } from "../data/vaultRoots";
+import { canWriteToRoot, isRootPublishable, isRootShareable } from "../data/vaultRoots";
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -34,6 +34,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   const isRoot = isVaultRootFolder(folder);
+
+  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
+  // even inside the OWNING human's own vault — see `vaultRoots.ts`. Applies
+  // to every mutation below (delete, rename, move, publish, share).
+  const rootKey = folder.vault_root_key ?? (await resolveVaultRootKey(folderId));
+  if (!canWriteToRoot(rootKey, user.role)) {
+    return Response.json(
+      { error: "You don't have permission to modify this folder" },
+      { status: 403 },
+    );
+  }
 
   if (request.method === "DELETE") {
     if (isRoot) {
@@ -104,6 +115,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
         return Response.json(
           { error: "Destination folder not found" },
           { status: 404 },
+        );
+      }
+      // Also check the DESTINATION's own write permission — moving INTO a
+      // restricted root (e.g. `skills`) needs the same role as creating
+      // directly inside it would.
+      const destRootKey =
+        newParent.vault_root_key ?? (await resolveVaultRootKey(newParent._id));
+      if (!canWriteToRoot(destRootKey, user.role)) {
+        return Response.json(
+          { error: "You don't have permission to move folders here" },
+          { status: 403 },
         );
       }
       if (newParent._id === folder._id) {

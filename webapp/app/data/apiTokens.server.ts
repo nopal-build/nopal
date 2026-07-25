@@ -20,8 +20,16 @@ export type ApiToken = Data & {
    * What the token may do. "full" (default) = everything the human can do.
    * "sync" = only the sync-engine endpoints, and only content under the
    * syncs/ vault root — see getScopedUserFromRequest in auth.server.ts.
+   * "sorter" = same access as "full" today (it isn't rejected anywhere
+   * `getUserFromRequest` is used, the same way "full" isn't) — reserved
+   * for an eventual sorting agent authenticating as a human, same "CLI/API
+   * is the agent's tool surface" design as `sortDailyLog`/`POST
+   * /api/daily-log/sort` itself (see `sorter.server.ts`). No minting UI
+   * exists for this scope yet (unlike "sync", which has one on the
+   * profile page) — it's declared ahead of that so the sort endpoint
+   * already recognizes it once one does.
    */
-  scope?: "full" | "sync";
+  scope?: "full" | "sync" | "sorter";
   createdAt: string;
   /** Null = never expires (used by revocable sync-scoped tokens). */
   expiresAt: string | null;

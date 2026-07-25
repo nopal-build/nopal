@@ -14,7 +14,7 @@ import {
 } from "../data/vault.server";
 import { cacheDailyLog, deleteDailyLogCache } from "../data/dailyLog.server";
 import { isFileRefLocked } from "../data/vault.types";
-import { isRootShareable } from "../data/vaultRoots";
+import { canWriteToRoot, isRootShareable } from "../data/vaultRoots";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { fileId } = params;
@@ -133,6 +133,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   // Owner-only operations below.
 
+  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
+  // even inside the OWNING human's own vault — see `vaultRoots.ts`.
+  if (request.method === "DELETE" || request.method === "PATCH") {
+    const rootKey = file.folder_id ? await resolveVaultRootKey(file.folder_id) : null;
+    if (!canWriteToRoot(rootKey, user.role)) {
+      return Response.json(
+        { error: "You don't have permission to modify this file" },
+        { status: 403 },
+      );
+    }
+  }
+
   if (
     isFileRefLocked(file) &&
     (request.method === "DELETE" || request.method === "PATCH")
@@ -180,6 +192,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const updates: Parameters<typeof updateFileRef>[1] = {};
+
+    // Moving a file INTO a restricted root (e.g. `skills`) needs the same
+    // role as creating one directly inside it would.
+    if ("folder_id" in body && body.folder_id) {
+      const destRootKey = await resolveVaultRootKey(body.folder_id);
+      if (!canWriteToRoot(destRootKey, user.role)) {
+        return Response.json(
+          { error: "You don't have permission to move files here" },
+          { status: 403 },
+        );
+      }
+    }
 
     if (body.name !== undefined) updates.name = body.name;
     if ("folder_id" in body) updates.folder_id = body.folder_id ?? null;

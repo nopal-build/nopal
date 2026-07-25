@@ -27,6 +27,7 @@ import type {
 } from "../data/vault.types";
 import {
   VAULT_ROOTS,
+  canWriteToRoot,
   isRootPublishable,
   isRootShareable,
   isVaultRootKey,
@@ -1464,6 +1465,14 @@ export default function VaultV2Page() {
     current.kind === "folder" &&
     !currentIsRootContainer &&
     isRootPublishable(current.folder.vault_root_key);
+  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
+  // even inside the OWNING human's own vault — see `vaultRoots.ts`. This
+  // ONLY hides the buttons; the server enforces the real restriction (see
+  // the `vault` skill's own rule against hidden-button-only gating).
+  const canWriteCurrent =
+    isOwnedByViewer &&
+    current.kind === "folder" &&
+    canWriteToRoot(current.folder.vault_root_key, user.role);
   // A folder is publicly reachable either because it was Published itself,
   // or because an ancestor was — Publish is resolved dynamically (see
   // resolvePublicRootFolder), not cascaded onto descendants at publish time,
@@ -1493,12 +1502,23 @@ export default function VaultV2Page() {
   // Past daily-log files are read-only — no Replace/Delete (server enforces too).
   const fileLocked = current.kind === "file" && isFileRefLocked(current.file);
 
+  // A file's own root key isn't denormalized onto it directly (only
+  // folders carry `vault_root_key`) — `ancestry[0]` is the root CONTAINER
+  // itself (see `getFolderAncestry`'s "root container → … → the folder
+  // itself" ordering), which always carries its own key.
+  const fileRootKey =
+    current.kind === "file" ? current.ancestry[0]?.vault_root_key : undefined;
+  const canWriteCurrentFile =
+    current.kind === "file" &&
+    isOwnedByViewer &&
+    canWriteToRoot(fileRootKey, user.role);
+
   // "More Actions" dropdown — management actions, gated by the same
   // policies that previously hid the standalone buttons. Unavailable actions
   // are omitted; when nothing is available the trigger renders disabled.
   // Upload / New folder / Download stay as standalone toolbar buttons.
   const moreActions: MoreMenuItem[] = [];
-  if (current.kind === "folder" && isOwnedByViewer) {
+  if (current.kind === "folder" && canWriteCurrent) {
     if (!currentIsRootContainer) {
       moreActions.push({ label: "Rename", onClick: handleRenameFolder });
     }
@@ -1531,7 +1551,7 @@ export default function VaultV2Page() {
         danger: true,
       });
     }
-  } else if (current.kind === "file" && isOwnedByViewer) {
+  } else if (current.kind === "file" && canWriteCurrentFile) {
     if (!fileLocked) {
       moreActions.push({
         label: "Replace",
@@ -1735,7 +1755,7 @@ export default function VaultV2Page() {
             {/* Actions */}
             {current.kind === "folder" && (
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {isOwnedByViewer && (
+                {canWriteCurrent && (
                   <button
                     className="vault-toolbar-btn"
                     onClick={() => uploadInputRef.current?.click()}
@@ -1743,7 +1763,7 @@ export default function VaultV2Page() {
                     ↑ Upload files
                   </button>
                 )}
-                {isOwnedByViewer && (
+                {canWriteCurrent && (
                   <button
                     className="vault-toolbar-btn"
                     onClick={handleNewFolder}
