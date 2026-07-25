@@ -31,6 +31,7 @@ import {
   type DailyLogCard,
 } from "../data/dailyLog.server";
 import { getProjectFolders } from "../data/vault.server";
+import type { SortSummary } from "../data/sorter.server";
 
 // ─── @ mentions ───────────────────────────────────────────────────────────────────────────────────
 // Module-level (not defined inside the component) since neither closes
@@ -378,16 +379,102 @@ function TodayLogEntry({
   );
 }
 
+// ─── Sort testing panel ─────────────────────────────────────────────
+// A manual trigger for the Sorter (`sorter.server.ts`) against TODAY's
+// already-saved content — lets a human type something, save (the normal
+// debounced autosave already does this), click, and immediately see what
+// the Sorter would do, rather than waiting for the once-a-day cron. Always
+// passes `force: true` — without it, a second click during the same
+// testing session would just report "already sorted" from the FIRST
+// click, which defeats the whole point of a repeatable manual trigger.
+// Deliberately styled as an obvious dev/testing panel (monospace, boxed,
+// labeled), not blended into the rest of the day's own content the way
+// Cards/prose are — this is a tool for iterating on the Sorter itself,
+// not a permanent part of the daily-log-writing experience.
+function SortTestPanel({ date }: { date: string }) {
+  const sortFetcher = useFetcher<SortSummary | { error: string }>();
+
+  const handleSort = () => {
+    sortFetcher.submit(
+      { date, force: true },
+      { method: "POST", action: "/api/daily-log/sort", encType: "application/json" },
+    );
+  };
+
+  const result = sortFetcher.data;
+  const loading = sortFetcher.state !== "idle";
+  const hasError = result && "error" in result;
+  const summary = result && !hasError ? (result as SortSummary) : null;
+
+  return (
+    <div
+      className="good-box"
+      style={{
+        padding: "16px",
+        marginTop: "-8px",
+        marginBottom: "32px",
+        fontFamily: "ui-monospace, monospace",
+        fontSize: "13px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+        <span
+          className="subtle-text"
+          style={{ textTransform: "uppercase", letterSpacing: "0.08em", fontSize: "11px" }}
+        >
+          Testing: Sorter
+        </span>
+        <button className="vault-toolbar-btn" onClick={handleSort} disabled={loading}>
+          {loading ? "Sorting…" : "Sort this day"}
+        </button>
+      </div>
+
+      {hasError && <p className="red-text">{(result as { error: string }).error}</p>}
+
+      {summary && (
+        <div>
+          {summary.entriesWritten === 0 ? (
+            <p className="subtle-text">
+              Nothing to sort — no @mentions of a project, completed Card tasks, or Card file
+              attachments found.
+            </p>
+          ) : (
+            <p>
+              Wrote {summary.entriesWritten} entr{summary.entriesWritten === 1 ? "y" : "ies"} across{" "}
+              {summary.projectsTouched.join(", ")}.
+            </p>
+          )}
+          <p className="subtle-text" style={{ marginTop: "12px", marginBottom: "4px" }}>
+            This day's release-log.md:
+          </p>
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              background: "var(--midground)",
+              padding: "10px",
+              borderRadius: "6px",
+              margin: 0,
+              maxHeight: "320px",
+              overflowY: "auto",
+            }}
+          >
+            {summary.dailyReleaseLog || "(empty)"}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── AddCardSection ────────────────────────────────────────────────
 // Always-visible list of real projects (folder selections), not a
 // click-to-reveal button — one fewer step, every option visible at a
 // glance. Only projects WITHOUT an existing card today are offered
 // (enforces one-card-per-project-per-day at a glance; the server
-// enforces it for real — see `createDailyLogCard`'s idempotency). Ported
-// from the `daily-log-v2` visual mockup's `AddCardSection`, now backed by
-// real project data instead of `MOCK_PROJECTS`. A future `/card` slash
-// command could trigger the identical `onCreate` from the cursor instead
-// of a chip click — nothing about how a card renders would change.
+// enforces it for real — see `createDailyLogCard`'s idempotency). A
+// future `/card` slash command could trigger the identical `onCreate`
+// from the cursor instead of a chip click — nothing about how a card
+// renders would change.
 
 function AddCardSection({
   projectFolders,
@@ -712,16 +799,19 @@ export default function DailyLogPage() {
             entirely sidesteps the race rather than trying to out-time
             it. */}
         {today && (
-          <TodayLogEntry
-            date={today}
-            today={today}
-            content={todayContent}
-            onChange={handleChange}
-            cards={todayCards}
-            onChangeCardContent={handleCardChange}
-            projectFolders={projectFolders}
-            onCreateCard={handleCreateCard}
-          />
+          <>
+            <TodayLogEntry
+              date={today}
+              today={today}
+              content={todayContent}
+              onChange={handleChange}
+              cards={todayCards}
+              onChangeCardContent={handleCardChange}
+              projectFolders={projectFolders}
+              onCreateCard={handleCreateCard}
+            />
+            <SortTestPanel date={today} />
+          </>
         )}
 
         {/* Past entries: newest first — no extra wrapper spacing needed,

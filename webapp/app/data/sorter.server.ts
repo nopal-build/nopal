@@ -34,6 +34,7 @@ import type { VaultFolder } from "./vault.types";
 import {
   appendDailyReleaseLogEntries,
   appendProjectReleaseLogEntries,
+  getReleaseLogContent,
 } from "./releaseLog.server";
 import {
   directiveAttrs,
@@ -151,6 +152,11 @@ export type SortSummary = {
   alreadySorted: boolean;
   projectsTouched: string[];
   entriesWritten: number;
+  /** The day's own `release-log.md` content AFTER this run — lets a
+   * caller (the Daily Log page's manual "Sort this day" testing button)
+   * show exactly what's there without a second round-trip. `""` when the
+   * day has never been sorted into anything, or never existed at all. */
+  dailyReleaseLog: string;
 };
 
 function pushLine(map: Map<string, string[]>, key: string, line: string): void {
@@ -170,7 +176,9 @@ export async function sortDailyLog(
 ): Promise<SortSummary> {
   const existingLog = await getDailyLogByDate(humanId, date);
   if (existingLog?.sortedAt && !force) {
-    return { date, alreadySorted: true, projectsTouched: [], entriesWritten: 0 };
+    const { dateFolderId } = await getDailyLogFolderAndReadmeId(humanId, date);
+    const dailyReleaseLog = await getReleaseLogContent(humanId, dateFolderId);
+    return { date, alreadySorted: true, projectsTouched: [], entriesWritten: 0, dailyReleaseLog };
   }
   // No `daily_logs` cache row at all (this date never had a readme.md
   // saved) — nothing to sort, and nothing to mark either: `setDailyLogSorted`
@@ -179,8 +187,10 @@ export async function sortDailyLog(
   // MERGE creates the record when it's missing) — one that could never
   // again be found by `getDailyLogByDate`'s own humanId+date filter, so
   // this exact guard would keep re-triggering on every future call.
+  // Deliberately does NOT resolve/create the date's own vault folder just
+  // to check for a release-log.md that couldn't possibly exist yet.
   if (!existingLog) {
-    return { date, alreadySorted: false, projectsTouched: [], entriesWritten: 0 };
+    return { date, alreadySorted: false, projectsTouched: [], entriesWritten: 0, dailyReleaseLog: "" };
   }
 
   const readmeContent = existingLog?.content ?? "";
@@ -253,7 +263,9 @@ export async function sortDailyLog(
     .map((id) => projectFolders.find((f) => f._id === id)?.name)
     .filter((name): name is string => Boolean(name));
 
-  return { date, alreadySorted: false, projectsTouched, entriesWritten };
+  const dailyReleaseLog = await getReleaseLogContent(humanId, dateFolderId);
+
+  return { date, alreadySorted: false, projectsTouched, entriesWritten, dailyReleaseLog };
 }
 
 function utcDateString(daysAgo: number): string {

@@ -472,18 +472,16 @@ Interacting mode first, without needing that decision resolved.
      **The page's whole visual FRAME is also now real**, not just the
      Cards data — `DayContainer`/`DayTitle`
      (`components/DailyLogDay.tsx`, `styles/dailyLog.css`) were promoted
-     out of the `daily-log-v2` mockup once its design settled, and BOTH
-     the real route and the mockup now import the SAME components/CSS
-     (the mockup no longer has its own local copies) so they can't
-     visually drift apart again. This mattered more than it might sound:
-     the real route had kept its OLD pre-mockup look (a generic
-     `good-box` wrapper around the editor, ad hoc per-day heading styles)
-     even after Cards were wired in, which meant a Card had no visual
-     contrast to "pop" against — the day's own prose area was the SAME
-     warm `good-box` tone as the card itself, not the mockup's deliberately
-     different near-white/dark-plum `.daily-log-day` frame. Confirmed
-     fixed by direct side-by-side screenshot comparison in both color
-     schemes, not just assumed from reading the code.
+     out of the (now-deleted) `daily-log-v2` visual mockup once its design
+     settled. This mattered more than it might sound: the real route had
+     kept its OLD pre-mockup look (a generic `good-box` wrapper around the
+     editor, ad hoc per-day heading styles) even after Cards were wired
+     in, which meant a Card had no visual contrast to "pop" against — the
+     day's own prose area was the SAME warm `good-box` tone as the card
+     itself, not the mockup's deliberately different near-white/dark-plum
+     `.daily-log-day` frame. Confirmed fixed by direct side-by-side
+     screenshot comparison in both color schemes, not just assumed from
+     reading the code.
    - **A second, subtler bug found the same way**: even with the shared
      frame in place, a Card still sat visibly WITHIN both gutters instead
      of overflowing them — confirmed by measuring, not just eyeballing,
@@ -498,7 +496,7 @@ Interacting mode first, without needing that decision resolved.
      gutter is the whole story). Separately, `.ox-card-directive`'s own
      bleed amount needed recalculating for a reason that has nothing to
      do with the stale padding: it lives NESTED inside the prose's own
-     `.ox-content` (unlike the `daily-log-v2` mockup's `CardBox`, a
+     `.ox-content` (unlike the old `daily-log-v2` mockup's `CardBox`, a
      top-level DayContainer SIBLING, unconstrained by anything) — and
      `.ox-content`'s `overflow-x: hidden` clips any descendant's bleed at
      `.ox-content`'s OWN edge, no matter how large a negative margin is
@@ -553,8 +551,12 @@ Interacting mode first, without needing that decision resolved.
    `OxEditor` without a `groupId` is unaffected. Each editor's
    document/undo history stays fully separate — this only ever moves
    keyboard focus, never merges content. First wired up on the
-   `daily-log-v2` visual mockup (`routes/fruits_.daily-log-v2.tsx`); not
-   yet ported to the real Daily Log route.
+   `daily-log-v2` visual mockup (since deleted — its design fully ported
+   to the real Daily Log route, see step 6 above); the underlying
+   `OxEditorGroup` machinery is now also used internally by the Card/file-
+   caption arrow flows (`CardEditorArrowPlugin.tsx`,
+   `FileCaptionArrowPlugin.tsx`), but the real Daily Log route itself does
+   not yet wrap its prose+Cards stack in an explicit `<OxEditorGroup>`.
 9. **Done — minimum-rows padding**, so an Editing-mode document is always
    clickable anywhere within a minimum box, not just wherever real
    content happens to reach. `oxmarkdown/MinRowsPlugin.tsx` registers a

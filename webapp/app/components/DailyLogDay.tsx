@@ -1,9 +1,7 @@
 /**
- * The Daily Log's day-framing components — promoted out of the
- * `daily-log-v2` visual mockup (`routes/fruits_.daily-log-v2.tsx`) once
- * its design settled, so the REAL route (`routes/fruits_.daily-log.tsx`)
- * and the mockup share one real implementation instead of two that can
- * drift apart. See `styles/dailyLog.css` for `.daily-log-day`.
+ * The Daily Log's day-framing components, used by the real route
+ * (`routes/fruits_.daily-log.tsx`). See `styles/dailyLog.css` for
+ * `.daily-log-day`.
  */
 
 import type { CSSProperties, ReactNode } from "react";

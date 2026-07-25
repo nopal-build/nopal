@@ -106,6 +106,28 @@ function appendUnderHeading(
 }
 
 /**
+ * Reads a folder's `release-log.md` content, or `""` if it doesn't exist
+ * yet — read-only, never creates the file (unlike
+ * `getOrCreateReleaseLogFile`, this is for REVIEWING what's already
+ * there, e.g. `sortDailyLog`'s own return value for the manual "Sort this
+ * day" testing button on the Daily Log page). */
+export async function getReleaseLogContent(
+  humanId: string,
+  folderId: string,
+): Promise<string> {
+  const result = await query<[FileRef[]]>(
+    `SELECT * FROM file_refs
+     WHERE human_id = $humanId AND folder_id = $folderId AND name = $name
+     LIMIT 1`,
+    { humanId, folderId, name: RELEASE_LOG_FILENAME },
+  );
+  const existing = result?.[0]?.[0]
+    ? formatRecord(result[0][0] as unknown as FileRef)
+    : null;
+  return existing?.content ?? "";
+}
+
+/**
  * Appends one or more bullet lines under a heading in a folder's
  * `release-log.md`, creating the file (and/or the heading section) if
  * needed. `bulletLines` should already be fully formatted (e.g.
