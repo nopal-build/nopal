@@ -213,6 +213,33 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
 A few designs that were tried, found lacking, and revised — recorded so
 they aren't re-litigated from scratch:
 
+- **A controlled `OxEditor` must never mount with a placeholder value
+  before the REAL one is known — confirmed to actively corrupt data, not
+  just flicker.** The Daily Log's `today`/`todayContent` intentionally
+  start as `""` (so server and initial client render match, avoiding a
+  hydration mismatch), with a `useEffect` filling in the real values
+  right after hydration. `TodayLogEntry`'s `<OxEditor>` used to render
+  UNCONDITIONALLY through that whole window, including with `markdown=""`.
+  Found by direct testing (a real, previously-saved day's content was
+  silently overwritten with blank): `OxEditor`'s OWN mount-time reseed
+  (`MarkdownSyncPlugin`) can itself be dirty enough (e.g. padding an
+  empty document up via `MinRowsPlugin`) to fire its update listener,
+  which echoes an `onChange("")` back up — and depending on effect
+  ordering (children's effects run before their parent's, so the child
+  editor's echo can fire either side of the PARENT's own hydration
+  effect), that echoed `setTodayContent("")` can land AFTER — and so
+  overwrite — the hydration effect's `setTodayContent(realContent)`
+  call, for the exact same reason `handleChange` exists at all: there's
+  no way to tell "this onChange is a real edit" from "this onChange is
+  my own placeholder mount echoing back" from the callback's own
+  perspective. Fixed by not rendering `<TodayLogEntry>`/its `<OxEditor>`
+  AT ALL until `today` resolves (`{today && <TodayLogEntry .../>}`) —
+  matching the SAME gating `pastEntries` already used, so there's no
+  "mount with a placeholder, then fix it up" step to race in the first
+  place. Generalizes beyond the Daily Log: any controlled `OxEditor`
+  whose real initial `markdown` isn't known synchronously on first
+  render should stay unmounted (or otherwise not commit its `onChange`
+  anywhere) until it is, not mount with a temporary placeholder value.
 - **Foundation for Editing mode: trimmed Lexical, not a custom
   `<textarea>`.** A `<textarea>` can only ever show its own literal text —
   no real checkbox glyphs, directive pills, or dot grid rendered inline —
@@ -401,9 +428,73 @@ Interacting mode first, without needing that decision resolved.
      `readme.md` itself lives in) and marks the resulting `file_ref`
      `source: "daily_log"`/`date` — the same convention `isFileRefLocked`
      already uses, so an attachment added today automatically becomes
-     read-only once the day is over. Not yet ported: Cards/`::card{...}`
-     itself (still mockup-only — see step 10's own note and the `vault`
-     skill's Daily Log section).
+     read-only once the day is over. Cards are ALSO now real (see step 11)
+     — `TodayLogEntry`/`AddCardSection` use real project data
+     (`getProjectFolders`) and real one-card-per-project-per-day
+     enforcement (`createDailyLogCard`'s idempotency), with `resolveCard`
+     wired through to both `TodayLogEntry` and `PastLogEntry`. Deliberately
+     NOT ported: a Card's own keyboard-flow polish (see step 11's own
+     scope note) and cross-human/shared projects as Card targets.
+     **The page's whole visual FRAME is also now real**, not just the
+     Cards data — `DayContainer`/`DayTitle`
+     (`components/DailyLogDay.tsx`, `styles/dailyLog.css`) were promoted
+     out of the `daily-log-v2` mockup once its design settled, and BOTH
+     the real route and the mockup now import the SAME components/CSS
+     (the mockup no longer has its own local copies) so they can't
+     visually drift apart again. This mattered more than it might sound:
+     the real route had kept its OLD pre-mockup look (a generic
+     `good-box` wrapper around the editor, ad hoc per-day heading styles)
+     even after Cards were wired in, which meant a Card had no visual
+     contrast to "pop" against — the day's own prose area was the SAME
+     warm `good-box` tone as the card itself, not the mockup's deliberately
+     different near-white/dark-plum `.daily-log-day` frame. Confirmed
+     fixed by direct side-by-side screenshot comparison in both color
+     schemes, not just assumed from reading the code.
+   - **A second, subtler bug found the same way**: even with the shared
+     frame in place, a Card still sat visibly WITHIN both gutters instead
+     of overflowing them — confirmed by measuring, not just eyeballing,
+     that it fell ~33px short of the day frame's own edge on both sides.
+     Root cause: `DayContainer`'s own right-padding (`var(--ox-grid)`,
+     41px) was a STALE compensation for `.ox-content` once being
+     LEFT-gutter-only — by the time this feature was built, `.ox-content`
+     had already become symmetric (see step 10's gutter-markers note), so
+     that right-padding was pure double-counting, not doing anything
+     useful anymore. Fixed by removing it (`DayContainer` now adds ZERO
+     padding of its own on either side — `.ox-content`'s own symmetric
+     gutter is the whole story). Separately, `.ox-card-directive`'s own
+     bleed amount needed recalculating for a reason that has nothing to
+     do with the stale padding: it lives NESTED inside the prose's own
+     `.ox-content` (unlike the `daily-log-v2` mockup's `CardBox`, a
+     top-level DayContainer SIBLING, unconstrained by anything) — and
+     `.ox-content`'s `overflow-x: hidden` clips any descendant's bleed at
+     `.ox-content`'s OWN edge, no matter how large a negative margin is
+     applied. Confirmed directly: trying to replicate the mockup's exact
+     `CARD_BLEED` (an extra `8px` past the gutter) got that extra sliver
+     silently clipped, squaring off the card's rounded corner instead of
+     extending it.
+
+     Reaching (not exceeding) the shared edge still wasn't the real goal,
+     though — a GENUINE `8px` overhang past the day frame's own border
+     (matching the mockup's own `CARD_BLEED` exactly) turned out to still
+     be achievable, just not via the card's own margin alone. The key
+     realization: `overflow-x: hidden` clips at `.ox-content`'s OWN
+     border-box edge specifically, and PADDING never moves that edge
+     (padding is inside the border-box) — only `.ox-content`'s OWN
+     MARGIN does. So the OUTER prose editor that hosts a Card gets a new
+     modifier, `.ox-card-host` (applied via `OxEditor`'s ordinary
+     `className` prop, in `fruits_.daily-log.tsx`): a small negative
+     margin (`-8px` each side) that widens `.ox-content`'s OWN border-box
+     by exactly the overhang amount, with a MATCHING increase to its own
+     padding (`+8px` each side) so the prose text's position doesn't
+     shift at all — only the (otherwise invisible) edge of the box
+     itself moves outward. The card's bleed then exactly cancels THAT
+     wider padding (`-1 * (var(--ox-grid) + 8px)`), landing its edge at
+     `.ox-card-host`'s new, wider border-box edge — which sits exactly
+     `8px` past the day frame's real visual border. Confirmed by
+     measuring actual rendered bounding boxes (Playwright), not just
+     eyeballing a screenshot — 8px is subtle enough that eyeballing alone
+     had already produced a false sense of "close enough" earlier in
+     this exact investigation.
    - **Not started**: `ProjectView.tsx` and the Vault file-view page
      (`routes/fruits_.vault.tsx`) — still on `MdxEditorView`. These have a
      real, non-trivial directive registry (`csv-table`/`gallery`/`svg`/
@@ -733,6 +824,97 @@ Interacting mode first, without needing that decision resolved.
       specificity tier, later in cascade order. Fixed by excluding it
       explicitly (`:not(.ox-add-file-link)`) rather than reordering
       rules, so the exclusion stays obvious at the selector itself.
+11. **Done — the `::card{file="..."}` interactable**, a built-in leaf
+    directive (own row, no children, same "mount point, not nested
+    markdown" shape as `::file{...}`) marking where a Card appears in a
+    day's flow. See the `vault` skill's "Cards" section for the vault-side
+    data model (`dailyLog.server.ts`'s `getDailyLogCards`/
+    `createDailyLogCard`/`saveDailyLogCard`) — this entry covers the
+    OxMarkdown-side rendering.
+    - Unlike `::file{...}`'s caption, a Card's content is NEVER stored in
+      an attribute on this directive — it's a whole separate vault file
+      with its own load/save lifecycle, resolved from OUTSIDE via a new
+      `OxEditor` prop, `resolveCard` (`oxmarkdown/cardDirective.ts`'s
+      `CardResolver` — `(fileName) => {projectName, projectHref,
+      markdown, onChange} | undefined`), same spirit as `mentionSearch`/
+      `onUploadFile`: `OxEditor` stays ignorant of vault/project
+      specifics, the caller (`fruits_.daily-log.tsx`) owns resolving real
+      data and debouncing the actual save.
+    - Reached two ways, both landing on the same directive shape: "Add a
+      card" (`AddCardSection`, always-visible project chips — filtered to
+      projects WITHOUT a card yet today via `cardedProjectFolderIds`,
+      which scans the readme's OWN markdown for existing `::card{...}`
+      occurrences rather than a separately-tracked list that could drift
+      from it) or, in principle, a future `/card` slash command (not
+      built) triggering the identical insertion from the cursor instead
+      of a chip click. "Add a card" itself works at the plain mdast level
+      (`appendCardDirectiveMarkdown`: parse → append → re-serialize)
+      rather than through a live Lexical editor instance — it's
+      triggered from OUTSIDE the editor (a Chip click), with no live
+      `LexicalEditor` reference at hand; the caller feeds the result
+      straight back in as `OxEditor`'s own controlled `markdown` prop,
+      which `MarkdownSyncPlugin` re-seeds from as an ordinary "changed
+      from outside" update.
+    - **Reuses `OxEditorContext`'s existing circular-import workaround**
+      to mount its OWN nested `<OxEditor>` — the SAME pattern `::file`'s
+      caption already proved safe, just with a whole document's worth of
+      content instead of a short caption, and `allowFileAttachments`/
+      `showAddFileLink` both ON (a Card, unlike a caption, is meant to
+      hold real attachments). A NEW context, `UploadFileContext`
+      (`components/OxRenderer.tsx`, alongside `DirectiveRegistryContext`/
+      `CardResolverContext`), threads the OUTER editor's own
+      `onUploadFile` down to the Card's nested editor, so an attachment
+      added inside a Card uploads to the exact same place (that day's
+      vault folder) the outer document's own attachments do, not a
+      second, divergent path.
+    - **Renders differently depending on mode**, all in
+      `components/OxRenderer.tsx`'s `CardDirectiveStatic`/
+      `CardDirectiveLayout` (the static/Interacting-mode path) and
+      `editingNodes.tsx`'s `OxDirectiveDecorator` (the live Editing-mode
+      path, alongside `::file`'s own branch):
+      - Editing mode: a real nested `<OxEditor mode="editing">`, wired to
+        `resolveCard`'s `markdown`/`onChange`.
+      - Interacting mode (`interactive` prop present, e.g. a past,
+        locked day): ALSO a real nested `<OxEditor mode="interacting">`
+        rather than a second, bespoke static-render path — a past day's
+        card still needs working checkbox toggles/file thumbnails, same
+        as the outer document's own past-day content does. Reached via
+        `OxEditorContext` too, which is why `OxInteractingSurface` (not
+        just `OxEditingSurface`) now ALSO provides `OxEditorContext`/
+        `CardResolverContext` — it didn't need to before this.
+      - No `interactive` at all (a fully passive render, e.g. a public
+        unauthenticated view): plain static markdown via `OxStaticNodes`,
+        matching how the rest of a non-interactive render behaves — no
+        live interaction of any kind, anywhere. Mounting a live editor
+        here would let a checkbox toggle silently call `resolved.onChange`
+        (a save) from a context with no business saving anything.
+      - `resolveCard` returning nothing yet (still loading) renders a
+        plain "Loading card…" placeholder inside the SAME header shell,
+        rather than vanishing, so the row's presence stays visible.
+    - Visually: `.ox-card-directive` bleeds outward past `.ox-content`'s
+      own gutters on both sides (negative margin + matching inward
+      padding, same technique `::file`'s thumbnail uses for the LEFT
+      gutter alone, here on both), `.good-box` (root.css) for the actual
+      fill/border, a header row (project name + "open project →" link to
+      `/fruits/vault?folder=<projectFolderId>`, plus a remove button) and
+      a content slot below. Ported directly from the `daily-log-v2`
+      visual mockup's `CardBox`.
+    - **Known, deliberate scope line**: unlike `::file`, a Card's nested
+      editor does NOT (yet) get its own arrow-key/Backspace flow into/out
+      of the surrounding document (no `FileCaptionArrowPlugin`/
+      `FileDirectiveArrowPlugin` equivalent) — entering one is mouse-click
+      only for now. Deferred deliberately rather than built blind: `::file`'s
+      OWN keyboard-flow niceties (double-Enter escape, Backspace-into,
+      outer↔caption arrow flow) were each built incrementally across
+      several rounds of hands-on iteration, and a Card's nested editor is
+      a full document rather than a short caption, so the same treatment
+      deserves its own dedicated pass rather than a rushed first guess.
+    - **Also deliberately out of scope**: cross-human projects (Cards can
+      only target projects the human OWNS — see the `vault` skill's
+      `getProjectFolders`) and nested cards (a `::card{...}` rendered
+      inside another Card's own content resolves to nothing, since
+      `resolveCard` isn't threaded to that depth — an accepted, not
+      actively guarded-against, degenerate case).
 
 ## Testing convention — verify three things together, never one alone
 

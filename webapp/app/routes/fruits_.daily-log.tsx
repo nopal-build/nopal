@@ -10,18 +10,27 @@ import {
   useRouteError,
   isRouteErrorResponse,
 } from "react-router";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
+import { Chip } from "../components/Chip";
+import { DayContainer, DayTitle } from "../components/DailyLogDay";
 import OxEditor from "../components/OxEditor";
 import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
 import type { UploadedFileInfo, UploadFileFn } from "../oxmarkdown/fileDirective";
+import type { CardResolver } from "../oxmarkdown/cardDirective";
+import { appendCardDirectiveMarkdown, cardedProjectFolderIds } from "../oxmarkdown/cardDirective";
 import {
   getDailyLogs,
   saveDailyLog,
   workableSaveDailyLog,
+  getDailyLogCards,
+  createDailyLogCard,
+  saveDailyLogCard,
   type DailyLog,
+  type DailyLogCard,
 } from "../data/dailyLog.server";
+import { getProjectFolders } from "../data/vault.server";
 
 // ─── @ mentions ───────────────────────────────────────────────────────────────────────────────────
 // Module-level (not defined inside the component) since neither closes
@@ -100,7 +109,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!user) return redirect("/login");
   // Load all entries newest-first; 500 is a generous ceiling for any user
   const { entries } = await getDailyLogs(user._id, { limit: 500 });
-  return { user, entries };
+
+  // Real projects for "Add a card" (replaces the old mockup's hardcoded
+  // project list) — see `vault.server.ts`'s `getProjectFolders`.
+  const projectFolders = await getProjectFolders(user._id);
+
+  // Cards for each day that actually references one — a cheap substring
+  // check up front so this stays proportional to real Card usage instead
+  // of doing a real folder/file lookup for every one of up to 500 days
+  // unconditionally (most days won't have any).
+  const cardsByDate: Record<string, DailyLogCard[]> = {};
+  await Promise.all(
+    entries
+      .filter((e) => e.content.includes("::card{"))
+      .map(async (e) => {
+        cardsByDate[e.date] = await getDailyLogCards(user._id, e.date);
+      }),
+  );
+
+  return {
+    user,
+    entries,
+    projectFolders: projectFolders.map((f) => ({ id: f._id, name: f.name })),
+    cardsByDate,
+  };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -112,15 +144,40 @@ export async function action({ request }: ActionFunctionArgs) {
   const ct = request.headers.get("content-type") ?? "";
 
   // ── JSON save ──────────────────────────────────────────────────────────────────────────────
+  // ── JSON save ─────────────────────────────────────────────────────────────
   if (ct.includes("application/json")) {
     const body = await request.json();
-    const { date, content, mode } = body as {
+
+    // Create (or, per `createDailyLogCard`'s own idempotency, reuse) a
+    // project's Card for a day — a separate request shape (no `content`)
+    // from the two content-save shapes below.
+    if ("createCardForProject" in body) {
+      const { date, createCardForProject } = body as {
+        date?: string;
+        createCardForProject?: string;
+      };
+      if (!date || !createCardForProject) return { error: "Invalid request" };
+      const card = await createDailyLogCard(user._id, date, createCardForProject);
+      return { success: true, card };
+    }
+
+    const { date, content, mode, cardFileId } = body as {
       date: string;
       content: string;
       mode?: string;
+      cardFileId?: string;
     };
     if (!date || typeof content !== "string")
       return { error: "Invalid request" };
+
+    // A Card's OWN content — always a flat overwrite, no md_version
+    // snapshotting (see `saveDailyLogCard`'s own header) — distinct from
+    // the day's own `readme.md` save below.
+    if (cardFileId) {
+      await saveDailyLogCard(cardFileId, content);
+      return { success: true };
+    }
+
     // workable mode — skip md_version snapshots for task check-offs etc.
     const entry =
       mode === "workable"
@@ -138,14 +195,49 @@ export async function action({ request }: ActionFunctionArgs) {
   return { success: true, entry };
 }
 
-// ─── PastLogEntry ─────────────────────────────────────────────────────────────
+// ─── Cards ────────────────────────────────────────────────────────────
+// Shared by `PastLogEntry`/`TodayLogEntry` — turns a plain `cards` array +
+// a "this one changed" callback into the `CardResolver` `OxEditor`'s
+// `resolveCard` prop expects (see `oxmarkdown/cardDirective.ts`). A fresh
+// function each render is fine — nothing memoizes on `resolveCard`'s own
+// identity, only on `cards`' contents (via the `useMemo` at each call site).
+
+function buildCardResolver(
+  cards: DailyLogCard[],
+  onChangeCard: (fileId: string, content: string) => void,
+): CardResolver {
+  return (fileName) => {
+    const card = cards.find((c) => c.fileName === fileName);
+    if (!card) return undefined;
+    return {
+      projectName: card.projectName,
+      projectHref: `/fruits/vault?folder=${card.projectFolderId}`,
+      markdown: card.content,
+      onChange: (v) => onChangeCard(card.fileId, v),
+    };
+  };
+}
+
+// ─── PastLogEntry ───────────────────────────────────────────────────
 // Read-mostly: main content is static prose, task checkboxes stay
 // interactive (click to check off leftover items) — OxEditor's Interacting
 // mode, the direct successor to the old Workable mode. Saves via
 // `mode: "workable"` so ticking a box doesn't spam the version history.
+// Cards behave the same way — a checkbox toggled inside a past day's card
+// still saves, just without any version snapshotting (see
+// `saveDailyLogCard`).
 
-function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
+function PastLogEntry({
+  entry,
+  today,
+  cards: initialCards,
+}: {
+  entry: DailyLog;
+  today: string;
+  cards: DailyLogCard[];
+}) {
   const [content, setContent] = useState(entry.content);
+  const [cards, setCards] = useState(initialCards);
 
   const saveFetcher = useFetcher<typeof action>();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -171,25 +263,50 @@ function PastLogEntry({ entry, today }: { entry: DailyLog; today: string }) {
     [entry.date, saveFetcher],
   );
 
-  return (
-    <div style={{ marginBottom: "80px" }}>
-      <div
-        style={{
-          fontFamily: "monospace",
-          fontSize: "20px",
-          fontWeight: "100",
-          color: "var(--text-subtle)",
-          borderBottom: "1px solid var(--midground)",
-          marginBottom: "12px",
-        }}
-      >
-        {formatEntryDate(entry.date, today)}
-      </div>
+  const cardSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const cardLastSaved = useRef<Record<string, string>>(
+    Object.fromEntries(initialCards.map((c) => [c.fileId, c.content])),
+  );
+  const handleCardChange = useCallback(
+    (fileId: string, newContent: string) => {
+      setCards((cs) => cs.map((c) => (c.fileId === fileId ? { ...c, content: newContent } : c)));
+      if (cardSaveTimers.current[fileId]) clearTimeout(cardSaveTimers.current[fileId]);
+      cardSaveTimers.current[fileId] = setTimeout(() => {
+        if (newContent === cardLastSaved.current[fileId]) return;
+        cardLastSaved.current[fileId] = newContent;
+        saveFetcher.submit(
+          { date: entry.date, cardFileId: fileId, content: newContent },
+          {
+            method: "POST",
+            action: "/fruits/daily-log",
+            encType: "application/json",
+          },
+        );
+      }, 1500);
+    },
+    [entry.date, saveFetcher],
+  );
 
-      <div className="good-box p-4">
-        <OxEditor mode="interacting" markdown={content} onChange={handleChange} />
-      </div>
-    </div>
+  const resolveCard = useMemo(
+    () => buildCardResolver(cards, handleCardChange),
+    [cards, handleCardChange],
+  );
+
+  return (
+    <>
+      <DayTitle className="subtle-text" style={{ fontWeight: 100 }}>
+        {formatEntryDate(entry.date, today)}
+      </DayTitle>
+      <DayContainer>
+        <OxEditor
+          mode="interacting"
+          markdown={content}
+          onChange={handleChange}
+          resolveCard={resolveCard}
+          className="ox-card-host"
+        />
+      </DayContainer>
+    </>
   );
 }
 
@@ -204,38 +321,40 @@ function TodayLogEntry({
   today,
   content,
   onChange,
+  cards,
+  onChangeCardContent,
+  projectFolders,
+  onCreateCard,
 }: {
   date: string;
   today: string;
   content: string;
   onChange: (v: string) => void;
+  cards: DailyLogCard[];
+  onChangeCardContent: (fileId: string, content: string) => void;
+  projectFolders: { id: string; name: string }[];
+  onCreateCard: (projectFolderId: string) => void;
 }) {
-  // Build "Today — Monday, November 15, 2024"
-  const [y, m, d] = date.split("-").map(Number);
-  const fullDate = new Date(y, m - 1, d).toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-  const dateLabel = formatEntryDate(date, today);
-  const heading = dateLabel === "Today" ? `Today — ${fullDate}` : dateLabel;
-
   // Stable per-date reference (not re-created every render) so `OxEditor`
   // doesn't see it as a changing prop — `date` is only ever the CURRENT
   // day here anyway (this component always renders "today"), so a plain
   // closure is enough without needing useCallback's dependency dance.
   const onUploadFile: UploadFileFn = (file) => uploadDailyLogFile(date, file);
 
-  return (
-    <div style={{ marginBottom: "12px" }}>
-      <div style={{ marginBottom: "8px" }}>
-        <span className="purple-light-text" style={{ fontFamily: "monospace", fontSize: "16px" }}>
-          {heading}
-        </span>
-      </div>
+  const resolveCard = useMemo(
+    () => buildCardResolver(cards, onChangeCardContent),
+    [cards, onChangeCardContent],
+  );
+  // Which projects already have a card today — parsed straight from the
+  // readme's OWN markdown (the source of truth for which cards exist; see
+  // `oxmarkdown/cardDirective.ts`), not a separately-tracked list that
+  // could drift from it.
+  const existingProjectFolderIds = useMemo(() => cardedProjectFolderIds(content), [content]);
 
-      <div className="good-box p-4">
+  return (
+    <>
+      <DayTitle className="purple-light-text">{formatEntryDate(date, today)}</DayTitle>
+      <DayContainer>
         <OxEditor
           key={date}
           mode="editing"
@@ -245,7 +364,72 @@ function TodayLogEntry({
           onMentionSelect={recordMentionSelected}
           allowFileAttachments
           onUploadFile={onUploadFile}
+          resolveCard={resolveCard}
+          className="ox-card-host"
         />
+
+        <AddCardSection
+          projectFolders={projectFolders}
+          existingProjectFolderIds={existingProjectFolderIds}
+          onCreate={onCreateCard}
+        />
+      </DayContainer>
+    </>
+  );
+}
+
+// ─── AddCardSection ────────────────────────────────────────────────
+// Always-visible list of real projects (folder selections), not a
+// click-to-reveal button — one fewer step, every option visible at a
+// glance. Only projects WITHOUT an existing card today are offered
+// (enforces one-card-per-project-per-day at a glance; the server
+// enforces it for real — see `createDailyLogCard`'s idempotency). Ported
+// from the `daily-log-v2` visual mockup's `AddCardSection`, now backed by
+// real project data instead of `MOCK_PROJECTS`. A future `/card` slash
+// command could trigger the identical `onCreate` from the cursor instead
+// of a chip click — nothing about how a card renders would change.
+
+function AddCardSection({
+  projectFolders,
+  existingProjectFolderIds,
+  onCreate,
+}: {
+  projectFolders: { id: string; name: string }[];
+  existingProjectFolderIds: Set<string>;
+  onCreate: (projectFolderId: string) => void;
+}) {
+  const available = projectFolders.filter((p) => !existingProjectFolderIds.has(p.id));
+
+  return (
+    <div style={{ paddingLeft: "var(--ox-grid, 41px)", marginTop: "8px", marginBottom: "16px" }}>
+      <div
+        className="subtle-text"
+        style={{
+          fontFamily: "monospace",
+          fontSize: "10px",
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          marginBottom: "8px",
+        }}
+      >
+        Add a card
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {projectFolders.length === 0 ? (
+          <span className="text-sm subtle-text">
+            No projects yet — create one in the Vault first.
+          </span>
+        ) : available.length === 0 ? (
+          <span className="text-sm subtle-text">
+            Every project already has a card today.
+          </span>
+        ) : (
+          available.map((p) => (
+            <Chip key={p.id} onClick={() => onCreate(p.id)}>
+              {p.name}
+            </Chip>
+          ))
+        )}
       </div>
     </div>
   );
@@ -326,16 +510,17 @@ export function ErrorBoundary() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DailyLogPage() {
-  const { entries: serverEntries } = useLoaderData<typeof loader>();
+  const { entries: serverEntries, projectFolders, cardsByDate } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
 
-  // ── today + todayContent ──────────────────────────────────────────────────
+  // ── today + todayContent ───────────────────────────────────────
   // Both start as "" so the server render and the initial client render
   // produce identical output (no hydration mismatch). The real device date
   // and server content are read in a single useEffect after hydration.
 
   const [today, setToday] = useState("");
   const [todayContent, setTodayContent] = useState("");
+  const [todayCards, setTodayCards] = useState<DailyLogCard[]>([]);
 
   useEffect(() => {
     const d = localDateString();
@@ -351,6 +536,7 @@ export default function DailyLogPage() {
     // from a previous day used to happen here — removed. It made today's
     // entry start with content the user didn't write and hadn't saved yet,
     // which was more confusing than useful in practice.)
+    setTodayCards(cardsByDate[d] ?? []);
   }, []); // intentionally empty — run exactly once after hydration
 
   // ── Derived values (gated on today being resolved) ───────────────────────
@@ -425,7 +611,83 @@ export default function DailyLogPage() {
     [scheduleSave],
   );
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Card content save ───────────────────────────────────────
+  // Mirrors `saveNow`/`scheduleSave` above, but per-card (keyed by fileId)
+  // — a card's content is a SEPARATE vault file with its own save target
+  // (`cardFileId` in the action), never touching the readme's own content.
+
+  const cardSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const cardLastSaved = useRef<Record<string, string>>({});
+
+  const saveCardNow = useCallback(
+    (fileId: string, content: string) => {
+      if (!today) return;
+      if (content === cardLastSaved.current[fileId]) return;
+      cardLastSaved.current[fileId] = content;
+      saveFetcher.submit(
+        { date: today, cardFileId: fileId, content },
+        { method: "POST", action: "/fruits/daily-log", encType: "application/json" },
+      );
+    },
+    [today, saveFetcher],
+  );
+
+  const handleCardChange = useCallback(
+    (fileId: string, content: string) => {
+      setTodayCards((cards) =>
+        cards.map((c) => (c.fileId === fileId ? { ...c, content } : c)),
+      );
+      if (cardSaveTimers.current[fileId]) clearTimeout(cardSaveTimers.current[fileId]);
+      cardSaveTimers.current[fileId] = setTimeout(() => saveCardNow(fileId, content), 2000);
+    },
+    [saveCardNow],
+  );
+
+  // ── Add a card ──────────────────────────────────────────────────
+  // Two steps, both driven off the SAME fetcher response: (1) get/create
+  // the card's own vault file server-side, (2) append its `::card{...}`
+  // mount point to the readme's own markdown — the SAME `saveNow` path
+  // any other edit uses, so the reference is persisted immediately rather
+  // than waiting for the next debounced readme save.
+
+  const createCardFetcher = useFetcher<typeof action>();
+
+  const handleCreateCard = useCallback(
+    (projectFolderId: string) => {
+      if (!today) return;
+      createCardFetcher.submit(
+        { date: today, createCardForProject: projectFolderId },
+        { method: "POST", action: "/fruits/daily-log", encType: "application/json" },
+      );
+    },
+    [today, createCardFetcher],
+  );
+
+  useEffect(() => {
+    const data = createCardFetcher.data;
+    if (!data || !("card" in data) || !data.card) return;
+    const card = data.card;
+    setTodayCards((cards) =>
+      cards.some((c) => c.fileId === card.fileId) ? cards : [...cards, card],
+    );
+    // Reads `todayContent` from THIS render's closure rather than a
+    // `setTodayContent` updater function — an updater must be a pure
+    // function of its previous value (React may invoke it more than
+    // once), so the side-effecting `saveNow` call below can't safely live
+    // inside one. Safe to read directly here: nothing else changes
+    // `todayContent` between this card being created and this effect
+    // running.
+    const next = appendCardDirectiveMarkdown(todayContent, {
+      file: card.fileName,
+      projectFolderId: card.projectFolderId,
+    });
+    setTodayContent(next);
+    saveNow(next);
+    // Only ever re-run when the fetcher actually delivers a NEW response.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createCardFetcher.data]);
+
+  // ─────────────────────────────────────────────────────
 
   return (
     <AppLayout>
@@ -436,20 +698,43 @@ export default function DailyLogPage() {
           margin: "0 auto",
         }}
       >
-        {/* Today's editable entry — at the top of the page */}
-        <TodayLogEntry
-          date={today}
-          today={today}
-          content={todayContent}
-          onChange={handleChange}
-        />
+        {/* Today's editable entry — at the top of the page. Deliberately
+            NOT rendered at all until `today` resolves (skips the SSR/
+            initial-hydration window where it would otherwise mount with
+            a placeholder `markdown=""` before real content is known) —
+            confirmed by direct testing that mounting with a placeholder
+            value here is NOT just a harmless visual flash: `OxEditor`'s
+            own initial reseed can itself be dirty enough to echo an
+            empty `onChange("")` back up, which can race with (and,
+            depending on timing, overwrite) the hydration effect's
+            `setTodayContent(realContent)` call right after — silently
+            replacing real saved content with blank. Skipping the render
+            entirely sidesteps the race rather than trying to out-time
+            it. */}
+        {today && (
+          <TodayLogEntry
+            date={today}
+            today={today}
+            content={todayContent}
+            onChange={handleChange}
+            cards={todayCards}
+            onChangeCardContent={handleCardChange}
+            projectFolders={projectFolders}
+            onCreateCard={handleCreateCard}
+          />
+        )}
 
-        {/* Past entries: newest first */}
-        <div style={{ marginTop: "60px" }}>
-          {pastEntries.map((entry) => (
-            <PastLogEntry key={entry.date} entry={entry} today={today} />
-          ))}
-        </div>
+        {/* Past entries: newest first — no extra wrapper spacing needed,
+            `DayContainer`'s own `marginBottom` already separates every
+            day consistently, Today included. */}
+        {pastEntries.map((entry) => (
+          <PastLogEntry
+            key={entry.date}
+            entry={entry}
+            today={today}
+            cards={cardsByDate[entry.date] ?? []}
+          />
+        ))}
       </div>
     </AppLayout>
   );

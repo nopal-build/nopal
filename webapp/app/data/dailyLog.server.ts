@@ -3,6 +3,8 @@ import { Data, query, formatRecord, upsert, remove } from "./generic.server";
 import {
   upsertDailyLogReadme,
   updateFileRef,
+  createFileRef,
+  getFolderById,
   getOrCreateVaultFolder,
   ensureVaultRootFolders,
 } from "./vault.server";
@@ -164,7 +166,143 @@ export async function deleteDailyLogCache(
   await remove("daily_logs", `${humanId}_${date}`);
 }
 
-// ─── New-user provisioning ────────────────────────────────────────────────────
+// ─── Cards (`::card{file="..."}`) ──────────────────────────────────────────
+// A Card's OWN markdown file lives alongside that day's `readme.md`
+// (`daily-logs/YYYY-MM-DD/`), marked `source: "daily_log_card"` (same
+// locking convention as the day's own readme — see `isFileRefLocked`) and
+// `project_folder_id` (which project it's for). The day's `readme.md` is
+// the source of truth for WHICH cards exist/their order (each one gets a
+// `::card{file="..."}` leaf directive inserted into it) — these helpers
+// only resolve WHERE a card's own content lives, for SSR-friendly loading
+// (`getDailyLogCards`) and for creating one (`createDailyLogCard`).
+
+export type DailyLogCard = {
+  fileId: string;
+  fileName: string;
+  projectFolderId: string;
+  /** Resolved fresh from the project folder's CURRENT name every time —
+   * never cached on the card itself, so a later project rename is
+   * reflected immediately without touching every past card. */
+  projectName: string;
+  content: string;
+};
+
+/** Deterministic from the project's folder id (not its name) — so
+ * re-clicking the same project's "Add a card" chip twice reliably reuses
+ * the SAME file (see `createDailyLogCard`'s idempotency below) and two
+ * differently-named projects can never collide onto the same filename
+ * via slug sanitization. */
+function cardFileName(projectFolderId: string): string {
+  return `card-${projectFolderId}.md`;
+}
+
+/**
+ * Every Card that already exists for `date` — for the daily-log loader to
+ * pass down as SSR-ready content (so opening the day never shows an empty
+ * flash before a client-side fetch resolves). Only ever READS; the day's
+ * folder is expected to already exist (every date passed here comes from
+ * an already-saved day, which means `upsertDailyLogReadme` already ran).
+ */
+export async function getDailyLogCards(
+  humanId: string,
+  date: string,
+): Promise<DailyLogCard[]> {
+  const rootFolder = await getOrCreateVaultFolder(humanId, "daily-logs", null);
+  const dateFolder = await getOrCreateVaultFolder(humanId, date, rootFolder._id);
+  const result = await query<[FileRef[]]>(
+    `SELECT * FROM file_refs
+     WHERE human_id = $humanId
+       AND folder_id = $folderId
+       AND source = 'daily_log_card'
+     ORDER BY created_at ASC`,
+    { humanId, folderId: dateFolder._id },
+  );
+  const files = (result?.[0] ?? []).map((r) => formatRecord(r as unknown as FileRef));
+
+  const cards: DailyLogCard[] = [];
+  for (const file of files) {
+    if (!file.project_folder_id) continue;
+    const projectFolder = await getFolderById(file.project_folder_id);
+    cards.push({
+      fileId: file._id,
+      fileName: file.name,
+      projectFolderId: file.project_folder_id,
+      projectName: projectFolder?.name ?? "Unknown project",
+      content: file.content ?? "",
+    });
+  }
+  return cards;
+}
+
+/**
+ * Creates (or, if one already exists for this project/date, reuses) that
+ * project's Card for `date` — idempotent BY DESIGN: re-clicking the same
+ * project's "Add a card" chip twice, or re-adding a `::card{...}` directive
+ * a human previously removed from the readme, always resolves back to the
+ * SAME underlying file/content rather than creating a duplicate. This is
+ * what makes one-card-per-project-per-day a property of the FILE layer,
+ * not just a client-side UI filter (see `AddCardSection` in the route).
+ */
+export async function createDailyLogCard(
+  humanId: string,
+  date: string,
+  projectFolderId: string,
+): Promise<DailyLogCard> {
+  const rootFolder = await getOrCreateVaultFolder(humanId, "daily-logs", null);
+  const dateFolder = await getOrCreateVaultFolder(humanId, date, rootFolder._id);
+  const fileName = cardFileName(projectFolderId);
+
+  const projectFolder = await getFolderById(projectFolderId);
+  const projectName = projectFolder?.name ?? "Unknown project";
+
+  const existingResult = await query<[FileRef[]]>(
+    `SELECT * FROM file_refs
+     WHERE human_id = $humanId AND folder_id = $folderId AND name = $fileName
+     LIMIT 1`,
+    { humanId, folderId: dateFolder._id, fileName },
+  );
+  const existing = existingResult?.[0]?.[0]
+    ? formatRecord(existingResult[0][0] as unknown as FileRef)
+    : null;
+
+  if (existing) {
+    return {
+      fileId: existing._id,
+      fileName: existing.name,
+      projectFolderId,
+      projectName,
+      content: existing.content ?? "",
+    };
+  }
+
+  const created = await createFileRef({
+    human_id: humanId,
+    name: fileName,
+    content: "",
+    content_type: "text/markdown",
+    folder_id: dateFolder._id,
+    source: "daily_log_card",
+    date,
+    project_folder_id: projectFolderId,
+  });
+  if (!created) throw new Error("Failed to create daily log card");
+
+  return {
+    fileId: created._id,
+    fileName: created.name,
+    projectFolderId,
+    projectName,
+    content: created.content ?? "",
+  };
+}
+
+/** Plain content update — a Card's content doesn't need `readme.md`'s own
+ * md_version snapshotting; it's a much smaller, single-project scope, and
+ * per-day granularity already gives it a natural history via the day
+ * itself. */
+export async function saveDailyLogCard(fileId: string, content: string): Promise<void> {
+  await updateFileRef(fileId, { content });
+}
 
 const SAMPLE_LOG_MARKDOWN = `# Welcome to your Daily Log
 

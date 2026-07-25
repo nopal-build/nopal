@@ -1,0 +1,22 @@
+/* Daily Log day-framing styles — promoted from the `daily-log-v2` visual
+   mockup once its design settled; shared by BOTH the real route
+   (`fruits_.daily-log.tsx`) and the mockup (`fruits_.daily-log-v2.tsx`) via
+   `components/DailyLogDay.tsx`'s `DayContainer`/`DayTitle`, so the two
+   can never visually drift apart again. `--foreground`/`--midground` and
+   their `--dark-*` counterparts don't auto-swap by themselves (see
+   root.css), so anything using them needs its own light/dark pair like
+   this. */
+
+.daily-log-day {
+  border: 1px solid var(--midground);
+  box-shadow: 0 0 8px var(--farground);
+  border-radius: 8px;
+  background: #fffefc;
+}
+@media (prefers-color-scheme: dark) {
+  .daily-log-day {
+    border-color: var(--dark-midground);
+    box-shadow: 0 0 8px var(--dark-farground);
+    background: #513f57;
+  }
+}

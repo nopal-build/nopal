@@ -37,9 +37,11 @@ export async function createFileRef(data: {
   content_hash?: string | null;
   folder_id?: string | null;
   size?: number | null;
-  source?: "daily_log";
-  /** YYYY-MM-DD — set for daily_log files. */
+  source?: "daily_log" | "daily_log_card";
+  /** YYYY-MM-DD — set for daily_log/daily_log_card files. */
   date?: string;
+  /** Which project folder a `daily_log_card` file is for. */
+  project_folder_id?: string | null;
 }): Promise<FileRef | undefined> {
   const now = new Date().toISOString();
   const result = await upsert("file_refs", {
@@ -55,6 +57,7 @@ export async function createFileRef(data: {
     size: data.size ?? null,
     ...(data.source ? { source: data.source } : {}),
     ...(data.date ? { date: data.date } : {}),
+    ...(data.project_folder_id ? { project_folder_id: data.project_folder_id } : {}),
     created_at: now,
     updated_at: now,
   });
@@ -568,6 +571,26 @@ export async function ensureVaultRootFolders(
     roots.push(created);
   }
   return roots;
+}
+
+/**
+ * Every project (a direct child folder of the `projects` vault root) the
+ * human owns — the simple, folder-name-is-the-project-name notion the
+ * `vault` skill describes, deliberately NOT the heavier `resolveProjectManifest`
+ * machinery in `project.server.ts` (which additionally requires a valid
+ * `README.md` manifest and exists for the project detail PAGE, not for
+ * "what projects exist at all"). Used by the Daily Log's Card feature to
+ * offer real projects instead of a mock list. Scoped to the human's OWN
+ * projects only — projects shared with them by someone else are not
+ * (yet) offered as Card targets; see the `oxmarkdown`/`vault` skills for
+ * this being a deliberate, tracked scope line, not an oversight.
+ */
+export async function getProjectFolders(humanId: string): Promise<VaultFolder[]> {
+  const roots = await ensureVaultRootFolders(humanId);
+  const projectsRoot = roots.find((r) => r.vault_root_key === "projects");
+  if (!projectsRoot) return [];
+  const { folders } = await listFolderChildren(humanId, projectsRoot._id);
+  return folders;
 }
 
 /**

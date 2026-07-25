@@ -669,6 +669,75 @@
   flex-shrink: 0;
 }
 
+/* ── Card directive (`::card{file="..."}`) ──────────────────
+   A Card's own separate vault file, mounted here as a leaf directive —
+   bleeds outward past `.ox-content`'s own gutters on BOTH sides (a
+   negative margin exactly canceling them, plus a matching inward padding
+   on the header row that cancels THAT), so it visually "sits on top of"
+   the day's frame while its own text still lands on the same column as
+   everything else — genuinely overhanging the day frame's own edge by
+   `8px` on each side (matching the `daily-log-v2` mockup's own
+   `CARD_BLEED`), not just reaching it.
+
+   `.ox-content`'s `overflow-x: hidden` clips any descendant's bleed at
+   `.ox-content`'s OWN border-box edge — no matter how large a negative
+   margin the descendant itself uses. Confirmed directly: a card can
+   never bleed past that edge on its own. Padding doesn't move that edge
+   either (it's INSIDE the border-box) — only `.ox-content`'s OWN margin
+   does. So the OUTER prose editor that hosts a Card needs `.ox-card-host`
+   (below): a small negative margin that widens `.ox-content`'s OWN
+   border-box by exactly the overhang amount, with a matching INCREASE to
+   its padding so the prose text's own position doesn't shift at all —
+   only the (invisible, until something bleeds into it) edge of the box
+   moves. This card's own bleed then exactly cancels that WIDER padding,
+   landing its edge at `.ox-card-host`'s new, wider border-box edge —
+   which sits exactly `8px` past the day frame's visual border (`DayContainer`
+   itself adds no padding of its own — `components/DailyLogDay.tsx`).
+   `.good-box` (root.css) supplies the actual fill/border look — nothing
+   card-specific there. */
+.ox-card-directive {
+  margin: 0 calc(-1 * (var(--ox-grid) + 8px)) 16px calc(-1 * (var(--ox-grid) + 8px));
+  padding: 8px;
+}
+
+/* Applied to the OUTER prose `<OxEditor>` in `fruits_.daily-log.tsx`
+ * (the one a `::card{...}` directive is nested inside) — see
+ * `.ox-card-directive`'s own comment above for the full reasoning. NOT
+ * applied to a card's own (nested) `.ox-content`, or anywhere a
+ * `::card{...}` can't appear — there's nothing for it to make room for
+ * there. */
+.ox-content.ox-card-host {
+  margin: 0 -8px;
+  padding: 0 calc(var(--ox-grid) + 8px);
+}
+.ox-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 var(--ox-grid) 8px var(--ox-grid);
+  border-bottom: 1px solid var(--midground);
+  padding-bottom: 10px;
+}
+.ox-card-header-info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+.ox-card-open-link {
+  text-decoration: underline;
+  white-space: nowrap;
+}
+/* A Card's content area keeps its OWN `.ox-content` (the nested
+   `<OxEditor>` renders one), so this wrapper needs no padding/background
+   of its own — just lays out the header above the content. */
+.ox-card-content {
+  min-width: 0;
+}
+
+/* ── Editing mode: checklist ─────────────────────── */
 /* ── Editing mode: checklist ───────────────────────────────────────── */
 /* `@lexical/list`'s native checklist shape differs from Interacting mode's
    static markup: there's no separate `.ox-task-checkbox` glyph element —

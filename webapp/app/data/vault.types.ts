@@ -29,10 +29,19 @@ export type FileRef = {
   content_type: string;
   folder_id: string | null;
   size: number | null;
-  /** Set when the file was uploaded from the Daily Log. */
-  source?: "daily_log";
-  /** YYYY-MM-DD log date — only present when source === "daily_log". */
+  /** Set when the file was uploaded from the Daily Log, or is itself a
+   * Card's own markdown file living alongside a day's `readme.md` — see
+   * the `vault` skill's Daily Log section. */
+  source?: "daily_log" | "daily_log_card";
+  /** YYYY-MM-DD log date — present when source is "daily_log" OR
+   * "daily_log_card" (a Card belongs to exactly one day, same as the
+   * day's own `readme.md`). */
   date?: string;
+  /** Which project (a folder under the `projects` vault root) this Card
+   * is for — only present when source === "daily_log_card". Stable even
+   * if the project folder is later renamed; the CURRENT display name is
+   * always resolved fresh from this id, never cached on the card itself. */
+  project_folder_id?: string | null;
   created_at: string;
   updated_at: string;
   /** How the file is shared when accessed via a shared folder. Defaults to "view". */

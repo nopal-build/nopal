@@ -12,7 +12,7 @@ import { AppLayout } from "../components/AppLayout";
 import { Chip } from "../components/Chip";
 import OxEditor from "../components/OxEditor";
 import { OxEditorGroup } from "../oxmarkdown/OxEditorGroup";
-import "../styles/daily-log-v2-mock.css";
+import { DayContainer, DayTitle } from "../components/DailyLogDay";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -22,55 +22,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 let mockCardCounter = 0;
 
-// ─── Day container ──────────────────────────────────────────────────────────
-// One bordered, rounded frame per day, holding that day's prose + cards +
-// release log. Its own left padding is `0` — the OxEditor content inside
-// already reserves the `41px` gutter itself (`--ox-grid`) — but its RIGHT
-// padding matches that same `41px`, so the whole frame reads as a
-// symmetric column instead of the usual left-only gutter.
-
-function DayContainer({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      className="dlv2-container ox-tokens"
-      style={{ padding: "24px var(--ox-grid, 41px) 24px 0", marginBottom: "64px" }}
-    >
-      {children}
-    </div>
-  );
-}
-
-/** A day's heading ("Today"/"Yesterday"/...) — same left gutter as
- * everything below it (`--ox-grid`), same font size across every day
- * (deliberately unified — an earlier version had "Today" and "Yesterday"
- * at two different sizes), and no underline (a border-bottom here read as
- * a stray rule sitting above the day's own framed container, not as part
- * of it). `className`/`style` let a caller vary color/weight per day
- * (e.g. "Today" reads more prominent than a locked past day) without
- * duplicating the shared gutter/size/spacing. */
-function DayTitle({
-  children,
-  className,
-  style,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <div
-      className={className}
-      style={{
-        paddingLeft: "var(--ox-grid, 41px)",
-        fontFamily: "monospace",
-        fontSize: "20px",
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
+// `DayContainer`/`DayTitle` now live in `components/DailyLogDay.tsx` —
+// promoted out of this file once their design settled, so the REAL route
+// (`fruits_.daily-log.tsx`) and this mockup share one real implementation
+// instead of two that could drift apart.
 
 // ─── Prose / Card ───────────────────────────────────────────────────────────
 
@@ -122,9 +77,14 @@ type CardState = {
  * card-specific), bled outward past its `DayContainer` on both sides via a
  * negative margin, with an equal inward padding that exactly cancels it —
  * so the card visually "sits on top of" the day's frame while its own text
- * still lands on the exact same column as everything else. */
+ * still lands on the exact same column as everything else. Symmetric on
+ * BOTH sides (`DayContainer` itself adds no padding of its own on
+ * either side — `components/DailyLogDay.tsx` — so `CARD_BLEED` is the
+ * whole story here, unlike the REAL `::card{...}` directive's version,
+ * which additionally has to cross `.ox-content`'s OWN gutter first since
+ * it lives nested inside the prose's editor, not as a sibling of it like
+ * this mockup's `CardBox` — see `oxmarkdown.css`'s `.ox-card-directive`). */
  const CARD_BLEED = 8;
- const GUTTER = 41; // matches --ox-grid — the day container's own right inset
 
  function CardBox({
    card,
@@ -142,7 +102,7 @@ type CardState = {
        className="good-box ox-tokens"
        style={{
          marginLeft: `-${CARD_BLEED}px`,
-         marginRight: `-${GUTTER + CARD_BLEED}px`,
+         marginRight: `-${CARD_BLEED}px`,
          padding: `${CARD_BLEED}px`,
          marginBottom: "16px",
        }}

@@ -67,7 +67,12 @@ import {
 import type { OxInteractive } from "../oxmarkdown/interactive";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
-import { OxTreeRenderer, DirectiveRegistryContext } from "./OxRenderer";
+import {
+  OxTreeRenderer,
+  DirectiveRegistryContext,
+  CardResolverContext,
+  UploadFileContext,
+} from "./OxRenderer";
 import { OxDirectiveNode, OxOpaqueNode } from "../oxmarkdown/editingNodes";
 import {
   exportOxDocument,
@@ -89,6 +94,7 @@ import FileDirectiveArrowPlugin from "../oxmarkdown/FileDirectiveArrowPlugin";
 import AddFileLinkPlugin from "../oxmarkdown/AddFileLinkPlugin";
 import FileCaptionArrowPlugin from "../oxmarkdown/FileCaptionArrowPlugin";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
+import type { CardResolver } from "../oxmarkdown/cardDirective";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import "../styles/oxmarkdown.css";
 
@@ -139,6 +145,14 @@ export interface OxEditorProps {
    * caller (e.g. the Daily Log route) owns where bytes actually go. Omit
    * for a browser-only preview with no server persistence. */
   onUploadFile?: UploadFileFn;
+  /** Resolves a `::card{file="..."}` directive's `file` attribute to real
+   * project/content data — see `oxmarkdown/cardDirective.ts`'s
+   * `CardResolver`. `OxEditor` itself stays ignorant of vault/project
+   * specifics, same spirit as `onUploadFile`/`mentionSearch`. Omit to
+   * leave any `::card{...}` directive showing a plain "Loading card…"
+   * placeholder (e.g. a caption or other nested editor that never needs
+   * to resolve cards itself). */
+  resolveCard?: CardResolver;
   /** How many rows tall this editor's minimum clickable canvas is — see
    * `oxmarkdown/MinRowsPlugin.tsx`. Defaults to a full 4-row canvas (a
    * card/prose editor); a `::file{...}` directive's caption editor passes
@@ -172,6 +186,7 @@ function OxInteractingSurface({
   directives,
   theme,
   className,
+  resolveCard,
 }: OxEditorProps) {
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
   const [selected, setSelected] = useState<object | null>(null);
@@ -202,7 +217,19 @@ function OxInteractingSurface({
 
   return (
     <div className={`ox-content ox-tokens${className ? ` ${className}` : ""}`} style={style}>
-      <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} />
+      {/* Interacting mode ALSO provides both contexts (not just Editing
+          mode) — a `::card{...}` directive rendered here (`CardDirectiveStatic`
+          in `OxRenderer.tsx`) may need to mount a REAL nested
+          `<OxEditor mode="interacting">` for its own content, and reaches
+          the component via `OxEditorContext` for the same "avoid a
+          circular import" reason `editingNodes.tsx` does. */}
+      <DirectiveRegistryContext.Provider value={directives}>
+        <CardResolverContext.Provider value={resolveCard}>
+          <OxEditorContext.Provider value={OxEditor}>
+            <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} resolveCard={resolveCard} />
+          </OxEditorContext.Provider>
+        </CardResolverContext.Provider>
+      </DirectiveRegistryContext.Provider>
     </div>
   );
 }
@@ -235,6 +262,7 @@ function OxEditingSurface({
   allowFileAttachments,
   showAddFileLink,
   onUploadFile,
+  resolveCard,
   minRows,
   fileCaptionFlow,
   placeholder = "Start typing — try “/” for commands…",
@@ -282,8 +310,11 @@ function OxEditingSurface({
       <DirectiveRegistryContext.Provider value={directives}>
         {/* Provides itself (`OxEditor`, this module's own default export) so
             `editingNodes.tsx` can mount a nested `<OxEditor>` for a
-            `::file{...}` directive's caption without a circular import —
-            see `oxmarkdown/OxEditorContext.tsx`. */}
+            `::file{...}` directive's caption, or a `::card{...}`
+            directive's own content, without a circular import — see
+            `oxmarkdown/OxEditorContext.tsx`. */}
+        <CardResolverContext.Provider value={resolveCard}>
+        <UploadFileContext.Provider value={onUploadFile}>
         <OxEditorContext.Provider value={OxEditor}>
           <LexicalComposer initialConfig={initialConfig}>
             <div
@@ -334,6 +365,8 @@ function OxEditingSurface({
             )}
           </LexicalComposer>
         </OxEditorContext.Provider>
+        </UploadFileContext.Provider>
+        </CardResolverContext.Provider>
       </DirectiveRegistryContext.Provider>
     </div>
   );

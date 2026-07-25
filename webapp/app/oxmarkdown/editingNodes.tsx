@@ -53,7 +53,10 @@ import {
 import type { OxInteractive } from "./interactive";
 import {
   DirectiveRegistryContext,
+  CardResolverContext,
+  UploadFileContext,
   FileDirectiveLayout,
+  CardDirectiveLayout,
   InteractiveDirective,
   OxStaticNodes,
 } from "../components/OxRenderer";
@@ -172,6 +175,8 @@ function OxDirectiveDecorator({
   const [editor] = useLexicalComposerContext();
   const [isSelected, setSelected] = useLexicalNodeSelection(nodeKey);
   const directives = useContext(DirectiveRegistryContext);
+  const resolveCard = useContext(CardResolverContext);
+  const onUploadFile = useContext(UploadFileContext);
   // See this component's header comment (below the JSDoc) for why this
   // comes from a context rather than a direct import of `OxEditor.tsx`.
   const OxEditorComponent = useContext(OxEditorContext);
@@ -241,6 +246,43 @@ function OxDirectiveDecorator({
               fileCaptionFlow={{ outerEditor: editor, nodeKey }}
             />
           ) : null
+        }
+      />
+    );
+  }
+
+  // `::card{file="..."}` — same built-in category as `::file{...}` above,
+  // see `oxmarkdown/cardDirective.ts`'s header. Unlike a file's caption,
+  // a Card's content is resolved from OUTSIDE (`resolveCard`, via
+  // `CardResolverContext`) rather than stored in an attribute on this
+  // directive — it's a whole separate vault file with its own load/save
+  // lifecycle. Allows file attachments (`allowFileAttachments`/
+  // `showAddFileLink`), unlike a caption, which deliberately doesn't.
+  if (mdastNode.name === "card" && mdastNode.type === "leafDirective") {
+    const resolved = resolveCard?.(attrs.file);
+    return (
+      <CardDirectiveLayout
+        projectName={resolved?.projectName ?? "Card"}
+        projectHref={resolved?.projectHref ?? "#"}
+        onRemove={() => {
+          editor.update(() => {
+            const node = $getNodeByKey(nodeKey);
+            node?.remove();
+          });
+        }}
+        content={
+          resolved && OxEditorComponent ? (
+            <OxEditorComponent
+              mode="editing"
+              markdown={resolved.markdown}
+              onChange={resolved.onChange}
+              allowFileAttachments
+              showAddFileLink
+              onUploadFile={onUploadFile}
+            />
+          ) : (
+            <span className="subtle-text">Loading card…</span>
+          )
         }
       />
     );

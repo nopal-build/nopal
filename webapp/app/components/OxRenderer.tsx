@@ -18,7 +18,7 @@
  * instead, modeled off the same design language.
  */
 
-import { createContext, Fragment, useMemo, useState } from "react";
+import { createContext, Fragment, useContext, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { Definition, RootContent } from "mdast";
 import {
@@ -33,6 +33,9 @@ import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
 import type { OxInteractive } from "../oxmarkdown/interactive";
 import OxPopover from "../oxmarkdown/OxPopover";
+import type { CardResolver } from "../oxmarkdown/cardDirective";
+import type { UploadFileFn } from "../oxmarkdown/fileDirective";
+import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import { CircleButton } from "./CircleButton";
 import "../styles/oxmarkdown.css";
 
@@ -48,6 +51,10 @@ export interface OxRendererProps {
   /** Turns on Interacting-mode rendering for checkboxes/directives — see
    * `oxmarkdown/interactive.ts`. Supplied by `OxEditor`. */
   interactive?: OxInteractive;
+  /** Resolves a `::card{file="..."}` directive's `file` attribute to real
+   * project/content data — see `oxmarkdown/cardDirective.ts`. Supplied by
+   * `OxEditor`. */
+  resolveCard?: CardResolver;
   className?: string;
 }
 
@@ -56,6 +63,7 @@ export default function OxRenderer({
   directives,
   theme,
   interactive,
+  resolveCard,
   className,
 }: OxRendererProps) {
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
@@ -66,7 +74,7 @@ export default function OxRenderer({
       className={`ox-content ox-tokens${className ? ` ${className}` : ""}`}
       style={style}
     >
-      <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} />
+      <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} resolveCard={resolveCard} />
     </div>
   );
 }
@@ -79,6 +87,20 @@ export default function OxRenderer({
  * threaded through Lexical's node model (which only holds plain data, not
  * arbitrary React props). */
 export const DirectiveRegistryContext = createContext<DirectiveRegistry | undefined>(undefined);
+
+/** Same idea as `DirectiveRegistryContext`, for `::card{...}`'s
+ * `resolveCard` lookup — `OxEditor`'s Editing-mode decorator nodes
+ * (`oxmarkdown/editingNodes.tsx`) need to reach it without a prop threaded
+ * through Lexical's node model (which only holds plain data). */
+export const CardResolverContext = createContext<CardResolver | undefined>(undefined);
+
+/** Same idea again, for a `::card{...}` directive's nested editor to reach
+ * the OUTER editor's own `onUploadFile` — a Card allows file attachments
+ * (unlike a `::file{...}` caption, which deliberately doesn't), and
+ * uploads should land in the exact same place the outer document's OWN
+ * attachments do (e.g. that day's vault folder), not a second, divergent
+ * upload path. */
+export const UploadFileContext = createContext<UploadFileFn | undefined>(undefined);
 
 /** Renders a plain list of mdast nodes with the same static logic as
  * `OxRenderer`/`OxTreeRenderer`, but with no `interactive` — used where
@@ -104,19 +126,23 @@ export interface OxTreeRendererProps {
   doc: OxDocument;
   directives?: DirectiveRegistry;
   interactive?: OxInteractive;
+  resolveCard?: CardResolver;
 }
 
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
-export function OxTreeRenderer({ doc, directives, interactive }: OxTreeRendererProps) {
+export function OxTreeRenderer({ doc, directives, interactive, resolveCard }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
-  return <>{renderBlockNodes(doc.children, { directives, definitions, interactive })}</>;
+  return (
+    <>{renderBlockNodes(doc.children, { directives, definitions, interactive, resolveCard })}</>
+  );
 }
 
 interface RenderCtx {
   directives?: DirectiveRegistry;
   definitions: Map<string, Definition>;
   interactive?: OxInteractive;
+  resolveCard?: CardResolver;
 }
 
 function collectDefinitions(doc: OxDocument): Map<string, Definition> {
@@ -392,6 +418,19 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     return <FileDirectiveStatic key={key} node={node} directives={ctx.directives} />;
   }
 
+  // `::card{file="..."}` — same category, see `oxmarkdown/cardDirective.ts`.
+  if (node.type === "leafDirective" && node.name === "card") {
+    return (
+      <CardDirectiveStatic
+        key={key}
+        node={node}
+        directives={ctx.directives}
+        interactive={ctx.interactive}
+        resolveCard={ctx.resolveCard}
+      />
+    );
+  }
+
   const attrs = directiveAttrs(node);
   const renderer = ctx.directives?.[node.name];
 
@@ -560,6 +599,130 @@ function FileDirectiveStatic({
       caption={
         captionDoc ? <OxStaticNodes nodes={captionDoc.children} directives={directives} /> : null
       }
+    />
+  );
+}
+
+// ── Card directive (`::card{file="..."}`) ──────────────────────────────
+// A Card's own vault file is mounted here as a whole nested document, not
+// a small caption like `::file{...}` — see `oxmarkdown/cardDirective.ts`
+// for why its content is resolved from OUTSIDE (`resolveCard`) rather than
+// stored in an attribute. Shares one layout shell (header + content slot)
+// across both the static path here and the live Editing-mode path
+// (`oxmarkdown/editingNodes.tsx`).
+
+/** `contentEditable={false}` on the root for the SAME reason
+ * `FileDirectiveLayout` needs it: the header (project name/link) is
+ * presentational, not real editable text, so without this a click there
+ * could still place a native caret. The nested content area is
+ * unaffected — a real editable region works normally inside a
+ * `contenteditable="false"` ancestor (confirmed already for `::file`'s
+ * caption; see the oxmarkdown skill). */
+export function CardDirectiveLayout({
+  projectName,
+  projectHref,
+  content,
+  onRemove,
+}: {
+  projectName: string;
+  projectHref: string;
+  content: ReactNode;
+  onRemove?: () => void;
+}) {
+  return (
+    <div className="ox-card-directive good-box" contentEditable={false}>
+      <div className="ox-card-header">
+        <div className="ox-card-header-info">
+          <span className="font-bold purple-light-text truncate">{projectName}</span>
+          <a href={projectHref} className="text-xs subtle-text ox-card-open-link">
+            open project →
+          </a>
+        </div>
+        {onRemove && (
+          <CircleButton
+            className="circle-btn-red"
+            onClick={onRemove}
+            aria-label={`Remove ${projectName} card`}
+          >
+            <RemoveFileIcon />
+          </CircleButton>
+        )}
+      </div>
+      <div className="ox-card-content">{content}</div>
+    </div>
+  );
+}
+
+/**
+ * The read-only path — used both by a fully passive `OxRenderer` (no
+ * `interactive` at all, e.g. a public unauthenticated view) AND by
+ * Interacting mode (`interactive` present). The two render the card's
+ * OWN content differently:
+ *
+ * - No `interactive` at all: plain static markdown via `OxStaticNodes`,
+ *   matching how the REST of a non-interactive render behaves — no live
+ *   interaction of any kind, anywhere.
+ * - `interactive` present: the caller wants SOME live interaction
+ *   elsewhere in this document (task checkboxes, directive popovers), so
+ *   the card's own content gets a REAL nested `<OxEditor mode="interacting">`
+ *   instead of a second, bespoke static-render path — its own checkboxes/
+ *   file thumbnails all keep working, and edits (a checkbox toggle) flow
+ *   into `resolved.onChange`, never the OUTER document's `onChange`.
+ *   Reusing THE component (via `OxEditorContext`, avoiding a circular
+ *   import — see that file) rather than reimplementing Interacting mode's
+ *   own selection/commit logic a second time here.
+ */
+function CardDirectiveStatic({
+  node,
+  directives,
+  interactive,
+  resolveCard,
+}: {
+  node: DirectiveNode;
+  directives?: DirectiveRegistry;
+  interactive?: OxInteractive;
+  resolveCard?: CardResolver;
+}) {
+  const attrs = directiveAttrs(node);
+  const resolved = resolveCard?.(attrs.file);
+  const OxEditorComponent = useContext(OxEditorContext);
+
+  if (!resolved) {
+    // Still loading, or this render context has no card data at all (e.g.
+    // no `resolveCard` was ever supplied) — show the shell so the row's
+    // presence is still visible rather than silently vanishing.
+    return (
+      <CardDirectiveLayout
+        projectName="Card"
+        projectHref="#"
+        content={<span className="subtle-text">Loading card…</span>}
+      />
+    );
+  }
+
+  if (interactive && OxEditorComponent) {
+    return (
+      <CardDirectiveLayout
+        projectName={resolved.projectName}
+        projectHref={resolved.projectHref}
+        content={
+          <OxEditorComponent
+            mode="interacting"
+            markdown={resolved.markdown}
+            onChange={resolved.onChange}
+            directives={directives}
+          />
+        }
+      />
+    );
+  }
+
+  const cardDoc = parseOxDocument(resolved.markdown);
+  return (
+    <CardDirectiveLayout
+      projectName={resolved.projectName}
+      projectHref={resolved.projectHref}
+      content={<OxStaticNodes nodes={cardDoc.children} directives={directives} />}
     />
   );
 }
