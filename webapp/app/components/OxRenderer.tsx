@@ -33,6 +33,7 @@ import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
 import type { OxInteractive } from "../oxmarkdown/interactive";
 import OxPopover from "../oxmarkdown/OxPopover";
+import { CircleButton } from "./CircleButton";
 import "../styles/oxmarkdown.css";
 
 export interface OxRendererProps {
@@ -383,6 +384,14 @@ function renderTable(node: any, key: number, ctx: RenderCtx): ReactNode {
 }
 
 function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): ReactNode {
+  // `::file{...}` is a BUILT-IN interactable, not a caller-registered
+  // directive (same category as task checkboxes, not "gallery"/"csv-table")
+  // — see `oxmarkdown/fileDirective.ts`'s header. Handled before the
+  // registry lookup so it can't be shadowed by a caller's own "file" entry.
+  if (node.type === "leafDirective" && node.name === "file") {
+    return <FileDirectiveStatic key={key} node={node} directives={ctx.directives} />;
+  }
+
   const attrs = directiveAttrs(node);
   const renderer = ctx.directives?.[node.name];
 
@@ -415,6 +424,113 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     );
   }
   return <Fragment key={key}>{content}</Fragment>;
+}
+
+// ── File directive (`::file{...}`) ────────────────────────────────────
+// A fixed-size placeholder thumbnail plus a caption alongside it, always
+// its own full block row (`display: flex`, never `inline-block` — unlike
+// every OTHER directive, which shrink-to-fit via `InteractiveDirective`).
+// Bypasses `InteractiveDirective`'s generic attrs-popover entirely: a
+// raw-text-field editor for `caption` would be redundant with (and
+// confusing next to) the real rendering right there, and `name` is just
+// the file's own original filename — not something to hand-edit at all.
+// See `oxmarkdown/fileDirective.ts` for why this is a built-in
+// interactable, not a caller-registered directive.
+
+/** Just the X mark from the provided artwork — CircleButton itself
+ * supplies the circular hover background/border (`.circle-btn-red`,
+ * root.css), so only the two crossing strokes are needed here, not the
+ * circle that came with them in the original combined default/hover
+ * reference image. `stroke="currentColor"` (swapped from the original
+ * hardcoded `#A63B31`, which is `--red`'s own hex value) so it inherits
+ * whatever color `.circle-btn-red` sets, same adaptation as the "add
+ * file" paperclip icon. Paths otherwise UNCHANGED from what was given;
+ * `viewBox` cropped to "0 0 36 36" (the default X's own coordinates
+ * already sit centered within that — confirmed against the reference
+ * artwork's hover-state circle, `rx=17.5`/35px, positioned identically
+ * relative to ITS OWN X once the +44px horizontal offset between the
+ * two is subtracted) — matching CircleButton's 36px default size. */
+function RemoveFileIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9.99805 25.0003L24.1276 11" stroke="currentColor" strokeWidth="2" />
+      <path d="M26.0022 24.8008L11.457 11.2005" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+/** Shared presentational shell — both the STATIC path here and the LIVE
+ * Editing-mode path (`oxmarkdown/editingNodes.tsx`) render this same
+ * layout, differing only in what `caption` node they pass in (plain
+ * rendered markdown here; a real nested `<OxEditor>` there) and whether
+ * `onRemove` is supplied at all (only Editing mode can remove content —
+ * the static/Interacting-mode path passes nothing, so no button renders).
+ *
+ * `contentEditable={false}` on the root: without it, a click inside the
+ * thumbnail (plain presentational `<div>`, no real text/Lexical node
+ * behind it) could still place a native caret there — `OxDirectiveNode`'s
+ * own wrapper element doesn't set this itself (unlike `OxOpaqueNode`,
+ * which does), so this directive's OWN rendered content has to. The
+ * caption's nested `<OxEditor>` (Editing mode) is unaffected — a nested
+ * `contenteditable="true"` region works normally inside a
+ * `contenteditable="false"` ancestor, confirmed directly (same reasoning
+ * that makes nesting one live Lexical editor inside another safe at all;
+ * see the oxmarkdown skill). */
+export function FileDirectiveLayout({
+  name,
+  caption,
+  onRemove,
+}: {
+  name: string;
+  caption: ReactNode;
+  onRemove?: () => void;
+}) {
+  return (
+    <div className="ox-file-directive" contentEditable={false}>
+      <div className="ox-file-thumb" title={name} aria-hidden="true" />
+      <div className="ox-file-caption">{caption}</div>
+      {onRemove && (
+        // A dedicated `--ox-grid`-wide (41px) slot, centering the 36px
+        // button within it — CircleButton sets its own width/height via
+        // an inline style (from its `size` prop), which a CSS class can
+        // never override, so the centering has to live on this WRAPPER
+        // instead of trying to resize the button itself.
+        <div className="ox-file-remove-slot">
+          <CircleButton
+            className="circle-btn-red"
+            onClick={onRemove}
+            aria-label={`Remove ${name}`}
+          >
+            <RemoveFileIcon />
+          </CircleButton>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The read-only path: a plain `OxRenderer` with no `interactive`, or
+ * Interacting mode (which never allows free-form typing — see the
+ * oxmarkdown skill's Interacting-vs-Editing model) — so the caption is
+ * just rendered markdown, the same static way anything else here is,
+ * never a live editor. */
+function FileDirectiveStatic({
+  node,
+  directives,
+}: {
+  node: DirectiveNode;
+  directives?: DirectiveRegistry;
+}) {
+  const attrs = directiveAttrs(node);
+  const captionDoc = attrs.caption ? parseOxDocument(attrs.caption) : null;
+  return (
+    <FileDirectiveLayout
+      name={attrs.name ?? "file"}
+      caption={
+        captionDoc ? <OxStaticNodes nodes={captionDoc.children} directives={directives} /> : null
+      }
+    />
+  );
 }
 
 // ── Interactive: directive (text/leaf) ──────────────────────────────

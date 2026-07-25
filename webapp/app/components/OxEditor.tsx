@@ -58,7 +58,7 @@ import { ListNode, ListItemNode } from "@lexical/list";
 import { LinkNode } from "@lexical/link";
 import { OxListItemNode } from "../oxmarkdown/OxListItemNode";
 import { CodeNode } from "@lexical/code";
-import { $createParagraphNode, $getRoot } from "lexical";
+import { $createParagraphNode, $getRoot, type LexicalEditor } from "lexical";
 import {
   parseOxDocument,
   serializeOxDocument,
@@ -83,6 +83,10 @@ import ChecklistUpgradePlugin from "../oxmarkdown/ChecklistUpgradePlugin";
 import MentionPlugin from "../oxmarkdown/MentionPlugin";
 import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
 import CrossEditorArrowPlugin from "../oxmarkdown/CrossEditorArrowPlugin";
+import MinRowsPlugin, { DEFAULT_MIN_EDITOR_ROWS, normalizeMinRows } from "../oxmarkdown/MinRowsPlugin";
+import AddFileLinkPlugin from "../oxmarkdown/AddFileLinkPlugin";
+import FileCaptionArrowPlugin from "../oxmarkdown/FileCaptionArrowPlugin";
+import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import "../styles/oxmarkdown.css";
 
 // `OX_CHECK_LIST` first — see that file's header for why order matters in
@@ -113,6 +117,36 @@ export interface OxEditorProps {
    * and a stable id for this editor, unique within that group's `order`.
    * Ignored in Interacting mode (no roaming caret there to move). */
   groupId?: string;
+  /** Enables the `::file{...}` interactable's `/files` slash command (see
+   * `oxmarkdown/fileDirective.ts`) — e.g. on for both the daily prose AND
+   * cards, off for a file's OWN nested caption editor (so captions can't
+   * recursively offer file attachments inside a file's caption). Ignored
+   * in Interacting mode (inserting new content is Editing-only). */
+  allowFileAttachments?: boolean;
+  /** ADDITIONALLY shows the persistent "add file" link below the editor
+   * (a second trigger for the exact same action `/files` runs — see
+   * `oxmarkdown/AddFileLinkPlugin.tsx`). Only meaningful alongside
+   * `allowFileAttachments`; on for cards, off for plain prose (which
+   * still gets `/files`, just not the persistent link). */
+  showAddFileLink?: boolean;
+  /** How many rows tall this editor's minimum clickable canvas is — see
+   * `oxmarkdown/MinRowsPlugin.tsx`. Defaults to a full 4-row canvas (a
+   * card/prose editor); a `::file{...}` directive's caption editor passes
+   * `1` instead, so it starts small and simply grows with its own
+   * content. Anything below `0` is treated as `1`. */
+  minRows?: number;
+  /** Internal use only, set by `editingNodes.tsx` when mounting a
+   * `::file{...}` directive's caption editor — lets ArrowUp/ArrowDown flow
+   * into a sibling file directive's caption within the SAME outer
+   * document (see `oxmarkdown/fileCaptionFlow.ts`). Not meant to be
+   * passed by ordinary callers. */
+  fileCaptionFlow?: { outerEditor: LexicalEditor; nodeKey: string };
+  /** Editing-mode empty-state placeholder text. Defaults to the usual
+   * "Start typing…" hint; a `::file{...}` directive's caption editor
+   * passes `"image info"` instead — a short annotation field reads
+   * better with a hint about WHAT goes there than a generic typing
+   * prompt. */
+  placeholder?: string;
 }
 
 export default function OxEditor(props: OxEditorProps) {
@@ -188,6 +222,11 @@ function OxEditingSurface({
   mentionSearch,
   onMentionSelect,
   groupId,
+  allowFileAttachments,
+  showAddFileLink,
+  minRows,
+  fileCaptionFlow,
+  placeholder = "Start typing — try “/” for commands…",
 }: OxEditorProps) {
   const initialConfig = useMemo<InitialConfigType>(
     () => ({
@@ -222,38 +261,61 @@ function OxEditingSurface({
     [],
   );
   const style = theme ? (themeToStyle(theme) as CSSProperties) : undefined;
+  // Same clamping `MinRowsPlugin` itself uses for the REAL padded-row
+  // count — shared via `normalizeMinRows` so the visual `min-height`
+  // (`--ox-min-rows`, `oxmarkdown.css`) can't drift from actual behavior.
+  const cssMinRows = normalizeMinRows(minRows ?? DEFAULT_MIN_EDITOR_ROWS);
 
   return (
     <div className={`ox-content ox-tokens${className ? ` ${className}` : ""}`} style={style}>
       <DirectiveRegistryContext.Provider value={directives}>
-        <LexicalComposer initialConfig={initialConfig}>
-          <div style={{ position: "relative" }}>
-            <RichTextPlugin
-              contentEditable={<ContentEditable className="ox-editing-surface" />}
-              placeholder={
-                <div className="ox-editing-placeholder">Start typing — try “/” for commands…</div>
+        {/* Provides itself (`OxEditor`, this module's own default export) so
+            `editingNodes.tsx` can mount a nested `<OxEditor>` for a
+            `::file{...}` directive's caption without a circular import —
+            see `oxmarkdown/OxEditorContext.tsx`. */}
+        <OxEditorContext.Provider value={OxEditor}>
+          <LexicalComposer initialConfig={initialConfig}>
+            <div
+              style={
+                {
+                  position: "relative",
+                  "--ox-min-rows": cssMinRows,
+                } as CSSProperties
               }
-              ErrorBoundary={LexicalErrorBoundary}
-            />
-          </div>
-          <HistoryPlugin />
-          <ListPlugin />
-          <OxChecklistPlugin />
-          <LinkPlugin />
-          <TabIndentationPlugin />
-          <HorizontalRulePlugin />
-          <MarkdownShortcutPlugin transformers={OX_TRANSFORMERS} />
-          <MarkdownSyncPlugin markdown={markdown} onChange={onChange} />
-          <InteractablesPlugin />
-          <SlashCommandPlugin />
-          <DirectiveShortcutPlugin />
-          <MarkdownPastePlugin />
-          <ChecklistUpgradePlugin />
-          {mentionSearch && (
-            <MentionPlugin search={mentionSearch} onSelect={onMentionSelect} />
-          )}
-          {groupId && <CrossEditorArrowPlugin groupId={groupId} />}
-        </LexicalComposer>
+            >
+              <RichTextPlugin
+                contentEditable={<ContentEditable className="ox-editing-surface" />}
+                placeholder={<div className="ox-editing-placeholder">{placeholder}</div>}
+                ErrorBoundary={LexicalErrorBoundary}
+              />
+            </div>
+            <HistoryPlugin />
+            <ListPlugin />
+            <OxChecklistPlugin />
+            <LinkPlugin />
+            <TabIndentationPlugin />
+            <HorizontalRulePlugin />
+            <MarkdownShortcutPlugin transformers={OX_TRANSFORMERS} />
+            <MarkdownSyncPlugin markdown={markdown} onChange={onChange} />
+            <InteractablesPlugin />
+            <SlashCommandPlugin allowFileAttachments={allowFileAttachments} />
+            <DirectiveShortcutPlugin />
+            <MarkdownPastePlugin />
+            <ChecklistUpgradePlugin />
+            {mentionSearch && (
+              <MentionPlugin search={mentionSearch} onSelect={onMentionSelect} />
+            )}
+            {groupId && <CrossEditorArrowPlugin groupId={groupId} />}
+            {fileCaptionFlow && (
+              <FileCaptionArrowPlugin
+                outerEditor={fileCaptionFlow.outerEditor}
+                nodeKey={fileCaptionFlow.nodeKey}
+              />
+            )}
+            <MinRowsPlugin minRows={minRows} />
+            {allowFileAttachments && showAddFileLink && <AddFileLinkPlugin />}
+          </LexicalComposer>
+        </OxEditorContext.Provider>
       </DirectiveRegistryContext.Provider>
     </div>
   );

@@ -33,6 +33,7 @@ import {
   $createTextNode,
   $isElementNode,
   $isLineBreakNode,
+  $isParagraphNode,
   $isTextNode,
   type LexicalNode,
   type RootNode,
@@ -326,8 +327,25 @@ const blankLineJoin: Join = (left, right) => {
   return undefined; // no opinion — defer to the library's own default (one blank line)
 };
 
+/** Trailing wholly-empty paragraphs never carry meaning — whether they're
+ * `MinRowsPlugin`'s own padding (the reason this exists at all: that
+ * padding must never leak into a saved file as meaningless trailing
+ * blank lines) or just a user's own trailing Enter presses they never
+ * came back to fill in. Only trims from the very END of the document;
+ * a blank line BETWEEN real content stays exactly as significant as
+ * `isBlankLineNode`/`blankLineJoin` (below) already treat it. */
+function trimTrailingBlankLines(nodes: LexicalNode[]): LexicalNode[] {
+  let end = nodes.length;
+  while (end > 0) {
+    const last = nodes[end - 1];
+    if (!$isParagraphNode(last) || last.getChildrenSize() !== 0) break;
+    end--;
+  }
+  return nodes.slice(0, end);
+}
+
 export function exportOxDocument(root: RootNode, aside: AsideContent): ExportResult {
-  const body = exportBlockList(root.getChildren());
+  const body = exportBlockList(trimTrailingBlankLines(root.getChildren()));
   const doc: OxDocument = {
     type: "root",
     children: [

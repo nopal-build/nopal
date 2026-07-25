@@ -50,7 +50,7 @@
   --ox-color-heading: black;
   --ox-color-accent: var(--purple-light, #7f5b8b);
   --ox-color-subtle: var(--text-subtle, #817186);
-  --ox-color-grid-dot: var(--moon, #c4c6fc);
+  --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 60%, transparent);
   --ox-color-code-bg: var(--midground, #ece7f3);
   --ox-color-border: rgba(0, 0, 0, 0.12);
   --ox-color-selected-bg: color-mix(in srgb, var(--ox-color-accent) 8%, transparent);
@@ -64,7 +64,7 @@
     --ox-color-heading: var(--dark-text, #e8ddd4);
     --ox-color-accent: var(--purple-light, #a78bfa);
     --ox-color-subtle: var(--text-subtle-dark, #c8b8ce);
-    --ox-color-grid-dot: var(--dark-midground, #2a2030);
+    --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 60%, transparent);
     /* NOT `--dark-midground` (#6d6e99) — found by checking actual computed
        colors, not just eyeballing a screenshot: nopal's real `--purple-light`
        (#7f5b8b, this file's own `--ox-color-accent`) and `--dark-midground`
@@ -81,18 +81,31 @@
   }
 }
 
+@media (min-resolution: 2x) {
+  .ox-tokens {
+    --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 40%, transparent);
+  }
+}
+
 /* `.ox-content` now carries only visual base styles — always pair it with
    `.ox-tokens` in markup (`className="ox-content ox-tokens"`), the same way
    `.ox-popover` does. */
 .ox-content {
-  /* Left padding is deliberately `--ox-grid`, not an arbitrary number: the
-     gutter markers/bullets/ordered-list numbers below all sit at negative
-     left offsets (they hang in the margin next to their content), and
-     `overflow-x: hidden` clips relative to THIS element's own box no matter
-     how much space a caller's wrapper provides around it — so this element
-     has to reserve its own room, not rely on one. One grid cell is enough
-     for all of them (the widest, the h1 marker, sits at -38px). */
-  padding: 8px 8px 16px var(--ox-grid);
+  /* Left AND right padding are deliberately `--ox-grid`, not an arbitrary
+     number: the gutter markers/bullets/ordered-list numbers below all sit
+     at negative left offsets (they hang in the margin next to their
+     content), and a `::file{...}` directive's remove button
+     (`.ox-file-remove-slot`) hangs in the margin on the RIGHT the exact
+     same way — `overflow-x: hidden` clips relative to THIS element's own
+     box no matter how much space a caller's wrapper provides around it, so
+     this element has to reserve its own room on BOTH sides, not rely on
+     one. One grid cell is enough for the widest thing on either side (the
+     h1 marker, at -38px, on the left; the remove button, exactly
+     `--ox-grid`, on the right). A caller that doesn't need either
+     reserved band at all (a `::file{...}` caption, which has no markers
+     of its own and no remove button poking out of IT specifically) opts
+     out of both via `.ox-no-gutter`, below. */
+  padding: 0 var(--ox-grid) 0 var(--ox-grid);
   font-family: var(--ox-font-family);
   font-size: 1.2rem;
   font-weight: var(--ox-font-weight);
@@ -103,8 +116,11 @@
   overflow-wrap: break-word;
   background-image: radial-gradient(var(--ox-color-grid-dot) 1px, transparent 0);
   background-size: var(--ox-grid) var(--ox-grid);
-  background-position: -22px -12px;
+  background-position: -22px -20px;
 }
+/*.ox-content > div {
+  margin-top: 8px;
+}*/
 
 /* STATIC/READ-ONLY display only (`OxRenderer`'s output — `.ox-content`'s
    own direct children, and a blockquote's direct children, one level
@@ -132,10 +148,47 @@
    is exactly one grid unit tall, with nothing added on top. A margin rule
    here would double up on top of that real row and break the uniform
    grid the live editing surface is required to keep — this is a real,
-   deliberate difference from the static renderer, not an oversight. */
-.ox-content > *:not(:first-child),
+   deliberate difference from the static renderer, not an oversight.
+
+   :not(.ox-add-file-link) excludes the persistent "add file" link
+   (AddFileLinkPlugin.tsx) - it IS a direct child of .ox-content in
+   Editing mode (every other plugin here renders null, so it is not
+   competing with any other real sibling), but it is UI chrome, not
+   document content, and already sets its own smaller margin-top - this
+   rule's higher specificity was silently overriding that back up to a
+   full 41px gap above it. */
+.ox-content > *:not(:first-child):not(.ox-add-file-link),
 .ox-content blockquote > *:not(:first-child) {
   margin-top: var(--ox-grid);
+}
+
+/* General modifier — disables the left AND right gutters (both are now
+   `--ox-grid` — see `.ox-content` above) and any marker glyph that hangs
+   in either (#/##/###/>, bullet/ordered-list markers, the checklist dash
+   on the left; a `::file{...}` remove button on the right) — for a
+   caller that wants its text flush with the OTHER paddings instead of
+   indented a full grid cell on either side. Apply via the `className`
+   prop `OxEditor`/`OxRenderer` already support (`className="...
+   ox-no-gutter"`) — no separate boolean prop needed. First use: a
+   `::file{...}` directive's caption (`editingNodes.tsx`) — the
+   thumbnail already provides the visual separation a left gutter would
+   otherwise add, and a caption has no remove button of its OWN poking
+   out of it (that belongs to the OUTER `.ox-file-directive` row, not
+   this nested editor), so neither reserved band does anything useful
+   there; without this, the caption's text sat one grid cell narrower on
+   both sides than it needed to. `content: none`, not `display: none`,
+   fully suppresses a `::before`/`::after` pseudo — no box generated at
+   all, not just a hidden one. */
+.ox-content.ox-no-gutter {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.ox-content.ox-no-gutter :is(h1, h2, h3, blockquote)::before,
+.ox-content.ox-no-gutter ul > li:not(.ox-task-item)::before,
+.ox-content.ox-no-gutter ol > li::before,
+.ox-content.ox-no-gutter .ox-task-item-editing--checked::before,
+.ox-content.ox-no-gutter .ox-task-item-editing--unchecked::before {
+  content: none;
 }
 
 /* ── Gutter markers (# / ## / ### / >) ──────────────────────────── */
@@ -490,9 +543,19 @@
    things with no static-rendering equivalent (the caret surface itself, the
    checklist's native DOM shape, code blocks) need rules here. */
 
+/* `--ox-min-rows` is set inline by `components/OxEditor.tsx`, computed
+   from the SAME `minRows` prop/clamping `MinRowsPlugin.tsx` uses for its
+   actual padding (`normalizeMinRows`) — so the visual `min-height` and
+   the real padded-row count can't drift apart. Defaults to 4 if unset
+   (a plain `.ox-content`/`OxRenderer` with no editor around it at all).
+   The min-height alone would only make clicking below short content
+   land at the nearest real position (the end of the last actual line);
+   it's `MinRowsPlugin` padding the document with real empty rows up to
+   the same count that makes clicking anywhere in this box land on the
+   exact row clicked, not just "somewhere near the end." */
 .ox-editing-surface {
   outline: none;
-  min-height: calc(var(--ox-grid) * 3);
+  min-height: calc(var(--ox-grid) * var(--ox-min-rows, 4));
 }
 .ox-editing-placeholder {
   position: absolute;
@@ -502,7 +565,106 @@
   user-select: none;
 }
 
-/* ── Editing mode: checklist ───────────────────────────────────────────── */
+/* ── File directive (`::file{...}`) ────────────────────────────────────── */
+/* Shared by both rendering paths (`components/OxRenderer.tsx`'s static
+   `FileDirectiveLayout`, reused live in `oxmarkdown/editingNodes.tsx`) —
+   not "Editing mode" specific, unlike most rules in this file below this
+   point. A fixed-size placeholder thumbnail (no real preview yet — see
+   `oxmarkdown/fileDirective.ts`'s header on why: there's no real vault
+   upload wired up yet, so nothing durable to actually preview) plus a
+   caption alongside it, always the full row (`display: flex`, never the
+   shrink-to-fit `inline-block` every other directive gets from
+   `InteractiveDirective` — this directive bypasses that wrapper entirely). */
+.ox-file-directive {
+  display: flex;
+  align-items: flex-start;
+  margin: 0;
+  /* Positioning context for `.ox-file-remove-slot`, which sits OUTSIDE
+     this flex row entirely (not a flex child — see that rule). */
+  position: relative;
+}
+.ox-file-thumb {
+  width: 74px;
+  height: 74px;
+  margin: 4px 3px 4px calc(-1 * var(--ox-grid) + 2px);
+  flex-shrink: 0;
+  border-radius: 4px;
+  background: var(--ox-color-code-bg);
+  border: 1px solid var(--ox-color-border);
+}
+
+.ox-file-caption {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The remove (X) button's SLOT sits OUTSIDE the flex row entirely —
+   `position: absolute` against `.ox-file-directive` (`position: relative`
+   above), not a flex child — so it sticks out `--ox-grid` (41px) past
+   the row's own right edge instead of taking up space the caption would
+   otherwise get, mirroring how the thumbnail sticks out past the LEFT
+   edge via a negative margin. Vertically centered against the row's
+   full height via `top: 50%` + `transform: translateY(-50%)` (the
+   normal way to center an absolutely-positioned element without knowing
+   its height up front). Still exactly one grid cell wide so the 36px
+   button inside it sits centered within a real grid-cell-sized column,
+   not an arbitrary width (CircleButton sets its own width/height via an
+   inline style, from its `size` prop, which no CSS class could
+   override, so sizing/centering has to live on this wrapper regardless
+   of flow). `.circle-btn-red` itself (root.css) owns the button's
+   actual look.
+
+   NOTE: `.ox-content` (the ancestor `overflow-x: hidden` lives on) only
+   reserves a full `--ox-grid` on its LEFT (`padding-left`) — its own
+   `padding-right` is just 8px, so this may get visually clipped
+   depending on how much room a caller's own layout leaves to the right
+   of `.ox-content`'s box. Not addressed here — widening `.ox-content`'s
+   padding-right to match would be a bigger, shared change affecting
+   every consumer of this system, not just this one directive. */
+.ox-file-remove-slot {
+  position: absolute;
+  top: 3px;
+  right: calc(-1 * var(--ox-grid));
+  width: var(--ox-grid);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* No dot grid on a `::file{...}` caption editor — it reads as a small
+   annotation field next to a thumbnail, not its own document (see
+   `editingNodes.tsx`, which passes this as the nested `<OxEditor>`'s
+   `className`). Only the background image is disabled; every other
+   `.ox-content` rule (gutter, rhythm, colors) still applies normally. */
+.ox-content.ox-file-caption-editor {
+  background-image: none;
+  margin-bottom: 0 !important;
+}
+
+/* The persistent "add file" trigger below the editor
+   (`oxmarkdown/AddFileLinkPlugin.tsx`) — a themed link (accent color +
+   underline), even though it's really a `<button>` (it triggers an
+   action, not navigation — see that file's header). */
+.ox-add-file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 6px;
+  margin-left: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ox-color-accent);
+  text-decoration: underline;
+  font-family: var(--ox-font-family);
+  font-size: 14px;
+}
+.ox-add-file-link svg {
+  flex-shrink: 0;
+}
+
+/* ── Editing mode: checklist ───────────────────────────────────────── */
 /* `@lexical/list`'s native checklist shape differs from Interacting mode's
    static markup: there's no separate `.ox-task-checkbox` glyph element —
    the `<li role="checkbox">` itself IS the checkbox (see `registerCheckList`

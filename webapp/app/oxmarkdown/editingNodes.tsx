@@ -53,9 +53,11 @@ import {
 import type { OxInteractive } from "./interactive";
 import {
   DirectiveRegistryContext,
+  FileDirectiveLayout,
   InteractiveDirective,
   OxStaticNodes,
 } from "../components/OxRenderer";
+import { OxEditorContext } from "./OxEditorContext";
 
 /** Shared by every decorator's own click handling below (`OxDirectiveNode`
  * and `OxOpaqueNode` today). A plain React `onClick` fires independently of
@@ -170,9 +172,77 @@ function OxDirectiveDecorator({
   const [editor] = useLexicalComposerContext();
   const [isSelected, setSelected] = useLexicalNodeSelection(nodeKey);
   const directives = useContext(DirectiveRegistryContext);
+  // See this component's header comment (below the JSDoc) for why this
+  // comes from a context rather than a direct import of `OxEditor.tsx`.
+  const OxEditorComponent = useContext(OxEditorContext);
   useSelectDecoratorOnClick(nodeKey, setSelected);
 
   const attrs = directiveAttrs(mdastNode);
+
+  // Every hook above runs unconditionally, on every render, regardless of
+  // directive kind — the "file" branch below returns early, so nothing
+  // after this point may itself be a hook (react-hooks/rules-of-hooks).
+  const interactive: OxInteractive = useMemo(
+    () => ({
+      isSelected: () => isSelected,
+      select: (n) => setSelected(n != null),
+      toggleTask: () => {},
+      editDirectiveAttr: (_node, key, value) => {
+        editor.update(() => {
+          const node = $getNodeByKey(nodeKey);
+          if ($isOxDirectiveNode(node)) node.setAttribute(key, value);
+        });
+      },
+    }),
+    [editor, nodeKey, isSelected, setSelected],
+  );
+
+  // `::file{...}` is a built-in interactable (same category as task
+  // checkboxes), not a caller-registered directive — see
+  // `oxmarkdown/fileDirective.ts`'s header. Its caption is a REAL, live
+  // nested `<OxEditor>` here (Editing mode always allows free-form typing
+  // — unlike the static/Interacting-mode path in `OxRenderer.tsx`, which
+  // renders the same caption as plain read-only markdown instead).
+  // `OxEditorComponent` comes from `OxEditorContext` rather than a direct
+  // import of `components/OxEditor.tsx`, which would be circular (that
+  // module already imports THIS one for `OxDirectiveNode`/`OxOpaqueNode`).
+  if (mdastNode.name === "file" && mdastNode.type === "leafDirective") {
+    return (
+      <FileDirectiveLayout
+        name={attrs.name ?? "file"}
+        onRemove={() => {
+          editor.update(() => {
+            const node = $getNodeByKey(nodeKey);
+            node?.remove();
+          });
+        }}
+        caption={
+          OxEditorComponent ? (
+            <OxEditorComponent
+              mode="editing"
+              markdown={attrs.caption ?? ""}
+              onChange={(value) => interactive.editDirectiveAttr(mdastNode, "caption", value)}
+              // Starts at 1 row and simply grows — a caption doesn't need
+              // (or want) a whole 4-row canvas reserved up front.
+              minRows={1}
+              // No dot grid, and no left gutter/marker glyphs either —
+              // it reads as a small annotation field next to a
+              // thumbnail, not its own document, and the gutter would
+              // otherwise push its text a further grid cell right of
+              // where it should align (both classes, `oxmarkdown.css`).
+              className="ox-file-caption-editor ox-no-gutter"
+              placeholder="add words"
+              // Lets ArrowUp/ArrowDown flow into a sibling file
+              // directive's caption within THIS SAME outer document —
+              // see `oxmarkdown/fileCaptionFlow.ts`.
+              fileCaptionFlow={{ outerEditor: editor, nodeKey }}
+            />
+          ) : null
+        }
+      />
+    );
+  }
+
   const renderer = directives?.[mdastNode.name];
   const content = renderer ? (
     renderer({
@@ -189,21 +259,6 @@ function OxDirectiveDecorator({
     <div className="ox-directive-unknown ox-directive-unknown--block">
       Unknown block: ::{mdastNode.name}
     </div>
-  );
-
-  const interactive: OxInteractive = useMemo(
-    () => ({
-      isSelected: () => isSelected,
-      select: (n) => setSelected(n != null),
-      toggleTask: () => {},
-      editDirectiveAttr: (_node, key, value) => {
-        editor.update(() => {
-          const node = $getNodeByKey(nodeKey);
-          if ($isOxDirectiveNode(node)) node.setAttribute(key, value);
-        });
-      },
-    }),
-    [editor, nodeKey, isSelected, setSelected],
   );
 
   return (
@@ -314,4 +369,3 @@ function OxOpaqueDecorator({
 // gets without hand-building each one (as the previous `OxBlankLinesNode`
 // here had to, including a click-redirect hack that's no longer needed at
 // all now that there's real, ordinary text-editable content to click on).
-

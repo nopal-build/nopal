@@ -10,7 +10,6 @@ import { useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Chip } from "../components/Chip";
-import { CircleButton } from "../components/CircleButton";
 import OxEditor from "../components/OxEditor";
 import { OxEditorGroup } from "../oxmarkdown/OxEditorGroup";
 import "../styles/daily-log-v2-mock.css";
@@ -21,21 +20,52 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return { user };
 }
 
-let mockFileCounter = 0;
 let mockCardCounter = 0;
 
 // ─── Day container ──────────────────────────────────────────────────────────
 // One bordered, rounded frame per day, holding that day's prose + cards +
-// release log. Its own left padding is `0` — the OxEditor/GutterRow content
-// inside already reserves the `41px` gutter themselves (`--ox-grid`) — but
-// its RIGHT padding matches that same `41px`, so the whole frame reads as a
+// release log. Its own left padding is `0` — the OxEditor content inside
+// already reserves the `41px` gutter itself (`--ox-grid`) — but its RIGHT
+// padding matches that same `41px`, so the whole frame reads as a
 // symmetric column instead of the usual left-only gutter.
 
 function DayContainer({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="dlv2-container ox-tokens"
-      style={{ padding: "24px var(--ox-grid, 41px) 24px 0", marginBottom: "48px" }}
+      style={{ padding: "24px var(--ox-grid, 41px) 24px 0", marginBottom: "64px" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A day's heading ("Today"/"Yesterday"/...) — same left gutter as
+ * everything below it (`--ox-grid`), same font size across every day
+ * (deliberately unified — an earlier version had "Today" and "Yesterday"
+ * at two different sizes), and no underline (a border-bottom here read as
+ * a stray rule sitting above the day's own framed container, not as part
+ * of it). `className`/`style` let a caller vary color/weight per day
+ * (e.g. "Today" reads more prominent than a locked past day) without
+ * duplicating the shared gutter/size/spacing. */
+function DayTitle({
+  children,
+  className,
+  style,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div
+      className={className}
+      style={{
+        paddingLeft: "var(--ox-grid, 41px)",
+        fontFamily: "monospace",
+        fontSize: "20px",
+        ...style,
+      }}
     >
       {children}
     </div>
@@ -62,7 +92,13 @@ function ProseBlock({
 }) {
   return (
     <div style={{ marginBottom: "16px" }}>
-      <OxEditor mode={mode} markdown={markdown} onChange={onChange} groupId={groupId} />
+      <OxEditor
+        mode={mode}
+        markdown={markdown}
+        onChange={onChange}
+        groupId={groupId}
+        allowFileAttachments
+      />
     </div>
   );
 }
@@ -71,107 +107,15 @@ type CardState = {
   id: string;
   project: string;
   markdown: string;
-  attachments: string[];
 };
 
-/** Reserves the SAME `41px` left gutter `.ox-content` uses for heading/list
- * markers (`--ox-grid`, set by the `.ox-tokens` class) — so a marker glyph
- * passed here hangs in that band exactly like `#`/`##`/`-` do elsewhere,
- * and `children` text always starts flush with the card's own OxEditor
- * body text below it. `marker` is optional — most rows here have none
- * (per the drawing, the card title itself carries no icon), but the slot
- * stays available for the day a real markdown heading marker is wired up. */
-function GutterRow({
-  marker,
-  children,
-}: {
-  marker?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={{ position: "relative", paddingLeft: "var(--ox-grid, 41px)" }}>
-      {marker != null && (
-        <span
-          aria-hidden
-          className="subtle-text"
-          style={{
-            position: "absolute",
-            left: 0,
-            width: "32px",
-            textAlign: "right",
-            paddingRight: "6px",
-            fontFamily: "ui-monospace, SF Mono, monospace",
-            fontSize: "12px",
-          }}
-        >
-          {marker}
-        </span>
-      )}
-      {children}
-    </div>
-  );
-}
-
-/** A small placeholder thumbnail standing in for a real attachment preview,
- * with its footnote-style index badged in the corner. */
-function AttachmentThumb({ index, name }: { index: number; name: string }) {
-  return (
-    <div
-      className="dlv2-thumb"
-      title={name}
-      style={{
-        position: "relative",
-        width: "72px",
-        height: "34px",
-        borderRadius: "4px",
-        flexShrink: 0,
-      }}
-    >
-      <span
-        className="dlv2-thumb-badge"
-        style={{
-          position: "absolute",
-          right: "3px",
-          bottom: "3px",
-          fontSize: "10px",
-          fontFamily: "monospace",
-          padding: "1px 4px",
-          borderRadius: "3px",
-        }}
-      >
-        {index})
-      </span>
-    </div>
-  );
-}
-
-/** Round "add" trigger — the same `CircleButton` + SVG plus-icon shown in
- * the design system (`fruits_.styles.tsx`, "Any SVG works"), at its normal
- * default size. Only the color changes, via `.circle-btn-green`
- * (root.css), so this reads as a solid affordance at rest instead of
- * `CircleButton`'s default transparent/hover-tinted look. */
-function AddAttachmentButton({ onClick }: { onClick: () => void }) {
-  return (
-    <CircleButton
-      className="circle-btn-green"
-      onClick={onClick}
-      aria-label="Attach file"
-    >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-      >
-        <line x1="12" y1="5" x2="12" y2="19" />
-        <line x1="5" y1="12" x2="19" y2="12" />
-      </svg>
-    </CircleButton>
-  );
-}
+// Attachments used to be separate, out-of-band mockup state (a plain
+// `attachments: string[]` field + placeholder thumbnail/add-button
+// components, unrelated to the card's own markdown). Replaced by the
+// REAL `::file{...}` interactable (`oxmarkdown/fileDirective.ts`) —
+// attaching a file now just means the card's OWN markdown contains a
+// `::file{...}` line, same as any other content. See `CardBox` below
+// (`allowFileAttachments`) and the mock card data further down.
 
 /** A card: `good-box` colors (warm `farground` fill, themed border — same
  * tokens the rest of the app already uses for a "box", nothing
@@ -185,13 +129,11 @@ function AddAttachmentButton({ onClick }: { onClick: () => void }) {
  function CardBox({
    card,
    onChangeMarkdown,
-   onAttach,
    editable = true,
    groupId,
  }: {
    card: CardState;
    onChangeMarkdown: (v: string) => void;
-   onAttach?: () => void;
    editable?: boolean;
    groupId?: string;
  }) {
@@ -201,28 +143,32 @@ function AddAttachmentButton({ onClick }: { onClick: () => void }) {
        style={{
          marginLeft: `-${CARD_BLEED}px`,
          marginRight: `-${GUTTER + CARD_BLEED}px`,
-         padding: `${CARD_BLEED}px ${GUTTER + CARD_BLEED}px ${CARD_BLEED}px ${CARD_BLEED}px`,
+         padding: `${CARD_BLEED}px`,
          marginBottom: "16px",
        }}
      >
+      {/* `marginLeft` here, not `paddingLeft` — a border traces a box's
+          OUTER edge regardless of its own padding, so only a margin
+          actually moves the border-bottom LINE itself into the gutter
+          column (matching where the project-title text below/inside it
+          starts) rather than leaving it flush with the card's true left
+          edge. */}
       <div
-        style={{
+         style={{
+          margin: "0 var(--ox-grid, 41px) 8px var(--ox-grid, 41px)",
           borderBottom: "1px solid var(--midground)",
           paddingBottom: "10px",
-          marginBottom: "12px",
         }}
       >
-        <GutterRow>
-          <span className="font-bold purple-light-text truncate">{card.project}</span>{" "}
-          <a
-            href="#"
-            className="text-xs subtle-text"
-            style={{ textDecoration: "underline", whiteSpace: "nowrap" }}
-            onClick={(e) => e.preventDefault()}
-          >
-            open project →
-          </a>
-        </GutterRow>
+        <span className="font-bold purple-light-text truncate">{card.project}</span>{" "}
+        <a
+          href="#"
+          className="text-xs subtle-text"
+          style={{ textDecoration: "underline", whiteSpace: "nowrap" }}
+          onClick={(e) => e.preventDefault()}
+        >
+          open project →
+        </a>
       </div>
 
       <OxEditor
@@ -230,26 +176,9 @@ function AddAttachmentButton({ onClick }: { onClick: () => void }) {
         markdown={card.markdown}
         onChange={onChangeMarkdown}
         groupId={groupId}
+        allowFileAttachments
+        showAddFileLink
       />
-
-      {(card.attachments.length > 0 || editable) && (
-        <div
-          style={{
-            borderTop: "1px dashed var(--midground)",
-            marginTop: "14px",
-            paddingTop: "10px",
-          }}
-        >
-          <GutterRow>
-            <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
-              {card.attachments.map((name, i) => (
-                <AttachmentThumb key={name} index={i + 1} name={name} />
-              ))}
-              {editable && <AddAttachmentButton onClick={onAttach!} />}
-            </div>
-          </GutterRow>
-        </div>
-      )}
     </div>
   );
 }
@@ -362,7 +291,7 @@ function ReleaseLogSection({
   groups: ProjectReleaseLog[];
   emptyHint: string;
 }) {
-  const [open, setOpen] = useState(groups.length > 0);
+  const [open, setOpen] = useState(false);
 
   return (
     <div style={{ paddingLeft: "var(--ox-grid, 41px)" }}>
@@ -432,22 +361,20 @@ export default function DailyLogV2Mockup() {
   useLoaderData<typeof loader>();
 
   const [todayIntro, setTodayIntro] = useState(
-    "Today\nI made a coffee and reviewed my tasks.",
+    "I made a coffee and reviewed my tasks.",
   );
   const [todayCards, setTodayCards] = useState<CardState[]>([
     {
       id: "sunny",
       project: "Sunny",
       markdown:
-        "Here I needed to clean up the site after a storm came through last night. It is now organized.\n\n- [x] Clear debris from driveway\n- [ ] Call insurance about the fence",
-      attachments: ["driveway-after.jpg", "fence-before.jpg", "receipt.jpg"],
+        'Here I needed to clean up the site after a storm came through last night. It is now organized.\n\n- [x] Clear debris from driveway\n- [ ] Call insurance about the fence\n\n::file{name="driveway-after.jpg" caption="After clearing debris"}\n::file{name="fence-before.jpg"}\n::file{name="receipt.jpg" caption="Insurance receipt"}',
     },
     {
       id: "crouch",
       project: "Crouch",
       markdown:
         "Here I also needed to clean up from storm damage.\n\n- [ ] Get quote for new gutter",
-      attachments: [],
     },
   ]);
 
@@ -458,8 +385,7 @@ export default function DailyLogV2Mockup() {
     id: "sunny-past",
     project: "Sunny",
     markdown:
-      "Walked the site with the contractor.\n\n- [x] Confirm delivery window\n- [x] Photograph existing fence line",
-    attachments: ["fence-line.jpg", "contractor-notes.pdf"],
+      'Walked the site with the contractor.\n\n- [x] Confirm delivery window\n- [x] Photograph existing fence line\n\n::file{name="fence-line.jpg" caption="Existing fence, before repairs"}\n::file{name="contractor-notes.pdf"}',
   };
 
   const pastReleaseLog: ProjectReleaseLog[] = [
@@ -528,35 +454,16 @@ export default function DailyLogV2Mockup() {
     },
   ];
 
-  function attach(cardId: string) {
-    mockFileCounter += 1;
-    const names = ["photo", "receipt", "notes", "before", "after"];
-    const name = `${names[mockFileCounter % names.length]}-${mockFileCounter}.jpg`;
-    setTodayCards((cards) =>
-      cards.map((c) => (c.id === cardId ? { ...c, attachments: [...c.attachments, name] } : c)),
-    );
-  }
-
   function createCard(project: string) {
     mockCardCounter += 1;
-    setTodayCards((cards) => [
-      ...cards,
-      { id: `new-${mockCardCounter}`, project, markdown: "", attachments: [] },
-    ]);
+    setTodayCards((cards) => [...cards, { id: `new-${mockCardCounter}`, project, markdown: "" }]);
   }
 
   return (
     <AppLayout>
       <div style={{ padding: "32px 16px 100px", maxWidth: "680px", margin: "0 auto" }}>
         {/* Today */}
-        <div style={{ marginBottom: "12px" }}>
-          <span
-            className="purple-light-text"
-            style={{ fontFamily: "monospace", fontSize: "16px" }}
-          >
-            Today
-          </span>
-        </div>
+        <DayTitle className="purple-light-text">Today</DayTitle>
         <DayContainer>
           <OxEditorGroup order={["today-intro", ...todayCards.map((c) => c.id)]}>
             <ProseBlock markdown={todayIntro} onChange={setTodayIntro} groupId="today-intro" />
@@ -569,7 +476,6 @@ export default function DailyLogV2Mockup() {
                     cards.map((c) => (c.id === card.id ? { ...c, markdown: v } : c)),
                   )
                 }
-                onAttach={() => attach(card.id)}
                 groupId={card.id}
               />
             ))}
@@ -582,20 +488,9 @@ export default function DailyLogV2Mockup() {
         </DayContainer>
 
         {/* Yesterday */}
-        <div style={{ marginBottom: "12px" }}>
-          <div
-            style={{
-              fontFamily: "monospace",
-              fontSize: "20px",
-              fontWeight: 100,
-              color: "var(--text-subtle)",
-              borderBottom: "1px solid var(--midground)",
-              marginBottom: "12px",
-            }}
-          >
-            Yesterday
-          </div>
-        </div>
+        <DayTitle className="subtle-text" style={{ fontWeight: 100 }}>
+          Yesterday
+        </DayTitle>
         <DayContainer>
           <ProseBlock markdown={pastIntro} onChange={() => {}} mode="interacting" />
           <CardBox card={pastCard} onChangeMarkdown={() => {}} editable={false} />

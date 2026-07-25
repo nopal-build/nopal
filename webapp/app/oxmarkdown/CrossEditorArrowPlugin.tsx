@@ -42,8 +42,11 @@ import { useOxEditorGroup, type OxEditorGroupMember } from "./OxEditorGroup";
 /** True when `selection`'s anchor sits at the very last valid caret
  * position in the whole document — the last text offset of the last
  * leaf, or simply ON the last leaf when it isn't a text node (a line
- * break, a decorator, or an empty block that IS its own last descendant). */
-function isAtDocumentEnd(selection: RangeSelection): boolean {
+ * break, a decorator, or an empty block that IS its own last descendant).
+ * Exported for `fileCaptionFlow.ts`, which needs the exact same
+ * true-boundary check for flowing between a `::file{...}` directive's
+ * caption editor and its sibling captions within the SAME outer document. */
+export function isAtDocumentEnd(selection: RangeSelection): boolean {
   const lastLeaf = $getRoot().getLastDescendant();
   if (lastLeaf === null) return true; // empty document
   const anchor = selection.anchor;
@@ -58,7 +61,7 @@ function isAtDocumentEnd(selection: RangeSelection): boolean {
 }
 
 /** Mirror of `isAtDocumentEnd` for the very FIRST valid caret position. */
-function isAtDocumentStart(selection: RangeSelection): boolean {
+export function isAtDocumentStart(selection: RangeSelection): boolean {
   const firstLeaf = $getRoot().getFirstDescendant();
   if (firstLeaf === null) return true; // empty document
   const anchor = selection.anchor;

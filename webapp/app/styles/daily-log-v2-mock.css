@@ -5,31 +5,14 @@
 
 .dlv2-container {
   border: 1px solid var(--midground);
+  box-shadow: 0 0 8px var(--farground);
   border-radius: 8px;
-  background: transparent;
+  background: #FFFEFC;
 }
 @media (prefers-color-scheme: dark) {
   .dlv2-container {
     border-color: var(--dark-midground);
-  }
-}
-
-.dlv2-thumb {
-  background: var(--midground);
-}
-@media (prefers-color-scheme: dark) {
-  .dlv2-thumb {
-    background: var(--dark-midground);
-  }
-}
-
-.dlv2-thumb-badge {
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--purple);
-}
-@media (prefers-color-scheme: dark) {
-  .dlv2-thumb-badge {
-    background: rgba(0, 0, 0, 0.55);
-    color: white;
+    box-shadow: 0 0 8px var(--dark-farground);
+    background: #513F57;
   }
 }

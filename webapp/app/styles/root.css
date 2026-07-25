@@ -190,6 +190,30 @@ body {
   }
 }
 
+/* Transparent-at-rest, red-tinted-on-hover variant of `.circle-btn` (pair
+   via CircleButton's `className` prop) - a "remove this" affordance
+   (the file directive's own X button, editingNodes.tsx). Icon color
+   stays --red in both states (matches the provided artwork - only the
+   background/border appear on hover); a transparent 1px border at rest
+   reserves the same space the hover border needs, so hovering doesn't
+   shift anything by a pixel. --red/--red-light already read fine in both
+   color schemes without a dark-mode pair (same as .badge-danger below,
+   already shipped with no override). Declared after .circle-btn so it
+   wins the same-specificity :hover ties. */
+.circle-btn-red {
+  color: var(--red);
+  border: 1px solid transparent;
+  box-sizing: border-box;
+
+  &:hover,
+  &:focus-visible,
+  &[data-active="true"] {
+    background: var(--red-light);
+    border-color: var(--red);
+    color: var(--red);
+  }
+}
+
 /* Badge variants (see components/Badge.tsx). The colored variants use
    light backgrounds + dark text that read fine in both schemes; neutral
    is built from light-scheme surface tokens, so it needs a dark-mode pair

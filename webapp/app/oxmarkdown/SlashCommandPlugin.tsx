@@ -59,9 +59,14 @@ import { $insertList } from "@lexical/list";
 import { $getNearestOxListItemNode } from "./OxListItemNode";
 import { $createHorizontalRuleNode } from "@lexical/react/LexicalHorizontalRuleNode";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { useMemo } from "react";
 import { $createOxDirectiveNode } from "./editingNodes";
+import { pickFilesAndInsertAtBlock } from "./fileDirective";
 
-function getTopLevelBlock(node: LexicalNode): ElementNode | null {
+/** Exported for `fileDirective.ts` — the `/files` command's insertion
+ * point needs the exact same "which top-level block is this trigger text
+ * inside" walk every other command already does. */
+export function getTopLevelBlock(node: LexicalNode): ElementNode | null {
   let current: LexicalNode | null = node;
   for (;;) {
     const parent: LexicalNode | null = current?.getParent() ?? null;
@@ -168,22 +173,43 @@ interface SlashMenuState {
   anchorEl: HTMLElement;
 }
 
-export default function SlashCommandPlugin(): React.ReactElement | null {
+export default function SlashCommandPlugin({
+  allowFileAttachments = false,
+}: {
+  /** Adds "Add file(s)" to the menu — see `oxmarkdown/fileDirective.ts`.
+   * Off by default so a directive's OWN nested caption editor (which also
+   * renders a `SlashCommandPlugin`) doesn't recursively offer file
+   * attachments inside a file's caption. */
+  allowFileAttachments?: boolean;
+} = {}): React.ReactElement | null {
   const [editor] = useLexicalComposerContext();
   const [menu, setMenu] = useState<SlashMenuState | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const menuRef = useRef<SlashMenuState | null>(null);
   menuRef.current = menu;
 
+  const commands = useMemo<SlashCommand[]>(() => {
+    if (!allowFileAttachments) return COMMANDS;
+    return [
+      ...COMMANDS,
+      {
+        label: "Add file(s)",
+        keywords: ["file", "files", "attachment", "upload", "photo", "image"],
+        run: (key) => pickFilesAndInsertAtBlock(editor, key),
+      },
+    ];
+  }, [allowFileAttachments, editor]);
+
   function matchesFor(state: SlashMenuState): SlashCommand[] {
     const q = state.query.toLowerCase();
-    if (!q) return COMMANDS;
-    return COMMANDS.filter(
+    if (!q) return commands;
+    return commands.filter(
       (c) => c.keywords.some((k) => k.includes(q)) || c.label.toLowerCase().includes(q),
     );
   }
 
   function runCommand(state: SlashMenuState, command: SlashCommand) {
+    console.log("[SC] runCommand", command.label);
     editor.update(() => command.run(state.anchorKey));
     setMenu(null);
   }

@@ -189,7 +189,13 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
 - **Gutter markers** — `#`/`##`/`###`/`>` render as absolutely positioned,
   low-opacity monospace pseudo-elements to the left of headings/
   blockquotes (`left: -38px`), echoing the raw markdown next to its
-  rendered form.
+  rendered form. `.ox-content`'s `padding` reserves a full `--ox-grid`
+  (41px) on BOTH the left AND right (not left-only, as it once was) —
+  the right side exists so a `::file{...}` directive's remove button can
+  stick out past the row's own right edge the same way markers stick out
+  past the left, without `overflow-x: hidden` clipping it. A caller with
+  no need for either reserved band (a `::file{...}` caption) opts out of
+  both via `.ox-no-gutter`.
 - **Color tokens** (`webapp/app/styles/root.css`): `--purple` (primary
   text), `--purple-light` (accents/headings), `--moon` (light-mode dot
   color), `--text-subtle`; full dark-mode counterparts via
@@ -415,6 +421,173 @@ Interacting mode first, without needing that decision resolved.
    keyboard focus, never merges content. First wired up on the
    `daily-log-v2` visual mockup (`routes/fruits_.daily-log-v2.tsx`); not
    yet ported to the real Daily Log route.
+9. **Done — minimum-rows padding**, so an Editing-mode document is always
+   clickable anywhere within a minimum box, not just wherever real
+   content happens to reach. `oxmarkdown/MinRowsPlugin.tsx` registers a
+   `RootNode` transform that tops the document's children up to a
+   `minRows` prop (default `DEFAULT_MIN_EDITOR_ROWS = 4`; any value below
+   `0` is treated as `1` via `normalizeMinRows`) with plain empty
+   `ParagraphNode`s whenever it falls short (short initial content, or
+   Backspace merging away a row) — it only ever ADDS to reach the floor,
+   never removes. `.ox-editing-surface`'s `min-height` reads the SAME
+   clamped value via an inline `--ox-min-rows` custom property
+   (`components/OxEditor.tsx` sets it; `oxmarkdown.css` consumes it) —
+   CSS can't reference a JS prop directly, so this is how the two stay in
+   sync instead of drifting apart the way two independently-hand-kept
+   constants eventually would. The padding is real, clickable rows, not
+   just empty CSS space — clicking the Nth row lands the caret exactly
+   there, which a min-height alone (with no backing content) can't
+   guarantee. Never leaks into saved markdown: `exportOxDocument` always
+   trims wholly-blank trailing paragraphs before serializing
+   (`editingTransforms.ts`), regardless of whether they're this padding
+   or a user's own trailing Enter presses. A `::file{...}` directive's
+   caption editor (step 10) uses `minRows={1}` — it starts small and
+   just grows, unlike a full card/prose editor's 4-row canvas.
+10. **Done — the `::file{...}` interactable**, a built-in leaf directive
+    (own row, no children — same "mount point, not nested markdown" shape
+    already planned for `::card{file=...}`) representing an attached
+    file: a fixed 79×79px placeholder thumbnail (no real preview — there's
+    no real vault upload wired up yet, a tracked, separate gap; see the
+    `vault` skill) offset left by one grid cell via `margin-left:
+    calc(-1 * var(--ox-grid))` so it sits IN the gutter (the same column
+    heading/list markers use) instead of the normal text-indent position,
+    plus a caption alongside it. `oxmarkdown/fileDirective.ts` holds the
+    shared insertion logic (pure Lexical-tree code, no React) and the
+    native-file-picker wrapper; reachable two ways, both landing on the
+    same code:
+    - The `/files` slash command (also matches `/file`) — gated by
+      `OxEditor`'s `allowFileAttachments` prop, on for both plain prose
+      and cards. Inserts at the current cursor's block.
+    - The persistent "add file" link below the editor
+      (`oxmarkdown/AddFileLinkPlugin.tsx`, gated by a SEPARATE
+      `showAddFileLink` prop — on for cards only, off for plain prose,
+      which still gets `/files` without the link) — always appends at
+      the document's END regardless of cursor position.
+    - Both call `pickFilesAndInsertAtBlock`/`pickFilesAndAppend`
+      respectively; found and fixed a real bug building this: a nested
+      `editor.update()` call (one made while `editor._updating` is
+      already true, e.g. from INSIDE `SlashCommandPlugin`'s own
+      `runCommand` wrapper) doesn't run its function immediately — it
+      QUEUES it for after the current update finishes (confirmed directly
+      in Lexical's own source) — which silently broke opening the file
+      dialog synchronously within the original trusted click. Fixed by
+      calling the needed `$`-prefixed functions directly, relying on
+      already being inside the caller's active update, instead of
+      wrapping them in a second one.
+    - The caption is a REAL, live nested `<OxEditor>` in Editing mode
+      (the first real use of the "leaf directive mounts a nested
+      independent OxEditor" pattern already planned for `::card`) —
+      made possible by `oxmarkdown/OxEditorContext.tsx`, a neutral file
+      breaking what would otherwise be a circular import
+      (`editingNodes.tsx` needs `OxEditor`, but `OxEditor.tsx` already
+      imports `OxDirectiveNode` FROM `editingNodes.tsx`): `OxEditor.tsx`
+      provides itself as a context value; `editingNodes.tsx` only ever
+      imports the neutral context file, never `OxEditor.tsx` directly.
+      Confirmed safe to nest one live Lexical editor inside another's
+      decorator this way — Lexical's own event system explicitly guards
+      against exactly this (`stopLexicalPropagation`/
+      `hasStoppedLexicalPropagation`, tagging a DOM event once an inner
+      editor's listener has handled it so an outer editor's listener on
+      the same bubbled event is a deliberate no-op).
+    - The caption's nested editor also gets its own dot-grid-free look
+      (`className="ox-file-caption-editor"`, overriding `.ox-content`'s
+      background-image — it reads as a small annotation field, not its
+      own document) and flows ArrowUp/ArrowDown into a SIBLING file
+      directive's caption within the same outer document
+      (`oxmarkdown/fileCaptionFlow.ts` + `FileCaptionArrowPlugin.tsx`) —
+      deliberately NOT built on `OxEditorGroup` (that mechanism wants an
+      externally-supplied flat `order`; here the members are decorator
+      nodes already ordered by the outer tree itself, so this walks that
+      tree directly instead, skipping blank-line paragraphs but stopping
+      at any other real content). Scope note: only connects captions to
+      EACH OTHER — entering the first caption from the prose above it, or
+      exiting the last one back into the prose below, still falls through
+      to Lexical's own default decorator-adjacency behavior (jumping PAST
+      the whole decorator), not handled here.
+    - The static/Interacting-mode path (`components/OxRenderer.tsx`'s
+      `FileDirectiveLayout`/`FileDirectiveStatic`) renders the same
+      caption as plain read-only markdown instead — Interacting mode
+      never allows free-form typing, so a live editor there would be
+      inconsistent with how locked/read-only content behaves everywhere
+      else.
+    - Bypasses the generic `DirectiveRegistry`/`InteractiveDirective`
+      attrs-popover entirely (checked in `renderDirective` and
+      `OxDirectiveDecorator` before the registry lookup) — same category
+      as task checkboxes: a built-in interactable, not a caller-registered
+      directive. A raw-text-field popover for `caption` would be
+      redundant with the real rendering right there, and `name` (the
+      file's own original filename) isn't meant to be hand-edited at all.
+    - The caption editor also disables the LEFT GUTTER, via a new
+      general-purpose modifier, `.ox-no-gutter` (`oxmarkdown.css`) —
+      applied through the ordinary `className` prop
+      (`"ox-file-caption-editor ox-no-gutter"`), not a new boolean prop.
+      Reduces `.ox-content`'s `padding-left` to match its other three
+      sides and suppresses every marker glyph that hangs in that band
+      (`#`/`##`/`###`/`>`, bullet/ordered-list markers, the checklist
+      dash — `content: none`, not `display: none`, so no box is
+      generated at all) — without it, the caption's text sat a further
+      grid cell right of where it should align next to the thumbnail.
+      Any other OxEditor/OxRenderer instance can reuse this the same way.
+    - `placeholder` is now a real `OxEditorProps` prop (default: the
+      usual "Start typing…" hint) — the caption editor passes
+      `"image info"` instead.
+    - After inserting, the FIRST newly-added file's caption gets focus
+      automatically, so typing a caption needs no extra click
+      (`focusFileCaptionOnceMounted` in `fileDirective.ts`). Needs to
+      POLL across a few animation frames rather than focus once, right
+      after `editor.update()` returns: the new decorator's own nested
+      `<OxEditor>` (and its `FileCaptionArrowPlugin` registration) hasn't
+      necessarily mounted yet at that exact instant — Lexical's DOM
+      reconciliation and React's rendering of that decorator's content
+      are two separate, only loosely-synchronized steps. Wins out over
+      the outer editor's own trailing-paragraph selection naturally,
+      just by running later.
+    - The thumbnail sets `contentEditable={false}` on the directive's
+      own root (`FileDirectiveLayout`) — without it, clicking the
+      thumbnail (a plain presentational `<div>`, no real text/Lexical
+      node behind it) could still place a native caret there;
+      `OxDirectiveNode`'s own wrapper element doesn't set this itself
+      (unlike `OxOpaqueNode`, which does), so this directive's own
+      rendered content has to. The caption's nested `<OxEditor>` is
+      unaffected — a nested `contenteditable="true"` region works
+      normally inside a `contenteditable="false"` ancestor.
+    - A `.circle-btn-red` `CircleButton` (root.css; transparent at rest,
+      `--red-light` background + `--red` border on hover — both
+      already-shipped nopal tokens, no new colors), at its normal default
+      36px size, removes the whole directive on click. Rendered by
+      `FileDirectiveLayout` only when an `onRemove` callback is supplied
+      (Editing mode only — `editingNodes.tsx` wires it to `node.remove()`;
+      the static/Interacting-mode path passes nothing, so no button
+      renders there). Lives OUTSIDE the row's own flex layout entirely
+      - `.ox-file-remove-slot` is `position: absolute` against
+      `.ox-file-directive` (`position: relative`), not a flex child, so
+      it sticks out `--ox-grid` (41px) past the row's own right edge
+      exactly the way the thumbnail sticks out past the left edge,
+      rather than taking up space the caption would otherwise get.
+      Vertically centered via `top: 50%` + `transform: translateY(-50%)`
+      (the normal way to center an absolutely-positioned element without
+      knowing its own height). Still exactly one grid cell wide so the
+      36px button inside it sits centered within a real grid-cell-sized
+      column - CircleButton sets its own width/height via an inline
+      style (from its `size` prop), which no CSS class can ever
+      override, so sizing/centering has to live on this wrapper
+      regardless of flow.
+      - This ONLY works because `.ox-content`'s `padding-right` is now
+        `--ox-grid` too (see "Gutter markers" above) - it started as
+        just 8px, and the remove button poking 41px past the row's edge
+        got silently clipped by `.ox-content`'s own `overflow-x: hidden`
+        until the right padding was widened to match the left. Confirmed
+        directly by measuring the clipped button's actual bounding box
+        against `.ox-content`'s, not assumed.
+    - The persistent "add file" link (`AddFileLinkPlugin.tsx`) is a
+      direct child of `.ox-content` in Editing mode (every OTHER plugin
+      there renders `null`), which meant `.ox-content`'s own
+      `*:not(:first-child) { margin-top: var(--ox-grid) }` rule (meant
+      for spacing between STATIC content blocks) was silently
+      overriding the link's own, smaller `margin-top` — same
+      specificity tier, later in cascade order. Fixed by excluding it
+      explicitly (`:not(.ox-add-file-link)`) rather than reordering
+      rules, so the exclusion stays obvious at the selector itself.
 
 ## Testing convention — verify three things together, never one alone
 
