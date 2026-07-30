@@ -68,30 +68,38 @@ httpServer.listen(3000, () => {
       setInterval(runArchiveCleanup, 24 * 60 * 60 * 1000);
     }, 30_000);
 
-    // ── Daily-log sort ──────────────────────────────────────────────────
+    // ── Daily-log sort ────────────────────────────────────────────────────
     // Sorts every human's closed, not-yet-sorted daily logs (mentions →
     // project backlinks, completed Card tasks, Card file attachments —
     // see sorter.server.ts) into their Release Logs. Same CRON_SECRET,
     // same once-a-day cadence as the archive cleanup above — just
     // staggered a little so the two don't fire in the exact same tick.
-    const runDailyLogSort = async () => {
-      try {
-        const res = await fetch(
-          "http://localhost:3000/api/daily-log/sort-all",
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${cronSecret}` },
-          },
-        );
-        const data = await res.json();
-        console.log("[cron] daily-log/sort-all:", data);
-      } catch (err) {
-        console.error("[cron] daily-log/sort-all failed:", err);
-      }
-    };
-    setTimeout(() => {
-      runDailyLogSort();
-      setInterval(runDailyLogSort, 24 * 60 * 60 * 1000);
-    }, 45_000);
+    //
+    // Temporary kill switch: only scheduled at all when SORTER_ENABLED is
+    // "true" (see `isSorterEnabled` in `sorter.server.ts`) — the route
+    // itself also checks this, but skipping the schedule entirely avoids
+    // pointless daily log noise while the Sorter's next phase (real
+    // project-folder filing) is being built out.
+    if (process.env.SORTER_ENABLED === "true") {
+      const runDailyLogSort = async () => {
+        try {
+          const res = await fetch(
+            "http://localhost:3000/api/daily-log/sort-all",
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${cronSecret}` },
+            },
+          );
+          const data = await res.json();
+          console.log("[cron] daily-log/sort-all:", data);
+        } catch (err) {
+          console.error("[cron] daily-log/sort-all failed:", err);
+        }
+      };
+      setTimeout(() => {
+        runDailyLogSort();
+        setInterval(runDailyLogSort, 24 * 60 * 60 * 1000);
+      }, 45_000);
+    }
   }
 });

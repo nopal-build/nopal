@@ -4,420 +4,23 @@
 //! resolved by walking the children API from the vault root. All policy
 //! (locked root folders, daily-log locks, sharing rules) is enforced
 //! server-side; this module just surfaces the server's error messages.
+//!
+//! The actual HTTP client, path resolution, and upload/download mechanics
+//! live in `nopal_core::vault` (shared with the native app) — this module
+//! is the CLI-specific presentation layer on top: printing, `--json`,
+//! interactive confirmation prompts, and clipboard/browser integration.
 
 use serde::Deserialize;
 use std::error::Error;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::auth;
-
-/// Chunk size for multipart parts (matches the web client's 10 MB parts;
-/// the server route caps parts at 10 MB specifically so each part finishes
-/// quickly and doesn't get killed by an intermediary proxy on a slow
-/// connection).
-const MULTIPART_CHUNK: usize = 10 * 1024 * 1024;
-/// Files larger than this upload via the S3 multipart endpoints instead of
-/// one single POST. Deliberately equal to the chunk size — ANY file that
-/// would need more than one chunk gets the more resilient, independently-
-/// retryable path. A single-shot POST for a large file (e.g. a 30 MB screen
-/// recording over a slow home upload) can take long enough that Fly's
-/// proxy-to-machine backhaul gives up on the still-arriving body
-/// (`unexpected end of file` / error code PU02) — splitting into several
-/// quick 10 MB requests avoids that failure mode entirely.
-const MULTIPART_THRESHOLD: u64 = MULTIPART_CHUNK as u64;
-/// Retries for a request that fails at the transport level (dropped/reset
-/// connection, DNS blip, etc.) — never for a definite HTTP error response,
-/// since retrying a 403/404 changes nothing.
-const MAX_ATTEMPTS: u32 = 4;
-
-fn retry_delay(attempt: u32) -> std::time::Duration {
-    std::time::Duration::from_secs(2u64.pow(attempt.min(4))) // 2s, 4s, 8s, 16s
-}
-
-// ─── API types ────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Folder {
-    pub _id: String,
-    pub name: String,
-    #[serde(default)]
-    pub vault_root_key: Option<String>,
-    #[serde(default)]
-    pub shared_with: serde_json::Value,
-    /// Published to a public, unauthenticated URL. Only reflects THIS
-    /// folder's own flag — a folder can also be publicly reachable because
-    /// an ancestor is published (see `link`, which checks the live page
-    /// rather than re-deriving that inheritance client-side).
-    #[serde(default)]
-    pub is_public: Option<bool>,
-    #[serde(default)]
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct FileListing {
-    pub _id: String,
-    pub name: String,
-    pub content_type: String,
-    #[serde(default)]
-    pub size: Option<u64>,
-    #[serde(default)]
-    pub updated_at: String,
-    #[serde(default)]
-    pub has_s3: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct Children {
-    pub(crate) folders: Vec<Folder>,
-    pub(crate) files: Vec<FileListing>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FullFile {
-    _id: String,
-    name: String,
-    content_type: String,
-    #[serde(default)]
-    content: Option<String>,
-    #[serde(default)]
-    s3_key: Option<String>,
-    #[serde(default)]
-    size: Option<u64>,
-    #[serde(default)]
-    created_at: String,
-    #[serde(default)]
-    updated_at: String,
-    #[serde(default)]
-    is_public: Option<bool>,
-}
-
-/// What a vault path resolved to.
-enum Resolved {
-    Folder(Folder),
-    File { file: FileListing },
-    Root,
-}
-
-// ─── HTTP client ──────────────────────────────────────────────────────────────
-
-pub(crate) struct Client {
-    http: reqwest::blocking::Client,
-    pub(crate) host: String,
-    token: String,
-}
-
-/// A fresh connection per request rather than reqwest's default pooling.
-/// This is a long-running CLI (especially the `--watch` worker) that issues
-/// requests sporadically — a pooled/kept-alive connection can sit idle long
-/// enough that Fly's proxy (or a home router's NAT) silently closes it, and
-/// the next large upload to reuse it fails with an opaque transport error
-/// (`error sending request for url`) partway through sending the body. A
-/// fresh connection costs one extra TLS handshake per request, which is
-/// noise next to an upload that takes seconds anyway.
-fn build_http_client() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
-        .pool_max_idle_per_host(0)
-        .build()
-        .unwrap_or_else(|_| reqwest::blocking::Client::new())
-}
-
-impl Client {
-    pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
-        // NOPAL_HOST/NOPAL_TOKEN override the stored login — useful for
-        // scripts, CI, and pointing at a local dev server.
-        if let (Ok(host), Ok(token)) = (std::env::var("NOPAL_HOST"), std::env::var("NOPAL_TOKEN")) {
-            return Ok(Client {
-                http: build_http_client(),
-                host: host.trim_end_matches('/').to_string(),
-                token,
-            });
-        }
-        let creds = auth::load_credentials().ok_or("Not logged in. Run 'nopal login' first.")?;
-        Ok(Client {
-            http: build_http_client(),
-            host: creds.host,
-            token: creds.token,
-        })
-    }
-
-    /// Like `new`, but prefers the sync-scoped token when one is stored —
-    /// used by the watcher so a long-running process never depends on the
-    /// 30-day login session. Falls back to the normal login (or env vars).
-    pub(crate) fn new_sync_preferred() -> Result<Self, Box<dyn Error>> {
-        if std::env::var("NOPAL_TOKEN").is_err() {
-            if let Some(creds) = auth::load_sync_credentials() {
-                return Ok(Client {
-                    http: build_http_client(),
-                    host: creds.host,
-                    token: creds.token,
-                });
-            }
-        }
-        Self::new()
-    }
-
-    fn url(&self, path: &str) -> String {
-        format!("{}{}", self.host, path)
-    }
-
-    /// Runs `send_request` up to `MAX_ATTEMPTS` times, retrying ONLY when
-    /// the request fails at the transport level (never received a response
-    /// at all — a dropped connection, DNS blip, etc). A definite HTTP
-    /// response, even an error one, returns immediately: retrying a 403
-    /// changes nothing.
-    fn send_with_retry(
-        &self,
-        mut send_request: impl FnMut() -> reqwest::Result<reqwest::blocking::Response>,
-    ) -> Result<reqwest::blocking::Response, Box<dyn Error>> {
-        let mut last_err: Option<reqwest::Error> = None;
-        for attempt in 0..MAX_ATTEMPTS {
-            if attempt > 0 {
-                eprintln!(
-                    "  network error, retrying ({attempt}/{})...",
-                    MAX_ATTEMPTS - 1
-                );
-                std::thread::sleep(retry_delay(attempt));
-            }
-            match send_request() {
-                Ok(resp) => return Ok(resp),
-                Err(e) => last_err = Some(e),
-            }
-        }
-        Err(Box::new(last_err.expect("MAX_ATTEMPTS > 0")))
-    }
-
-    /// GET returning JSON, with a friendly error for non-2xx responses.
-    pub(crate) fn get_json<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-    ) -> Result<T, Box<dyn Error>> {
-        let resp = self.send_with_retry(|| {
-            self.http
-                .get(self.url(path))
-                .bearer_auth(&self.token)
-                .send()
-        })?;
-        Self::parse(resp)
-    }
-
-    pub(crate) fn post_json<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &serde_json::Value,
-    ) -> Result<T, Box<dyn Error>> {
-        let resp = self.send_with_retry(|| {
-            self.http
-                .post(self.url(path))
-                .bearer_auth(&self.token)
-                .json(body)
-                .send()
-        })?;
-        Self::parse(resp)
-    }
-
-    /// Multipart POST. `build_form` is called fresh on every attempt (not
-    /// passed a pre-built `Form`) so a retry re-reads the file/bytes rather
-    /// than reusing a body that's already been partially consumed.
-    pub(crate) fn post_form<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-        build_form: impl Fn() -> Result<reqwest::blocking::multipart::Form, Box<dyn Error>>,
-    ) -> Result<T, Box<dyn Error>> {
-        let mut last_err: Option<Box<dyn Error>> = None;
-        for attempt in 0..MAX_ATTEMPTS {
-            if attempt > 0 {
-                eprintln!(
-                    "  network error, retrying ({attempt}/{})...",
-                    MAX_ATTEMPTS - 1
-                );
-                std::thread::sleep(retry_delay(attempt));
-            }
-            let form = match build_form() {
-                Ok(f) => f,
-                Err(e) => return Err(e),
-            };
-            match self
-                .http
-                .post(self.url(path))
-                .bearer_auth(&self.token)
-                .multipart(form)
-                .send()
-            {
-                Ok(resp) => return Self::parse(resp),
-                Err(e) => last_err = Some(Box::new(e)),
-            }
-        }
-        Err(last_err.expect("MAX_ATTEMPTS > 0"))
-    }
-
-    pub(crate) fn patch_json<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &serde_json::Value,
-    ) -> Result<T, Box<dyn Error>> {
-        let resp = self.send_with_retry(|| {
-            self.http
-                .patch(self.url(path))
-                .bearer_auth(&self.token)
-                .json(body)
-                .send()
-        })?;
-        Self::parse(resp)
-    }
-
-    pub(crate) fn delete<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-    ) -> Result<T, Box<dyn Error>> {
-        let resp = self.send_with_retry(|| {
-            self.http
-                .delete(self.url(path))
-                .bearer_auth(&self.token)
-                .send()
-        })?;
-        Self::parse(resp)
-    }
-
-    /// DELETE with a JSON body (e.g. revoking a sync token).
-    pub(crate) fn delete_with_body(
-        &self,
-        path: &str,
-        body: &serde_json::Value,
-    ) -> Result<(), Box<dyn Error>> {
-        let resp = self.send_with_retry(|| {
-            self.http
-                .delete(self.url(path))
-                .bearer_auth(&self.token)
-                .json(body)
-                .send()
-        })?;
-        let _: serde_json::Value = Self::parse(resp)?;
-        Ok(())
-    }
-
-    fn parse<T: serde::de::DeserializeOwned>(
-        resp: reqwest::blocking::Response,
-    ) -> Result<T, Box<dyn Error>> {
-        let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err("Session expired or invalid. Run 'nopal login' again.".into());
-        }
-        let text = resp.text()?;
-        if !status.is_success() {
-            // Surface the server's { error } message when present.
-            let msg = serde_json::from_str::<serde_json::Value>(&text)
-                .ok()
-                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
-                .unwrap_or_else(|| format!("Request failed ({status})"));
-            return Err(msg.into());
-        }
-        Ok(serde_json::from_str(&text)?)
-    }
-
-    pub(crate) fn children(&self, folder_id: &str) -> Result<Children, Box<dyn Error>> {
-        self.get_json(&format!("/api/vault/folders/{folder_id}/children"))
-    }
-}
-
-// ─── Path resolution ──────────────────────────────────────────────────────────
-
-/// Case-insensitive segment match; also lets `Daily Logs` match `daily-logs`.
-fn segment_matches(segment: &str, name: &str) -> bool {
-    let norm = |s: &str| s.trim().to_lowercase().replace(' ', "-");
-    norm(segment) == norm(name)
-}
-
-fn split_path(path: &str) -> Vec<&str> {
-    path.split('/')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-/// Walks the vault from the root, matching folders first and, for the final
-/// segment only, files. Empty path resolves to the vault root.
-fn resolve(client: &Client, path: &str) -> Result<Resolved, Box<dyn Error>> {
-    let segments = split_path(path);
-    if segments.is_empty() {
-        return Ok(Resolved::Root);
-    }
-
-    let mut children = client.children("root")?;
-    let mut current: Option<Folder> = None;
-
-    for (i, segment) in segments.iter().enumerate() {
-        let is_last = i == segments.len() - 1;
-
-        if let Some(folder) = children
-            .folders
-            .iter()
-            .find(|f| segment_matches(segment, &f.name))
-            .cloned()
-        {
-            children = client.children(&folder._id)?;
-            current = Some(folder);
-            continue;
-        }
-
-        if is_last && current.is_some() {
-            if let Some(file) = children
-                .files
-                .iter()
-                .find(|f| segment_matches(segment, &f.name))
-                .cloned()
-            {
-                return Ok(Resolved::File { file });
-            }
-        }
-
-        let where_ = current
-            .as_ref()
-            .map(|f| f.name.clone())
-            .unwrap_or_else(|| "the vault root".to_string());
-        return Err(format!("'{segment}' not found in {where_}").into());
-    }
-
-    Ok(Resolved::Folder(
-        current.expect("non-empty path sets current"),
-    ))
-}
-
-fn resolve_folder(client: &Client, path: &str) -> Result<Option<Folder>, Box<dyn Error>> {
-    match resolve(client, path)? {
-        Resolved::Root => Ok(None),
-        Resolved::Folder(f) => Ok(Some(f)),
-        Resolved::File { file } => Err(format!("'{}' is a file, not a folder", file.name).into()),
-    }
-}
-
-fn resolve_file(client: &Client, path: &str) -> Result<FileListing, Box<dyn Error>> {
-    match resolve(client, path)? {
-        Resolved::File { file } => Ok(file),
-        Resolved::Folder(f) => Err(format!("'{}' is a folder, not a file", f.name).into()),
-        Resolved::Root => Err("Expected a file path, got the vault root".into()),
-    }
-}
+pub(crate) use nopal_core::vault::{
+    format_date, format_size, is_shared, resolve, resolve_file, resolve_folder, segment_matches,
+    split_path, Children, Client, FileListing, Folder, Resolved,
+};
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
-
-pub(crate) fn format_size(size: Option<u64>) -> String {
-    match size {
-        None => String::new(),
-        Some(b) if b < 1024 => format!("{b} B"),
-        Some(b) if b < 1024 * 1024 => format!("{:.1} KB", b as f64 / 1024.0),
-        Some(b) if b < 1024 * 1024 * 1024 => {
-            format!("{:.1} MB", b as f64 / (1024.0 * 1024.0))
-        }
-        Some(b) => format!("{:.1} GB", b as f64 / (1024.0 * 1024.0 * 1024.0)),
-    }
-}
-
-fn format_date(iso: &str) -> String {
-    iso.split('T').next().unwrap_or(iso).to_string()
-}
 
 /// Interactive y/N prompt — anything but y/yes is a no.
 pub(crate) fn confirm(prompt: &str) -> bool {
@@ -429,14 +32,6 @@ pub(crate) fn confirm(prompt: &str) -> bool {
         return false;
     }
     matches!(line.trim().to_lowercase().as_str(), "y" | "yes")
-}
-
-fn is_shared(folder: &Folder) -> bool {
-    match &folder.shared_with {
-        serde_json::Value::String(s) => s == "everyone",
-        serde_json::Value::Array(a) => !a.is_empty(),
-        _ => false,
-    }
 }
 
 fn print_listing(folders: &[Folder], files: &[FileListing]) {
@@ -463,7 +58,7 @@ fn print_listing(folders: &[Folder], files: &[FileListing]) {
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
-pub fn ls(path: &str, json: bool) -> Result<(), Box<dyn Error>> {
+pub fn ls(path: &str, json: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let folder_id = match resolve_folder(&client, path)? {
         Some(f) => f._id,
@@ -491,7 +86,7 @@ pub fn ls(path: &str, json: bool) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn tree(path: &str, depth: u32, folders_only: bool) -> Result<(), Box<dyn Error>> {
+pub fn tree(path: &str, depth: u32, folders_only: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let (label, folder_id) = match resolve_folder(&client, path)? {
         Some(f) => (f.name.clone(), f._id),
@@ -507,7 +102,7 @@ fn tree_inner(
     prefix: &str,
     depth: u32,
     folders_only: bool,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     if depth == 0 {
         return Ok(());
     }
@@ -541,11 +136,11 @@ fn branch_chars(prefix: &str, last: bool) -> (String, String) {
     }
 }
 
-pub fn cat(path: &str) -> Result<(), Box<dyn Error>> {
+pub fn cat(path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let listing = resolve_file(&client, path)?;
     let resp: serde_json::Value = client.get_json(&format!("/api/vault/{}", listing._id))?;
-    let file: FullFile = serde_json::from_value(resp["file"].clone())?;
+    let file: nopal_core::vault::FullFile = serde_json::from_value(resp["file"].clone())?;
 
     match file.content {
         Some(content) => {
@@ -563,38 +158,18 @@ pub fn cat(path: &str) -> Result<(), Box<dyn Error>> {
     }
 }
 
-pub fn download(path: &str, output: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
+pub fn download(path: &str, output: Option<PathBuf>) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let listing = resolve_file(&client, path)?;
     let out = output.unwrap_or_else(|| PathBuf::from(&listing.name));
 
-    if listing.has_s3 {
-        let resp: serde_json::Value =
-            client.get_json(&format!("/api/vault/download/{}", listing._id))?;
-        let url = resp["url"]
-            .as_str()
-            .ok_or("Server did not return a download URL")?;
-        let mut s3_resp = reqwest::blocking::get(url)?;
-        if !s3_resp.status().is_success() {
-            return Err(format!("Download failed ({})", s3_resp.status()).into());
-        }
-        let mut file = fs::File::create(&out)?;
-        s3_resp.copy_to(&mut file)?;
-    } else {
-        // Markdown/text cards live in the DB — write their content directly.
-        let resp: serde_json::Value = client.get_json(&format!("/api/vault/{}", listing._id))?;
-        let file: FullFile = serde_json::from_value(resp["file"].clone())?;
-        let content = file
-            .content
-            .ok_or_else(|| format!("'{}' has no downloadable content", file.name))?;
-        fs::write(&out, content)?;
-    }
+    nopal_core::vault::download_file(&client, &listing, &out)?;
 
     println!("Downloaded {} -> {}", listing.name, out.display());
     Ok(())
 }
 
-pub fn info(path: &str, json: bool) -> Result<(), Box<dyn Error>> {
+pub fn info(path: &str, json: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     match resolve(&client, path)? {
         Resolved::Root => Err("Provide a folder or file path".into()),
@@ -630,7 +205,7 @@ pub fn info(path: &str, json: bool) -> Result<(), Box<dyn Error>> {
         Resolved::File { file: listing } => {
             let resp: serde_json::Value =
                 client.get_json(&format!("/api/vault/{}", listing._id))?;
-            let f: FullFile = serde_json::from_value(resp["file"].clone())?;
+            let f: nopal_core::vault::FullFile = serde_json::from_value(resp["file"].clone())?;
             if json {
                 println!(
                     "{}",
@@ -668,7 +243,7 @@ pub fn info(path: &str, json: bool) -> Result<(), Box<dyn Error>> {
     }
 }
 
-pub fn open(path: &str) -> Result<(), Box<dyn Error>> {
+pub fn open(path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let url = match resolve(&client, path)? {
         Resolved::Root => format!("{}/fruits/vault", client.host),
@@ -684,7 +259,7 @@ pub fn open(path: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn upload(local_files: &[PathBuf], to: &str) -> Result<(), Box<dyn Error>> {
+pub fn upload(local_files: &[PathBuf], to: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let folder = resolve_folder(&client, to)?
         .ok_or("Files can't be uploaded to the vault root — pick a folder like personal/")?;
@@ -695,57 +270,50 @@ pub fn upload(local_files: &[PathBuf], to: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Uploads one file, returning the created file_ref's id (used by sync's
-/// state tracking).
+/// Uploads one file, printing progress, and returning the created
+/// file_ref's id (used by sync's state tracking). A thin, printing wrapper
+/// over `nopal_core::vault::upload_file`.
 pub(crate) fn upload_one(
     client: &Client,
     local: &Path,
     folder: &Folder,
-) -> Result<String, Box<dyn Error>> {
+) -> Result<String, Box<dyn Error + Send + Sync>> {
     let meta = fs::metadata(local).map_err(|e| format!("{}: {e}", local.display()))?;
-    if !meta.is_file() {
-        return Err(format!("{} is not a file", local.display()).into());
-    }
     let name = local
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| format!("Invalid file name: {}", local.display()))?
+        .unwrap_or("file")
         .to_string();
-    let content_type = mime_guess::from_path(local)
-        .first_or_octet_stream()
-        .to_string();
-    let size = meta.len();
 
     println!(
         "Uploading {} ({}) -> {}/ ...",
         name,
-        format_size(Some(size)),
+        format_size(Some(meta.len())),
         folder.name
     );
 
-    let file_id = if size <= MULTIPART_THRESHOLD {
-        let folder_id = folder._id.clone();
-        let resp: serde_json::Value = client.post_form("/api/vault/upload", || {
-            Ok(reqwest::blocking::multipart::Form::new()
-                .file("file", local)?
-                .text("folderId", folder_id.clone()))
-        })?;
-        resp["fileRef"]["_id"]
-            .as_str()
-            .ok_or("Upload did not return a file id")?
-            .to_string()
-    } else {
-        upload_multipart(client, local, folder, &name, &content_type, size)?
-    };
-
-    println!("  ✓ {name}");
-    Ok(file_id)
+    let mut printed_progress = false;
+    let uploaded = nopal_core::vault::upload_file(client, local, folder, |progress| {
+        let nopal_core::vault::UploadProgress::Part {
+            part_number,
+            total_parts,
+        } = progress;
+        print!("\r  part {part_number}/{total_parts}");
+        use std::io::Write;
+        std::io::stdout().flush().ok();
+        printed_progress = true;
+    })?;
+    if printed_progress {
+        println!();
+    }
+    println!("  ✓ {}", uploaded.name);
+    Ok(uploaded.file_id)
 }
 
 /// `mkdir -p` semantics: walks the path from the vault root and creates any
 /// missing folders. The first segment must be an existing Vault Root Folder
 /// (daily-logs / projects / personal) — the root itself is locked.
-pub fn mkdir(path: &str) -> Result<(), Box<dyn Error>> {
+pub fn mkdir(path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let segments = split_path(path);
     if segments.is_empty() {
@@ -804,7 +372,7 @@ pub fn mkdir(path: &str) -> Result<(), Box<dyn Error>> {
 /// Move a folder into another folder (possibly across vault roots — e.g.
 /// personal → projects). Shared folders, cycles, and root containers are
 /// rejected server-side.
-pub fn mv(src: &str, dest: &str) -> Result<(), Box<dyn Error>> {
+pub fn mv(src: &str, dest: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let folder = resolve_folder(&client, src)?.ok_or("The vault root can't be moved")?;
     let dest_folder = resolve_folder(&client, dest)?
@@ -818,7 +386,7 @@ pub fn mv(src: &str, dest: &str) -> Result<(), Box<dyn Error>> {
 }
 
 /// Rename a folder. (Files can't be renamed — matching the web UI.)
-pub fn rename(path: &str, new_name: &str) -> Result<(), Box<dyn Error>> {
+pub fn rename(path: &str, new_name: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let new_name = new_name.trim();
     if new_name.is_empty() || new_name.contains('/') {
         return Err("NEW_NAME must be a plain folder name (no '/')".into());
@@ -844,7 +412,7 @@ pub fn rename(path: &str, new_name: &str) -> Result<(), Box<dyn Error>> {
 
 /// Replace a vault file's bytes in place — same file id, so links keep
 /// working. Locked daily-log files are rejected server-side.
-pub fn replace(local: &Path, vault_path: &str) -> Result<(), Box<dyn Error>> {
+pub fn replace(local: &Path, vault_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let meta = fs::metadata(local).map_err(|e| format!("{}: {e}", local.display()))?;
     if !meta.is_file() {
         return Err(format!("{} is not a file", local.display()).into());
@@ -869,7 +437,7 @@ pub fn replace(local: &Path, vault_path: &str) -> Result<(), Box<dyn Error>> {
 /// Delete a vault file or folder. Non-empty folders need --recursive;
 /// everything asks for confirmation unless --force. Root containers and
 /// locked daily-log content are rejected server-side.
-pub fn rm(path: &str, force: bool, recursive: bool) -> Result<(), Box<dyn Error>> {
+pub fn rm(path: &str, force: bool, recursive: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     match resolve(&client, path)? {
         Resolved::Root => Err("Provide a folder or file path to delete".into()),
@@ -917,7 +485,7 @@ struct RelatedHuman {
     email: String,
 }
 
-fn related_humans(client: &Client) -> Result<Vec<RelatedHuman>, Box<dyn Error>> {
+fn related_humans(client: &Client) -> Result<Vec<RelatedHuman>, Box<dyn Error + Send + Sync>> {
     let resp: serde_json::Value = client.get_json("/api/humans/related")?;
     Ok(serde_json::from_value(resp["humans"].clone())?)
 }
@@ -931,7 +499,7 @@ pub fn share(
     everyone: bool,
     private: bool,
     with: &[String],
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let folder = match resolve(&client, path)? {
         Resolved::Root => return Err("The vault root can't be shared".into()),
@@ -1042,7 +610,7 @@ fn maybe_copy(url: &str, copy: bool) {
 
 /// Publish a folder — it (and everything inside it, including anything
 /// added later) becomes reachable at a public URL with no login required.
-pub fn publish(path: &str, copy: bool) -> Result<(), Box<dyn Error>> {
+pub fn publish(path: &str, copy: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let folder = match resolve(&client, path)? {
         Resolved::Root => return Err("The vault root can't be published".into()),
@@ -1075,7 +643,7 @@ pub fn publish(path: &str, copy: bool) -> Result<(), Box<dyn Error>> {
 /// Unpublish a folder that was published directly (not one that's only
 /// public because a parent folder is published — unpublish that parent to
 /// revoke it).
-pub fn unpublish(path: &str) -> Result<(), Box<dyn Error>> {
+pub fn unpublish(path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let folder = match resolve(&client, path)? {
         Resolved::Root => return Err("The vault root can't be unpublished".into()),
@@ -1099,7 +667,7 @@ pub fn unpublish(path: &str) -> Result<(), Box<dyn Error>> {
 /// inherits publicness from a published ancestor. Rather than re-deriving
 /// that inheritance client-side, this asks the live public page directly
 /// (no auth) and reports what it finds — always authoritative.
-pub fn link(path: &str, copy: bool) -> Result<(), Box<dyn Error>> {
+pub fn link(path: &str, copy: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let (kind, id, name) = match resolve(&client, path)? {
         Resolved::Root => return Err("The vault root doesn't have a public link".into()),
@@ -1108,14 +676,7 @@ pub fn link(path: &str, copy: bool) -> Result<(), Box<dyn Error>> {
     };
 
     let url = public_url(&client.host, kind, &id);
-    let reachable = client
-        .http
-        .get(&url)
-        .send()
-        .map(|r| r.status().is_success())
-        .unwrap_or(false);
-
-    if !reachable {
+    if !client.get_reachable(&url) {
         return Err(format!(
             "'{name}' isn't published. Publish it (or a parent folder) first:\n  \
              nopal vault publish {path}"
@@ -1126,135 +687,4 @@ pub fn link(path: &str, copy: bool) -> Result<(), Box<dyn Error>> {
     println!("{url}");
     maybe_copy(&url, copy);
     Ok(())
-}
-
-fn upload_multipart(
-    client: &Client,
-    local: &Path,
-    folder: &Folder,
-    name: &str,
-    content_type: &str,
-    size: u64,
-) -> Result<String, Box<dyn Error>> {
-    let init: serde_json::Value = client.post_json(
-        "/api/vault/multipart-init",
-        &serde_json::json!({
-            "filename": name,
-            "contentType": content_type,
-            "folderId": folder._id,
-            "originalName": name,
-            "size": size,
-        }),
-    )?;
-    let upload_id = init["uploadId"]
-        .as_str()
-        .ok_or("multipart-init did not return an uploadId")?
-        .to_string();
-    let key = init["key"]
-        .as_str()
-        .ok_or("multipart-init did not return a key")?
-        .to_string();
-
-    // Abort the S3 upload on any failure so we don't leak storage.
-    let result = upload_parts(
-        client,
-        local,
-        &upload_id,
-        &key,
-        folder,
-        name,
-        content_type,
-        size,
-    );
-    if result.is_err() {
-        let _: Result<serde_json::Value, _> = client.post_json(
-            "/api/vault/multipart-abort",
-            &serde_json::json!({ "uploadId": upload_id, "key": key }),
-        );
-    }
-    result
-}
-
-#[allow(clippy::too_many_arguments)]
-fn upload_parts(
-    client: &Client,
-    local: &Path,
-    upload_id: &str,
-    key: &str,
-    folder: &Folder,
-    name: &str,
-    content_type: &str,
-    size: u64,
-) -> Result<String, Box<dyn Error>> {
-    use sha2::Digest;
-    let mut file = fs::File::open(local)?;
-    let mut parts: Vec<serde_json::Value> = Vec::new();
-    let total_parts = size.div_ceil(MULTIPART_CHUNK as u64);
-    let mut part_number: u32 = 1;
-    let mut buf = vec![0u8; MULTIPART_CHUNK];
-    // Hash while chunking — the server never holds the whole file during a
-    // multipart upload, so the content hash must come from us.
-    let mut hasher = sha2::Sha256::new();
-
-    loop {
-        let mut filled = 0;
-        while filled < buf.len() {
-            let n = file.read(&mut buf[filled..])?;
-            if n == 0 {
-                break;
-            }
-            filled += n;
-        }
-        if filled == 0 {
-            break;
-        }
-
-        hasher.update(&buf[..filled]);
-        // Cloned into the closure so a retry re-sends the same bytes rather
-        // than reusing an already-consumed Form/Part (each is single-use).
-        let chunk_bytes = buf[..filled].to_vec();
-        let resp: serde_json::Value = client.post_form("/api/vault/multipart-part", || {
-            let chunk_part = reqwest::blocking::multipart::Part::bytes(chunk_bytes.clone())
-                .file_name("chunk")
-                .mime_str("application/octet-stream")?;
-            Ok(reqwest::blocking::multipart::Form::new()
-                .text("uploadId", upload_id.to_string())
-                .text("key", key.to_string())
-                .text("partNumber", part_number.to_string())
-                .part("chunk", chunk_part))
-        })?;
-        let etag = resp["ETag"]
-            .as_str()
-            .ok_or_else(|| format!("No ETag for part {part_number}"))?;
-        parts.push(serde_json::json!({ "PartNumber": part_number, "ETag": etag }));
-
-        print!("\r  part {part_number}/{total_parts}");
-        use std::io::Write;
-        std::io::stdout().flush().ok();
-
-        part_number += 1;
-        if filled < buf.len() {
-            break;
-        }
-    }
-    println!();
-
-    let content_hash = format!("{:x}", hasher.finalize());
-    let resp: serde_json::Value = client.post_json(
-        "/api/vault/multipart-complete",
-        &serde_json::json!({
-            "uploadId": upload_id,
-            "key": key,
-            "parts": parts,
-            "name": name,
-            "folderId": folder._id,
-            "contentType": content_type,
-            "size": size,
-            "contentHash": content_hash,
-        }),
-    )?;
-    resp["fileRef"]["_id"]
-        .as_str()
-        .map(String::from)
-        .ok_or_else(|| "multipart-complete did not return a file id".into())
 }

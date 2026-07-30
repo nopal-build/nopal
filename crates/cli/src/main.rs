@@ -51,7 +51,8 @@ enum Command {
         #[command(subcommand)]
         command: VaultCommand,
     },
-    /// Mirror local directories into the vault's syncs/ folder (push-only).
+    /// Mirror local directories into a project's (or your Personal space's)
+    /// Syncs folder (push-only by default; --two-way for both directions).
     Sync {
         #[command(subcommand)]
         command: SyncCommand,
@@ -275,7 +276,7 @@ enum SyncCommand {
         /// The local directory to sync.
         dir: PathBuf,
         /// Name for the target (defaults to the directory name). Also the
-        /// folder name under syncs/ in the vault.
+        /// connector folder's name inside the space's Syncs folder.
         #[arg(long)]
         name: Option<String>,
         /// Optimize videos with `nopal video prep` before uploading — the
@@ -288,6 +289,11 @@ enum SyncCommand {
         /// directory is never modified.
         #[arg(long)]
         two_way: bool,
+        /// Which project's Syncs folder to add this to (its Syncs folder is
+        /// created on first use if it doesn't exist yet). Defaults to your
+        /// Personal space when omitted.
+        #[arg(long)]
+        project: Option<String>,
     },
     /// List sync targets (all devices).
     Ls {},
@@ -488,7 +494,8 @@ fn main() {
                     name,
                     preprocess,
                     two_way,
-                } => sync::add(&dir, name, preprocess, two_way),
+                    project,
+                } => sync::add(&dir, name, preprocess, two_way, project),
                 SyncCommand::Ls {} => sync::ls(),
                 SyncCommand::Rm {
                     name,

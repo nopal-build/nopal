@@ -32,6 +32,15 @@ import {
   isRootShareable,
   isVaultRootKey,
 } from "../data/vaultRoots";
+import {
+  SPACE_FOLDER_TYPES,
+  SYNC_FOLDER_TYPES,
+  canWriteToFolderType,
+  isFolderTypePublishable,
+  isFolderTypeShareable,
+  type SpaceFolderTypeKey,
+  type SyncFolderTypeKey,
+} from "../data/vaultFolderTypes";
 // Server functions are only used inside `loader`; React Router strips them
 // from the client bundle automatically.
 import {
@@ -605,6 +614,120 @@ function MovePickerNode({
             onSelect={onSelect}
           />
         ))}
+    </div>
+  );
+}
+
+/**
+ * Panel content for the "New folder" `MoreMenu` popover (see `VaultV2Page`'s
+ * toolbar) — NOT a modal. Plain-folder creation is a name + Create (or hit
+ * Enter); a Vault Folder Type (Skills/Syncs, or a sync connector when the
+ * current folder IS a Syncs folder — see the vault skill) is a single
+ * button that kicks off creation immediately, no typing required.
+ */
+function NewFolderPanel({
+  parentFolder,
+  isSpaceTypeEligible,
+  existingChildren,
+  onCreate,
+}: {
+  parentFolder: VaultFolder;
+  /** True when `parentFolder` is either the Personal root or a direct child
+   * of the `projects` root — the only places Space types (Skills/Syncs) may
+   * be created (see the vault skill). */
+  isSpaceTypeEligible: boolean;
+  existingChildren: VaultFolder[];
+  onCreate: (name: string, folderType: string | null) => void;
+}) {
+  const isSyncsContainer =
+    parentFolder.folder_type === "syncs" && parentFolder.is_folder_type_root;
+
+  const existingSpaceTypes = new Set(
+    existingChildren
+      .filter((f) => f.is_folder_type_root && f.folder_type)
+      .map((f) => f.folder_type as string),
+  );
+
+  const spaceTypeOptions = isSpaceTypeEligible
+    ? (Object.keys(SPACE_FOLDER_TYPES) as SpaceFolderTypeKey[]).filter(
+        (key) => !existingSpaceTypes.has(key),
+      )
+    : [];
+  const syncTypeOptions = isSyncsContainer
+    ? (Object.keys(SYNC_FOLDER_TYPES) as SyncFolderTypeKey[])
+    : [];
+
+  const typeDefs: Record<string, { label: string; description: string; comingSoon?: boolean }> = {
+    ...SPACE_FOLDER_TYPES,
+    ...SYNC_FOLDER_TYPES,
+  };
+  const typeOptions = [...spaceTypeOptions, ...syncTypeOptions];
+
+  const [name, setName] = useState("");
+  const canSubmit = name.trim().length > 0;
+  const submitPlain = () => {
+    if (!canSubmit) return;
+    onCreate(name.trim(), null);
+  };
+
+  return (
+    <div style={{ width: "230px" }}>
+      <div style={{ display: "flex", gap: "6px", padding: "2px 2px 6px" }}>
+        <input
+          autoFocus
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitPlain();
+          }}
+          placeholder="Folder name"
+          className="text-xs font-mono"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: "5px 7px",
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border)",
+            borderRadius: "4px",
+            color: "var(--text)",
+          }}
+        />
+        <button
+          type="button"
+          onClick={submitPlain}
+          disabled={!canSubmit}
+          className="btn-purple text-xs font-mono px-2 py-1 rounded"
+          style={!canSubmit ? { opacity: 0.5, cursor: "not-allowed" } : {}}
+        >
+          Create
+        </button>
+      </div>
+
+      {typeOptions.length > 0 && (
+        <>
+          <div
+            style={{ borderTop: "1px solid var(--border)", margin: "2px 0 4px" }}
+          />
+          {typeOptions.map((key) => {
+            const def = typeDefs[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                role="menuitem"
+                disabled={def.comingSoon}
+                title={def.description}
+                onClick={() => onCreate(def.label, key)}
+                className="menu-item text-sm purple-text"
+              >
+                {def.label}
+                {def.comingSoon ? " (soon)" : ""}
+              </button>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
@@ -1298,14 +1421,16 @@ export default function VaultV2Page() {
     );
   };
 
-  const handleNewFolder = async () => {
+  const handleCreateFolder = async (name: string, folderType: string | null) => {
     if (current.kind !== "folder") return;
     const folderId = current.folder._id;
-    const name = window.prompt("New folder name")?.trim();
-    if (!name) return;
     const data = await apiJson("/api/vault/folders", {
       method: "POST",
-      body: JSON.stringify({ name, parent_folder_id: folderId }),
+      body: JSON.stringify({
+        name,
+        parent_folder_id: folderId,
+        folder_type: folderType,
+      }),
     });
     if (data) invalidateAndRevalidate([folderId]);
   };
@@ -1455,24 +1580,30 @@ export default function VaultV2Page() {
 
   const currentIsRootContainer =
     current.kind === "folder" && isVaultRootFolder(current.folder);
+  const currentFolderType =
+    current.kind === "folder" ? (current.folder.folder_type ?? null) : null;
   const canShareCurrent =
     isOwnedByViewer &&
     current.kind === "folder" &&
     !currentIsRootContainer &&
-    isRootShareable(current.folder.vault_root_key);
+    isRootShareable(current.folder.vault_root_key) &&
+    isFolderTypeShareable(currentFolderType);
   const canPublishCurrent =
     isOwnedByViewer &&
     current.kind === "folder" &&
     !currentIsRootContainer &&
-    isRootPublishable(current.folder.vault_root_key);
-  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
-  // even inside the OWNING human's own vault — see `vaultRoots.ts`. This
-  // ONLY hides the buttons; the server enforces the real restriction (see
-  // the `vault` skill's own rule against hidden-button-only gating).
+    isRootPublishable(current.folder.vault_root_key) &&
+    isFolderTypePublishable(currentFolderType);
+  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
+  // Admin/Super, even inside the OWNING human's own vault — see
+  // `vaultRoots.ts` / `vaultFolderTypes.ts`. This ONLY hides the buttons;
+  // the server enforces the real restriction (see the `vault` skill's own
+  // rule against hidden-button-only gating).
   const canWriteCurrent =
     isOwnedByViewer &&
     current.kind === "folder" &&
-    canWriteToRoot(current.folder.vault_root_key, user.role);
+    canWriteToRoot(current.folder.vault_root_key, user.role) &&
+    canWriteToFolderType(currentFolderType, user.role);
   // A folder is publicly reachable either because it was Published itself,
   // or because an ancestor was — Publish is resolved dynamically (see
   // resolvePublicRootFolder), not cascaded onto descendants at publish time,
@@ -1488,12 +1619,15 @@ export default function VaultV2Page() {
   const fileEffectivelyPublic =
     current.kind === "file" &&
     (current.file.is_public === true || filePublicViaAncestor);
-  // Any folder can be moved anywhere — except root containers and folders
-  // that are currently shared (the server also rejects shared descendants).
+  // Any folder can be moved anywhere — except root containers, folder-type
+  // anchors (a project's own "Skills"/"Syncs" folder, or a sync connector
+  // inside one — pinned in place, see the vault skill), and folders that
+  // are currently shared (the server also rejects shared descendants).
   const canMoveCurrent =
     isOwnedByViewer &&
     current.kind === "folder" &&
     !currentIsRootContainer &&
+    !current.folder.is_folder_type_root &&
     !isFolderShared(current.folder);
 
   const fileHasS3 =
@@ -1508,10 +1642,18 @@ export default function VaultV2Page() {
   // itself" ordering), which always carries its own key.
   const fileRootKey =
     current.kind === "file" ? current.ancestry[0]?.vault_root_key : undefined;
+  // Same reasoning as fileRootKey above, but for the file's TYPE — the
+  // immediate containing folder (last in the ancestry chain) carries the
+  // correct denormalized `folder_type` for wherever the file actually lives.
+  const fileFolderType =
+    current.kind === "file"
+      ? current.ancestry[current.ancestry.length - 1]?.folder_type
+      : undefined;
   const canWriteCurrentFile =
     current.kind === "file" &&
     isOwnedByViewer &&
-    canWriteToRoot(fileRootKey, user.role);
+    canWriteToRoot(fileRootKey, user.role) &&
+    canWriteToFolderType(fileFolderType, user.role);
 
   // "More Actions" dropdown — management actions, gated by the same
   // policies that previously hid the standalone buttons. Unavailable actions
@@ -1764,12 +1906,40 @@ export default function VaultV2Page() {
                   </button>
                 )}
                 {canWriteCurrent && (
-                  <button
-                    className="vault-toolbar-btn"
-                    onClick={handleNewFolder}
+                  <MoreMenu
+                    label="New folder"
+                    align="left"
+                    trigger={({ toggle, open, label }) => (
+                      <button
+                        type="button"
+                        className="vault-toolbar-btn"
+                        aria-label={label}
+                        aria-haspopup="menu"
+                        aria-expanded={open}
+                        onClick={toggle}
+                      >
+                        + New folder
+                      </button>
+                    )}
                   >
-                    + New folder
-                  </button>
+                    {({ close }) => (
+                      <NewFolderPanel
+                        parentFolder={current.folder}
+                        isSpaceTypeEligible={
+                          (current.folder.vault_root_key === "personal" &&
+                            isVaultRootFolder(current.folder)) ||
+                          current.folder.parent_folder_id === projectsRootId
+                        }
+                        existingChildren={
+                          foldersByParent[current.folder._id] ?? []
+                        }
+                        onCreate={(name, folderType) => {
+                          handleCreateFolder(name, folderType);
+                          close();
+                        }}
+                      />
+                    )}
+                  </MoreMenu>
                 )}
                 {folderEffectivelyPublic && (
                   <CopyLinkButton path={`/public/folder/${current.folder._id}`} />

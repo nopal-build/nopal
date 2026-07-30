@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { sortDailyLog } from "../data/sorter.server";
+import { isSorterEnabled, sortDailyLog } from "../data/sorter.server";
 
 /**
  * POST /api/daily-log/sort
@@ -24,6 +24,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
+  }
+
+  // Temporary kill switch — see `isSorterEnabled` in `sorter.server.ts`.
+  if (!isSorterEnabled()) {
+    return Response.json(
+      { error: "Sorting is temporarily disabled." },
+      { status: 503 },
+    );
   }
 
   const body = (await request.json().catch(() => ({}))) as {

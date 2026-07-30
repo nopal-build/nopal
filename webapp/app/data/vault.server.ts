@@ -21,9 +21,25 @@ import type {
 import {
   VAULT_ROOT_KEYS,
   VAULT_ROOTS,
+  canWriteToRoot,
+  isRootPublishable,
+  isRootShareable,
   isVaultRootKey,
   type VaultRootKey,
 } from "./vaultRoots";
+import {
+  canWriteToFolderType,
+  isFolderTypePublishable,
+  isFolderTypeShareable,
+  isSpaceFolderTypeKey,
+  isSyncFamilyFolderType,
+  isSyncFolderTypeKey,
+  SPACE_FOLDER_TYPES,
+  SYNC_FOLDER_TYPES,
+  type VaultFolderTypeKey,
+} from "./vaultFolderTypes";
+import { isVaultRootFolder } from "./vault.types";
+import type { Role } from "./humans.server";
 
 // ─── FileRef CRUD ─────────────────────────────────────────────────────────────
 
@@ -176,6 +192,13 @@ export async function createVaultFolder(data: {
   parent_folder_id?: string | null;
   shared_with?: string[] | "everyone";
   vault_root_key?: VaultRootKey | null;
+  /** Explicitly DEFINES this folder as a Vault Folder Type anchor (e.g. a
+   * project's own "Skills"/"Syncs" folder, or a sync connector inside one)
+   * — see vaultFolderTypes.ts. Omit for an ordinary folder, which instead
+   * INHERITS whatever type (if any) its parent already carries. Callers are
+   * responsible for validating the type is allowed for this parent (see
+   * `validateFolderTypeForParent`) — this function is mechanical only. */
+  folder_type?: VaultFolderTypeKey | null;
 }): Promise<VaultFolder | undefined> {
   const now = new Date().toISOString();
 
@@ -186,17 +209,95 @@ export async function createVaultFolder(data: {
     rootKey = await resolveVaultRootKey(data.parent_folder_id);
   }
 
+  // Same denormalize-for-O(1)-reads trick as vault_root_key, one level
+  // deeper: either this folder itself DEFINES a type, or it inherits
+  // whatever type (if any) its parent folder already carries.
+  let folderType: VaultFolderTypeKey | null = null;
+  let isFolderTypeRoot = false;
+  if (data.folder_type) {
+    folderType = data.folder_type;
+    isFolderTypeRoot = true;
+  } else if (data.parent_folder_id) {
+    const parent = await getFolderById(data.parent_folder_id);
+    folderType = parent?.folder_type ?? null;
+  }
+
   const result = await upsert("vault_folders", {
     human_id: data.human_id,
     name: data.name,
     parent_folder_id: data.parent_folder_id ?? null,
     shared_with: data.shared_with ?? [],
     vault_root_key: rootKey,
+    folder_type: folderType,
+    is_folder_type_root: isFolderTypeRoot,
     created_at: now,
     updated_at: now,
   });
   const record = Array.isArray(result) ? result[0] : result;
   return record ? formatRecord(record as unknown as VaultFolder) : undefined;
+}
+
+/**
+ * Validates that `folderType` may be created as a NEW folder directly
+ * inside `parent` — the server-side gate behind the "New folder" type
+ * picker (see the vault skill). Returns an error string (safe to surface
+ * to the human, e.g. in a 4xx response) or null when the creation is OK.
+ * Purely a context/singleton check — write-permission (`skills` requiring
+ * Admin/Super) is separate, see `canWriteToFolderType`.
+ *
+ *  - Space types (`skills`, `syncs`): only directly inside a project folder
+ *    (a direct child of the `projects` root) or directly inside the
+ *    `personal` root itself — and only ONE of each per parent (checked
+ *    against the parent's own DIRECT children only, not the whole
+ *    subtree — a nested folder inheriting the same type doesn't count).
+ *  - Sync types (`sync-one-way`, …): only directly inside a folder whose
+ *    OWN `folder_type` is exactly `"syncs"` (not nested any deeper), and
+ *    NOT singleton — a `syncs` folder can hold many connectors.
+ */
+export async function validateFolderTypeForParent(
+  parent: VaultFolder,
+  folderType: VaultFolderTypeKey,
+): Promise<string | null> {
+  if (isSpaceFolderTypeKey(folderType)) {
+    const label = SPACE_FOLDER_TYPES[folderType].label;
+
+    const isPersonalRoot =
+      isVaultRootFolder(parent) && parent.vault_root_key === "personal";
+
+    let isProjectFolder = false;
+    if (!isPersonalRoot && parent.parent_folder_id) {
+      const grandparent = await getFolderById(parent.parent_folder_id);
+      isProjectFolder =
+        !!grandparent &&
+        isVaultRootFolder(grandparent) &&
+        grandparent.vault_root_key === "projects";
+    }
+
+    if (!isPersonalRoot && !isProjectFolder) {
+      return `${label} folders can only be created directly inside a project or your Personal space`;
+    }
+
+    const { folders: siblings } = await listFolderChildren(
+      parent.human_id,
+      parent._id,
+    );
+    if (siblings.some((f) => f.is_folder_type_root && f.folder_type === folderType)) {
+      return `A ${label} folder already exists here`;
+    }
+    return null;
+  }
+
+  if (isSyncFolderTypeKey(folderType)) {
+    if (parent.folder_type !== "syncs" || !parent.is_folder_type_root) {
+      return "Sync folders can only be created directly inside a Syncs folder";
+    }
+    if (SYNC_FOLDER_TYPES[folderType].comingSoon) {
+      return `${SYNC_FOLDER_TYPES[folderType].label} isn't available yet`;
+    }
+    return null;
+  }
+
+  return "Unknown folder type";
 }
 
 /**
@@ -458,14 +559,66 @@ export async function isFileEffectivelyPublic(file: FileRef): Promise<boolean> {
 }
 
 /**
- * Whether a folder sits inside the syncs/ subtree — the resource check for
- * sync-scoped tokens. Fails closed on missing folders.
+ * Whether a folder sits inside a `syncs` folder-type subtree (the `syncs`
+ * container itself, or any sync connector folder living inside one, at any
+ * depth) — the resource check for sync-scoped tokens. Fails closed on
+ * missing folders. `folder_type` is denormalized onto every descendant
+ * (see vaultFolderTypes.ts / createVaultFolder), so this is a single read.
  */
 export async function isFolderUnderSyncs(
   folderId: string | null | undefined,
 ): Promise<boolean> {
   if (!folderId) return false;
-  return (await resolveVaultRootKey(folderId)) === "syncs";
+  const folder = await getFolderById(folderId);
+  return isSyncFamilyFolderType(folder?.folder_type);
+}
+
+/**
+ * Combined write-permission check for a folder id: the ROOT policy
+ * (`canWriteToRoot`, vaultRoots.ts) AND the folder TYPE policy
+ * (`canWriteToFolderType`, vaultFolderTypes.ts) must both allow it — e.g. a
+ * `skills`-typed folder requires Admin/Super even though its containing
+ * root (`projects`/`personal`) is ordinary `"owner"`-writable. A missing
+ * folder id (root-level write) is treated as an ordinary, untyped folder.
+ */
+export async function canWriteToFolderId(
+  folderId: string | null | undefined,
+  role: Role,
+): Promise<boolean> {
+  if (!folderId) return canWriteToRoot(null, role);
+  const folder = await getFolderById(folderId);
+  const rootKey = folder?.vault_root_key ?? (await resolveVaultRootKey(folderId));
+  return (
+    canWriteToRoot(rootKey, role) &&
+    canWriteToFolderType(folder?.folder_type ?? null, role)
+  );
+}
+
+/** Combined shareable check for a folder id — root policy AND folder-type
+ * policy must both allow it (see `isFolderTypeShareable`). */
+export async function isFolderIdShareable(
+  folderId: string | null | undefined,
+): Promise<boolean> {
+  if (!folderId) return false;
+  const folder = await getFolderById(folderId);
+  const rootKey = folder?.vault_root_key ?? (await resolveVaultRootKey(folderId));
+  return (
+    isRootShareable(rootKey) && isFolderTypeShareable(folder?.folder_type ?? null)
+  );
+}
+
+/** Combined publishable check for a folder id — root policy AND folder-type
+ * policy must both allow it (see `isFolderTypePublishable`). */
+export async function isFolderIdPublishable(
+  folderId: string | null | undefined,
+): Promise<boolean> {
+  if (!folderId) return false;
+  const folder = await getFolderById(folderId);
+  const rootKey = folder?.vault_root_key ?? (await resolveVaultRootKey(folderId));
+  return (
+    isRootPublishable(rootKey) &&
+    isFolderTypePublishable(folder?.folder_type ?? null)
+  );
 }
 
 /** Every descendant folder record (BFS) of the given folder. */
@@ -489,12 +642,56 @@ export async function getDescendantFolders(
 }
 
 /**
- * Re-parents a folder under `newParent`, re-stamping `vault_root_key` on the
- * folder and every descendant (moves may cross root subtrees, e.g.
- * personal → projects).
+ * Re-stamps `folder_type` across a subtree after a move, WITHOUT touching
+ * anchors (folders where `is_folder_type_root` is true — e.g. a nested
+ * `syncs` folder's own sync connectors): an anchor's type is sticky and
+ * never overwritten by an ancestor moving, but its own descendants still
+ * propagate ITS type downward (unaffected by the move, since the anchor
+ * itself didn't change). Mirrors `moveVaultFolder`'s `vault_root_key`
+ * cascade, one level deeper, and is why folder-type anchors can safely ride
+ * along inside a moved subtree (e.g. moving a whole project) without
+ * losing their own type.
+ */
+async function cascadeFolderType(
+  folderId: string,
+  inheritedType: VaultFolderTypeKey | null,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const result = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders WHERE parent_folder_id = $folderId`,
+    { folderId },
+  );
+  for (const child of (result?.[0] ?? []).map(formatRecord)) {
+    if (child.is_folder_type_root) {
+      // Sticky — keeps its own explicit type; still propagates THAT type
+      // (unchanged) into its own descendants.
+      await cascadeFolderType(child._id, child.folder_type ?? null);
+      continue;
+    }
+    if (child.folder_type !== inheritedType) {
+      await merge("vault_folders", child._id, {
+        folder_type: inheritedType,
+        updated_at: now,
+      });
+    }
+    await cascadeFolderType(child._id, inheritedType);
+  }
+}
+
+/**
+ * Re-parents a folder under `newParent`, re-stamping `vault_root_key` AND
+ * `folder_type` on the folder and every descendant (moves may cross root
+ * subtrees, e.g. personal → projects, or move a folder into/out of a
+ * `skills`/`syncs` subtree).
+ *
+ * A folder-type ANCHOR's own `folder_type` is sticky — never overwritten by
+ * the new parent's type (see `cascadeFolderType`); an ordinary folder
+ * inherits the new parent's type, same as it would inherit at create time.
  *
  * Mechanical only — callers are responsible for policy checks (ownership,
- * root containers, shared folders, cycles).
+ * root containers, shared folders, cycles, and — for a folder-type anchor
+ * being moved directly — that anchors aren't movable at all, see the vault
+ * skill).
  */
 export async function moveVaultFolder(
   folder: VaultFolder,
@@ -504,10 +701,14 @@ export async function moveVaultFolder(
   const now = new Date().toISOString();
   const newKey =
     newParent.vault_root_key ?? (await resolveVaultRootKey(newParent._id));
+  const newFolderType = folder.is_folder_type_root
+    ? (folder.folder_type ?? null)
+    : (newParent.folder_type ?? null);
 
   const updated = await merge("vault_folders", folder._id, {
     parent_folder_id: newParent._id,
     vault_root_key: newKey,
+    folder_type: newFolderType,
     updated_at: now,
   });
 
@@ -519,6 +720,8 @@ export async function moveVaultFolder(
       });
     }
   }
+
+  await cascadeFolderType(folder._id, newFolderType);
 
   return updated ? formatRecord(updated as unknown as VaultFolder) : undefined;
 }

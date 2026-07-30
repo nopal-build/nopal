@@ -7,15 +7,16 @@ import {
   createSyncTarget,
   getSyncTargetsByHuman,
 } from "../data/syncTargets.server";
-import { getFolderById, resolveVaultRootKey } from "../data/vault.server";
+import { getFolderById, isFolderUnderSyncs } from "../data/vault.server";
 
 /**
  * GET  /api/sync-targets          — list this human's sync targets
  * POST /api/sync-targets          — register a new target
  *   Body: { name, folderId, deviceId, deviceLabel, localPath }
  *
- * The folder must live under the human's `syncs/` root. Bearer-token auth
- * supported (this API exists for the CLI).
+ * The folder must live inside a `syncs`-typed folder (a project's or the
+ * Personal space's own Syncs folder — see the vault skill). Bearer-token
+ * auth supported (this API exists for the CLI).
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   // Listing targets is inherently sync-scope — the watcher needs it.
@@ -58,11 +59,9 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!folder || folder.human_id !== user._id) {
     return Response.json({ error: "Folder not found" }, { status: 404 });
   }
-  const rootKey =
-    folder.vault_root_key ?? (await resolveVaultRootKey(folder._id));
-  if (rootKey !== "syncs") {
+  if (!(await isFolderUnderSyncs(folder._id))) {
     return Response.json(
-      { error: "Sync targets must point at a folder inside syncs/" },
+      { error: "Sync targets must point at a folder inside a Syncs folder" },
       { status: 400 },
     );
   }

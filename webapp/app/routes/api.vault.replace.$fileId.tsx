@@ -3,13 +3,12 @@ import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { uploadFileToS3, deleteFromS3 } from "../data/file.server";
 import {
+  canWriteToFolderId,
   getFileRefById,
   computeMdUpdate,
   isFolderUnderSyncs,
-  resolveVaultRootKey,
 } from "../data/vault.server";
 import { isFileRefLocked } from "../data/vault.types";
-import { canWriteToRoot } from "../data/vaultRoots";
 import { merge } from "../data/generic.server";
 import { cacheDailyLog } from "../data/dailyLog.server";
 
@@ -62,10 +61,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (syncScoped && !(await isFolderUnderSyncs(existing.folder_id))) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
-  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
-  // even inside the OWNING human's own vault — see `vaultRoots.ts`.
-  const rootKey = existing.folder_id ? await resolveVaultRootKey(existing.folder_id) : null;
-  if (!canWriteToRoot(rootKey, user.role)) {
+  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
+  // Admin/Super, even inside the OWNING human's own vault — see
+  // `vaultRoots.ts` / `vaultFolderTypes.ts`.
+  if (!(await canWriteToFolderId(existing.folder_id, user.role))) {
     return Response.json(
       { error: "You don't have permission to modify this file" },
       { status: 403 },

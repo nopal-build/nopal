@@ -4,17 +4,17 @@ import {
   getUserFromRequest,
 } from "../modules/auth/auth.server";
 import {
+  canWriteToFolderId,
   getFileRefById,
   updateFileRef,
   deleteFileRef,
   computeMdUpdate,
   getFolderById,
+  isFolderIdShareable,
   isFolderUnderSyncs,
-  resolveVaultRootKey,
 } from "../data/vault.server";
 import { cacheDailyLog, deleteDailyLogCache } from "../data/dailyLog.server";
 import { isFileRefLocked } from "../data/vault.types";
-import { canWriteToRoot, isRootShareable } from "../data/vaultRoots";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { fileId } = params;
@@ -133,11 +133,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   // Owner-only operations below.
 
-  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
-  // even inside the OWNING human's own vault — see `vaultRoots.ts`.
+  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
+  // Admin/Super, even inside the OWNING human's own vault — see
+  // `vaultRoots.ts` / `vaultFolderTypes.ts`.
   if (request.method === "DELETE" || request.method === "PATCH") {
-    const rootKey = file.folder_id ? await resolveVaultRootKey(file.folder_id) : null;
-    if (!canWriteToRoot(rootKey, user.role)) {
+    if (!(await canWriteToFolderId(file.folder_id, user.role))) {
       return Response.json(
         { error: "You don't have permission to modify this file" },
         { status: 403 },
@@ -177,13 +177,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     };
 
     // Making a file public (or granting shared write access) follows the same
-    // per-root policy as folder sharing — e.g. daily-logs/personal files can
-    // never be shared, even directly.
+    // per-root AND per-folder-type policy as folder sharing — e.g. daily-
+    // logs/personal files can never be shared, even directly, and neither
+    // can files inside a `skills` folder.
     if (body.is_public === true || body.shared_type !== undefined) {
-      const rootKey = file.folder_id
-        ? await resolveVaultRootKey(file.folder_id)
-        : null;
-      if (!isRootShareable(rootKey)) {
+      if (!(await isFolderIdShareable(file.folder_id))) {
         return Response.json(
           { error: "Files in this part of the vault cannot be shared" },
           { status: 403 },
@@ -193,11 +191,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     const updates: Parameters<typeof updateFileRef>[1] = {};
 
-    // Moving a file INTO a restricted root (e.g. `skills`) needs the same
-    // role as creating one directly inside it would.
+    // Moving a file INTO a restricted root or folder type (e.g. `skills`)
+    // needs the same role as creating one directly inside it would.
     if ("folder_id" in body && body.folder_id) {
-      const destRootKey = await resolveVaultRootKey(body.folder_id);
-      if (!canWriteToRoot(destRootKey, user.role)) {
+      if (!(await canWriteToFolderId(body.folder_id, user.role))) {
         return Response.json(
           { error: "You don't have permission to move files here" },
           { status: 403 },

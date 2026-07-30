@@ -1,18 +1,19 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import {
+  canWriteToFolderId,
   getFolderById,
   updateVaultFolder,
   cascadeShareVaultFolder,
   deleteVaultFolderCascade,
-  resolveVaultRootKey,
   getDescendantFolders,
   getFileRefsByFolderIds,
+  isFolderIdPublishable,
+  isFolderIdShareable,
   isFolderShared,
   moveVaultFolder,
 } from "../data/vault.server";
 import { isFileRefLocked, isVaultRootFolder } from "../data/vault.types";
-import { canWriteToRoot, isRootPublishable, isRootShareable } from "../data/vaultRoots";
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -35,11 +36,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const isRoot = isVaultRootFolder(folder);
 
-  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
-  // even inside the OWNING human's own vault — see `vaultRoots.ts`. Applies
-  // to every mutation below (delete, rename, move, publish, share).
-  const rootKey = folder.vault_root_key ?? (await resolveVaultRootKey(folderId));
-  if (!canWriteToRoot(rootKey, user.role)) {
+  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
+  // Admin/Super, even inside the OWNING human's own vault — see
+  // `vaultRoots.ts` / `vaultFolderTypes.ts`. Applies to every mutation below
+  // (delete, rename, move, publish, share).
+  if (!(await canWriteToFolderId(folderId, user.role))) {
     return Response.json(
       { error: "You don't have permission to modify this folder" },
       { status: 403 },
@@ -103,6 +104,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
           { status: 403 },
         );
       }
+      // A folder-type anchor (a project's own "Skills"/"Syncs" folder, or a
+      // sync connector inside one) is pinned in place — see the vault skill
+      // for why (keeps the create-time singleton/context rules honest over
+      // time without needing to re-validate them on every move).
+      if (folder.is_folder_type_root) {
+        return Response.json(
+          { error: "This folder's type is pinned — it cannot be moved" },
+          { status: 403 },
+        );
+      }
       if (isFolderShared(folder)) {
         return Response.json(
           { error: "Shared folders cannot be moved — unshare it first" },
@@ -118,11 +129,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
         );
       }
       // Also check the DESTINATION's own write permission — moving INTO a
-      // restricted root (e.g. `skills`) needs the same role as creating
-      // directly inside it would.
-      const destRootKey =
-        newParent.vault_root_key ?? (await resolveVaultRootKey(newParent._id));
-      if (!canWriteToRoot(destRootKey, user.role)) {
+      // restricted root or folder type (e.g. `skills`) needs the same role
+      // as creating directly inside it would.
+      if (!(await canWriteToFolderId(newParent._id, user.role))) {
         return Response.json(
           { error: "You don't have permission to move folders here" },
           { status: 403 },
@@ -168,9 +177,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
           { status: 403 },
         );
       }
-      const rootKey =
-        folder.vault_root_key ?? (await resolveVaultRootKey(folder._id));
-      if (!isRootPublishable(rootKey)) {
+      if (!(await isFolderIdPublishable(folder._id))) {
         return Response.json(
           { error: "Folders in this part of the vault cannot be published" },
           { status: 403 },
@@ -183,12 +190,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     if (body.shared_with !== undefined) {
-      // Sharing is a per-root policy (see vaultRoots.ts). The root container
-      // itself is never shareable; nested folders only when the policy allows.
-      const rootKey = isRoot
-        ? null
-        : (folder.vault_root_key ?? (await resolveVaultRootKey(folder._id)));
-      if (!isRootShareable(rootKey)) {
+      // Sharing is a per-root AND per-folder-type policy (see vaultRoots.ts /
+      // vaultFolderTypes.ts). The root container itself is never shareable;
+      // nested folders only when both policies allow it.
+      const shareable = !isRoot && (await isFolderIdShareable(folder._id));
+      if (!shareable) {
         return Response.json(
           { error: "Folders in this part of the vault cannot be shared" },
           { status: 403 },

@@ -21,42 +21,60 @@ The root of the vault holds only locked, system-provisioned folders — humans c
 - `daily-logs`: one folder per day, sorted latest → oldest. Written by the Daily Log page (`fruits_.daily-log.tsx`), but humans can add files/folders inside too.
 - `projects`: each folder inside is a "project". The only shareable subtree.
 - `personal`: general catch-all for the human's own files.
-- `syncs`: the CLI/sync engine's own subtree — sync-scoped API tokens may only read/write here (see `isFolderUnderSyncs`).
-- `skills`: instructions steering an eventual sorting agent (mentions→backlinks, Card→project filing, etc.). Every human still gets their OWN `skills` root folder, same as every other root — this one is just locked down to platform-curated content: writing here requires the ACTING human to hold the `Admin` or `Super` role, not merely ownership of the vault. Convention (not yet enforced by code, just a naming/placement pattern): a project gets a `SKILL.md` file sitting right next to its `README.md`, mirroring this very repo's `.agents/skills/*/SKILL.md` layout — project-local instructions vs. this vault-wide `skills` root's global ones.
 
-Every folder carries a denormalized `vault_root_key` identifying which root subtree it belongs to (re-stamped on move). Per-root policy (shareable, publishable, child sort order, and now **writable**) lives in `VAULT_ROOTS`. Root containers are provisioned by `ensureVaultRootFolders` (called from the vault loader and new-user provisioning) — it iterates `VAULT_ROOT_KEYS` generically, so any new root added to that list is automatically provisioned for every human, existing or new, with no other code changes.
+`skills` and `syncs` used to live here too as their own top-level roots; they're now **Vault Folder Types** (below) — special sub-folders created ONE LEVEL DOWN, inside a project or inside `personal`, so every project gets its own identity/data-collection folders instead of there being exactly one global `skills`/`syncs` for the whole vault.
 
-### Root write policy (`writable: "owner" | "admin"`)
+Every folder carries a denormalized `vault_root_key` identifying which root subtree it belongs to (re-stamped on move). Per-root policy (shareable, publishable, child sort order, and **writable**) lives in `VAULT_ROOTS`. Root containers are provisioned by `ensureVaultRootFolders` (called from the vault loader and new-user provisioning) — it iterates `VAULT_ROOT_KEYS` generically, so any new root added to that list is automatically provisioned for every human, existing or new, with no other code changes. All three of today's roots are `writable: "owner"` — the extra Admin/Super gate that used to live on the `skills` ROOT now lives on the `skills` folder TYPE instead (see below).
 
-Most roots use `"owner"` — the ordinary rule that the owning human may write to their own vault (still gated by all the usual folder/file checks — locked daily logs, shared-folder move restrictions, etc.). `skills` uses `"admin"`: writing anywhere under a human's OWN `skills` root ALSO requires that human's `role` to be `Admin` or `Super`. This is layered ON TOP of the ownership check, never a replacement for it.
+## Vault Folder Types
 
-`canWriteToRoot(rootKey, role)` (`vaultRoots.ts`) is the single helper both directions of policy funnel through — fail-closed (an unrecognized root key requires Admin/Super, never silently allows a plain `Human` write). It's enforced SERVER-SIDE, in every route that can create/rename/move/delete a folder or file, or upload/replace file bytes:
+Where a root is a fixed, system-provisioned top-level container, a folder TYPE (`webapp/app/data/vaultFolderTypes.ts`) is an opt-in tag a human attaches when they hit **New folder** and pick a type instead of leaving it plain. Two tiers:
 
-- `api.vault.folders.tsx` — create (checks the PARENT folder's root key).
-- `api.vault.folders.$folderId.tsx` — rename/delete (checks the folder's own root key) and move (checks BOTH the folder's own root key and the DESTINATION's root key — moving into a restricted root needs the same role as creating directly inside it would).
-- `api.vault.$fileId.tsx` — PATCH/DELETE (checks the file's own root key) and move-via-`folder_id`-change (checks the destination's root key, same as folder move).
-- `api.vault.upload.tsx` / `api.vault.multipart-init.tsx` — checks the target folder's root key.
-- `api.vault.replace.$fileId.tsx` — checks the file's own root key.
+**Space types** — `skills`, `syncs`. Creatable directly inside a project folder (a direct child of the `projects` root) or directly inside the `personal` root itself — nowhere else. SINGLETON per parent: a project (or `personal`) can have at most one `skills` and one `syncs` folder, enforced server-side (`validateFolderTypeForParent`, `vault.server.ts`) against that parent's DIRECT children only.
 
-Client-side, `fruits_.vault.tsx` hides the write-triggering UI (Upload/New Folder toolbar buttons, Rename/Move/Delete/Replace menu entries) when `canWriteToRoot` says no — this is a UX nicety layered on top, never a substitute for the server checks above (see "Enforcement" below).
+- `skills` codifies the identity of that project/space — instructions steering how it should be built, organized, and maintained (an eventual sorting agent's guide, and the project's own equivalent of this very repo's `.agents/skills/*/SKILL.md`). Writing anywhere inside a `skills` folder requires the ACTING human's `role` to be `Admin` or `Super`, even inside their OWN vault — same restriction the old `skills` ROOT had, just relocated. Convention (not yet enforced by code): a project's own `SKILL.md` lives at `projects/<name>/skills/SKILL.md`, mirroring this repo's `.agents/skills/*/SKILL.md` layout — project-local instructions vs. the platform-curated ones.
+- `syncs` is a pure data-collection container — see "Sync types" below. Not itself where synced files land; that's the connector folders created INSIDE it.
+
+**Sync types** — `sync-one-way`, `sync-two-way`, and the not-yet-implemented `sync-api` / `sync-email` / `sync-custom` (listed now so the architecture already has a slot for them; `comingSoon: true` keeps them visible-but-disabled in the "New folder" type picker). Creatable directly inside a `syncs` folder, one per data source — NOT singleton, a `syncs` folder can hold many connectors. Every sync type's job is the same regardless of mechanism (land plain files in the vault); what differs is how:
+
+- `sync-one-way` / `sync-two-way`: the CLI's folder sync (`nopal sync add [--two-way] [--project NAME]`) — a local directory mirrors in (one-way) or both ways (two-way). `nopal sync add` resolves (or creates) the target space's `syncs` folder itself, then creates the connector folder tagged with the right sync type.
+- `sync-api` / `sync-email` / `sync-custom`: hooks for an external API, forwarded email/text, or a one-off hand-built collector — not built yet.
+
+### Denormalization (`folder_type`, `is_folder_type_root`)
+
+`folder_type` is denormalized onto EVERY descendant folder, same O(1)-read trick `vault_root_key` uses one level up — a folder either DEFINES its type (`is_folder_type_root: true`, e.g. a project's own `skills` folder, or a `sync-one-way` connector inside a `syncs` folder) or INHERITS whatever type its parent already carries. `is_folder_type_root` folders are STICKY (their own `folder_type` is never overwritten by a move) and PINNED (they cannot be moved at all — delete-and-recreate elsewhere if you really need to relocate one); this is what keeps the create-time singleton/context rules honest over time without re-validating them on every move. Moving an ORDINARY folder that happens to contain nested type anchors (e.g. moving a whole project) still correctly preserves those anchors' own types (`cascadeFolderType`, `vault.server.ts`).
+
+`isFolderUnderSyncs(folderId)` (`vault.server.ts`) — true for the `syncs` folder itself and every sync connector folder inside one, at any depth — is the resource check sync-scoped API tokens are restricted to (unchanged in spirit from when `syncs` was a root; just reads `folder_type` now instead of `vault_root_key`).
+
+### Write/share/publish policy (`writable: "owner" | "admin"`, `shareable`, `publishable`)
+
+Each folder type carries the same three policy knobs `VAULT_ROOTS` does, layered ON TOP of (never a replacement for) the containing ROOT's own policy — both must agree. `canWriteToFolderId(folderId, role)` / `isFolderIdShareable(folderId)` / `isFolderIdPublishable(folderId)` (`vault.server.ts`) are the single helpers both directions of policy funnel through, combining `vaultRoots.ts`'s root-level check with `vaultFolderTypes.ts`'s type-level check. Enforced SERVER-SIDE in every route that can create/rename/move/delete/share/publish a folder or file, or upload/replace file bytes:
+
+- `api.vault.folders.tsx` — create (checks the PARENT folder; validates a `folder_type` in the request against `validateFolderTypeForParent`).
+- `api.vault.folders.$folderId.tsx` — rename/delete/publish/share (checks the folder's own policy) and move (checks BOTH the folder's own policy and the DESTINATION's; blocks moving a folder-type anchor outright).
+- `api.vault.$fileId.tsx` — PATCH/DELETE (checks the file's own folder) and move-via-`folder_id`-change / share (checks the destination's policy, same as folder move).
+- `api.vault.upload.tsx` / `api.vault.multipart-init.tsx` — checks the target folder's policy.
+- `api.vault.replace.$fileId.tsx` — checks the file's own folder's policy.
+
+Client-side, `fruits_.vault.tsx` hides the write/share/publish-triggering UI when these say no — a UX nicety layered on top, never a substitute for the server checks above.
 
 ## Data model
 
-- `vault_folders`: `human_id`, `name`, `parent_folder_id`, `shared_with` (ids | "everyone"), `vault_root_key`
+- `vault_folders`: `human_id`, `name`, `parent_folder_id`, `shared_with` (ids | "everyone"), `vault_root_key`, `folder_type`, `is_folder_type_root`
 - `file_refs`: `human_id`, `name`, `content` (markdown stored in DB) or `s3_key`/`s3_url` (binary in S3), `content_type`, `folder_id`, `md_versions` (daily snapshots via `computeMdUpdate`), `source` (`"daily_log"` | `"daily_log_card"` — see "Daily Logs" below), `project_folder_id` (only on a `"daily_log_card"` file — which project it's for)
-- Server functions: `webapp/app/data/vault.server.ts`; client-safe types/helpers: `vault.types.ts`, `vaultRoots.ts`
+- Server functions: `webapp/app/data/vault.server.ts`; client-safe types/helpers: `vault.types.ts`, `vaultRoots.ts`, `vaultFolderTypes.ts`
 - `getProjectFolders(humanId)` (`vault.server.ts`): every direct child folder of the human's OWN `projects` root — the simple "a project is just a folder under `projects`" notion, deliberately NOT `project.server.ts`'s heavier `resolveProjectManifest` (which additionally requires a valid `README.md` manifest, and exists for the project detail PAGE, not "what projects exist"). Used by the Daily Log's Cards feature. Scoped to owned projects only — projects shared with the human by someone else aren't yet offered as Card targets (a deliberate, tracked scope line).
 
 ## Actions (policy-gated)
 
-Folder: Upload file, New folder, Rename (not root containers), Move (not root containers, not shared folders or folders containing shared descendants; re-stamps `vault_root_key` across the subtree), Share (only inside `projects`).
+Folder: Upload file, New folder (optionally picking a folder TYPE — see above), Rename (not root containers), Move (not root containers, not folder-type anchors, not shared folders or folders containing shared descendants; re-stamps `vault_root_key`/`folder_type` across the subtree), Share (only where the root AND folder-type policy both allow it — e.g. never inside `skills`).
 File: Download (S3-backed files), Replace (same file id, new bytes — `/api/vault/replace/:fileId`).
 
 Enforcement is server-side in `api.vault.folders.$folderId.tsx` / `api.vault.$fileId.tsx`, not just hidden buttons.
 
 ## Sharing
 
-- Folder sharing cascades to all descendants (`cascadeShareVaultFolder`); allowed only where the root policy permits (`projects`).
+- Folder sharing cascades to all descendants (`cascadeShareVaultFolder`); allowed only where BOTH the root policy (`projects`) and the folder-type policy permit it (e.g. never inside a `skills` folder, even inside `projects`).
 - Markdown files can be public (`is_public`) — public view at `/card/:fileId`.
 - File share types (view / workable / editable) correspond to the @mdx-editor modes.
 
@@ -99,6 +117,6 @@ Triggered two ways, both landing on the exact same `sortDailyLog(humanId, date)`
 Every entry is written to BOTH places on purpose (same data, two views — context for the day, access for the project):
 
 - `daily-logs/YYYY-MM-DD/release-log.md` — that human's own receipt for the day, grouped by project (`## <Project Name>`), resolved fresh every time (never cached), same convention `getDailyLogCards`'s `projectName` already uses.
-- `projects/<name>/release-log.md` — everyone with project access, grouped by date (`## YYYY-MM-DD`). Lives directly inside the project's own folder, right alongside its `README.md`/`SKILL.md` — one file per project; manual overflow (a hand-created `release-log-p2.md`) only if one ever becomes unwieldy, no pre-emptive partitioning.
+- `projects/<name>/release-log.md` — everyone with project access, grouped by date (`## YYYY-MM-DD`). Lives directly inside the project's own folder, right alongside its `README.md` (and its `skills/` folder, if present) — one file per project; manual overflow (a hand-created `release-log-p2.md`) only if one ever becomes unwieldy, no pre-emptive partitioning.
 
 Both are ordinary `file_refs` (get-or-created on first entry, plain content overwrite thereafter — no `md_versions` snapshotting, same reasoning Cards already use: per-day/per-project granularity is its own natural history). `appendReleaseLogEntries`'s heading-insert is a deliberately dumb line-based text scan (find `## <heading>`, insert before the next heading or EOF) rather than a full mdast round-trip — headings here are simple, unique markers, so this keeps every OTHER section's exact formatting (blank lines, nested-bullet indentation) completely untouched by an append to one section.

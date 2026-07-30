@@ -1,4 +1,6 @@
-//! `nopal sync ...` — mirror local directories into the `syncs/` vault root.
+//! `nopal sync ...` — mirror local directories into a `syncs`-typed vault
+//! folder (a project's own, or the Personal space's — see the vault skill;
+//! `syncs` is no longer a fixed top-level root).
 //!
 //! Phase B: one-way PUSH (local → vault). Nothing is ever deleted or pulled
 //! from the vault; local is the source of truth. Change detection compares
@@ -34,7 +36,7 @@ struct DeviceIdentity {
 }
 
 /// Stable per-machine identity, created on first use.
-fn device_identity() -> Result<DeviceIdentity, Box<dyn Error>> {
+fn device_identity() -> Result<DeviceIdentity, Box<dyn Error + Send + Sync>> {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     let path = base.join("nopal").join("device.json");
 
@@ -136,30 +138,68 @@ struct Manifest {
     files: Vec<ManifestFile>,
 }
 
-fn fetch_targets(client: &Client) -> Result<Vec<SyncTarget>, Box<dyn Error>> {
+fn fetch_targets(client: &Client) -> Result<Vec<SyncTarget>, Box<dyn Error + Send + Sync>> {
     let resp: serde_json::Value = client.get_json("/api/sync-targets")?;
     Ok(serde_json::from_value(resp["targets"].clone())?)
 }
 
-/// Finds the human's `syncs/` root container (provisioned server-side).
-fn syncs_root(client: &Client) -> Result<Folder, Box<dyn Error>> {
-    let children = client.children("root")?;
-    children
+/// Resolves the "space" a sync target belongs to: a named project folder
+/// (`projects/<name>`), or the Personal space when no project is given.
+/// Every project (and Personal) has its OWN `syncs`-typed folder — see the
+/// vault skill.
+fn resolve_space(client: &Client, project: Option<&str>) -> Result<Folder, Box<dyn Error + Send + Sync>> {
+    match project {
+        Some(name) => vault::resolve_folder(client, &format!("projects/{name}"))?.ok_or_else(|| {
+            format!(
+                "No project named '{name}' — create it first (e.g. `nopal vault mkdir projects/{name}`)"
+            )
+            .into()
+        }),
+        None => {
+            let children = client.children("root")?;
+            children
+                .folders
+                .into_iter()
+                .find(|f| f.vault_root_key.as_deref() == Some("personal"))
+                .ok_or_else(|| "No personal/ root folder found — is the server up to date?".into())
+        }
+    }
+}
+
+/// Finds `space`'s `syncs`-typed folder, creating it if missing (each
+/// project, and Personal, gets its own — see the vault skill).
+fn syncs_folder(client: &Client, space: &Folder) -> Result<Folder, Box<dyn Error + Send + Sync>> {
+    let children = client.children(&space._id)?;
+    if let Some(folder) = children
         .folders
         .into_iter()
-        .find(|f| f.vault_root_key.as_deref() == Some("syncs"))
-        .ok_or_else(|| "No syncs/ root folder found — is the server up to date?".into())
+        .find(|f| f.folder_type.as_deref() == Some("syncs"))
+    {
+        return Ok(folder);
+    }
+
+    let resp: serde_json::Value = client.post_json(
+        "/api/vault/folders",
+        &serde_json::json!({
+            "name": "syncs",
+            "parent_folder_id": space._id,
+            "folder_type": "syncs",
+        }),
+    )?;
+    Ok(serde_json::from_value(resp["folder"].clone())?)
 }
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
-/// Register LOCAL_DIR as a sync target (creating syncs/<name>/) and push.
+/// Register LOCAL_DIR as a sync target (creating a Syncs connector folder
+/// inside `project`'s — or Personal's — Syncs folder) and push.
 pub fn add(
     local_dir: &Path,
     name: Option<String>,
     preprocess: bool,
     two_way: bool,
-) -> Result<(), Box<dyn Error>> {
+    project: Option<String>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let local_dir = local_dir
         .canonicalize()
         .map_err(|e| format!("{}: {e}", local_dir.display()))?;
@@ -190,19 +230,24 @@ pub fn add(
         .into());
     }
 
-    let root = syncs_root(&client)?;
+    let space = resolve_space(&client, project.as_deref())?;
+    let syncs = syncs_folder(&client, &space)?;
     if client
-        .children(&root._id)?
+        .children(&syncs._id)?
         .folders
         .iter()
         .any(|f| f.name == name)
     {
-        return Err(format!("syncs/{name}/ already exists in the vault").into());
+        return Err(format!("{}/syncs/{name}/ already exists in the vault", space.name).into());
     }
 
     let resp: serde_json::Value = client.post_json(
         "/api/vault/folders",
-        &serde_json::json!({ "name": name, "parent_folder_id": root._id }),
+        &serde_json::json!({
+            "name": name,
+            "parent_folder_id": syncs._id,
+            "folder_type": if two_way { "sync-two-way" } else { "sync-one-way" },
+        }),
     )?;
     let folder: Folder = serde_json::from_value(resp["folder"].clone())?;
 
@@ -221,10 +266,11 @@ pub fn add(
     let target: SyncTarget = serde_json::from_value(resp["target"].clone())?;
 
     println!(
-        "Registered '{}' — {} {} syncs/{}/{}",
+        "Registered '{}' — {} {} {}/syncs/{}/{}",
         target.name,
         local_dir.display(),
         if target.two_way { "<->" } else { "->" },
+        space.name,
         target.name,
         if target.preprocess {
             " (videos optimized before upload)"
@@ -243,7 +289,7 @@ pub fn add(
     run_target(&client, &target)
 }
 
-pub fn ls() -> Result<(), Box<dyn Error>> {
+pub fn ls() -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let identity = device_identity()?;
     let targets = fetch_targets(&client)?;
@@ -277,7 +323,7 @@ pub fn ls() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn rm(name: &str, keep_remote: bool, force: bool) -> Result<(), Box<dyn Error>> {
+pub fn rm(name: &str, keep_remote: bool, force: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let target = fetch_targets(&client)?
         .into_iter()
@@ -309,7 +355,7 @@ pub fn rm(name: &str, keep_remote: bool, force: bool) -> Result<(), Box<dyn Erro
 }
 
 /// This machine's stable device id (creating it on first use).
-pub fn device_id() -> Result<String, Box<dyn Error>> {
+pub fn device_id() -> Result<String, Box<dyn Error + Send + Sync>> {
     Ok(device_identity()?.device_id)
 }
 
@@ -319,7 +365,7 @@ pub fn device_id() -> Result<String, Box<dyn Error>> {
 pub fn run_device_targets(
     client: &Client,
     device_id: &str,
-) -> Result<(Vec<PathBuf>, Vec<String>), Box<dyn Error>> {
+) -> Result<(Vec<PathBuf>, Vec<String>), Box<dyn Error + Send + Sync>> {
     let targets: Vec<SyncTarget> = fetch_targets(client)?
         .into_iter()
         .filter(|t| t.device_id == device_id)
@@ -339,7 +385,7 @@ pub fn run_device_targets(
 }
 
 /// Push local changes for one target (by name) or all targets on this device.
-pub fn run(name: Option<String>) -> Result<(), Box<dyn Error>> {
+pub fn run(name: Option<String>) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let identity = device_identity()?;
     let targets = fetch_targets(&client)?;
@@ -379,7 +425,7 @@ pub fn run(name: Option<String>) -> Result<(), Box<dyn Error>> {
 
 // ─── The push engine ──────────────────────────────────────────────────────────
 
-fn run_target(client: &Client, target: &SyncTarget) -> Result<(), Box<dyn Error>> {
+fn run_target(client: &Client, target: &SyncTarget) -> Result<(), Box<dyn Error + Send + Sync>> {
     let local_root = PathBuf::from(&target.local_path);
     if !local_root.is_dir() {
         return Err(format!(
@@ -547,7 +593,7 @@ fn run_push_only(
     local_files: &[(String, PathBuf)],
     remote_files: &HashMap<String, RemoteEntry>,
     folder_paths: &mut HashMap<String, String>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let (mut uploaded, mut replaced, mut unchanged) = (0u32, 0u32, 0u32);
     for (rel, abs) in local_files {
         let local_hash = sha256_file(abs)?;
@@ -616,7 +662,7 @@ fn run_two_way(
     local_files: &[(String, PathBuf)],
     remote_files: &HashMap<String, RemoteEntry>,
     folder_paths: &mut HashMap<String, String>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut state = load_state(&target._id);
     let local_map: HashMap<&String, &PathBuf> =
         local_files.iter().map(|(rel, abs)| (rel, abs)).collect();
@@ -799,7 +845,7 @@ fn push_new(
     folder_paths: &mut HashMap<String, String>,
     rel: &str,
     abs: &Path,
-) -> Result<String, Box<dyn Error>> {
+) -> Result<String, Box<dyn Error + Send + Sync>> {
     let dir_rel = match rel.rsplit_once('/') {
         Some((dir, _)) => dir.to_string(),
         None => String::new(),
@@ -812,7 +858,8 @@ fn push_new(
         } else {
             dir_rel.clone()
         },
-        vault_root_key: Some("syncs".to_string()),
+        vault_root_key: None,
+        folder_type: None,
         shared_with: serde_json::json!([]),
         is_public: None,
         updated_at: String::new(),
@@ -820,7 +867,7 @@ fn push_new(
     vault::upload_one(client, abs, &folder)
 }
 
-fn replace_remote(client: &Client, file_id: &str, abs: &Path) -> Result<(), Box<dyn Error>> {
+fn replace_remote(client: &Client, file_id: &str, abs: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
     let _: serde_json::Value = client
         .post_form(&format!("/api/vault/replace/{file_id}"), || {
             Ok(reqwest::blocking::multipart::Form::new().file("file", abs)?)
@@ -830,7 +877,7 @@ fn replace_remote(client: &Client, file_id: &str, abs: &Path) -> Result<(), Box<
 
 /// Archive (not delete) a vault file — recoverable for ~30 days via the
 /// existing archive cleanup.
-fn archive_remote(client: &Client, file_id: &str) -> Result<(), Box<dyn Error>> {
+fn archive_remote(client: &Client, file_id: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let now = jiff::Timestamp::now().to_string();
     let _: serde_json::Value = client.patch_json(
         &format!("/api/vault/{file_id}"),
@@ -841,7 +888,7 @@ fn archive_remote(client: &Client, file_id: &str) -> Result<(), Box<dyn Error>> 
 
 /// Download a remote file to `abs` (temp file + rename, parents created).
 /// Returns the sha256 of what was written.
-fn pull_file(client: &Client, remote: &RemoteEntry, abs: &Path) -> Result<String, Box<dyn Error>> {
+fn pull_file(client: &Client, remote: &RemoteEntry, abs: &Path) -> Result<String, Box<dyn Error + Send + Sync>> {
     if let Some(parent) = abs.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -921,7 +968,7 @@ fn load_state(target_id: &str) -> SyncState {
         .unwrap_or_default()
 }
 
-fn save_state(target_id: &str, state: &SyncState) -> Result<(), Box<dyn Error>> {
+fn save_state(target_id: &str, state: &SyncState) -> Result<(), Box<dyn Error + Send + Sync>> {
     let path = state_file_path(target_id);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -935,7 +982,7 @@ fn scan_dir(
     dir: &Path,
     rel_prefix: &str,
     out: &mut Vec<(String, PathBuf)>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut entries: Vec<_> = fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
     entries.sort_by_key(|e| e.file_name());
 
@@ -969,7 +1016,7 @@ fn ensure_remote_dir(
     target: &SyncTarget,
     folder_paths: &mut HashMap<String, String>,
     dir_rel: &str,
-) -> Result<String, Box<dyn Error>> {
+) -> Result<String, Box<dyn Error + Send + Sync>> {
     if let Some(id) = folder_paths.get(dir_rel) {
         return Ok(id.clone());
     }
@@ -996,7 +1043,7 @@ fn ensure_remote_dir(
     Ok(parent_id)
 }
 
-fn sha256_file(path: &Path) -> Result<String, Box<dyn Error>> {
+fn sha256_file(path: &Path) -> Result<String, Box<dyn Error + Send + Sync>> {
     let mut file = fs::File::open(path)?;
     let mut hasher = sha2::Sha256::new();
     let mut buf = vec![0u8; 1024 * 1024];

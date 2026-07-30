@@ -3,6 +3,7 @@ import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import {
   getFolderById,
   getDescendantFolders,
+  isFolderUnderSyncs,
   listFilesMetaByFolderIds,
 } from "../data/vault.server";
 
@@ -32,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!root || root.human_id !== user._id) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
-  if (syncScoped && root.vault_root_key !== "syncs") {
+  if (syncScoped && !(await isFolderUnderSyncs(root._id))) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 

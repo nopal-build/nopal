@@ -20,12 +20,7 @@
 
 import type { Role } from "./humans.server";
 
-export type VaultRootKey =
-  | "daily-logs"
-  | "projects"
-  | "personal"
-  | "syncs"
-  | "skills";
+export type VaultRootKey = "daily-logs" | "projects" | "personal";
 
 export type VaultRootPolicy = {
   /** Display name in the UI. */
@@ -43,14 +38,14 @@ export type VaultRootPolicy = {
   /** Who may create/edit/delete folders and files *within* this root
    * subtree (the root container itself is never writable by anyone,
    * regardless of this setting — see the "cannot be created, renamed, or
-   * deleted" rule above). `"owner"` is the ordinary rule every other root
-   * uses today (the owning human may write to their own vault).
-   * `"admin"` additionally requires the ACTING human to hold the `Admin`
-   * or `Super` role — e.g. `skills`, whose content steers an eventual
-   * sorting agent and is meant to be platform-curated, not hand-edited by
-   * every human in their own vault. Enforced server-side in every
-   * `api.vault.*` write route, not just a hidden button — see the `vault`
-   * skill. */
+   * deleted" rule above). `"owner"` is the rule every root uses today (the
+   * owning human may write to their own vault). `"admin"` would
+   * additionally require the ACTING human to hold the `Admin` or `Super`
+   * role — none of today's roots need it (that restriction now lives one
+   * level deeper, on the `skills` FOLDER TYPE — see `vaultFolderTypes.ts`),
+   * but the mechanism stays here for a future root that might. Enforced
+   * server-side in every `api.vault.*` write route, not just a hidden
+   * button — see the `vault` skill. */
   writable: "owner" | "admin";
 };
 
@@ -78,26 +73,6 @@ export const VAULT_ROOTS: Record<VaultRootKey, VaultRootPolicy> = {
     childSort: "name-asc",
     writable: "owner",
   },
-  syncs: {
-    label: "Syncs",
-    shareable: false,
-    publishable: true,
-    childSort: "name-asc",
-    writable: "owner",
-  },
-  // Instructions steering an eventual sorting agent — see the `oxmarkdown`
-  // skill's Daily Log section and the project handoff notes. Platform-
-  // curated rather than hand-edited by every human in their own vault, so
-  // writing here requires the Admin/Super role, not just ownership (every
-  // human still gets their OWN `skills` root, same as every other one —
-  // this only restricts WHO may write into it, not where it lives).
-  skills: {
-    label: "Skills",
-    shareable: false,
-    publishable: false,
-    childSort: "name-asc",
-    writable: "admin",
-  },
 };
 
 export const VAULT_ROOT_KEYS = Object.keys(VAULT_ROOTS) as VaultRootKey[];
@@ -121,12 +96,13 @@ export function isRootPublishable(key: string | null | undefined): boolean {
 /** Whether `role` may write (create/edit/delete folders or files) into the
  * given root subtree — the ownership check (is this even the acting
  * human's OWN vault?) is separate and always happens FIRST in every
- * `api.vault.*` route; this is the ADDITIONAL role gate on top of that,
- * for roots like `skills` where owning your own vault isn't sufficient.
- * Unknown/missing keys are treated as `"owner"`-only content by an
- * unrecognized role — fail closed by requiring Admin/Super, never
- * silently allowing a plain `Human` write into something this function
- * doesn't recognize. */
+ * `api.vault.*` route; this is the ADDITIONAL role gate on top of that.
+ * See `canWriteToFolderType` (`vaultFolderTypes.ts`) for the equivalent,
+ * ADDITIONAL gate on the more granular folder TYPE a folder may carry
+ * (e.g. `skills`) — both must pass. Unknown/missing keys are treated as
+ * `"owner"`-only content by an unrecognized role — fail closed by
+ * requiring Admin/Super, never silently allowing a plain `Human` write
+ * into something this function doesn't recognize. */
 export function canWriteToRoot(
   key: string | null | undefined,
   role: Role,

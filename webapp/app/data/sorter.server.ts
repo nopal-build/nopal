@@ -145,6 +145,22 @@ export function extractFileAttachments(
   return files;
 }
 
+// ─── Kill switch ────────────────────────────────────────────────────────
+
+/**
+ * Whether the Sorter is allowed to run at all right now — checked by both
+ * API routes (`api.daily-log.sort.tsx`/`sort-all.tsx`) and the cron
+ * scheduler (`server.js`). Defaults to OFF (same "absent env var = feature
+ * off" convention `CRON_SECRET` already uses for the cron itself), so a
+ * fresh deploy never sorts real production daily logs until this is
+ * explicitly turned on. Flip it on (locally or via `fly secrets set
+ * SORTER_ENABLED=true`) once the Sorter's next phase (real project-folder
+ * filing, not just release-log links) is ready to run for real again.
+ */
+export function isSorterEnabled(): boolean {
+  return process.env.SORTER_ENABLED === "true";
+}
+
 // ─── Orchestration ──────────────────────────────────────────────────────
 
 export type SortSummary = {

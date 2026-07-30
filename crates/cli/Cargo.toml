@@ -19,21 +19,18 @@ dist = true
 
 [dependencies]
 # reframed.workspace = true
+nopal-core = { path = "../core" }
 serialport = "4.2.0"
 jiff = { version = "0.1", features = ["std"] }
 clap = { version = "4.4", features = ["derive"] }
-tiny_http = "0.12"
 open = "5"
-keyring = "2"
 rand = "0.8"
 reqwest = { version = "0.12", features = ["blocking", "json", "multipart"] }
-mime_guess = "2"
 sha2 = "0.10"
 notify = "7"
 arboard = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-urlencoding = "2"
 dirs = "5"
 hostname = "0.4"
 self-replace = "1"

@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { sortAllDueDailyLogs } from "../data/sorter.server";
+import { isSorterEnabled, sortAllDueDailyLogs } from "../data/sorter.server";
 
 /**
  * POST /api/daily-log/sort-all
@@ -30,6 +30,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${cronSecret}`) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Temporary kill switch — see `isSorterEnabled` in `sorter.server.ts`.
+  if (!isSorterEnabled()) {
+    console.log("sort-all: skipped, SORTER_ENABLED is not \"true\"");
+    return Response.json({ processed: 0, results: [], disabled: true });
   }
 
   const { processed, results } = await sortAllDueDailyLogs();

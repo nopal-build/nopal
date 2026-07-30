@@ -157,7 +157,8 @@ export async function appendReleaseLogEntries(
 /** Convenience wrapper for a project's own `release-log.md`, grouped by
  * date — `projectFolderId` is the project's own vault folder (a direct
  * child of the `projects` root), and `release-log.md` lives directly
- * inside it, right alongside the project's `README.md`/`SKILL.md`. */
+ * inside it, right alongside the project's `README.md` (and its `skills/`
+ * folder, if present — see the vault skill / `vaultFolderTypes.ts`). */
 export async function appendProjectReleaseLogEntries(
   humanId: string,
   projectFolderId: string,

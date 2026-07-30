@@ -84,7 +84,7 @@ fn write_heartbeat(ok: bool, error: Option<String>) {
 
 // ─── The foreground worker (`nopal sync run --watch`) ─────────────────────────
 
-pub fn run_watch() -> Result<(), Box<dyn Error>> {
+pub fn run_watch() -> Result<(), Box<dyn Error + Send + Sync>> {
     use notify::{RecursiveMode, Watcher};
 
     let client = Client::new_sync_preferred()?;
@@ -179,7 +179,7 @@ fn run_all(client: &Client, device_id: &str) -> Vec<PathBuf> {
 
 // ─── launchd management ───────────────────────────────────────────────────────
 
-fn ensure_macos() -> Result<(), Box<dyn Error>> {
+fn ensure_macos() -> Result<(), Box<dyn Error + Send + Sync>> {
     if cfg!(target_os = "macos") {
         Ok(())
     } else {
@@ -220,7 +220,7 @@ fn launchd_path_env() -> String {
     dirs.join(":")
 }
 
-fn launchctl(args: &[&str]) -> Result<bool, Box<dyn Error>> {
+fn launchctl(args: &[&str]) -> Result<bool, Box<dyn Error + Send + Sync>> {
     let status = Command::new("launchctl")
         .args(args)
         .stdout(std::process::Stdio::null())
@@ -240,7 +240,7 @@ fn launchctl(args: &[&str]) -> Result<bool, Box<dyn Error>> {
 /// binary in place at the same path `ProgramArguments` already points at,
 /// so nothing about the plist needs to change — launchd just needs to be
 /// told to relaunch the job.
-pub fn restart_if_enabled() -> Result<(), Box<dyn Error>> {
+pub fn restart_if_enabled() -> Result<(), Box<dyn Error + Send + Sync>> {
     let plist_path = launch_agent_path();
     if !plist_path.exists() {
         return Ok(());
@@ -257,7 +257,7 @@ pub fn restart_if_enabled() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn enable() -> Result<(), Box<dyn Error>> {
+pub fn enable() -> Result<(), Box<dyn Error + Send + Sync>> {
     ensure_macos()?;
 
     // 1. Mint a sync-scoped token using the CURRENT (full) login, so the
@@ -346,7 +346,7 @@ pub fn enable() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn disable() -> Result<(), Box<dyn Error>> {
+pub fn disable() -> Result<(), Box<dyn Error + Send + Sync>> {
     ensure_macos()?;
     let plist_path = launch_agent_path();
     let mut did_anything = false;
@@ -384,7 +384,7 @@ pub fn disable() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn status() -> Result<(), Box<dyn Error>> {
+pub fn status() -> Result<(), Box<dyn Error + Send + Sync>> {
     ensure_macos()?;
     let plist_path = launch_agent_path();
     println!(
@@ -430,7 +430,7 @@ pub fn status() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn logs(lines: usize) -> Result<(), Box<dyn Error>> {
+pub fn logs(lines: usize) -> Result<(), Box<dyn Error + Send + Sync>> {
     let path = log_path();
     let contents =
         fs::read_to_string(&path).map_err(|_| format!("No log file yet at {}", path.display()))?;

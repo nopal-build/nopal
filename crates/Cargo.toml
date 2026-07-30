@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["cli", "api"]
+members = ["cli", "api", "core", "app"]
 resolver = "2"
 
 [workspace.dependencies]

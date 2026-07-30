@@ -47,8 +47,23 @@ type MoreMenuTriggerProps = {
   label: string;
 };
 
+type MoreMenuPanelProps = {
+  /** Closes the panel — wire this to a custom action's completion (plain
+   * `items` already auto-close on click; custom `children` content is
+   * responsible for calling this itself). */
+  close: () => void;
+};
+
 type MoreMenuProps = {
-  items: MoreMenuItem[];
+  /** A plain action list. Ignored (and optional) when `children` is given. */
+  items?: MoreMenuItem[];
+  /**
+   * Custom panel content instead of a plain action list — e.g. a small
+   * inline form (see the vault's "New folder" panel). Mutually exclusive
+   * with `items`; the menu still owns open/close state, positioning,
+   * outside-click, and Escape either way.
+   */
+  children?: (props: MoreMenuPanelProps) => ReactNode;
   /** Accessible name for the default trigger button. Defaults to "More actions". Ignored if you pass your own `trigger`. */
   label?: string;
   /** Which side of the trigger the panel hangs off of. Defaults to "right". */
@@ -94,7 +109,8 @@ type MenuPosition = { top: number; left: number };
  * wraps on mobile) never drags the panel half off-screen with it.
  */
 export function MoreMenu({
-  items,
+  items = [],
+  children,
   label = "More actions",
   align = "right",
   className = "",
@@ -219,24 +235,26 @@ export function MoreMenu({
             padding: "4px",
           }}
         >
-          {items.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              role="menuitem"
-              disabled={item.disabled}
-              onClick={() => {
-                setOpen(false);
-                item.onClick();
-              }}
-              className={[
-                "menu-item text-sm",
-                item.danger ? "red-text" : "purple-text",
-              ].join(" ")}
-            >
-              {item.label}
-            </button>
-          ))}
+          {children
+            ? children({ close: () => setOpen(false) })
+            : items.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  role="menuitem"
+                  disabled={item.disabled}
+                  onClick={() => {
+                    setOpen(false);
+                    item.onClick();
+                  }}
+                  className={[
+                    "menu-item text-sm",
+                    item.danger ? "red-text" : "purple-text",
+                  ].join(" ")}
+                >
+                  {item.label}
+                </button>
+              ))}
         </div>
       )}
     </div>

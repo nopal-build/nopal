@@ -2,8 +2,11 @@ import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { uploadFileToS3 } from "../data/file.server";
-import { createFileRef, isFolderUnderSyncs, resolveVaultRootKey } from "../data/vault.server";
-import { canWriteToRoot } from "../data/vaultRoots";
+import {
+  canWriteToFolderId,
+  createFileRef,
+  isFolderUnderSyncs,
+} from "../data/vault.server";
 
 /**
  * POST /api/vault/upload
@@ -39,10 +42,10 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Some root subtrees (e.g. `skills`) restrict writing to Admin/Super,
-  // even inside the OWNING human's own vault — see `vaultRoots.ts`.
-  const rootKey = folderId ? await resolveVaultRootKey(folderId) : null;
-  if (!canWriteToRoot(rootKey, user.role)) {
+  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
+  // Admin/Super, even inside the OWNING human's own vault — see
+  // `vaultRoots.ts` / `vaultFolderTypes.ts`.
+  if (!(await canWriteToFolderId(folderId, user.role))) {
     return Response.json(
       { error: "You don't have permission to upload files here" },
       { status: 403 },

@@ -26,7 +26,7 @@ struct SortSummary {
 
 /// Runs the Sorter for `date` (YYYY-MM-DD; server defaults to yesterday
 /// in UTC when omitted).
-pub fn run(date: Option<String>, force: bool) -> Result<(), Box<dyn Error>> {
+pub fn run(date: Option<String>, force: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
 
     let mut body = serde_json::json!({ "force": force });

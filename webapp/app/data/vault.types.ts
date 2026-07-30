@@ -6,6 +6,7 @@
  */
 
 import type { VaultRootKey } from "./vaultRoots";
+import type { VaultFolderTypeKey } from "./vaultFolderTypes";
 
 export type FileShareType = "view" | "workable" | "editable";
 
@@ -109,6 +110,24 @@ export type VaultFolder = {
    * Null/absent only on legacy records that predate root folders.
    */
   vault_root_key?: VaultRootKey | null;
+  /**
+   * Which Vault Folder Type (see vaultFolderTypes.ts) this folder carries —
+   * either because it IS one (`is_folder_type_root: true`, e.g. a project's
+   * own "Skills" or "Syncs" folder, or a sync connector living inside a
+   * "Syncs" folder) or because it INHERITS one from the nearest typed
+   * ancestor. Denormalized onto every descendant (re-stamped on move, same
+   * trick `vault_root_key` uses) so policy checks stay O(1). Null/absent
+   * for an ordinary, untyped folder.
+   */
+  folder_type?: VaultFolderTypeKey | null;
+  /** True only on the folder that itself DEFINES `folder_type` (not merely
+   * inherits it from an ancestor) — the anchor a human picked when they hit
+   * "New folder" and chose a type. Anchors are sticky across moves (their
+   * own `folder_type` is never overwritten by a new parent's) and cannot be
+   * moved at all (see the vault skill) to keep the create-time singleton/
+   * context rules (one `skills` + one `syncs` per project/personal; sync
+   * types only directly inside a `syncs` folder) honest over time. */
+  is_folder_type_root?: boolean;
   /** Whether THIS folder (and everything inside it, recursively — resolved
    * dynamically, not cascaded onto descendants) is published to a public,
    * unauthenticated URL. See resolvePublicRootFolder in vault.server.ts. */
