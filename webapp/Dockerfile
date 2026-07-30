@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1
 
 # Adjust NODE_VERSION as desired
-ARG NODE_VERSION=22.16.0
+ARG NODE_VERSION=22.23.2
 FROM node:${NODE_VERSION}-slim as base
 
 LABEL fly_launch_runtime="React Router"

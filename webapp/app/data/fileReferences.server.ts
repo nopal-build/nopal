@@ -35,7 +35,7 @@
  * second source of truth for what's being referenced.
  */
 
-import { query, upsert, formatRecord, type Data } from "./generic.server";
+import { query, upsert, formatRecord, defineTable, type Data } from "./generic.server";
 import type { FileRef } from "./vault.types";
 import {
   ensureVaultRootFolders,
@@ -74,6 +74,19 @@ export type FileReference = Data & {
 };
 
 export type TargetRef = { type: ReferenceTargetType; id: string };
+
+/** SurrealDB only auto-creates a table on its first INSERT/UPSERT — a
+ * `SELECT`/`DELETE` against `file_references` before this database has
+ * ever written a row to it fails with "table does not exist" rather than
+ * just returning zero rows. Every read/delete entry point below calls
+ * this first; memoized per process so it's a real no-op after the first
+ * call, not a query on every single one. */
+let fileReferencesTableEnsured = false;
+async function ensureFileReferencesTable(): Promise<void> {
+  if (fileReferencesTableEnsured) return;
+  await defineTable("file_references");
+  fileReferencesTableEnsured = true;
+}
 
 // ─── Path resolution (name-based paths, same convention `@mention` uses) ───
 
@@ -274,6 +287,7 @@ function isReferenceTrackable(file: Pick<FileRef, "content_type">): boolean {
  * call this itself.
  */
 export async function syncFileReferences(file: FileRef): Promise<void> {
+  await ensureFileReferencesTable();
   await query(`DELETE file_references WHERE source_file_id = $id`, {
     id: file._id,
   });
@@ -305,11 +319,22 @@ export async function syncFileReferences(file: FileRef): Promise<void> {
 // ─── Propagation (rename/move, and delete) ─────────────────────────────────
 
 async function findReferencingRows(target: TargetRef): Promise<FileReference[]> {
+  await ensureFileReferencesTable();
   const result = await query<[FileReference[]]>(
     `SELECT * FROM file_references WHERE target_type = $type AND target_id = $id`,
     { type: target.type, id: target.id },
   );
   return (result?.[0] ?? []).map(formatRecord);
+}
+
+/** Drops every OUTGOING reference row for a file that's about to be (or
+ * has just been) deleted — the counterpart to `propagateTargetDeletion`,
+ * which only ever cleans up INCOMING rows (`target_id = ...`). Exported
+ * so `vault.server.ts`'s `deleteFileRef` doesn't need to know
+ * `file_references`'s own schema/table-creation details. */
+export async function dropOutgoingReferences(sourceFileId: string): Promise<void> {
+  await ensureFileReferencesTable();
+  await query(`DELETE file_references WHERE source_file_id = $id`, { id: sourceFileId });
 }
 
 function groupBySource<T extends { source_file_id: string }>(
@@ -457,6 +482,7 @@ export async function propagateTargetDeletion(
     }
   }
 
+  await ensureFileReferencesTable();
   await query(
     `DELETE file_references WHERE target_type = $type AND target_id = $id`,
     { type: target.type, id: target.id },

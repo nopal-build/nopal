@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
-import { getUser } from "../modules/auth/auth.server";
+import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFileRefById, canViewFileRef } from "../data/vault.server";
 import { getPresignedViewUrl } from "../data/file.server";
 
@@ -23,11 +23,15 @@ import { getPresignedViewUrl } from "../data/file.server";
  * Because this redirects rather than returning JSON, it works as a plain
  * same-origin URL anywhere the browser can follow a redirect (img/a/etc) —
  * no client-side fetch dance required. Auth flows via the normal session
- * cookie. Owners and anyone with view access via a shared folder may use
- * this; see `canViewFileRef`.
+ * cookie OR a bearer token (`getUserFromRequest` — a strict superset of
+ * session-only `getUser`, checked first here so the CLI/scripts can reach
+ * this too, same as `/api/vault/download/:fileId` already could; this used
+ * to be session-only, a real inconsistency found while pulling production
+ * files down for local dev). Owners and anyone with view access via a
+ * shared folder may use this; see `canViewFileRef`.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = await getUser(request);
+  const user = await getUserFromRequest(request);
   if (!user) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }

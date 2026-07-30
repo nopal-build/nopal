@@ -19,7 +19,7 @@
  * exist, and is it owner-tier?".
  */
 
-import { query, upsert, formatRecord, type Data } from "./generic.server";
+import { query, upsert, formatRecord, defineTable, type Data } from "./generic.server";
 
 export type SharingRole = Data & {
   name: string;
@@ -47,8 +47,16 @@ async function seedDefaultSharingRoles(): Promise<void> {
 /** Every defined sharing role — seeds the three defaults on first call if
  * the table is still empty (same lazy-seed pattern `ensureVaultRootFolders`
  * uses for vault roots), so a fresh environment never needs a separate
- * migration/seed step run by hand. */
+ * migration/seed step run by hand.
+ *
+ * `defineTable` runs first because SurrealDB only auto-creates a table on
+ * its first INSERT/UPSERT — a `SELECT`/`DELETE` against a table that has
+ * NEVER been written to in this database yet fails with "table does not
+ * exist" rather than just returning zero rows. A brand new environment
+ * (e.g. a freshly seeded local dev DB) hits this on the very first call;
+ * an already-seeded one no-ops here (`IF NOT EXISTS`). */
 export async function getSharingRoles(): Promise<SharingRole[]> {
+  await defineTable("sharing_roles");
   const result = await query<[SharingRole[]]>(
     `SELECT * FROM sharing_roles ORDER BY name ASC`,
   );

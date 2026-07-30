@@ -475,6 +475,16 @@ export async function provisionNewUserVault(humanId: string): Promise<void> {
       String(yesterday.getDate()).padStart(2, "0"),
     ].join("-");
 
+    // Don't clobber a real entry that already exists for that date — e.g.
+    // seeded/pulled content (see `scripts/pull-daily-logs.ts`) written
+    // BEFORE this human ever logged in for the first time through the
+    // normal invite flow (`inviteHuman`), which calls this unconditionally.
+    // `saveDailyLog` is a flat overwrite with no such check itself, so the
+    // guard has to live here, at the one call site that writes placeholder
+    // content rather than something the human actually authored.
+    const existing = await getDailyLogByDate(humanId, dateStr);
+    if (existing) return;
+
     await saveDailyLog(humanId, dateStr, SAMPLE_LOG_MARKDOWN);
   } catch (err) {
     // Non-fatal: log but don't break user creation

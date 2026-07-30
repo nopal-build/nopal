@@ -60,10 +60,23 @@ import {
 } from "./vault.server";
 import { getDailyLogFolderAndReadmeId } from "./dailyLog.server";
 import { getProjectRole } from "./projectSharing.server";
-import { query, upsert, merge, formatRecord, type Data } from "./generic.server";
+import { query, upsert, merge, formatRecord, defineTable, type Data } from "./generic.server";
 import type { FileRef } from "./vault.types";
 
 const RELEASE_LOG_FILENAME = "release-log.md";
+
+/** SurrealDB only auto-creates a table on its first INSERT/UPSERT — a
+ * `SELECT` against `release_log_entries`/`release_log_changesets` before
+ * this database has ever written a row to either fails with "table does
+ * not exist" rather than just returning zero rows. Every read entry point
+ * below calls this first; memoized per process. */
+let releaseLogTablesEnsured = false;
+async function ensureReleaseLogTables(): Promise<void> {
+  if (releaseLogTablesEnsured) return;
+  await defineTable("release_log_entries");
+  await defineTable("release_log_changesets");
+  releaseLogTablesEnsured = true;
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -262,6 +275,7 @@ export async function regenerateDailyReleaseLog(
 // ─── Entries/changesets CRUD ────────────────────────────────────────────
 
 async function nextSequence(projectFolderId: string): Promise<number> {
+  await ensureReleaseLogTables();
   const result = await query<[{ sequence: number }[]]>(
     `SELECT sequence FROM release_log_entries
      WHERE project_folder_id = $projectFolderId
@@ -292,6 +306,7 @@ export async function findReleaseLogEntryBySource(
   kind: ReleaseLogEntryKind,
   sourceRef: string,
 ): Promise<ReleaseLogEntry | null> {
+  await ensureReleaseLogTables();
   const result = await query<[ReleaseLogEntry[]]>(
     `SELECT * FROM release_log_entries
      WHERE project_folder_id = $projectFolderId AND date = $date
@@ -362,6 +377,7 @@ export async function createReleaseLogEntry(
 export async function getProjectReleaseLogEntries(
   projectFolderId: string,
 ): Promise<ReleaseLogEntry[]> {
+  await ensureReleaseLogTables();
   const result = await query<[ReleaseLogEntry[]]>(
     `SELECT * FROM release_log_entries WHERE project_folder_id = $projectFolderId ORDER BY sequence ASC`,
     { projectFolderId },
@@ -373,6 +389,7 @@ export async function getDailyReleaseLogEntries(
   actingHumanId: string,
   date: string,
 ): Promise<ReleaseLogEntry[]> {
+  await ensureReleaseLogTables();
   const result = await query<[ReleaseLogEntry[]]>(
     `SELECT * FROM release_log_entries
      WHERE acting_human_id = $actingHumanId AND date = $date
@@ -385,6 +402,7 @@ export async function getDailyReleaseLogEntries(
 export async function getReleaseLogEntryById(
   entryId: string,
 ): Promise<ReleaseLogEntry | undefined> {
+  await ensureReleaseLogTables();
   const result = await query<[ReleaseLogEntry[]]>(
     `SELECT * FROM release_log_entries WHERE id = $rid`,
     { rid: new RecordId("release_log_entries", entryId) },
@@ -396,6 +414,7 @@ export async function getReleaseLogEntryById(
 export async function getChangesetsForEntry(
   entryId: string,
 ): Promise<ReleaseLogChangeset[]> {
+  await ensureReleaseLogTables();
   const result = await query<[ReleaseLogChangeset[]]>(
     `SELECT * FROM release_log_changesets WHERE entry_id = $entryId`,
     { entryId },
@@ -416,6 +435,7 @@ async function getLaterChangesetsForFile(
   afterSequence: number,
   fileId: string,
 ): Promise<LaterChangeset[]> {
+  await ensureReleaseLogTables();
   const laterEntries = await query<[ReleaseLogEntry[]]>(
     `SELECT * FROM release_log_entries
      WHERE project_folder_id = $projectFolderId AND sequence > $afterSequence

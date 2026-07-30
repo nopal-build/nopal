@@ -58,9 +58,17 @@ export async function createFileRef(data: {
   date?: string;
   /** Which project folder a `daily_log_card` file is for. */
   project_folder_id?: string | null;
+  /** Use this EXACT id instead of letting SurrealDB generate one — for
+   * callers that must keep an id stable across a copy of this record
+   * living somewhere else (currently only `scripts/pull-daily-logs.ts`,
+   * preserving each production id locally so directive ids embedded in
+   * pulled content, e.g. `::file{fileId="..."}`/`::card{file="..."}`,
+   * keep resolving correctly without any separate remap pass). Omit for
+   * the normal, auto-generated-id path every real upload uses. */
+  id?: string;
 }): Promise<FileRef | undefined> {
   const now = new Date().toISOString();
-  const result = await upsert("file_refs", {
+  const result = await upsert(data.id ? new RecordId("file_refs", data.id) : "file_refs", {
     human_id: data.human_id,
     name: data.name,
     s3_url: data.s3_url ?? null,
@@ -202,9 +210,10 @@ export async function deleteFileRef(id: string): Promise<void> {
   if (file) {
     // File Referencing & Renaming: mark any dead mention pointing at this
     // now-gone file, and drop its own outgoing/incoming reference rows.
-    const { propagateTargetDeletion } = await import("./fileReferences.server");
+    const { dropOutgoingReferences, propagateTargetDeletion } =
+      await import("./fileReferences.server");
     await propagateTargetDeletion({ type: "file", id }, file.name);
-    await query(`DELETE file_references WHERE source_file_id = $id`, { id });
+    await dropOutgoingReferences(id);
   }
 }
 
@@ -223,6 +232,10 @@ export async function createVaultFolder(data: {
    * responsible for validating the type is allowed for this parent (see
    * `validateFolderTypeForParent`) — this function is mechanical only. */
   folder_type?: VaultFolderTypeKey | null;
+  /** Use this EXACT id instead of letting SurrealDB generate one — see
+   * `createFileRef`'s own doc for why (only `scripts/pull-daily-logs.ts`
+   * needs this today). */
+  id?: string;
 }): Promise<VaultFolder | undefined> {
   const now = new Date().toISOString();
 
@@ -246,7 +259,7 @@ export async function createVaultFolder(data: {
     folderType = parent?.folder_type ?? null;
   }
 
-  const result = await upsert("vault_folders", {
+  const result = await upsert(data.id ? new RecordId("vault_folders", data.id) : "vault_folders", {
     human_id: data.human_id,
     name: data.name,
     parent_folder_id: data.parent_folder_id ?? null,
