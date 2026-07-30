@@ -37,7 +37,14 @@ enum Command {
     /// Remove the locally stored CLI session.
     Logout {},
     /// Show who the CLI is currently logged in as.
-    Whoami {},
+    Whoami {
+        /// Also print the raw bearer token this session is using — a real
+        /// secret, handle it like a password. Useful for feeding a script
+        /// (e.g. `webapp/scripts/pull-daily-logs.ts`) that calls the HTTP
+        /// API directly.
+        #[arg(long)]
+        token: bool,
+    },
     /// Utilities for working with video files (compression, etc). Uploading
     /// lives under its own separate command.
     Video {
@@ -488,8 +495,8 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Command::Whoami {} => {
-            if let Err(e) = auth::whoami() {
+        Command::Whoami { token } => {
+            if let Err(e) = auth::whoami(token) {
                 eprintln!("{e}");
                 std::process::exit(1);
             }

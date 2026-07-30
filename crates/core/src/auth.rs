@@ -209,11 +209,21 @@ pub fn logout() -> Result<()> {
     Ok(())
 }
 
-pub fn whoami() -> Result<()> {
+/// `show_token` prints the raw bearer token this CLI session is currently
+/// using — the same one every `nopal vault`/`sort`/... command already
+/// sends as `Authorization: Bearer ...`. Useful for a script that needs to
+/// call the same HTTP API directly (e.g. `webapp/scripts/pull-daily-logs.ts`)
+/// without going through a separate login flow of its own. Deliberately
+/// opt-in (never printed by plain `nopal whoami`) since it's a real secret
+/// — anyone with it can act as you until it expires or you `nopal logout`.
+pub fn whoami(show_token: bool) -> Result<()> {
     match load_credentials() {
         Some(creds) => {
             println!("Logged in as {} ({})", creds.email, creds.host);
             println!("Session valid until {}", creds.expires_at);
+            if show_token {
+                println!("Token: {}", creds.token);
+            }
             Ok(())
         }
         None => Err("Not logged in. Run 'nopal login' first.".into()),

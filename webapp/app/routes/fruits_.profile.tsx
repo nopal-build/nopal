@@ -56,6 +56,7 @@ import {
   type Passkey,
 } from "../data/passkeys.server";
 import {
+  createPersonalAccessToken,
   getApiTokensByHuman,
   revokeApiToken,
   type ApiToken,
@@ -622,6 +623,34 @@ async function handleRevokeApiToken(request: Request, form: FormData) {
   return data({ intent: "revoke-api-token" as const, success: true });
 }
 
+async function handleGenerateApiToken(request: Request, form: FormData) {
+  const user = await getUser(request);
+  if (!user) return redirect("/login");
+
+  const rawName = String(form.get("name") ?? "").trim();
+  if (!rawName) {
+    return data(
+      { intent: "generate-api-token" as const, error: "Give the token a name." },
+      { status: 400 },
+    );
+  }
+
+  const minted = await createPersonalAccessToken(
+    user._id,
+    `${rawName} (personal access token)`,
+  );
+  if (!minted) {
+    return data(
+      { intent: "generate-api-token" as const, error: "Failed to generate token." },
+      { status: 500 },
+    );
+  }
+
+  // The raw token is returned ONLY in this one response — never stored,
+  // never retrievable again after this render.
+  return data({ intent: "generate-api-token" as const, success: true, token: minted.token });
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "update-name");
@@ -643,6 +672,9 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   if (intent === "revoke-api-token") {
     return handleRevokeApiToken(request, form);
+  }
+  if (intent === "generate-api-token") {
+    return handleGenerateApiToken(request, form);
   }
   if (intent === "request-email-change") {
     return handleRequestEmailChange(request, form);
@@ -1105,12 +1137,25 @@ export default function Profile() {
     waivers,
     relatedHumans,
     passkeys,
-    apiTokens,
+    apiTokens: allApiTokens,
     inviteExpired,
     revokedRelationships,
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const { revalidate } = useRevalidator();
+
+  // Personal access tokens (minted from the section below) and CLI login
+  // sessions (`nopal login`) are the same underlying `api_tokens` rows —
+  // split apart here purely by the name suffix each minting path already
+  // gives its own tokens (see `createPersonalAccessToken`/`cli-login.tsx`),
+  // so they render as two separate, clearly-labeled lists instead of one
+  // ambiguous mixed one.
+  const personalAccessTokens = allApiTokens.filter((t) =>
+    t.name.endsWith("(personal access token)"),
+  );
+  const cliSessionTokens = allApiTokens.filter(
+    (t) => !t.name.endsWith("(personal access token)"),
+  );
 
   // The relationships email input does double duty: it filters the visible
   // cards live as you type, and doubles as the "add relationship" field —
@@ -1153,6 +1198,18 @@ export default function Profile() {
       // Clipboard API can be unavailable (older browser, non-secure context) —
       // the input itself is still readonly + auto-selecting on focus/click, so
       // manual copy always works as a fallback.
+    }
+  }
+
+  const [newTokenCopied, setNewTokenCopied] = useState(false);
+  async function handleCopyNewToken(token: string) {
+    try {
+      await navigator.clipboard.writeText(token);
+      setNewTokenCopied(true);
+      setTimeout(() => setNewTokenCopied(false), 2000);
+    } catch {
+      // Same fallback reasoning as handleCopyCliInstallCommand above — the
+      // token field itself is readonly + auto-selecting.
     }
   }
 
@@ -1332,6 +1389,8 @@ export default function Profile() {
     actionData?.intent === "delete-passkey" ? actionData : undefined;
   const apiTokenRevokeResult =
     actionData?.intent === "revoke-api-token" ? actionData : undefined;
+  const apiTokenGenerateResult =
+    actionData?.intent === "generate-api-token" ? actionData : undefined;
   const nameResult =
     actionData?.intent === "update-name" ? actionData : undefined;
   const emailResult =
@@ -2091,7 +2150,7 @@ export default function Profile() {
                 </div>
               </div>
 
-              {apiTokens.length === 0 ? (
+              {cliSessionTokens.length === 0 ? (
                 <div
                   className="good-box p-3 text-sm mb-4"
                   style={{ color: "var(--text-subtle)" }}
@@ -2100,7 +2159,7 @@ export default function Profile() {
                 </div>
               ) : (
                 <div className="flex flex-col gap-2 mb-4">
-                  {apiTokens.map((token) => (
+                  {cliSessionTokens.map((token) => (
                     <ApiTokenCard key={token._id} token={token} />
                   ))}
                 </div>
@@ -2109,6 +2168,76 @@ export default function Profile() {
               {apiTokenRevokeResult && "error" in apiTokenRevokeResult && (
                 <div className="red-text text-sm mb-4">
                   {apiTokenRevokeResult.error}
+                </div>
+              )}
+
+              <h3 className="font-bold mt-6 mb-1">Personal access tokens</h3>
+              <p
+                className="text-sm mb-4"
+                style={{ color: "var(--text-subtle)" }}
+              >
+                For scripts and automation that call the Nopal API directly,
+                without a CLI login flow. Never expire on their own — revoke
+                one to invalidate it.
+              </p>
+
+              {apiTokenGenerateResult && "token" in apiTokenGenerateResult && (
+                <div className="good-box p-3 text-sm mb-4">
+                  <div className="mb-2 red-text font-bold">
+                    Copy this now — it won't be shown again.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      readOnly
+                      value={apiTokenGenerateResult.token}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onClick={(e) => e.currentTarget.select()}
+                      aria-label="New personal access token"
+                      className="font-mono flex-1 min-w-0 code-input"
+                      style={{ fontSize: "0.75rem", padding: "6px 8px" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCopyNewToken(apiTokenGenerateResult.token)}
+                      className="btn-secondary shrink-0"
+                      style={{ padding: "6px 12px", fontSize: "0.75rem" }}
+                    >
+                      {newTokenCopied ? "Copied!" : "Copy"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <Form method="post" className="flex items-center gap-2 mb-4">
+                <input type="hidden" name="intent" value="generate-api-token" />
+                <input
+                  type="text"
+                  name="name"
+                  placeholder='e.g. "Daily-log pull script"'
+                  required
+                  className="font-mono flex-1 min-w-0 code-input"
+                  style={{ fontSize: "0.75rem", padding: "6px 8px" }}
+                />
+                <button
+                  type="submit"
+                  className="btn-secondary shrink-0"
+                  style={{ padding: "6px 12px", fontSize: "0.75rem" }}
+                >
+                  + Generate token
+                </button>
+              </Form>
+
+              {apiTokenGenerateResult && "error" in apiTokenGenerateResult && (
+                <div className="red-text text-sm mb-4">
+                  {apiTokenGenerateResult.error}
+                </div>
+              )}
+
+              {personalAccessTokens.length > 0 && (
+                <div className="flex flex-col gap-2 mb-4">
+                  {personalAccessTokens.map((token) => (
+                    <ApiTokenCard key={token._id} token={token} />
+                  ))}
                 </div>
               )}
             </section>

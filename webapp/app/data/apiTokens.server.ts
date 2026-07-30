@@ -159,6 +159,40 @@ export async function createSyncScopedToken(
   return { token: rawToken, tokenId: formatted._id };
 }
 
+/**
+ * Mints a full-access personal token, for scripts/automation to call the
+ * HTTP API directly without a `nopal login` browser flow (e.g.
+ * `webapp/scripts/pull-daily-logs.ts`) — minted from the profile page's
+ * "Personal access tokens" section. Never expires (revocation is the kill
+ * switch), same reasoning `createSyncScopedToken` already uses: a script
+ * silently breaking every 30 days because a login-flow token expired is
+ * worse than a durable, explicitly-revocable one. `scope: "full"` is set
+ * explicitly (rather than left undefined, as `createApiTokenWithExchangeCode`
+ * does) purely so a token's own row says what minted it, for anyone
+ * reading the data later. Returns the raw token — shown to the human
+ * exactly once by the caller, never stored.
+ */
+export async function createPersonalAccessToken(
+  humanId: string,
+  name: string,
+): Promise<{ token: string; tokenId: string } | undefined> {
+  const rawToken = crypto.randomBytes(32).toString("base64url");
+  const result = await upsert("api_tokens", {
+    humanId,
+    name,
+    tokenHash: hashToken(rawToken),
+    scope: "full",
+    createdAt: new Date().toISOString(),
+    expiresAt: null,
+    lastUsedAt: null,
+    revokedAt: null,
+  });
+  const record = Array.isArray(result) ? result[0] : result;
+  if (!record) return undefined;
+  const formatted = formatRecord(record as unknown as ApiToken);
+  return { token: rawToken, tokenId: formatted._id };
+}
+
 /** Best-effort — callers should not let a failure here block a request. */
 export async function touchApiTokenLastUsed(id: string): Promise<void> {
   await merge("api_tokens", id, { lastUsedAt: new Date().toISOString() });
