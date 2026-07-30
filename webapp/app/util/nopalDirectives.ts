@@ -75,6 +75,52 @@ export function extractLeafDirectives(text: string): ParsedDirective[] {
   return out;
 }
 
+export type LeafDirectiveOccurrence = ParsedDirective & {
+  /** Index into the ORIGINAL string where this occurrence's full match
+   * (`::name{...}`) starts — lets a caller splice a targeted replacement
+   * back in without a full re-parse/re-serialize of the whole document
+   * (see `fileReferences.server.ts`, which needs this for File Referencing
+   * & Renaming's rename propagation). */
+  index: number;
+  /** The exact, verbatim substring matched (`m[0]`). */
+  match: string;
+};
+
+/** Same as `extractLeafDirectives`, but also returns each occurrence's exact
+ * position/raw text — needed to rewrite ONE specific directive's attribute
+ * value in place (`replaceDirectiveAttrInMatch` below) without disturbing
+ * anything else in the file. */
+export function findLeafDirectiveOccurrences(text: string): LeafDirectiveOccurrence[] {
+  const out: LeafDirectiveOccurrence[] = [];
+  for (const m of text.matchAll(LEAF_RE)) {
+    out.push({
+      name: m[1],
+      label: m[2] ?? null,
+      attrs: parseDirectiveAttrs(m[3]),
+      index: m.index ?? 0,
+      match: m[0],
+    });
+  }
+  return out;
+}
+
+/**
+ * Replaces ONE attribute's value within a SPECIFIC leaf-directive
+ * occurrence's own raw text (as returned by `findLeafDirectiveOccurrences`)
+ * — a scoped, single-attribute string replace rather than a full
+ * re-parse/re-serialize, so nothing else about the directive (attribute
+ * order, quoting, other attributes) or the rest of the file is touched.
+ * A no-op (returns `matchText` unchanged) if the attribute isn't present.
+ */
+export function replaceDirectiveAttrInMatch(
+  matchText: string,
+  attrName: string,
+  newValue: string,
+): string {
+  const re = new RegExp(`(\\b${attrName}\\s*=\\s*")[^"]*(")`);
+  return matchText.replace(re, `$1${newValue}$2`);
+}
+
 function attr(name: string, value: string): string {
   return `data-${name}="${encodeURIComponent(value)}"`;
 }

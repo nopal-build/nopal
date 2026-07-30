@@ -46,12 +46,12 @@ Where a root is a fixed, system-provisioned top-level container, a folder TYPE (
 
 `isFolderUnderSyncs(folderId)` (`vault.server.ts`) — true for the `syncs` folder itself and every sync connector folder inside one, at any depth — is the resource check sync-scoped API tokens are restricted to (unchanged in spirit from when `syncs` was a root; just reads `folder_type` now instead of `vault_root_key`).
 
-### Write/share/publish policy (`writable: "owner" | "admin"`, `shareable`, `publishable`)
+### Write/publish policy (`writable: "owner" | "admin"`, `shareable`, `publishable`)
 
-Each folder type carries the same three policy knobs `VAULT_ROOTS` does, layered ON TOP of (never a replacement for) the containing ROOT's own policy — both must agree. `canWriteToFolderId(folderId, role)` / `isFolderIdShareable(folderId)` / `isFolderIdPublishable(folderId)` (`vault.server.ts`) are the single helpers both directions of policy funnel through, combining `vaultRoots.ts`'s root-level check with `vaultFolderTypes.ts`'s type-level check. Enforced SERVER-SIDE in every route that can create/rename/move/delete/share/publish a folder or file, or upload/replace file bytes:
+Each folder type carries the same three policy knobs `VAULT_ROOTS` does, layered ON TOP of (never a replacement for) the containing ROOT's own policy — both must agree. `canWriteToFolderId(folderId, role)` / `isFolderIdShareable(folderId)` / `isFolderIdPublishable(folderId)` (`vault.server.ts`) are the single helpers both directions of policy funnel through, combining `vaultRoots.ts`'s root-level check with `vaultFolderTypes.ts`'s type-level check. `skills.writable` is `"owner"` (a project's own creator can always write there — no longer platform-Admin/Super-gated); a Crafter/Observer collaborator's ability to edit `skills` content is a SEPARATE, project-Role-aware check layered on top — see "Sharing Roles" above, not this policy chain. Enforced SERVER-SIDE in every route that can create/rename/move/delete/publish a folder or file, or upload/replace file bytes:
 
 - `api.vault.folders.tsx` — create (checks the PARENT folder; validates a `folder_type` in the request against `validateFolderTypeForParent`).
-- `api.vault.folders.$folderId.tsx` — rename/delete/publish/share (checks the folder's own policy) and move (checks BOTH the folder's own policy and the DESTINATION's; blocks moving a folder-type anchor outright).
+- `api.vault.folders.$folderId.tsx` — rename/delete/publish (checks the folder's own policy) and move (checks BOTH the folder's own policy and the DESTINATION's; blocks moving a folder-type anchor outright). No longer handles sharing at all — see "Sharing Roles" above.
 - `api.vault.$fileId.tsx` — PATCH/DELETE (checks the file's own folder) and move-via-`folder_id`-change / share (checks the destination's policy, same as folder move).
 - `api.vault.upload.tsx` / `api.vault.multipart-init.tsx` — checks the target folder's policy.
 - `api.vault.replace.$fileId.tsx` — checks the file's own folder's policy.
@@ -60,23 +60,48 @@ Client-side, `fruits_.vault.tsx` hides the write/share/publish-triggering UI whe
 
 ## Data model
 
-- `vault_folders`: `human_id`, `name`, `parent_folder_id`, `shared_with` (ids | "everyone"), `vault_root_key`, `folder_type`, `is_folder_type_root`
+- `vault_folders`: `human_id`, `name`, `parent_folder_id`, `shared_with` (a plain `string[]` of human ids — no "everyone" option, see "Sharing Roles" below), `vault_root_key`, `folder_type`, `is_folder_type_root`
 - `file_refs`: `human_id`, `name`, `content` (markdown stored in DB) or `s3_key`/`s3_url` (binary in S3), `content_type`, `folder_id`, `md_versions` (daily snapshots via `computeMdUpdate`), `source` (`"daily_log"` | `"daily_log_card"` — see "Daily Logs" below), `project_folder_id` (only on a `"daily_log_card"` file — which project it's for)
+- `sharing_roles`: `name`, `is_owner` — role DEFINITIONS, see "Sharing Roles" below.
 - Server functions: `webapp/app/data/vault.server.ts`; client-safe types/helpers: `vault.types.ts`, `vaultRoots.ts`, `vaultFolderTypes.ts`
-- `getProjectFolders(humanId)` (`vault.server.ts`): every direct child folder of the human's OWN `projects` root — the simple "a project is just a folder under `projects`" notion, deliberately NOT `project.server.ts`'s heavier `resolveProjectManifest` (which additionally requires a valid `README.md` manifest, and exists for the project detail PAGE, not "what projects exist"). Used by the Daily Log's Cards feature. Scoped to owned projects only — projects shared with the human by someone else aren't yet offered as Card targets (a deliberate, tracked scope line).
+- `getProjectFolders(humanId)` (`vault.server.ts`): every direct child folder of the human's OWN `projects` root — the simple "a project is just a folder under `projects`" notion, deliberately NOT `project.server.ts`'s heavier `resolveProjectManifest` (which additionally requires a valid `README.md` manifest, and exists for the project detail PAGE, not "what projects exist"). `getAccessibleProjectFolders(humanId)` additionally includes every project someone else has shared a Sharing Role with them on (any role) — what the Daily Log's Cards feature actually uses as its target list, since a Card is how any role (including Observer) "contributes" to a project it doesn't own.
 
 ## Actions (policy-gated)
 
-Folder: Upload file, New folder (optionally picking a folder TYPE — see above), Rename (not root containers), Move (not root containers, not folder-type anchors, not shared folders or folders containing shared descendants; re-stamps `vault_root_key`/`folder_type` across the subtree), Share (only where the root AND folder-type policy both allow it — e.g. never inside `skills`).
+Folder: Upload file, New folder (optionally picking a folder TYPE — see above), Rename (not root containers), Move (not root containers, not folder-type anchors, not shared folders or folders containing shared descendants; re-stamps `vault_root_key`/`folder_type` across the subtree), Share (project folders only — see "Sharing Roles" below).
 File: Download (S3-backed files), Replace (same file id, new bytes — `/api/vault/replace/:fileId`).
 
 Enforcement is server-side in `api.vault.folders.$folderId.tsx` / `api.vault.$fileId.tsx`, not just hidden buttons.
 
-## Sharing
+## Sharing Roles
 
-- Folder sharing cascades to all descendants (`cascadeShareVaultFolder`); allowed only where BOTH the root policy (`projects`) and the folder-type policy permit it (e.g. never inside a `skills` folder, even inside `projects`).
+PhyLog's replacement for the old "private / everyone / specific people" model — sharing a PROJECT (a folder directly under `projects`; no other folder is independently shareable) now means giving each collaborator a named Role instead of a flat yes/no. "Shared with everyone" is gone entirely.
+
+- **Role DEFINITIONS** (`name` + `is_owner`) live in the `sharing_roles` DB table (`webapp/app/data/sharingRoles.server.ts`), lazily seeded on first read with three defaults: `Owner` (is_owner: true), `Crafter` (is_owner: true), `Observer` (is_owner: false). `is_owner` is the only permission tier that exists today — it gates writing to a project's `skills` folder (see below); everything else a role can do (view the project, contribute a daily-log Card) is available to every role.
+- **Role ASSIGNMENTS** (who has which role on THIS project) are NOT a database table — they live directly in that project's own `README.md` YAML front matter, a `sharing` list: `[{ human: humanId, role: roleName }]` (see `project.types.ts`'s `parseProjectSharing`/`withProjectSharing`, and `projectSharing.server.ts`). This is deliberate: a project's collaborator list travels with the project's own file, the same way its `title`/`type`/`layout` manifest fields already do. The project's own creator is never listed — always an implicit "Owner" (`projectSharing.server.ts`'s `getProjectRole`).
+- `vault_folders.shared_with` is kept as a DERIVED, DENORMALIZED CACHE of that `sharing` list (recomputed + cascaded to every descendant via the existing `cascadeShareVaultFolder` whenever `setProjectSharing` runs) purely so the pre-existing O(1) view-access plumbing (`canViewFileRef`, `getSharedFoldersForHuman`, the Vault sidebar's "Shared with me") keeps working unchanged. Never write `shared_with` directly for a project folder.
+- API: `GET`/`PUT /api/vault/projects/:folderId/sharing` (`api.vault.projects.$folderId.sharing.tsx`) — `PUT` replaces the entire collaborator list and requires the acting human to already hold an owner-tier role (the creator, or an existing Owner/Crafter); Observers may not change sharing. The old generic `PATCH /api/vault/folders/:folderId { shared_with }` path is gone (400s with a pointer to the new endpoint).
+- **`skills` folder writes**: no longer platform-Admin/Super-gated (`vaultFolderTypes.ts`'s `skills.writable` is now `"owner"`, so the project's own creator can always write there). A non-owner collaborator additionally needs an owner-tier project Role (Owner/Crafter) to edit a file inside `skills` — enforced in `api.vault.$fileId.tsx`'s non-owner PATCH path via `projectSharing.server.ts`'s `getProjectRoleForFolderId`, on top of the ordinary per-file `shared_type`/`shared_with` check. An Observer cannot edit `skills` even if the file's own `shared_type` says "editable".
+- `nopal vault share <path> --with email:Role [--with email:Role ...]` / `--private` (CLI) — project folders only; role names aren't validated client-side, the server checks them against `sharing_roles`.
 - Markdown files can be public (`is_public`) — public view at `/card/:fileId`.
-- File share types (view / workable / editable) correspond to the @mdx-editor modes.
+- File share types (view / workable / editable) correspond to the @mdx-editor modes — orthogonal to Sharing Roles (a per-FILE grant, not a project-wide one).
+
+## File Referencing & Renaming
+
+`file_references` (`webapp/app/data/fileReferences.server.ts`) is an index of every outgoing reference a markdown file's content contains, so renaming or moving a file/folder can find and fix every place it's referenced in O(references-to-that-target) instead of scanning the whole vault. ID-only rows (`source_file_id`, `target_type`/`target_id`, `kind`) — `ref_text` is a CACHE of the exact raw text currently expressing the reference (refreshed on every save), never a second source of truth.
+
+Two reference kinds, deliberately excluding anything already ID-based (nothing to fix there): `::file{fileId=...}` and `::card{file=... projectFolderId=...}` are skipped entirely.
+
+- **`mention`** — an `@`-mention link (`oxmarkdown/mention.ts`'s `[@Name](/humanId:path/to/target)`). Deliberately kept in its shipped, human-readable-path form rather than switched to opaque ids — this table is what makes a targeted rewrite of that path cheap on rename, without changing the saved markdown format. Cross-human: a mention can point into another human's shared project; propagation only ever rewrites the REFERRER's own file, so it never needs write access to the target's owner's vault.
+- **`directive-attr`** — a `file="..."`/`folder="..."` attribute on any OTHER leaf directive (`::csv-table{file=...}`, `::gallery{folder=...}`, ...), resolved against the attribute's own containing folder's direct children by name — mirrors exactly how `project.server.ts`'s `resolveProjectManifest` already resolves them for rendering.
+
+**Sync** is centralized inside `vault.server.ts`'s `createFileRef`/`updateFileRef` (a dynamic `import("./fileReferences.server")`, avoiding a static circular dependency) — every markdown save triggers a full delete-and-re-extract resync of that file's OWN outgoing references, so no individual route has to remember to call this itself.
+
+**Propagation** — `propagateTargetChange(targets)` handles a rename AND a move identically (a move changes a target's computed path just as much as a rename does): finds every `file_references` row pointing at any of `targets`, groups by referencing file, recomputes each one's CURRENT path/name fresh from the database, and rewrites the exact cached `ref_text` span in place. A folder rename/move expands `targets` to itself plus every descendant folder/file (`collectFolderAndDescendantTargets`) since their paths changed too, even though their own names didn't. Hooked into `updateVaultFolder` (name change), `moveVaultFolder` (any move), and `updateFileRef` (a file's own name/`folder_id` change).
+
+**Deletion** — `propagateTargetDeletion(target, deletedName)`, hooked into `deleteFileRef` and `deleteVaultFolderCascade` (once per cascaded folder; cascaded files are already covered since the cascade calls `deleteFileRef` for each). A dead `mention`'s LABEL is rewritten to flag it (`[Name (deleted)](oldHref)`) rather than silently left stale or removed — the href is left as-is (nothing to point it at) so a human reading it later still knows what USED to be there. A `directive-attr` reference has no separate label to annotate this way; its stale value is left untouched, same as `project.server.ts` already silently skipping any unresolvable `file=`/`folder=` attribute today. Either way, the now-meaningless `file_references` rows for that target are deleted.
+
+**Explicitly out of scope for now**: task/checkbox references (duplicating a task across files so checking one checks all of them) — a separate, not-yet-designed feature, not an extension of this table. **Also not built**: a "broken links" scanner/report — `file_references` plus a plain "does this target id still resolve" check would make one straightforward to add later; noted here as a good candidate, not committed to.
 
 ## Media
 

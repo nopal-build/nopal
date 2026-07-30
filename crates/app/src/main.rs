@@ -10,6 +10,7 @@
 
 mod app;
 mod login;
+mod record_view;
 mod sync_view;
 mod vault_view;
 

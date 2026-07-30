@@ -57,10 +57,14 @@ export type VaultFolderTypeDef = {
   label: string;
   /** Short explanation shown in the type picker. */
   description: string;
-  /** Same policy shape as `VaultRootPolicy.writable` (`vaultRoots.ts`),
-   * applied ON TOP of the containing root's own policy — writing anywhere
-   * inside a `skills`-typed folder needs Admin/Super, even inside the
-   * owning human's own vault. */
+  /** Same policy shape as `VaultRootPolicy.writable` (`vaultRoots.ts`) —
+   * `"admin"` requires the ACTING human to hold the platform `Admin`/`Super`
+   * role, even inside their own vault; `"owner"` means the folder's own
+   * owner may always write. No folder type uses `"admin"` today —
+   * `skills` used to, but that's superseded by PhyLog's project-level
+   * Sharing Roles (a SEPARATE, project-Role-aware gate on top of this one—
+   * see the `vault` skill's "Sharing Roles" section); kept as a mechanism
+   * for a future folder type that might still want a platform-role gate. */
   writable: "owner" | "admin";
   /** Whether a folder of this type may be shared with other humans —
    * independent of whether its containing root permits sharing at all
@@ -81,7 +85,12 @@ export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> 
     label: "Skills",
     description:
       "Instructions that codify this project's (or your Personal space's) identity — guidance for how it should be built, organized, and maintained.",
-    writable: "admin",
+    // No longer platform-Admin/Super-gated (superseded by PhyLog's Sharing
+    // Roles): a project's own creator can always write here, and an
+    // owner-tier collaborator (Crafter) is separately allowed to EDIT
+    // existing skills content — see the project-role gate in
+    // `api.vault.$fileId.tsx` and the `vault`/`oxmarkdown` skills.
+    writable: "owner",
     shareable: false,
     publishable: false,
   },

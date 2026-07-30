@@ -30,7 +30,8 @@ import {
   type DailyLog,
   type DailyLogCard,
 } from "../data/dailyLog.server";
-import { getProjectFolders } from "../data/vault.server";
+import { getAccessibleProjectFolders, getFolderById } from "../data/vault.server";
+import { getProjectRole } from "../data/projectSharing.server";
 import type { SortSummary } from "../data/sorter.server";
 
 // ─── @ mentions ───────────────────────────────────────────────────────────────────────────────────
@@ -112,8 +113,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { entries } = await getDailyLogs(user._id, { limit: 500 });
 
   // Real projects for "Add a card" (replaces the old mockup's hardcoded
-  // project list) — see `vault.server.ts`'s `getProjectFolders`.
-  const projectFolders = await getProjectFolders(user._id);
+  // project list) — the human's own projects, PLUS any project someone
+  // else shared a Sharing Role with them on (any role, including
+  // Observer — Cards are how PhyLog lets a non-owner "contribute" to a
+  // project; see `vault.server.ts`'s `getAccessibleProjectFolders`).
+  const projectFolders = await getAccessibleProjectFolders(user._id);
 
   // Cards for each day that actually references one — a cheap substring
   // check up front so this stays proportional to real Card usage instead
@@ -158,6 +162,14 @@ export async function action({ request }: ActionFunctionArgs) {
         createCardForProject?: string;
       };
       if (!date || !createCardForProject) return { error: "Invalid request" };
+      // A Card is how a non-owner "contributes" to a shared project, so
+      // this must accept more than just projects `user` owns — but still
+      // requires SOME Sharing Role on the target project, not an
+      // arbitrary folder id.
+      const projectFolder = await getFolderById(createCardForProject);
+      if (!projectFolder || !(await getProjectRole(projectFolder, user._id))) {
+        return { error: "You don't have access to that project" };
+      }
       const card = await createDailyLogCard(user._id, date, createCardForProject);
       return { success: true, card };
     }

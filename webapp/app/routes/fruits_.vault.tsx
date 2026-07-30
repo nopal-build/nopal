@@ -242,7 +242,6 @@ function fileIcon(contentType: string): string {
 }
 
 function folderIcon(shared_with: VaultFolder["shared_with"]): string {
-  if (shared_with === "everyone") return "🌍";
   if (Array.isArray(shared_with) && shared_with.length > 0) return "👥";
   return "📁";
 }
@@ -366,102 +365,101 @@ function CopyLinkButton({ path }: { path: string }) {
 
 // ─── Share Modal ───────────────────────────────────────────────────────────────────────────────
 
+type ProjectSharingRole = { name: string; is_owner: boolean };
+type ProjectSharingEntry = { human: string; role: string };
+
+/**
+ * A project's Sharing Roles — supersedes the old "private / everyone /
+ * specific people" modal entirely (see `projectSharing.server.ts`).
+ * "Everyone in the app" is gone; every collaborator now gets an explicit
+ * named Role (Owner/Crafter/Observer by default — see
+ * `sharingRoles.server.ts`), stored directly in the project's own
+ * README.md front matter. Loads/saves via
+ * `/api/vault/projects/:folderId/sharing` rather than the generic folder
+ * PATCH endpoint.
+ */
 function ShareModal({
   folder,
   allHumans,
   onClose,
-  onSave,
+  apiJson,
 }: {
   folder: VaultFolder;
   allHumans: HumanEntry[];
   onClose: () => void;
-  onSave: (shared_with: string[] | "everyone") => void;
+  apiJson: (url: string, options?: RequestInit) => Promise<any>;
 }) {
-  const current = folder.shared_with;
+  const [loading, setLoading] = useState(true);
+  const [roles, setRoles] = useState<ProjectSharingRole[]>([]);
+  // human id -> role name; absent = not shared with this human at all.
+  const [assignments, setAssignments] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
 
-  const [mode, setMode] = useState<"private" | "everyone" | "specific">(
-    current === "everyone"
-      ? "everyone"
-      : Array.isArray(current) && current.length > 0
-        ? "specific"
-        : "private",
-  );
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    new Set(Array.isArray(current) ? current : []),
-  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await apiJson(`/api/vault/projects/${folder._id}/sharing`);
+      if (cancelled || !data) return;
+      setRoles(data.roles ?? []);
+      const next: Record<string, string> = {};
+      for (const entry of (data.sharing ?? []) as ProjectSharingEntry[]) {
+        next[entry.human] = entry.role;
+      }
+      setAssignments(next);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [folder._id, apiJson]);
 
-  const toggle = (id: string) =>
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  const defaultRole = roles.find((r) => !r.is_owner)?.name ?? roles[0]?.name ?? "";
+
+  const setRoleFor = (humanId: string, role: string | null) => {
+    setAssignments((prev) => {
+      const next = { ...prev };
+      if (role) next[humanId] = role;
+      else delete next[humanId];
       return next;
     });
-
-  const handleSave = () => {
-    if (mode === "everyone") onSave("everyone");
-    else if (mode === "specific") onSave([...selectedIds]);
-    else onSave([]);
-    onClose();
   };
 
-  const inputStyle: React.CSSProperties = {
-    accentColor: "var(--purple)",
-    cursor: "pointer",
-    flexShrink: 0,
+  const handleSave = async () => {
+    setSaving(true);
+    const sharing: ProjectSharingEntry[] = Object.entries(assignments).map(
+      ([human, role]) => ({ human, role }),
+    );
+    const data = await apiJson(`/api/vault/projects/${folder._id}/sharing`, {
+      method: "PUT",
+      body: JSON.stringify({ sharing }),
+    });
+    setSaving(false);
+    if (data) onClose();
   };
-  const radioRowStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    cursor: "pointer",
+
+  const selectStyle: React.CSSProperties = {
+    fontFamily: "monospace",
+    fontSize: "12px",
+    padding: "2px 6px",
   };
 
   return (
     <div className="vault-modal-backdrop" onClick={onClose}>
       <div className="vault-modal" onClick={(e) => e.stopPropagation()}>
         <h3 className="vault-modal-title">Share "{folder.name}"</h3>
-
-        {/* Mode selector */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "10px",
-            marginBottom: "16px",
-          }}
+        <p
+          className="text-xs font-mono"
+          style={{ color: "var(--text-subtle)", marginTop: "-8px", marginBottom: "16px" }}
         >
-          <label style={radioRowStyle}>
-            <input
-              type="radio"
-              checked={mode === "private"}
-              onChange={() => setMode("private")}
-              style={inputStyle}
-            />
-            <span className="text-sm font-mono">🔒 Private (only me)</span>
-          </label>
-          <label style={radioRowStyle}>
-            <input
-              type="radio"
-              checked={mode === "everyone"}
-              onChange={() => setMode("everyone")}
-              style={inputStyle}
-            />
-            <span className="text-sm font-mono">🌍 Everyone in the app</span>
-          </label>
-          <label style={radioRowStyle}>
-            <input
-              type="radio"
-              checked={mode === "specific"}
-              onChange={() => setMode("specific")}
-              style={inputStyle}
-            />
-            <span className="text-sm font-mono">👥 Specific people</span>
-          </label>
-        </div>
+          Give a collaborator a Role on this project. There's no "everyone"
+          option — pick people explicitly.
+        </p>
 
-        {/* Human list — only when "specific" */}
-        {mode === "specific" && (
+        {loading ? (
+          <p className="text-xs font-mono" style={{ padding: "12px" }}>
+            Loading…
+          </p>
+        ) : (
           <div className="vault-human-list">
             {allHumans.length === 0 ? (
               <p
@@ -472,17 +470,19 @@ function ShareModal({
               </p>
             ) : (
               allHumans.map((h) => {
-                const checked = selectedIds.has(h._id);
+                const role = assignments[h._id];
                 return (
                   <label
                     key={h._id}
-                    className={`vault-human-row ${checked ? "vault-human-row--checked" : ""}`}
+                    className={`vault-human-row ${role ? "vault-human-row--checked" : ""}`}
                   >
                     <input
                       type="checkbox"
-                      checked={checked}
-                      onChange={() => toggle(h._id)}
-                      style={inputStyle}
+                      checked={!!role}
+                      onChange={() =>
+                        setRoleFor(h._id, role ? null : defaultRole)
+                      }
+                      style={{ accentColor: "var(--purple)", cursor: "pointer", flexShrink: 0 }}
                     />
                     <span
                       className="text-sm font-mono"
@@ -496,26 +496,24 @@ function ShareModal({
                     >
                       {h.name || h.email}
                     </span>
+                    {role && (
+                      <select
+                        value={role}
+                        onChange={(e) => setRoleFor(h._id, e.target.value)}
+                        style={selectStyle}
+                      >
+                        {roles.map((r) => (
+                          <option key={r.name} value={r.name}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </label>
                 );
               })
             )}
           </div>
-        )}
-
-        {/* Explicit confirmation of who's about to get access — catches
-            misclicks on a long/scrollable checklist before they're saved. */}
-        {mode === "specific" && selectedIds.size > 0 && (
-          <p
-            className="text-xs font-mono"
-            style={{ color: "var(--text-subtle)", marginTop: "-8px", marginBottom: "16px" }}
-          >
-            Sharing with:{" "}
-            {allHumans
-              .filter((h) => selectedIds.has(h._id))
-              .map((h) => h.name || h.email)
-              .join(", ")}
-          </p>
         )}
 
         <div
@@ -529,9 +527,10 @@ function ShareModal({
           </button>
           <button
             onClick={handleSave}
+            disabled={saving || loading}
             className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
           >
-            Save
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>
@@ -1447,15 +1446,7 @@ export default function VaultV2Page() {
     if (data) invalidateAndRevalidate([folder.parent_folder_id]);
   };
 
-  const handleShareFolder = async (shared_with: string[] | "everyone") => {
-    if (current.kind !== "folder") return;
-    const folder = current.folder;
-    const data = await apiJson(`/api/vault/folders/${folder._id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ shared_with }),
-    });
-    if (data) invalidateAndRevalidate([folder.parent_folder_id]);
-  };
+
 
   const handleMoveFolder = async (targetFolderId: string) => {
     if (current.kind !== "folder") return;
@@ -1582,10 +1573,20 @@ export default function VaultV2Page() {
     current.kind === "folder" && isVaultRootFolder(current.folder);
   const currentFolderType =
     current.kind === "folder" ? (current.folder.folder_type ?? null) : null;
+  // Sharing Roles only apply at the PROJECT level (a role is a project-
+  // wide grant stored in that project's own README.md — see
+  // `projectSharing.server.ts`), never to an arbitrary nested subfolder,
+  // so "Share" is only offered on a folder that IS a top-level project:
+  // a direct child of the `projects` root (ancestry = [root, folder]).
+  const isTopLevelProject =
+    current.kind === "folder" &&
+    current.folder.vault_root_key === "projects" &&
+    current.ancestry.length === 2;
   const canShareCurrent =
     isOwnedByViewer &&
     current.kind === "folder" &&
     !currentIsRootContainer &&
+    isTopLevelProject &&
     isRootShareable(current.folder.vault_root_key) &&
     isFolderTypeShareable(currentFolderType);
   const canPublishCurrent =
@@ -2197,8 +2198,11 @@ export default function VaultV2Page() {
         <ShareModal
           folder={current.folder}
           allHumans={relatedHumans}
-          onClose={() => setShareOpen(false)}
-          onSave={handleShareFolder}
+          onClose={() => {
+            setShareOpen(false);
+            invalidateAndRevalidate([current.folder._id, current.folder.parent_folder_id]);
+          }}
+          apiJson={apiJson}
         />
       )}
 

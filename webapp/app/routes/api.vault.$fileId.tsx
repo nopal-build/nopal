@@ -13,6 +13,7 @@ import {
   isFolderIdShareable,
   isFolderUnderSyncs,
 } from "../data/vault.server";
+import { getProjectRoleForFolderId } from "../data/projectSharing.server";
 import { cacheDailyLog, deleteDailyLogCache } from "../data/dailyLog.server";
 import { isFileRefLocked } from "../data/vault.types";
 
@@ -108,13 +109,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     const folder = await getFolderById(file.folder_id);
     const isShared =
-      folder &&
-      (folder.shared_with === "everyone" ||
-        (Array.isArray(folder.shared_with) &&
-          folder.shared_with.includes(user._id)));
+      folder && Array.isArray(folder.shared_with) && folder.shared_with.includes(user._id);
 
     if (!isShared) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // A `skills` folder is further gated by Sharing Role, on top of the
+    // ordinary shared_type/shared_with check above: only an owner-tier
+    // collaborator (Owner/Crafter) may edit it — an Observer's plain
+    // "editable" grant on the file itself isn't enough. See the
+    // `vault`/`oxmarkdown` skills and `projectSharing.server.ts`.
+    if (folder && folder.folder_type === "skills") {
+      const role = await getProjectRoleForFolderId(folder._id, user._id);
+      if (!role?.isOwner) {
+        return Response.json({ error: "Forbidden" }, { status: 403 });
+      }
     }
 
     // Allow only a content update.
@@ -133,9 +143,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   // Owner-only operations below.
 
-  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
-  // Admin/Super, even inside the OWNING human's own vault — see
-  // `vaultRoots.ts` / `vaultFolderTypes.ts`.
+  // Root/folder-type policy (`vaultRoots.ts` / `vaultFolderTypes.ts`) —
+  // today every root/type an owner can reach is "owner"-writable, so this
+  // always passes for the file's own owner; kept for future restricted
+  // types. The `skills`-specific, project-Role-aware gate lives in the
+  // non-owner branch above (an owner-tier COLLABORATOR isn't the file's
+  // owner, so it can't be checked here).
   if (request.method === "DELETE" || request.method === "PATCH") {
     if (!(await canWriteToFolderId(file.folder_id, user.role))) {
       return Response.json(

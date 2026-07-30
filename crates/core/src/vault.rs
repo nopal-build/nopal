@@ -54,7 +54,7 @@ pub struct Folder {
     #[serde(default)]
     pub folder_type: Option<String>,
     #[serde(default)]
-    pub shared_with: serde_json::Value,
+    pub shared_with: Vec<String>,
     /// Published to a public, unauthenticated URL. Only reflects THIS
     /// folder's own flag — a folder can also be publicly reachable because
     /// an ancestor is published.
@@ -285,6 +285,21 @@ impl Client {
         Self::parse(resp)
     }
 
+    pub fn put_json<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<T> {
+        let resp = self.send_with_retry(|| {
+            self.http
+                .put(self.url(path))
+                .bearer_auth(&self.token)
+                .json(body)
+                .send()
+        })?;
+        Self::parse(resp)
+    }
+
     pub fn delete<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
         let resp = self.send_with_retry(|| {
             self.http
@@ -413,6 +428,19 @@ pub fn resolve_folder(client: &Client, path: &str) -> Result<Option<Folder>> {
     }
 }
 
+/// Every direct child folder of the human's `projects` root — the simple
+/// list of "what projects exist," used by anything that needs to let a
+/// human pick a project scope (sync targets, screen-recording uploads,
+/// ...). Empty (not an error) if the `projects` root itself can't be
+/// resolved, so callers can treat "no projects yet" and "couldn't check"
+/// the same way — just offer Personal.
+pub fn list_projects(client: &Client) -> Result<Vec<Folder>> {
+    let Some(projects_root) = resolve_folder(client, "projects")? else {
+        return Ok(Vec::new());
+    };
+    Ok(client.children(&projects_root._id)?.folders)
+}
+
 pub fn resolve_file(client: &Client, path: &str) -> Result<FileListing> {
     match resolve(client, path)? {
         Resolved::File { file } => Ok(file),
@@ -440,11 +468,7 @@ pub fn format_date(iso: &str) -> String {
 }
 
 pub fn is_shared(folder: &Folder) -> bool {
-    match &folder.shared_with {
-        serde_json::Value::String(s) => s == "everyone",
-        serde_json::Value::Array(a) => !a.is_empty(),
-        _ => false,
-    }
+    !folder.shared_with.is_empty()
 }
 
 // ─── Download ─────────────────────────────────────────────────────────────

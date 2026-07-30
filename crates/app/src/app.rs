@@ -5,6 +5,7 @@ use nopal_core::auth;
 use nopal_core::vault::Client;
 
 use crate::login::{LoginOutcome, LoginScreen};
+use crate::record_view::RecordScreen;
 use crate::sync_view::SyncScreen;
 use crate::vault_view::VaultScreen;
 
@@ -16,6 +17,7 @@ enum Screen {
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum Tab {
     Vault,
+    Record,
     Sync,
 }
 
@@ -27,6 +29,7 @@ struct Workspace {
     host: String,
     tab: Tab,
     vault: VaultScreen,
+    record: RecordScreen,
     sync: SyncScreen,
 }
 
@@ -38,12 +41,14 @@ impl Workspace {
             host,
             tab: Tab::Vault,
             vault: VaultScreen::new(client.clone(), ctx.clone()),
+            record: RecordScreen::new(client.clone(), ctx.clone()),
             sync: SyncScreen::new(client, ctx),
         }
     }
 
     fn poll(&mut self) {
         self.vault.poll();
+        self.record.poll();
         self.sync.poll();
     }
 
@@ -63,12 +68,14 @@ impl Workspace {
 
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Vault, "Vault");
+            ui.selectable_value(&mut self.tab, Tab::Record, "Record");
             ui.selectable_value(&mut self.tab, Tab::Sync, "Sync");
         });
         ui.separator();
 
         match self.tab {
             Tab::Vault => self.vault.ui(ui, ctx),
+            Tab::Record => self.record.ui(ui, ctx),
             Tab::Sync => self.sync.ui(ui, ctx),
         }
 

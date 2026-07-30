@@ -79,10 +79,7 @@ async function propagateRootKey(
 }
 
 function isShared(folder: VaultFolder): boolean {
-  return (
-    folder.shared_with === "everyone" ||
-    (Array.isArray(folder.shared_with) && folder.shared_with.length > 0)
-  );
+  return Array.isArray(folder.shared_with) && folder.shared_with.length > 0;
 }
 
 async function migrateHuman(human: Human): Promise<void> {

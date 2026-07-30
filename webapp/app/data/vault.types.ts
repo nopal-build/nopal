@@ -102,7 +102,15 @@ export type VaultFolder = {
   human_id: string;
   name: string;
   parent_folder_id: string | null;
-  shared_with: string[] | "everyone";
+  /**
+   * Human ids this folder is shared with — a plain array only; there is no
+   * "everyone" option (removed in favor of PhyLog's Sharing Roles, see
+   * `projectSharing.server.ts`). For a folder under `projects`, this is a
+   * DERIVED CACHE of that project's own README.md `sharing` list, kept in
+   * sync (and cascaded to every descendant) by `setProjectSharing` — never
+   * write this directly for a project folder.
+   */
+  shared_with: string[];
   /**
    * Which Vault Root Folder subtree this folder belongs to (see vaultRoots.ts).
    * Set on the root containers themselves AND denormalized onto every
@@ -142,12 +150,9 @@ export function isVaultRootFolder(folder: VaultFolder): boolean {
   return folder.parent_folder_id === null && !!folder.vault_root_key;
 }
 
-/** Whether a folder is shared with anyone (a specific list or everyone). */
+/** Whether a folder is shared with anyone. */
 export function isFolderShared(folder: VaultFolder): boolean {
-  return (
-    folder.shared_with === "everyone" ||
-    (Array.isArray(folder.shared_with) && folder.shared_with.length > 0)
-  );
+  return Array.isArray(folder.shared_with) && folder.shared_with.length > 0;
 }
 
 /**
@@ -158,8 +163,5 @@ export function isFolderShared(folder: VaultFolder): boolean {
  */
 export function canViewFolder(humanId: string, folder: VaultFolder): boolean {
   if (folder.human_id === humanId) return true;
-  if (folder.shared_with === "everyone") return true;
-  return (
-    Array.isArray(folder.shared_with) && folder.shared_with.includes(humanId)
-  );
+  return Array.isArray(folder.shared_with) && folder.shared_with.includes(humanId);
 }

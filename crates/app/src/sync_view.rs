@@ -130,17 +130,7 @@ impl SyncScreen {
         let tx = self.tx.clone();
         self.pending += 1;
         std::thread::spawn(move || {
-            let result = (|| -> Result<Vec<Folder>, String> {
-                let projects_root = nopal_core::vault::resolve_folder(&client, "projects")
-                    .map_err(|e| e.to_string())?;
-                let Some(projects_root) = projects_root else {
-                    return Ok(Vec::new());
-                };
-                let children = client
-                    .children(&projects_root._id)
-                    .map_err(|e| e.to_string())?;
-                Ok(children.folders)
-            })();
+            let result = nopal_core::vault::list_projects(&client).map_err(|e| e.to_string());
             let _ = tx.send(Job::Projects(result));
             ctx.request_repaint();
         });

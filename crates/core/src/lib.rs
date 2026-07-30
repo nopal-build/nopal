@@ -8,6 +8,7 @@
 //! this crate owns "talk to the Nopal server correctly."
 
 pub mod auth;
+pub mod record;
 pub mod sync;
 pub mod vault;
 pub mod video;

@@ -833,7 +833,7 @@ fn push_new(
         },
         vault_root_key: None,
         folder_type: None,
-        shared_with: serde_json::json!([]),
+        shared_with: vec![],
         is_public: None,
         updated_at: String::new(),
     };

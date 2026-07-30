@@ -4,12 +4,10 @@ import {
   canWriteToFolderId,
   getFolderById,
   updateVaultFolder,
-  cascadeShareVaultFolder,
   deleteVaultFolderCascade,
   getDescendantFolders,
   getFileRefsByFolderIds,
   isFolderIdPublishable,
-  isFolderIdShareable,
   isFolderShared,
   moveVaultFolder,
 } from "../data/vault.server";
@@ -80,7 +78,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (request.method === "PATCH") {
     const body = (await request.json()) as {
       name?: string;
-      shared_with?: string[] | "everyone";
+      /** No longer accepted here — sharing is now project-Role-based (see
+       * `projectSharing.server.ts`), managed exclusively via
+       * `PUT /api/vault/projects/:folderId/sharing`. Still typed so a
+       * lingering caller gets a clear error instead of a silently ignored
+       * field. */
+      shared_with?: unknown;
       /** Move the folder under this parent. Never null — the vault root only
        * holds the locked root containers. */
       parent_folder_id?: string;
@@ -88,6 +91,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
        * reachable at a public, unauthenticated URL. */
       is_public?: boolean;
     };
+
+    if (body.shared_with !== undefined) {
+      return Response.json(
+        {
+          error:
+            "Sharing is managed via PUT /api/vault/projects/:folderId/sharing now — see the vault skill's Sharing Roles section.",
+        },
+        { status: 400 },
+      );
+    }
 
     if (isRoot && body.name !== undefined) {
       return Response.json(
@@ -189,34 +202,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return Response.json({ folder: updated });
     }
 
-    if (body.shared_with !== undefined) {
-      // Sharing is a per-root AND per-folder-type policy (see vaultRoots.ts /
-      // vaultFolderTypes.ts). The root container itself is never shareable;
-      // nested folders only when both policies allow it.
-      const shareable = !isRoot && (await isFolderIdShareable(folder._id));
-      if (!shareable) {
-        return Response.json(
-          { error: "Folders in this part of the vault cannot be shared" },
-          { status: 403 },
-        );
-      }
-    }
-
-    let updated;
-
-    if (body.shared_with !== undefined) {
-      // Apply any non-sharing changes (e.g. rename) first, then cascade the
-      // new sharing setting to this folder AND all of its descendants.
-      if (body.name !== undefined) {
-        await updateVaultFolder(folderId, { name: body.name });
-      }
-      updated = await cascadeShareVaultFolder(folderId, body.shared_with);
-    } else {
-      // Name-only (or other non-sharing) update — no cascade needed.
-      const updates: Parameters<typeof updateVaultFolder>[1] = {};
-      if (body.name !== undefined) updates.name = body.name;
-      updated = await updateVaultFolder(folderId, updates);
-    }
+    // Name-only (or other non-sharing) update — no cascade needed.
+    const updates: Parameters<typeof updateVaultFolder>[1] = {};
+    if (body.name !== undefined) updates.name = body.name;
+    const updated = await updateVaultFolder(folderId, updates);
 
     return Response.json({ folder: updated });
   }

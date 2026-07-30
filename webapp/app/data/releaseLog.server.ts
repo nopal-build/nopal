@@ -158,14 +158,28 @@ export async function appendReleaseLogEntries(
  * date — `projectFolderId` is the project's own vault folder (a direct
  * child of the `projects` root), and `release-log.md` lives directly
  * inside it, right alongside the project's `README.md` (and its `skills/`
- * folder, if present — see the vault skill / `vaultFolderTypes.ts`). */
+ * folder, if present — see the vault skill / `vaultFolderTypes.ts`).
+ *
+ * Deliberately resolves and uses the PROJECT FOLDER'S OWN owner
+ * (`projectFolder.human_id`), never `actingHumanId`, as the file's
+ * `human_id` — `getOrCreateReleaseLogFile` looks up/creates by
+ * `human_id + folder_id + name`, and `folder_id` here always belongs to
+ * the project's owner regardless of who triggered this entry. Before
+ * Sharing Roles made cross-human Cards possible, `actingHumanId` was
+ * always the project's own owner anyway, so this never mattered; now that
+ * an Observer/Crafter's Card can target a project they don't own (see the
+ * `vault` skill's Cards section), using the wrong human_id here would
+ * create a `release-log.md` with a mismatched owner/folder pair that
+ * `getOrCreateReleaseLogFile`'s own query could never find again. */
 export async function appendProjectReleaseLogEntries(
-  humanId: string,
+  actingHumanId: string,
   projectFolderId: string,
   date: string,
   bulletLines: string[],
 ): Promise<void> {
-  await appendReleaseLogEntries(humanId, projectFolderId, date, bulletLines);
+  const projectFolder = await getFolderById(projectFolderId);
+  const ownerHumanId = projectFolder?.human_id ?? actingHumanId;
+  await appendReleaseLogEntries(ownerHumanId, projectFolderId, date, bulletLines);
 }
 
 /** Convenience wrapper for a day's own `release-log.md`, grouped by

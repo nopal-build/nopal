@@ -8,6 +8,7 @@ use std::time::Duration;
 
 mod auth;
 mod image;
+mod record;
 mod skills;
 mod sort;
 mod sync;
@@ -45,6 +46,13 @@ enum Command {
     Image {
         #[command(subcommand)]
         command: ImageCommand,
+    },
+    /// Record your screen — captures and compresses in a single ffmpeg
+    /// pass (see `nopal_core::record`'s doc comment), so there's no
+    /// separate `nopal video prep` step needed afterward.
+    Record {
+        #[command(subcommand)]
+        command: RecordCommand,
     },
     /// Browse and upload to your Nopal Vault.
     Vault {
@@ -97,6 +105,39 @@ enum VideoCommand {
         max_height: u32,
         /// ffmpeg encoding speed/efficiency tradeoff (e.g. fast, medium, slow).
         #[arg(long, default_value = "medium")]
+        preset: String,
+        /// Overwrite the output file if it already exists.
+        #[arg(long)]
+        overwrite: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RecordCommand {
+    /// List capturable screens (feed the index into `start --screen`).
+    ListScreens {},
+    /// Start recording; press Enter in this terminal to stop.
+    Start {
+        /// Output path (e.g. `recording.mp4`).
+        output: PathBuf,
+        /// Which screen to capture — see `nopal record list-screens` for
+        /// the index (NOT a plain 0-based count — avfoundation shares one
+        /// index space across cameras and screens). Defaults to the first
+        /// screen `list-screens` finds.
+        #[arg(long)]
+        screen: Option<u32>,
+        /// Capture frame rate. Screen content rarely benefits from > 30.
+        #[arg(long, default_value_t = 30)]
+        fps: u32,
+        /// H.264 quality (lower = better quality, larger file). Typical range 18-28.
+        #[arg(long, default_value_t = 23)]
+        crf: u8,
+        /// Cap the output height, preserving aspect ratio; never upscales.
+        #[arg(long, default_value_t = 1080)]
+        max_height: u32,
+        /// ffmpeg encoding speed/efficiency tradeoff — defaults to a
+        /// real-time-safe preset ("medium"/"slow" can drop frames live).
+        #[arg(long, default_value = "veryfast")]
         preset: String,
         /// Overwrite the output file if it already exists.
         #[arg(long)]
@@ -219,19 +260,19 @@ enum VaultCommand {
         /// Vault path of the file to replace.
         path: String,
     },
-    /// Show or change who a folder is shared with (projects/ only).
+    /// Show or change a project's collaborators and their Sharing Roles
+    /// (e.g. Owner, Crafter, Observer — see `sharing_roles`). Only works on
+    /// a project folder (one directly under `projects/`).
     Share {
-        /// Vault path of the folder (no flags → show current sharing).
+        /// Vault path of the project folder (no flags → show current sharing).
         path: String,
-        /// Share with everyone in the app.
-        #[arg(long, conflicts_with_all = ["private", "with"])]
-        everyone: bool,
-        /// Stop sharing — only you can see it.
-        #[arg(long, conflicts_with_all = ["everyone", "with"])]
+        /// Stop sharing — clears the whole collaborator list.
+        #[arg(long, conflicts_with = "with")]
         private: bool,
-        /// Share with specific people by email (repeatable). Replaces the
-        /// current list rather than adding to it.
-        #[arg(long = "with", value_name = "EMAIL")]
+        /// Share with a person and assign their role, as EMAIL:ROLE
+        /// (repeatable). Replaces the current collaborator list rather
+        /// than adding to it.
+        #[arg(long = "with", value_name = "EMAIL:ROLE")]
         with: Vec<String>,
     },
     /// Publish a folder to a public URL — no login required to view it.
@@ -450,6 +491,37 @@ fn main() {
                 }
             }
         },
+        Command::Record { command } => {
+            let result = match command {
+                RecordCommand::ListScreens {} => record::list_screens(),
+                RecordCommand::Start {
+                    output,
+                    screen,
+                    fps,
+                    crf,
+                    max_height,
+                    preset,
+                    overwrite,
+                } => (|| {
+                    let screen = match screen {
+                        Some(s) => s,
+                        None => {
+                            let first = nopal_core::record::list_screens()?
+                                .into_iter()
+                                .next()
+                                .ok_or("No capturable screens found")?;
+                            println!("No --screen given — using {}: {}", first.index, first.name);
+                            first.index
+                        }
+                    };
+                    record::start(output, screen, fps, crf, preset, max_height, overwrite)
+                })(),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
         Command::Vault { command } => {
             let result = match command {
                 VaultCommand::Ls { path, json } => vault::ls(&path, json),
@@ -469,10 +541,9 @@ fn main() {
                 VaultCommand::Replace { local, path } => vault::replace(&local, &path),
                 VaultCommand::Share {
                     path,
-                    everyone,
                     private,
                     with,
-                } => vault::share(&path, everyone, private, &with),
+                } => vault::share(&path, private, &with),
                 VaultCommand::Publish { path, copy } => vault::publish(&path, copy),
                 VaultCommand::Unpublish { path } => vault::unpublish(&path),
                 VaultCommand::Link { path, copy } => vault::link(&path, copy),

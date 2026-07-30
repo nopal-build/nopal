@@ -78,7 +78,15 @@ export async function createFileRef(data: {
     updated_at: now,
   });
   const record = Array.isArray(result) ? result[0] : result;
-  return record ? formatRecord(record as unknown as FileRef) : undefined;
+  const created = record ? formatRecord(record as unknown as FileRef) : undefined;
+  if (created) {
+    // File Referencing & Renaming (see `fileReferences.server.ts`) — a
+    // dynamic import avoids a static circular dependency (that module
+    // imports several read helpers back from THIS file).
+    const { syncFileReferences } = await import("./fileReferences.server");
+    await syncFileReferences(created);
+  }
+  return created;
 }
 
 export async function getFileRefsByHuman(humanId: string): Promise<FileRef[]> {
@@ -124,7 +132,6 @@ export async function canViewFileRef(
   if (!file.folder_id) return false;
   const folder = await getFolderById(file.folder_id);
   if (!folder) return false;
-  if (folder.shared_with === "everyone") return true;
   return (
     Array.isArray(folder.shared_with) && folder.shared_with.includes(humanId)
   );
@@ -148,7 +155,17 @@ export async function updateFileRef(
     ...(updates as Record<string, unknown>),
     updated_at: new Date().toISOString(),
   });
-  return result ? formatRecord(result as unknown as FileRef) : undefined;
+  const updated = result ? formatRecord(result as unknown as FileRef) : undefined;
+  if (updated) {
+    const fileReferences = await import("./fileReferences.server");
+    if ("content" in updates) {
+      await fileReferences.syncFileReferences(updated);
+    }
+    if ("name" in updates || "folder_id" in updates) {
+      await fileReferences.propagateTargetChange([{ type: "file", id: updated._id }]);
+    }
+  }
+  return updated;
 }
 
 /**
@@ -182,6 +199,13 @@ export async function deleteFileRef(id: string): Promise<void> {
     }
   }
   await remove("file_refs", id);
+  if (file) {
+    // File Referencing & Renaming: mark any dead mention pointing at this
+    // now-gone file, and drop its own outgoing/incoming reference rows.
+    const { propagateTargetDeletion } = await import("./fileReferences.server");
+    await propagateTargetDeletion({ type: "file", id }, file.name);
+    await query(`DELETE file_references WHERE source_file_id = $id`, { id });
+  }
 }
 
 // ─── VaultFolder CRUD ─────────────────────────────────────────────────────────
@@ -190,7 +214,7 @@ export async function createVaultFolder(data: {
   human_id: string;
   name: string;
   parent_folder_id?: string | null;
-  shared_with?: string[] | "everyone";
+  shared_with?: string[];
   vault_root_key?: VaultRootKey | null;
   /** Explicitly DEFINES this folder as a Vault Folder Type anchor (e.g. a
    * project's own "Skills"/"Syncs" folder, or a sync connector inside one)
@@ -350,7 +374,7 @@ export async function getSharedFoldersForHuman(
   const result = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders
      WHERE human_id != $humanId
-       AND (shared_with = 'everyone' OR $humanId IN shared_with)
+       AND $humanId IN shared_with
      ORDER BY human_id, name ASC`,
     { humanId },
   );
@@ -381,7 +405,7 @@ export async function updateVaultFolder(
   id: string,
   updates: Partial<{
     name: string;
-    shared_with: string[] | "everyone";
+    shared_with: string[];
     is_public: boolean;
   }>,
 ): Promise<VaultFolder | undefined> {
@@ -389,7 +413,16 @@ export async function updateVaultFolder(
     ...(updates as Record<string, unknown>),
     updated_at: new Date().toISOString(),
   });
-  return result ? formatRecord(result as unknown as VaultFolder) : undefined;
+  const updated = result ? formatRecord(result as unknown as VaultFolder) : undefined;
+  if (updated && updates.name !== undefined) {
+    // File Referencing & Renaming: a folder rename changes the computed
+    // mention path of itself AND every descendant folder/file, not just
+    // its own name.
+    const { collectFolderAndDescendantTargets, propagateTargetChange } =
+      await import("./fileReferences.server");
+    await propagateTargetChange(await collectFolderAndDescendantTargets(id));
+  }
+  return updated;
 }
 
 /**
@@ -401,7 +434,7 @@ export async function updateVaultFolder(
  */
 export async function cascadeShareVaultFolder(
   folderId: string,
-  shared_with: string[] | "everyone",
+  shared_with: string[],
 ): Promise<VaultFolder | undefined> {
   const now = new Date().toISOString();
 
@@ -723,7 +756,16 @@ export async function moveVaultFolder(
 
   await cascadeFolderType(folder._id, newFolderType);
 
-  return updated ? formatRecord(updated as unknown as VaultFolder) : undefined;
+  const result = updated ? formatRecord(updated as unknown as VaultFolder) : undefined;
+  if (result) {
+    // File Referencing & Renaming: a move changes the computed mention
+    // path of the folder AND every descendant just as much as a rename
+    // does — same propagation call, see `updateVaultFolder` above.
+    const { collectFolderAndDescendantTargets, propagateTargetChange } =
+      await import("./fileReferences.server");
+    await propagateTargetChange(await collectFolderAndDescendantTargets(folder._id));
+  }
+  return result;
 }
 
 /**
@@ -782,11 +824,10 @@ export async function ensureVaultRootFolders(
  * `vault` skill describes, deliberately NOT the heavier `resolveProjectManifest`
  * machinery in `project.server.ts` (which additionally requires a valid
  * `README.md` manifest and exists for the project detail PAGE, not for
- * "what projects exist at all"). Used by the Daily Log's Card feature to
- * offer real projects instead of a mock list. Scoped to the human's OWN
- * projects only — projects shared with them by someone else are not
- * (yet) offered as Card targets; see the `oxmarkdown`/`vault` skills for
- * this being a deliberate, tracked scope line, not an oversight.
+ * "what projects exist at all"). Scoped to the human's OWN projects only
+ * — see `getAccessibleProjectFolders` below for the superset (also
+ * including projects shared with them) that the Daily Log's Card feature
+ * actually targets.
  */
 export async function getProjectFolders(humanId: string): Promise<VaultFolder[]> {
   const roots = await ensureVaultRootFolders(humanId);
@@ -794,6 +835,31 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
   if (!projectsRoot) return [];
   const { folders } = await listFolderChildren(humanId, projectsRoot._id);
   return folders;
+}
+
+/**
+ * Every project folder `humanId` can target for a daily-log Card — their
+ * OWN projects, plus any project someone else has shared a Sharing Role
+ * with them on (see `projectSharing.server.ts`). Cards are the one place
+ * PhyLog lets ANY role (including Observer) "contribute" to a project it
+ * doesn't own — see the vault skill's Daily Log/Cards section.
+ *
+ * `getTopLevelSharedFolders` already returns exactly the top of each
+ * shared subtree (a folder whose parent isn't itself shared) — since a
+ * project is only ever shared as a whole via `setProjectSharing` (never a
+ * nested subfolder individually), that top is always the project folder
+ * itself; the `vault_root_key === "projects"` filter is just defensive
+ * (excludes anything unexpected, e.g. a future shareable root).
+ */
+export async function getAccessibleProjectFolders(
+  humanId: string,
+): Promise<VaultFolder[]> {
+  const [owned, sharedTop] = await Promise.all([
+    getProjectFolders(humanId),
+    getTopLevelSharedFolders(humanId),
+  ]);
+  const sharedProjects = sharedTop.filter((f) => f.vault_root_key === "projects");
+  return [...owned, ...sharedProjects];
 }
 
 /**
@@ -983,6 +1049,16 @@ export async function deleteVaultFolderCascade(
   const allFolderIds = await getAllNestedFolderIds(folderId);
   allFolderIds.push(folderId);
 
+  // File Referencing & Renaming: mark any dead mention pointing at each
+  // about-to-be-deleted folder BEFORE it (and its name) are gone —
+  // deliberately fetched up front, not interleaved with the deletes below.
+  const { propagateTargetDeletion } = await import("./fileReferences.server");
+  const foldersById = new Map(
+    (await Promise.all(allFolderIds.map((fid) => getFolderById(fid))))
+      .filter((f): f is VaultFolder => !!f)
+      .map((f) => [f._id, f] as const),
+  );
+
   for (const fid of allFolderIds) {
     const filesResult = await query<[FileRef[]]>(
       `SELECT * FROM file_refs WHERE folder_id = $fid`,
@@ -990,11 +1066,18 @@ export async function deleteVaultFolderCascade(
     );
     const files = (filesResult?.[0] ?? []).map(formatRecord);
     for (const file of files) {
+      // `deleteFileRef` itself already calls `propagateTargetDeletion` for
+      // each file, so cascade-deleted files are covered without any extra
+      // work here.
       await deleteFileRef(file._id);
     }
   }
 
   for (const fid of allFolderIds) {
+    // A folder is only ever a reference TARGET, never a source (only file
+    // content can contain a reference) — no outgoing rows to clean up here.
+    const name = foldersById.get(fid)?.name ?? fid;
+    await propagateTargetDeletion({ type: "folder", id: fid }, name);
     await remove("vault_folders", fid);
   }
 }

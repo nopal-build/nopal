@@ -10,7 +10,7 @@
 //! is the CLI-specific presentation layer on top: printing, `--json`,
 //! interactive confirmation prompts, and clipboard/browser integration.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -86,7 +86,11 @@ pub fn ls(path: &str, json: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
-pub fn tree(path: &str, depth: u32, folders_only: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn tree(
+    path: &str,
+    depth: u32,
+    folders_only: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let (label, folder_id) = match resolve_folder(&client, path)? {
         Some(f) => (f.name.clone(), f._id),
@@ -490,13 +494,27 @@ fn related_humans(client: &Client) -> Result<Vec<RelatedHuman>, Box<dyn Error + 
     Ok(serde_json::from_value(resp["humans"].clone())?)
 }
 
-/// Show or change a folder's sharing. With no mode flags this prints the
-/// current sharing state. `--with` REPLACES the audience list (it doesn't
-/// add to it). Sharing is only allowed inside `projects/` — the server
-/// rejects everything else.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct SharingEntry {
+    human: String,
+    role: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SharingGetResponse {
+    sharing: Vec<SharingEntry>,
+}
+
+/// Show or change who a project folder is shared with, and under which
+/// Role (see `sharing_roles` — e.g. `Owner`, `Crafter`, `Observer`; the
+/// server validates the name, this CLI doesn't). With no mode flags this
+/// prints the current sharing state. `--with EMAIL:ROLE` REPLACES the
+/// whole collaborator list (it doesn't add to it) — pass it multiple times
+/// to share with several people at once. `--private` clears the list
+/// entirely. Sharing only works on a project folder (one directly under
+/// `projects/`) — the server rejects everything else.
 pub fn share(
     path: &str,
-    everyone: bool,
     private: bool,
     with: &[String],
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -508,57 +526,68 @@ pub fn share(
         }
         Resolved::Folder(f) => f,
     };
+    let sharing_path = format!("/api/vault/projects/{}/sharing", folder._id);
 
     // ── No flags: show the current state ────────────────────────────────
-    if !everyone && !private && with.is_empty() {
-        match &folder.shared_with {
-            serde_json::Value::String(s) if s == "everyone" => {
-                println!("{}/ is shared with everyone", folder.name);
-            }
-            serde_json::Value::Array(ids) if !ids.is_empty() => {
-                let humans = related_humans(&client).unwrap_or_default();
-                println!("{}/ is shared with:", folder.name);
-                for id in ids {
-                    let id = id.as_str().unwrap_or_default();
-                    match humans.iter().find(|h| h._id == id) {
-                        Some(h) => println!("  {} <{}>", h.name, h.email),
-                        None => println!("  {id}"),
-                    }
+    if !private && with.is_empty() {
+        let resp: SharingGetResponse = client.get_json(&sharing_path)?;
+        if resp.sharing.is_empty() {
+            println!("{}/ is private (only you)", folder.name);
+        } else {
+            let humans = related_humans(&client).unwrap_or_default();
+            println!("{}/ is shared with:", folder.name);
+            for entry in &resp.sharing {
+                match humans.iter().find(|h| h._id == entry.human) {
+                    Some(h) => println!("  {} <{}> — {}", h.name, h.email, entry.role),
+                    None => println!("  {} — {}", entry.human, entry.role),
                 }
             }
-            _ => println!("{}/ is private (only you)", folder.name),
         }
         return Ok(());
     }
 
-    // ── Build the new shared_with value ─────────────────────────────────
-    let shared_with: serde_json::Value = if everyone {
-        serde_json::Value::String("everyone".to_string())
-    } else if private {
-        serde_json::json!([])
+    // ── Build the new sharing list ───────────────────────────────────────
+    let sharing: Vec<SharingEntry> = if private {
+        Vec::new()
     } else {
         let humans = related_humans(&client)?;
-        let mut ids = Vec::new();
+        let mut entries = Vec::new();
         let mut matched = Vec::new();
-        let mut unknown = Vec::new();
-        for email in with {
+        let mut bad = Vec::new();
+        for spec in with {
+            let Some((email, role)) = spec.rsplit_once(':') else {
+                bad.push(format!("'{spec}' — expected EMAIL:ROLE"));
+                continue;
+            };
             let want = email.trim().to_lowercase();
+            let role = role.trim();
+            if role.is_empty() {
+                bad.push(format!("'{spec}' — expected EMAIL:ROLE"));
+                continue;
+            }
             match humans
                 .iter()
                 .find(|h| h.email.trim().to_lowercase() == want)
             {
                 Some(h) => {
-                    ids.push(h._id.clone());
-                    matched.push(format!("{} <{}>", h.name, h.email));
+                    matched.push(format!("{} <{}> — {}", h.name, h.email, role));
+                    entries.push(SharingEntry {
+                        human: h._id.clone(),
+                        role: role.to_string(),
+                    });
                 }
-                None => unknown.push(email.clone()),
+                None => bad.push(format!("'{email}' — no such shareable human")),
             }
         }
-        if !unknown.is_empty() {
+        if !bad.is_empty() {
             return Err(format!(
-                "No shareable human found for: {}\n(They need an account and a \
+                "Couldn't share with:\n{}\n(Format is EMAIL:ROLE, e.g. \
+                 jane@example.com:Crafter. They also need an account and a \
                  relationship with you — see who's available on your profile page.)",
-                unknown.join(", ")
+                bad.iter()
+                    .map(|b| format!("  {b}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             )
             .into());
         }
@@ -566,17 +595,13 @@ pub fn share(
         for m in &matched {
             println!("  {m}");
         }
-        serde_json::json!(ids)
+        entries
     };
 
-    let _: serde_json::Value = client.patch_json(
-        &format!("/api/vault/folders/{}", folder._id),
-        &serde_json::json!({ "shared_with": shared_with }),
-    )?;
+    let _: serde_json::Value =
+        client.put_json(&sharing_path, &serde_json::json!({ "sharing": sharing }))?;
 
-    if everyone {
-        println!("{}/ is now shared with everyone", folder.name);
-    } else if private {
+    if private {
         println!("{}/ is now private", folder.name);
     } else {
         println!("  ✓ shared");
