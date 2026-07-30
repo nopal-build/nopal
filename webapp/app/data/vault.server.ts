@@ -862,6 +862,23 @@ export async function getAccessibleProjectFolders(
   return [...owned, ...sharedProjects];
 }
 
+/** Finds a folder's own `README.md` (case-insensitive), owned by `ownerId`
+ * — the shared lookup `projectSharing.server.ts` and `phylogAgent.server.ts`
+ * both need (a project's manifest/sharing YAML, or its content for the
+ * PhyLog agent to read/propose edits to). `null` when the folder has no
+ * README yet. */
+export async function getReadmeFileForFolder(
+  ownerId: string,
+  folderId: string,
+): Promise<FileRef | null> {
+  const result = await query<[FileRef[]]>(
+    `SELECT * FROM file_refs WHERE human_id = $ownerId AND folder_id = $folderId`,
+    { ownerId, folderId },
+  );
+  const files = (result?.[0] ?? []).map(formatRecord);
+  return files.find((f) => f.name.toLowerCase() === "readme.md") ?? null;
+}
+
 /**
  * Copies a file's REFERENCE (never its bytes) into another folder — a new
  * `file_refs` row pointing at the exact same `s3_key`/`s3_url`, so nothing

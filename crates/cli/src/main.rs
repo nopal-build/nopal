@@ -8,6 +8,7 @@ use std::time::Duration;
 
 mod auth;
 mod image;
+mod phylog;
 mod record;
 mod release_log;
 mod skills;
@@ -78,6 +79,13 @@ enum Command {
     ReleaseLog {
         #[command(subcommand)]
         command: ReleaseLogCommand,
+    },
+    /// Run the PhyLog agent for one project's Card on one day (see the
+    /// `vault` skill's PhyLog Agent section). Defaults to a PREVIEW —
+    /// nothing is written unless --apply is passed.
+    Phylog {
+        #[command(subcommand)]
+        command: PhylogCommand,
     },
     /// Reference docs for how to write things in Nopal (OxMarkdown syntax,
     /// the Vault, etc). Lists available skills by default.
@@ -389,6 +397,23 @@ enum SortCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum PhylogCommand {
+    /// Preview (or, with --apply, actually commit) a README update for
+    /// one project's Card on one day.
+    Run {
+        /// Vault path of the project, e.g. `projects/sunny`.
+        #[arg(long)]
+        project: String,
+        /// YYYY-MM-DD.
+        #[arg(long)]
+        date: String,
+        /// Actually commit the change (default: preview only).
+        #[arg(long)]
+        apply: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ReleaseLogCommand {
     /// Reverts one entry — only entries that changed a project file (a
     /// Card file attachment being filed into the project) can be
@@ -628,6 +653,19 @@ fn main() {
         Command::ReleaseLog { command } => {
             let result = match command {
                 ReleaseLogCommand::Revert { entry_id } => release_log::revert(&entry_id),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Phylog { command } => {
+            let result = match command {
+                PhylogCommand::Run {
+                    project,
+                    date,
+                    apply,
+                } => phylog::run(&project, &date, apply),
             };
             if let Err(e) = result {
                 eprintln!("{e}");

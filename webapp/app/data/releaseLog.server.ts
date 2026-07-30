@@ -67,7 +67,7 @@ const RELEASE_LOG_FILENAME = "release-log.md";
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
-export type ReleaseLogEntryKind = "mention" | "task" | "file-added";
+export type ReleaseLogEntryKind = "mention" | "task" | "file-added" | "ai-update";
 
 export type ReleaseLogEntry = Data & {
   /** The PROJECT's own owner \u2014 whose vault this entry's project-side

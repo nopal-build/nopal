@@ -30,10 +30,10 @@ import {
   createFileRef,
   getFolderAncestry,
   getFolderById,
+  getReadmeFileForFolder,
   updateFileRef,
   type VaultFolder,
 } from "./vault.server";
-import { query, formatRecord } from "./generic.server";
 import type { FileRef } from "./vault.types";
 import {
   parseProjectSharing,
@@ -44,23 +44,11 @@ import { getSharingRoleByName, isOwnerTierRole } from "./sharingRoles.server";
 
 export type { ProjectSharingEntry };
 
-async function getReadmeFile(
-  ownerId: string,
-  folderId: string,
-): Promise<FileRef | null> {
-  const result = await query<[FileRef[]]>(
-    `SELECT * FROM file_refs WHERE human_id = $ownerId AND folder_id = $folderId`,
-    { ownerId, folderId },
-  );
-  const files = (result?.[0] ?? []).map(formatRecord);
-  return files.find((f) => f.name.toLowerCase() === "readme.md") ?? null;
-}
-
 async function getOrCreateReadme(
   ownerId: string,
   folderId: string,
 ): Promise<FileRef> {
-  const existing = await getReadmeFile(ownerId, folderId);
+  const existing = await getReadmeFileForFolder(ownerId, folderId);
   if (existing) return existing;
   const created = await createFileRef({
     human_id: ownerId,
@@ -108,7 +96,7 @@ export async function findOwningProjectFolder(
 export async function getProjectSharing(
   projectFolder: VaultFolder,
 ): Promise<ProjectSharingEntry[]> {
-  const readme = await getReadmeFile(projectFolder.human_id, projectFolder._id);
+  const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
   if (!readme?.content) return [];
   return parseProjectSharing(readme.content);
 }
