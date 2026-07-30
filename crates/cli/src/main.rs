@@ -405,16 +405,23 @@ enum SortCommand {
 
 #[derive(Debug, Subcommand)]
 enum PhylogCommand {
-    /// Preview (or, with --apply, actually commit) a README update for
-    /// one project's Card on one day.
+    /// Preview (or, with --apply, actually commit) a README update for one
+    /// project's Card. Pass --date for a single day, or omit it to run
+    /// EVERY day this project already has a Card for, up to today
+    /// (optionally bounded below by --since).
     Run {
         /// Vault path of the project, e.g. `projects/sunny`.
         #[arg(long)]
         project: String,
-        /// YYYY-MM-DD.
+        /// YYYY-MM-DD. Omit to run every day up to today instead.
         #[arg(long)]
-        date: String,
-        /// Actually commit the change (default: preview only).
+        date: Option<String>,
+        /// Only relevant with --date omitted: earliest day to include
+        /// (inclusive), YYYY-MM-DD. Omit to start from this project's very
+        /// first Card.
+        #[arg(long)]
+        since: Option<String>,
+        /// Actually commit each change (default: preview only).
         #[arg(long)]
         apply: bool,
     },
@@ -671,8 +678,9 @@ fn main() {
                 PhylogCommand::Run {
                     project,
                     date,
+                    since,
                     apply,
-                } => phylog::run(&project, &date, apply),
+                } => phylog::run(&project, date.as_deref(), since.as_deref(), apply),
             };
             if let Err(e) = result {
                 eprintln!("{e}");

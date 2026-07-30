@@ -305,6 +305,40 @@ export async function getDailyLogCards(
 }
 
 /**
+ * Every date (ascending) that already has a Card for `projectFolderId` —
+ * the enumeration `runPhylogAgentForRange` (`phylogAgent.server.ts`) walks
+ * so "run PhyLog for everything up to today" doesn't require the caller
+ * to already know which specific days have anything to process. Queries
+ * `file_refs` directly (by `project_folder_id`, not by folder) since Cards
+ * for the same project are scattered across many different date folders.
+ */
+export async function listCardDatesForProject(
+  humanId: string,
+  projectFolderId: string,
+  { since, until }: { since?: string; until?: string } = {},
+): Promise<string[]> {
+  const conditions = [
+    "human_id = $humanId",
+    "source = 'daily_log_card'",
+    "project_folder_id = $projectFolderId",
+  ];
+  const params: Record<string, unknown> = { humanId, projectFolderId };
+  if (since) {
+    conditions.push("date >= $since");
+    params.since = since;
+  }
+  if (until) {
+    conditions.push("date <= $until");
+    params.until = until;
+  }
+  const result = await query<[{ date: string }[]]>(
+    `SELECT date FROM file_refs WHERE ${conditions.join(" AND ")} ORDER BY date ASC`,
+    params,
+  );
+  return (result?.[0] ?? []).map((r) => r.date).filter(Boolean);
+}
+
+/**
  * Creates (or, if one already exists for this project/date, reuses) that
  * project's Card for `date` — idempotent BY DESIGN: re-clicking the same
  * project's "Add a card" chip twice, or re-adding a `::card{...}` directive

@@ -46,6 +46,7 @@ import { createHash } from "node:crypto";
 import {
   getDailyLogCards,
   getDailyLogFolderAndReadmeId,
+  listCardDatesForProject,
   type DailyLogCard,
 } from "./dailyLog.server";
 import {
@@ -320,6 +321,60 @@ export async function runPhylogAgent(
   await regenerateDailyReleaseLog(actingHumanId, date, dateFolderId);
 
   return { ok: true, proposedChange: true, newReadmeBody: newBody, reason, applied: true };
+}
+
+// ─── Range runner ("everything up to today") ───────────────────────────
+
+export type PhylogAgentRangeResultItem = { date: string } & PhylogAgentResult;
+
+export type RunPhylogAgentRangeOptions = {
+  /** YYYY-MM-DD, inclusive. Omit to start from this project's very first
+   * Card — i.e. truly "everything". */
+  since?: string;
+  /** YYYY-MM-DD, inclusive. Defaults to today (UTC) — same "UTC, not the
+   * human's own local date" convention `sortAllDueDailyLogs` already uses
+   * for its own day boundary. */
+  until?: string;
+  dryRun: boolean;
+  provider?: LlmProvider;
+};
+
+/**
+ * Runs the PhyLog agent across EVERY day that already has a Card for this
+ * project, from `since` through `until` — the "run everything up to
+ * today" counterpart to `runPhylogAgent`'s single day, so a caller never
+ * has to already know which specific days have anything to process (that's
+ * exactly what required manually passing `--date` before this existed).
+ *
+ * Walks dates in ascending (oldest-first) order so a real `--apply` run's
+ * Release Log entries land in the same chronological order they would if
+ * each day were run one at a time — `revertReleaseLogEntry`'s
+ * later-entries replay depends on that ordering being correct.
+ *
+ * Each day is fully independent: one day erroring or being skipped never
+ * stops the rest from being attempted, so the caller always gets a
+ * complete per-day picture back rather than an all-or-nothing failure.
+ */
+export async function runPhylogAgentForRange(
+  actingHumanId: string,
+  projectFolderId: string,
+  { since, until, dryRun, provider }: RunPhylogAgentRangeOptions,
+): Promise<PhylogAgentRangeResultItem[]> {
+  const upTo = until ?? new Date().toISOString().slice(0, 10);
+  const dates = await listCardDatesForProject(actingHumanId, projectFolderId, {
+    since,
+    until: upTo,
+  });
+
+  const results: PhylogAgentRangeResultItem[] = [];
+  for (const date of dates) {
+    const result = await runPhylogAgent(actingHumanId, projectFolderId, date, {
+      dryRun,
+      provider,
+    });
+    results.push({ date, ...result });
+  }
+  return results;
 }
 
 export type { DailyLogCard };
