@@ -9,6 +9,7 @@ use std::time::Duration;
 mod auth;
 mod image;
 mod record;
+mod release_log;
 mod skills;
 mod sort;
 mod sync;
@@ -71,6 +72,12 @@ enum Command {
     Sort {
         #[command(subcommand)]
         command: SortCommand,
+    },
+    /// Manage structured Release Log entries (see the `vault` skill's
+    /// Release Log section) — today, just reverting one.
+    ReleaseLog {
+        #[command(subcommand)]
+        command: ReleaseLogCommand,
     },
     /// Reference docs for how to write things in Nopal (OxMarkdown syntax,
     /// the Vault, etc). Lists available skills by default.
@@ -382,6 +389,19 @@ enum SortCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum ReleaseLogCommand {
+    /// Reverts one entry — only entries that changed a project file (a
+    /// Card file attachment being filed into the project) can be
+    /// reverted; a plain @mention backlink or completed-task entry has
+    /// nothing to undo and the server will reject it.
+    Revert {
+        /// The entry's own id (see the invisible `<!-- release-log-entry:... -->`
+        /// marker on each bullet in a project's/day's release-log.md).
+        entry_id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum SkillsCommand {
     /// List available skill references. (default)
     List {},
@@ -599,6 +619,15 @@ fn main() {
         Command::Sort { command } => {
             let result = match command {
                 SortCommand::Run { date, force } => sort::run(date, force),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::ReleaseLog { command } => {
+            let result = match command {
+                ReleaseLogCommand::Revert { entry_id } => release_log::revert(&entry_id),
             };
             if let Err(e) = result {
                 eprintln!("{e}");

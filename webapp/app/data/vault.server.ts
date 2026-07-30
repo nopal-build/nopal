@@ -863,6 +863,56 @@ export async function getAccessibleProjectFolders(
 }
 
 /**
+ * Copies a file's REFERENCE (never its bytes) into another folder — a new
+ * `file_refs` row pointing at the exact same `s3_key`/`s3_url`, so nothing
+ * is ever duplicated in S3. This is PhyLog's "a Card's file attachment
+ * gets added to the project" operation (see the `vault` skill's Release
+ * Log section / `sorter.server.ts`), but is a generic vault primitive, not
+ * Sorter-specific — the source and destination don't have to belong to
+ * the same human (the new row always belongs to the DESTINATION folder's
+ * own owner, same convention `createVaultFolder`/`createFileRef` already
+ * use elsewhere).
+ *
+ * Auto-dedupes the destination name (`Name (2).ext`, `Name (3).ext`, ...)
+ * rather than silently overwriting or erroring on a collision, matching
+ * the existing skip-and-warn convention `fruits_.vault.tsx`'s own upload
+ * flow already uses for name clashes.
+ */
+export async function copyFileIntoFolder(
+  sourceFileId: string,
+  destFolderId: string,
+): Promise<FileRef | undefined> {
+  const source = await getFileRefById(sourceFileId);
+  if (!source) return undefined;
+  const destFolder = await getFolderById(destFolderId);
+  if (!destFolder) return undefined;
+
+  const { files: existing } = await listFolderChildren(destFolder.human_id, destFolderId);
+  const existingNames = new Set(existing.map((f) => f.name));
+  let name = source.name;
+  if (existingNames.has(name)) {
+    const dot = name.lastIndexOf(".");
+    const base = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : "";
+    let n = 2;
+    while (existingNames.has(`${base} (${n})${ext}`)) n++;
+    name = `${base} (${n})${ext}`;
+  }
+
+  return createFileRef({
+    human_id: destFolder.human_id,
+    name,
+    s3_url: source.s3_url,
+    s3_key: source.s3_key,
+    content: source.content,
+    content_type: source.content_type,
+    content_hash: source.content_hash,
+    folder_id: destFolderId,
+    size: source.size,
+  });
+}
+
+/**
  * Ancestor chain for a folder, ordered root container → … → the folder
  * itself. Used for breadcrumbs and revealing the tree path on deep links.
  */

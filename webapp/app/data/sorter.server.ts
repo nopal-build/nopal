@@ -11,6 +11,11 @@
  *     explicit, project-scoped section, so no inference is needed to know
  *     which project a task inside it belongs to.
  *   - A file attachment (`::file{...}`) inside a Card — same reasoning.
+ *     ACTUALLY files it into the project now (`copyFileIntoFolder`, a new
+ *     `file_refs` row in the project's own folder pointing at the same S3
+ *     bytes, no duplication) rather than just logging a link back to the
+ *     daily-log copy — see `releaseLog.server.ts`'s Release Log module doc
+ *     for the structured entry/changeset this produces.
  *
  * Runs once per closed day per human, idempotently (`DailyLog.sortedAt` —
  * see `dailyLog.server.ts`). Triggered two ways, both landing on this same
@@ -29,12 +34,14 @@ import {
   getUnsortedDailyLogsBefore,
   setDailyLogSorted,
 } from "./dailyLog.server";
-import { getProjectFolders } from "./vault.server";
+import { copyFileIntoFolder, getAccessibleProjectFolders, getProjectFolders } from "./vault.server";
 import type { VaultFolder } from "./vault.types";
 import {
-  appendDailyReleaseLogEntries,
-  appendProjectReleaseLogEntries,
+  createReleaseLogEntry,
+  findReleaseLogEntryBySource,
   getReleaseLogContent,
+  regenerateDailyReleaseLog,
+  regenerateProjectReleaseLog,
 } from "./releaseLog.server";
 import {
   directiveAttrs,
@@ -175,15 +182,14 @@ export type SortSummary = {
   dailyReleaseLog: string;
 };
 
-function pushLine(map: Map<string, string[]>, key: string, line: string): void {
-  const existing = map.get(key);
-  if (existing) existing.push(line);
-  else map.set(key, [line]);
-}
-
 /**
  * Sorts one human's one day. Safe to call repeatedly — a no-op (returns
- * `alreadySorted: true`) once `sortedAt` is set, unless `force`.
+ * `alreadySorted: true`) once `sortedAt` is set, unless `force`. Also safe
+ * to FORCE repeatedly without creating duplicate entries or re-copying the
+ * same file into a project twice — every entry is keyed by a stable
+ * `sourceRef` (see `releaseLog.server.ts`) derived from the ORIGINATING
+ * signal (a task's own text, an attachment's own fileId, ...), never from
+ * anything a re-run itself would create fresh.
  */
 export async function sortDailyLog(
   humanId: string,
@@ -210,17 +216,21 @@ export async function sortDailyLog(
   }
 
   const readmeContent = existingLog?.content ?? "";
-  const [cards, projectFolders, { dateFolderId, readmeFileId }] = await Promise.all([
-    getDailyLogCards(humanId, date),
-    getProjectFolders(humanId),
-    getDailyLogFolderAndReadmeId(humanId, date),
-  ]);
+  const [cards, projectFolders, accessibleProjectFolders, { dateFolderId, readmeFileId }] =
+    await Promise.all([
+      getDailyLogCards(humanId, date),
+      // @mentions only ever reach a human's OWN projects (cross-human
+      // mentions aren't yet actionable — see `resolveMentionedProject`).
+      getProjectFolders(humanId),
+      // Cards, however, CAN target a project shared with `humanId` (any
+      // Sharing Role, including Observer) — needed for `projectsTouched`
+      // name resolution below.
+      getAccessibleProjectFolders(humanId),
+      getDailyLogFolderAndReadmeId(humanId, date),
+    ]);
 
-  // project id -> bullet lines for THAT project's own release-log.md
-  const projectEntries = new Map<string, string[]>();
-  // project id -> bullet lines for the DAY's own release-log.md
-  const dailyEntries = new Map<string, string[]>();
   const touchedProjectIds = new Set<string>();
+  let entriesWritten = 0;
 
   // 1) @mentions in the day's own prose — a project backlink. Only
   // possible once the readme's own file exists (it always does for any
@@ -233,16 +243,15 @@ export async function sortDailyLog(
     );
     for (const project of mentionedProjects) {
       touchedProjectIds.add(project._id);
-      pushLine(
-        projectEntries,
-        project._id,
-        `- Mentioned in the daily log — [View](/fruits/vault?file=${readmeFileId})`,
-      );
-      pushLine(
-        dailyEntries,
-        project._id,
-        `- Mentioned this project — [View](/fruits/vault?folder=${project._id})`,
-      );
+      const { created } = await createReleaseLogEntry({
+        projectFolderId: project._id,
+        date,
+        actingHumanId: humanId,
+        kind: "mention",
+        summary: `Mentioned in the daily log — [View](/fruits/vault?file=${readmeFileId})`,
+        sourceRef: readmeFileId,
+      });
+      if (created) entriesWritten++;
     }
   }
 
@@ -252,31 +261,73 @@ export async function sortDailyLog(
     touchedProjectIds.add(card.projectFolderId);
 
     for (const taskText of extractCompletedTasks(card.content)) {
-      const line = `- Completed task: "${taskText}" — [View](/fruits/vault?file=${card.fileId})`;
-      pushLine(projectEntries, card.projectFolderId, line);
-      pushLine(dailyEntries, card.projectFolderId, line);
+      const { created } = await createReleaseLogEntry({
+        projectFolderId: card.projectFolderId,
+        date,
+        actingHumanId: humanId,
+        kind: "task",
+        summary: `Completed task: "${taskText}" — [View](/fruits/vault?file=${card.fileId})`,
+        sourceRef: `${card.fileId}:${taskText}`,
+      });
+      if (created) entriesWritten++;
     }
 
     for (const attachment of extractFileAttachments(card.content)) {
-      const line = `- Added file "${attachment.name}" — [View](/fruits/vault?file=${attachment.fileId})`;
-      pushLine(projectEntries, card.projectFolderId, line);
-      pushLine(dailyEntries, card.projectFolderId, line);
-    }
-  }
+      // Checked BEFORE copying — idempotency has to guard the actual
+      // file-copy mutation itself, not just the log entry, or a forced
+      // re-run would add a second copy of the same attachment to the
+      // project every time it runs.
+      const sourceRef = `${card.fileId}:${attachment.fileId}`;
+      const alreadyRecorded = await findReleaseLogEntryBySource(
+        card.projectFolderId,
+        date,
+        "file-added",
+        sourceRef,
+      );
+      if (alreadyRecorded) continue;
 
-  let entriesWritten = 0;
-  for (const [projectId, lines] of projectEntries) {
-    await appendProjectReleaseLogEntries(humanId, projectId, date, lines);
-    entriesWritten += lines.length;
-  }
-  for (const [projectId, lines] of dailyEntries) {
-    await appendDailyReleaseLogEntries(humanId, dateFolderId, projectId, lines);
+      const added = await copyFileIntoFolder(attachment.fileId, card.projectFolderId);
+      if (!added) continue; // source file or project folder vanished mid-flight
+
+      const { created } = await createReleaseLogEntry({
+        projectFolderId: card.projectFolderId,
+        date,
+        actingHumanId: humanId,
+        kind: "file-added",
+        summary: `Added file "${added.name}" — [View](/fruits/vault?file=${added._id})`,
+        sourceRef,
+        changesets: [
+          {
+            fileId: added._id,
+            action: "created",
+            before: null,
+            after: {
+              human_id: added.human_id,
+              name: added.name,
+              content_type: added.content_type,
+              s3_url: added.s3_url,
+              s3_key: added.s3_key,
+              content: added.content,
+              content_hash: added.content_hash,
+              folder_id: added.folder_id ?? card.projectFolderId,
+              size: added.size,
+            },
+          },
+        ],
+      });
+      if (created) entriesWritten++;
+    }
   }
 
   await setDailyLogSorted(humanId, date, new Date().toISOString());
 
+  for (const projectId of touchedProjectIds) {
+    await regenerateProjectReleaseLog(projectId);
+  }
+  await regenerateDailyReleaseLog(humanId, date, dateFolderId);
+
   const projectsTouched = [...touchedProjectIds]
-    .map((id) => projectFolders.find((f) => f._id === id)?.name)
+    .map((id) => accessibleProjectFolders.find((f) => f._id === id)?.name)
     .filter((name): name is string => Boolean(name));
 
   const dailyReleaseLog = await getReleaseLogContent(humanId, dateFolderId);
