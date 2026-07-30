@@ -157,7 +157,7 @@ pub fn run_watch() -> Result<(), Box<dyn Error + Send + Sync>> {
 /// One pass over every target on this device. Errors are logged and written
 /// to the heartbeat, never fatal — the worker keeps running.
 fn run_all(client: &Client, device_id: &str) -> Vec<PathBuf> {
-    match sync::run_device_targets(client, device_id) {
+    match sync::run_device_targets(client, device_id, &mut |line| println!("{line}")) {
         Ok((paths, errors)) => {
             if errors.is_empty() {
                 write_heartbeat(true, None);

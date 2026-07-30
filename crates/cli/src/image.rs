@@ -29,7 +29,7 @@ pub struct OcrOptions {
     pub markdown: bool,
 }
 
-pub fn ocr(input: &Path, opts: OcrOptions) -> Result<(), Box<dyn Error>> {
+pub fn ocr(input: &Path, opts: OcrOptions) -> Result<(), Box<dyn Error + Send + Sync>> {
     let tesseract = resolve_tesseract()?;
 
     if !input.is_file() {
@@ -175,7 +175,7 @@ fn escape_markdown_line(line: &str) -> String {
 /// Finds tesseract: PATH first, then common install locations that a
 /// non-login process might not have on PATH — notably Homebrew's bin dirs
 /// on both Apple Silicon and Intel.
-fn resolve_tesseract() -> Result<String, Box<dyn Error>> {
+fn resolve_tesseract() -> Result<String, Box<dyn Error + Send + Sync>> {
     if command_works("tesseract") {
         return Ok("tesseract".to_string());
     }
@@ -209,7 +209,7 @@ fn command_works(program: &str) -> bool {
 /// (currently just HEIC/HEIF), converts it to a PNG in the system temp
 /// directory and returns that path. Returns `None` when no conversion is
 /// needed.
-fn convert_if_needed(input: &Path) -> Result<Option<PathBuf>, Box<dyn Error>> {
+fn convert_if_needed(input: &Path) -> Result<Option<PathBuf>, Box<dyn Error + Send + Sync>> {
     let ext = input
         .extension()
         .and_then(|e| e.to_str())
@@ -227,7 +227,7 @@ fn convert_if_needed(input: &Path) -> Result<Option<PathBuf>, Box<dyn Error>> {
 /// macOS install, so no extra dependency for the common HEIC-from-iPhone
 /// case) and falls back to `ffmpeg` (already a soft dependency of `nopal
 /// video prep`) elsewhere.
-fn convert_to_png(input: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
+fn convert_to_png(input: &Path, output: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
     if cfg!(target_os = "macos") && command_works("sips") {
         let status = Command::new("sips")
             .args(["-s", "format", "png"])

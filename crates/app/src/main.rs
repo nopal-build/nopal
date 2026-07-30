@@ -10,6 +10,7 @@
 
 mod app;
 mod login;
+mod sync_view;
 mod vault_view;
 
 use app::NopalApp;

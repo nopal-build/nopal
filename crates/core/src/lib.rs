@@ -8,7 +8,9 @@
 //! this crate owns "talk to the Nopal server correctly."
 
 pub mod auth;
+pub mod sync;
 pub mod vault;
+pub mod video;
 
 /// A boxed error that's `Send + Sync`, so it can cross an `await` point /
 /// be sent back from a background thread to a GUI event loop — plain

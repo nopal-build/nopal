@@ -8,7 +8,7 @@
 //! natural next thing to build on this same shell.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
 use eframe::egui;
@@ -38,8 +38,6 @@ enum Job {
 
 pub struct VaultScreen {
     client: Arc<Client>,
-    pub email: String,
-    pub host: String,
 
     crumbs: Vec<Crumb>,
     listing: Option<Children>,
@@ -47,31 +45,31 @@ pub struct VaultScreen {
     error: Option<String>,
     status: Option<String>,
 
-    rx: Option<Receiver<Job>>,
+    /// One persistent channel for the screen's whole lifetime — every
+    /// background job clones `tx` to send into it. Creating a FRESH
+    /// channel per job (and overwriting a single `Option<Receiver>` field)
+    /// was an earlier, broken approach: starting a second job before the
+    /// first finished dropped the first job's receiver, silently losing
+    /// its result and leaving `pending` stuck above zero forever.
+    tx: Sender<Job>,
+    rx: Receiver<Job>,
     /// How many background jobs are currently in flight — the upload
-    /// button disables itself while > 0, and separate uploads (one per
-    /// picked file) don't stomp on each other's `rx` since they all share
-    /// this one channel/receiver pump.
+    /// button disables itself while > 0.
     pending: u32,
 }
 
-pub enum VaultOutcome {
-    None,
-    LoggedOut,
-}
-
 impl VaultScreen {
-    pub fn new(client: Client, email: String, host: String, ctx: egui::Context) -> Self {
+    pub fn new(client: Arc<Client>, ctx: egui::Context) -> Self {
+        let (tx, rx) = channel();
         let mut screen = VaultScreen {
-            client: Arc::new(client),
-            email,
-            host,
+            client,
             crumbs: Vec::new(),
             listing: None,
             loading: false,
             error: None,
             status: None,
-            rx: None,
+            tx,
+            rx,
             pending: 0,
         };
         screen.fetch("root".to_string(), ctx);
@@ -89,8 +87,7 @@ impl VaultScreen {
         self.loading = true;
         self.error = None;
         let client = self.client.clone();
-        let (tx, rx) = channel();
-        self.rx = Some(rx);
+        let tx = self.tx.clone();
         self.pending += 1;
         let fid = folder_id.clone();
         std::thread::spawn(move || {
@@ -105,8 +102,7 @@ impl VaultScreen {
 
     /// Drains any finished background jobs. Called once per frame.
     pub fn poll(&mut self) {
-        let Some(rx) = &self.rx else { return };
-        while let Ok(job) = rx.try_recv() {
+        while let Ok(job) = self.rx.try_recv() {
             self.pending = self.pending.saturating_sub(1);
             match job {
                 Job::Listing { folder_id, result } => {
@@ -161,8 +157,7 @@ impl VaultScreen {
         // fetch it once here.
         let client = self.client.clone();
         for path in paths {
-            let (tx, rx) = channel();
-            self.rx = Some(rx);
+            let tx = self.tx.clone();
             self.pending += 1;
             let client = client.clone();
             let folder_id = folder_id.clone();
@@ -198,8 +193,7 @@ impl VaultScreen {
         };
         let client = self.client.clone();
         let listing = file.clone();
-        let (tx, rx) = channel();
-        self.rx = Some(rx);
+        let tx = self.tx.clone();
         self.pending += 1;
         std::thread::spawn(move || {
             let result = vault::download_file(&client, &listing, &dest)
@@ -213,19 +207,7 @@ impl VaultScreen {
         });
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> VaultOutcome {
-        let mut outcome = VaultOutcome::None;
-
-        ui.horizontal(|ui| {
-            ui.label(format!("{} ({})", self.email, self.host));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Log out").clicked() {
-                    outcome = VaultOutcome::LoggedOut;
-                }
-            });
-        });
-        ui.separator();
-
+    pub fn ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal(|ui| {
             let root_button = ui.link("Vault");
             if root_button.clicked() {
@@ -303,7 +285,5 @@ impl VaultScreen {
                 });
             }
         });
-
-        outcome
     }
 }
