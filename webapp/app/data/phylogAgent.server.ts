@@ -64,6 +64,7 @@ import {
   regenerateDailyReleaseLog,
   regenerateProjectReleaseLog,
 } from "./releaseLog.server";
+import { fileCardAttachments, type FiledAttachment } from "./sorter.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
 import type {
   LlmMessage,
@@ -199,6 +200,14 @@ export type PhylogAgentResult =
        * hash was already filed before — the model was never even called
        * this time. */
       alreadyApplied?: boolean;
+      /** Attachments actually filed into the project THIS call — only
+       * present when `dryRun: false` (see `fileCardAttachments`). Filing is
+       * deterministic and independent of the model's own README decision,
+       * so this can be non-empty even when `proposedChange` is false. */
+      filedAttachments?: FiledAttachment[];
+      /** Attachments still NOT yet filed — only present when `dryRun: true`,
+       * previewing what `--apply` would file. */
+      pendingAttachments?: FiledAttachment[];
     };
 
 export type RunPhylogAgentOptions = {
@@ -232,6 +241,30 @@ export async function runPhylogAgent(
     return { ok: false, error: "No Card found for this project on this day" };
   }
 
+  // Deterministic, zero-inference FIRST step — the exact same Sorter-style
+  // file filing `sortDailyLog` performs for this one signal kind, done
+  // directly here so a Card's photos land in the project without a
+  // separate `nopal sort run` first (see `fileCardAttachments`'s own doc).
+  // Independent of the model's own README decision below — attachments
+  // still get filed (or previewed) even on a day the model decides not to
+  // touch the README at all.
+  const { filed, pending } = await fileCardAttachments(card, date, actingHumanId, { dryRun });
+  let releaseLogsDirty = filed.length > 0;
+
+  const finish = async (result: PhylogAgentResult): Promise<PhylogAgentResult> => {
+    if (!dryRun && releaseLogsDirty) {
+      await regenerateProjectReleaseLog(projectFolderId);
+      const { dateFolderId } = await getDailyLogFolderAndReadmeId(actingHumanId, date);
+      await regenerateDailyReleaseLog(actingHumanId, date, dateFolderId);
+    }
+    if (!result.ok) return result;
+    return {
+      ...result,
+      filedAttachments: dryRun ? undefined : filed,
+      pendingAttachments: dryRun ? pending : undefined,
+    };
+  };
+
   const contentHash = createHash("sha256").update(card.content).digest("hex").slice(0, 16);
   const sourceRef = `${card.fileId}:${contentHash}`;
 
@@ -243,7 +276,7 @@ export async function runPhylogAgent(
       sourceRef,
     );
     if (existing) {
-      return { ok: true, proposedChange: true, applied: true, alreadyApplied: true };
+      return finish({ ok: true, proposedChange: true, applied: true, alreadyApplied: true });
     }
   }
 
@@ -270,17 +303,17 @@ export async function runPhylogAgent(
 
   const updateCall = toolCallsMade.find((c) => c.name === "update_readme");
   if (!updateCall) {
-    return { ok: true, proposedChange: false, applied: false };
+    return finish({ ok: true, proposedChange: false, applied: false });
   }
 
   const newBody = String(updateCall.input.newBody ?? "");
   const reason = String(updateCall.input.reason ?? "");
 
   if (dryRun) {
-    return { ok: true, proposedChange: true, newReadmeBody: newBody, reason, applied: false };
+    return finish({ ok: true, proposedChange: true, newReadmeBody: newBody, reason, applied: false });
   }
 
-  // ── Apply for real ──────────────────────────────────────────────────
+  // ── Apply for real ────────────────────────────────────────────
   const oldFullContent = readmeContent;
   const newFullContent = withReadmeBody(oldFullContent, newBody);
 
@@ -315,12 +348,9 @@ export async function runPhylogAgent(
       },
     ],
   });
+  releaseLogsDirty = true;
 
-  await regenerateProjectReleaseLog(projectFolderId);
-  const { dateFolderId } = await getDailyLogFolderAndReadmeId(actingHumanId, date);
-  await regenerateDailyReleaseLog(actingHumanId, date, dateFolderId);
-
-  return { ok: true, proposedChange: true, newReadmeBody: newBody, reason, applied: true };
+  return finish({ ok: true, proposedChange: true, newReadmeBody: newBody, reason, applied: true });
 }
 
 // ─── Range runner ("everything up to today") ───────────────────────────

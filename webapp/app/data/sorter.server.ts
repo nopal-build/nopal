@@ -33,6 +33,7 @@ import {
   getDailyLogFolderAndReadmeId,
   getUnsortedDailyLogsBefore,
   setDailyLogSorted,
+  type DailyLogCard,
 } from "./dailyLog.server";
 import { copyFileIntoFolder, getAccessibleProjectFolders, getProjectFolders } from "./vault.server";
 import type { VaultFolder } from "./vault.types";
@@ -150,6 +151,98 @@ export function extractFileAttachments(
     if (attrs.fileId) files.push({ fileId: attrs.fileId, name: attrs.name || "file" });
   });
   return files;
+}
+
+// ─── File attachments — shared with the PhyLog Agent ─────────────────────
+
+export type FiledAttachment = { fileId: string; name: string };
+
+/**
+ * Files every NOT-YET-filed `::file{...}` attachment in `card`'s content
+ * into its own project's root folder — same reasoning as `sortDailyLog`'s
+ * own module doc (a Card is already an explicit, project-scoped section,
+ * so no inference is needed about WHICH project; "which folder inside the
+ * project" isn't a real question either — everything lands in its root,
+ * same as it always has here). Extracted so `phylogAgent.server.ts`'s
+ * `runPhylogAgent` can perform this exact same deterministic step directly
+ * — per the PhyLog design conversation ("the Sorter should just be one
+ * part of the process... PhyLog should define what can be done"), a
+ * Card's photos shouldn't need a separate `nopal sort run` first just to
+ * reach the project.
+ *
+ * Both callers share the exact same idempotency key (`kind: "file-added"`,
+ * `sourceRef` derived from the Card's own fileId + the attachment's own
+ * fileId, checked via `findReleaseLogEntryBySource` BEFORE copying) —
+ * running the Sorter AND the PhyLog Agent for the same day never files the
+ * same attachment twice.
+ *
+ * `dryRun: true` only REPORTS which attachments are still pending (in
+ * `pending`) — no copy, no Release Log entry, nothing written. Callers
+ * are responsible for regenerating both release-log.md reflections
+ * (`regenerateProjectReleaseLog`/`regenerateDailyReleaseLog`) when
+ * `filed.length > 0`, same as any other Release Log write.
+ */
+export async function fileCardAttachments(
+  card: DailyLogCard,
+  date: string,
+  actingHumanId: string,
+  { dryRun }: { dryRun: boolean },
+): Promise<{ filed: FiledAttachment[]; pending: FiledAttachment[] }> {
+  const filed: FiledAttachment[] = [];
+  const pending: FiledAttachment[] = [];
+
+  for (const attachment of extractFileAttachments(card.content)) {
+    // Checked BEFORE copying — idempotency has to guard the actual
+    // file-copy mutation itself, not just the log entry, or a forced
+    // re-run would add a second copy of the same attachment to the
+    // project every time it runs.
+    const sourceRef = `${card.fileId}:${attachment.fileId}`;
+    const alreadyRecorded = await findReleaseLogEntryBySource(
+      card.projectFolderId,
+      date,
+      "file-added",
+      sourceRef,
+    );
+    if (alreadyRecorded) continue;
+
+    if (dryRun) {
+      pending.push({ fileId: attachment.fileId, name: attachment.name });
+      continue;
+    }
+
+    const added = await copyFileIntoFolder(attachment.fileId, card.projectFolderId);
+    if (!added) continue; // source file or project folder vanished mid-flight
+
+    const { created } = await createReleaseLogEntry({
+      projectFolderId: card.projectFolderId,
+      date,
+      actingHumanId,
+      kind: "file-added",
+      summary: `Added file "${added.name}" — [View](/fruits/vault?file=${added._id})`,
+      sourceRef,
+      changesets: [
+        {
+          fileId: added._id,
+          action: "created",
+          before: null,
+          after: {
+            human_id: added.human_id,
+            name: added.name,
+            content_type: added.content_type,
+            s3_url: added.s3_url,
+            s3_key: added.s3_key,
+            content: added.content,
+            content_hash: added.content_hash,
+            folder_id: added.folder_id ?? card.projectFolderId,
+            size: added.size,
+          },
+        },
+      ],
+    });
+    if (created) filed.push({ fileId: added._id, name: added.name });
+  }
+
+  return { filed, pending };
 }
 
 // ─── Kill switch ────────────────────────────────────────────────────────
@@ -272,51 +365,8 @@ export async function sortDailyLog(
       if (created) entriesWritten++;
     }
 
-    for (const attachment of extractFileAttachments(card.content)) {
-      // Checked BEFORE copying — idempotency has to guard the actual
-      // file-copy mutation itself, not just the log entry, or a forced
-      // re-run would add a second copy of the same attachment to the
-      // project every time it runs.
-      const sourceRef = `${card.fileId}:${attachment.fileId}`;
-      const alreadyRecorded = await findReleaseLogEntryBySource(
-        card.projectFolderId,
-        date,
-        "file-added",
-        sourceRef,
-      );
-      if (alreadyRecorded) continue;
-
-      const added = await copyFileIntoFolder(attachment.fileId, card.projectFolderId);
-      if (!added) continue; // source file or project folder vanished mid-flight
-
-      const { created } = await createReleaseLogEntry({
-        projectFolderId: card.projectFolderId,
-        date,
-        actingHumanId: humanId,
-        kind: "file-added",
-        summary: `Added file "${added.name}" — [View](/fruits/vault?file=${added._id})`,
-        sourceRef,
-        changesets: [
-          {
-            fileId: added._id,
-            action: "created",
-            before: null,
-            after: {
-              human_id: added.human_id,
-              name: added.name,
-              content_type: added.content_type,
-              s3_url: added.s3_url,
-              s3_key: added.s3_key,
-              content: added.content,
-              content_hash: added.content_hash,
-              folder_id: added.folder_id ?? card.projectFolderId,
-              size: added.size,
-            },
-          },
-        ],
-      });
-      if (created) entriesWritten++;
-    }
+    const { filed } = await fileCardAttachments(card, date, humanId, { dryRun: false });
+    entriesWritten += filed.length;
   }
 
   await setDailyLogSorted(humanId, date, new Date().toISOString());

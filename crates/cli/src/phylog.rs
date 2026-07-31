@@ -16,6 +16,12 @@ use crate::vault::{resolve_folder, Client};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct FiledAttachment {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AgentResult {
     #[serde(default)]
     proposed_change: bool,
@@ -25,6 +31,13 @@ struct AgentResult {
     applied: bool,
     #[serde(default)]
     already_applied: bool,
+    /// Attachments actually filed into the project this call — only
+    /// present on a real (`--apply`) run.
+    #[serde(default)]
+    filed_attachments: Vec<FiledAttachment>,
+    /// Attachments not yet filed — only present on a preview run.
+    #[serde(default)]
+    pending_attachments: Vec<FiledAttachment>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,6 +123,22 @@ fn run_all(
 }
 
 fn print_result(date: &str, result: &AgentResult, apply: bool) {
+    // Attachment filing is deterministic and independent of the model's own
+    // README decision below, so it's reported regardless of which branch
+    // that decision falls into.
+    if apply {
+        for f in &result.filed_attachments {
+            println!("{date}: filed \"{}\" into the project.", f.name);
+        }
+    } else {
+        for f in &result.pending_attachments {
+            println!(
+                "{date}: \"{}\" would be filed into the project (pass --apply to commit).",
+                f.name
+            );
+        }
+    }
+
     if result.already_applied {
         println!("{date}: already applied for this Card's current content — nothing to do.");
         return;
