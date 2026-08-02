@@ -1,4 +1,4 @@
-.PHONY: dev seed migrate migrate-prod down reset clean deploy restart cli release-cli update-cli-version
+.PHONY: dev start seed migrate migrate-prod down stop reset clean deploy restart cli release-cli update-cli-version
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -24,6 +24,9 @@ dev:
 	@echo "  ✓ Webapp     →  http://localhost:3000"
 	@echo "  ✓ Logs       →  http://localhost:9999"
 	@echo ""
+
+## Alias for `make dev`.
+start: dev
 
 ## Seed the running database with default namespaces, databases, and users.
 ## Depends on migrate so the tables exist before data is inserted.
@@ -79,6 +82,9 @@ restart:
 ## Stop all containers (data is preserved in named volumes).
 down:
 	docker compose down
+
+## Alias for `make down`.
+stop: down
 
 ## Destroy all data and start fresh.
 reset: clean dev migrate seed
