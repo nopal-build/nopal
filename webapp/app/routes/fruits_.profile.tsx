@@ -20,6 +20,7 @@ import {
   getHumanByEmail,
   getHumanById,
   updateHumanName,
+  updateHumanRole,
   isEmailTakenByAnotherHuman,
   startEmailChange,
   isPendingEmailCodeValid,
@@ -574,6 +575,95 @@ async function handleRekindleRelationship(request: Request, form: FormData) {
   });
 }
 
+/**
+ * Change another human's role between Admin and Human. Only Admins/Supers
+ * may call this at all, a Super's role can never be changed by anyone
+ * (including another Super), and an Admin may demote another Admin but
+ * never themselves. Promoting to "Super" isn't offered — that role is
+ * fixed and never assigned through this flow.
+ */
+async function handleUpdateRelationshipRole(request: Request, form: FormData) {
+  const user = await getUser(request);
+  if (!user) return redirect("/login");
+
+  const humanId = String(form.get("humanId") ?? "");
+
+  if (!isAdminOrSuper(user)) {
+    return data(
+      {
+        intent: "update-relationship-role" as const,
+        error: "You don't have permission to do that.",
+        humanId,
+      },
+      { status: 403 },
+    );
+  }
+  const role = form.get("role");
+  if (role !== "Admin" && role !== "Human") {
+    return data(
+      {
+        intent: "update-relationship-role" as const,
+        error: "Invalid role.",
+        humanId,
+      },
+      { status: 400 },
+    );
+  }
+
+  const target = await getHumanById(humanId);
+  if (!target) {
+    return data(
+      {
+        intent: "update-relationship-role" as const,
+        error: "Human not found.",
+        humanId,
+      },
+      { status: 404 },
+    );
+  }
+
+  if (target.role === "Super") {
+    return data(
+      {
+        intent: "update-relationship-role" as const,
+        error: "A Super's role can never be changed.",
+        humanId,
+      },
+      { status: 403 },
+    );
+  }
+
+  if (target._id === user._id && user.role === "Admin" && role !== "Admin") {
+    return data(
+      {
+        intent: "update-relationship-role" as const,
+        error: "You can't demote yourself.",
+        humanId,
+      },
+      { status: 403 },
+    );
+  }
+
+  const updated = await updateHumanRole(humanId, role);
+  if (!updated) {
+    return data(
+      {
+        intent: "update-relationship-role" as const,
+        error: "Failed to update role.",
+        humanId,
+      },
+      { status: 500 },
+    );
+  }
+
+  return data({
+    intent: "update-relationship-role" as const,
+    success: true,
+    humanId,
+    role: updated.role,
+  });
+}
+
 async function handleDeletePasskey(request: Request, form: FormData) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
@@ -667,6 +757,9 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === "rekindle-relationship") {
     return handleRekindleRelationship(request, form);
   }
+  if (intent === "update-relationship-role") {
+    return handleUpdateRelationshipRole(request, form);
+  }
   if (intent === "delete-passkey") {
     return handleDeletePasskey(request, form);
   }
@@ -693,11 +786,19 @@ export async function action({ request }: ActionFunctionArgs) {
 
 // ─── Waivers ────────────────────────────────────────────────────────────────
 
+// Deliberately pinned to a fixed "timeZone" (rather than the viewer's
+// local one) — `toLocaleDateString` without one resolves to whatever
+// timezone the *runtime* is in, which is the server's during SSR and the
+// browser's during hydration. Near a midnight boundary those two disagree
+// on the calendar day, and React treats that as a real hydration error
+// (not just a mismatch warning), tearing down and remounting the whole
+// tree — which is what made the page look entirely broken after load.
 function formatSignedAt(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -769,6 +870,14 @@ function RelationshipCard({
   // accounts, never other admins/supers; Supers can log in as anyone.
   const canImpersonateRow =
     Boolean(onImpersonate) && (viewerRole === "Super" || !isAutomatic);
+
+  // Mirrors handleUpdateRelationshipRole() server-side: Admins/Supers can
+  // promote/demote anyone except a Super, whose role is fixed. (An Admin
+  // demoting *themselves* is blocked server-side too, but that case never
+  // reaches this row since related-humans lists never include the viewer.)
+  const viewerIsAdminOrSuper = viewerRole === "Admin" || viewerRole === "Super";
+  const canManageRoleRow = viewerIsAdminOrSuper && human.role !== "Super";
+  const nextRole: Role = human.role === "Admin" ? "Human" : "Admin";
   const [impersonating, setImpersonating] = useState(false);
   const [impersonateError, setImpersonateError] = useState<string | null>(
     null,
@@ -854,6 +963,29 @@ function RelationshipCard({
   function submitRekindle() {
     rekindleFetcher.submit(
       { intent: "rekindle-relationship", humanId: human._id },
+      { method: "post" },
+    );
+  }
+
+  const roleFetcher = useFetcher<typeof action>();
+  const roleData =
+    roleFetcher.data?.intent === "update-relationship-role" &&
+    roleFetcher.data.humanId === human._id
+      ? roleFetcher.data
+      : undefined;
+  const changingRole = roleFetcher.state !== "idle";
+  const [confirmRoleOpen, setConfirmRoleOpen] = useState(false);
+
+  useEffect(() => {
+    if (roleData && "success" in roleData) {
+      setConfirmRoleOpen(false);
+      revalidate();
+    }
+  }, [roleData, revalidate]);
+
+  function submitRoleChange() {
+    roleFetcher.submit(
+      { intent: "update-relationship-role", humanId: human._id, role: nextRole },
       { method: "post" },
     );
   }
@@ -1006,7 +1138,57 @@ function RelationshipCard({
           </>
         )}
 
-        {canImpersonateRow &&
+        {canManageRoleRow && (
+          <Modal
+            open={confirmRoleOpen}
+            onClose={() => setConfirmRoleOpen(false)}
+            title={human.role === "Admin" ? "Remove admin access" : "Make admin"}
+          >
+            <div className="flex flex-col gap-4">
+              <p className="text-sm">
+                {human.role === "Admin" ? (
+                  <>
+                    Remove admin access from <strong>{human.name}</strong>?
+                    They'll become a regular Human, and will only be able to
+                    see humans they have an active relationship with.
+                  </>
+                ) : (
+                  <>
+                    Make <strong>{human.name}</strong> an Admin? They'll be
+                    able to see and manage every human's account.
+                  </>
+                )}
+              </p>
+              {roleData && "error" in roleData && (
+                <div className="red-text text-sm">{roleData.error}</div>
+              )}
+              <div className="flex items-center justify-end gap-4">
+                <button
+                  type="button"
+                  className="link text-sm"
+                  disabled={changingRole}
+                  onClick={() => setConfirmRoleOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={changingRole}
+                  onClick={submitRoleChange}
+                >
+                  {changingRole
+                    ? "Saving…"
+                    : human.role === "Admin"
+                      ? "Remove admin access"
+                      : "Make admin"}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {(canImpersonateRow || canManageRoleRow) &&
           (impersonating ? (
             <span className="text-sm font-mono subtle-text shrink-0">
               Logging in…
@@ -1014,7 +1196,22 @@ function RelationshipCard({
           ) : (
             <MoreMenu
               label={`Manage ${human.name}`}
-              items={[{ label: "Login as user", onClick: handleLoginAsUser }]}
+              items={[
+                ...(canImpersonateRow
+                  ? [{ label: "Login as user", onClick: handleLoginAsUser }]
+                  : []),
+                ...(canManageRoleRow
+                  ? [
+                      {
+                        label:
+                          human.role === "Admin"
+                            ? "Remove admin access"
+                            : "Make admin",
+                        onClick: () => setConfirmRoleOpen(true),
+                      },
+                    ]
+                  : []),
+              ]}
             />
           ))}
       </div>

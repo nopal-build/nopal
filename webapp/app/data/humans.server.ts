@@ -102,6 +102,14 @@ export async function updateHuman(
   return record ? formatRecord(record as unknown as Human) : undefined;
 }
 
+export async function updateHumanRole(
+  id: string,
+  role: Role,
+): Promise<Human | undefined> {
+  await merge("humans", id, { role });
+  return getHumanById(id);
+}
+
 export async function deleteHuman(id: string): Promise<void> {
   await remove("humans", id);
 }
