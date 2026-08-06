@@ -1,9 +1,9 @@
 // app/components/AppLayout.tsx
-import { Link, NavLink } from "react-router";
+import { Link, NavLink, useLocation } from "react-router";
 import { ReactNode, useState, useCallback, useEffect } from "react";
 import { useUser, permissions } from "../hooks/useUser";
-import nopalLogo from "../images/nopal-v2.svg";
-import nopalDarkLogo from "../images/nopal-dark-v2.svg";
+import noLogoColor from "../images/no-logo-color.svg";
+import noLogoWhite from "../images/no-logo-white.svg";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { HamburgerNeqIcon } from "./HamburgerNeqIcon";
 
@@ -97,19 +97,33 @@ function ImpersonationBanner({ targetName }: { targetName: string }) {
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `text-sm font-mono py-2 rounded block ${
-    isActive ? "font-bold" : "purple-light-text"
+    isActive ? "font-bold app-nav-active-bg" : "purple-light-text"
   }`;
 
 const navLinkStyle = ({ isActive }: { isActive: boolean }) =>
   ({
-    ...(isActive
-      ? {
-          color: "var(--purple)",
-          background: "var(--foreground)",
-          paddingLeft: "8px",
-        }
-      : {}),
+    ...(isActive ? { paddingLeft: "8px" } : {}),
     textDecoration: "none",
+    transition: "background 150ms, color 150ms",
+  }) as React.CSSProperties;
+
+function getCurrentSectionLabel(pathname: string): string {
+  if (pathname.startsWith("/fruits/daily-log")) return "Daily Log";
+  if (pathname.startsWith("/fruits/vault")) return "Vault";
+  if (pathname.startsWith("/fruits/profile")) return "Profile";
+  if (pathname.startsWith("/fruits/styles")) return "Styles";
+  return "Dashboard";
+}
+
+const topbarLinkClass = ({ isActive }: { isActive: boolean }) =>
+  `text-sm font-mono rounded ${
+    isActive ? "font-bold app-nav-active-bg" : "purple-light-text"
+  }`;
+
+const topbarLinkStyle = () =>
+  ({
+    textDecoration: "none",
+    padding: "6px 14px",
     transition: "background 150ms, color 150ms",
   }) as React.CSSProperties;
 
@@ -119,6 +133,8 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const user = useUser();
   const isSuper = permissions.isSuper(user);
   const isAdmin = permissions.isAdmin(user);
+  const location = useLocation();
+  const currentSectionLabel = getCurrentSectionLabel(location.pathname);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
@@ -130,35 +146,35 @@ export function AppLayout({ children }: { children?: ReactNode }) {
         className="app-layout"
         style={{ height: "auto", flex: 1, minHeight: 0 }}
       >
-      {/* ===== SIDEBAR (desktop ≥860px) ===== */}
-      <aside className="app-sidebar">
-        <Link to="/" prefetch="intent">
-          <img src={isDark ? nopalDarkLogo : nopalLogo} alt="nopal" />
+      {/* ===== TOP NAV BAR (desktop ≥860px) ===== */}
+      <header className="app-topbar">
+        <Link to="/" prefetch="intent" className="app-topbar-logo">
+          <img src={isDark ? noLogoWhite : noLogoColor} alt="no." />
         </Link>
 
-        <nav style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+        <nav className="app-topbar-nav">
           <NavLink
             to="/fruits"
             prefetch="intent"
             end
-            className={navLinkClass}
-            style={navLinkStyle}
+            className={topbarLinkClass}
+            style={topbarLinkStyle}
           >
             Dashboard
           </NavLink>
           <NavLink
             to="/fruits/daily-log"
             prefetch="intent"
-            className={navLinkClass}
-            style={navLinkStyle}
+            className={topbarLinkClass}
+            style={topbarLinkStyle}
           >
             Daily Log
           </NavLink>
           <NavLink
             to="/fruits/vault"
             prefetch="intent"
-            className={navLinkClass}
-            style={navLinkStyle}
+            className={topbarLinkClass}
+            style={topbarLinkStyle}
           >
             Vault
           </NavLink>
@@ -166,34 +182,34 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             <NavLink
               to="/fruits/styles"
               prefetch="intent"
-              className={navLinkClass}
-              style={navLinkStyle}
+              className={topbarLinkClass}
+              style={topbarLinkStyle}
             >
               Styles
             </NavLink>
           )}
         </nav>
 
-        <div style={{ marginTop: "auto" }}>
+        <div className="app-topbar-profile">
           <NavLink
             to="/fruits/profile"
             prefetch="intent"
-            className={navLinkClass}
-            style={navLinkStyle}
+            className={topbarLinkClass}
+            style={topbarLinkStyle}
           >
             Profile
           </NavLink>
         </div>
-      </aside>
+      </header>
 
       {/* ===== TOP NAV (mobile <860px) ===== */}
       <div className="app-topnav">
         <div className="app-topnav-bar">
           <Link to="/fruits" prefetch="intent">
             <img
-              src={isDark ? nopalDarkLogo : nopalLogo}
-              alt="Nopal"
-              style={{ width: "64px", display: "block" }}
+              src={isDark ? noLogoWhite : noLogoColor}
+              alt="no."
+              style={{ height: "20px", display: "block" }}
             />
           </Link>
           <button
@@ -207,8 +223,10 @@ export function AppLayout({ children }: { children?: ReactNode }) {
               padding: "4px",
               display: "flex",
               alignItems: "center",
+              gap: "8px",
             }}
           >
+            <span className="text-sm font-mono">{currentSectionLabel}</span>
             <HamburgerNeqIcon open={menuOpen} />
           </button>
         </div>

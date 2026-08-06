@@ -1032,6 +1032,57 @@ export default function VaultV2Page() {
     }
   }, []);
 
+  // ─── Bulk cache warm-up ─────────────────────────────────────────────────
+  // One request for every file in the viewer's OWN vault (metadata only,
+  // same shape `loadChildren` already fetches one folder at a time), fired
+  // once right after mount, so expanding ANY of the viewer's own folders —
+  // sidebar or main view, on a fresh page load OR a hard reload — feels
+  // instant instead of each one waiting on its own fetch the first time
+  // it's opened. Shared folders (owned by someone else) still lazy-load as
+  // before via `loadChildren` — this endpoint is scoped to the viewer's own
+  // human_id and can't resolve those in one shot. Additive only: never
+  // overwrites a folder `cache` already has an entry for, so a real-time
+  // invalidation (or an already-in-flight `loadChildren`) that happens to
+  // land first can't be clobbered by this catching up a moment later.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/vault/all-files")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { files?: FileRefListing[] } | null) => {
+        if (cancelled || !data?.files) return;
+        const filesByFolder: Record<string, FileRefListing[]> = {};
+        for (const file of data.files) {
+          if (!file.folder_id) continue;
+          (filesByFolder[file.folder_id] ??= []).push(file);
+        }
+        setCache((prev) => {
+          const next = { ...prev };
+          let changed = false;
+          for (const folder of allFolders) {
+            if (folder.human_id !== user._id) continue; // shared — not covered here
+            if (folder._id in next) continue; // already loaded/loading — don't stomp it
+            next[folder._id] = {
+              folders: foldersByParent[folder._id] ?? [],
+              files: filesByFolder[folder._id] ?? [],
+            };
+            changed = true;
+          }
+          return changed ? next : prev;
+        });
+      })
+      .catch(() => {
+        // Best-effort warm-up — the existing per-folder lazy fetch is still
+        // the correctness fallback if this fails for any reason.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Deliberately once-per-mount, not tied to `allFolders`/`foldersByParent`
+    // — those already flow through normally on their own; this exists purely
+    // to fill in whatever's still missing right after the page first loads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** Drop cached children for the given folders, then re-run the loader. */
   const invalidateAndRevalidate = (
     folderIds: (string | null | undefined)[],

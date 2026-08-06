@@ -571,6 +571,30 @@ export async function listFilesMetaByFolderIds(
 }
 
 /**
+ * File metadata (no content) for EVERY file the human owns, across their
+ * entire vault, in one query — the bulk warm-up `GET /api/vault/all-files`
+ * uses to pre-fill the Vault page's per-folder children cache for every
+ * folder at once right after the page mounts, instead of each folder only
+ * fetching its own files the first time it's expanded. Same shape/behavior
+ * as `listFolderChildren`'s own file query (no `archived_at` filtering —
+ * callers that care already filter it themselves, e.g. the sync manifest).
+ */
+export async function getAllFileListingsForHuman(
+  humanId: string,
+): Promise<FileRefListing[]> {
+  const result = await query<[FileRef[]]>(
+    `SELECT id, human_id, name, content_type, content_hash, folder_id,
+            size, source, date, created_at, updated_at, archived_at,
+            (s3_key != NONE AND s3_key != null) AS has_s3
+     FROM file_refs
+     WHERE human_id = $humanId
+     ORDER BY name ASC`,
+    { humanId },
+  );
+  return (result?.[0] ?? []).map(formatRecord) as unknown as FileRefListing[];
+}
+
+/**
  * Resolves the nearest "published" folder in `folderId`'s own chain —
  * itself or an ancestor with `is_public === true`. Returns null when
  * nothing in the chain is published.
