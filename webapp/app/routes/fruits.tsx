@@ -122,7 +122,7 @@ export default function Fruits() {
               {projects.map((project) => (
                 <QuickLink
                   key={project._id}
-                  to={`/fruits/projects/${project._id}`}
+                  to={`/fruits/newspaper/${project._id}`}
                   label={project.name}
                 />
               ))}

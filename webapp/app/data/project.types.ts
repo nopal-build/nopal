@@ -11,7 +11,7 @@
  * body as generic directives (see `util/nopalDirectives.ts`), so the body
  * reads as one continuous document instead of a manifest pointing at a
  * separate `overview.md`. A folder with no front matter, or malformed front
- * matter, simply falls back to the plain vault folder view: nothing breaks.
+ matter, simply renders with sensible defaults (see `resolveProjectManifest` in `project.server.ts`, which never fails closed on this).
  *
  * Example `README.md`:
  *

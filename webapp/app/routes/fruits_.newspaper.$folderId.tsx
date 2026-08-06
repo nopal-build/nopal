@@ -1,13 +1,20 @@
-// app/routes/fruits_.projects.$folderId.tsx
-// The rolled-up view of one project folder (under the `projects` vault
-// root), driven by the manifest front matter on its README.md — see
-// `app/data/project.types.ts` for the manifest grammar and
-// `app/data/project.server.ts` for how it's resolved.
+// app/routes/fruits_.newspaper.$folderId.tsx
+// The Project Newspaper — the rolled-up view of one project folder (under
+// the `projects` vault root), driven by the manifest front matter on its
+// README.md — see `app/data/project.types.ts` for the manifest grammar and
+// `app/data/project.server.ts` for how it's resolved. See also the
+// `project-newspaper` skill.
 //
-// A project folder with no manifest yet just isn't a "project view" —
-// redirect back to the plain vault folder view rather than showing a dead
-// end, so every folder under `projects` is always viewable one way or
-// another.
+// Lives at `/fruits/newspaper/:folderId` — was previously
+// `fruits_.projects.$folderId.tsx` (renamed once this became the project's
+// single detail page, rather than living alongside a separate
+// OxMarkdown-based prototype at a `.../newspaper` sub-path).
+//
+// Gated ONLY on the viewer's ACCESS to the folder (`canViewFolder` below) —
+// never on whether the README happens to have valid manifest front matter
+// yet. `resolveProjectManifest` never fails closed (see its own doc), so
+// anyone who can view this folder always sees this route; there's no
+// redirect-to-vault fallback to worry about missing here.
 import type { LoaderFunctionArgs } from "react-router";
 import { Link, redirect, useLoaderData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
@@ -33,14 +40,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Children/README belong to the folder's OWNER, not necessarily the viewer
   // (this folder may only be reachable because it's shared with them).
   const project = await resolveProjectManifest(folder.human_id, folder);
-  if (!project) {
-    return redirect(`/fruits/vault?folder=${folderId}`);
-  }
 
   return { folder, project };
 }
 
-export default function ProjectRoute() {
+export default function NewspaperRoute() {
   const { folder, project } = useLoaderData<typeof loader>();
   const { manifest, body, files, folders, csvFields } = project;
 

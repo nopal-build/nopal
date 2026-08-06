@@ -1,6 +1,6 @@
 // =============================================================================
 // One-off demo: creates a sample project folder with a manifest-driven
-// README.md so the `/fruits/projects/:folderId` view has something real to
+// README.md so the `/fruits/newspaper/:folderId` view has something real to
 // render. Exercises all 3 directive forms (text/leaf/container) — see
 // `app/util/nopalDirectives.ts`. Safe to re-run — deletes and recreates the
 // demo folder each time.
@@ -168,7 +168,7 @@ async function main() {
   await uploadSvg(human._id, photos._id, "demo-1.svg", photoSvg("Demo day", "#c0533e"));
   await uploadSvg(human._id, photos._id, "demo-2.svg", photoSvg("Framing done", "#3f7f5c"));
 
-  console.log(`\n✓ Done. Visit /fruits/projects/${project._id} (as ${email}).`);
+  console.log(`\n✓ Done. Visit /fruits/newspaper/${project._id} (as ${email}).`);
 }
 
 main().catch((err) => {

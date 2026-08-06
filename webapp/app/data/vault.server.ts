@@ -835,8 +835,8 @@ export async function ensureVaultRootFolders(
  * Every project (a direct child folder of the `projects` vault root) the
  * human owns — the simple, folder-name-is-the-project-name notion the
  * `vault` skill describes, deliberately NOT the heavier `resolveProjectManifest`
- * machinery in `project.server.ts` (which additionally requires a valid
- * `README.md` manifest and exists for the project detail PAGE, not for
+ * machinery in `project.server.ts` (which additionally resolves directive-
+ * referenced files/folders and exists for the project detail PAGE, not for
  * "what projects exist at all"). Scoped to the human's OWN projects only
  * — see `getAccessibleProjectFolders` below for the superset (also
  * including projects shared with them) that the Daily Log's Card feature
