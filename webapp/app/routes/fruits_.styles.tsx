@@ -12,6 +12,7 @@ import { CopyField } from "../components/CopyField";
 import { SearchCollection } from "../components/SearchCollection";
 import { MoreMenu, MoreIcon } from "../components/MoreMenu";
 import { CircleButton } from "../components/CircleButton";
+import { HamburgerNeqIcon } from "../components/HamburgerNeqIcon";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -110,6 +111,25 @@ function Swatch({
   );
 }
 
+// ─── Hamburger → "≠" Icon ────────────────────────────────────────────────────
+
+/** Self-contained demo of `HamburgerNeqIcon` (components/HamburgerNeqIcon.tsx)
+ * — owns its own open/closed state so it can be dropped into the style
+ * guide without wiring anything up. */
+function HamburgerNeqDemo() {
+  const [open, setOpen] = useState(false);
+  return (
+    <CircleButton
+      aria-label={open ? "Collapse" : "Expand"}
+      aria-pressed={open}
+      active={open}
+      onClick={() => setOpen((o) => !o)}
+    >
+      <HamburgerNeqIcon open={open} />
+    </CircleButton>
+  );
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 const DEMO_FRUITS = ["Apple", "Banana", "Cherry", "Date", "Elderberry"];
@@ -158,6 +178,7 @@ export default function FruitsStyles() {
             ["#collections", "Collections"],
             ["#overlays", "Overlays"],
             ["#menus", "Menus"],
+            ["#icons", "Icons"],
             ["/fruits/styles/oxmarkdown", "OxMarkdown →"],
           ].map(([href, label]) => (
             <a
@@ -1774,6 +1795,46 @@ export default function FruitsStyles() {
                 <div style={{ paddingLeft: "16px" }}>{")}"}</div>
                 <div>{"/>"}</div>
               </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ── 14. Icons ──────────────────────────────────────────── */}
+        <Section id="icons" title="14 · Icons">
+          <div className="flex flex-col gap-6">
+            <p className="text-xs font-mono subtle-text">
+              A hamburger icon that morphs into a "≠"-style mark. The top
+              and bottom lines slide 3px toward the center (they read as
+              the two bars of "="), and the middle line rotates -55° on
+              click — clicking again reverses both. Built from three plain{" "}
+              <Code>div</Code> lines (not an SVG) so each line's{" "}
+              <Code>transform</Code> can be transitioned independently.
+            </p>
+
+            <Row>
+              <Tile>
+                <Label>Click to toggle</Label>
+                <HamburgerNeqDemo />
+              </Tile>
+            </Row>
+
+            <div
+              className="good-box p-3 text-xs font-mono code-block"
+              style={{ lineHeight: 1.7 }}
+            >
+              <div>{"const [open, setOpen] = useState(false);"}</div>
+              <div>{"<CircleButton"}</div>
+              <div style={{ paddingLeft: "16px" }}>
+                {"active={open}"}
+              </div>
+              <div style={{ paddingLeft: "16px" }}>
+                {"onClick={() => setOpen((o) => !o)}"}
+              </div>
+              <div>{">"}</div>
+              <div style={{ paddingLeft: "16px" }}>
+                {"<HamburgerNeqIcon open={open} />"}
+              </div>
+              <div>{"</CircleButton>"}</div>
             </div>
           </div>
         </Section>

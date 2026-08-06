@@ -96,6 +96,7 @@ import LeadingBlockGuardPlugin from "../oxmarkdown/LeadingBlockGuardPlugin";
 import OxTogglePlugin from "../oxmarkdown/OxTogglePlugin";
 import { OxToggleNode, OxToggleSummaryNode } from "../oxmarkdown/OxToggleNode";
 import FileDirectiveArrowPlugin from "../oxmarkdown/FileDirectiveArrowPlugin";
+import NestedEditorBlurPlugin from "../oxmarkdown/NestedEditorBlurPlugin";
 import AddFileLinkPlugin from "../oxmarkdown/AddFileLinkPlugin";
 import FileCaptionArrowPlugin from "../oxmarkdown/FileCaptionArrowPlugin";
 import CardDirectiveArrowPlugin from "../oxmarkdown/CardDirectiveArrowPlugin";
@@ -368,6 +369,7 @@ function OxEditingSurface({
               <MarkdownShortcutPlugin transformers={OX_TRANSFORMERS} />
               <MarkdownSyncPlugin markdown={markdown} onChange={onChange} />
               <InteractablesPlugin />
+              <NestedEditorBlurPlugin />
               <FileDirectiveArrowPlugin />
               <CardDirectiveArrowPlugin />
               <SlashCommandPlugin

@@ -776,6 +776,36 @@ Interacting mode first, without needing that decision resolved.
         `FileCaptionArrowPlugin.tsx`. Relevant to any FUTURE nested-editor
         flow too (e.g. `::card`'s own planned nested `OxEditor`) —
         clearing the handoff side's selection isn't specific to files.
+      - **That per-plugin fix only covers focus handoffs routed through
+        those specific keyboard flows (ArrowUp/Down, Backspace, Enter) —
+        a plain MOUSE CLICK directly into a caption/card's nested editor
+        never goes through any of them**, so the outer (or Card-hosting)
+        editor's selection was never cleared and the identical
+        bounce-back reproduced on the very first keystroke — reported
+        as "with several files in the same document, I can't type in a
+        caption without focus jumping back to the containing editor,"
+        confirmed as exactly this bug (clicking straight into a caption,
+        skipping the arrow-key plugins entirely, is the common case once
+        there's more than one file to click between). Fixed generically
+        with a new plugin, `oxmarkdown/NestedEditorBlurPlugin.tsx`,
+        mounted unconditionally on every Editing-mode `OxEditor`
+        (alongside `InteractablesPlugin`/`MinRowsPlugin`): listens for
+        Lexical's own `BLUR_COMMAND` and, a frame later (checking
+        `document.activeElement` rather than trusting the blur
+        `FocusEvent`'s own `relatedTarget`, whose support for plain
+        `focus`/`blur` — as opposed to `focusin`/`focusout` — has
+        historically been inconsistent across engines), clears THIS
+        editor's selection if-and-only-if focus landed inside a DOM
+        DESCENDANT of its own root — which only ever means a nested
+        `<OxEditor>` mounted inside one of its own decorators. Losing
+        focus to anything else (outside the page, the add-file link, a
+        popover, ...) leaves the selection untouched, matching Lexical's
+        own default behavior for those cases. This makes the fix apply to
+        ANY current or future nested-editor entry point, mouse or
+        keyboard, without each one needing to remember to clear selection
+        by hand — the existing arrow-key-driven plugins' own explicit
+        `$setSelection(null)` calls are still in place (harmless,
+        idempotent alongside this) rather than removed.
     - The static/Interacting-mode path (`components/OxRenderer.tsx`'s
       `FileDirectiveLayout`/`FileDirectiveStatic`) renders the same
       caption as plain read-only markdown instead — Interacting mode

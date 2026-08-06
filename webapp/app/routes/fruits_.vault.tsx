@@ -58,6 +58,7 @@ import { getRelatedHumans } from "../data/relationships.server";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "../components/MoreMenu";
 import MdxEditorView from "../components/MdxEditorView";
+import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
 import "../styles/vault.css";
 import "../styles/mdxeditor.css";
 
@@ -78,10 +79,21 @@ type PendingUpload = {
   file: File;
   name: string;
   size: number;
+  contentType: string;
   progress: number; // 0-100
-  status: "queued" | "uploading" | "error";
+  /** "done": bytes are safely uploaded and `fileId` is known, but the
+   * folder's AUTHORITATIVE listing (loader `treeSeed`, or `cache` for a
+   * not-currently-open folder) hasn't caught up yet — rendered identically
+   * to a real completed row (see `renderFileRow` below) so nothing visibly
+   * changes when the real row eventually replaces it; see the "remove
+   * confirmed uploads" effect for the other half of that swap. */
+  status: "queued" | "uploading" | "error" | "done";
   error?: string;
   targetFolderId: string;
+  /** Set once the server hands back the created record — how the
+   * reconciliation effect recognizes "the authoritative listing now has
+   * this exact file" and drops the placeholder. */
+  fileId?: string;
 };
 
 type Current =
@@ -1067,6 +1079,59 @@ export default function VaultV2Page() {
   const activeFolderId = current.kind === "folder" ? current.folder._id : null;
   const activeFileId = current.kind === "file" ? current.file._id : null;
 
+  // ─── Real-time ────────────────────────────────────────────────────────────
+  // A file or folder changed somewhere in this human's vault — another
+  // device, or a sync run (see `data/realtime.server.ts`). Folder structure
+  // (`allFolders`/`roots`) comes straight from loader data every render, so
+  // a revalidate alone keeps the sidebar skeleton/breadcrumbs correct — no
+  // local state to patch for that case. File LISTINGS are different: the
+  // ACTIVE folder's own listing ALSO comes from loader data (`treeSeed`,
+  // which always wins over `cache` in `mergedCache` above), so that one
+  // case needs a revalidate too; every OTHER folder's listing lives in
+  // `cache`, filled in lazily by `loadChildren`. For those, just drop the
+  // stale entry rather than trying to merge a full `FileRefListing` back
+  // together from the event's own (deliberately skinny) payload — the
+  // expand-tracking effect above already re-fetches any EXPANDED folder
+  // that's missing from `mergedCache`, so a dropped-but-expanded entry
+  // refreshes itself automatically; a dropped-but-collapsed one simply
+  // fetches fresh next time it's opened, instead of silently going stale.
+  const realtimeRevalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRevalidate = useCallback(() => {
+    if (realtimeRevalidateTimer.current) clearTimeout(realtimeRevalidateTimer.current);
+    realtimeRevalidateTimer.current = setTimeout(() => revalidator.revalidate(), 300);
+  }, [revalidator]);
+  useEffect(
+    () => () => {
+      if (realtimeRevalidateTimer.current) clearTimeout(realtimeRevalidateTimer.current);
+    },
+    [],
+  );
+
+  useVaultEvents(
+    useCallback(
+      (event) => {
+        if (event.table === "vault_folders") {
+          scheduleRevalidate();
+          return;
+        }
+        // file_refs
+        if (event.folderId === activeFolderId) {
+          scheduleRevalidate();
+          return;
+        }
+        const folderId = event.folderId;
+        if (!folderId) return;
+        setCache((prev) => {
+          if (!(folderId in prev)) return prev; // never loaded — nothing to invalidate
+          const next = { ...prev };
+          delete next[folderId];
+          return next;
+        });
+      },
+      [activeFolderId, scheduleRevalidate],
+    ),
+  );
+
   // ─── Navigation ─────────────────────────────────────────────────────────────
 
   const selectFolder = (folder: VaultFolder) => {
@@ -1132,8 +1197,23 @@ export default function VaultV2Page() {
   const activeUploadIds = useRef<Set<string>>(new Set());
 
   const finishUpload = useCallback(
-    (id: string, folderId: string) => {
-      setPendingUploads((prev) => prev.filter((p) => p.id !== id));
+    (id: string, folderId: string, fileId?: string) => {
+      // This tab's own upload — suppress the real-time echo for it (see
+      // `useVaultEvents`); `invalidateAndRevalidate` below already refreshes
+      // this tab's own view immediately, so the SSE copy would otherwise
+      // just be redundant work a moment later.
+      markOwnMutation(fileId);
+      // Don't drop the placeholder yet — bytes are safely uploaded, but the
+      // AUTHORITATIVE listing (what `invalidateAndRevalidate` below goes and
+      // fetches) hasn't caught up. Flip it to "done" instead: rendered
+      // identically to a real completed row (see `renderFileRow`), already
+      // sitting in its final sorted position, so there's nothing left to
+      // visibly change once the real row actually lands — the "remove
+      // confirmed uploads" effect below removes THIS placeholder in the
+      // very same render that the real row first appears in.
+      setPendingUploads((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, status: "done", fileId, progress: 100 } : p)),
+      );
       invalidateAndRevalidate([folderId]);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1151,6 +1231,27 @@ export default function VaultV2Page() {
       prev.map((p) => (p.id === id ? { ...p, progress } : p)),
     );
   }, []);
+
+  // The other half of the seamless upload swap (see `finishUpload`'s own
+  // comment): once a "done" placeholder's target folder listing actually
+  // contains its file — matched by `fileId` when the upload response gave
+  // us one, falling back to `name` otherwise (uploads are already
+  // de-duped by name per folder in `enqueueFiles`, so this is unambiguous)
+  // — the real row has arrived and the placeholder is redundant.
+  useEffect(() => {
+    const doneUploads = pendingUploads.filter((p) => p.status === "done");
+    if (!doneUploads.length) return;
+    const confirmedIds = new Set(
+      doneUploads
+        .filter((p) => {
+          const files = mergedCache[p.targetFolderId]?.files ?? [];
+          return files.some((f) => (p.fileId ? f._id === p.fileId : f.name === p.name));
+        })
+        .map((p) => p.id),
+    );
+    if (!confirmedIds.size) return;
+    setPendingUploads((prev) => prev.filter((p) => !confirmedIds.has(p.id)));
+  }, [pendingUploads, mergedCache]);
 
   const runMultipartUpload = useCallback(
     async (upload: PendingUpload) => {
@@ -1226,8 +1327,11 @@ export default function VaultV2Page() {
             data.error ?? `Complete failed (${completeRes.status})`,
           );
         }
+        const completeData = (await completeRes.json().catch(() => null)) as {
+          fileRef?: { _id?: string };
+        } | null;
 
-        finishUpload(id, folderId);
+        finishUpload(id, folderId, completeData?.fileRef?._id);
       } catch (err) {
         // Best-effort abort so S3 never leaks partial uploads
         fetch("/api/vault/multipart-abort", {
@@ -1275,7 +1379,16 @@ export default function VaultV2Page() {
       xhr.onload = () => {
         activeUploadIds.current.delete(id);
         if (xhr.status >= 200 && xhr.status < 300) {
-          finishUpload(id, folderId);
+          let uploadedFileId: string | undefined;
+          try {
+            const data = JSON.parse(xhr.responseText) as {
+              fileRef?: { _id?: string };
+            };
+            uploadedFileId = data.fileRef?._id;
+          } catch {
+            /* non-JSON body */
+          }
+          finishUpload(id, folderId, uploadedFileId);
         } else {
           let error = `Server error (HTTP ${xhr.status})`;
           try {
@@ -1390,6 +1503,7 @@ export default function VaultV2Page() {
         file,
         name: file.name,
         size: file.size,
+        contentType: file.type || "application/octet-stream",
         progress: 0,
         status: "queued",
         targetFolderId: folderId,
@@ -1431,7 +1545,10 @@ export default function VaultV2Page() {
         folder_type: folderType,
       }),
     });
-    if (data) invalidateAndRevalidate([folderId]);
+    if (data) {
+      markOwnMutation(data.folder?._id);
+      invalidateAndRevalidate([folderId]);
+    }
   };
 
   const handleRenameFolder = async () => {
@@ -1443,7 +1560,10 @@ export default function VaultV2Page() {
       method: "PATCH",
       body: JSON.stringify({ name }),
     });
-    if (data) invalidateAndRevalidate([folder.parent_folder_id]);
+    if (data) {
+      markOwnMutation(folder._id);
+      invalidateAndRevalidate([folder.parent_folder_id]);
+    }
   };
 
 
@@ -1456,7 +1576,10 @@ export default function VaultV2Page() {
       body: JSON.stringify({ parent_folder_id: targetFolderId }),
     });
     // Both the old and new parent listings changed.
-    if (data) invalidateAndRevalidate([folder.parent_folder_id, targetFolderId]);
+    if (data) {
+      markOwnMutation(folder._id);
+      invalidateAndRevalidate([folder.parent_folder_id, targetFolderId]);
+    }
   };
 
   const handleDeleteFolder = async () => {
@@ -1473,6 +1596,7 @@ export default function VaultV2Page() {
       method: "DELETE",
     });
     if (data) {
+      markOwnMutation(folder._id);
       // The folder is gone — land on its parent (or the vault root).
       if (folder.parent_folder_id) {
         setSearchParams({ folder: folder.parent_folder_id });
@@ -1491,6 +1615,7 @@ export default function VaultV2Page() {
     }
     const data = await apiJson(`/api/vault/${file._id}`, { method: "DELETE" });
     if (data) {
+      markOwnMutation(file._id);
       // The file is gone — land on its containing folder (or the vault root).
       if (file.folder_id) setSearchParams({ folder: file.folder_id });
       else setSearchParams({});
@@ -1559,6 +1684,25 @@ export default function VaultV2Page() {
           files: mergedCache[current.folder._id]?.files ?? [],
         }
       : null;
+
+  // One sorted list mixing real files with in-flight/just-finished uploads,
+  // by name — exactly the order `folderChildren.files` itself already sorts
+  // by (`ORDER BY name ASC`, see `listFolderChildren`). This is what makes
+  // an upload land in its FINAL position from the moment it's enqueued
+  // (queued → uploading → done all render at the same spot) instead of
+  // always trailing behind the real files until a refresh relocates it.
+  const combinedFolderRows: Array<
+    { kind: "file"; file: FileRefListing } | { kind: "pending"; upload: PendingUpload }
+  > = folderChildren
+    ? [
+        ...folderChildren.files.map((file) => ({ kind: "file" as const, file })),
+        ...pendingForCurrentFolder.map((upload) => ({ kind: "pending" as const, upload })),
+      ].sort((a, b) => {
+        const aName = a.kind === "file" ? a.file.name : a.upload.name;
+        const bName = b.kind === "file" ? b.file.name : b.upload.name;
+        return aName.localeCompare(bName);
+      })
+    : [];
 
   // Shared (non-owned) folders/files are view-only in this UI — all
   // mutation actions below (rename/move/share/publish/delete/upload/replace)
@@ -2067,80 +2211,104 @@ export default function VaultV2Page() {
                     </span>
                   </button>
                 ))}
-                {folderChildren.files.map((file) => (
-                  <button
-                    key={file._id}
-                    className="vault-v2-row"
-                    onClick={() => selectFile(file)}
-                  >
-                    <span className="vault-v2-row-icon">
-                      {fileIcon(file.content_type)}
-                    </span>
-                    <span className="vault-v2-row-name">{file.name}</span>
-                    <span className="vault-v2-row-size">
-                      {formatSize(file.size)}
-                    </span>
-                    <span className="vault-v2-row-date">
-                      {formatDate(file.updated_at)}
-                    </span>
-                  </button>
-                ))}
-                {/* In-flight uploads for this folder */}
-                {pendingForCurrentFolder.map((p) => (
-                  <div
-                    key={p.id}
-                    className="vault-v2-row vault-v2-row--pending"
-                  >
-                    <span className="vault-v2-row-icon">
-                      {p.status === "error" ? "⚠️" : "⏳"}
-                    </span>
-                    <span className="vault-v2-row-name">
-                      {p.name}
-                      {p.status === "error" && (
-                        <span className="vault-v2-upload-error">
-                          {" — "}
-                          {p.error}
-                        </span>
-                      )}
-                    </span>
-                    {p.status === "error" ? (
-                      <span className="vault-v2-upload-actions">
-                        <button
-                          className="vault-toolbar-btn"
-                          onClick={() => retryUpload(p.id)}
-                        >
-                          Retry
-                        </button>
-                        <button
-                          className="vault-toolbar-btn"
-                          onClick={() => dismissUpload(p.id)}
-                        >
-                          Dismiss
-                        </button>
+                {/* Real files and in-flight/just-finished uploads, merged into
+                    ONE sorted list (see `combinedFolderRows`) — an upload
+                    already sits in its final position from the moment it's
+                    enqueued, so completing never relocates or flashes it. */}
+                {combinedFolderRows.map((row) =>
+                  row.kind === "file" ? (
+                    <button
+                      key={row.file._id}
+                      className="vault-v2-row"
+                      onClick={() => selectFile(row.file)}
+                    >
+                      <span className="vault-v2-row-icon">
+                        {fileIcon(row.file.content_type)}
                       </span>
-                    ) : (
-                      <>
-                        <span className="vault-v2-row-size">
-                          {formatSize(p.size)}
+                      <span className="vault-v2-row-name">{row.file.name}</span>
+                      <span className="vault-v2-row-size">
+                        {formatSize(row.file.size)}
+                      </span>
+                      <span className="vault-v2-row-date">
+                        {formatDate(row.file.updated_at)}
+                      </span>
+                    </button>
+                  ) : row.upload.status === "done" ? (
+                    // Bytes are already uploaded — render exactly like a real
+                    // completed row (not the progress-bar markup below) so
+                    // there's nothing left to visibly change once the real
+                    // row actually replaces this placeholder.
+                    <div
+                      key={row.upload.id}
+                      className="vault-v2-row vault-v2-row--pending"
+                    >
+                      <span className="vault-v2-row-icon">
+                        {fileIcon(row.upload.contentType)}
+                      </span>
+                      <span className="vault-v2-row-name">{row.upload.name}</span>
+                      <span className="vault-v2-row-size">
+                        {formatSize(row.upload.size)}
+                      </span>
+                      <span className="vault-v2-row-date">
+                        {formatDate(new Date().toISOString())}
+                      </span>
+                    </div>
+                  ) : (
+                    <div
+                      key={row.upload.id}
+                      className="vault-v2-row vault-v2-row--pending"
+                    >
+                      <span className="vault-v2-row-icon">
+                        {row.upload.status === "error" ? "⚠️" : "⏳"}
+                      </span>
+                      <span className="vault-v2-row-name">
+                        {row.upload.name}
+                        {row.upload.status === "error" && (
+                          <span className="vault-v2-upload-error">
+                            {" — "}
+                            {row.upload.error}
+                          </span>
+                        )}
+                      </span>
+                      {row.upload.status === "error" ? (
+                        <span className="vault-v2-upload-actions">
+                          <button
+                            className="vault-toolbar-btn"
+                            onClick={() => retryUpload(row.upload.id)}
+                          >
+                            Retry
+                          </button>
+                          <button
+                            className="vault-toolbar-btn"
+                            onClick={() => dismissUpload(row.upload.id)}
+                          >
+                            Dismiss
+                          </button>
                         </span>
-                        <span className="vault-v2-upload-bar">
-                          {p.status === "queued" ? (
-                            <span className="vault-v2-upload-queued">
-                              queued
-                            </span>
-                          ) : (
-                            <span className="vault-upload-progress">
-                              <span
-                                className="vault-upload-progress-fill"
-                                style={{ width: `${p.progress}%` }}
-                              />
-                            </span>
-                          )}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                ))}
+                      ) : (
+                        <>
+                          <span className="vault-v2-row-size">
+                            {formatSize(row.upload.size)}
+                          </span>
+                          <span className="vault-v2-upload-bar">
+                            {row.upload.status === "queued" ? (
+                              <span className="vault-v2-upload-queued">
+                                queued
+                              </span>
+                            ) : (
+                              <span className="vault-upload-progress">
+                                <span
+                                  className="vault-upload-progress-fill"
+                                  style={{ width: `${row.upload.progress}%` }}
+                                />
+                              </span>
+                            )}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  ),
+                )}
               </div>
 
               {current.readme && (
