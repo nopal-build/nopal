@@ -369,6 +369,23 @@ export async function applyPendingEmailChange(
   return getHumanById(human._id);
 }
 
+/**
+ * True once a human has finished onboarding — i.e. no longer has a
+ * pending invite token — and their account isn't suspended. Passkey setup
+ * (`consumeInviteToken`) is what clears the token; a human who only ever
+ * signs in via the emailed TOTP code never consumes it, so this is a
+ * heuristic ("has this account been fully activated") rather than a
+ * strict "has this human ever logged in" check.
+ */
+export function isHumanActive(human: Human): boolean {
+  return !human.suspendedAt && !human.inviteToken;
+}
+
+/** True while a human's invite is still pending completion — see `isHumanActive`. */
+export function isHumanInvited(human: Human): boolean {
+  return Boolean(human.inviteToken);
+}
+
 export async function getHumansById(ids: string[]): Promise<Human[]> {
   if (!ids.length) return [];
   const result = await query<[Human[]]>(

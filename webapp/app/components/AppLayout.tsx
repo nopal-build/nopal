@@ -111,7 +111,8 @@ function getCurrentSectionLabel(pathname: string): string {
   if (pathname.startsWith("/fruits/daily-log")) return "Daily Log";
   if (pathname.startsWith("/fruits/vault")) return "Vault";
   if (pathname.startsWith("/fruits/profile")) return "Profile";
-  if (pathname.startsWith("/fruits/styles")) return "Styles";
+  if (pathname.startsWith("/fruits/maker")) return "Maker";
+  if (pathname.startsWith("/fruits/styles")) return "Stamps";
   return "Dashboard";
 }
 
@@ -131,7 +132,6 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const schemePref = useSchemePref();
   const isDark = schemePref === "dark";
   const user = useUser();
-  const isSuper = permissions.isSuper(user);
   const isAdmin = permissions.isAdmin(user);
   const location = useLocation();
   const currentSectionLabel = getCurrentSectionLabel(location.pathname);
@@ -178,14 +178,14 @@ export function AppLayout({ children }: { children?: ReactNode }) {
           >
             Vault
           </NavLink>
-          {isSuper && (
+          {isAdmin && (
             <NavLink
-              to="/fruits/styles"
+              to="/fruits/maker"
               prefetch="intent"
               className={topbarLinkClass}
               style={topbarLinkStyle}
             >
-              Styles
+              Maker
             </NavLink>
           )}
         </nav>
@@ -263,13 +263,13 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             </NavLink>
             {isAdmin && (
               <NavLink
-                to="/fruits/styles"
+                to="/fruits/maker"
                 prefetch="intent"
                 className={navLinkClass}
                 style={navLinkStyle}
                 onClick={closeMenu}
               >
-                Styles
+                Maker
               </NavLink>
             )}
             <NavLink

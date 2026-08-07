@@ -809,7 +809,7 @@ export default function OxMarkdownStyles() {
             className="text-xs subtle-text hover:opacity-80"
             style={{ textDecoration: "none" }}
           >
-            ← Design System
+            ← Stamps
           </Link>
           <h1 className="font-bold text-2xl mt-2 mb-2">OxMarkdown</h1>
           <p className="text-sm font-mono subtle-text">

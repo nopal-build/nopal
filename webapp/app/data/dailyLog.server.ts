@@ -69,6 +69,19 @@ export async function getDailyLogs(
   };
 }
 
+/**
+ * All daily-log entries (across every human) with `date >= startDate`.
+ * Admin/monitoring use only (e.g. the Maker dashboard) — unlike
+ * `getDailyLogs`, this is intentionally not scoped to a single human.
+ */
+export async function getDailyLogsSince(startDate: string): Promise<DailyLog[]> {
+  const result = await query<[DailyLog[]]>(
+    `SELECT * FROM daily_logs WHERE date >= $startDate ORDER BY date DESC;`,
+    { startDate },
+  );
+  return (result?.[0] ?? []).map(formatRecord);
+}
+
 // ─── Writes ───────────────────────────────────────────────────────────────────
 
 /**

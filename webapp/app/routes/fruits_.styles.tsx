@@ -152,9 +152,10 @@ export default function FruitsStyles() {
       >
         {/* Page header */}
         <div className="mb-12">
-          <h1 className="font-bold text-2xl mb-2">Design System</h1>
+          <h1 className="font-bold text-2xl mb-2">Stamps</h1>
           <p className="text-sm font-mono subtle-text">
-            Tokens, components, and patterns for the Fruits app.
+            Our design system — tokens, components, and patterns for the
+            Fruits app.
           </p>
         </div>
 
