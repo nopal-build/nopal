@@ -196,11 +196,11 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // workable mode — skip md_version snapshots for task check-offs etc.
-    const entry =
+    const { entry, fileId } =
       mode === "workable"
         ? await workableSaveDailyLog(user._id, date, content)
         : await saveDailyLog(user._id, date, content);
-    return { success: true, entry };
+    return { success: true, entry, fileId };
   }
 
   // ── Multipart: form save ──────────────────────────────────────────────────
@@ -208,8 +208,8 @@ export async function action({ request }: ActionFunctionArgs) {
   const date = String(form.get("date") ?? "");
   const content = String(form.get("content") ?? "");
   if (!date || typeof content !== "string") return { error: "Invalid request" };
-  const entry = await saveDailyLog(user._id, date, content);
-  return { success: true, entry };
+  const { entry, fileId } = await saveDailyLog(user._id, date, content);
+  return { success: true, entry, fileId };
 }
 
 // ─── Cards ────────────────────────────────────────────────────────────
@@ -260,22 +260,38 @@ function PastLogEntry({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef(entry.content);
 
+  // This tab's own save — suppress the real-time echo for it, same as the
+  // Today equivalent above.
+  useEffect(() => {
+    const data = saveFetcher.data;
+    if (data && "success" in data && data.success && "fileId" in data) {
+      markOwnMutation(data.fileId);
+    }
+  }, [saveFetcher.data]);
+
   // `entry`/`initialCards` are keyed by date only (see the `key={entry.date}`
   // in the parent), so React reuses this same instance across a revalidate
   // instead of remounting it — meaning fresh props DO reach an already-
   // mounted day, they just get ignored by `useState`'s one-time initializer
   // unless something explicitly pulls them in. Mirrors the Today reconciler
-  // above: only overwrite local content when there's no unsaved edit
-  // pending; only ADD cards this tab doesn't already know about.
+  // above, including the same `saveFetcher.state === "idle"` guard — without
+  // it, a revalidate racing this tab's own in-flight save could read the
+  // PRE-save content and reconcile back to it, which is the "add it, remove
+  // it, re-add it" bug this closes off. Cards are ADDED only, never
+  // overwritten/removed.
   const lastEntryRef = useRef(entry);
   useEffect(() => {
     if (entry === lastEntryRef.current) return;
     lastEntryRef.current = entry;
-    if (content === lastSavedRef.current && entry.content !== content) {
+    if (
+      saveFetcher.state === "idle" &&
+      content === lastSavedRef.current &&
+      entry.content !== content
+    ) {
       setContent(entry.content);
       lastSavedRef.current = entry.content;
     }
-  }, [entry, content]);
+  }, [entry, content, saveFetcher.state]);
 
   const lastInitialCardsRef = useRef(initialCards);
   useEffect(() => {
@@ -319,6 +335,9 @@ function PastLogEntry({
       cardSaveTimers.current[fileId] = setTimeout(() => {
         if (newContent === cardLastSaved.current[fileId]) return;
         cardLastSaved.current[fileId] = newContent;
+        // A Card's content is its own `file_refs` row — suppress the
+        // real-time echo for it, same as the Today page's `saveCardNow`.
+        markOwnMutation(fileId);
         saveFetcher.submit(
           { date: entry.date, cardFileId: fileId, content: newContent },
           {
@@ -618,15 +637,36 @@ export default function DailyLogPage() {
     [today, saveFetcher],
   );
 
+  // This tab's own save — suppress the real-time echo for it (see
+  // `useVaultEvents`), the same way uploads/card saves already do. Waits
+  // for the fetcher's own response (rather than tagging synchronously in
+  // `saveNow`) because the readme's underlying vault file id isn't known
+  // until the server hands it back.
+  useEffect(() => {
+    const data = saveFetcher.data;
+    if (data && "success" in data && data.success && "fileId" in data) {
+      markOwnMutation(data.fileId);
+    }
+  }, [saveFetcher.data]);
+
   // Pulls a fresh `serverEntries`/`cardsByDate` in for TODAY specifically —
   // run after every loader re-run (revalidate), but only takes effect once
-  // `today` itself is known (post-hydration) and only touches
-  // `todayContent` when this tab has no unsaved edit pending (`todayContent
-  // === lastSavedRef.current`), so a change from another device can appear
-  // here without ever clobbering something being actively typed on THIS
-  // one. Cards are merged additively only (a brand-new card from elsewhere
-  // is added; an already-known card's content is left alone — its own
-  // save/echo-suppression path owns that).
+  // `today` itself is known (post-hydration). Cards are merged additively
+  // only (a brand-new card from elsewhere is added; an already-known
+  // card's content is left alone — its own save/echo-suppression path owns
+  // that), so that half is always safe. Content is the risky half: only
+  // touch `todayContent` when (a) this tab has no unsaved edit pending
+  // (`todayContent === lastSavedRef.current`) AND (b) no save from this tab
+  // is currently in flight (`saveFetcher.state === "idle"`). (b) closes a
+  // real race — `lastSavedRef.current` is set SYNCHRONOUSLY the moment a
+  // save starts, before the request even lands, so a revalidate that
+  // happens to run while that save is still in flight could otherwise read
+  // the server's PRE-save content, satisfy (a) anyway, and reconcile
+  // `todayContent` back to stale data — which is exactly the "card gets
+  // added, then removed, then re-added" bug this fixes (a coincidental
+  // revalidate briefly winning a race against this tab's own in-flight
+  // save, before that save's own now-tagged echo would have been
+  // suppressed anyway).
   const lastServerEntriesRef = useRef(serverEntries);
   useEffect(() => {
     if (!today) return;
@@ -634,7 +674,11 @@ export default function DailyLogPage() {
     lastServerEntriesRef.current = serverEntries;
 
     const freshContent = serverEntries.find((e) => e.date === today)?.content ?? "";
-    if (todayContent === lastSavedRef.current && freshContent !== todayContent) {
+    if (
+      saveFetcher.state === "idle" &&
+      todayContent === lastSavedRef.current &&
+      freshContent !== todayContent
+    ) {
       setTodayContent(freshContent);
       lastSavedRef.current = freshContent;
     }
@@ -647,7 +691,7 @@ export default function DailyLogPage() {
         return newOnes.length ? [...cards, ...newOnes] : cards;
       });
     }
-  }, [serverEntries, cardsByDate, today, todayContent]);
+  }, [serverEntries, cardsByDate, today, todayContent, saveFetcher.state]);
 
   const scheduleSave = useCallback(
     (content: string) => {
@@ -678,10 +722,15 @@ export default function DailyLogPage() {
     return () => window.removeEventListener("pageshow", handlePageShow);
   }, [revalidator]);
 
-  // Real-time: a file or folder changed anywhere in this human's vault —
+  // Real-time: a daily-log file changed anywhere in this human's vault —
   // e.g. an attachment added from another device, or a past day edited
-  // from the Vault directly (see `data/realtime.server.ts`). Just calling
-  // `revalidator.revalidate()` here would silently do nothing visible: BOTH
+  // from the Vault directly (see `data/realtime.server.ts`). Filtered to
+  // `source === "daily_log" | "daily_log_card"` — nothing on this page
+  // reads from a project/personal file or a folder rename, so reacting to
+  // those would just be noise (and, prior to the `saveFetcher.state` guards
+  // below, actual bug risk: every extra revalidate was one more chance to
+  // land mid-save and read stale data). Just calling `revalidator.revalidate()`
+  // here would otherwise silently do nothing visible anyway: BOTH
   // `todayContent`/`todayCards` (below) and `PastLogEntry`'s own
   // `content`/`cards` are seeded from loader data once and then
   // deliberately frozen in local state afterwards, to protect in-progress
@@ -690,15 +739,21 @@ export default function DailyLogPage() {
   // already-mounted entry keeps ignoring it. The reconciliation effects
   // below (right after `lastSavedRef`, and inside `PastLogEntry` itself)
   // are what actually pull a fresh value in, and ONLY when it's safe to —
-  // i.e. this tab has no unsaved edit of its own pending for that same day.
-  // Debounced briefly since a folder-delete cascade fires many individual
-  // events at once.
+  // i.e. this tab has no unsaved edit of its own pending for that same day
+  // AND no save of its own is currently in flight. Debounced briefly since
+  // a folder-delete cascade (or a day with several attachments) fires many
+  // individual events at once.
   const realtimeRevalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useVaultEvents(
-    useCallback(() => {
-      if (realtimeRevalidateTimer.current) clearTimeout(realtimeRevalidateTimer.current);
-      realtimeRevalidateTimer.current = setTimeout(() => revalidator.revalidate(), 300);
-    }, [revalidator]),
+    useCallback(
+      (event) => {
+        if (event.table !== "file_refs") return;
+        if (event.source !== "daily_log" && event.source !== "daily_log_card") return;
+        if (realtimeRevalidateTimer.current) clearTimeout(realtimeRevalidateTimer.current);
+        realtimeRevalidateTimer.current = setTimeout(() => revalidator.revalidate(), 300);
+      },
+      [revalidator],
+    ),
   );
   useEffect(
     () => () => {

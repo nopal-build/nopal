@@ -14,6 +14,10 @@ export type VaultChangeEvent = {
   name: string | null;
   contentType: string | null;
   archived: boolean;
+  /** `"daily_log"` | `"daily_log_card"` | null — lets a consumer filter to
+   * only the events it could plausibly care about (see the Daily Log page's
+   * own use of this). */
+  source: string | null;
   at: string;
 };
 

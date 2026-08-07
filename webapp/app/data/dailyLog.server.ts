@@ -87,14 +87,24 @@ export async function getDailyLogsSince(startDate: string): Promise<DailyLog[]> 
 /**
  * Primary write entry point — vault is the source of truth.
  * Writes to the vault first, then updates the daily_logs cache.
+ *
+ * Returns the underlying vault `file_refs` id alongside the cache record —
+ * the caller (the daily-log route's action) forwards it to the client so
+ * it can suppress the real-time echo of THIS SAME save (`markOwnMutation`,
+ * see `useVaultEvents`) instead of only ever suppressing a card's own
+ * create/update. Without it, a same-tab save could race a coincidental
+ * revalidate into reading its own not-yet-committed write, momentarily
+ * reconciling back to stale content — the exact "add it, remove it,
+ * re-add it" class of bug this is closing off.
  */
 export async function saveDailyLog(
   humanId: string,
   date: string,
   content: string,
-): Promise<DailyLog | undefined> {
-  await upsertDailyLogReadme(humanId, date, content);
-  return cacheDailyLog(humanId, date, content);
+): Promise<{ entry: DailyLog | undefined; fileId: string | null }> {
+  const fileRef = await upsertDailyLogReadme(humanId, date, content);
+  const entry = await cacheDailyLog(humanId, date, content);
+  return { entry, fileId: fileRef?._id ?? null };
 }
 
 /**
@@ -111,7 +121,8 @@ export async function workableSaveDailyLog(
   humanId: string,
   date: string,
   content: string,
-): Promise<DailyLog | undefined> {
+): Promise<{ entry: DailyLog | undefined; fileId: string | null }> {
+  let fileId: string | null = null;
   try {
     const rootFolder = await getOrCreateVaultFolder(
       humanId,
@@ -138,15 +149,18 @@ export async function workableSaveDailyLog(
     if (existing) {
       // Direct content patch — skips computeMdUpdate so no md_version snapshot
       await updateFileRef(existing._id, { content });
+      fileId = existing._id;
     } else {
       // Vault record missing (e.g. pre-vault entry) — create it properly
-      await upsertDailyLogReadme(humanId, date, content);
+      const created = await upsertDailyLogReadme(humanId, date, content);
+      fileId = created?._id ?? null;
     }
   } catch (err) {
     console.error("workableSaveDailyLog vault update failed:", err);
     // Non-fatal — cache update proceeds even if vault write fails
   }
-  return cacheDailyLog(humanId, date, content);
+  const entry = await cacheDailyLog(humanId, date, content);
+  return { entry, fileId };
 }
 
 /**

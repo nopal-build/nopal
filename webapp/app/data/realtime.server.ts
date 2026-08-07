@@ -52,6 +52,13 @@ export type VaultChangeEvent = {
    * `listFilesMetaByFolderIds`'s own comment), so a consumer should treat
    * this exactly like a DELETE for cache purposes. */
   archived: boolean;
+  /** `file_refs.source` (`"daily_log"` | `"daily_log_card"` | undefined) —
+   * lets a consumer like the Daily Log page filter to only the events that
+   * could plausibly affect it, instead of reacting to every vault change
+   * anywhere (a project file upload, an unrelated shared folder, …). Fewer
+   * spurious revalidates also means fewer chances to hit the same-tab
+   * stale-read race `saveFetcher.state` guards against client-side. */
+  source: string | null;
   at: string;
 };
 
@@ -136,6 +143,8 @@ function handleNotification(
         ? readString((result as Record<string, unknown>).content_type)
         : null,
     archived: table === "file_refs" ? !!archivedAt : false,
+    source:
+      table === "file_refs" ? readString((result as Record<string, unknown>).source) : null,
     at: new Date().toISOString(),
   };
 
