@@ -73,6 +73,7 @@ authenticator.use(
     async ({ email, request }) => {
       const human = await getHumanByEmail(email);
       if (!human) throw new Error("No account found for that email address.");
+      if (human.suspendedAt) throw new Error("This account has been suspended.");
       // Set user in session; strategy will catch this Response, add _totp clearing cookie, and re-throw
       const session = await sessionStorage.getSession(
         request.headers.get("cookie"),
@@ -86,6 +87,10 @@ authenticator.use(
       session.unset("impersonatorEmail");
       session.unset("impersonationExpiresAt");
       session.set("user", human);
+      // Anchors the invalidation check in `getUser` — any `forceLogoutHuman`/
+      // `suspendHuman` call that happens *after* this moment will end this
+      // session on its next request.
+      session.set("sessionIssuedAt", Date.now());
 
       // If `/login` was reached via a `redirectTo` (e.g. from `/cli-login`),
       // it stashed the target in its own short-lived cookie — honor it here
@@ -136,7 +141,8 @@ export async function getUser(request: Request): Promise<Human | null> {
   const session = await sessionStorage.getSession(
     request.headers.get("cookie"),
   );
-  const user = session.get("user") ?? null;
+  const cachedUser: Human | null = session.get("user") ?? null;
+  if (!cachedUser) return null;
 
   // If an impersonation session has outlived its window (see
   // `startImpersonation`), treat the real admin as the authorization
@@ -147,16 +153,36 @@ export async function getUser(request: Request): Promise<Human | null> {
   // authorization is never wrong even a moment past expiry.
   const impersonatorId = session.get("impersonatorId");
   const expiresAt = session.get("impersonationExpiresAt");
-  if (
-    impersonatorId &&
+  const impersonationExpired =
+    Boolean(impersonatorId) &&
     typeof expiresAt === "number" &&
-    Date.now() > expiresAt
-  ) {
-    const admin = await getHumanById(impersonatorId);
-    if (admin) return admin;
+    Date.now() > expiresAt;
+  const targetId = impersonationExpired ? impersonatorId : cachedUser._id;
+
+  // Sessions are plain signed cookies with no server-side revocation list —
+  // an Admin/Super's "force logout" or "suspend" (see `forceLogoutHuman`/
+  // `suspendHuman`) can only take effect on an already-issued cookie by
+  // re-checking the live record on every request, rather than trusting the
+  // (possibly stale, possibly since-revoked) snapshot cached in the cookie.
+  const current = await getHumanById(targetId);
+  if (!current || current.suspendedAt) return null;
+
+  // Skip the invalidation-timestamp check when we just fell back to the
+  // admin above — that path is re-authenticating as the *admin*, whose own
+  // session validity was already established at their original login, not
+  // at whatever moment `sessionIssuedAt` reflects (impersonation start).
+  if (!impersonationExpired) {
+    const sessionIssuedAt = session.get("sessionIssuedAt");
+    if (
+      current.sessionsInvalidatedAt &&
+      (typeof sessionIssuedAt !== "number" ||
+        new Date(current.sessionsInvalidatedAt).getTime() > sessionIssuedAt)
+    ) {
+      return null;
+    }
   }
 
-  return user;
+  return current;
 }
 
 /**
@@ -224,7 +250,7 @@ async function resolveBearerHuman(
   if (!token || !isApiTokenValid(token)) return null;
 
   const human = await getHumanById(token.humanId);
-  if (!human) return null;
+  if (!human || human.suspendedAt) return null;
 
   // Best-effort — never let a logging failure block the actual request.
   touchApiTokenLastUsed(token._id).catch((e) =>
@@ -294,6 +320,12 @@ export async function startImpersonation(
       error: "That account no longer exists.",
     };
   }
+  if (target.suspendedAt) {
+    return {
+      setCookie: await sessionStorage.commitSession(session),
+      error: "That account is suspended.",
+    };
+  }
 
   const permissionError = canImpersonate(actor, target);
   if (permissionError) {
@@ -304,6 +336,7 @@ export async function startImpersonation(
   }
 
   session.set("user", target);
+  session.set("sessionIssuedAt", Date.now());
   session.set("impersonatorId", actor._id);
   session.set("impersonatorName", actor.name);
   session.set("impersonatorEmail", actor.email);
@@ -350,7 +383,10 @@ export async function stopImpersonation(
   session.unset("impersonatorName");
   session.unset("impersonatorEmail");
   session.unset("impersonationExpiresAt");
-  if (admin) session.set("user", admin);
+  if (admin) {
+    session.set("user", admin);
+    session.set("sessionIssuedAt", Date.now());
+  }
 
   const setCookie = await sessionStorage.commitSession(session);
 

@@ -53,6 +53,24 @@ export type Human = Data & {
   pendingEmailCode?: string;
   pendingEmailCodeExpiresAt?: string;
   pendingEmailAttempts?: number;
+  /**
+   * Bumped to "now" by `forceLogoutHuman`/`suspendHuman` to immediately
+   * invalidate every outstanding browser session for this human. Sessions
+   * are plain signed cookies with no server-side revocation list, so
+   * `getUser` in auth.server.ts is what actually enforces this, by
+   * comparing it against the session's own `sessionIssuedAt` on every
+   * request.
+   */
+  sessionsInvalidatedAt?: string;
+  /**
+   * When set, this account is suspended: immediately logged out (see
+   * `sessionsInvalidatedAt`, always bumped alongside this) and blocked
+   * from logging back in — by TOTP code, passkey, or API/CLI token —
+   * until an Admin/Super lifts it via `unsuspendHuman`.
+   */
+  suspendedAt?: string;
+  /** Who suspended this account, for the audit trail shown alongside it. */
+  suspendedBy?: string;
 };
 
 export type Humans = Collection<Human>;
@@ -107,6 +125,38 @@ export async function updateHumanRole(
   role: Role,
 ): Promise<Human | undefined> {
   await merge("humans", id, { role });
+  return getHumanById(id);
+}
+
+/** Immediately invalidates every outstanding browser session for this human — see `getUser` in auth.server.ts, which is what enforces it. */
+export async function forceLogoutHuman(id: string): Promise<Human | undefined> {
+  await merge("humans", id, {
+    sessionsInvalidatedAt: new Date().toISOString(),
+  });
+  return getHumanById(id);
+}
+
+/**
+ * Suspends this human's account: forces an immediate logout (see
+ * `forceLogoutHuman`) and, until `unsuspendHuman` is called, blocks any
+ * future login (TOTP, passkey, or API/CLI token — see `getUser` and
+ * `resolveBearerHuman` in auth.server.ts).
+ */
+export async function suspendHuman(
+  id: string,
+  suspendedBy: string,
+): Promise<Human | undefined> {
+  const now = new Date().toISOString();
+  await merge("humans", id, {
+    suspendedAt: now,
+    suspendedBy,
+    sessionsInvalidatedAt: now,
+  });
+  return getHumanById(id);
+}
+
+export async function unsuspendHuman(id: string): Promise<Human | undefined> {
+  await merge("humans", id, { suspendedAt: null, suspendedBy: null });
   return getHumanById(id);
 }
 

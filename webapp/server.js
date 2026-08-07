@@ -1,5 +1,6 @@
 import { createRequestHandler } from "@react-router/express";
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 
 const app = express();
@@ -32,6 +33,78 @@ const viteDevServer =
 app.use(
   viteDevServer ? viteDevServer.middlewares : express.static("build/client"),
 );
+
+// ── Rate limiting ────────────────────────────────────────────────────────────
+// Placed AFTER the static-file middleware above, so requests for hashed
+// JS/CSS/image assets (served directly by `express.static`/Vite and never
+// reach here) don't eat into anyone's quota — only real page loads and API
+// calls do. Keyed by IP (via `trust proxy` above, so this correctly reads
+// the real client IP behind Fly's proxy rather than Fly's own address).
+//
+// Backed by in-memory counters, which is fine today (single Fly machine —
+// see `min_machines_running`/no autoscaling in fly.toml). If this app ever
+// runs multiple machines, swap the store for a shared one (e.g. Redis/
+// Upstash via `rate-limit-redis`) so limits are enforced across instances.
+const rateLimitHeaders = { standardHeaders: true, legacyHeaders: false };
+
+// Broad safety net: protects the server/DB from being slammed by any one IP.
+const generalLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 600,
+  ...rateLimitHeaders,
+  message: { error: "Too many requests. Please slow down and try again shortly." },
+});
+app.use(generalLimiter);
+
+// Auth-adjacent endpoints: unauthenticated by design, so IP is the only
+// signal available to slow down brute-force/credential-stuffing attempts.
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  ...rateLimitHeaders,
+  message: { error: "Too many attempts. Please wait a minute and try again." },
+});
+app.use(["/api/passkeys", "/api/cli-auth/exchange"], authLimiter);
+
+// PhyLog agent runs: each call is a real, billed Anthropic API request.
+const aiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  ...rateLimitHeaders,
+  message: { error: "PhyLog run limit reached for this hour. Please try again later." },
+});
+app.use("/api/phylog", aiLimiter);
+
+// Uploads: each call costs S3 storage/transfer.
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  ...rateLimitHeaders,
+  message: { error: "Too many uploads. Please wait a bit and try again." },
+});
+app.use(
+  [
+    "/api/upload",
+    "/api/daily-log/upload",
+    "/api/vault/upload",
+    "/api/vault/presign",
+    "/api/vault/multipart-init",
+    "/api/vault/multipart-part",
+    "/api/vault/multipart-complete",
+    "/api/upload/presign",
+  ],
+  uploadLimiter,
+);
+
+// Public, no-session forms: each submission triggers an email send (and, for
+// the WC waiver, a permanent legal record) — worth throttling per IP.
+const publicFormLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  ...rateLimitHeaders,
+  message: { error: "Too many submissions. Please try again later." },
+});
+app.use(["/contact", "/docs/wc-waiver"], publicFormLimiter);
 
 const build = viteDevServer
   ? () => viteDevServer.ssrLoadModule("virtual:react-router/server-build")

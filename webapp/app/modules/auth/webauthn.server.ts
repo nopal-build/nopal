@@ -285,6 +285,13 @@ export async function verifyPasskeyAuthentication(
       error: "No account found for that passkey.",
     };
   }
+  if (human.suspendedAt) {
+    return {
+      verified: false,
+      setCookie: await sessionStorage.commitSession(session),
+      error: "This account has been suspended.",
+    };
+  }
 
   await updatePasskeyCounter(
     passkey._id,
@@ -300,6 +307,9 @@ export async function verifyPasskeyAuthentication(
   session.unset("impersonatorEmail");
   session.unset("impersonationExpiresAt");
   session.set("user", human);
+  // Anchors the invalidation check in `getUser` — see the same call in
+  // auth.server.ts's TOTP success callback.
+  session.set("sessionIssuedAt", Date.now());
   const setCookie = await sessionStorage.commitSession(session);
 
   return { verified: true, setCookie };

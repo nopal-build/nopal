@@ -11,7 +11,7 @@ export const meta: MetaFunction = () => [
   },
 ];
 
-const LAST_UPDATED = "July 15, 2026";
+const LAST_UPDATED = "August 6, 2026";
 
 export default function Privacy() {
   return (
@@ -81,6 +81,20 @@ export default function Privacy() {
                 can access them. Every request for a file's contents is
                 checked against who's signed in; files are never made public
                 by default.
+              </p>
+            </SubSection>
+            <SubSection title="Keeping Nopal available (rate limiting)">
+              <p>
+                Like most web apps, our servers briefly note the IP address
+                of incoming requests so we can detect and throttle unusually
+                high traffic from any one source — this protects Nopal from
+                being knocked over (or running up a surprise bill) by a
+                traffic spike or an automated script. This only lives in
+                server memory for a few minutes to enforce those limits; it
+                isn't written to our database, linked to your account, sold,
+                or used for tracking or advertising. (The Workers' Comp
+                Waiver form below is the one exception, where an IP is kept
+                as part of a permanent legal record.)
               </p>
             </SubSection>
             <SubSection title="Workers' Comp Waiver form">

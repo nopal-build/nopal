@@ -21,6 +21,9 @@ import {
   getHumanById,
   updateHumanName,
   updateHumanRole,
+  forceLogoutHuman,
+  suspendHuman,
+  unsuspendHuman,
   isEmailTakenByAnotherHuman,
   startEmailChange,
   isPendingEmailCodeValid,
@@ -664,6 +667,147 @@ async function handleUpdateRelationshipRole(request: Request, form: FormData) {
   });
 }
 
+/**
+ * Immediately end every browser session a human currently has open,
+ * forcing them to sign back in (email code or passkey) the next time they
+ * use Nopal. Same permission shape as `handleUpdateRelationshipRole`: only
+ * Admins/Supers may call this, a Super can never be forced out, and an
+ * Admin can force out another Admin but never themselves.
+ */
+async function handleForceLogout(request: Request, form: FormData) {
+  const user = await getUser(request);
+  if (!user) return redirect("/login");
+
+  const humanId = String(form.get("humanId") ?? "");
+
+  if (!isAdminOrSuper(user)) {
+    return data(
+      {
+        intent: "force-logout" as const,
+        error: "You don't have permission to do that.",
+        humanId,
+      },
+      { status: 403 },
+    );
+  }
+
+  const target = await getHumanById(humanId);
+  if (!target) {
+    return data(
+      { intent: "force-logout" as const, error: "Human not found.", humanId },
+      { status: 404 },
+    );
+  }
+
+  if (target.role === "Super") {
+    return data(
+      {
+        intent: "force-logout" as const,
+        error: "A Super's sessions can never be forced out.",
+        humanId,
+      },
+      { status: 403 },
+    );
+  }
+
+  if (target._id === user._id) {
+    return data(
+      {
+        intent: "force-logout" as const,
+        error: "You can't force yourself out.",
+        humanId,
+      },
+      { status: 403 },
+    );
+  }
+
+  await forceLogoutHuman(humanId);
+  return data({ intent: "force-logout" as const, success: true, humanId });
+}
+
+/**
+ * Suspends or unsuspends a human's account. Suspending immediately force-
+ * logs them out (see `handleForceLogout`) and blocks any future login —
+ * email code, passkey, or CLI/API token — until unsuspended. Same
+ * permission shape as role changes/force-logout, but only applied when
+ * *suspending* — lifting a suspension is never destructive, so it's open
+ * to any Admin/Super regardless of the target's role.
+ */
+async function handleUpdateAccountSuspension(request: Request, form: FormData) {
+  const user = await getUser(request);
+  if (!user) return redirect("/login");
+
+  const humanId = String(form.get("humanId") ?? "");
+  const suspended = form.get("suspended") === "true";
+
+  if (!isAdminOrSuper(user)) {
+    return data(
+      {
+        intent: "update-account-suspension" as const,
+        error: "You don't have permission to do that.",
+        humanId,
+      },
+      { status: 403 },
+    );
+  }
+
+  const target = await getHumanById(humanId);
+  if (!target) {
+    return data(
+      {
+        intent: "update-account-suspension" as const,
+        error: "Human not found.",
+        humanId,
+      },
+      { status: 404 },
+    );
+  }
+
+  if (suspended) {
+    if (target.role === "Super") {
+      return data(
+        {
+          intent: "update-account-suspension" as const,
+          error: "A Super's account can never be suspended.",
+          humanId,
+        },
+        { status: 403 },
+      );
+    }
+    if (target._id === user._id) {
+      return data(
+        {
+          intent: "update-account-suspension" as const,
+          error: "You can't suspend yourself.",
+          humanId,
+        },
+        { status: 403 },
+      );
+    }
+  }
+
+  const updated = suspended
+    ? await suspendHuman(humanId, user._id)
+    : await unsuspendHuman(humanId);
+  if (!updated) {
+    return data(
+      {
+        intent: "update-account-suspension" as const,
+        error: "Failed to update account.",
+        humanId,
+      },
+      { status: 500 },
+    );
+  }
+
+  return data({
+    intent: "update-account-suspension" as const,
+    success: true,
+    humanId,
+    suspended: Boolean(updated.suspendedAt),
+  });
+}
+
 async function handleDeletePasskey(request: Request, form: FormData) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
@@ -759,6 +903,12 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   if (intent === "update-relationship-role") {
     return handleUpdateRelationshipRole(request, form);
+  }
+  if (intent === "force-logout") {
+    return handleForceLogout(request, form);
+  }
+  if (intent === "update-account-suspension") {
+    return handleUpdateAccountSuspension(request, form);
   }
   if (intent === "delete-passkey") {
     return handleDeletePasskey(request, form);
@@ -871,13 +1021,15 @@ function RelationshipCard({
   const canImpersonateRow =
     Boolean(onImpersonate) && (viewerRole === "Super" || !isAutomatic);
 
-  // Mirrors handleUpdateRelationshipRole() server-side: Admins/Supers can
-  // promote/demote anyone except a Super, whose role is fixed. (An Admin
-  // demoting *themselves* is blocked server-side too, but that case never
+  // Mirrors the server-side checks in handleUpdateRelationshipRole/
+  // handleForceLogout/handleUpdateAccountSuspension: Admins/Supers can
+  // manage anyone except a Super, whose account is untouchable. (An Admin
+  // acting on *themselves* is blocked server-side too, but that case never
   // reaches this row since related-humans lists never include the viewer.)
   const viewerIsAdminOrSuper = viewerRole === "Admin" || viewerRole === "Super";
-  const canManageRoleRow = viewerIsAdminOrSuper && human.role !== "Super";
+  const canManageAccountRow = viewerIsAdminOrSuper && human.role !== "Super";
   const nextRole: Role = human.role === "Admin" ? "Human" : "Admin";
+  const isSuspended = Boolean(human.suspendedAt);
   const [impersonating, setImpersonating] = useState(false);
   const [impersonateError, setImpersonateError] = useState<string | null>(
     null,
@@ -990,6 +1142,49 @@ function RelationshipCard({
     );
   }
 
+  const forceLogoutFetcher = useFetcher<typeof action>();
+  const forceLogoutData =
+    forceLogoutFetcher.data?.intent === "force-logout" &&
+    forceLogoutFetcher.data.humanId === human._id
+      ? forceLogoutFetcher.data
+      : undefined;
+  const forcingLogout = forceLogoutFetcher.state !== "idle";
+  const [confirmForceLogoutOpen, setConfirmForceLogoutOpen] = useState(false);
+
+  function submitForceLogout() {
+    forceLogoutFetcher.submit(
+      { intent: "force-logout", humanId: human._id },
+      { method: "post" },
+    );
+  }
+
+  const suspendFetcher = useFetcher<typeof action>();
+  const suspendData =
+    suspendFetcher.data?.intent === "update-account-suspension" &&
+    suspendFetcher.data.humanId === human._id
+      ? suspendFetcher.data
+      : undefined;
+  const suspending = suspendFetcher.state !== "idle";
+  const [confirmSuspendOpen, setConfirmSuspendOpen] = useState(false);
+
+  useEffect(() => {
+    if (suspendData && "success" in suspendData) {
+      setConfirmSuspendOpen(false);
+      revalidate();
+    }
+  }, [suspendData, revalidate]);
+
+  function submitSuspension(suspended: boolean) {
+    suspendFetcher.submit(
+      {
+        intent: "update-account-suspension",
+        humanId: human._id,
+        suspended: suspended ? "true" : "false",
+      },
+      { method: "post" },
+    );
+  }
+
   return (
     <div className="good-box p-3 flex items-center justify-between gap-4">
       <div
@@ -1010,9 +1205,30 @@ function RelationshipCard({
         {impersonateError && (
           <div className="red-text">{impersonateError}</div>
         )}
+        {forceLogoutData && "error" in forceLogoutData && (
+          <div className="red-text">{forceLogoutData.error}</div>
+        )}
+        {forceLogoutData && "success" in forceLogoutData && (
+          <div style={{ color: "var(--green)" }}>
+            Logged out — they'll need to sign back in.
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3 shrink-0">
         {isAutomatic && <Badge>{human.role}</Badge>}
+
+        {isSuspended && (
+          <span
+            className="shrink-0"
+            title={
+              human.suspendedAt
+                ? `Suspended ${formatSignedAt(human.suspendedAt)}`
+                : undefined
+            }
+          >
+            <Badge variant="danger">Suspended</Badge>
+          </span>
+        )}
 
         {pendingInvite && (
           <>
@@ -1138,7 +1354,7 @@ function RelationshipCard({
           </>
         )}
 
-        {canManageRoleRow && (
+        {canManageAccountRow && (
           <Modal
             open={confirmRoleOpen}
             onClose={() => setConfirmRoleOpen(false)}
@@ -1188,7 +1404,85 @@ function RelationshipCard({
           </Modal>
         )}
 
-        {(canImpersonateRow || canManageRoleRow) &&
+        {canManageAccountRow && (
+          <Modal
+            open={confirmForceLogoutOpen}
+            onClose={() => setConfirmForceLogoutOpen(false)}
+            title="Force logout"
+          >
+            <div className="flex flex-col gap-4">
+              <p className="text-sm">
+                Force <strong>{human.name}</strong> to log out of every
+                device? They'll need to sign back in — with an email code or
+                passkey — the next time they use Nopal.
+              </p>
+              {forceLogoutData && "error" in forceLogoutData && (
+                <div className="red-text text-sm">{forceLogoutData.error}</div>
+              )}
+              <div className="flex items-center justify-end gap-4">
+                <button
+                  type="button"
+                  className="link text-sm"
+                  disabled={forcingLogout}
+                  onClick={() => setConfirmForceLogoutOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={forcingLogout}
+                  onClick={submitForceLogout}
+                >
+                  {forcingLogout ? "Logging out…" : "Force logout"}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {canManageAccountRow && (
+          <Modal
+            open={confirmSuspendOpen}
+            onClose={() => setConfirmSuspendOpen(false)}
+            title="Suspend account"
+          >
+            <div className="flex flex-col gap-4">
+              <p className="text-sm">
+                Suspend <strong>{human.name}</strong>? They'll be logged out
+                of every device immediately, and won't be able to log back
+                in — by email code, passkey, or CLI/API token — until you
+                unsuspend them.
+              </p>
+              {suspendData && "error" in suspendData && (
+                <div className="red-text text-sm">{suspendData.error}</div>
+              )}
+              <div className="flex items-center justify-end gap-4">
+                <button
+                  type="button"
+                  className="link text-sm"
+                  disabled={suspending}
+                  onClick={() => setConfirmSuspendOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={suspending}
+                  style={
+                    { "--btn-color": "var(--red)" } as React.CSSProperties
+                  }
+                  onClick={() => submitSuspension(true)}
+                >
+                  {suspending ? "Suspending…" : "Suspend"}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {(canImpersonateRow || canManageAccountRow) &&
           (impersonating ? (
             <span className="text-sm font-mono subtle-text shrink-0">
               Logging in…
@@ -1200,7 +1494,7 @@ function RelationshipCard({
                 ...(canImpersonateRow
                   ? [{ label: "Login as user", onClick: handleLoginAsUser }]
                   : []),
-                ...(canManageRoleRow
+                ...(canManageAccountRow
                   ? [
                       {
                         label:
@@ -1208,6 +1502,20 @@ function RelationshipCard({
                             ? "Remove admin access"
                             : "Make admin",
                         onClick: () => setConfirmRoleOpen(true),
+                      },
+                      {
+                        label: "Force logout",
+                        onClick: () => setConfirmForceLogoutOpen(true),
+                      },
+                      {
+                        label: isSuspended
+                          ? "Unsuspend account"
+                          : "Suspend account",
+                        danger: !isSuspended,
+                        onClick: () =>
+                          isSuspended
+                            ? submitSuspension(false)
+                            : setConfirmSuspendOpen(true),
                       },
                     ]
                   : []),

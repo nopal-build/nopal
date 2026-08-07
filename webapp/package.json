@@ -45,6 +45,7 @@
     "@types/pdfkit": "^0.17.6",
     "cross-env": "^7.0.3",
     "express": "^4.19.2",
+    "express-rate-limit": "^8.6.2",
     "isbot": "^4.4.0",
     "lexical": "^0.35.0",
     "mdast-util-directive": "^3.1.0",
