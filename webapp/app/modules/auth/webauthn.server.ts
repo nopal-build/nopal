@@ -224,7 +224,15 @@ export async function generatePasskeyAuthenticationOptions(
 export async function verifyPasskeyAuthentication(
   request: Request,
   response: AuthenticationResponseJSON,
-): Promise<{ verified: boolean; setCookie: string; error?: string }> {
+): Promise<{
+  verified: boolean;
+  setCookie: string;
+  error?: string;
+  /** True when the identified human's account is suspended — callers
+   * should route the visitor to /login-error rather than showing `error`
+   * as an ordinary inline validation message. */
+  suspended?: boolean;
+}> {
   const session = await sessionStorage.getSession(
     request.headers.get("cookie"),
   );
@@ -288,6 +296,7 @@ export async function verifyPasskeyAuthentication(
   if (human.suspendedAt) {
     return {
       verified: false,
+      suspended: true,
       setCookie: await sessionStorage.commitSession(session),
       error: "This account has been suspended.",
     };

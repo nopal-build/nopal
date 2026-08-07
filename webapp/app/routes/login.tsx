@@ -43,6 +43,7 @@ export async function action({ request }: ActionFunctionArgs) {
       { status: 400 },
     );
   }
+  if (user.suspendedAt) return redirect("/login-error");
 
   // Strategy sends TOTP and throws redirect to /verify (redirectTo, if any,
   // rides along in a short-lived cookie so /verify's success lands there).
@@ -77,6 +78,10 @@ export default function Login() {
         body: JSON.stringify({ response: authResponse }),
       });
       const verifyData = await verifyRes.json();
+      if (verifyData.suspended) {
+        navigate("/login-error");
+        return;
+      }
       if (!verifyRes.ok || !verifyData.verified) {
         throw new Error(verifyData.error ?? "Could not verify passkey.");
       }

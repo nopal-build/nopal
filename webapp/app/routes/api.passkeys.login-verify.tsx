@@ -27,14 +27,12 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  const { verified, setCookie, error } = await verifyPasskeyAuthentication(
-    request,
-    body.response,
-  );
+  const { verified, setCookie, error, suspended } =
+    await verifyPasskeyAuthentication(request, body.response);
 
   if (!verified) {
     return Response.json(
-      { error: error ?? "Could not verify passkey" },
+      { error: error ?? "Could not verify passkey", suspended },
       { status: 400, headers: { "Set-Cookie": setCookie } },
     );
   }

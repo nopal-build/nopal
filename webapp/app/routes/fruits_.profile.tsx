@@ -1152,6 +1152,7 @@ function RelationshipCard({
   const [confirmForceLogoutOpen, setConfirmForceLogoutOpen] = useState(false);
 
   function submitForceLogout() {
+    setConfirmForceLogoutOpen(false);
     forceLogoutFetcher.submit(
       { intent: "force-logout", humanId: human._id },
       { method: "post" },
@@ -1817,6 +1818,10 @@ export default function Profile() {
         body: JSON.stringify({ response: authResponse }),
       });
       const verifyData = await verifyRes.json();
+      if (verifyData.suspended) {
+        window.location.href = "/login-error";
+        return;
+      }
       if (!verifyRes.ok || !verifyData.verified) {
         throw new Error(verifyData.error ?? "Could not verify passkey.");
       }

@@ -73,7 +73,13 @@ authenticator.use(
     async ({ email, request }) => {
       const human = await getHumanByEmail(email);
       if (!human) throw new Error("No account found for that email address.");
-      if (human.suspendedAt) throw new Error("This account has been suspended.");
+      // `/login`'s action already blocks a suspended account before a code
+      // is ever sent — this is a defense-in-depth backstop for the (rare)
+      // case where the account was suspended *after* the code went out but
+      // before it was entered here. A plain `throw redirect(...)` (like the
+      // success path below) sends them straight to /login-error instead of
+      // through the strategy's normal failureRedirect-to-/verify handling.
+      if (human.suspendedAt) throw redirect("/login-error");
       // Set user in session; strategy will catch this Response, add _totp clearing cookie, and re-throw
       const session = await sessionStorage.getSession(
         request.headers.get("cookie"),
