@@ -34,7 +34,7 @@ export const humansSeed: SeedTable<Human> = {
       id: "admin_4",
       name: "Cam W",
       email: "cam@nopal.build",
-      role: "Admin",
+      role: "Human",
     },
     {
       id: "human_1",
