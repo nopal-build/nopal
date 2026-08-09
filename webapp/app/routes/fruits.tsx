@@ -109,7 +109,6 @@ export default function Fruits() {
         {/* Quick links */}
         <div className="flex flex-col gap-4 mb-10">
           <QuickLink to="/fruits/daily-log" label="Daily Log" />
-          <QuickLink to="/fruits/vault" label="Vault" />
         </div>
 
         {/* Projects */}

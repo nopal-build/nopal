@@ -1196,6 +1196,162 @@ Interacting mode first, without needing that decision resolved.
       body (not generalized to "any non-root paragraph," e.g.
       blockquotes) — that's the concrete, requested gap; broadening
       further can follow if a real need shows up elsewhere.
+13. **Done — a basic grid (`:::grid{columns="N"}` / `::col`), STATIC/
+    Interacting-mode rendering only, by deliberate, documented design.**
+    Motivating case: side-by-side layouts (image comparisons, a small
+    gallery of cells) that don't need any of the live-editing machinery
+    every other built-in interactable above was built for.
+    - **Built directly into `renderDirective` (`components/OxRenderer.tsx`),
+      same category as `::file`/`::card`/`:::toggle` — NOT a
+      caller-registered `DirectiveRegistry` entry**, even though a plain
+      registry entry was the first idea floated (see "Key resolved
+      decisions" pattern of starting narrow via the registry before
+      reaching for a built-in). Rejected once it became clear cell-
+      splitting needs the container's RAW child mdast nodes — the
+      `DirectiveRenderer` contract only ever hands a registered renderer
+      the already-rendered `children: ReactNode` for a container
+      directive, which is exactly the wrong shape once cells need to be
+      cut apart on `::col` markers first.
+    - **Markdown shape, no nested `:::` fences needed**: `::col` is a
+      LEAF directive (never nests, no fence-length bookkeeping the way a
+      nested container directive would need), used purely as a
+      cell-break marker within the outer `:::grid{...}` container's own
+      flat child list:
+      ```
+      :::grid{columns="3"}
+      First cell
+
+      ::col
+      Second cell
+
+      ::col
+      Third cell
+      :::
+      ```
+      `splitGridCells` walks `node.children` once, starting a new cell
+      array every time it hits a `leafDirective` named `col`; content
+      before the first `::col` is always the first cell, so a `:::grid`
+      with zero `::col` markers degrades to one full-width cell rather
+      than an error. A stray `::col` used OUTSIDE a `:::grid{...}` falls
+      through to the ordinary "unknown directive" rendering every other
+      directive misuse already gets — no special-casing needed there.
+    - **`columns` defaults to the cell count, not a fixed number** —
+      `clampGridColumns` only falls back to a hardcoded default when the
+      attribute is missing/invalid, and clamps either way to a sane
+      `1..6` range. This means the common case ("split content into N
+      groups, lay them out side by side") needs no attribute at all;
+      `columns` only needs setting to force a DIFFERENT column count than
+      the number of `::col`-separated groups (e.g. 4 cells wrapping at 2
+      columns).
+    - **`.ox-grid-directive`/`.ox-grid-cell` (`oxmarkdown.css`)**: plain
+      CSS Grid, `gap: var(--ox-grid)` so the seams between cells stay on
+      the same 41px rhythm as everything else, collapsing to a single
+      column below the same `640px` breakpoint `OxPopover`/the `@`-mention
+      menu already use for mobile. Each cell keeps its own normal
+      `renderBlockNodes` rhythm internally (a cell with a heading and
+      several paragraphs reads top-to-bottom exactly like ordinary prose,
+      just narrower).
+    - **Deliberately, explicitly NOT given an Editing-mode rendering.**
+      `editingTransforms.ts`'s `convertBlock` has no special case for
+      `name === "grid"` (unlike `"toggle"`) — a `:::grid{...}` container
+      falls through to the ordinary `$createOxDirectiveNode(node)` path,
+      same as any other unregistered container directive, which means
+      `editingNodes.tsx`'s `OxDirectiveDecorator` shows it as a plain
+      "Unknown block: ::grid" placeholder while editing rather than a
+      real grid preview. This is a genuine, intentional gap, not an
+      oversight: **a grid's whole point is a passive, read-only layout**
+      (image galleries, side-by-side comparisons) — unlike `::file`'s
+      caption or `::card`'s content, there was never a real need for live
+      per-cell typing to justify the much bigger lift a real Editing-mode
+      preview would need (either teaching the generic directive-decorator
+      path to render arbitrary nested content read-only, or promoting
+      `grid` to a real container `ElementNode` the way `:::toggle` needed
+      to become). Nothing is destroyed by this gap — `OxDirectiveNode`
+      holds the exact original mdast node and round-trips it losslessly
+      through export regardless of how (or whether) it's previewed while
+      typing — confirmed by the project's own three-leg testing
+      convention (below): input markdown, rendered static/Interacting
+      output, and re-exported markdown for a `:::grid{...}` sample all
+      agree. If a real need for live grid editing shows up later, promote
+      it the same way Toggle List was promoted, rather than guessing at
+      it blind now.
+    - Demoed on the `fruits/styles/oxmarkdown` decision log (`DEFAULT_SAMPLE`)
+      alongside the other built-in directives.
+14. **Done — a basic gallery (`:::gallery{max-columns="N"}`), STATIC/
+    Interacting-mode rendering only, same deliberate scope as Grid (step
+    13) and for the same reasons.** Motivating case: the actual thing Grid
+    itself was originally motivated by ("side-by-side layouts, image
+    comparisons, a small gallery of cells") but purpose-built for photos
+    specifically, with an auto-computed column count instead of an
+    explicit `columns` attribute.
+    - **Built directly into `renderDirective` (`components/OxRenderer.tsx`),
+      same built-in category as `::file`/`::card`/`:::toggle`/`:::grid` —
+      NOT a caller-registered `DirectiveRegistry` entry**, for the exact
+      same reason Grid isn't one: laying photos out needs the container's
+      RAW child mdast nodes (to find every `image` node recursively), and
+      the `DirectiveRenderer` contract only ever hands a registered
+      renderer the already-rendered `children: ReactNode` for a container
+      directive.
+    - **Deliberately NO new per-photo syntax** — a gallery's children are
+      just ordinary, standard `![alt](url)` markdown images, typically one
+      per line/paragraph:
+      ```
+      :::gallery{max-columns="3"}
+      ![First photo caption](https://example.com/1.jpg)
+      ![Second photo caption](https://example.com/2.jpg)
+      ![](https://example.com/3.jpg)
+      :::
+      ```
+      `collectGalleryImages` walks `node.children` recursively (any
+      descendant, not just direct children, since a real markdown image
+      normally sits one level down inside its own `paragraph`) collecting
+      every `image` node in document order. This is what makes a gallery
+      degrade GRACEFULLY: a renderer that doesn't understand the `gallery`
+      directive at all (Obsidian, GitHub, a bare text editor) still shows
+      every photo, just stacked instead of tiled, unlike a bespoke
+      `::photo{fileId=...}`-style directive would. An empty gallery (no
+      `image` nodes found at all) degrades further still, falling back to
+      plain `renderBlockNodes` of whatever content IS there — same
+      graceful-degradation instinct as Grid's own "zero `::col` markers"
+      case.
+    - **Column count is auto-computed from the photo count, then capped
+      by `max-columns`** — deliberately different from Grid's own
+      `columns` attribute (which defaults to the literal cell count with
+      no other logic): 1 photo → 1 column always, 2–6 photos → 2 columns,
+      7+ photos → 3 columns (`computeGalleryColumns`'s `auto` value).
+      `max-columns` defaults to, AND is hard-capped at, `GALLERY_COLUMN_CAP`
+      (`3`) — unlike Grid's `MAX_GRID_COLUMNS` (`6`, a sanity ceiling
+      against typos), this ceiling is a real, current product constraint:
+      `max-columns` can only ever bring the column count DOWN from what
+      the photo count would otherwise produce, never raise it past 3 —
+      there is no way to get a 4+ column gallery right now. Final column
+      count is `min(auto, clamp(max-columns, 1, 3))`.
+    - **`.ox-gallery-directive`/`.ox-gallery-item` (`oxmarkdown.css`)**:
+      plain CSS Grid (`grid-template-columns: repeat(var(--ox-gallery-
+      columns, 3), 1fr)`), `gap: var(--ox-grid)` for the same 41px rhythm
+      every other seam in OxMarkdown uses, collapsing to a single column
+      below the same `640px` breakpoint `OxPopover`/the `@`-mention
+      menu/`:::grid` already use for mobile. Each photo renders as a
+      square `aspect-ratio: 1 / 1` tile (`object-fit: cover`), with the
+      image's own `alt` text doubling as an optional `<figcaption>` below
+      it when non-empty — no separate caption attribute/syntax needed,
+      since standard markdown images already carry exactly that field.
+    - **Deliberately, explicitly NOT given an Editing-mode rendering** —
+      identical reasoning and identical mechanism to Grid (step 13):
+      `editingTransforms.ts`'s `convertBlock` has no special case for
+      `name === "gallery"`, so a `:::gallery{...}` container falls through
+      to the ordinary `$createOxDirectiveNode(node)` path, same as any
+      other unregistered container directive — `editingNodes.tsx`'s
+      `OxDirectiveDecorator` shows it as a plain "Unknown block: ::gallery"
+      placeholder while editing. Nothing is destroyed by this: the real
+      mdast node round-trips losslessly through export regardless of
+      whether (or how) it's previewed while typing — confirmed via the
+      project's own three-leg testing convention (below). A gallery's
+      whole point, same as Grid's, is a passive, read-only layout — there
+      was never a real need for live per-photo editing to justify the
+      bigger lift a real Editing-mode preview would need.
+    - Demoed on the `fruits/styles/oxmarkdown` decision log (`DEFAULT_SAMPLE`)
+      alongside Grid and the other built-in directives.
 
 ## Testing convention — verify three things together, never one alone
 

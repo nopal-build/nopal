@@ -664,6 +664,48 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "A basic grid: :::grid{columns=\"N\"} / ::col, static rendering only",
+    body: (
+      <>
+        A side-by-side layout, built as a first-class built-in (same category as{" "}
+        <code>::file</code>/<code>::card</code>/<code>:::toggle</code>) rather than a
+        caller-registered directive — splitting the container's own children into cells on
+        <code>::col</code> leaf-directive markers needs the raw child nodes, which the
+        caller-facing <code>DirectiveRegistry</code> contract only ever hands back already
+        rendered. <code>columns</code> defaults to the number of cells found, so the common
+        case ("split content into N groups, lay them out side by side") needs no attribute at
+        all. Deliberately <strong>static/Interacting-mode only</strong> — exactly the kind of
+        syntax that's a perfect fit for that limitation, since a grid's whole point is a
+        passive, read-only layout (image galleries, side-by-side comparisons), not something
+        that needs live per-cell typing the way a Card's content does. Editing mode doesn't
+        special-case it at all: it falls back to the same generic "Unknown block" placeholder
+        any other unregistered container directive already shows there — nothing is lost, since
+        the real mdast node still round-trips losslessly through <code>OxDirectiveNode</code>,
+        it just isn't previewed as a real grid while typing.
+      </>
+    ),
+  },
+  {
+    title: "A basic gallery: :::gallery{max-columns=\"N\"}, plain images as children",
+    body: (
+      <>
+        Same built-in category as <code>:::grid</code> (not a caller-registered directive) for
+        the same reason — laying photos out in a grid needs the raw child nodes to find every{" "}
+        <code>image</code> node, which a registry renderer only ever gets back already rendered.
+        Deliberately no new per-photo syntax: a gallery's children are just ordinary{" "}
+        <code>![alt](url)</code> images, one per line, which is what lets it degrade to a plain
+        sequence of individually-viewable images anywhere that doesn't understand the{" "}
+        <code>gallery</code> directive at all (Obsidian, GitHub, a bare text editor). Column count
+        is auto-computed from the photo count — 1 photo stays 1 column, 2–6 is 2 columns, 7+ is 3
+        — then capped by <code>max-columns</code>, which defaults to 3 and can only ever bring the
+        count DOWN: 3 is the most columns the layout supports at all right now. Same{" "}
+        <strong>static/Interacting-mode only</strong> scope as <code>:::grid</code>, for the same
+        reason (a gallery is a passive, read-only layout) — Editing mode shows the same generic
+        "Unknown block" placeholder, with zero data loss either way.
+      </>
+    ),
+  },
 ];
 
 // ─── Sample content for the playground ──────────────────────────────────────────────────────────────────
@@ -681,6 +723,22 @@ the exact case that broke the old regex-based system. It survives here.
 ::badge{label="Leaf directive"}
 
 ::unregistered{demo="unknown directive fallback"}
+
+:::grid{columns="3"}
+First cell — any block content works here (headings, lists, ...).
+
+::col
+Second cell.
+
+::col
+Third cell.
+:::
+
+:::gallery{max-columns="3"}
+![Sunset over the bay](https://picsum.photos/seed/nopal1/400)
+![Trail markers](https://picsum.photos/seed/nopal2/400)
+![Fence line repair](https://picsum.photos/seed/nopal3/400)
+:::
 
 - [ ] Unchecked task
 - [x] Checked task

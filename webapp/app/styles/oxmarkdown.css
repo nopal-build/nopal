@@ -1220,3 +1220,86 @@
 .ox-toggle > *:not(.ox-toggle-summary) {
   padding-left: var(--ox-grid);
 }
+
+/* ── Grid layout (`:::grid{columns="N"}` / `::col`) ─────────────────────── */
+/* A basic side-by-side layout, built the same way `:::toggle` is: a
+   first-class, always-available built-in, not a caller-registered
+   directive — see `OxRenderer.tsx`'s `renderDirective` for the markdown
+   shape and cell-splitting logic.
+
+   STATIC/Interacting-mode ONLY — there is deliberately no Editing-mode
+   rendering for this (see that same comment in `OxRenderer.tsx`). This is
+   a fine place for that limitation to live: a grid's whole POINT is a
+   passive, read-only layout (image galleries, side-by-side comparisons),
+   so "can't type inside it" was never the goal the way it was for
+   `::file`'s caption or `::card`'s content. */
+.ox-grid-directive {
+  display: grid;
+  grid-template-columns: repeat(var(--ox-grid-columns, 2), 1fr);
+  gap: var(--ox-grid);
+}
+
+/* Each cell keeps its OWN normal block rhythm (`renderBlockNodes`, same as
+   the top-level document) — a cell with several paragraphs/a heading still
+   reads top-to-bottom exactly like ordinary prose, just narrower. */
+.ox-grid-cell > *:not(:first-child) {
+  margin-top: var(--ox-grid);
+}
+
+/* Below the same breakpoint every other OxMarkdown mobile treatment uses
+   (`OxPopover`, the `@`-mention menu) — a grid narrow enough to need a
+   phone screen at all reads better as stacked single-column content than
+   squeezed side-by-side columns. */
+@media (max-width: 640px) {
+  .ox-grid-directive {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Gallery (`:::gallery{max-columns="N"}`) ─────────────────────── */
+/* A basic photo grid, same built-in category as `:::grid` above — see
+   `OxRenderer.tsx`'s `renderDirective` for the markdown shape (plain
+   `![alt](url)` images as children, no new per-photo syntax) and the
+   column-count rules (1 photo → 1 column, 2–6 → 2, 7+ → 3, capped by
+   `max-columns`, itself capped at 3 — see `GALLERY_COLUMN_CAP`).
+
+   STATIC/Interacting-mode ONLY, same deliberate limitation as `:::grid`
+   (see that section's own comment) — Editing mode shows the generic
+   "Unknown block" placeholder instead. */
+.ox-gallery-directive {
+  display: grid;
+  grid-template-columns: repeat(var(--ox-gallery-columns, 3), 1fr);
+  gap: var(--ox-grid);
+}
+
+.ox-gallery-item {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ox-gallery-item img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--ox-color-code-bg);
+  border: 1px solid var(--ox-color-border);
+}
+
+.ox-gallery-item figcaption {
+  font-size: 0.85rem;
+  color: var(--ox-color-subtle);
+  line-height: 1.3;
+}
+
+/* Same breakpoint every other OxMarkdown mobile treatment uses
+   (`OxPopover`, the `@`-mention menu, `.ox-grid-directive`) — collapses to
+   a single column rather than squeezing photos too small to see clearly. */
+@media (max-width: 640px) {
+  .ox-gallery-directive {
+    grid-template-columns: 1fr;
+  }
+}

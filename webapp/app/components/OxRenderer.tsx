@@ -411,6 +411,78 @@ function renderTable(node: any, key: number, ctx: RenderCtx): ReactNode {
   );
 }
 
+/** Splits a `:::grid{...}` container's own children into cells on `::col`
+ * leaf-directive markers — the marker itself is a pure break, never
+ * rendered on its own. Content before the first `::col` is always the
+ * first cell, so a `:::grid` with no `::col` at all degrades to one
+ * full-width cell rather than an error. */
+function splitGridCells(children: readonly unknown[]): RootContent[][] {
+  const cells: RootContent[][] = [[]];
+  for (const child of children as RootContent[]) {
+    if ((child as DirectiveNode).type === "leafDirective" && (child as DirectiveNode).name === "col") {
+      cells.push([]);
+      continue;
+    }
+    cells[cells.length - 1].push(child);
+  }
+  return cells;
+}
+
+const MAX_GRID_COLUMNS = 6;
+
+/** The `columns` attribute wins when present (clamped to a sane range so a
+ * typo can't blow out the layout); otherwise defaults to one column per
+ * cell, so the common case — "split content into N groups, lay them out
+ * side by side" — needs no attribute at all. */
+function clampGridColumns(columnsAttr: string | undefined, cellCount: number): number {
+  const parsed = columnsAttr ? parseInt(columnsAttr, 10) : NaN;
+  const base = Number.isFinite(parsed) && parsed > 0 ? parsed : cellCount;
+  return Math.min(Math.max(base, 1), MAX_GRID_COLUMNS);
+}
+
+interface GalleryImage {
+  url: string;
+  alt: string | null;
+  title: string | null;
+}
+
+/** Recursively collects every `image` mdast node found within a
+ * `:::gallery{...}` container's children — no new syntax needed, a
+ * gallery is just a directive-wrapped SEQUENCE of ordinary `![alt](url)`
+ * markdown images, usually one per line/paragraph. This is what makes it
+ * degrade gracefully: a renderer that doesn't understand the `gallery`
+ * directive at all (Obsidian, GitHub, a bare text editor) still shows every
+ * photo, just stacked instead of tiled. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function collectGalleryImages(nodes: readonly unknown[]): GalleryImage[] {
+  const images: GalleryImage[] = [];
+  const visit = (node: any) => {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "image") {
+      images.push({ url: node.url, alt: node.alt ?? null, title: node.title ?? null });
+      return;
+    }
+    if (Array.isArray(node.children)) node.children.forEach(visit);
+  };
+  (nodes as RootContent[]).forEach(visit);
+  return images;
+}
+
+// 3 is the most columns the gallery layout supports at all right now —
+// `max-columns` can only ever bring this DOWN, never raise it.
+const GALLERY_COLUMN_CAP = 3;
+
+/** The gallery's own fixed breakpoints: 1 photo → 1 column, 2–6 → 2, 7+ →
+ * 3 — then capped by the `max-columns` attribute (default/hard ceiling
+ * `GALLERY_COLUMN_CAP`). */
+function computeGalleryColumns(photoCount: number, maxColumnsAttr: string | undefined): number {
+  const auto = photoCount <= 1 ? 1 : photoCount <= 6 ? 2 : 3;
+  const parsed = maxColumnsAttr ? parseInt(maxColumnsAttr, 10) : NaN;
+  const maxColumns =
+    Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, GALLERY_COLUMN_CAP) : GALLERY_COLUMN_CAP;
+  return Math.min(auto, maxColumns);
+}
+
 function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): ReactNode {
   // `::file{...}` is a BUILT-IN interactable, not a caller-registered
   // directive (same category as task checkboxes, not "gallery"/"csv-table")
@@ -457,6 +529,73 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
         <summary className="ox-toggle-summary">{renderNodes(titleChildren, ctx)}</summary>
         <div className="ox-toggle-body">{renderBlockNodes(bodySource, ctx)}</div>
       </details>
+    );
+  }
+
+  // `:::grid{columns="N"}` / `::col` — a basic side-by-side layout, built
+  // the same way `:::toggle` is: a first-class, always-available built-in
+  // (not a caller-registered directive from `oxmarkdown/directiveRegistry.ts`),
+  // so it works out of the box on any page with no wiring. STATIC/
+  // Interacting-mode ONLY — Editing mode has no dedicated preview for it
+  // and falls back to the same generic "Unknown block" placeholder any
+  // other unregistered container directive shows there (`editingNodes.tsx`'s
+  // `OxDirectiveDecorator`). Nothing is destroyed by that — the underlying
+  // markdown round-trips losslessly regardless (`OxDirectiveNode` holds the
+  // real mdast node) — it just isn't rendered as a real grid while typing.
+  // A stray `::col` used outside a `:::grid{...}` falls through to the
+  // ordinary "unknown directive" rendering below, same as any other
+  // directive misuse.
+  if (node.type === "containerDirective" && node.name === "grid") {
+    const cells = splitGridCells(node.children);
+    const columns = clampGridColumns(directiveAttrs(node).columns, cells.length);
+    return (
+      <div
+        key={key}
+        className="ox-grid-directive"
+        style={{ "--ox-grid-columns": columns } as CSSProperties}
+      >
+        {cells.map((cellNodes, i) => (
+          <div key={i} className="ox-grid-cell">
+            {renderBlockNodes(cellNodes, ctx)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // `:::gallery{max-columns="N"}` — a basic photo grid, same built-in
+  // category as `:::grid` above (not a caller-registered directive — see
+  // that case's own comment for why). Deliberately built on ORDINARY
+  // markdown images (`![alt](url)`) as the container's children, not a
+  // new per-photo leaf directive — this is what lets a gallery degrade to
+  // a plain sequence of individually-viewable images on any renderer that
+  // doesn't understand the `gallery` directive at all. STATIC/
+  // Interacting-mode ONLY, same deliberate limitation as `:::grid` (see
+  // that case's comment) — Editing mode shows the generic "Unknown block"
+  // placeholder instead; nothing is lost, the real mdast node round-trips
+  // losslessly through export either way.
+  if (node.type === "containerDirective" && node.name === "gallery") {
+    const images = collectGalleryImages(node.children);
+    // No images found at all (e.g. a caller left it empty, or every child
+    // is some other kind of content) — degrade to plain content instead of
+    // an empty box, same as any other unregistered container directive.
+    if (images.length === 0) {
+      return <Fragment key={key}>{renderBlockNodes(node.children, ctx)}</Fragment>;
+    }
+    const columns = computeGalleryColumns(images.length, directiveAttrs(node)["max-columns"]);
+    return (
+      <div
+        key={key}
+        className="ox-gallery-directive"
+        style={{ "--ox-gallery-columns": columns } as CSSProperties}
+      >
+        {images.map((img, i) => (
+          <figure key={i} className="ox-gallery-item">
+            <img src={img.url} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
+            {img.alt && <figcaption>{img.alt}</figcaption>}
+          </figure>
+        ))}
+      </div>
     );
   }
 
