@@ -109,6 +109,8 @@ content
 :::
 ```
 
+::file{url="https://....", description="Description"}
+
 - On the legacy path (`webapp/app/util/nopalDirectives.ts`), this is a
   hand-rolled regex preprocessor, wired into `MdxRenderer.tsx` and
   `project.server.ts` (server-side `file=`/`folder=` resolution for
@@ -182,7 +184,21 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
 - **41×41px dot grid background** behind all content:
   `background-image: radial-gradient(var(--moon) 1px, transparent 0);
   background-size: 41px 41px;` — dark mode swaps the dot to
-  `var(--dark-midground)`.
+  `var(--dark-midground)`. Lives on a NESTED `.ox-dot-grid` child `<div>`
+  inside `.ox-content` (`OxEditor.tsx`/`OxRenderer.tsx` all render
+  `<div class="ox-content ..."><div class="ox-dot-grid">...`), not on
+  `.ox-content` itself — so any modifier that wants to suppress the dots
+  for one particular surface (e.g. `.ox-file-caption-editor`) must target
+  `.ox-content.<modifier> > .ox-dot-grid`, not just
+  `.ox-content.<modifier>` — `background-image` isn't inherited, so
+  overriding it on the outer element is a silent no-op once the child
+  sets its own. **Real bug found and fixed this way**: the
+  `::file{...}` caption editor's own dot-suppression rule had drifted to
+  target `.ox-content.ox-file-caption-editor` directly (dead code left
+  over from before `.ox-dot-grid` was split out into its own child div),
+  so the caption editor kept silently showing the dot grid despite the
+  rule intended to suppress it — fixed by retargeting the rule at
+  `.ox-content.ox-file-caption-editor > .ox-dot-grid` instead.
 - **Vertical rhythm locked to the grid.** Every block element's
   `line-height` is exactly `41px` (one cell). Headings add whole-cell
   top margins: `h1`/`h2` → `82px` (2 cells), `h3` → `41px` (1 cell).
@@ -687,10 +703,12 @@ Interacting mode first, without needing that decision resolved.
       editor's listener has handled it so an outer editor's listener on
       the same bubbled event is a deliberate no-op).
     - The caption's nested editor also gets its own dot-grid-free look
-      (`className="ox-file-caption-editor"`, overriding `.ox-content`'s
-      background-image — it reads as a small annotation field, not its
-      own document) and flows ArrowUp/ArrowDown into a SIBLING file
-      directive's caption within the same outer document
+      (`className="ox-file-caption-editor"`, overriding the background-
+      image on the NESTED `.ox-dot-grid` child div — see "Design
+      language" below for why it's a child, not `.ox-content` itself —
+      it reads as a small annotation field, not its own document) and
+      flows ArrowUp/ArrowDown into a SIBLING file directive's caption
+      within the same outer document
       (`oxmarkdown/fileCaptionFlow.ts` + `FileCaptionArrowPlugin.tsx`) —
       deliberately NOT built on `OxEditorGroup` (that mechanism wants an
       externally-supplied flat `order`; here the members are decorator

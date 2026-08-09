@@ -154,6 +154,7 @@
   background-image: radial-gradient(var(--ox-color-grid-dot) 1px, transparent 0);
   background-size: var(--ox-grid) var(--ox-grid);
   background-position: -20px -20px;
+  padding-bottom: 1px;
 }
 
 
@@ -658,10 +659,18 @@
    annotation field next to a thumbnail, not its own document (see
    `editingNodes.tsx`, which passes this as the nested `<OxEditor>`'s
    `className`). Only the background image is disabled; every other
-   `.ox-content` rule (gutter, rhythm, colors) still applies normally. */
+   `.ox-content` rule (gutter, rhythm, colors) still applies normally.
+   The dot grid itself lives on a NESTED `.ox-dot-grid` child div (see
+   that class above), not on `.ox-content` directly, so the override has
+   to reach that child specifically — setting `background-image: none`
+   on `.ox-content.ox-file-caption-editor` alone is a no-op, since
+   `background-image` isn't inherited and the child sets its own. */
 .ox-content.ox-file-caption-editor {
-  background-image: none;
   margin-bottom: 0 !important;
+}
+.ox-content.ox-file-caption-editor > .ox-dot-grid {
+  background-image: none;
+  padding-bottom: 0;
 }
 
 /* The persistent "add file" trigger below the editor
