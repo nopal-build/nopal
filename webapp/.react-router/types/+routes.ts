@@ -62,6 +62,9 @@ type Pages = {
   "/tools/grade-differential": {
     params: {};
   };
+  "/api/phylog/post-capture": {
+    params: {};
+  };
   "/public/folder/:folderId": {
     params: {
       "folderId": string;
@@ -71,6 +74,9 @@ type Pages = {
     params: {};
   };
   "/api/daily-log/sort-all": {
+    params: {};
+  };
+  "/api/phylog/pre-capture": {
     params: {};
   };
   "/api/admin/impersonate": {
@@ -108,7 +114,7 @@ type Pages = {
   "/api/humans/related": {
     params: {};
   };
-  "/api/phylog/run-all": {
+  "/api/phylog/capture": {
     params: {};
   };
   "/tools/space-layout": {
@@ -118,6 +124,9 @@ type Pages = {
     params: {};
   };
   "/good/architecture": {
+    params: {};
+  };
+  "/api/phylog/reset": {
     params: {};
   };
   "/api/sync-targets": {
@@ -229,6 +238,11 @@ type Pages = {
       "folderId": string;
     };
   };
+  "/api/vault/projects/:folderId/status": {
+    params: {
+      "folderId": string;
+    };
+  };
   "/api/vault/public-download/:fileId": {
     params: {
       "fileId": string;
@@ -265,6 +279,9 @@ type Pages = {
     params: {};
   };
   "/api/vault/sync-manifest": {
+    params: {};
+  };
+  "/api/vault/trash-cleanup": {
     params: {};
   };
   "/api/vault/view/:fileId": {
@@ -384,7 +401,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/humans/related" | "/api/phylog/run-all" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/api/phylog/run" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
+    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/api/phylog/post-capture" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/phylog/pre-capture" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/humans/related" | "/api/phylog/capture" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/phylog/reset" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/api/phylog/run" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
   };
   "routes/api.passkeys.invite-register-options.tsx": {
     id: "routes/api.passkeys.invite-register-options";
@@ -442,6 +459,10 @@ type RouteFiles = {
     id: "routes/tools.grade-differential";
     page: "/tools/grade-differential";
   };
+  "routes/api.phylog.post-capture.tsx": {
+    id: "routes/api.phylog.post-capture";
+    page: "/api/phylog/post-capture";
+  };
   "routes/public.folder.$folderId.tsx": {
     id: "routes/public.folder.$folderId";
     page: "/public/folder/:folderId";
@@ -453,6 +474,10 @@ type RouteFiles = {
   "routes/api.daily-log.sort-all.tsx": {
     id: "routes/api.daily-log.sort-all";
     page: "/api/daily-log/sort-all";
+  };
+  "routes/api.phylog.pre-capture.tsx": {
+    id: "routes/api.phylog.pre-capture";
+    page: "/api/phylog/pre-capture";
   };
   "routes/api.admin.impersonate.tsx": {
     id: "routes/api.admin.impersonate";
@@ -498,9 +523,9 @@ type RouteFiles = {
     id: "routes/api.humans.related";
     page: "/api/humans/related";
   };
-  "routes/api.phylog.run-all.tsx": {
-    id: "routes/api.phylog.run-all";
-    page: "/api/phylog/run-all";
+  "routes/api.phylog.capture.tsx": {
+    id: "routes/api.phylog.capture";
+    page: "/api/phylog/capture";
   };
   "routes/tools.space-layout.tsx": {
     id: "routes/tools.space-layout";
@@ -513,6 +538,10 @@ type RouteFiles = {
   "routes/good.architecture.tsx": {
     id: "routes/good.architecture";
     page: "/good/architecture";
+  };
+  "routes/api.phylog.reset.tsx": {
+    id: "routes/api.phylog.reset";
+    page: "/api/phylog/reset";
   };
   "routes/api.sync-targets.tsx": {
     id: "routes/api.sync-targets";
@@ -632,11 +661,15 @@ type RouteFiles = {
   };
   "routes/api.vault.tsx": {
     id: "routes/api.vault";
-    page: "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload";
+    page: "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload";
   };
   "routes/api.vault.projects.$folderId.sharing.tsx": {
     id: "routes/api.vault.projects.$folderId.sharing";
     page: "/api/vault/projects/:folderId/sharing";
+  };
+  "routes/api.vault.projects.$folderId.status.tsx": {
+    id: "routes/api.vault.projects.$folderId.status";
+    page: "/api/vault/projects/:folderId/status";
   };
   "routes/api.vault.public-download.$fileId.tsx": {
     id: "routes/api.vault.public-download.$fileId";
@@ -677,6 +710,10 @@ type RouteFiles = {
   "routes/api.vault.sync-manifest.tsx": {
     id: "routes/api.vault.sync-manifest";
     page: "/api/vault/sync-manifest";
+  };
+  "routes/api.vault.trash-cleanup.tsx": {
+    id: "routes/api.vault.trash-cleanup";
+    page: "/api/vault/trash-cleanup";
   };
   "routes/api.vault.view.$fileId.tsx": {
     id: "routes/api.vault.view.$fileId";
@@ -844,9 +881,11 @@ type RouteModules = {
   "routes/api.passkeys.login-verify": typeof import("./app/routes/api.passkeys.login-verify.tsx");
   "routes/tools.frames-volume-calc": typeof import("./app/routes/tools.frames-volume-calc.tsx");
   "routes/tools.grade-differential": typeof import("./app/routes/tools.grade-differential.tsx");
+  "routes/api.phylog.post-capture": typeof import("./app/routes/api.phylog.post-capture.tsx");
   "routes/public.folder.$folderId": typeof import("./app/routes/public.folder.$folderId.tsx");
   "routes/tools.building-envelope": typeof import("./app/routes/tools.building-envelope.tsx");
   "routes/api.daily-log.sort-all": typeof import("./app/routes/api.daily-log.sort-all.tsx");
+  "routes/api.phylog.pre-capture": typeof import("./app/routes/api.phylog.pre-capture.tsx");
   "routes/api.admin.impersonate": typeof import("./app/routes/api.admin.impersonate.tsx");
   "routes/api.cli-auth.exchange": typeof import("./app/routes/api.cli-auth.exchange.tsx");
   "routes/grandpas-cabin-recipe": typeof import("./app/routes/grandpas-cabin-recipe.tsx");
@@ -858,10 +897,11 @@ type RouteModules = {
   "routes/public.file.$fileId": typeof import("./app/routes/public.file.$fileId.tsx");
   "routes/api.daily-log.sort": typeof import("./app/routes/api.daily-log.sort.tsx");
   "routes/api.humans.related": typeof import("./app/routes/api.humans.related.tsx");
-  "routes/api.phylog.run-all": typeof import("./app/routes/api.phylog.run-all.tsx");
+  "routes/api.phylog.capture": typeof import("./app/routes/api.phylog.capture.tsx");
   "routes/tools.space-layout": typeof import("./app/routes/tools.space-layout.tsx");
   "routes/fruits_.daily-log": typeof import("./app/routes/fruits_.daily-log.tsx");
   "routes/good.architecture": typeof import("./app/routes/good.architecture.tsx");
+  "routes/api.phylog.reset": typeof import("./app/routes/api.phylog.reset.tsx");
   "routes/api.sync-targets": typeof import("./app/routes/api.sync-targets.tsx");
   "routes/api.sync-targets.$targetId": typeof import("./app/routes/api.sync-targets.$targetId.tsx");
   "routes/tools.do-not-use": typeof import("./app/routes/tools.do-not-use.tsx");
@@ -893,6 +933,7 @@ type RouteModules = {
   "routes/magic-link": typeof import("./app/routes/magic-link.tsx");
   "routes/api.vault": typeof import("./app/routes/api.vault.tsx");
   "routes/api.vault.projects.$folderId.sharing": typeof import("./app/routes/api.vault.projects.$folderId.sharing.tsx");
+  "routes/api.vault.projects.$folderId.status": typeof import("./app/routes/api.vault.projects.$folderId.status.tsx");
   "routes/api.vault.public-download.$fileId": typeof import("./app/routes/api.vault.public-download.$fileId.tsx");
   "routes/api.vault.public-view.$fileId": typeof import("./app/routes/api.vault.public-view.$fileId.tsx");
   "routes/api.vault.multipart-complete": typeof import("./app/routes/api.vault.multipart-complete.tsx");
@@ -903,6 +944,7 @@ type RouteModules = {
   "routes/api.vault.multipart-init": typeof import("./app/routes/api.vault.multipart-init.tsx");
   "routes/api.vault.multipart-part": typeof import("./app/routes/api.vault.multipart-part.tsx");
   "routes/api.vault.sync-manifest": typeof import("./app/routes/api.vault.sync-manifest.tsx");
+  "routes/api.vault.trash-cleanup": typeof import("./app/routes/api.vault.trash-cleanup.tsx");
   "routes/api.vault.view.$fileId": typeof import("./app/routes/api.vault.view.$fileId.tsx");
   "routes/api.vault.all-files": typeof import("./app/routes/api.vault.all-files.tsx");
   "routes/api.vault.$fileId": typeof import("./app/routes/api.vault.$fileId.tsx");

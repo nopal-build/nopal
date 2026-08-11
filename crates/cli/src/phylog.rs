@@ -1,163 +1,344 @@
-//! `nopal phylog run ...` — run the PhyLog agent for one project's Card, on
-//! one day (`--date`) or across every day it has a Card for, up to today
-//! (`--date` omitted, optionally bounded by `--since`).
+//! `nopal phylog ...` — PhyLog's three-stage pipeline (see the `phylog`
+//! skill for the full design):
 //!
-//! Thin client over `POST /api/phylog/run` / `POST /api/phylog/run-all` —
-//! all real logic (reading the Card + the project's own SKILL.md + its
-//! current README.md, then asking an LLM whether to propose a README
-//! update) lives server-side, see `phylogAgent.server.ts`'s module doc.
-//! Defaults to a DRY RUN (preview only, nothing written) — pass `--apply`
-//! to actually commit.
+//!   pre-capture -> capture -> post-capture
+//!
+//! `nopal phylog run` runs all three, in order, for one project. Each
+//! stage is ALSO independently runnable (`pre-capture`/`capture`/
+//! `post-capture`) — useful while iterating on a project's own
+//! `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md` without paying
+//! for the other stages every time. `nopal phylog reset` wipes a
+//! project's PhyLog-managed content (everything except its `skills`/
+//! `syncs` folders) so it can be rebuilt from scratch.
+//!
+//! Thin client over `/api/phylog/*` — all real logic lives server-side,
+//! see `phylogAgent.server.ts`/`preCapture.server.ts`/`capture.server.ts`/
+//! `postCapture.server.ts`. ALWAYS APPLIES — there is no preview/dry-run
+//! mode or `--apply` flag anymore; `nopal release-log revert` remains the
+//! safety net for undoing a specific capture's README edit, and `phylog
+//! reset` + `capture --full` is the "start over" workflow.
 
 use serde::Deserialize;
+use serde_json::json;
 use std::error::Error;
 
-use crate::vault::{resolve_folder, Client};
+use crate::vault::{resolve_file, resolve_folder, Client, Folder};
+
+fn resolve_project(client: &Client, path: &str) -> Result<Folder, Box<dyn Error + Send + Sync>> {
+    resolve_folder(client, path)?.ok_or_else(|| {
+        "The vault root isn't a project — pass a path like 'projects/sunny' or 'personal'".into()
+    })
+}
+
+fn print_log(log: &[String]) {
+    for line in log {
+        println!("{line}");
+    }
+}
+
+// ─── Response shapes ────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PreCaptureSummary {
+    name: String,
+    #[serde(default)]
+    generated: bool,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct UnsupportedFile {
+    name: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PreCaptureResult {
+    #[serde(default)]
+    skipped: bool,
+    #[serde(default)]
+    summaries: Vec<PreCaptureSummary>,
+    #[serde(default)]
+    unsupported: Vec<UnsupportedFile>,
+}
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreCaptureResponse {
+    #[serde(flatten)]
+    result: PreCaptureResult,
+    #[serde(default)]
+    log: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct FiledAttachment {
     name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct AgentResult {
+struct CaptureDayResult {
+    date: String,
     #[serde(default)]
-    proposed_change: bool,
-    new_readme_body: Option<String>,
-    reason: Option<String>,
+    filed: Vec<FiledAttachment>,
     #[serde(default)]
-    applied: bool,
+    organize_actions: Vec<String>,
+    #[serde(default)]
+    readme_updated: bool,
     #[serde(default)]
     already_applied: bool,
-    /// Attachments actually filed into the project this call — only
-    /// present on a real (`--apply`) run.
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ResetSummary {
     #[serde(default)]
-    filed_attachments: Vec<FiledAttachment>,
-    /// Attachments not yet filed — only present on a preview run.
+    deleted_folders: Vec<String>,
     #[serde(default)]
-    pending_attachments: Vec<FiledAttachment>,
+    deleted_files: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct CaptureResult {
+    reset_summary: Option<ResetSummary>,
+    #[serde(default)]
+    days: Vec<CaptureDayResult>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DatedAgentResult {
-    date: String,
+struct CaptureResponse {
     #[serde(flatten)]
-    result: AgentResult,
+    result: CaptureResult,
+    #[serde(default)]
+    log: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PostCaptureResult {
+    #[serde(default)]
+    skipped: bool,
+    note: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RangeResponse {
-    results: Vec<DatedAgentResult>,
+struct PostCaptureResponse {
+    #[serde(flatten)]
+    result: PostCaptureResult,
+    #[serde(default)]
+    log: Vec<String>,
 }
 
-/// Runs the PhyLog agent for `project_path`. Pass `date` for one specific
-/// day; omit it to run every day this project already has a Card for, up
-/// to today (optionally bounded below by `since`). Preview-only unless
-/// `apply` is set.
-pub fn run(
-    project_path: &str,
-    date: Option<&str>,
-    since: Option<&str>,
-    apply: bool,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let client = Client::new()?;
-    let folder = resolve_folder(&client, project_path)?
-        .ok_or("The vault root isn't a project — pass a path like 'projects/sunny'")?;
-
-    match date {
-        Some(date) => run_one(&client, &folder._id, date, apply),
-        None => run_all(&client, &folder._id, since, apply),
-    }
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunResponse {
+    #[serde(default)]
+    pre_capture: PreCaptureResult,
+    #[serde(default)]
+    capture: CaptureResult,
+    #[serde(default)]
+    post_capture: PostCaptureResult,
+    #[serde(default)]
+    log: Vec<String>,
 }
 
-fn run_one(
-    client: &Client,
-    project_folder_id: &str,
-    date: &str,
-    apply: bool,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let body = serde_json::json!({
-        "projectFolderId": project_folder_id,
-        "date": date,
-        "dryRun": !apply,
-    });
-    let result: AgentResult = client.post_json("/api/phylog/run", &body)?;
-    print_result(date, &result, apply);
-    Ok(())
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetResponse {
+    summary: ResetSummary,
 }
 
-fn run_all(
-    client: &Client,
-    project_folder_id: &str,
-    since: Option<&str>,
-    apply: bool,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let mut body = serde_json::json!({
-        "projectFolderId": project_folder_id,
-        "dryRun": !apply,
-    });
-    if let Some(since) = since {
-        body["since"] = serde_json::Value::String(since.to_string());
-    }
-    let response: RangeResponse = client.post_json("/api/phylog/run-all", &body)?;
+// ─── Printing ───────────────────────────────────────────────────────────
 
-    if response.results.is_empty() {
-        println!(
-            "No Card found for this project on any day{}.",
-            match since {
-                Some(since) => format!(" since {since}"),
-                None => String::new(),
-            }
-        );
-        return Ok(());
+fn print_pre_capture(result: &PreCaptureResult) {
+    if result.skipped {
+        println!("Pre-capture: skipped (skills/PRE_CAPTURE.md says skip).");
+        return;
     }
-
-    for dated in &response.results {
-        print_result(&dated.date, &dated.result, apply);
-    }
-    Ok(())
-}
-
-fn print_result(date: &str, result: &AgentResult, apply: bool) {
-    // Attachment filing is deterministic and independent of the model's own
-    // README decision below, so it's reported regardless of which branch
-    // that decision falls into.
-    if apply {
-        for f in &result.filed_attachments {
-            println!("{date}: filed \"{}\" into the project.", f.name);
-        }
+    let generated: Vec<&PreCaptureSummary> =
+        result.summaries.iter().filter(|s| s.generated).collect();
+    if generated.is_empty() && result.unsupported.is_empty() {
+        println!("Pre-capture: nothing new to summarize.");
     } else {
-        for f in &result.pending_attachments {
+        for s in &generated {
+            println!("Pre-capture: wrote a summary for \"{}\".", s.name);
+        }
+        for u in &result.unsupported {
             println!(
-                "{date}: \"{}\" would be filed into the project (pass --apply to commit).",
-                f.name
+                "Pre-capture: \"{}\" couldn't be summarized (no readable content).",
+                u.name
             );
         }
     }
+}
 
-    if result.already_applied {
-        println!("{date}: already applied for this Card's current content — nothing to do.");
+fn print_capture(result: &CaptureResult) {
+    if let Some(reset) = &result.reset_summary {
+        println!(
+            "Capture: --full reset removed {} folder(s) and {} file(s) before rebuilding.",
+            reset.deleted_folders.len(),
+            reset.deleted_files.len()
+        );
+    }
+    if result.days.is_empty() {
+        println!("Capture: no Card found for this project on any day in range.");
         return;
     }
+    for day in &result.days {
+        if day.already_applied {
+            println!(
+                "Capture: {} — already applied for this Card's current content.",
+                day.date
+            );
+            continue;
+        }
+        for f in &day.filed {
+            println!("Capture: {} — filed \"{}\".", day.date, f.name);
+        }
+        for action in &day.organize_actions {
+            println!("Capture: {} — {action}.", day.date);
+        }
+        if day.readme_updated {
+            println!("Capture: {} — README updated.", day.date);
+        } else if day.filed.is_empty() && day.organize_actions.is_empty() {
+            println!("Capture: {} — nothing warranted a change.", day.date);
+        }
+    }
+}
 
-    if !result.proposed_change {
-        println!("{date}: PhyLog decided no README update was warranted.");
-        return;
+fn print_post_capture(result: &PostCaptureResult) {
+    if result.skipped {
+        println!("Post-capture: skipped (skills/POST_CAPTURE.md says skip).");
+    } else if let Some(note) = &result.note {
+        println!("Post-capture: {note}");
+    }
+}
+
+// ─── Commands ───────────────────────────────────────────────────────────
+
+/// `nopal phylog run --project <path> [--full] [--since ...] [--until ...]`
+pub fn run(
+    project_path: &str,
+    full: bool,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== PhyLog run: {project_path}/ ===");
+    let mut body = json!({ "projectFolderId": folder._id, "full": full });
+    if let Some(since) = since {
+        body["since"] = serde_json::Value::String(since.to_string());
+    }
+    if let Some(until) = until {
+        body["until"] = serde_json::Value::String(until.to_string());
     }
 
-    if apply && result.applied {
-        println!("{date}: applied — README.md updated.");
-    } else {
-        println!("{date}: PREVIEW (nothing written — pass --apply to commit):");
+    let response: RunResponse = client.post_json("/api/phylog/run", &body)?;
+    print_log(&response.log);
+    println!("--- Stage 1/3: pre-capture ---");
+    print_pre_capture(&response.pre_capture);
+    println!("--- Stage 2/3: capture ---");
+    print_capture(&response.capture);
+    println!("--- Stage 3/3: post-capture ---");
+    print_post_capture(&response.post_capture);
+    println!("=== Done ===");
+    Ok(())
+}
+
+/// `nopal phylog pre-capture --project <path> [--date ...] [--file <path>]`
+pub fn pre_capture(
+    project_path: &str,
+    date: Option<&str>,
+    file: Option<&str>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    let mut body = json!({ "projectFolderId": folder._id });
+    if let Some(date) = date {
+        body["date"] = serde_json::Value::String(date.to_string());
     }
-    if let Some(reason) = &result.reason {
-        println!("  reason: {reason}");
+    if let Some(file_path) = file {
+        let file_listing = resolve_file(&client, file_path)?;
+        body["fileId"] = serde_json::Value::String(file_listing._id);
     }
-    if let Some(body) = &result.new_readme_body {
-        println!("\n--- proposed README body ---\n{body}\n--- end ---");
+
+    println!("=== PhyLog pre-capture: {project_path}/ ===");
+    let response: PreCaptureResponse = client.post_json("/api/phylog/pre-capture", &body)?;
+    print_log(&response.log);
+    print_pre_capture(&response.result);
+    Ok(())
+}
+
+/// `nopal phylog capture --project <path> [--full] [--since ...] [--until ...]`
+pub fn capture(
+    project_path: &str,
+    full: bool,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    let mut body = json!({ "projectFolderId": folder._id, "full": full });
+    if let Some(since) = since {
+        body["since"] = serde_json::Value::String(since.to_string());
     }
+    if let Some(until) = until {
+        body["until"] = serde_json::Value::String(until.to_string());
+    }
+
+    println!(
+        "=== PhyLog capture: {project_path}/ ({}) ===",
+        if full { "full rebuild" } else { "incremental" }
+    );
+    let response: CaptureResponse = client.post_json("/api/phylog/capture", &body)?;
+    print_log(&response.log);
+    print_capture(&response.result);
+    Ok(())
+}
+
+/// `nopal phylog post-capture --project <path>`
+pub fn post_capture(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== PhyLog post-capture: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let response: PostCaptureResponse = client.post_json("/api/phylog/post-capture", &body)?;
+    print_log(&response.log);
+    print_post_capture(&response.result);
+    Ok(())
+}
+
+/// `nopal phylog reset --project <path> --yes`
+pub fn reset(project_path: &str, confirmed: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !confirmed {
+        return Err(format!(
+            "This deletes everything in {project_path}/ except its skills/ and syncs/ folders. Pass --yes to confirm."
+        )
+        .into());
+    }
+
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== PhyLog reset: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let response: ResetResponse = client.post_json("/api/phylog/reset", &body)?;
+    println!(
+        "Reset removed {} folder(s) and {} file(s). skills/ and syncs/ were left untouched.",
+        response.summary.deleted_folders.len(),
+        response.summary.deleted_files.len()
+    );
+    println!("Run `nopal phylog capture --project {project_path} --full` to rebuild.");
+    Ok(())
 }

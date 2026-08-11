@@ -7,6 +7,7 @@
 
 import type { VaultRootKey } from "./vaultRoots";
 import type { VaultFolderTypeKey } from "./vaultFolderTypes";
+import type { ProjectStatus } from "./project.types";
 
 export type FileShareType = "view" | "workable" | "editable";
 
@@ -140,6 +141,20 @@ export type VaultFolder = {
    * dynamically, not cascaded onto descendants) is published to a public,
    * unauthenticated URL. See resolvePublicRootFolder in vault.server.ts. */
   is_public?: boolean;
+  /**
+   * A project folder's current lifecycle status (Active/Completed/Trashed
+   * — see the `vault` skill's Projects section). DENORMALIZED CACHE of
+   * that project's own README.md `status` front matter, kept in sync by
+   * `projectStatus.server.ts`'s `setProjectStatus` — never write this
+   * directly. Null/absent (treat as "active") on every non-project folder
+   * and on projects that predate this field. Not cascaded to descendants—
+   * unlike `shared_with`, this isn't a view-access grant.
+   */
+  project_status?: ProjectStatus | null;
+  /** ISO timestamp of the last `setProjectStatus` call — what the 30-day
+   * trash-cleanup cron (`api.vault.trash-cleanup.tsx`) measures a
+   * "trashed" project's age against. */
+  project_status_at?: string | null;
   created_at: string;
   updated_at: string;
 };

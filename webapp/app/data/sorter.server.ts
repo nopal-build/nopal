@@ -35,14 +35,21 @@ import {
   setDailyLogSorted,
   type DailyLogCard,
 } from "./dailyLog.server";
-import { copyFileIntoFolder, getAccessibleProjectFolders, getProjectFolders } from "./vault.server";
-import type { VaultFolder } from "./vault.types";
+import {
+  copyFileIntoFolder,
+  getAccessibleProjectFolders,
+  getFileRefById,
+  getProjectFolders,
+  listFolderChildren,
+} from "./vault.server";
+import type { FileRef, VaultFolder } from "./vault.types";
 import {
   createReleaseLogEntry,
   findReleaseLogEntryBySource,
   getReleaseLogContent,
   regenerateDailyReleaseLog,
   regenerateProjectReleaseLog,
+  type ChangesetInput,
 } from "./releaseLog.server";
 import {
   directiveAttrs,
@@ -135,20 +142,25 @@ export function extractCompletedTasks(markdown: string): string[] {
   return tasks;
 }
 
-/** Every `::file{...}` attachment's `fileId`/`name`, in document order —
- * see `oxmarkdown/fileDirective.ts` for the directive shape (a built-in
- * leaf directive, not a caller-registered one). */
+/** Every `::file{...}` attachment's `fileId`/`name`/`caption`, in document
+ * order — see `oxmarkdown/fileDirective.ts` for the directive shape (a
+ * built-in leaf directive, not a caller-registered one). `caption` is
+ * `""` when the human never wrote one — see `preCapture.server.ts` for
+ * the one caller that actually uses it (everyone else here only ever
+ * needed `fileId`/`name`). */
 export function extractFileAttachments(
   markdown: string,
-): { fileId: string; name: string }[] {
+): { fileId: string; name: string; caption: string }[] {
   const doc = parseOxDocument(markdown);
-  const files: { fileId: string; name: string }[] = [];
+  const files: { fileId: string; name: string; caption: string }[] = [];
   walk(doc as unknown as AnyNode, (node) => {
     if (node.type !== "leafDirective") return;
     const directive = node as unknown as DirectiveNode;
     if (directive.name !== "file") return;
     const attrs = directiveAttrs(directive);
-    if (attrs.fileId) files.push({ fileId: attrs.fileId, name: attrs.name || "file" });
+    if (attrs.fileId) {
+      files.push({ fileId: attrs.fileId, name: attrs.name || "file", caption: attrs.caption ?? "" });
+    }
   });
   return files;
 }
@@ -157,16 +169,46 @@ export function extractFileAttachments(
 
 export type FiledAttachment = { fileId: string; name: string };
 
+export function isImageContentType(contentType: string): boolean {
+  return contentType.startsWith("image/");
+}
+
+/** The sibling summary markdown filename PhyLog's pre-capture stage
+ * (`preCapture.server.ts`) writes right next to a source file —
+ * `IMG_1523.jpeg` -> `IMG_1523-summary.md`. Shared here (rather than
+ * defined in that module) so `fileCardAttachments` below can find and file
+ * the pair together without an import cycle (`preCapture.server.ts`
+ * already imports THIS file for `extractFileAttachments`). */
+export function summaryFileName(sourceName: string): string {
+  const dot = sourceName.lastIndexOf(".");
+  const base = dot > 0 ? sourceName.slice(0, dot) : sourceName;
+  return `${base}-summary.md`;
+}
+
+function fileSnapshot(file: FileRef) {
+  return {
+    human_id: file.human_id,
+    name: file.name,
+    content_type: file.content_type,
+    s3_url: file.s3_url,
+    s3_key: file.s3_key,
+    content: file.content,
+    content_hash: file.content_hash,
+    folder_id: file.folder_id,
+    size: file.size,
+  };
+}
+
 /**
  * Files every NOT-YET-filed `::file{...}` attachment in `card`'s content
  * into its own project's root folder — same reasoning as `sortDailyLog`'s
  * own module doc (a Card is already an explicit, project-scoped section,
  * so no inference is needed about WHICH project; "which folder inside the
  * project" isn't a real question either — everything lands in its root,
- * same as it always has here). Extracted so `phylogAgent.server.ts`'s
- * `runPhylogAgent` can perform this exact same deterministic step directly
- * — per the PhyLog design conversation ("the Sorter should just be one
- * part of the process... PhyLog should define what can be done"), a
+ * same as it always has here). Extracted so PhyLog's own capture stage
+ * (`capture.server.ts`) can perform this exact same deterministic step
+ * directly — per the PhyLog design conversation ("the Sorter should just
+ * be one part of the process... PhyLog should define what can be done"), a
  * Card's photos shouldn't need a separate `nopal sort run` first just to
  * reach the project.
  *
@@ -213,6 +255,48 @@ export async function fileCardAttachments(
     const added = await copyFileIntoFolder(attachment.fileId, card.projectFolderId);
     if (!added) continue; // source file or project folder vanished mid-flight
 
+    const changesets: ChangesetInput[] = [
+      {
+        fileId: added._id,
+        action: "created",
+        before: null,
+        after: { ...fileSnapshot(added), folder_id: added.folder_id ?? card.projectFolderId },
+      },
+    ];
+
+    // A photo's own AI-generated descriptor (`photoPreprocess.server.ts`)
+    // lives right next to it in the daily log — file the PAIR together as
+    // one signal, rather than leaving the descriptor behind. Bundled into
+    // this SAME entry (two changesets) rather than a second entry, since
+    // it's really one event: "this photo (and what PhyLog made of it)
+    // reached the project".
+    if (isImageContentType(added.content_type)) {
+      const source = await getFileRefById(attachment.fileId);
+      if (source?.folder_id) {
+        const { files: siblings } = await listFolderChildren(source.human_id, source.folder_id);
+        const descriptorListing = siblings.find(
+          (f) => f.name === summaryFileName(source.name),
+        );
+        if (descriptorListing) {
+          const addedDescriptor = await copyFileIntoFolder(
+            descriptorListing._id,
+            card.projectFolderId,
+          );
+          if (addedDescriptor) {
+            changesets.push({
+              fileId: addedDescriptor._id,
+              action: "created",
+              before: null,
+              after: {
+                ...fileSnapshot(addedDescriptor),
+                folder_id: addedDescriptor.folder_id ?? card.projectFolderId,
+              },
+            });
+          }
+        }
+      }
+    }
+
     const { created } = await createReleaseLogEntry({
       projectFolderId: card.projectFolderId,
       date,
@@ -220,24 +304,7 @@ export async function fileCardAttachments(
       kind: "file-added",
       summary: `Added file "${added.name}" — [View](/fruits/vault?file=${added._id})`,
       sourceRef,
-      changesets: [
-        {
-          fileId: added._id,
-          action: "created",
-          before: null,
-          after: {
-            human_id: added.human_id,
-            name: added.name,
-            content_type: added.content_type,
-            s3_url: added.s3_url,
-            s3_key: added.s3_key,
-            content: added.content,
-            content_hash: added.content_hash,
-            folder_id: added.folder_id ?? card.projectFolderId,
-            size: added.size,
-          },
-        },
-      ],
+      changesets,
     });
     if (created) filed.push({ fileId: added._id, name: added.name });
   }

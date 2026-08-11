@@ -791,14 +791,24 @@ export function CardDirectiveLayout({
   projectHref,
   content,
   onRemove,
+  pending,
 }: {
   projectName: string;
   projectHref: string;
   content: ReactNode;
   onRemove?: () => void;
+  /** True while this Card is still an optimistic placeholder — see
+   * `ResolvedCard.pending` (`oxmarkdown/cardDirective.ts`). Dims the whole
+   * card and disables interaction with its content area (the header's
+   * "open project" link stays live — its href is already the real,
+   * known folder id, nothing about it is actually pending). */
+  pending?: boolean;
 }) {
   return (
-    <div className="ox-card-directive good-box" contentEditable={false}>
+    <div
+      className={`ox-card-directive good-box${pending ? " ox-card-directive--pending" : ""}`}
+      contentEditable={false}
+    >
       <div className="ox-card-header">
         <div className="ox-card-header-info">
           <span className="font-bold purple-light-text truncate">{projectName}</span>
@@ -864,6 +874,22 @@ function CardDirectiveStatic({
         projectName="Card"
         projectHref="#"
         content={<span className="subtle-text">Loading card…</span>}
+      />
+    );
+  }
+
+  // An OPTIMISTIC placeholder (see `ResolvedCard.pending`'s own header) —
+  // `projectName`/`projectHref` are already the REAL values (known
+  // client-side without the server), so the header shows correctly right
+  // away; only the content area defers to the real thing landing, rather
+  // than mounting a live editor against a card that doesn't exist yet.
+  if (resolved.pending) {
+    return (
+      <CardDirectiveLayout
+        projectName={resolved.projectName}
+        projectHref={resolved.projectHref}
+        pending
+        content={<span className="subtle-text">Creating card…</span>}
       />
     );
   }

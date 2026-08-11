@@ -55,6 +55,21 @@ export type ProjectBlockSize = "third" | "half" | "full";
  */
 export type ProjectLayout = "document" | "grid";
 
+/**
+ * Where a project sits in the human's own project lifecycle — see the
+ * `vault` skill's Projects section. "trashed" is a soft-delete: the
+ * trash-cleanup cron (`api.vault.trash-cleanup.tsx`) permanently deletes a
+ * project 30 days after its status was last set to "trashed".
+ */
+export type ProjectStatus = "active" | "completed" | "trashed";
+
+export const PROJECT_STATUSES: ProjectStatus[] = ["active", "completed", "trashed"];
+
+/** Every project starts out Active — the default when a README has no
+ * `status` front matter yet (a brand new project, or one written before
+ * this field existed). */
+export const DEFAULT_PROJECT_STATUS: ProjectStatus = "active";
+
 export type ProjectManifest = {
   title?: string;
   /** Free-form label (e.g. "blog", "client-deliverable", "budget"). Not yet
@@ -62,6 +77,11 @@ export type ProjectManifest = {
   type?: string;
   /** Defaults to "document" — the layout that can never look broken. */
   layout?: ProjectLayout;
+  /** Defaults to "active". Written exclusively via
+   * `projectStatus.server.ts`'s `setProjectStatus`, which also keeps
+   * `vault_folders.project_status` (a denormalized read cache, same trick
+   * `shared_with` uses for `sharing`) in sync. */
+  status?: ProjectStatus;
   /** This project's collaborators and their Sharing Role — see
    * `projectSharing.server.ts`. Convenience passthrough for callers already
    * resolving the full manifest (e.g. the project rollup page); read
@@ -119,6 +139,17 @@ export function splitFrontmatter(markdown: string): {
 }
 
 const VALID_LAYOUTS = new Set(["document", "grid"]);
+const VALID_STATUSES = new Set<string>(PROJECT_STATUSES);
+
+/** Normalizes a raw front-matter `status` value — anything unrecognized
+ * (missing, malformed, hand-typed typo) silently falls back to the
+ * default rather than failing the whole manifest parse, same reasoning
+ * `parseSharingList` already uses for `sharing`. */
+function parseStatus(raw: unknown): ProjectStatus {
+  return typeof raw === "string" && VALID_STATUSES.has(raw)
+    ? (raw as ProjectStatus)
+    : DEFAULT_PROJECT_STATUS;
+}
 
 /** Validates/coerces a raw `sharing` front-matter value into a clean
  * `ProjectSharingEntry[]` — silently drops anything malformed (not an
@@ -161,6 +192,21 @@ export function parseProjectSharing(markdown: string): ProjectSharingEntry[] {
   }
 }
 
+/** Reads just the `status` field from a README's front matter — mirrors
+ * `parseProjectSharing` above. Defaults to "active" for a project with no
+ * README/front matter, malformed front matter, or no `status` key. */
+export function parseProjectStatus(markdown: string): ProjectStatus {
+  const { frontmatter } = splitFrontmatter(markdown);
+  if (!frontmatter) return DEFAULT_PROJECT_STATUS;
+  try {
+    const data = parseYaml(frontmatter);
+    if (!data || typeof data !== "object") return DEFAULT_PROJECT_STATUS;
+    return parseStatus((data as Record<string, unknown>).status);
+  } catch {
+    return DEFAULT_PROJECT_STATUS;
+  }
+}
+
 /**
  * Rewrites ONLY the `sharing` key of a README's front matter, preserving
  * every other front-matter field (title/type/layout/...) and the body
@@ -199,6 +245,35 @@ export function withProjectSharing(
 }
 
 /**
+ * Rewrites ONLY the `status` key of a README's front matter, preserving
+ * every other field (title/type/layout/sharing/...) untouched — the sole
+ * intended writer of a project's `status`
+ * (`projectStatus.server.ts`'s `setProjectStatus`). Setting the default
+ * ("active") removes the `status` key entirely, same convention
+ * `withProjectSharing` uses for an empty collaborator list.
+ */
+export function withProjectStatus(markdown: string, status: ProjectStatus): string {
+  const { frontmatter, body } = splitFrontmatter(markdown);
+  let data: Record<string, unknown> = {};
+  if (frontmatter) {
+    try {
+      const parsed = parseYaml(frontmatter);
+      if (parsed && typeof parsed === "object") {
+        data = { ...(parsed as Record<string, unknown>) };
+      }
+    } catch {
+      data = {};
+    }
+  }
+  if (status !== DEFAULT_PROJECT_STATUS) data.status = status;
+  else delete data.status;
+
+  if (Object.keys(data).length === 0) return body;
+  const yamlText = stringifyYaml(data).trimEnd();
+  return `---\n${yamlText}\n---\n${body}`;
+}
+
+/**
  * Parses a `README.md`'s content into a `ProjectManifest`, if present.
  * Fails closed on any malformed/missing front matter — returns
  * `manifest: null` rather than throwing, so callers can always fall back to
@@ -222,6 +297,7 @@ export function parseProjectManifest(markdown: string): {
         title: typeof data.title === "string" ? data.title : undefined,
         type: typeof data.type === "string" ? data.type : undefined,
         layout: data.layout,
+        status: parseStatus((data as Record<string, unknown>).status),
         sharing: parseSharingList((data as Record<string, unknown>).sharing),
       },
       body,

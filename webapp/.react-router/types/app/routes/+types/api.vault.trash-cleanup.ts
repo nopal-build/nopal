@@ -2,10 +2,10 @@
 
 import type { GetInfo, GetAnnotations } from "react-router/internal";
 
-type Module = typeof import("../api.phylog.run-all.js")
+type Module = typeof import("../api.vault.trash-cleanup.js")
 
 type Info = GetInfo<{
-  file: "routes/api.phylog.run-all.tsx",
+  file: "routes/api.vault.trash-cleanup.tsx",
   module: Module
 }>
 
@@ -13,8 +13,11 @@ type Matches = [{
   id: "root";
   module: typeof import("../../root.js");
 }, {
-  id: "routes/api.phylog.run-all";
-  module: typeof import("../api.phylog.run-all.js");
+  id: "routes/api.vault";
+  module: typeof import("../api.vault.js");
+}, {
+  id: "routes/api.vault.trash-cleanup";
+  module: typeof import("../api.vault.trash-cleanup.js");
 }];
 
 type Annotations = GetAnnotations<Info & { module: Module, matches: Matches }>;

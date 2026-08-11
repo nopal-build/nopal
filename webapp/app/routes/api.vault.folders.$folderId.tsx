@@ -11,6 +11,7 @@ import {
   isFolderShared,
   moveVaultFolder,
 } from "../data/vault.server";
+import { canWriteToRoot } from "../data/vaultRoots";
 import { isFileRefLocked, isVaultRootFolder } from "../data/vault.types";
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -34,11 +35,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const isRoot = isVaultRootFolder(folder);
 
-  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
-  // Admin/Super, even inside the OWNING human's own vault — see
-  // `vaultRoots.ts` / `vaultFolderTypes.ts`. Applies to every mutation below
-  // (delete, rename, move, publish, share).
-  if (!(await canWriteToFolderId(folderId, user.role))) {
+  // A `project-n01` folder (a project, or `personal`) is `writable:
+  // "system"` at the CONTENT level — only PhyLog may write files/folders
+  // INSIDE it (see `vaultFolderTypes.ts`). That restriction is NOT about
+  // operating on the anchor folder itself, though: its own owner can still
+  // rename/delete/move/share/publish their own project exactly as before—
+  // so THIS folder's own object-level mutations only need the ROOT policy,
+  // not the (necessarily stricter) folder-type content policy.
+  const isProjectN01Anchor = folder.is_folder_type_root && folder.folder_type === "project-n01";
+  const permitted = isProjectN01Anchor
+    ? canWriteToRoot(folder.vault_root_key, user.role)
+    : await canWriteToFolderId(folderId, user.role);
+  if (!permitted) {
     return Response.json(
       { error: "You don't have permission to modify this folder" },
       { status: 403 },

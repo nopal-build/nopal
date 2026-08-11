@@ -129,6 +129,16 @@ pub struct Client {
 fn build_http_client() -> reqwest::blocking::Client {
     reqwest::blocking::Client::builder()
         .pool_max_idle_per_host(0)
+        // PhyLog's pipeline endpoints (`/api/phylog/*`) can legitimately run
+        // for minutes (many sequential vision/LLM calls) — a short read
+        // timeout here would fire mid-request and trigger `send_with_retry`
+        // to resend the SAME mutating call while the server is still
+        // finishing the first one, which is unsafe for anything that isn't
+        // purely idempotent at the transport level (observed in practice:
+        // duplicate `*-summary.md` files from two overlapping pre-capture
+        // runs). Generous on purpose — costs nothing for the many fast
+        // calls this client also makes.
+        .timeout(std::time::Duration::from_secs(15 * 60))
         .build()
         .unwrap_or_else(|_| reqwest::blocking::Client::new())
 }

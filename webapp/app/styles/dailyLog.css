@@ -17,3 +17,94 @@
     background: #513f57;
   }
 }
+
+/* A hard, square bottom edge — for the dashboard's Daily Log preview
+   (`fruits.tsx`), which cuts its content off mid-entry (`.daily-log-fade`
+   below); a rounded corner at an arbitrary cut point reads as a
+   "finished" box, which this isn't. Top stays rounded since that edge IS
+   the frame's real start. */
+.daily-log-day--hard-cut {
+  border-radius: 8px 8px 0 0;
+}
+
+/* The dashboard's Daily Log preview (`fruits.tsx`) reuses the exact
+   `.daily-log-day` frame/colors as the real Daily Log page, but the
+   frame holds ONLY a clipped, faded preview of the day's content — the
+   "Keep writing" action lives OUTSIDE it (`.daily-log-fade-footer`,
+   below), not inside a second box.
+
+   The clip/fade is applied DIRECTLY to `.ox-content` (passed as a
+   `className` on `OxRenderer`) rather than an ancestor wrapper div, and
+   ONLY on the y-axis — critical so a `::card{...}` directive's own
+   negative-margin overhang (`.ox-content.ox-card-host`, oxmarkdown.css)
+   still bleeds past the day frame's edge exactly like it does on the
+   real page. An ancestor wrapper with its own `overflow: hidden` would
+   clip that horizontal bleed at ITS edge instead — `.ox-content` already
+   owns `overflow-x: hidden` itself (oxmarkdown.css), so adding
+   `overflow-y: hidden` to that SAME element clips only height, never
+   re-clipping the bleed `.ox-card-host`'s widened box already accounts
+   for. */
+.ox-content.daily-log-fade {
+  position: relative;
+  max-height: 180px;
+  overflow-y: hidden;
+}
+.daily-log-fade::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 72px;
+  background: linear-gradient(to bottom, transparent, #fffefc);
+  pointer-events: none;
+}
+@media (prefers-color-scheme: dark) {
+  .daily-log-fade::after {
+    background: linear-gradient(to bottom, transparent, #513f57);
+  }
+}
+
+/* Restores a visible paragraph-to-paragraph gap for the ordinary case —
+   exactly ONE blank line, the bare minimum CommonMark requires to
+   separate two blocks at all. `.ox-content p { margin: 0 }`
+   (oxmarkdown.css) means the static renderer otherwise draws a plain
+   single-blank-line paragraph break pixel-IDENTICAL to a soft-wrapped
+   continuation line within the SAME paragraph — only blank lines BEYOND
+   that first one get their own visible `.ox-blank-line-spacer` row
+   (`countExtraBlankLines`/`renderBlockNodes`, OxRenderer.tsx). This adds
+   the missing baseline unit so the preview actually looks like the real
+   entry's own paragraph breaks, not a run-on block.
+
+   Deliberately scoped to just THIS preview (`.ox-dot-grid`'s children,
+   reached through `.daily-log-fade` on the `.ox-content` ancestor — see
+   oxmarkdown.css for why the real block content lives one level below
+   `.ox-content` itself) rather than a blanket `.ox-content` rule, to
+   stay a narrow, low-risk addition while the editor itself is being
+   actively worked on elsewhere. `:not(.ox-blank-line-spacer)` keeps this
+   ADDITIVE with the existing extra-blank-line spacers rather than
+   double-counting: a spacer's own height already accounts for one more
+   blank line, so it doesn't need a margin-top of its own too — the real
+   content block that follows one still gets this rule's margin-top,
+   which is exactly the "one more unit for one more blank line" rhythm
+   this rule is establishing for the baseline case. */
+.ox-content.daily-log-fade > .ox-dot-grid > *:not(:first-child):not(.ox-blank-line-spacer) {
+  margin-top: var(--ox-grid, 41px);
+}
+
+/* The solid rule + "Keep writing" button BELOW the day frame —
+   deliberately a plain divider, not a second bordered box. Same border
+   tone `.daily-log-day`'s own border uses, so it still reads as
+   belonging to the same frame. Horizontal padding matches `.ox-content`'s
+   own gutter (`--ox-grid`) so the button lands on the same left edge as
+   the prose above it. */
+.daily-log-fade-footer {
+  border-top: 1px solid var(--midground);
+  margin-top: 16px;
+  padding: 16px var(--ox-grid, 41px) 0;
+}
+@media (prefers-color-scheme: dark) {
+  .daily-log-fade-footer {
+    border-top-color: var(--dark-midground);
+  }
+}

@@ -60,7 +60,7 @@ import {
 } from "./vault.server";
 import { getDailyLogFolderAndReadmeId } from "./dailyLog.server";
 import { getProjectRole } from "./projectSharing.server";
-import { query, upsert, merge, formatRecord, defineTable, type Data } from "./generic.server";
+import { query, upsert, merge, remove, formatRecord, defineTable, type Data } from "./generic.server";
 import type { FileRef } from "./vault.types";
 
 const RELEASE_LOG_FILENAME = "release-log.md";
@@ -270,6 +270,40 @@ export async function regenerateDailyReleaseLog(
   const content = renderSections(groups);
   const file = await getOrCreateReleaseLogFile(actingHumanId, dateFolderId);
   if (file.content !== content) await updateFileRef(file._id, { content });
+}
+
+/**
+ * Deletes EVERY release-log entry (and its changesets) for one project —
+ * used by `resetProjectN01Content` (`projectN01.server.ts`) when wiping a
+ * `project-n01` folder's PhyLog-managed content: those entries describe
+ * state (filed attachments, past README versions) that a reset just
+ * deleted, so leaving them behind would make a later `capture --full`
+ * think everything was already applied and skip reprocessing it.
+ * Regenerates the project's own (now-empty) `release-log.md`, and every
+ * affected day's `release-log.md` too (a reset can span many acting
+ * humans/dates, unlike a single day's own capture run).
+ */
+export async function clearReleaseLogForProject(projectFolderId: string): Promise<void> {
+  await ensureReleaseLogTables();
+  const entries = await getProjectReleaseLogEntries(projectFolderId);
+  if (entries.length === 0) return;
+
+  const affectedDates = new Map<string, string>(); // `${humanId}:${date}` -> humanId
+  for (const entry of entries) {
+    const changesets = await getChangesetsForEntry(entry._id);
+    for (const changeset of changesets) {
+      await remove("release_log_changesets", changeset._id);
+    }
+    await remove("release_log_entries", entry._id);
+    affectedDates.set(`${entry.acting_human_id}:${entry.date}`, entry.acting_human_id);
+  }
+
+  await regenerateProjectReleaseLog(projectFolderId);
+  for (const [key, humanId] of affectedDates) {
+    const date = key.slice(humanId.length + 1);
+    const { dateFolderId } = await getDailyLogFolderAndReadmeId(humanId, date);
+    await regenerateDailyReleaseLog(humanId, date, dateFolderId);
+  }
 }
 
 // ─── Entries/changesets CRUD ────────────────────────────────────────────

@@ -52,3 +52,36 @@ export interface LlmProvider {
     tools: ToolDefinition[];
   }): Promise<LlmResponse>;
 }
+
+/**
+ * A second, deliberately SEPARATE small interface — vision, not tool-
+ * calling. PhyLog's pre-capture stage (`preCapture.server.ts`) uses this
+ * to turn one photo's bytes plus its own text context (a Card's
+ * caption for it, the project it belongs to) into a plain-text description,
+ * BEFORE the README-writing step ever runs — so `runAgentLoop`'s own
+ * `LlmProvider` never needs image content blocks at all. Kept separate
+ * from `LlmProvider` (rather than folding an optional image param into
+ * `complete`) because the two calls have nothing else in common: no tools,
+ * no multi-turn loop, no system prompt swapping — just "describe this
+ * photo, given this context".
+ *
+ * `AnthropicProvider` (`anthropicProvider.server.ts`) implements BOTH
+ * interfaces off the same underlying client — a second provider is free
+ * to do the same, or implement only one of the two if it can't (or
+ * shouldn't) do vision.
+ */
+export type PhotoDescriptionInput = {
+  /** Raw image bytes, base64-encoded. */
+  imageBase64: string;
+  /** e.g. "image/jpeg" — passed straight through to the provider's own
+   * image content block. */
+  mediaType: string;
+  /** Whatever text context should ground the description — the Card's
+   * own caption for this photo, the project/day it was logged against,
+   * etc. Assembled by the caller, not this interface. */
+  context: string;
+};
+
+export interface PhotoDescriber {
+  describePhoto(input: PhotoDescriptionInput): Promise<string>;
+}

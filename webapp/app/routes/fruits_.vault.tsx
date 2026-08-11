@@ -1800,6 +1800,21 @@ export default function VaultV2Page() {
     current.kind === "folder" &&
     canWriteToRoot(current.folder.vault_root_key, user.role) &&
     canWriteToFolderType(currentFolderType, user.role);
+  // Rename/Move/Share/Publish/Delete act on the folder OBJECT itself, not
+  // its content — a `project-n01` folder (a project, or Personal) is
+  // `writable: "system"` at the CONTENT level (see `vaultFolderTypes.ts`),
+  // but its own owner can still manage the folder itself exactly as
+  // before, so this anchor case only needs the root-level policy. Mirrors
+  // the same carve-out `api.vault.folders.$folderId.tsx` makes server-side.
+  const isProjectN01AnchorCurrent =
+    current.kind === "folder" &&
+    current.folder.is_folder_type_root &&
+    currentFolderType === "project-n01";
+  const canManageCurrent =
+    isOwnedByViewer &&
+    current.kind === "folder" &&
+    canWriteToRoot(current.folder.vault_root_key, user.role) &&
+    (isProjectN01AnchorCurrent || canWriteToFolderType(currentFolderType, user.role));
   // A folder is publicly reachable either because it was Published itself,
   // or because an ancestor was — Publish is resolved dynamically (see
   // resolvePublicRootFolder), not cascaded onto descendants at publish time,
@@ -1856,7 +1871,7 @@ export default function VaultV2Page() {
   // are omitted; when nothing is available the trigger renders disabled.
   // Upload / New folder / Download stay as standalone toolbar buttons.
   const moreActions: MoreMenuItem[] = [];
-  if (current.kind === "folder" && canWriteCurrent) {
+  if (current.kind === "folder" && canManageCurrent) {
     if (!currentIsRootContainer) {
       moreActions.push({ label: "Rename", onClick: handleRenameFolder });
     }

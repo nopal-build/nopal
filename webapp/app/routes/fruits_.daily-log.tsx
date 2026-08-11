@@ -19,7 +19,14 @@ import OxEditor from "../components/OxEditor";
 import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
 import type { UploadedFileInfo, UploadFileFn } from "../oxmarkdown/fileDirective";
 import type { CardResolver } from "../oxmarkdown/cardDirective";
-import { appendCardDirectiveMarkdown, cardedProjectFolderIds } from "../oxmarkdown/cardDirective";
+import {
+  appendCardDirectiveMarkdown,
+  removeCardDirectiveMarkdown,
+  cardedProjectFolderIds,
+  cardFileName,
+  pendingCardFileId,
+  isPendingCardFileId,
+} from "../oxmarkdown/cardDirective";
 import {
   getDailyLogs,
   saveDailyLog,
@@ -231,6 +238,9 @@ function buildCardResolver(
       projectHref: `/fruits/vault?folder=${card.projectFolderId}`,
       markdown: card.content,
       onChange: (v) => onChangeCard(card.fileId, v),
+      // Derived from the card's OWN fileId, never set independently — see
+      // `ResolvedCard.pending`'s own header for why that matters.
+      pending: isPendingCardFileId(card.fileId),
     };
   };
 }
@@ -585,6 +595,17 @@ export default function DailyLogPage() {
   const [todayContent, setTodayContent] = useState("");
   const [todayCards, setTodayCards] = useState<DailyLogCard[]>([]);
 
+  // Always the LATEST todayContent, unlike a value captured in a closure
+  // that only re-created when some OTHER dependency last changed —
+  // needed by handleCreateCard's rollback-on-error path below, which runs
+  // inside an effect keyed on createCardFetcher.data (not todayContent),
+  // so a closure over todayContent there could otherwise be stale by the
+  // time a real network round trip resolves.
+  const todayContentRef = useRef(todayContent);
+  useEffect(() => {
+    todayContentRef.current = todayContent;
+  }, [todayContent]);
+
   useEffect(() => {
     const d = localDateString();
     setToday(d);
@@ -781,6 +802,11 @@ export default function DailyLogPage() {
   const saveCardNow = useCallback(
     (fileId: string, content: string) => {
       if (!today) return;
+      // Defensive only — the UI never renders an editable editor for a
+      // still-pending card (see `ResolvedCard.pending`), so this should be
+      // unreachable, but a save against a placeholder id would otherwise
+      // silently 404/fail server-side once the real save request lands.
+      if (isPendingCardFileId(fileId)) return;
       if (content === cardLastSaved.current[fileId]) return;
       cardLastSaved.current[fileId] = content;
       // A Card's content lives in its own `file_refs` row — this save is
@@ -807,48 +833,121 @@ export default function DailyLogPage() {
   );
 
   // ── Add a card ──────────────────────────────────────────────────
-  // Two steps, both driven off the SAME fetcher response: (1) get/create
-  // the card's own vault file server-side, (2) append its `::card{...}`
-  // mount point to the readme's own markdown — the SAME `saveNow` path
-  // any other edit uses, so the reference is persisted immediately rather
-  // than waiting for the next debounced readme save.
+  // OPTIMISTIC: the whole point is to not make "click a project chip"
+  // wait on a real round trip before anything visible happens. On click,
+  // `handleCreateCard` immediately (a) adds a placeholder `DailyLogCard`
+  // to `todayCards` (real project name/href, computed client-side — see
+  // `cardFileName`'s own header — but no real content yet, rendered
+  // grayed-out via `ResolvedCard.pending`) and (b) appends + saves the
+  // `::card{...}` mount point, the SAME `saveNow` path any other edit
+  // uses. The actual server request still happens in the background;
+  // its response effect below only ever RECONCILES what's already on
+  // screen (swap the placeholder for the real card, or roll both steps
+  // back on a genuine failure) — it never blocks anything on its own.
+  //
+  // Known, deliberate limitation: `createCardFetcher` is a single fetcher
+  // instance, so only one "Add a card" request is meaningfully tracked at
+  // a time via `pendingCreateRef` below — this pre-dates this optimistic
+  // rework (the fetcher itself has always only tracked one in-flight
+  // submission), and clicking a SECOND project chip before the first
+  // one's request resolves isn't a new regression, just not specially
+  // hardened against either.
 
   const createCardFetcher = useFetcher<typeof action>();
+  const pendingCreateRef = useRef<{ projectFolderId: string; fileName: string } | null>(null);
 
   const handleCreateCard = useCallback(
     (projectFolderId: string) => {
       if (!today) return;
+      const fileName = cardFileName(projectFolderId);
+      // Chips are already filtered to projects WITHOUT a card yet (see
+      // `AddCardSection`'s `existingProjectFolderIds`), but that filter is
+      // recomputed from `todayContent` — which this function itself is
+      // about to change — so re-check directly to guard against a
+      // double-click landing both calls before the chip has a chance to
+      // disappear.
+      if (cardedProjectFolderIds(todayContent).has(projectFolderId)) return;
+
+      const projectFolder = projectFolders.find((f) => f.id === projectFolderId);
+      setTodayCards((cards) => [
+        ...cards,
+        {
+          fileId: pendingCardFileId(fileName),
+          fileName,
+          projectFolderId,
+          projectName: projectFolder?.name ?? "Project",
+          content: "",
+        },
+      ]);
+
+      // Updates the EDITOR's displayed content immediately (so the row
+      // appears right away) but deliberately does NOT call `saveNow` yet
+      // — see the effect below for why: persisting this reference before
+      // the underlying vault file is CONFIRMED to exist can leave a
+      // permanently dangling `::card{...}` (a card that looks like it
+      // exists but has no backing file, stuck on "Loading card…"
+      // forever) if the create request never completes — page closed/
+      // refreshed mid-flight, a network failure, or simply outliving the
+      // component. This is a REAL bug that shipped once already; see the
+      // oxmarkdown skill's own note on it for the full story.
+      const next = appendCardDirectiveMarkdown(todayContent, { file: fileName, projectFolderId });
+      setTodayContent(next);
+
+      pendingCreateRef.current = { projectFolderId, fileName };
       createCardFetcher.submit(
         { date: today, createCardForProject: projectFolderId },
         { method: "POST", action: "/fruits/daily-log", encType: "application/json" },
       );
     },
-    [today, createCardFetcher],
+    [today, todayContent, projectFolders, createCardFetcher],
   );
 
   useEffect(() => {
     const data = createCardFetcher.data;
-    if (!data || !("card" in data) || !data.card) return;
+    if (!data) return;
+    const pending = pendingCreateRef.current;
+
+    if ("error" in data) {
+      // The one real, reachable failure here is a permission check (see the
+      // action) — roll the optimistic content edit back exactly, using the
+      // freshest content (not a stale closure — see `todayContentRef`'s
+      // own header), since the user may well have kept typing elsewhere
+      // during the round trip. `saveNow` here is a safety net, not the
+      // normal path — the reference was never persisted in the first
+      // place (see `handleCreateCard`), so this is a no-op UNLESS an
+      // unrelated edit's own debounced autosave already persisted it in
+      // the meantime; either way, this guarantees the server never ends
+      // up with a dangling reference.
+      pendingCreateRef.current = null;
+      if (!pending) return;
+      setTodayCards((cards) => cards.filter((c) => c.fileName !== pending.fileName));
+      const rolledBack = removeCardDirectiveMarkdown(todayContentRef.current, pending.fileName);
+      setTodayContent(rolledBack);
+      saveNow(rolledBack);
+      return;
+    }
+
+    if (!("card" in data) || !data.card) return;
     const card = data.card;
+    pendingCreateRef.current = null;
     // A brand-new Card is its own new `file_refs` row — suppress the
     // real-time echo for it, same reasoning as `saveCardNow`/uploads above.
     markOwnMutation(card.fileId);
-    setTodayCards((cards) =>
-      cards.some((c) => c.fileId === card.fileId) ? cards : [...cards, card],
-    );
-    // Reads `todayContent` from THIS render's closure rather than a
-    // `setTodayContent` updater function — an updater must be a pure
-    // function of its previous value (React may invoke it more than
-    // once), so the side-effecting `saveNow` call below can't safely live
-    // inside one. Safe to read directly here: nothing else changes
-    // `todayContent` between this card being created and this effect
-    // running.
-    const next = appendCardDirectiveMarkdown(todayContent, {
-      file: card.fileName,
-      projectFolderId: card.projectFolderId,
+    setTodayCards((cards) => {
+      const idx = cards.findIndex((c) => c.fileName === card.fileName);
+      // Nothing to reconcile (e.g. the user removed the placeholder card
+      // before the server responded) — don't resurrect it.
+      if (idx === -1) return cards;
+      const next = [...cards];
+      next[idx] = card;
+      return next;
     });
-    setTodayContent(next);
-    saveNow(next);
+    // NOW it's safe to persist the `::card{...}` reference — the
+    // underlying vault file is CONFIRMED to exist. Uses the freshest
+    // content (not the `next` string computed back in `handleCreateCard`,
+    // which would be stale if the user kept typing elsewhere during the
+    // round trip), same reasoning as the rollback branch above.
+    saveNow(todayContentRef.current);
     // Only ever re-run when the fetcher actually delivers a NEW response.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createCardFetcher.data]);

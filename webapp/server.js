@@ -18,6 +18,15 @@ app.use((req, _res, next) => {
 
 const httpServer = createServer(app);
 
+// PhyLog's pipeline endpoints (`/api/phylog/*`) can legitimately run for
+// several minutes (many sequential vision/LLM calls across many days'
+// Cards) — Node's default socket timeout (~2 minutes) would otherwise kill
+// the connection mid-request, which the CLI's client then retries,
+// re-running the (non-atomic) pipeline concurrently with the still-running
+// original call. Generous on purpose; costs nothing for every other, much
+// faster route.
+httpServer.setTimeout(15 * 60 * 1000);
+
 const viteDevServer =
   process.env.NODE_ENV === "production"
     ? null
@@ -140,6 +149,31 @@ httpServer.listen(3000, () => {
       runArchiveCleanup();
       setInterval(runArchiveCleanup, 24 * 60 * 60 * 1000);
     }, 30_000);
+
+    // ── Trashed-project cleanup ────────────────────────────────────────────
+    // Permanently deletes any project folder that's been sitting in
+    // "Trashed" status for 30+ days (see the vault skill's Projects
+    // section, and projectStatus.server.ts). Same CRON_SECRET, staggered a
+    // little from the archive cleanup above.
+    const runTrashCleanup = async () => {
+      try {
+        const res = await fetch(
+          "http://localhost:3000/api/vault/trash-cleanup",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${cronSecret}` },
+          },
+        );
+        const data = await res.json();
+        console.log("[cron] trash-cleanup:", data);
+      } catch (err) {
+        console.error("[cron] trash-cleanup failed:", err);
+      }
+    };
+    setTimeout(() => {
+      runTrashCleanup();
+      setInterval(runTrashCleanup, 24 * 60 * 60 * 1000);
+    }, 37_000);
 
     // ── Daily-log sort ────────────────────────────────────────────────────
     // Sorts every human's closed, not-yet-sorted daily logs (mentions →

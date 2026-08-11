@@ -769,7 +769,22 @@
   min-width: 0;
 }
 
-/* ── Editing mode: checklist ─────────────────────── */
+/* An OPTIMISTIC placeholder, added to the UI the instant "Add a card" is
+   clicked, before the server round trip that actually creates the
+   underlying vault file has finished — see `ResolvedCard.pending`
+   (`oxmarkdown/cardDirective.ts`). Dims the WHOLE card (header included —
+   simplest, most honest signal that this row isn't fully real yet) but
+   only disables pointer events on the CONTENT area: the header's "open
+   project" link already points at a real, known project, so there's no
+   reason to block it. */
+.ox-card-directive--pending {
+  opacity: 0.55;
+}
+.ox-card-directive--pending .ox-card-content {
+  pointer-events: none;
+}
+
+/* ── Editing mode: checklist ──────────────── */
 /* ── Editing mode: checklist ───────────────────────────────────────── */
 /* `@lexical/list`'s native checklist shape differs from Interacting mode's
    static markup: there's no separate `.ox-task-checkbox` glyph element —

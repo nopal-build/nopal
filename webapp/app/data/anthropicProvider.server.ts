@@ -10,6 +10,8 @@ import type {
   LlmMessage,
   LlmProvider,
   LlmResponse,
+  PhotoDescriber,
+  PhotoDescriptionInput,
   StopReason,
   ToolCall,
   ToolDefinition,
@@ -17,6 +19,19 @@ import type {
 
 const DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
 const DEFAULT_MAX_TOKENS = 4096;
+/** Vision calls want a paragraph, not a whole README — kept separate from
+ * `DEFAULT_MAX_TOKENS` so tightening one doesn't silently affect the
+ * other. */
+const PHOTO_DESCRIPTION_MAX_TOKENS = 512;
+
+const PHOTO_DESCRIPTION_SYSTEM_PROMPT = `You are PhyLog, describing a photo that was attached to a project's daily-log Card. Write a short, factual paragraph (2-4 sentences) capturing what the photo actually shows — objects, people, setting, visible state of progress — grounded ONLY in what's visible plus the text context you're given. Never speculate beyond what's visible. No preamble, no "this photo shows" framing — just the description itself.`;
+
+const ANTHROPIC_IMAGE_MEDIA_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
 
 function mapStopReason(reason: string | null): StopReason {
   switch (reason) {
@@ -74,7 +89,7 @@ function toAnthropicTools(tools: ToolDefinition[]): Anthropic.Tool[] {
   }));
 }
 
-export class AnthropicProvider implements LlmProvider {
+export class AnthropicProvider implements LlmProvider, PhotoDescriber {
   private client: Anthropic;
   private model: string;
 
@@ -117,6 +132,44 @@ export class AnthropicProvider implements LlmProvider {
     }
 
     return { text, toolCalls, stopReason: mapStopReason(response.stop_reason) };
+  }
+
+  /** See `PhotoDescriber` (`llmProvider.ts`) for the design reasoning —
+   * a plain, single-turn vision call, no tools, no message history. */
+  async describePhoto(input: PhotoDescriptionInput): Promise<string> {
+    if (!ANTHROPIC_IMAGE_MEDIA_TYPES.has(input.mediaType)) {
+      throw new Error(`Unsupported image media type for description: ${input.mediaType}`);
+    }
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: PHOTO_DESCRIPTION_MAX_TOKENS,
+      system: PHOTO_DESCRIPTION_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: input.mediaType as Anthropic.Base64ImageSource["media_type"],
+                data: input.imageBase64,
+              },
+            },
+            {
+              type: "text",
+              text: input.context || "(no additional context provided)",
+            },
+          ],
+        },
+      ],
+    });
+
+    return response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("")
+      .trim();
   }
 }
 

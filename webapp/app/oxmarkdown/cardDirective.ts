@@ -33,6 +33,46 @@ export interface ResolvedCard {
   projectHref: string;
   markdown: string;
   onChange: (markdown: string) => void;
+  /** True while this Card is an OPTIMISTIC placeholder — added to the UI
+   * immediately on "Add a card" (before the server has actually created
+   * the underlying vault file), so the round trip doesn't have to finish
+   * before the row appears. `projectName`/`projectHref` are already the
+   * REAL values (known client-side without asking the server — see
+   * `cardFileName`/`isPendingCardFileId` below), so only the content area
+   * needs to visually defer to the real thing landing: see
+   * `CardDirectiveLayout`'s `pending` prop (`components/OxRenderer.tsx`)
+   * and its Editing-mode counterpart in `editingNodes.tsx`. Never set by
+   * `resolveCard` implementations directly — derived from whether the
+   * underlying `DailyLogCard.fileId` is a placeholder id (see
+   * `isPendingCardFileId`), so it can never drift from reality once the
+   * real fileId lands. */
+  pending?: boolean;
+}
+
+/** The deterministic filename `createDailyLogCard` (`data/dailyLog.server.ts`)
+ * uses for a project's Card on a given day — shared here (an isomorphic
+ * module, unlike the `.server.ts` file that owns the real creation logic)
+ * so the CLIENT can compute the same filename up front, before the server
+ * round trip even starts. This is what makes an optimistic "Add a card"
+ * possible at all: without a shared, deterministic filename, the client
+ * would have no `file="..."` value to put in the `::card{...}` directive
+ * until the server handed one back. */
+export function cardFileName(projectFolderId: string): string {
+  return `card-${projectFolderId}.md`;
+}
+
+// The placeholder `fileId` an optimistically-added `DailyLogCard` gets
+// before the server's real vault-file id is known — deliberately NOT a
+// plausible-looking real id, so a bug that skips replacing it is obvious
+// rather than silently saving content against a fake id.
+const PENDING_FILE_ID_PREFIX = "pending:";
+
+export function pendingCardFileId(fileName: string): string {
+  return `${PENDING_FILE_ID_PREFIX}${fileName}`;
+}
+
+export function isPendingCardFileId(fileId: string): boolean {
+  return fileId.startsWith(PENDING_FILE_ID_PREFIX);
 }
 
 /** A plain lookup function, same spirit as `oxmarkdown/mention.ts`'s
@@ -73,6 +113,30 @@ export function appendCardDirectiveMarkdown(
     children: [],
   };
   doc.children.push(directive as unknown as RootContent);
+  return serializeOxDocument(doc);
+}
+
+/**
+ * The symmetric rollback for `appendCardDirectiveMarkdown` — removes the
+ * `::card{file="..."}` directive for `file` from `markdown`, if present.
+ * Used when an OPTIMISTICALLY-added card's server-side creation actually
+ * fails (e.g. a permission check rejects it) — the append already ran (and
+ * was already saved) at click time, before the round trip even started,
+ * so undoing it needs to be just as direct: parse, filter the one
+ * directive out, re-serialize, exactly mirroring how the append itself
+ * works. A no-op (returns `markdown` unchanged, just re-serialized) if no
+ * matching directive is found — e.g. the user already removed the card
+ * themselves while the request was still in flight. */
+export function removeCardDirectiveMarkdown(markdown: string, file: string): string {
+  const doc = parseOxDocument(markdown);
+  doc.children = doc.children.filter(
+    (node) =>
+      !(
+        (node as DirectiveNode).type === "leafDirective" &&
+        (node as DirectiveNode).name === "card" &&
+        (node as DirectiveNode).attributes?.file === file
+      ),
+  );
   return serializeOxDocument(doc);
 }
 

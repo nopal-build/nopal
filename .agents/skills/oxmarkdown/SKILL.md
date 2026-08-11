@@ -939,6 +939,41 @@ Interacting mode first, without needing that decision resolved.
       straight back in as `OxEditor`'s own controlled `markdown` prop,
       which `MarkdownSyncPlugin` re-seeds from as an ordinary "changed
       from outside" update.
+    - **"Add a card" is OPTIMISTIC, not round-trip-gated** — clicking a
+      project chip used to wait on a full server round trip
+      (`createDailyLogCard`) before anything appeared at all, which felt
+      slow. `fruits_.daily-log.tsx`'s `handleCreateCard` now adds a
+      placeholder `DailyLogCard` to `todayCards` AND appends + saves the
+      `::card{...}` mount point SYNCHRONOUSLY on click, with the real
+      server request happening in the background; its response effect
+      only ever reconciles what's already on screen (swap the placeholder
+      for the real card, or roll both steps back on a genuine failure,
+      e.g. a permission check rejecting it). This only works because the
+      Card's filename is DETERMINISTIC from the project folder id alone
+      (`cardFileName`, moved from a `dailyLog.server.ts`-private helper
+      into `oxmarkdown/cardDirective.ts` — an isomorphic module — so the
+      CLIENT can compute the exact same filename the server will, without
+      asking it first) — the one piece of server-generated data an
+      optimistic add can't know up front is the real vault file id, so the
+      placeholder gets a synthetic one instead (`pendingCardFileId`,
+      recognized via `isPendingCardFileId`). `ResolvedCard.pending` flows
+      this into rendering: `CardDirectiveLayout` gets a `pending` prop
+      (`.ox-card-directive--pending`, `oxmarkdown.css` — dims the card,
+      disables pointer events on its content, but leaves the "open
+      project" link live since that href is already real) and both
+      rendering paths (`OxRenderer.tsx`'s `CardDirectiveStatic`,
+      `editingNodes.tsx`'s `OxDirectiveDecorator`) show a "Creating
+      card…" placeholder instead of mounting a live nested `<OxEditor>`
+      against a card that doesn't exist yet — there's nothing to save
+      into until the real fileId lands. `saveCardNow` also defensively
+      no-ops against a pending fileId, though the UI should never reach
+      that path (no editable surface renders for a pending card at all).
+      Known, deliberate limitation: `createCardFetcher` is a single
+      fetcher instance, so only one "Add a card" request is meaningfully
+      tracked at a time — pre-existing (the fetcher itself always only
+      tracked one in-flight submission), not a new regression from this
+      change, just not specially hardened against a second chip click
+      landing before the first request resolves.
     - **Reuses `OxEditorContext`'s existing circular-import workaround**
       to mount its OWN nested `<OxEditor>` — the SAME pattern `::file`'s
       caption already proved safe, just with a whole document's worth of

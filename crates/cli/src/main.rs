@@ -87,9 +87,8 @@ enum Command {
         #[command(subcommand)]
         command: ReleaseLogCommand,
     },
-    /// Run the PhyLog agent for one project's Card on one day (see the
-    /// `vault` skill's PhyLog Agent section). Defaults to a PREVIEW —
-    /// nothing is written unless --apply is passed.
+    /// PhyLog's pre-capture -> capture -> post-capture pipeline for one
+    /// project (see the `phylog` skill). Always applies for real.
     Phylog {
         #[command(subcommand)]
         command: PhylogCommand,
@@ -405,25 +404,82 @@ enum SortCommand {
 
 #[derive(Debug, Subcommand)]
 enum PhylogCommand {
-    /// Preview (or, with --apply, actually commit) a README update for one
-    /// project's Card. Pass --date for a single day, or omit it to run
-    /// EVERY day this project already has a Card for, up to today
-    /// (optionally bounded below by --since).
+    /// Runs all three stages, in order: pre-capture -> capture ->
+    /// post-capture. Always applies for real (no preview mode) — use
+    /// `phylog reset` + `--full` if you want to start over and inspect
+    /// the result before rebuilding.
     Run {
-        /// Vault path of the project, e.g. `projects/sunny`.
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
         #[arg(long)]
         project: String,
-        /// YYYY-MM-DD. Omit to run every day up to today instead.
+        /// Reset this project's PhyLog-managed content and reprocess
+        /// EVERY day from scratch (capture's full-rebuild mode).
         #[arg(long)]
-        date: Option<String>,
-        /// Only relevant with --date omitted: earliest day to include
-        /// (inclusive), YYYY-MM-DD. Omit to start from this project's very
-        /// first Card.
+        full: bool,
+        /// Only relevant with --full: earliest day to include (inclusive),
+        /// YYYY-MM-DD. Omit to start from this project's very first Card.
         #[arg(long)]
         since: Option<String>,
-        /// Actually commit each change (default: preview only).
+        /// Only relevant with --full: latest day to include (inclusive),
+        /// YYYY-MM-DD. Defaults to today.
         #[arg(long)]
-        apply: bool,
+        until: Option<String>,
+    },
+    /// Stage 1: pre-processes daily-log Card attachments and this
+    /// project's own syncs/ files into `*-summary.md` sidecars, per
+    /// skills/PRE_CAPTURE.md's own instructions (a no-op by default).
+    PreCapture {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Process just this day's Card attachments (plus, always, a
+        /// syncs sweep). Omit (with --file also omitted) to process every
+        /// day this project has a Card for.
+        #[arg(long)]
+        date: Option<String>,
+        /// Process just this one file (a vault path), ignoring --date.
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Stage 2: files Card attachments into the project and organizes/
+    /// updates the README, per skills/CAPTURE.md's own instructions.
+    /// Always applies for real.
+    Capture {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Full rebuild: reset this project's managed content first, then
+        /// reprocess EVERY day from scratch. Default is incremental (only
+        /// days not yet applied).
+        #[arg(long)]
+        full: bool,
+        /// Only relevant with --full: earliest day to include (inclusive),
+        /// YYYY-MM-DD.
+        #[arg(long)]
+        since: Option<String>,
+        /// Only relevant with --full: latest day to include (inclusive),
+        /// YYYY-MM-DD. Defaults to today.
+        #[arg(long)]
+        until: Option<String>,
+    },
+    /// Stage 3: runs post-capture, per skills/POST_CAPTURE.md's own
+    /// instructions. Currently mostly a placeholder — see the `phylog`
+    /// skill.
+    PostCapture {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Deletes everything in this project EXCEPT its skills/ and syncs/
+    /// folders — the "start over" operation, always explicit and never
+    /// run implicitly. Follow with `capture --full` to rebuild.
+    Reset {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually delete anything — this is destructive.
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -677,10 +733,23 @@ fn main() {
             let result = match command {
                 PhylogCommand::Run {
                     project,
-                    date,
+                    full,
                     since,
-                    apply,
-                } => phylog::run(&project, date.as_deref(), since.as_deref(), apply),
+                    until,
+                } => phylog::run(&project, full, since.as_deref(), until.as_deref()),
+                PhylogCommand::PreCapture {
+                    project,
+                    date,
+                    file,
+                } => phylog::pre_capture(&project, date.as_deref(), file.as_deref()),
+                PhylogCommand::Capture {
+                    project,
+                    full,
+                    since,
+                    until,
+                } => phylog::capture(&project, full, since.as_deref(), until.as_deref()),
+                PhylogCommand::PostCapture { project } => phylog::post_capture(&project),
+                PhylogCommand::Reset { project, yes } => phylog::reset(&project, yes),
             };
             if let Err(e) = result {
                 eprintln!("{e}");

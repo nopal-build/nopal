@@ -2,73 +2,64 @@ import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById } from "../data/vault.server";
 import { getProjectRole } from "../data/projectSharing.server";
-import { runPhylogAgent } from "../data/phylogAgent.server";
+import { runPhylogPipeline } from "../data/phylogAgent.server";
 
 /**
  * POST /api/phylog/run
  *
- * Runs the PhyLog agent (`phylogAgent.server.ts`) for one project's Card on
- * one day — same authenticated-tool-surface pattern every `api.daily-log.*`/
- * `api.release-log.*` route already uses (a real browser session, or the
- * CLI's bearer token — `nopal phylog run`).
+ * Runs PhyLog's full three-stage pipeline (`phylogAgent.server.ts`'s
+ * `runPhylogPipeline` — pre-capture -> capture -> post-capture) for one
+ * project. Thin client: `nopal phylog run`.
  *
  * Body:
- *   projectFolderId — required.
- *   date             — required, YYYY-MM-DD.
- *   dryRun           — defaults to true. Pass `false` to actually commit
- *                       the change (requires an owner-tier Sharing Role on
- *                       the project, same bar as sharing/revert).
+ *   projectFolderId — required. A project, or the human's own `personal`.
+ *   full             — capture's full-rebuild mode (resets first, then
+ *                       reprocesses everything). Defaults to false
+ *                       (incremental — only days not yet applied).
+ *   since / until     — bound capture's date range (YYYY-MM-DD). Ignored
+ *                        when `full` isn't set and unnecessary otherwise.
+ *
+ * ALWAYS APPLIES — there is no preview/dry-run mode. Requires an owner-tier
+ * Sharing Role on the project (or being the project/personal's own owner).
  */
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
-  if (!user) {
-    return Response.json({ error: "Not authenticated" }, { status: 401 });
-  }
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
-  }
+  if (!user) return Response.json({ error: "Not authenticated" }, { status: 401 });
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
 
   const body = (await request.json().catch(() => ({}))) as {
     projectFolderId?: string;
-    date?: string;
-    dryRun?: boolean;
+    full?: boolean;
+    since?: string;
+    until?: string;
   };
-  const { projectFolderId, date } = body;
-  const dryRun = body.dryRun ?? true;
-
-  if (!projectFolderId || !date) {
-    return Response.json({ error: "projectFolderId and date are required" }, { status: 400 });
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return Response.json({ error: "date must be YYYY-MM-DD" }, { status: 400 });
+  const { projectFolderId, full, since, until } = body;
+  if (!projectFolderId) {
+    return Response.json({ error: "projectFolderId is required" }, { status: 400 });
   }
 
   const projectFolder = await getFolderById(projectFolderId);
-  if (!projectFolder) {
-    return Response.json({ error: "Project not found" }, { status: 404 });
-  }
+  if (!projectFolder) return Response.json({ error: "Project not found" }, { status: 404 });
   const role = await getProjectRole(projectFolder, user._id);
-  if (!role) {
+  if (!role?.isOwner) {
     // 404 (not 403) so a non-collaborator can't probe which project ids exist.
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
-  if (!dryRun && !role.isOwner) {
-    return Response.json(
-      { error: "You don't have permission to apply PhyLog changes on this project" },
-      { status: 403 },
-    );
-  }
 
+  const log: string[] = [];
   try {
-    const result = await runPhylogAgent(user._id, projectFolderId, date, { dryRun });
-    if (!result.ok) {
-      return Response.json({ error: result.error }, { status: 400 });
-    }
-    return Response.json(result);
+    const result = await runPhylogPipeline(
+      user._id,
+      projectFolderId,
+      { full, since, until },
+      (line) => log.push(line),
+    );
+    if (!result.ok) return Response.json({ error: result.error, log }, { status: 400 });
+    return Response.json({ ...result, log });
   } catch (err) {
-    console.error("PhyLog agent run error:", err);
+    console.error("PhyLog run error:", err);
     return Response.json(
-      { error: err instanceof Error ? err.message : "PhyLog run failed" },
+      { error: err instanceof Error ? err.message : "PhyLog run failed", log },
       { status: 500 },
     );
   }

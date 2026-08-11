@@ -196,14 +196,36 @@ export async function getArchivedFilesForCleanup(
   return (result?.[0] ?? []).map(formatRecord);
 }
 
+/** `copyFileIntoFolder` deliberately shares the SAME `s3_key`/`s3_url`
+ * across multiple `file_refs` rows (a "copy" is a second DB row pointing
+ * at the same S3 object, never a byte-for-byte S3 duplication) — so
+ * deleting one such row must NEVER delete the underlying S3 object out
+ * from under every OTHER row that still references it (e.g. the original
+ * daily-log photo a project's own filed copy was made from). Checked by
+ * `deleteFileRef` before it ever calls `deleteFromS3`. */
+async function isS3KeyReferencedElsewhere(
+  s3Key: string,
+  excludeId: string,
+): Promise<boolean> {
+  const result = await query<[FileRef[]]>(
+    `SELECT id FROM file_refs WHERE s3_key = $s3Key`,
+    { s3Key },
+  );
+  const rows = (result?.[0] ?? []).map(formatRecord);
+  return rows.some((r) => r._id !== excludeId);
+}
+
 export async function deleteFileRef(id: string): Promise<void> {
   const file = await getFileRefById(id);
   if (file?.s3_key) {
-    try {
-      await deleteFromS3(file.s3_key);
-    } catch (err) {
-      console.error(`Failed to delete S3 object for file_ref ${id}:`, err);
-      // Continue with DB deletion even if S3 fails
+    const sharedElsewhere = await isS3KeyReferencedElsewhere(file.s3_key, id);
+    if (!sharedElsewhere) {
+      try {
+        await deleteFromS3(file.s3_key);
+      } catch (err) {
+        console.error(`Failed to delete S3 object for file_ref ${id}:`, err);
+        // Continue with DB deletion even if S3 fails
+      }
     }
   }
   await remove("file_refs", id);
@@ -251,12 +273,26 @@ export async function createVaultFolder(data: {
   // whatever type (if any) its parent folder already carries.
   let folderType: VaultFolderTypeKey | null = null;
   let isFolderTypeRoot = false;
+  let parent: VaultFolder | undefined;
+  if (data.parent_folder_id) {
+    parent = await getFolderById(data.parent_folder_id);
+  }
   if (data.folder_type) {
     folderType = data.folder_type;
     isFolderTypeRoot = true;
-  } else if (data.parent_folder_id) {
-    const parent = await getFolderById(data.parent_folder_id);
-    folderType = parent?.folder_type ?? null;
+  } else if (parent) {
+    folderType = parent.folder_type ?? null;
+  }
+
+  // A direct child of the `projects` root IS a project — every project is
+  // a `project-n01` container, never anything else (the `personal` root
+  // itself is tagged separately, see `ensureProjectN01`/
+  // `ensureVaultRootFolders`). Forced here, not just in the "New folder"
+  // API route, so it's true regardless of caller.
+  const isNewProject = !!parent && !parent.parent_folder_id && parent.vault_root_key === "projects";
+  if (isNewProject) {
+    folderType = "project-n01";
+    isFolderTypeRoot = true;
   }
 
   const result = await upsert(data.id ? new RecordId("vault_folders", data.id) : "vault_folders", {
@@ -271,7 +307,17 @@ export async function createVaultFolder(data: {
     updated_at: now,
   });
   const record = Array.isArray(result) ? result[0] : result;
-  return record ? formatRecord(record as unknown as VaultFolder) : undefined;
+  const folder = record ? formatRecord(record as unknown as VaultFolder) : undefined;
+
+  // Seed the new project's default skills/PRE_CAPTURE.md, CAPTURE.md,
+  // POST_CAPTURE.md — dynamic import to avoid a cycle (`projectN01.server`
+  // itself calls back into this function to create that Skills folder).
+  if (folder && isNewProject) {
+    const { ensureProjectN01 } = await import("./projectN01.server");
+    await ensureProjectN01(folder);
+  }
+
+  return folder;
 }
 
 /**
@@ -296,22 +342,18 @@ export async function validateFolderTypeForParent(
   folderType: VaultFolderTypeKey,
 ): Promise<string | null> {
   if (isSpaceFolderTypeKey(folderType)) {
-    const label = SPACE_FOLDER_TYPES[folderType].label;
+    const def = SPACE_FOLDER_TYPES[folderType];
 
-    const isPersonalRoot =
-      isVaultRootFolder(parent) && parent.vault_root_key === "personal";
-
-    let isProjectFolder = false;
-    if (!isPersonalRoot && parent.parent_folder_id) {
-      const grandparent = await getFolderById(parent.parent_folder_id);
-      isProjectFolder =
-        !!grandparent &&
-        isVaultRootFolder(grandparent) &&
-        grandparent.vault_root_key === "projects";
+    // Every project and `personal` is itself tagged `project-n01` (see
+    // `ensureProjectN01`) — a space type may only be created directly
+    // inside one of those, never nested any deeper.
+    const isProjectN01 = parent.folder_type === "project-n01" && parent.is_folder_type_root;
+    if (!isProjectN01) {
+      return `${def.label} folders can only be created directly inside a project or your Personal space`;
     }
 
-    if (!isPersonalRoot && !isProjectFolder) {
-      return `${label} folders can only be created directly inside a project or your Personal space`;
+    if (def.comingSoon) {
+      return `${def.label} isn't available yet`;
     }
 
     const { folders: siblings } = await listFolderChildren(
@@ -319,7 +361,7 @@ export async function validateFolderTypeForParent(
       parent._id,
     );
     if (siblings.some((f) => f.is_folder_type_root && f.folder_type === folderType)) {
-      return `A ${label} folder already exists here`;
+      return `A ${def.label} folder already exists here`;
     }
     return null;
   }
@@ -420,6 +462,10 @@ export async function updateVaultFolder(
     name: string;
     shared_with: string[];
     is_public: boolean;
+    /** See `projectStatus.server.ts`'s `setProjectStatus` — the only
+     * intended writer of these two. */
+    project_status: string | null;
+    project_status_at: string | null;
   }>,
 ): Promise<VaultFolder | undefined> {
   const result = await merge("vault_folders", id, {
@@ -520,16 +566,55 @@ export async function removeFolderSharingBetweenHumans(
  * Find an existing folder matching (humanId + name + parentFolderId) or create it.
  * Useful for auto-provisioning the daily-logs folder tree.
  */
+/**
+ * A DETERMINISTIC id for a folder in the system-managed tree
+ * `getOrCreateVaultFolder` owns (today: the daily-logs root + its
+ * per-date subfolders — see every call site's `name`, always either the
+ * literal `"daily-logs"` or a `YYYY-MM-DD` string, never arbitrary user
+ * input). Mirrors `dailyLog.server.ts`'s own `logRecordId` pattern for
+ * exactly the same reason: a plain "SELECT, then CREATE if missing" check
+ * (below) is NOT atomic — two concurrent calls for the SAME conceptual
+ * folder (e.g. an upload request and a Card-creation request landing at
+ * the same moment) can both miss the SELECT and both create one, leaving
+ * REAL, silently duplicate folders behind (confirmed directly against a
+ * dev database: multiple "daily-logs" roots, and multiple same-date
+ * subfolders, for the same human). Once that happens, later
+ * `getOrCreateVaultFolder` calls can non-deterministically resolve to
+ * WHICHEVER duplicate a bare `LIMIT 1` (no `ORDER BY`) happens to return,
+ * so a file created via one duplicate can become permanently invisible
+ * to a later request (e.g. a page reload) that resolves to a different
+ * one — this is exactly what caused a freshly-added Daily Log Card to
+ * work within the session that created it, then get stuck on "Loading
+ * card…" forever after a reload. Using this id with `upsert` (an atomic,
+ * single statement at the database level) makes creating the "same"
+ * folder twice a no-op rather than a duplicate, closing the race
+ * entirely, regardless of how many requests race for it. */
+function systemVaultFolderKey(
+  humanId: string,
+  name: string,
+  parentFolderId: string | null,
+): string {
+  return `${humanId}_${parentFolderId ?? "root"}_${name}`;
+}
+
 export async function getOrCreateVaultFolder(
   humanId: string,
   name: string,
   parentFolderId: string | null = null,
 ): Promise<VaultFolder> {
+  // `ORDER BY created_at ASC` is a deliberate, defensive belt-and-suspenders
+  // measure alongside `systemVaultFolderKey` above: it doesn't fix any
+  // ALREADY-existing duplicate rows (see that migration, if one has been
+  // run), but it guarantees that if duplicates from a past race are still
+  // sitting in the database, every caller converges on picking the SAME
+  // one (the oldest) instead of a `LIMIT 1` with no explicit order
+  // returning a non-deterministic pick per call.
   const result = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders
      WHERE human_id = $humanId
        AND name = $name
        AND parent_folder_id = $parentFolderId
+     ORDER BY created_at ASC
      LIMIT 1`,
     { humanId, name, parentFolderId },
   );
@@ -544,6 +629,9 @@ export async function getOrCreateVaultFolder(
     // themselves (e.g. "daily-logs" from the daily-log write path).
     vault_root_key:
       parentFolderId === null && isVaultRootKey(name) ? name : undefined,
+    // See `systemVaultFolderKey`'s own header — this is what actually
+    // closes the race, not just a nicer-looking id.
+    id: systemVaultFolderKey(humanId, name, parentFolderId),
   });
   if (!created) throw new Error(`Failed to create vault folder: ${name}`);
   return created;
@@ -816,11 +904,16 @@ export async function ensureVaultRootFolders(
 ): Promise<VaultFolder[]> {
   const roots: VaultFolder[] = [];
   for (const key of VAULT_ROOT_KEYS) {
+    // Same check-then-create race `getOrCreateVaultFolder` above documents
+    // in full — and the same fix: `ORDER BY` for a stable pick among any
+    // ALREADY-existing duplicates, plus a deterministic `id` (below) so a
+    // race can never produce a NEW one going forward.
     const result = await query<[VaultFolder[]]>(
       `SELECT * FROM vault_folders
        WHERE human_id = $humanId
          AND parent_folder_id = null
          AND name = $name
+       ORDER BY created_at ASC
        LIMIT 1`,
       { humanId, name: key },
     );
@@ -848,10 +941,23 @@ export async function ensureVaultRootFolders(
       name: key,
       parent_folder_id: null,
       vault_root_key: key,
+      id: systemVaultFolderKey(humanId, key, null),
     });
     if (!created) throw new Error(`Failed to create vault root folder: ${key}`);
     roots.push(created);
   }
+
+  // The `personal` root is itself a `project-n01` container (see the
+  // vault skill) — stamp + seed it here, self-healing for any vault that
+  // predates this type, same convention as the `vault_root_key` backfill
+  // above. Dynamic import to avoid a cycle (`projectN01.server` imports
+  // from this file).
+  const personalIndex = roots.findIndex((r) => r.vault_root_key === "personal");
+  if (personalIndex !== -1) {
+    const { ensureProjectN01 } = await import("./projectN01.server");
+    roots[personalIndex] = await ensureProjectN01(roots[personalIndex]);
+  }
+
   return roots;
 }
 
@@ -871,7 +977,15 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
   const projectsRoot = roots.find((r) => r.vault_root_key === "projects");
   if (!projectsRoot) return [];
   const { folders } = await listFolderChildren(humanId, projectsRoot._id);
-  return folders;
+
+  // Self-healing retrofit for any project created before `project-n01`
+  // existed — same lazy-backfill convention as the root keys above.
+  const { ensureProjectN01 } = await import("./projectN01.server");
+  return Promise.all(
+    folders.map((f) =>
+      f.folder_type === "project-n01" && f.is_folder_type_root ? f : ensureProjectN01(f),
+    ),
+  );
 }
 
 /**

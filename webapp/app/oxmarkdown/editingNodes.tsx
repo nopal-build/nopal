@@ -260,10 +260,16 @@ function OxDirectiveDecorator({
   // `showAddFileLink`), unlike a caption, which deliberately doesn't.
   if (mdastNode.name === "card" && mdastNode.type === "leafDirective") {
     const resolved = resolveCard?.(attrs.file);
+    // An OPTIMISTIC placeholder (see `ResolvedCard.pending`'s own header) —
+    // `projectName`/`projectHref` already show the real project, so only
+    // the content area needs to defer — no live nested `<OxEditor>` yet,
+    // since there's no real Card file underneath it to save into.
+    const pending = resolved?.pending ?? false;
     return (
       <CardDirectiveLayout
         projectName={resolved?.projectName ?? "Card"}
         projectHref={resolved?.projectHref ?? "#"}
+        pending={pending}
         onRemove={() => {
           editor.update(() => {
             const node = $getNodeByKey(nodeKey);
@@ -271,7 +277,7 @@ function OxDirectiveDecorator({
           });
         }}
         content={
-          resolved && OxEditorComponent ? (
+          resolved && !pending && OxEditorComponent ? (
             <OxEditorComponent
               mode="editing"
               markdown={resolved.markdown}
@@ -284,7 +290,7 @@ function OxDirectiveDecorator({
               cardFlow={{ outerEditor: editor, nodeKey }}
             />
           ) : (
-            <span className="subtle-text">Loading card…</span>
+            <span className="subtle-text">{pending ? "Creating card…" : "Loading card…"}</span>
           )
         }
       />

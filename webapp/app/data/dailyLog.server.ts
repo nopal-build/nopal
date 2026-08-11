@@ -9,6 +9,7 @@ import {
   ensureVaultRootFolders,
 } from "./vault.server";
 import type { FileRef } from "./vault.types";
+import { cardFileName } from "../oxmarkdown/cardDirective";
 
 export type DailyLog = Data & {
   humanId: string;
@@ -284,14 +285,14 @@ export type DailyLogCard = {
   content: string;
 };
 
-/** Deterministic from the project's folder id (not its name) — so
- * re-clicking the same project's "Add a card" chip twice reliably reuses
- * the SAME file (see `createDailyLogCard`'s idempotency below) and two
- * differently-named projects can never collide onto the same filename
- * via slug sanitization. */
-function cardFileName(projectFolderId: string): string {
-  return `card-${projectFolderId}.md`;
-}
+// `cardFileName` itself now lives in `oxmarkdown/cardDirective.ts` (an
+// isomorphic module, unlike this `.server.ts` file) — deterministic from
+// the project's folder id (not its name) so re-clicking the same
+// project's "Add a card" chip twice reliably reuses the SAME file (see
+// `createDailyLogCard`'s idempotency below), two differently-named
+// projects can never collide onto the same filename via slug
+// sanitization, AND the CLIENT can compute the exact same filename up
+// front for an optimistic "Add a card" (see that module's own header).
 
 /**
  * Every Card that already exists for `date` — for the daily-log loader to
@@ -333,11 +334,12 @@ export async function getDailyLogCards(
 
 /**
  * Every date (ascending) that already has a Card for `projectFolderId` —
- * the enumeration `runPhylogAgentForRange` (`phylogAgent.server.ts`) walks
- * so "run PhyLog for everything up to today" doesn't require the caller
- * to already know which specific days have anything to process. Queries
- * `file_refs` directly (by `project_folder_id`, not by folder) since Cards
- * for the same project are scattered across many different date folders.
+ * the enumeration PhyLog's pre-capture and capture stages
+ * (`preCapture.server.ts`/`capture.server.ts`) walk so "run PhyLog for
+ * everything" doesn't require the caller to already know which specific
+ * days have anything to process. Queries `file_refs` directly (by
+ * `project_folder_id`, not by folder) since Cards for the same project are
+ * scattered across many different date folders.
  */
 export async function listCardDatesForProject(
   humanId: string,
