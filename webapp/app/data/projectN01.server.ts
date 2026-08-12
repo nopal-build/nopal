@@ -70,6 +70,10 @@ sake. Never invent progress, dates, or facts that aren't grounded in the
 Card content, any pre-capture summaries, or README.md's own existing
 content.
 
+When presenting a GROUP of related photos, use the ::gallery{folder="..."}
+directive (group them into a single subfolder, then reference it by name)
+so they display as a photo grid instead of a bulleted list of links.
+
 Replace this file with your own instructions to change how this project
 gets organized — e.g. "group photos by month" or "keep a running task
 list at the top of the README."

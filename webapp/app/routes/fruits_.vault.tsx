@@ -55,9 +55,11 @@ import {
 } from "../data/vault.server";
 import { getHumansById } from "../data/humans.server";
 import { getRelatedHumans } from "../data/relationships.server";
+import { resolveProjectManifest, type ResolvedProject } from "../data/project.server";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "../components/MoreMenu";
 import MdxEditorView from "../components/MdxEditorView";
+import { ProjectView } from "../components/ProjectView";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
 import "../styles/vault.css";
 import "../styles/mdxeditor.css";
@@ -103,8 +105,19 @@ type Current =
       folder: VaultFolder;
       ancestry: VaultFolder[];
       readme: FileRef | null;
+      /** Non-null exactly when `readme` is a `project-n01` folder's own
+       * README.md — resolves ⁠`::gallery{folder="..."}`/`::csv-table{...}`/
+       * `::svg{...}` the same way the Newspaper page does, so a human
+       * looking at the README right here in the Vault sees the same thing,
+       * not "unknown directive" markers (see the `phylog`/`vault` skills). */
+      projectManifest: ResolvedProject | null;
     }
-  | { kind: "file"; file: FileRef; ancestry: VaultFolder[] };
+  | {
+      kind: "file";
+      file: FileRef;
+      ancestry: VaultFolder[];
+      projectManifest: ResolvedProject | null;
+    };
 
 type HumanEntry = { _id: string; name: string; email: string };
 
@@ -182,7 +195,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (file.human_id !== user._id) {
       ancestry = anchorSharedAncestry(ancestry, user._id, roots);
     }
-    current = { kind: "file", file, ancestry };
+    const fileProjectFolder = ancestry[ancestry.length - 1];
+    const projectManifestForFile =
+      isMarkdownFile(file) &&
+      file.name.toLowerCase() === "readme.md" &&
+      fileProjectFolder &&
+      isProjectN01Anchor(fileProjectFolder)
+        ? await resolveProjectManifest(fileProjectFolder.human_id, fileProjectFolder)
+        : null;
+    current = { kind: "file", file, ancestry, projectManifest: projectManifestForFile };
   } else if (folderParam) {
     const folder = await getFolderById(folderParam);
     if (!folder || !canViewFolder(user._id, folder)) {
@@ -203,7 +224,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const readme = readmeListing
       ? ((await getFileRefById(readmeListing._id)) ?? null)
       : null;
-    current = { kind: "folder", folder, ancestry, readme };
+    const projectManifestForFolder =
+      readme && isProjectN01Anchor(folder)
+        ? await resolveProjectManifest(folder.human_id, folder)
+        : null;
+    current = { kind: "folder", folder, ancestry, readme, projectManifest: projectManifestForFolder };
   }
 
   return {
@@ -291,6 +316,12 @@ function isMarkdownFile(file: Pick<FileRef, "name" | "content_type">): boolean {
     file.content_type === "text/markdown" ||
     file.name.toLowerCase().endsWith(".md")
   );
+}
+
+/** True for a project, or the `personal` root — see the `vault`/`phylog`
+ * skills' "project-n01" sections. */
+function isProjectN01Anchor(folder: VaultFolder): boolean {
+  return folder.folder_type === "project-n01" && folder.is_folder_type_root === true;
 }
 
 /** Column header row for the GitHub-style listing table. */
@@ -2379,17 +2410,37 @@ export default function VaultV2Page() {
 
               {current.readme && (
                 <div className="vault-readme-section">
-                  <MdxEditorView markdown={current.readme.content ?? ""} />
+                  {current.projectManifest ? (
+                    <ProjectView
+                      manifest={current.projectManifest.manifest}
+                      body={current.projectManifest.body}
+                      files={current.projectManifest.files}
+                      folders={current.projectManifest.folders}
+                      csvFields={current.projectManifest.csvFields}
+                    />
+                  ) : (
+                    <MdxEditorView markdown={current.readme.content ?? ""} />
+                  )}
                 </div>
               )}
             </>
           )}
 
-          {/* ── File view — render by content type ────────────────────────── */}
+          {/* ── File view ─ render by content type ────────────────── */}
           {current.kind === "file" &&
             (isMarkdownFile(current.file) ? (
               <div className="vault-readme-section">
-                <MdxEditorView markdown={current.file.content ?? ""} />
+                {current.projectManifest ? (
+                  <ProjectView
+                    manifest={current.projectManifest.manifest}
+                    body={current.projectManifest.body}
+                    files={current.projectManifest.files}
+                    folders={current.projectManifest.folders}
+                    csvFields={current.projectManifest.csvFields}
+                  />
+                ) : (
+                  <MdxEditorView markdown={current.file.content ?? ""} />
+                )}
               </div>
             ) : current.file.content_type.startsWith("image/") ? (
               <img

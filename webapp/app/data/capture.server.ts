@@ -18,7 +18,18 @@
  *      summaries, and the current README, the model may call
  *      `create_folder`/`move_file` any number of times to (re)organize
  *      what's been filed, then `update_readme` at most once to keep the
- *      README a real index of the result.
+ *      README a real index of the result. The model is told about
+ *      OxMarkdown's `::gallery{folder="..."}` directive (see
+ *      `buildSystemPrompt`) so it can group related photos into a titled
+ *      photo grid — create a subfolder, move the relevant photos into it,
+ *      then reference that subfolder by name — instead of listing every
+ *      photo as an individual link. This directive is resolved server-side
+ *      by `project.server.ts`'s `resolveProjectManifest` and rendered by
+ *      `ProjectView` — wired into both the Vault's own file view
+ *      (`fruits_.vault.tsx`) and the Newspaper page, so it actually
+ *      displays as photos wherever a human looks at this README, not as
+ *      an "unknown directive" marker (see the `vault` skill's Projects
+ *      section).
  *
  * TWO MODES:
  *   - Incremental (default): walks every day this project has a Card for,
@@ -84,11 +95,11 @@ const MANAGED_FOLDER_TYPES = new Set(["skills", "syncs", "newspapers"]);
 const CREATE_FOLDER_TOOL: ToolDefinition = {
   name: "create_folder",
   description:
-    "Create a folder (and any missing parent folders) inside this project, to organize filed content. Path is relative to the project root — e.g. \"Photos/2026-08\". Never targets skills/, syncs/, or newspapers/ (reserved).",
+    "Create a folder (and any missing parent folders) inside this project, to organize filed content. Path is relative to the project root — e.g. \"Photos/2026-08\". Never targets skills/, syncs/, or newspapers/ (reserved). If you plan to reference this folder from a ::gallery{folder=\"...\"} directive in the README, create it as a SINGLE, direct child of the project root (e.g. \"Hip Installation\", not \"Photos/Hip Installation\") — the gallery directive only resolves direct children by name, never nested paths.",
   inputSchema: {
     type: "object",
     properties: {
-      path: { type: "string", description: "Relative folder path to create, e.g. \"Photos/2026-08\"." },
+      path: { type: "string", description: "Relative folder path to create, e.g. \"Photos/2026-08\", or a single name like \"Hip Installation\" if you intend to reference it from a gallery." },
     },
     required: ["path"],
   },
@@ -111,7 +122,7 @@ const MOVE_FILE_TOOL: ToolDefinition = {
 const UPDATE_README_TOOL: ToolDefinition = {
   name: "update_readme",
   description:
-    "Replace the project's README.md BODY (everything after its front matter, if any) with a new version. Call this only when today's Card content, filed attachments, or reorganization actually warrant a real update — skip it entirely on a day where nothing meaningfully changed. Never invent information that isn't grounded in the Card content, pre-capture summaries, or the README's own prior content.",
+    "Replace the project's README.md BODY (everything after its front matter, if any) with a new version. Call this only when today's Card content, filed attachments, or reorganization actually warrant a real update — skip it entirely on a day where nothing meaningfully changed. Never invent information that isn't grounded in the Card content, pre-capture summaries, or the README's own prior content. To display a GROUP of related photos as a photo grid instead of a bulleted list of links, use ::gallery{folder=\"<direct child folder name>\" title=\"...\"} — see the system prompt's own explanation of this directive.",
   inputSchema: {
     type: "object",
     properties: {
@@ -228,6 +239,16 @@ async function resolveOrCreatePath(
   return { ok: true, folderId: currentId };
 }
 
+const DIRECTIVE_GUIDE = `## Available markdown directives
+
+The README is rendered with OxMarkdown directive support, not plain markdown alone — use these where they genuinely help instead of always writing plain bullet lists of links:
+
+- ::gallery{folder="<name>" title="Optional title"} — renders EVERY image inside a folder as a titled photo grid, instead of one link per photo. The folder MUST be a SINGLE, direct child of this project's root (create it with create_folder using a plain name like "Hip Installation", never a nested path like "Photos/Hip Installation" — the directive can't resolve nested paths). Use this whenever you're presenting a GROUP of related photos (e.g. everything from one day, or one phase of work) — create the folder, move the relevant photos into it with move_file, then reference it by name. A single, standout photo can still just be an ordinary markdown link.
+- ::csv-table{file="project.csv" title="Optional title"} — renders a CSV file (a direct child of the project root) as a table.
+- ::svg{file="<name>" title="Optional title"} — renders an SVG file (a direct child of the project root) inline.
+
+All three only resolve DIRECT children of the project root by name — never nested paths, never files/folders inside skills/syncs/newspapers.`;
+
 function buildSystemPrompt(skillContent: string, generalSkill: string | null): string {
   const generalSection = generalSkill ? `\n\n## Project SKILL.md (general steering)\n\n${generalSkill}` : "";
   return `You are PhyLog, capturing a project's daily work into a well-organized structure and an up-to-date README.
@@ -240,6 +261,8 @@ You will be given:
 - The project's current README.md.
 
 You may call create_folder / move_file any number of times to organize today's filed content, then update_readme AT MOST ONCE with the full new body if the README genuinely needs to change. Most days, especially quiet ones, need no README change — do nothing rather than making a cosmetic edit. Never fabricate progress, dates, or facts not grounded in what you were given.
+
+${DIRECTIVE_GUIDE}
 
 ## Project CAPTURE.md
 

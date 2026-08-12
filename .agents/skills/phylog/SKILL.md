@@ -196,6 +196,28 @@ Two parts, run per day (oldest first, across whatever date range applies):
    `newspapers` by name — those subtrees are permanently off limits to
    this stage.
 
+**The model is told about OxMarkdown's directives** (`DIRECTIVE_GUIDE` in
+`capture.server.ts`, injected into the system prompt every call) so it can
+write real directive syntax instead of plain bullet-list links —
+especially `::gallery{folder="<name>" title="..."}`, which renders every
+image inside a project-root subfolder as a titled photo grid. The usual
+pattern: `create_folder` a plain, SINGLE-level name (e.g. "Hip
+Installation" — the directive only resolves DIRECT children of the
+project root, never nested paths), `move_file` the relevant photos into
+it, then reference that folder by name from `update_readme`.
+`::csv-table{file="..."}`/`::svg{file="..."}` are mentioned too, for
+completeness. All three are resolved server-side by
+`project.server.ts`'s `resolveProjectManifest` — the SAME mechanism the
+`project-newspaper` skill's page already used, now ALSO wired into the
+Vault's own file-view page (`fruits_.vault.tsx`): viewing a `project-n01`
+folder's own README (either by browsing into the folder, or via
+`?file=<readmeId>` directly) resolves and renders through `ProjectView`
+instead of a directive-blind plain `MdxEditorView`, so a gallery PhyLog
+writes actually displays as photos wherever a human looks at it, not as
+an "unknown directive" marker. This is a `project-n01`-specific carve-out
+(checked via `folder_type === "project-n01" && is_folder_type_root`) —
+every OTHER markdown file in the Vault renders exactly as before.
+
 **Two modes** (`runCapture`'s `full` option; CLI: `--full`):
 
 - **Incremental** (default) — walks every day this project has a Card
