@@ -325,6 +325,73 @@ Sharing Role on the project (or being the project/`personal`'s own owner)
 `nopal sort run` remains the lower-bar path (any role) for the Sorter's
 own, zero-inference filing.
 
+## Usage tracking
+
+Every LLM call PhyLog makes is recorded via `phylogMetrics.server.ts`'s
+`recordPhylogUsage` — tokens and timing ONLY, deliberately anonymized for
+"understand aggregate usage over time," never a forensic log of what any
+one run did (no file names, no prompt/response content, no raw error
+text — errors are classified into a small closed set via
+`classifyLlmError`). Two tables:
+
+- `phylog_usage_events` — one row per LLM call (or skipped/errored
+  attempt). Short-lived on purpose: pruned past a 30-day retention window
+  (`pruneOldPhylogUsageEvents`, `POST /api/phylog/usage-cleanup`, same
+  `CRON_SECRET` cron pattern as `archive-cleanup`/`trash-cleanup`, wired
+  into `server.js`).
+- `phylog_usage_daily` — one row per (date, human, project, stage),
+  incremented at the SAME time every raw event is written (no separate
+  batch rollup step). This is the durable table — tiny (bounded by
+  active humans/projects/days, not by files processed), kept
+  indefinitely, and what the dashboards below actually read, so pruning
+  the raw table never loses the ability to show usage trends over time.
+
+`getPhylogUsageSummary(days)` aggregates the daily rollup for a given
+range (calls/tokens/duration, broken down by stage/project/human/date) —
+read by `/fruits/maker`'s own "PhyLog Usage" summary section and its
+linked deep-dive page, `/fruits/maker/phylog` (both Admin/Super-gated,
+same as the rest of the Maker dashboard).
+
+Each stage records exactly one event per meaningful unit of work: one per
+file pre-capture attempts to summarize (`preCapture.server.ts`), one per
+day capture runs its organize/README agent loop for (`capture.server.ts`—
+usage/duration accumulated across every turn of that loop, via
+`runAgentLoop`'s own return value), and one per post-capture invocation.
+Capture's per-day agent loop is wrapped in its own try/catch
+(`captureOneDay`) so one bad day (a rate limit, a transient error) can't
+abort the rest of a multi-day run — mirrors the per-file resilience
+`preCapture.server.ts` already had. A metrics write failing never breaks
+the PhyLog run it's describing (`recordPhylogUsage` swallows its own
+errors).
+
+**Known limitation**: the daily rollup stores sums and a `maxDurationMs`
+per bucket, not a real distribution — a true p95/p99 needs the raw
+events, which are pruned after 30 days. Revisit if tail latency ever
+needs closer tracking than "worst call that day."
+
+### Estimated cost (`llmPricing.ts`)
+
+Anthropic has no public "current price for model X" API — the closest
+thing, the Usage & Cost Admin API
+(`GET /v1/organizations/cost_report`), reports ACTUAL BILLED SPEND after
+the fact (not a price list) and requires a separate Admin API key plus
+organization-level Console access this app doesn't have configured. So
+`llmPricing.ts`'s `MODEL_PRICING` table is hand-transcribed from
+https://platform.claude.com/docs/en/about-claude/pricing, with a
+`PRICING_AS_OF` date bumped whenever it's re-verified. There's no way to
+auto-refresh it, only to flag it: `isPricingStale()`/`pricingAgeDays()`
+(>30 days old) surface a warning `Badge` on both dashboards prompting a
+human to go re-check the pricing page and bump the constant — "re-fetch"
+in spirit, since there's no real fetch to do.
+
+`model` is now part of the daily rollup's own bucket key (not just a
+stored field) so a future model change shows up as a new bucket with its
+own correct price, rather than blending two price points into one row.
+`getPhylogUsageSummary` applies `estimateCostUsd` per row at aggregation
+time and sums into `estimatedCostUsd` (overall, per stage, per project,
+per human, per day) — a rough gauge for "how much are we spending,"
+deliberately never presented as a reconciled bill.
+
 ## Files
 
 - `webapp/app/data/projectN01.server.ts` — `project-n01` seeding/retrofit
@@ -351,3 +418,11 @@ own, zero-inference filing.
   `api.phylog.capture.tsx` / `api.phylog.post-capture.tsx` /
   `api.phylog.reset.tsx` — API surface.
 - `crates/cli/src/phylog.rs` — CLI surface (`nopal phylog ...`).
+- `webapp/app/data/phylogMetrics.server.ts` — usage tracking (see "Usage
+  tracking" above).
+- `webapp/app/data/llmPricing.ts` — static, hand-maintained model pricing
+  (see "Estimated cost" above). No server-only imports.
+- `webapp/app/routes/api.phylog.usage-cleanup.tsx` — raw usage-event
+  pruning cron.
+- `webapp/app/routes/fruits_.maker.tsx` / `fruits_.maker_.phylog.tsx` —
+  the usage dashboards (Admin/Super only).

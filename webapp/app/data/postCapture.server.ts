@@ -19,12 +19,13 @@
  */
 
 import { getProjectStageSkill, isSkipInstruction } from "./projectN01.server";
+import { recordPhylogUsage } from "./phylogMetrics.server";
 import type { VaultFolder } from "./vault.server";
 
 export type PostCaptureResult = { ok: true; skipped: boolean; note?: string };
 
 export async function runPostCapture(
-  _actingHumanId: string,
+  actingHumanId: string,
   projectFolder: VaultFolder,
   onProgress?: (line: string) => void,
 ): Promise<PostCaptureResult> {
@@ -32,9 +33,29 @@ export async function runPostCapture(
   const skill = await getProjectStageSkill(projectFolder, "POST_CAPTURE.md");
   if (isSkipInstruction(skill)) {
     log("post-capture: skills/POST_CAPTURE.md says skip — nothing to do.");
+    await recordPhylogUsage({
+      humanId: actingHumanId,
+      projectFolderId: projectFolder._id,
+      stage: "post-capture",
+      kind: "pipeline",
+      durationMs: 0,
+      outcome: "skipped",
+    });
     return { ok: true, skipped: true };
   }
   log("post-capture: instructions found in skills/POST_CAPTURE.md, but no post-capture tools are implemented yet.");
+  // Not a real "success" (no model call, no tokens) and not a "skip"
+  // either (the skill file explicitly asked for something) — tracked as
+  // skipped for now since there's genuinely nothing actionable yet; will
+  // become a real success/error split once tools land here.
+  await recordPhylogUsage({
+    humanId: actingHumanId,
+    projectFolderId: projectFolder._id,
+    stage: "post-capture",
+    kind: "pipeline",
+    durationMs: 0,
+    outcome: "skipped",
+  });
   return {
     ok: true,
     skipped: false,

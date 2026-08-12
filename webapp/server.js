@@ -175,6 +175,32 @@ httpServer.listen(3000, () => {
       setInterval(runTrashCleanup, 24 * 60 * 60 * 1000);
     }, 37_000);
 
+    // ── PhyLog usage-events cleanup ─────────────────────────────────────
+    // Prunes raw phylogMetrics.server.ts usage events past their retention
+    // window — the durable daily rollup those events already incremented
+    // is untouched, so this only trims short-lived detail, never the usage
+    // trends /fruits/maker/phylog reads. Same CRON_SECRET, staggered a
+    // little from the other daily jobs.
+    const runPhylogUsageCleanup = async () => {
+      try {
+        const res = await fetch(
+          "http://localhost:3000/api/phylog/usage-cleanup",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${cronSecret}` },
+          },
+        );
+        const data = await res.json();
+        console.log("[cron] phylog/usage-cleanup:", data);
+      } catch (err) {
+        console.error("[cron] phylog/usage-cleanup failed:", err);
+      }
+    };
+    setTimeout(() => {
+      runPhylogUsageCleanup();
+      setInterval(runPhylogUsageCleanup, 24 * 60 * 60 * 1000);
+    }, 44_000);
+
     // ── Daily-log sort ────────────────────────────────────────────────────
     // Sorts every human's closed, not-yet-sorted daily logs (mentions →
     // project backlinks, completed Card tasks, Card file attachments —

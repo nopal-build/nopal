@@ -58,6 +58,7 @@ import { downloadFileBytes } from "./file.server";
 import { getDailyLogCards, listCardDatesForProject, type DailyLogCard } from "./dailyLog.server";
 import { getProjectStageSkill, isSkipInstruction } from "./projectN01.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
+import { classifyLlmError, recordPhylogUsage } from "./phylogMetrics.server";
 import type { LlmProvider, PhotoDescriber } from "./llmProvider";
 
 export type PreCaptureCandidate = {
@@ -165,6 +166,14 @@ export async function runPreCapture(
   const skill = await getProjectStageSkill(projectFolder, "PRE_CAPTURE.md");
   if (isSkipInstruction(skill)) {
     log("pre-capture: skills/PRE_CAPTURE.md says skip — nothing to do.");
+    await recordPhylogUsage({
+      humanId: actingHumanId,
+      projectFolderId: projectFolder._id,
+      stage: "pre-capture",
+      kind: "pipeline",
+      durationMs: 0,
+      outcome: "skipped",
+    });
     return { ok: true, skipped: true, summaries: [], unsupported: [] };
   }
   // Backward-compat continuity: a project may already have a general
@@ -226,14 +235,28 @@ export async function runPreCapture(
     }
 
     let body: string | null = null;
+    const isImage = isImageContentType(source.content_type) && !!source.s3_key;
+    const kind = isImage ? "photo-summary" : "text-summary";
+    const callStart = Date.now();
     try {
-      if (isImageContentType(source.content_type) && source.s3_key) {
+      if (isImage) {
         photoLlm ??= new AnthropicProvider();
-        const bytes = await downloadFileBytes(source.s3_key);
-        body = await photoLlm.describePhoto({
+        const bytes = await downloadFileBytes(source.s3_key!);
+        const result = await photoLlm.describePhoto({
           imageBase64: bytes.toString("base64"),
           mediaType: source.content_type,
           context: buildContext({ skill: skillContent, card: candidate.card, caption: candidate.caption }),
+        });
+        body = result.description;
+        await recordPhylogUsage({
+          humanId: actingHumanId,
+          projectFolderId: projectFolder._id,
+          stage: "pre-capture",
+          kind,
+          model: result.model,
+          usage: result.usage,
+          durationMs: Date.now() - callStart,
+          outcome: "success",
         });
       } else if (source.content) {
         textLlm ??= new AnthropicProvider();
@@ -248,6 +271,16 @@ export async function runPreCapture(
           tools: [],
         });
         body = response.text?.trim() || null;
+        await recordPhylogUsage({
+          humanId: actingHumanId,
+          projectFolderId: projectFolder._id,
+          stage: "pre-capture",
+          kind,
+          model: response.model,
+          usage: response.usage,
+          durationMs: Date.now() - callStart,
+          outcome: "success",
+        });
       } else {
         unsupported.push({ fileId: source._id, name: source.name });
         log(`pre-capture: "${source.name}" has no readable content — skipped (no summary written).`);
@@ -261,6 +294,15 @@ export async function runPreCapture(
       log(
         `pre-capture: "${source.name}" couldn't be summarized (${err instanceof Error ? err.message : "unknown error"}).`,
       );
+      await recordPhylogUsage({
+        humanId: actingHumanId,
+        projectFolderId: projectFolder._id,
+        stage: "pre-capture",
+        kind,
+        durationMs: Date.now() - callStart,
+        outcome: "error",
+        errorKind: classifyLlmError(err),
+      });
       continue;
     }
 

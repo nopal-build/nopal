@@ -37,12 +37,30 @@ export type LlmMessage =
 
 export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "other";
 
+/** Token counts only — no dollar estimate here on purpose. Usage tracking
+ * (`phylogMetrics.server.ts`) is deliberately tokens-only for now; a $
+ * conversion can be layered on top later without touching this interface.
+ * `cacheReadTokens`/`cacheWriteTokens` are here even though nothing uses
+ * prompt caching yet, so turning it on later doesn't need an interface
+ * change. */
+export type LlmUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+};
+
 export type LlmResponse = {
   /** Any plain text the model produced alongside (or instead of) a tool
    * call — e.g. its reasoning for NOT calling a tool this turn. */
   text: string | null;
   toolCalls: ToolCall[];
   stopReason: StopReason;
+  usage: LlmUsage;
+  /** Which model actually served this call — for usage tracking
+   * (`phylogMetrics.server.ts`), so a future model change shows up in the
+   * data instead of being assumed. */
+  model: string;
 };
 
 export interface LlmProvider {
@@ -82,6 +100,12 @@ export type PhotoDescriptionInput = {
   context: string;
 };
 
+export type PhotoDescriptionResult = {
+  description: string;
+  usage: LlmUsage;
+  model: string;
+};
+
 export interface PhotoDescriber {
-  describePhoto(input: PhotoDescriptionInput): Promise<string>;
+  describePhoto(input: PhotoDescriptionInput): Promise<PhotoDescriptionResult>;
 }

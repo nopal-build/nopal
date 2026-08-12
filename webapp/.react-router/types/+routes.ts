@@ -56,6 +56,9 @@ type Pages = {
   "/api/passkeys/login-verify": {
     params: {};
   };
+  "/api/phylog/usage-cleanup": {
+    params: {};
+  };
   "/tools/frames-volume-calc": {
     params: {};
   };
@@ -83,6 +86,9 @@ type Pages = {
     params: {};
   };
   "/api/cli-auth/exchange": {
+    params: {};
+  };
+  "/fruits/maker/phylog": {
     params: {};
   };
   "/grandpas-cabin-recipe": {
@@ -401,7 +407,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/api/phylog/post-capture" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/phylog/pre-capture" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/humans/related" | "/api/phylog/capture" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/phylog/reset" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/api/phylog/run" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
+    page: "/" | "/api/passkeys/invite-register-options" | "/api/passkeys/invite-register-verify" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/passkeys/register-verify" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/api/phylog/usage-cleanup" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/api/phylog/post-capture" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/phylog/pre-capture" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/fruits/maker/phylog" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/humans/related" | "/api/phylog/capture" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/phylog/reset" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/api/phylog/run" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
   };
   "routes/api.passkeys.invite-register-options.tsx": {
     id: "routes/api.passkeys.invite-register-options";
@@ -451,6 +457,10 @@ type RouteFiles = {
     id: "routes/api.passkeys.login-verify";
     page: "/api/passkeys/login-verify";
   };
+  "routes/api.phylog.usage-cleanup.tsx": {
+    id: "routes/api.phylog.usage-cleanup";
+    page: "/api/phylog/usage-cleanup";
+  };
   "routes/tools.frames-volume-calc.tsx": {
     id: "routes/tools.frames-volume-calc";
     page: "/tools/frames-volume-calc";
@@ -486,6 +496,10 @@ type RouteFiles = {
   "routes/api.cli-auth.exchange.tsx": {
     id: "routes/api.cli-auth.exchange";
     page: "/api/cli-auth/exchange";
+  };
+  "routes/fruits_.maker_.phylog.tsx": {
+    id: "routes/fruits_.maker_.phylog";
+    page: "/fruits/maker/phylog";
   };
   "routes/grandpas-cabin-recipe.tsx": {
     id: "routes/grandpas-cabin-recipe";
@@ -879,6 +893,7 @@ type RouteModules = {
   "routes/api.passkeys.login-options": typeof import("./app/routes/api.passkeys.login-options.tsx");
   "routes/fruits_.styles_.oxmarkdown": typeof import("./app/routes/fruits_.styles_.oxmarkdown.tsx");
   "routes/api.passkeys.login-verify": typeof import("./app/routes/api.passkeys.login-verify.tsx");
+  "routes/api.phylog.usage-cleanup": typeof import("./app/routes/api.phylog.usage-cleanup.tsx");
   "routes/tools.frames-volume-calc": typeof import("./app/routes/tools.frames-volume-calc.tsx");
   "routes/tools.grade-differential": typeof import("./app/routes/tools.grade-differential.tsx");
   "routes/api.phylog.post-capture": typeof import("./app/routes/api.phylog.post-capture.tsx");
@@ -888,6 +903,7 @@ type RouteModules = {
   "routes/api.phylog.pre-capture": typeof import("./app/routes/api.phylog.pre-capture.tsx");
   "routes/api.admin.impersonate": typeof import("./app/routes/api.admin.impersonate.tsx");
   "routes/api.cli-auth.exchange": typeof import("./app/routes/api.cli-auth.exchange.tsx");
+  "routes/fruits_.maker_.phylog": typeof import("./app/routes/fruits_.maker_.phylog.tsx");
   "routes/grandpas-cabin-recipe": typeof import("./app/routes/grandpas-cabin-recipe.tsx");
   "routes/tools.thermal-inertia": typeof import("./app/routes/tools.thermal-inertia.tsx");
   "routes/api.daily-log.upload": typeof import("./app/routes/api.daily-log.upload.tsx");

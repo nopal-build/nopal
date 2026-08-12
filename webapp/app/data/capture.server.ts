@@ -46,6 +46,14 @@
  * ALWAYS APPLIES — there is no preview/dry-run mode. The Release Log's
  * revert mechanism (`nopal release-log revert`) is the safety net.
  *
+ * Each day's organize/README agent loop is isolated in its own try/catch
+ * (`captureOneDay`) — a failure on one day (a rate limit, a transient
+ * error) never aborts the rest of a multi-day run, same resilience
+ * philosophy `preCapture.server.ts` already applies per-file. Every day
+ * records exactly one `phylogMetrics.server.ts` usage event (skipped/
+ * success/error) — see that file's own doc for the token/timing tracking
+ * design.
+ *
  * KNOWN LIMITATION: only `update_readme` produces a Release Log CHANGESET
  * (so only README edits are individually revertible) — `create_folder`/
  * `move_file` actions are reported in the entry's own summary text but not
@@ -86,7 +94,8 @@ import {
   type ResetSummary,
 } from "./projectN01.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
-import type { LlmMessage, LlmProvider, ToolCall, ToolDefinition } from "./llmProvider";
+import { classifyLlmError, recordPhylogUsage } from "./phylogMetrics.server";
+import type { LlmMessage, LlmProvider, LlmUsage, ToolCall, ToolDefinition } from "./llmProvider";
 
 const MANAGED_FOLDER_TYPES = new Set(["skills", "syncs", "newspapers"]);
 
@@ -146,12 +155,18 @@ async function runAgentLoop(
   tools: ToolDefinition[],
   executors: Record<string, (input: Record<string, unknown>) => Promise<string>>,
   maxTurns = 6,
-): Promise<{ toolCallsMade: ToolCall[] }> {
+): Promise<{ toolCallsMade: ToolCall[]; usage: LlmUsage; durationMs: number; model: string | null }> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const toolCallsMade: ToolCall[] = [];
+  const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
+  let model: string | null = null;
+  const loopStart = Date.now();
 
   for (let turn = 0; turn < maxTurns; turn++) {
     const response = await provider.complete({ system, messages, tools });
+    usage.inputTokens += response.usage.inputTokens;
+    usage.outputTokens += response.usage.outputTokens;
+    model = response.model;
     messages.push({ role: "assistant", content: response.text ?? "", toolCalls: response.toolCalls });
     if (response.toolCalls.length === 0) break;
     for (const call of response.toolCalls) {
@@ -162,7 +177,7 @@ async function runAgentLoop(
     }
     if (response.stopReason !== "tool_use") break;
   }
-  return { toolCallsMade };
+  return { toolCallsMade, usage, durationMs: Date.now() - loopStart, model };
 }
 
 /** Renders every folder/file in `projectFolder`'s tree EXCLUDING the
@@ -362,113 +377,54 @@ export async function runCapture(
     const existing = await findReleaseLogEntryBySource(projectFolder._id, date, "ai-update", sourceRef);
     if (existing) {
       log(`capture: ${date} — already applied for this Card's current content.`);
+      await recordPhylogUsage({
+        humanId: actingHumanId,
+        projectFolderId: projectFolder._id,
+        stage: "capture",
+        kind: "organize",
+        durationMs: 0,
+        outcome: "skipped",
+      });
       days.push({ date, filed, organizeActions: [], readmeUpdated: false, alreadyApplied: true });
       continue;
     }
 
-    const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
-    const readmeContent = readme?.content ?? "";
-    const tree = await renderManagedTree(projectFolder.human_id, projectFolder._id);
-
-    const summaries: { name: string; body: string }[] = [];
-    for (const f of filed) {
-      const { files: siblings } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
-      const listing = siblings.find((s) => s.name === summaryFileName(f.name));
-      if (!listing) continue;
-      const file = await getFileRefById(listing._id);
-      if (file?.content) summaries.push({ name: f.name, body: splitFrontmatter(file.content).body.trim() });
-    }
-
-    const organizeActions: string[] = [];
-    const executors: Record<string, (input: Record<string, unknown>) => Promise<string>> = {
-      create_folder: async (input) => {
-        const path = String(input.path ?? "");
-        const result = await resolveOrCreatePath(projectFolder, path);
-        if (!result.ok) return `Error: ${result.error}`;
-        organizeActions.push(`created folder "${path}"`);
-        log(`capture: ${date} — created folder "${path}".`);
-        return `Created (or already existed): ${path || "/"}`;
-      },
-      move_file: async (input) => {
-        const name = String(input.name ?? "");
-        const destinationPath = String(input.destinationPath ?? "");
-        const found = await findManagedFileByName(projectFolder.human_id, projectFolder._id, name);
-        if (!found) return `Error: no file named "${name}" found in this project`;
-        const dest = await resolveOrCreatePath(projectFolder, destinationPath);
-        if (!dest.ok) return `Error: ${dest.error}`;
-        await updateFileRef(found.fileId, { folder_id: dest.folderId });
-        organizeActions.push(`moved "${name}" to "${destinationPath || "/"}"`);
-        log(`capture: ${date} — moved "${name}" to "${destinationPath || "/"}".`);
-        return `Moved "${name}" to ${destinationPath || "/"}`;
-      },
-      update_readme: async () => "Recorded.",
-    };
-
-    const userPrompt = buildUserPrompt({ tree, cardContent: card.content, filed, summaries, readmeContent });
-    const { toolCallsMade } = await runAgentLoop(
-      llm,
-      buildSystemPrompt(skillContent, generalSkill),
-      userPrompt,
-      [CREATE_FOLDER_TOOL, MOVE_FILE_TOOL, UPDATE_README_TOOL],
-      executors,
-    );
-
-    const updateCall = toolCallsMade.find((c) => c.name === "update_readme");
     let readmeUpdated = false;
-    if (updateCall) {
-      const newBody = String(updateCall.input.newBody ?? "");
-      const reason = String(updateCall.input.reason ?? "");
-      const oldFullContent = readmeContent;
-      const newFullContent = withReadmeBody(oldFullContent, newBody);
-
-      let readmeFileId = readme?._id;
-      if (!readme) {
-        const created = await createFileRef({
-          human_id: projectFolder.human_id,
-          name: "README.md",
-          content: newFullContent,
-          content_type: "text/markdown",
-          folder_id: projectFolder._id,
-        });
-        readmeFileId = created?._id;
-      } else {
-        await updateFileRef(readme._id, { content: newFullContent });
-      }
-
-      if (readmeFileId) {
-        const actionSummary = organizeActions.length > 0 ? ` (also: ${organizeActions.join(", ")})` : "";
-        await createReleaseLogEntry({
-          projectFolderId: projectFolder._id,
-          date,
-          actingHumanId,
-          kind: "ai-update",
-          summary: `PhyLog captured the day — [View](/fruits/vault?file=${readmeFileId}): ${reason}${actionSummary}`,
-          sourceRef,
-          changesets: [
-            { fileId: readmeFileId, action: "content-edit", before: { content: oldFullContent }, after: { content: newFullContent } },
-          ],
-        });
-        readmeUpdated = true;
+    let organizeActions: string[] = [];
+    try {
+      const result = await captureOneDay({
+        actingHumanId,
+        projectFolder,
+        date,
+        card,
+        filed,
+        sourceRef,
+        llm,
+        skillContent,
+        generalSkill,
+        log,
+      });
+      readmeUpdated = result.readmeUpdated;
+      organizeActions = result.organizeActions;
+      if (readmeUpdated || organizeActions.length > 0) {
         releaseLogsDirty = true;
         touchedDates.add(date);
-        log(`capture: ${date} — README updated: ${reason}`);
+      } else {
+        log(`capture: ${date} — no README update or reorganization warranted.`);
       }
-    } else if (organizeActions.length > 0) {
-      // Reorganization happened without a README change — still worth a
-      // (changeset-less) Release Log entry so it's visible in the project's
-      // own receipt, using the same sourceRef so a re-run doesn't repeat it.
-      await createReleaseLogEntry({
+    } catch (err) {
+      log(
+        `capture: ${date} — organize/README step failed (${err instanceof Error ? err.message : "unknown error"}).`,
+      );
+      await recordPhylogUsage({
+        humanId: actingHumanId,
         projectFolderId: projectFolder._id,
-        date,
-        actingHumanId,
-        kind: "ai-update",
-        summary: `PhyLog reorganized this project: ${organizeActions.join(", ")}`,
-        sourceRef,
+        stage: "capture",
+        kind: "organize",
+        durationMs: 0,
+        outcome: "error",
+        errorKind: classifyLlmError(err),
       });
-      releaseLogsDirty = true;
-      touchedDates.add(date);
-    } else {
-      log(`capture: ${date} — no README update or reorganization warranted.`);
     }
 
     days.push({ date, filed, organizeActions, readmeUpdated, alreadyApplied: false });
@@ -483,4 +439,139 @@ export async function runCapture(
   }
 
   return { ok: true, full: opts.full, resetSummary, days };
+}
+
+/**
+ * Runs the organize/README agent loop for ONE day — split out so
+ * `runCapture`'s own per-day try/catch can isolate a failure to just that
+ * day (see this file's own module doc). Records exactly one
+ * `phylogMetrics` usage event for the day's agent loop on success; the
+ * caller records "skipped" (already applied) and "error" cases itself,
+ * since those never reach this function at all or throw out of it.
+ */
+async function captureOneDay(input: {
+  actingHumanId: string;
+  projectFolder: VaultFolder;
+  date: string;
+  card: DailyLogCard;
+  filed: FiledAttachment[];
+  sourceRef: string;
+  llm: LlmProvider;
+  skillContent: string;
+  generalSkill: string | null;
+  log: (line: string) => void;
+}): Promise<{ readmeUpdated: boolean; organizeActions: string[] }> {
+  const { actingHumanId, projectFolder, date, card, filed, sourceRef, llm, skillContent, generalSkill, log } = input;
+
+  const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
+  const readmeContent = readme?.content ?? "";
+  const tree = await renderManagedTree(projectFolder.human_id, projectFolder._id);
+
+  const summaries: { name: string; body: string }[] = [];
+  for (const f of filed) {
+    const { files: siblings } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
+    const listing = siblings.find((s) => s.name === summaryFileName(f.name));
+    if (!listing) continue;
+    const file = await getFileRefById(listing._id);
+    if (file?.content) summaries.push({ name: f.name, body: splitFrontmatter(file.content).body.trim() });
+  }
+
+  const organizeActions: string[] = [];
+  const executors: Record<string, (input: Record<string, unknown>) => Promise<string>> = {
+    create_folder: async (input) => {
+      const path = String(input.path ?? "");
+      const result = await resolveOrCreatePath(projectFolder, path);
+      if (!result.ok) return `Error: ${result.error}`;
+      organizeActions.push(`created folder "${path}"`);
+      log(`capture: ${date} — created folder "${path}".`);
+      return `Created (or already existed): ${path || "/"}`;
+    },
+    move_file: async (input) => {
+      const name = String(input.name ?? "");
+      const destinationPath = String(input.destinationPath ?? "");
+      const found = await findManagedFileByName(projectFolder.human_id, projectFolder._id, name);
+      if (!found) return `Error: no file named "${name}" found in this project`;
+      const dest = await resolveOrCreatePath(projectFolder, destinationPath);
+      if (!dest.ok) return `Error: ${dest.error}`;
+      await updateFileRef(found.fileId, { folder_id: dest.folderId });
+      organizeActions.push(`moved "${name}" to "${destinationPath || "/"}"`);
+      log(`capture: ${date} — moved "${name}" to "${destinationPath || "/"}".`);
+      return `Moved "${name}" to ${destinationPath || "/"}`;
+    },
+    update_readme: async () => "Recorded.",
+  };
+
+  const userPrompt = buildUserPrompt({ tree, cardContent: card.content, filed, summaries, readmeContent });
+  const { toolCallsMade, usage, durationMs, model } = await runAgentLoop(
+    llm,
+    buildSystemPrompt(skillContent, generalSkill),
+    userPrompt,
+    [CREATE_FOLDER_TOOL, MOVE_FILE_TOOL, UPDATE_README_TOOL],
+    executors,
+  );
+
+  await recordPhylogUsage({
+    humanId: actingHumanId,
+    projectFolderId: projectFolder._id,
+    stage: "capture",
+    kind: "organize",
+    model: model ?? undefined,
+    usage,
+    durationMs,
+    outcome: "success",
+  });
+
+  const updateCall = toolCallsMade.find((c) => c.name === "update_readme");
+  let readmeUpdated = false;
+  if (updateCall) {
+    const newBody = String(updateCall.input.newBody ?? "");
+    const reason = String(updateCall.input.reason ?? "");
+    const oldFullContent = readmeContent;
+    const newFullContent = withReadmeBody(oldFullContent, newBody);
+
+    let readmeFileId = readme?._id;
+    if (!readme) {
+      const created = await createFileRef({
+        human_id: projectFolder.human_id,
+        name: "README.md",
+        content: newFullContent,
+        content_type: "text/markdown",
+        folder_id: projectFolder._id,
+      });
+      readmeFileId = created?._id;
+    } else {
+      await updateFileRef(readme._id, { content: newFullContent });
+    }
+
+    if (readmeFileId) {
+      const actionSummary = organizeActions.length > 0 ? ` (also: ${organizeActions.join(", ")})` : "";
+      await createReleaseLogEntry({
+        projectFolderId: projectFolder._id,
+        date,
+        actingHumanId,
+        kind: "ai-update",
+        summary: `PhyLog captured the day — [View](/fruits/vault?file=${readmeFileId}): ${reason}${actionSummary}`,
+        sourceRef,
+        changesets: [
+          { fileId: readmeFileId, action: "content-edit", before: { content: oldFullContent }, after: { content: newFullContent } },
+        ],
+      });
+      readmeUpdated = true;
+      log(`capture: ${date} — README updated: ${reason}`);
+    }
+  } else if (organizeActions.length > 0) {
+    // Reorganization happened without a README change — still worth a
+    // (changeset-less) Release Log entry so it's visible in the project's
+    // own receipt, using the same sourceRef so a re-run doesn't repeat it.
+    await createReleaseLogEntry({
+      projectFolderId: projectFolder._id,
+      date,
+      actingHumanId,
+      kind: "ai-update",
+      summary: `PhyLog reorganized this project: ${organizeActions.join(", ")}`,
+      sourceRef,
+    });
+  }
+
+  return { readmeUpdated, organizeActions };
 }

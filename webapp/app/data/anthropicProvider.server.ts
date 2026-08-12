@@ -10,8 +10,10 @@ import type {
   LlmMessage,
   LlmProvider,
   LlmResponse,
+  LlmUsage,
   PhotoDescriber,
   PhotoDescriptionInput,
+  PhotoDescriptionResult,
   StopReason,
   ToolCall,
   ToolDefinition,
@@ -89,6 +91,15 @@ function toAnthropicTools(tools: ToolDefinition[]): Anthropic.Tool[] {
   }));
 }
 
+function toLlmUsage(usage: Anthropic.Usage): LlmUsage {
+  return {
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheReadTokens: usage.cache_read_input_tokens ?? undefined,
+    cacheWriteTokens: usage.cache_creation_input_tokens ?? undefined,
+  };
+}
+
 export class AnthropicProvider implements LlmProvider, PhotoDescriber {
   private client: Anthropic;
   private model: string;
@@ -131,12 +142,18 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
       }
     }
 
-    return { text, toolCalls, stopReason: mapStopReason(response.stop_reason) };
+    return {
+      text,
+      toolCalls,
+      stopReason: mapStopReason(response.stop_reason),
+      usage: toLlmUsage(response.usage),
+      model: this.model,
+    };
   }
 
   /** See `PhotoDescriber` (`llmProvider.ts`) for the design reasoning —
    * a plain, single-turn vision call, no tools, no message history. */
-  async describePhoto(input: PhotoDescriptionInput): Promise<string> {
+  async describePhoto(input: PhotoDescriptionInput): Promise<PhotoDescriptionResult> {
     if (!ANTHROPIC_IMAGE_MEDIA_TYPES.has(input.mediaType)) {
       throw new Error(`Unsupported image media type for description: ${input.mediaType}`);
     }
@@ -165,11 +182,12 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
       ],
     });
 
-    return response.content
+    const description = response.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")
       .map((block) => block.text)
       .join("")
       .trim();
+    return { description, usage: toLlmUsage(response.usage), model: this.model };
   }
 }
 

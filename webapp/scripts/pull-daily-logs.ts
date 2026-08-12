@@ -194,11 +194,22 @@ async function remoteFile(host: string, token: string, fileId: string): Promise<
 async function ensureLocalHuman(id: string, email: string, name: string): Promise<void> {
   const db = await getDb();
   try {
-    await db.upsert(new RecordId("humans", id), {
-      email,
-      name,
-      role: "Human",
-    });
+    const existing = await db.select(new RecordId("humans", id));
+    if (existing) {
+      // `db.upsert` REPLACES the entire record (SurrealDB's own docs: "UPSERT
+      // replaces the entire record if it exists") — doing that here would
+      // silently stomp an already-promoted local role (Super/Admin) back
+      // down to "Human" on every single re-run of this script, which is
+      // exactly the bug this guarded against. `db.merge` only touches the
+      // fields we actually pass, leaving role (and anything else) alone.
+      await db.merge(new RecordId("humans", id), { email, name });
+    } else {
+      await db.upsert(new RecordId("humans", id), {
+        email,
+        name,
+        role: "Human",
+      });
+    }
   } finally {
     await db.close();
   }
