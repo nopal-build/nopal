@@ -16,7 +16,7 @@ PROXY_PORT ?= 8081
 ## `fly deploy` runs from here with explicit --config/--dockerfile instead
 ## of `cd`-ing into each app's own directory.
 deploy:
-	pnpm --filter remix test -- --run
+	pnpm --filter remix run test --run
 	cd db && fly deploy
 	fly deploy . --config webapp/fly.toml --dockerfile webapp/Dockerfile
 	fly deploy . --config packages/worker/fly.toml --dockerfile packages/worker/Dockerfile

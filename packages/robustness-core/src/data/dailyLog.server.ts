@@ -5,6 +5,7 @@ import {
   updateFileRef,
   createFileRef,
   getFolderById,
+  getFoldersByIds,
   getOrCreateVaultFolder,
   ensureVaultRootFolders,
 } from "./vault.server";
@@ -317,15 +318,25 @@ export async function getDailyLogCards(
   );
   const files = (result?.[0] ?? []).map((r) => formatRecord(r as unknown as FileRef));
 
+  // ONE batched lookup for every card's project folder, instead of one
+  // round trip PER card in a loop — a real difference once a day has
+  // several cards (each card here is already a resolved file, so this is
+  // strictly about avoiding N extra sequential DB round trips, not about
+  // indexing).
+  const projectFolderIds = [
+    ...new Set(files.map((f) => f.project_folder_id).filter((id): id is string => !!id)),
+  ];
+  const projectFolders = await getFoldersByIds(projectFolderIds);
+  const projectNameById = new Map(projectFolders.map((f) => [f._id, f.name]));
+
   const cards: DailyLogCard[] = [];
   for (const file of files) {
     if (!file.project_folder_id) continue;
-    const projectFolder = await getFolderById(file.project_folder_id);
     cards.push({
       fileId: file._id,
       fileName: file.name,
       projectFolderId: file.project_folder_id,
-      projectName: projectFolder?.name ?? "Unknown project",
+      projectName: projectNameById.get(file.project_folder_id) ?? "Unknown project",
       content: file.content ?? "",
     });
   }

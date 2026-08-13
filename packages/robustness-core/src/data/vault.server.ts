@@ -423,6 +423,19 @@ export async function getFolderById(
   return record ? formatRecord(record) : undefined;
 }
 
+/** Batch form of `getFolderById` — ONE round trip for many ids, instead of
+ * one round trip PER id in a loop (the exact N+1 shape `getDailyLogCards`
+ * used to have, resolving each card's project name one at a time). Mirrors
+ * `humans.server.ts`'s `getHumansById`. */
+export async function getFoldersByIds(ids: string[]): Promise<VaultFolder[]> {
+  if (!ids.length) return [];
+  const result = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders WHERE id IN $ids`,
+    { ids: ids.map((id) => new RecordId("vault_folders", id)) },
+  );
+  return (result?.[0] ?? []).map(formatRecord);
+}
+
 export async function getSharedFoldersForHuman(
   humanId: string,
 ): Promise<VaultFolder[]> {
