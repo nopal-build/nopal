@@ -791,6 +791,9 @@ fn read_serial_port_interactive(port_name: &str) -> Result<(), Box<dyn std::erro
                 .open()?;
 
             let now = jiff::Timestamp::now();
+            // Write output relative to wherever the command is invoked from,
+            // creating the `data` directory if it doesn't already exist.
+            std::fs::create_dir_all("./data")?;
             let filename = format!(
                 "./data/load_cell_data_{}.csv",
                 now.strftime("%Y-%m-%d_%H:%M").to_string()
@@ -844,6 +847,12 @@ fn read_single_measurement(
     port: &mut Box<dyn serialport::SerialPort>,
 ) -> Result<(f64, f64), Box<dyn std::error::Error>> {
     let mut serial_buf: Vec<u8> = vec![0; 1000];
+
+    // The load cell streams readings continuously, so by the time the user
+    // enters a distance, stale readings (taken before they moved anything)
+    // have already piled up in the OS input buffer. Discard them so the
+    // reading we return below reflects fresh data only.
+    let _ = port.clear(serialport::ClearBuffer::Input);
 
     // Try to get a valid measurement for up to 1 second
     let start = std::time::Instant::now();
