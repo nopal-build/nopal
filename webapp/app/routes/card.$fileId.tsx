@@ -3,8 +3,8 @@
 
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
-import { getFileRefById } from "../data/vault.server";
-import type { FileRef } from "../data/vault.types";
+import { getFileRefById } from "robustness-core/data/vault.server";
+import type { FileRef } from "robustness-core/data/vault.types";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import MdxEditorView from "../components/MdxEditorView";

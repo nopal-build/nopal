@@ -33,7 +33,7 @@ import {
   removeAliasEmail,
   type Human,
   type Role,
-} from "../data/humans.server";
+} from "robustness-core/data/humans.server";
 import { sendEmail } from "../util/email.server";
 import { ConfirmEmail } from "../emails/confirmEmail";
 import { EmailChangeNotice } from "../emails/emailChangeNotice";
@@ -43,7 +43,7 @@ import {
   relationshipExists,
   getRelatedHumans,
   getRelationshipsForHuman,
-} from "../data/relationships.server";
+} from "robustness-core/data/relationships.server";
 import {
   inviteHuman,
   canResendInvite,
@@ -52,19 +52,19 @@ import {
 import {
   getLegalDocumentsByEmail,
   type LegalDocumentRecord,
-} from "../data/legalDocuments.server";
+} from "robustness-core/data/legalDocuments.server";
 import {
   getPasskeysByHuman,
   getPasskeyById,
   deletePasskey,
   type Passkey,
-} from "../data/passkeys.server";
+} from "robustness-core/data/passkeys.server";
 import {
   createPersonalAccessToken,
   getApiTokensByHuman,
   revokeApiToken,
   type ApiToken,
-} from "../data/apiTokens.server";
+} from "robustness-core/data/apiTokens.server";
 import { AppLayout } from "../components/AppLayout";
 import { Input } from "../components/Input";
 import { Badge } from "../components/Badge";

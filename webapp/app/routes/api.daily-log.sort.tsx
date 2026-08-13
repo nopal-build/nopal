@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { isSorterEnabled, sortDailyLog } from "../data/sorter.server";
+import { isSorterEnabled, sortDailyLog } from "robustness-core/data/sorter.server";
 
 /**
  * POST /api/daily-log/sort

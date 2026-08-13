@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { getFileRefById, isFolderUnderSyncs } from "../data/vault.server";
-import { getPresignedDownloadUrl } from "../data/file.server";
+import { getFileRefById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
+import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
 
 /**
  * GET /api/vault/download/:fileId

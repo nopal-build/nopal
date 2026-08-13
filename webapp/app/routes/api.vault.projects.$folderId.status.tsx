@@ -1,12 +1,12 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFolderById } from "../data/vault.server";
-import { isProjectFolder } from "../data/projectSharing.server";
+import { getFolderById } from "robustness-core/data/vault.server";
+import { isProjectFolder } from "robustness-core/data/projectSharing.server";
 import {
   getProjectStatus,
   setProjectStatus,
-} from "../data/projectStatus.server";
-import { PROJECT_STATUSES, type ProjectStatus } from "../data/project.types";
+} from "robustness-core/data/projectStatus.server";
+import { PROJECT_STATUSES, type ProjectStatus } from "robustness-core/data/project.types";
 
 /**
  * GET/PUT /api/vault/projects/:folderId/status — a project's Active/

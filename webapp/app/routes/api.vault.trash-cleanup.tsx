@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getTrashedProjectFoldersForCleanup } from "../data/projectStatus.server";
-import { deleteVaultFolderCascade } from "../data/vault.server";
+import { getTrashedProjectFoldersForCleanup } from "robustness-core/data/projectStatus.server";
+import { deleteVaultFolderCascade } from "robustness-core/data/vault.server";
 
 /**
  * POST /api/vault/trash-cleanup

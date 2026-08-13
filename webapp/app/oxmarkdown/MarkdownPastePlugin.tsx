@@ -44,7 +44,7 @@
 import { useEffect } from "react";
 import { $insertNodes, COMMAND_PRIORITY_HIGH, PASTE_COMMAND } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { parseOxDocument } from "./document";
+import { parseOxDocument } from "oxmarkdown-core";
 import { importOxDocument } from "./editingTransforms";
 
 /** Reduces an HTML clipboard payload to plain text, without ever letting

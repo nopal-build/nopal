@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import {
   getArchivedFilesForCleanup,
   deleteFileRef,
-} from "../data/vault.server";
+} from "robustness-core/data/vault.server";
 
 /**
  * POST /api/vault/archive-cleanup

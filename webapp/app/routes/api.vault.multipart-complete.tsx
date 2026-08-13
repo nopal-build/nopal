@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { completeMultipartUpload } from "../data/file.server";
-import { createFileRef, isFolderUnderSyncs } from "../data/vault.server";
+import { completeMultipartUpload } from "robustness-core/data/file.server";
+import { createFileRef, isFolderUnderSyncs } from "robustness-core/data/vault.server";
 
 /**
  * POST /api/vault/multipart-complete

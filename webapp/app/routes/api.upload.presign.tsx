@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
-import { getPresignedUploadUrl, getFileContentType } from "../data/file.server";
-import { getOrCreateVaultFolder } from "../data/vault.server";
+import { getPresignedUploadUrl, getFileContentType } from "robustness-core/data/file.server";
+import { getOrCreateVaultFolder } from "robustness-core/data/vault.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUser(request);

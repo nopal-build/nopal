@@ -47,7 +47,7 @@ import {
   listFolderChildren,
   updateFileRef,
 } from "./vault.server";
-import { parseOxDocument } from "../oxmarkdown/document";
+import { parseOxDocument } from "oxmarkdown-core";
 import {
   findLeafDirectiveOccurrences,
   replaceDirectiveAttrInMatch,

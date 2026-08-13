@@ -18,6 +18,7 @@ node_modules
 remix/build
 .cache/
 build/
+.pnpm-store/
 
 # Playwright screenshots from webapp/scripts/visual-check.ts
 webapp/tmp/

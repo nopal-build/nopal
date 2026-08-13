@@ -4,14 +4,14 @@ import { TOTPStrategy } from "remix-auth-totp";
 import { redirect } from "react-router";
 import { sessionStorage } from "./session.server";
 import { sendEmail } from "../../util/email.server";
-import { Human, getHumanByEmail, getHumanById } from "../../data/humans.server";
+import { Human, getHumanByEmail, getHumanById } from "robustness-core/data/humans.server";
 import { LoginCode } from "../../emails/loginCode";
-import { recordImpersonationEvent } from "../../data/impersonationEvents.server";
+import { recordImpersonationEvent } from "robustness-core/data/impersonationEvents.server";
 import {
   getApiTokenByHash,
   isApiTokenValid,
   touchApiTokenLastUsed,
-} from "../../data/apiTokens.server";
+} from "robustness-core/data/apiTokens.server";
 
 const IMPERSONATION_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day
 

@@ -4,7 +4,7 @@ import {
   getHumanByInviteToken,
   isInviteTokenValid,
   consumeInviteToken,
-} from "../data/humans.server";
+} from "robustness-core/data/humans.server";
 import { verifyPasskeyRegistration } from "../modules/auth/webauthn.server";
 
 /**

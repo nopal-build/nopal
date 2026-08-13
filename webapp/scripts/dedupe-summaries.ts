@@ -6,8 +6,8 @@
 //
 // Run via: npx vite-node scripts/dedupe-summaries.ts <folderId>
 
-import { listFolderChildren, deleteFileRef } from "../app/data/vault.server";
-import { getHumanByEmail } from "../app/data/humans.server";
+import { listFolderChildren, deleteFileRef } from "robustness-core/data/vault.server";
+import { getHumanByEmail } from "robustness-core/data/humans.server";
 
 async function main() {
   const folderId = process.argv[2];

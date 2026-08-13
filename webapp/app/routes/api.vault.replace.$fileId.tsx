@@ -1,16 +1,16 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { uploadFileToS3, deleteFromS3 } from "../data/file.server";
+import { uploadFileToS3, deleteFromS3 } from "robustness-core/data/file.server";
 import {
   canWriteToFolderId,
   getFileRefById,
   computeMdUpdate,
   isFolderUnderSyncs,
-} from "../data/vault.server";
-import { isFileRefLocked } from "../data/vault.types";
-import { merge } from "../data/generic.server";
-import { cacheDailyLog } from "../data/dailyLog.server";
+} from "robustness-core/data/vault.server";
+import { isFileRefLocked } from "robustness-core/data/vault.types";
+import { merge } from "robustness-core/data/generic.server";
+import { cacheDailyLog } from "robustness-core/data/dailyLog.server";
 
 /**
  * POST /api/vault/replace/:fileId

@@ -28,12 +28,12 @@ import {
   isDirectiveNode,
   type OxDocument,
   type DirectiveNode,
-} from "../oxmarkdown/document";
+} from "oxmarkdown-core";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
 import type { OxInteractive } from "../oxmarkdown/interactive";
 import OxPopover from "../oxmarkdown/OxPopover";
-import type { CardResolver } from "../oxmarkdown/cardDirective";
+import type { CardResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import { CircleButton } from "./CircleButton";

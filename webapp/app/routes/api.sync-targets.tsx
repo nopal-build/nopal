@@ -6,8 +6,8 @@ import {
 import {
   createSyncTarget,
   getSyncTargetsByHuman,
-} from "../data/syncTargets.server";
-import { getFolderById, isFolderUnderSyncs } from "../data/vault.server";
+} from "robustness-core/data/syncTargets.server";
+import { getFolderById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
 
 /**
  * GET  /api/sync-targets          — list this human's sync targets

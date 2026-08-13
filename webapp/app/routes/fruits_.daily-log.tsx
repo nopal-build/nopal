@@ -16,9 +16,9 @@ import { AppLayout } from "../components/AppLayout";
 import { Chip } from "../components/Chip";
 import { DayContainer, DayTitle } from "../components/DailyLogDay";
 import OxEditor from "../components/OxEditor";
-import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
+import type { MentionItem, MentionSearch } from "oxmarkdown-core";
 import type { UploadedFileInfo, UploadFileFn } from "../oxmarkdown/fileDirective";
-import type { CardResolver } from "../oxmarkdown/cardDirective";
+import type { CardResolver } from "oxmarkdown-core";
 import {
   appendCardDirectiveMarkdown,
   removeCardDirectiveMarkdown,
@@ -26,7 +26,7 @@ import {
   cardFileName,
   pendingCardFileId,
   isPendingCardFileId,
-} from "../oxmarkdown/cardDirective";
+} from "oxmarkdown-core";
 import {
   getDailyLogs,
   saveDailyLog,
@@ -36,9 +36,9 @@ import {
   saveDailyLogCard,
   type DailyLog,
   type DailyLogCard,
-} from "../data/dailyLog.server";
-import { getAccessibleProjectFolders, getFolderById } from "../data/vault.server";
-import { getProjectRole } from "../data/projectSharing.server";
+} from "robustness-core/data/dailyLog.server";
+import { getAccessibleProjectFolders, getFolderById } from "robustness-core/data/vault.server";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
 
 // ─── @ mentions ───────────────────────────────────────────────────────────────────────────────────

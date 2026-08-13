@@ -19,7 +19,7 @@ import {
 } from "../components/FiveFactors";
 import { getSampleSciences } from "../data/notion/science.server";
 import { getAllStories } from "../data/notion/stories.server";
-import type { Collection } from "../data/generic.server";
+import type { Collection } from "robustness-core/data/generic.server";
 import type {
   StoryRecord,
   ScienceRecord,

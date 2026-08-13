@@ -38,7 +38,7 @@ import {
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $createTextNode, $insertNodes, type TextNode } from "lexical";
 import { $createLinkNode } from "@lexical/link";
-import type { MentionItem, MentionSearch } from "./mention";
+import type { MentionItem, MentionSearch } from "oxmarkdown-core";
 
 class MentionOption extends MenuOption {
   item: MentionItem;

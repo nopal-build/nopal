@@ -9,7 +9,7 @@ import { useMemo } from "react";
 import { importFromMarkdown } from "../util/nopalEditorState";
 import MdxRenderer from "./MdxRenderer";
 import type { VaultRefItem } from "./refPopoverPlugin";
-import type { DirectiveRegistry } from "../util/nopalDirectives";
+import type { DirectiveRegistry } from "robustness-core/util/nopalDirectives";
 
 interface MdxEditorViewProps {
   markdown: string;

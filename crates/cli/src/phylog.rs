@@ -17,12 +17,26 @@
 //! mode or `--apply` flag anymore; `nopal release-log revert` remains the
 //! safety net for undoing a specific capture's README edit, and `phylog
 //! reset` + `capture --full` is the "start over" workflow.
+//!
+//! EVERY subcommand below is now enqueue-then-poll, not one blocking
+//! request: PhyLog runs happen in a separate worker process (`worker.ts`,
+//! see `phylogQueue.server.ts`), and the API routes just enqueue and
+//! return a job id (`202` + `{ jobId }`) immediately. Each command POSTs
+//! to enqueue, then polls `GET /api/phylog/jobs/:jobId` until the job
+//! finishes, printing new progress-log lines as they arrive (the server
+//! always returns the FULL cumulative log, so `poll_job` tracks how many
+//! lines it's already printed and only prints the new ones each poll —
+//! see `phylogQueue.server.ts`'s own doc on why there's no delta API).
 
 use serde::Deserialize;
 use serde_json::json;
 use std::error::Error;
+use std::time::Duration;
 
 use crate::vault::{resolve_file, resolve_folder, Client, Folder};
+
+/// How often to poll a running job for new log lines / completion.
+const POLL_INTERVAL: Duration = Duration::from_millis(1200);
 
 fn resolve_project(client: &Client, path: &str) -> Result<Folder, Box<dyn Error + Send + Sync>> {
     resolve_folder(client, path)?.ok_or_else(|| {
@@ -30,13 +44,80 @@ fn resolve_project(client: &Client, path: &str) -> Result<Folder, Box<dyn Error 
     })
 }
 
-fn print_log(log: &[String]) {
-    for line in log {
-        println!("{line}");
+// ─── Queue plumbing ─────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnqueueResponse {
+    job_id: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct JobStatusResponse {
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    log: Vec<String>,
+    #[serde(default)]
+    result: Option<serde_json::Value>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+/// POSTs `body` to `path` to enqueue a PhyLog job, returning its id.
+fn enqueue(
+    client: &Client,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let response: EnqueueResponse = client.post_json(path, body)?;
+    println!(
+        "Queued as job {} — waiting for the worker…",
+        response.job_id
+    );
+    Ok(response.job_id)
+}
+
+/// Polls `GET /api/phylog/jobs/:jobId` until the job completes or fails,
+/// printing new progress-log lines as they show up, then deserializes the
+/// job's return value into `T`.
+fn poll_job<T: serde::de::DeserializeOwned>(
+    client: &Client,
+    job_id: &str,
+) -> Result<T, Box<dyn Error + Send + Sync>> {
+    let mut printed = 0usize;
+    loop {
+        let status: JobStatusResponse = client.get_json(&format!("/api/phylog/jobs/{job_id}"))?;
+
+        if status.log.len() > printed {
+            for line in &status.log[printed..] {
+                println!("{line}");
+            }
+            printed = status.log.len();
+        }
+
+        match status.state.as_str() {
+            "completed" => {
+                let value = status
+                    .result
+                    .ok_or("PhyLog job completed without a result")?;
+                return Ok(serde_json::from_value(value)?);
+            }
+            "failed" => {
+                return Err(status
+                    .error
+                    .unwrap_or_else(|| "PhyLog job failed".to_string())
+                    .into());
+            }
+            _ => {
+                std::thread::sleep(POLL_INTERVAL);
+            }
+        }
     }
 }
 
-// ─── Response shapes ────────────────────────────────────────────────────
+// ─── Result shapes (deserialized from a completed job's return value) ──
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -61,15 +142,6 @@ struct PreCaptureResult {
     summaries: Vec<PreCaptureSummary>,
     #[serde(default)]
     unsupported: Vec<UnsupportedFile>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PreCaptureResponse {
-    #[serde(flatten)]
-    result: PreCaptureResult,
-    #[serde(default)]
-    log: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -109,15 +181,6 @@ struct CaptureResult {
     days: Vec<CaptureDayResult>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CaptureResponse {
-    #[serde(flatten)]
-    result: CaptureResult,
-    #[serde(default)]
-    log: Vec<String>,
-}
-
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct PostCaptureResult {
@@ -126,31 +189,20 @@ struct PostCaptureResult {
     note: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct PostCaptureResponse {
-    #[serde(flatten)]
-    result: PostCaptureResult,
-    #[serde(default)]
-    log: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RunResponse {
+struct RunResult {
     #[serde(default)]
     pre_capture: PreCaptureResult,
     #[serde(default)]
     capture: CaptureResult,
     #[serde(default)]
     post_capture: PostCaptureResult,
-    #[serde(default)]
-    log: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct ResetResponse {
+struct ResetResult {
     summary: ResetSummary,
 }
 
@@ -241,14 +293,13 @@ pub fn run(
         body["until"] = serde_json::Value::String(until.to_string());
     }
 
-    let response: RunResponse = client.post_json("/api/phylog/run", &body)?;
-    print_log(&response.log);
-    println!("--- Stage 1/3: pre-capture ---");
-    print_pre_capture(&response.pre_capture);
-    println!("--- Stage 2/3: capture ---");
-    print_capture(&response.capture);
-    println!("--- Stage 3/3: post-capture ---");
-    print_post_capture(&response.post_capture);
+    let job_id = enqueue(&client, "/api/phylog/run", &body)?;
+    let result: RunResult = poll_job(&client, &job_id)?;
+
+    println!("--- Results ---");
+    print_pre_capture(&result.pre_capture);
+    print_capture(&result.capture);
+    print_post_capture(&result.post_capture);
     println!("=== Done ===");
     Ok(())
 }
@@ -272,9 +323,9 @@ pub fn pre_capture(
     }
 
     println!("=== PhyLog pre-capture: {project_path}/ ===");
-    let response: PreCaptureResponse = client.post_json("/api/phylog/pre-capture", &body)?;
-    print_log(&response.log);
-    print_pre_capture(&response.result);
+    let job_id = enqueue(&client, "/api/phylog/pre-capture", &body)?;
+    let result: PreCaptureResult = poll_job(&client, &job_id)?;
+    print_pre_capture(&result);
     Ok(())
 }
 
@@ -300,9 +351,9 @@ pub fn capture(
         "=== PhyLog capture: {project_path}/ ({}) ===",
         if full { "full rebuild" } else { "incremental" }
     );
-    let response: CaptureResponse = client.post_json("/api/phylog/capture", &body)?;
-    print_log(&response.log);
-    print_capture(&response.result);
+    let job_id = enqueue(&client, "/api/phylog/capture", &body)?;
+    let result: CaptureResult = poll_job(&client, &job_id)?;
+    print_capture(&result);
     Ok(())
 }
 
@@ -313,9 +364,9 @@ pub fn post_capture(project_path: &str) -> Result<(), Box<dyn Error + Send + Syn
 
     println!("=== PhyLog post-capture: {project_path}/ ===");
     let body = json!({ "projectFolderId": folder._id });
-    let response: PostCaptureResponse = client.post_json("/api/phylog/post-capture", &body)?;
-    print_log(&response.log);
-    print_post_capture(&response.result);
+    let job_id = enqueue(&client, "/api/phylog/post-capture", &body)?;
+    let result: PostCaptureResult = poll_job(&client, &job_id)?;
+    print_post_capture(&result);
     Ok(())
 }
 
@@ -333,11 +384,12 @@ pub fn reset(project_path: &str, confirmed: bool) -> Result<(), Box<dyn Error + 
 
     println!("=== PhyLog reset: {project_path}/ ===");
     let body = json!({ "projectFolderId": folder._id });
-    let response: ResetResponse = client.post_json("/api/phylog/reset", &body)?;
+    let job_id = enqueue(&client, "/api/phylog/reset", &body)?;
+    let result: ResetResult = poll_job(&client, &job_id)?;
     println!(
         "Reset removed {} folder(s) and {} file(s). skills/ and syncs/ were left untouched.",
-        response.summary.deleted_folders.len(),
-        response.summary.deleted_files.len()
+        result.summary.deleted_folders.len(),
+        result.summary.deleted_files.len()
     );
     println!("Run `nopal phylog capture --project {project_path} --full` to rebuild.");
     Ok(())

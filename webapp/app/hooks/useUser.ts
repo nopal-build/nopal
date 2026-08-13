@@ -1,6 +1,6 @@
 // app/hooks/useUser.ts
 import { useMatches } from "react-router";
-import type { Human } from "../data/humans.server";
+import type { Human } from "robustness-core/data/humans.server";
 
 export function useUser(): Human | null {
   const matches = useMatches();

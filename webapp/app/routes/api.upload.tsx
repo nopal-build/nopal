@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
-import { uploadFileToS3 } from "../data/file.server";
-import { createFileRef, getOrCreateVaultFolder } from "../data/vault.server";
+import { uploadFileToS3 } from "robustness-core/data/file.server";
+import { createFileRef, getOrCreateVaultFolder } from "robustness-core/data/vault.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUser(request);

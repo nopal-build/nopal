@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { createMultipartUpload } from "../data/file.server";
-import { canWriteToFolderId, isFolderUnderSyncs } from "../data/vault.server";
+import { createMultipartUpload } from "robustness-core/data/file.server";
+import { canWriteToFolderId, isFolderUnderSyncs } from "robustness-core/data/vault.server";
 
 /**
  * POST /api/vault/multipart-init

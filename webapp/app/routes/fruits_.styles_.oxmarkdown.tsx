@@ -26,7 +26,7 @@ import { AppLayout } from "../components/AppLayout";
 import OxRenderer from "../components/OxRenderer";
 import OxEditor from "../components/OxEditor";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
-import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
+import type { MentionItem, MentionSearch } from "oxmarkdown-core";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);

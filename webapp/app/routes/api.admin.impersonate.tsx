@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { startImpersonation } from "../modules/auth/auth.server";
-import { getHumanByEmail } from "../data/humans.server";
+import { getHumanByEmail } from "robustness-core/data/humans.server";
 
 /**
  * POST /api/admin/impersonate

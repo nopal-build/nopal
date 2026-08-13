@@ -15,7 +15,7 @@ import {
   updateHuman,
   type Human,
   type Role,
-} from "../data/humans.server";
+} from "robustness-core/data/humans.server";
 import { inviteHuman } from "../data/invites.server";
 import { Input } from "../components/Input";
 

@@ -5,8 +5,8 @@
 // Run via: npx vite-node scripts/mint-cli-token.ts [email]
 // (defaults to gerald@nopal.build)
 
-import { getHumanByEmail } from "../app/data/humans.server";
-import { createPersonalAccessToken } from "../app/data/apiTokens.server";
+import { getHumanByEmail } from "robustness-core/data/humans.server";
+import { createPersonalAccessToken } from "robustness-core/data/apiTokens.server";
 
 async function main() {
   const email = process.argv[2] ?? "gerald@nopal.build";

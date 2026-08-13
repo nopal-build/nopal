@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getAllFileListingsForHuman } from "../data/vault.server";
+import { getAllFileListingsForHuman } from "robustness-core/data/vault.server";
 
 /**
  * GET /api/vault/all-files

@@ -1,18 +1,18 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFolderById } from "../data/vault.server";
-import { getProjectRole } from "../data/projectSharing.server";
-import { resetProject } from "../data/phylogAgent.server";
+import { getFolderById } from "robustness-core/data/vault.server";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
+import { enqueuePhylogJob } from "robustness-core/data/phylogQueue.server";
 
 /**
  * POST /api/phylog/reset
  *
- * Deletes every direct child of a `project-n01` folder (a project, or the
- * human's own `personal`) EXCEPT its `skills`/`syncs`/`newspapers` anchors
- * — see `resetProjectN01Content`'s own doc (`projectN01.server.ts`) for
- * exactly what this does and why it also clears the project's Release Log
- * history. Thin client: `nopal phylog reset`. Destructive and NOT run
- * implicitly by anything else — always an explicit, separate call.
+ * Enqueues deletion of every direct child of a `project-n01` folder
+ * EXCEPT its `skills`/`syncs`/`newspapers` anchors — see
+ * `resetProjectN01Content`'s own doc (`projectN01.server.ts`). Returns
+ * immediately with a job id; poll `GET /api/phylog/jobs/:jobId`. Thin
+ * client: `nopal phylog reset`. Destructive and NOT run implicitly by
+ * anything else — always an explicit, separate call.
  */
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -33,13 +33,15 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    const result = await resetProject(projectFolderId);
-    if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
-    return Response.json(result);
+    const jobId = await enqueuePhylogJob("reset", {
+      actingHumanId: user._id,
+      projectFolderId,
+    });
+    return Response.json({ jobId }, { status: 202 });
   } catch (err) {
-    console.error("PhyLog reset error:", err);
+    console.error("PhyLog reset enqueue error:", err);
     return Response.json(
-      { error: err instanceof Error ? err.message : "Reset failed" },
+      { error: err instanceof Error ? err.message : "Failed to enqueue reset" },
       { status: 500 },
     );
   }

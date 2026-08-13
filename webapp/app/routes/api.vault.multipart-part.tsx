@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { uploadMultipartPart } from "../data/file.server";
+import { uploadMultipartPart } from "robustness-core/data/file.server";
 
 /**
  * POST /api/vault/multipart-part   (multipart/form-data)

@@ -4,8 +4,8 @@
  */
 
 import { visit } from "unist-util-visit";
-import type { OxDocument } from "./document";
-import { directiveAttrs, isDirectiveNode } from "./document";
+import type { OxDocument } from "oxmarkdown-core";
+import { directiveAttrs, isDirectiveNode } from "oxmarkdown-core";
 
 export { visit };
 

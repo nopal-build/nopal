@@ -10,9 +10,9 @@ import {
   isFolderIdPublishable,
   isFolderShared,
   moveVaultFolder,
-} from "../data/vault.server";
-import { canWriteToRoot } from "../data/vaultRoots";
-import { isFileRefLocked, isVaultRootFolder } from "../data/vault.types";
+} from "robustness-core/data/vault.server";
+import { canWriteToRoot } from "robustness-core/data/vaultRoots";
+import { isFileRefLocked, isVaultRootFolder } from "robustness-core/data/vault.types";
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);

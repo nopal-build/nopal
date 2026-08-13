@@ -18,14 +18,12 @@ app.use((req, _res, next) => {
 
 const httpServer = createServer(app);
 
-// PhyLog's pipeline endpoints (`/api/phylog/*`) can legitimately run for
-// several minutes (many sequential vision/LLM calls across many days'
-// Cards) — Node's default socket timeout (~2 minutes) would otherwise kill
-// the connection mid-request, which the CLI's client then retries,
-// re-running the (non-atomic) pipeline concurrently with the still-running
-// original call. Generous on purpose; costs nothing for every other, much
-// faster route.
-httpServer.setTimeout(15 * 60 * 1000);
+// NOTE: `/api/phylog/*` used to run its multi-minute pipeline inline in
+// the request, which needed a generous `httpServer.setTimeout(...)` bump
+// here to survive. That's no longer true — every `/api/phylog/*` route
+// now just enqueues a job (or polls one) and returns almost immediately
+// (see `phylogQueue.server.ts`/`worker.ts`), so Node's own defaults are
+// fine again and this override has been removed.
 
 const viteDevServer =
   process.env.NODE_ENV === "production"
@@ -76,13 +74,28 @@ const authLimiter = rateLimit({
 app.use(["/api/passkeys", "/api/cli-auth/exchange"], authLimiter);
 
 // PhyLog agent runs: each call is a real, billed Anthropic API request.
+// Scoped to just the ENQUEUE routes, not the whole `/api/phylog` prefix —
+// `/api/phylog/jobs/:jobId` (polled every ~1.2s by the CLI while a job
+// runs, see `phylogQueue.server.ts`/`crates/cli/src/phylog.rs`) costs
+// nothing and isn't billed, so it shouldn't share this budget. A single
+// multi-minute run could otherwise exhaust an hourly quota sized for ~20
+// real invocations purely from its own polling.
 const aiLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   limit: 20,
   ...rateLimitHeaders,
   message: { error: "PhyLog run limit reached for this hour. Please try again later." },
 });
-app.use("/api/phylog", aiLimiter);
+app.use(
+  [
+    "/api/phylog/run",
+    "/api/phylog/pre-capture",
+    "/api/phylog/capture",
+    "/api/phylog/post-capture",
+    "/api/phylog/reset",
+  ],
+  aiLimiter,
+);
 
 // Uploads: each call costs S3 storage/transfer.
 const uploadLimiter = rateLimit({

@@ -4,7 +4,7 @@ import {
   getPageByDbRefAndSlug,
 } from "./core.server";
 import type { StoryRecord } from "./types";
-import { formatRecord } from "../generic.server";
+import { formatRecord } from "robustness-core/data/generic.server";
 
 const db = {
   id: "27af2211e45f80a993d4dde9a4067ea3",

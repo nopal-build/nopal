@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { isSorterEnabled, sortAllDueDailyLogs } from "../data/sorter.server";
+import { isSorterEnabled, sortAllDueDailyLogs } from "robustness-core/data/sorter.server";
 
 /**
  * POST /api/daily-log/sort-all

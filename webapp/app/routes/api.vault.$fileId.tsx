@@ -12,10 +12,10 @@ import {
   getFolderById,
   isFolderIdShareable,
   isFolderUnderSyncs,
-} from "../data/vault.server";
-import { getProjectRoleForFolderId } from "../data/projectSharing.server";
-import { cacheDailyLog, deleteDailyLogCache } from "../data/dailyLog.server";
-import { isFileRefLocked } from "../data/vault.types";
+} from "robustness-core/data/vault.server";
+import { getProjectRoleForFolderId } from "robustness-core/data/projectSharing.server";
+import { cacheDailyLog, deleteDailyLogCache } from "robustness-core/data/dailyLog.server";
+import { isFileRefLocked } from "robustness-core/data/vault.types";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { fileId } = params;

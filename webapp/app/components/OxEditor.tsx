@@ -65,7 +65,7 @@ import {
   parseOxDocument,
   serializeOxDocument,
   type DirectiveNode,
-} from "../oxmarkdown/document";
+} from "oxmarkdown-core";
 import type { OxInteractive } from "../oxmarkdown/interactive";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
@@ -89,7 +89,7 @@ import MarkdownPastePlugin from "../oxmarkdown/MarkdownPastePlugin";
 import ChecklistUpgradePlugin from "../oxmarkdown/ChecklistUpgradePlugin";
 import ToggleListPlugin from "../oxmarkdown/ToggleListPlugin";
 import MentionPlugin from "../oxmarkdown/MentionPlugin";
-import type { MentionItem, MentionSearch } from "../oxmarkdown/mention";
+import type { MentionItem, MentionSearch } from "oxmarkdown-core";
 import CrossEditorArrowPlugin from "../oxmarkdown/CrossEditorArrowPlugin";
 import MinRowsPlugin, { DEFAULT_MIN_EDITOR_ROWS, normalizeMinRows } from "../oxmarkdown/MinRowsPlugin";
 import LeadingBlockGuardPlugin from "../oxmarkdown/LeadingBlockGuardPlugin";
@@ -102,7 +102,7 @@ import FileCaptionArrowPlugin from "../oxmarkdown/FileCaptionArrowPlugin";
 import CardDirectiveArrowPlugin from "../oxmarkdown/CardDirectiveArrowPlugin";
 import CardEditorArrowPlugin from "../oxmarkdown/CardEditorArrowPlugin";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
-import type { CardResolver } from "../oxmarkdown/cardDirective";
+import type { CardResolver } from "oxmarkdown-core";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import "../styles/oxmarkdown.css";
 

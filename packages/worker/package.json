@@ -1,0 +1,15 @@
+{
+  "name": "worker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "vite-node worker.ts"
+  },
+  "dependencies": {
+    "bullmq": "^5.60.0",
+    "robustness-core": "workspace:*",
+    "vite": "^5.2.12",
+    "vite-node": "^2.1.8"
+  }
+}

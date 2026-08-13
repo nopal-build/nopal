@@ -9,16 +9,16 @@ import { Chip } from "../components/Chip";
 import { MoreMenu } from "../components/MoreMenu";
 import { DayContainer, DayTitle } from "../components/DailyLogDay";
 import OxRenderer from "../components/OxRenderer";
-import { ensureVaultRootFolders, listFolderChildren } from "../data/vault.server";
-import type { VaultFolder } from "../data/vault.types";
-import { getDailyLogs, getDailyLogCards, type DailyLogCard } from "../data/dailyLog.server";
-import { getProjectStatus } from "../data/projectStatus.server";
+import { getAccessibleProjectFolders } from "robustness-core/data/vault.server";
+import type { VaultFolder } from "robustness-core/data/vault.types";
+import { getDailyLogs, getDailyLogCards, type DailyLogCard } from "robustness-core/data/dailyLog.server";
+import { getProjectStatus } from "robustness-core/data/projectStatus.server";
 import {
   DEFAULT_PROJECT_STATUS,
   PROJECT_STATUSES,
   type ProjectStatus,
-} from "../data/project.types";
-import type { CardResolver } from "../oxmarkdown/cardDirective";
+} from "robustness-core/data/project.types";
+import type { CardResolver } from "oxmarkdown-core";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -32,11 +32,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (statusParam as ProjectStatus)
     : DEFAULT_PROJECT_STATUS;
 
-  const roots = await ensureVaultRootFolders(user._id);
-  const projectsRoot = roots.find((r) => r.vault_root_key === "projects");
-  const allProjects: VaultFolder[] = projectsRoot
-    ? (await listFolderChildren(user._id, projectsRoot._id)).folders
-    : [];
+  // Own projects PLUS anything someone else has shared a Sharing Role
+  // with the user on (any role) — same superset the Daily Log's Cards
+  // feature already uses (see the `vault` skill's Data model section).
+  const allProjects: VaultFolder[] = await getAccessibleProjectFolders(user._id);
 
   const counts: Record<ProjectStatus, number> = {
     active: 0,

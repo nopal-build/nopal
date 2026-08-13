@@ -1,14 +1,14 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFolderById } from "../data/vault.server";
+import { getFolderById } from "robustness-core/data/vault.server";
 import {
   getProjectRole,
   getProjectSharing,
   isProjectFolder,
   setProjectSharing,
   type ProjectSharingEntry,
-} from "../data/projectSharing.server";
-import { getSharingRoles } from "../data/sharingRoles.server";
+} from "robustness-core/data/projectSharing.server";
+import { getSharingRoles } from "robustness-core/data/sharingRoles.server";
 
 /**
  * GET/PUT /api/vault/projects/:folderId/sharing — PhyLog's Sharing Roles.

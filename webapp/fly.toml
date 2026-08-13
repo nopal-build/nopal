@@ -2,6 +2,14 @@
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
+# Build context is the REPO ROOT (webapp depends on the `robustness-core`/
+# `oxmarkdown-core` workspace packages) — deploy from the repo root:
+#
+#   fly deploy . --config webapp/fly.toml --dockerfile webapp/Dockerfile
+#
+# (`make deploy` does this for you.) PhyLog's queue worker is its own,
+# separate Fly app — see packages/worker/fly.toml and the `phylog` skill's
+# "Scaling & Process Isolation" section.
 
 app = 'webapp-billowing-meadow-8538'
 primary_region = 'lax'

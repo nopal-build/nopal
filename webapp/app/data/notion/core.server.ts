@@ -5,8 +5,8 @@ import type {
   ListBlockChildrenResponse,
   PageObjectResponse,
 } from "@notionhq/client/build/src/api-endpoints";
-import { query, select, defineTable, upsert } from "../generic.server";
-import type { Data } from "../generic.server";
+import { query, select, defineTable, upsert } from "robustness-core/data/generic.server";
+import type { Data } from "robustness-core/data/generic.server";
 
 // Nopal Notion Wrapper Types
 export type NopalBlock = ListBlockChildrenResponse & Data;

@@ -49,8 +49,9 @@ export function NotionPageDetails({
       ) => {
         if (detail.type == "numbered_list_item") {
           const lastIdx = acc.length - 1;
-          if (Array.isArray(acc[lastIdx])) {
-            acc[lastIdx].push(detail);
+          const last = acc[lastIdx];
+          if (Array.isArray(last)) {
+            last.push(detail);
             return acc;
           } else {
             return [...acc, [detail]];

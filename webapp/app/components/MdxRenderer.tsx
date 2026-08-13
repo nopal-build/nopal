@@ -38,7 +38,7 @@ import {
   preprocessDirectives,
   type DirectiveAttrs,
   type DirectiveRegistry,
-} from "../util/nopalDirectives";
+} from "robustness-core/util/nopalDirectives";
 
 // ── Public props interface ─────────────────────────────────────────────────────
 

@@ -1,8 +1,8 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
-import { getLegalDocumentById } from "../data/legalDocuments.server";
-import { getPresignedViewUrl } from "../data/file.server";
+import { getLegalDocumentById } from "robustness-core/data/legalDocuments.server";
+import { getPresignedViewUrl } from "robustness-core/data/file.server";
 
 /**
  * GET /api/legal-documents/view/:docId

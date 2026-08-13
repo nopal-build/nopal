@@ -19,19 +19,19 @@ import {
   isFileRefLocked,
   isFolderShared,
   isVaultRootFolder,
-} from "../data/vault.types";
+} from "robustness-core/data/vault.types";
 import type {
   FileRef,
   FileRefListing,
   VaultFolder,
-} from "../data/vault.types";
+} from "robustness-core/data/vault.types";
 import {
   VAULT_ROOTS,
   canWriteToRoot,
   isRootPublishable,
   isRootShareable,
   isVaultRootKey,
-} from "../data/vaultRoots";
+} from "robustness-core/data/vaultRoots";
 import {
   SPACE_FOLDER_TYPES,
   SYNC_FOLDER_TYPES,
@@ -40,7 +40,7 @@ import {
   isFolderTypeShareable,
   type SpaceFolderTypeKey,
   type SyncFolderTypeKey,
-} from "../data/vaultFolderTypes";
+} from "robustness-core/data/vaultFolderTypes";
 // Server functions are only used inside `loader`; React Router strips them
 // from the client bundle automatically.
 import {
@@ -52,10 +52,10 @@ import {
   getFoldersByHuman,
   getSharedFoldersForHuman,
   listFolderChildren,
-} from "../data/vault.server";
-import { getHumansById } from "../data/humans.server";
-import { getRelatedHumans } from "../data/relationships.server";
-import { resolveProjectManifest, type ResolvedProject } from "../data/project.server";
+} from "robustness-core/data/vault.server";
+import { getHumansById } from "robustness-core/data/humans.server";
+import { getRelatedHumans } from "robustness-core/data/relationships.server";
+import { resolveProjectManifest, type ResolvedProject } from "robustness-core/data/project.server";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "../components/MoreMenu";
 import MdxEditorView from "../components/MdxEditorView";

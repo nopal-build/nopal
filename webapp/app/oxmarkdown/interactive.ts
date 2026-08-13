@@ -14,7 +14,7 @@
  * anything in it. See `components/OxEditor.tsx`.
  */
 
-import type { DirectiveNode } from "./document";
+import type { DirectiveNode } from "oxmarkdown-core";
 
 export interface OxInteractive {
   isSelected: (node: object) => boolean;

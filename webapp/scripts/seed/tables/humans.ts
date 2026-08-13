@@ -1,4 +1,4 @@
-import type { Human } from "../../../app/data/humans.server";
+import type { Human } from "robustness-core/data/humans.server";
 import type { SeedTable, SeedRecord } from "../index";
 
 type HumanSeed = SeedRecord<Human>;

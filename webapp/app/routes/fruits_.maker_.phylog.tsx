@@ -16,9 +16,9 @@ import { Badge } from "../components/Badge";
 import {
   getPhylogUsageSummary,
   type PhylogStage,
-} from "../data/phylogMetrics.server";
-import { getFolderById } from "../data/vault.server";
-import { getHumansById } from "../data/humans.server";
+} from "robustness-core/data/phylogMetrics.server";
+import { getFolderById } from "robustness-core/data/vault.server";
+import { getHumansById } from "robustness-core/data/humans.server";
 
 type MakerRangeDays = 7 | 30;
 

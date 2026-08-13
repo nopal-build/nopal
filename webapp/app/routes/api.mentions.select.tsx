@@ -8,7 +8,7 @@
 // (the link itself is already inserted client-side before this runs).
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { recordMentionSelection } from "../data/mentionHistory.server";
+import { recordMentionSelection } from "robustness-core/data/mentionHistory.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);

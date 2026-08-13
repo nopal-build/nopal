@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
-import { consumeExchangeCode } from "../data/apiTokens.server";
-import { getHumanById } from "../data/humans.server";
+import { consumeExchangeCode } from "robustness-core/data/apiTokens.server";
+import { getHumanById } from "robustness-core/data/humans.server";
 
 /**
  * POST /api/cli-auth/exchange

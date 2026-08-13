@@ -4,7 +4,7 @@ import {
   getSyncTargetById,
   touchSyncTarget,
   deleteSyncTarget,
-} from "../data/syncTargets.server";
+} from "robustness-core/data/syncTargets.server";
 
 /**
  * PATCH  /api/sync-targets/:targetId — mark a sync as completed (bumps

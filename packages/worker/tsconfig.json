@@ -1,0 +1,14 @@
+{
+  "include": ["*.ts"],
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["vite/client"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true
+  }
+}

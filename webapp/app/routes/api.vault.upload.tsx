@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { uploadFileToS3 } from "../data/file.server";
+import { uploadFileToS3 } from "robustness-core/data/file.server";
 import {
   canWriteToFolderId,
   createFileRef,
   isFolderUnderSyncs,
-} from "../data/vault.server";
+} from "robustness-core/data/vault.server";
 
 /**
  * POST /api/vault/upload

@@ -12,8 +12,8 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "../components/Badge";
 import { useSchemePref } from "../hooks/useSchemePref";
-import { getMakerStats, type MakerRangeDays } from "../data/makerStats.server";
-import { getPhylogUsageSummary } from "../data/phylogMetrics.server";
+import { getMakerStats, type MakerRangeDays } from "robustness-core/data/makerStats.server";
+import { getPhylogUsageSummary } from "robustness-core/data/phylogMetrics.server";
 import stamp22cLight from "../images/stamps/22c-light.svg";
 import stamp22cDark from "../images/stamps/22c-dark.svg";
 

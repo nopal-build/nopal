@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import {
   getHumanByInviteToken,
   isInviteTokenValid,
-} from "../data/humans.server";
+} from "robustness-core/data/humans.server";
 import { generatePasskeyRegistrationOptions } from "../modules/auth/webauthn.server";
 
 /**

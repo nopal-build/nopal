@@ -55,7 +55,7 @@ import {
   directiveAttrs,
   parseOxDocument,
   type DirectiveNode,
-} from "../oxmarkdown/document";
+} from "oxmarkdown-core";
 
 // ─── Markdown extraction (pure — no vault I/O) ─────────────────────────────
 

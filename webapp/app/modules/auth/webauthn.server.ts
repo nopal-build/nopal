@@ -15,13 +15,13 @@ import {
   getHumanById,
   getHumanByEmail,
   type Human,
-} from "../../data/humans.server";
+} from "robustness-core/data/humans.server";
 import {
   createPasskey,
   getPasskeysByHuman,
   getPasskeyByCredentialId,
   updatePasskeyCounter,
-} from "../../data/passkeys.server";
+} from "robustness-core/data/passkeys.server";
 
 const RP_NAME = "Nopal";
 

@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { pruneOldPhylogUsageEvents } from "../data/phylogMetrics.server";
+import { pruneOldPhylogUsageEvents } from "robustness-core/data/phylogMetrics.server";
 
 /**
  * POST /api/phylog/usage-cleanup

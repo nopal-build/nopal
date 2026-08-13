@@ -11,7 +11,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, Form, useLoaderData, useActionData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
-import { createApiTokenWithExchangeCode } from "../data/apiTokens.server";
+import { createApiTokenWithExchangeCode } from "robustness-core/data/apiTokens.server";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 

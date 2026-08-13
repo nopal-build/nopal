@@ -1,4 +1,4 @@
-import type { Collection } from "../data/generic.server";
+import type { Collection } from "robustness-core/data/generic.server";
 import type { MaterialRecord } from "../data/notion/types";
 import { useLoaderData, useLocation, useNavigate } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";

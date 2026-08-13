@@ -3,7 +3,7 @@ import { getUserFromRequest } from "../modules/auth/auth.server";
 import {
   createSyncScopedToken,
   revokeApiToken,
-} from "../data/apiTokens.server";
+} from "robustness-core/data/apiTokens.server";
 
 /**
  * POST   /api/sync-tokens          — mint a sync-scoped token

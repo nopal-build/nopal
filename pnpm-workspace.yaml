@@ -1,0 +1,17 @@
+packages:
+  - "webapp"
+  - "packages/*"
+
+allowBuilds:
+  es5-ext: true
+  esbuild: true
+  msgpackr-extract: true
+
+# Makes `pnpm deploy` (used to build a genuinely standalone, pruned
+# node_modules for `packages/worker` — see the phylog skill's "Scaling &
+# Process Isolation" section) copy workspace dependencies (robustness-core,
+# oxmarkdown-core) into the deploy output instead of symlinking back to
+# this checkout. Without this, a deploy target only works as long as this
+# exact repo checkout still exists on disk at the same path — useless once
+# copied alone into a Docker image.
+injectWorkspacePackages: true

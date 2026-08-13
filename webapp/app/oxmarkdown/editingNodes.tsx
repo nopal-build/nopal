@@ -49,7 +49,7 @@ import type { RootContent } from "mdast";
 import {
   directiveAttrs,
   type DirectiveNode as OxMdastDirectiveNode,
-} from "./document";
+} from "oxmarkdown-core";
 import type { OxInteractive } from "./interactive";
 import {
   DirectiveRegistryContext,

@@ -10,10 +10,10 @@ import {
   findNopalPageById,
 } from "./core.server";
 import type { NotionDatabase } from "./core.server";
-import { downloadAndUploadToS3 } from "../file.server";
+import { downloadAndUploadToS3 } from "robustness-core/data/file.server";
 import { getFileNameFromUrl } from "../../util/getFileNameFromUrl";
 import { getBlockObjectResponseWithRichText } from "../../util/notion";
-import { defineTable, upsert } from "../generic.server";
+import { defineTable, upsert } from "robustness-core/data/generic.server";
 import {
   ListBlockChildrenResponse,
   BlockObjectResponse,

@@ -5,7 +5,7 @@ import {
   getFolderById,
   listFolderChildren,
   ensureVaultRootFolders,
-} from "../data/vault.server";
+} from "robustness-core/data/vault.server";
 
 /**
  * GET /api/vault/folders/:folderId/children

@@ -10,16 +10,16 @@
 // env/defaults as `npm run seed:data`.)
 // =============================================================================
 
-import { getHumanByEmail } from "../app/data/humans.server";
+import { getHumanByEmail } from "robustness-core/data/humans.server";
 import {
   createFileRef,
   createVaultFolder,
   deleteVaultFolderCascade,
   ensureVaultRootFolders,
   listFolderChildren,
-} from "../app/data/vault.server";
-import { uploadPrivateFileToS3, getFileContentType } from "../app/data/file.server";
-import { PROJECT_CSV_NAME, serializeCsvFields } from "../app/util/projectCsv";
+} from "robustness-core/data/vault.server";
+import { uploadPrivateFileToS3, getFileContentType } from "robustness-core/data/file.server";
+import { PROJECT_CSV_NAME, serializeCsvFields } from "robustness-core/util/projectCsv";
 
 const PROJECT_NAME = "Casa Verde Remodel";
 

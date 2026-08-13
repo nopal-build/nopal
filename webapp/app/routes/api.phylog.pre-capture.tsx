@@ -1,15 +1,16 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFolderById } from "../data/vault.server";
-import { getProjectRole } from "../data/projectSharing.server";
-import { resolveProjectN01 } from "../data/projectN01.server";
-import { runPreCapture } from "../data/preCapture.server";
+import { getFolderById } from "robustness-core/data/vault.server";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
+import { enqueuePhylogJob } from "robustness-core/data/phylogQueue.server";
 
 /**
  * POST /api/phylog/pre-capture
  *
- * Runs PhyLog's pre-capture stage alone (`preCapture.server.ts`) — thin
- * client: `nopal phylog pre-capture`.
+ * Enqueues PhyLog's pre-capture stage alone — see `phylogQueue.server.ts`'s
+ * own module doc. Returns immediately with a job id; poll
+ * `GET /api/phylog/jobs/:jobId` for progress/results. Thin client:
+ * `nopal phylog pre-capture`.
  *
  * Body:
  *   projectFolderId — required.
@@ -42,18 +43,18 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const resolved = await resolveProjectN01(projectFolderId);
-  if (!resolved.ok) return Response.json({ error: resolved.error }, { status: 400 });
-
-  const log: string[] = [];
   try {
-    const result = await runPreCapture(user._id, resolved.folder, { date, fileId }, (line) => log.push(line));
-    if (!result.ok) return Response.json({ error: result.error, log }, { status: 400 });
-    return Response.json({ ...result, log });
+    const jobId = await enqueuePhylogJob("pre-capture", {
+      actingHumanId: user._id,
+      projectFolderId,
+      date,
+      fileId,
+    });
+    return Response.json({ jobId }, { status: 202 });
   } catch (err) {
-    console.error("PhyLog pre-capture error:", err);
+    console.error("PhyLog pre-capture enqueue error:", err);
     return Response.json(
-      { error: err instanceof Error ? err.message : "Pre-capture failed", log },
+      { error: err instanceof Error ? err.message : "Failed to enqueue pre-capture" },
       { status: 500 },
     );
   }

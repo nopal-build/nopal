@@ -21,8 +21,8 @@
  *     human author — just a size hint per block, same as before.
  */
 
-import type { ProjectManifest, ResolvedFile } from "../data/project.types";
-import type { DirectiveRegistry } from "../util/nopalDirectives";
+import type { ProjectManifest, ResolvedFile } from "robustness-core/data/project.types";
+import type { DirectiveRegistry } from "robustness-core/util/nopalDirectives";
 import MdxEditorView from "./MdxEditorView";
 
 export interface ProjectViewProps {

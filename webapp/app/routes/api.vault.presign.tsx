@@ -3,7 +3,7 @@ import { getUser } from "../modules/auth/auth.server";
 import {
   getPresignedUploadUrl,
   getFileContentType,
-} from "../data/file.server";
+} from "robustness-core/data/file.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUser(request);

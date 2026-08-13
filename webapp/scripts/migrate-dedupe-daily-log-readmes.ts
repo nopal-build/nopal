@@ -25,10 +25,10 @@
 // Idempotent — safe to re-run.
 // =============================================================================
 
-import { getDb } from "../app/data/db.server";
-import { query, formatRecord, remove } from "../app/data/generic.server";
-import type { FileRef } from "../app/data/vault.types";
-import type { Human } from "../app/data/humans.server";
+import { getDb } from "robustness-core/data/db.server";
+import { query, formatRecord, remove } from "robustness-core/data/generic.server";
+import type { FileRef } from "robustness-core/data/vault.types";
+import type { Human } from "robustness-core/data/humans.server";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 

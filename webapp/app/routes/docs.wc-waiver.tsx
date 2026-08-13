@@ -10,8 +10,8 @@ import type { ActionFunctionArgs, MetaFunction } from "react-router";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { generateWaiverPdf } from "../util/waiverPdf.server";
-import { uploadPrivateFileToS3, getPresignedViewUrl } from "../data/file.server";
-import { createLegalDocument } from "../data/legalDocuments.server";
+import { uploadPrivateFileToS3, getPresignedViewUrl } from "robustness-core/data/file.server";
+import { createLegalDocument } from "robustness-core/data/legalDocuments.server";
 import { sendEmail } from "../util/email.server";
 import { WaiverComplete } from "../emails/waiverComplete";
 

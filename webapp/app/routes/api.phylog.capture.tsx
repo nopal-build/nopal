@@ -1,14 +1,15 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFolderById } from "../data/vault.server";
-import { getProjectRole } from "../data/projectSharing.server";
-import { resolveProjectN01 } from "../data/projectN01.server";
-import { runCapture } from "../data/capture.server";
+import { getFolderById } from "robustness-core/data/vault.server";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
+import { enqueuePhylogJob } from "robustness-core/data/phylogQueue.server";
 
 /**
  * POST /api/phylog/capture
  *
- * Runs PhyLog's capture stage alone (`capture.server.ts`) — thin client:
+ * Enqueues PhyLog's capture stage alone — see `phylogQueue.server.ts`'s
+ * own module doc. Returns immediately with a job id; poll
+ * `GET /api/phylog/jobs/:jobId` for progress/results. Thin client:
  * `nopal phylog capture`.
  *
  * Body:
@@ -44,23 +45,19 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const resolved = await resolveProjectN01(projectFolderId);
-  if (!resolved.ok) return Response.json({ error: resolved.error }, { status: 400 });
-
-  const log: string[] = [];
   try {
-    const result = await runCapture(
-      user._id,
-      resolved.folder,
-      { full: full ?? false, since, until },
-      (line) => log.push(line),
-    );
-    if (!result.ok) return Response.json({ error: result.error, log }, { status: 400 });
-    return Response.json({ ...result, log });
+    const jobId = await enqueuePhylogJob("capture", {
+      actingHumanId: user._id,
+      projectFolderId,
+      full: full ?? false,
+      since,
+      until,
+    });
+    return Response.json({ jobId }, { status: 202 });
   } catch (err) {
-    console.error("PhyLog capture error:", err);
+    console.error("PhyLog capture enqueue error:", err);
     return Response.json(
-      { error: err instanceof Error ? err.message : "Capture failed", log },
+      { error: err instanceof Error ? err.message : "Failed to enqueue capture" },
       { status: 500 },
     );
   }

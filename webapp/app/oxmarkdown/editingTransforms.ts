@@ -59,7 +59,7 @@ import type {
   RootContent,
   Yaml,
 } from "mdast";
-import { countBlankLines, getFrontmatterNode, type OxDocument } from "./document";
+import { countBlankLines, getFrontmatterNode, type OxDocument } from "oxmarkdown-core";
 import {
   $createOxDirectiveNode,
   $createOxOpaqueNode,
@@ -73,7 +73,7 @@ import {
   $isOxToggleNode,
   $isOxToggleSummaryNode,
 } from "./OxToggleNode";
-import { directiveAttrs, type DirectiveNode } from "./document";
+import { directiveAttrs, type DirectiveNode } from "oxmarkdown-core";
 
 // ── Import: mdast -> Lexical ────────────────────────────────────────────────
 

@@ -1,15 +1,18 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFolderById } from "../data/vault.server";
-import { getProjectRole } from "../data/projectSharing.server";
-import { runPhylogPipeline } from "../data/phylogAgent.server";
+import { getFolderById } from "robustness-core/data/vault.server";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
+import { enqueuePhylogJob } from "robustness-core/data/phylogQueue.server";
 
 /**
  * POST /api/phylog/run
  *
- * Runs PhyLog's full three-stage pipeline (`phylogAgent.server.ts`'s
- * `runPhylogPipeline` — pre-capture -> capture -> post-capture) for one
- * project. Thin client: `nopal phylog run`.
+ * Enqueues PhyLog's full three-stage pipeline (pre-capture -> capture ->
+ * post-capture) for one project — see `phylogQueue.server.ts`'s own
+ * module doc for why this is a queued job (`worker.ts`) rather than run
+ * inline. Returns immediately with a job id; poll
+ * `GET /api/phylog/jobs/:jobId` for progress/results. Thin client:
+ * `nopal phylog run`.
  *
  * Body:
  *   projectFolderId — required. A project, or the human's own `personal`.
@@ -46,20 +49,19 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const log: string[] = [];
   try {
-    const result = await runPhylogPipeline(
-      user._id,
+    const jobId = await enqueuePhylogJob("run", {
+      actingHumanId: user._id,
       projectFolderId,
-      { full, since, until },
-      (line) => log.push(line),
-    );
-    if (!result.ok) return Response.json({ error: result.error, log }, { status: 400 });
-    return Response.json({ ...result, log });
+      full,
+      since,
+      until,
+    });
+    return Response.json({ jobId }, { status: 202 });
   } catch (err) {
-    console.error("PhyLog run error:", err);
+    console.error("PhyLog run enqueue error:", err);
     return Response.json(
-      { error: err instanceof Error ? err.message : "PhyLog run failed", log },
+      { error: err instanceof Error ? err.message : "Failed to enqueue PhyLog run" },
       { status: 500 },
     );
   }

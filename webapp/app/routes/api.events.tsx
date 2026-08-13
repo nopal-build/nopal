@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
-import { subscribeToVaultEvents, type VaultChangeEvent } from "../data/realtime.server";
+import { subscribeToVaultEvents, type VaultChangeEvent } from "robustness-core/data/realtime.server";
 
 /**
  * GET /api/events

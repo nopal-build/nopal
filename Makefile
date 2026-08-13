@@ -9,11 +9,17 @@ PROXY_PORT ?= 8081
 
 # ── Full-stack dev lifecycle ───────────────────────────────────────────────────
 
-## Run unit tests and deploy the webapp to Fly.io.
+## Run unit tests and deploy the webapp, PhyLog worker, and db to Fly.io.
+## webapp/worker both build from the REPO ROOT (they're pnpm workspace
+## members depending on packages/robustness-core + packages/oxmarkdown-core
+## — see the `phylog` skill's "Scaling & Process Isolation" section), so
+## `fly deploy` runs from here with explicit --config/--dockerfile instead
+## of `cd`-ing into each app's own directory.
 deploy:
-	cd webapp && npm test -- --run
+	pnpm --filter remix test -- --run
 	cd db && fly deploy
-	cd webapp && fly deploy
+	fly deploy . --config webapp/fly.toml --dockerfile webapp/Dockerfile
+	fly deploy . --config packages/worker/fly.toml --dockerfile packages/worker/Dockerfile
 
 ## Start the database and webapp together, then seed the database.
 dev:
@@ -22,6 +28,7 @@ dev:
 	@echo ""
 	@echo "  ✓ SurrealDB  →  http://localhost:8080"
 	@echo "  ✓ Webapp     →  http://localhost:3000"
+	@echo "  ✓ PhyLog worker running (see 'docker compose logs -f worker')"
 	@echo "  ✓ Logs       →  http://localhost:9999"
 	@echo ""
 
@@ -76,7 +83,7 @@ migrate-prod:
 ## Restart the webapp container, clearing the Vite dep cache first.
 ## Use this after package changes or whenever the dev server needs a clean reload.
 restart:
-	docker compose exec webapp rm -rf /app/node_modules/.vite
+	docker compose exec webapp rm -rf /app/webapp/node_modules/.vite
 	docker compose restart webapp
 
 ## Stop all containers (data is preserved in named volumes).

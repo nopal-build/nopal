@@ -16,7 +16,7 @@ import {
   getAuthError,
   isSafeRedirectPath,
 } from "../modules/auth/auth.server";
-import { getHumanByEmail } from "../data/humans.server";
+import { getHumanByEmail } from "robustness-core/data/humans.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);

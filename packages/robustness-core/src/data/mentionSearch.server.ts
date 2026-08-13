@@ -18,7 +18,7 @@
  * inserted (no prefixing needed there, it's already in the recorded path).
  */
 
-import type { MentionItem } from "../oxmarkdown/mention";
+import type { MentionItem } from "oxmarkdown-core";
 import { getRecentMentions } from "./mentionHistory.server";
 import { getRecentProjectFolders, searchVaultEntries } from "./vault.server";
 

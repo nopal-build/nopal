@@ -10,11 +10,11 @@ import {
   getFoldersByHuman,
   isFolderUnderSyncs,
   validateFolderTypeForParent,
-} from "../data/vault.server";
+} from "robustness-core/data/vault.server";
 import {
   isVaultFolderTypeKey,
   type VaultFolderTypeKey,
-} from "../data/vaultFolderTypes";
+} from "robustness-core/data/vaultFolderTypes";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUserFromRequest(request);

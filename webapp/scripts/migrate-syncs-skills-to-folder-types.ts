@@ -25,11 +25,11 @@
 // personal/syncs, or no stray root at all, is a no-op).
 // =============================================================================
 
-import { getDb } from "../app/data/db.server";
-import { query, formatRecord, merge } from "../app/data/generic.server";
-import { ensureVaultRootFolders } from "../app/data/vault.server";
-import type { VaultFolder } from "../app/data/vault.types";
-import type { Human } from "../app/data/humans.server";
+import { getDb } from "robustness-core/data/db.server";
+import { query, formatRecord, merge } from "robustness-core/data/generic.server";
+import { ensureVaultRootFolders } from "robustness-core/data/vault.server";
+import type { VaultFolder } from "robustness-core/data/vault.types";
+import type { Human } from "robustness-core/data/humans.server";
 
 async function allHumans(): Promise<Human[]> {
   const result = await query<[Human[]]>(`SELECT * FROM humans`);

@@ -5,7 +5,7 @@ import {
   getDescendantFolders,
   isFolderUnderSyncs,
   listFilesMetaByFolderIds,
-} from "../data/vault.server";
+} from "robustness-core/data/vault.server";
 
 /**
  * GET /api/vault/sync-manifest?folderId=<id>

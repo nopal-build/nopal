@@ -1,4 +1,4 @@
-import { query } from "../generic.server";
+import { query } from "robustness-core/data/generic.server";
 import {
   registerDb,
   getAllPublishedPagesByDbRef,
@@ -7,7 +7,7 @@ import {
 import type { NopalPage } from "./core.server";
 import { getAssembliesByPageIds } from "./assemblies.server";
 import type { ScienceRecord } from "./types";
-import { formatRecord } from "../generic.server";
+import { formatRecord } from "robustness-core/data/generic.server";
 import { RecordId } from "surrealdb";
 
 const db = {

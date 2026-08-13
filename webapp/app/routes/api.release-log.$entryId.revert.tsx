@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { revertReleaseLogEntry } from "../data/releaseLog.server";
+import { revertReleaseLogEntry } from "robustness-core/data/releaseLog.server";
 
 /**
  * POST /api/release-log/:entryId/revert

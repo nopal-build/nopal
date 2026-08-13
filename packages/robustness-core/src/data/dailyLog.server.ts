@@ -9,7 +9,7 @@ import {
   ensureVaultRootFolders,
 } from "./vault.server";
 import type { FileRef } from "./vault.types";
-import { cardFileName } from "../oxmarkdown/cardDirective";
+import { cardFileName } from "oxmarkdown-core";
 
 export type DailyLog = Data & {
   humanId: string;

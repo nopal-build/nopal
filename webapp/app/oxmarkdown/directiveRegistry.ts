@@ -13,7 +13,7 @@
  */
 
 import type { ReactNode } from "react";
-import type { DirectiveAttrs } from "./document";
+import type { DirectiveAttrs } from "oxmarkdown-core";
 
 export type DirectiveRenderProps = {
   attrs: DirectiveAttrs;

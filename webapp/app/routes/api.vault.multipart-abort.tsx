@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { abortMultipartUpload } from "../data/file.server";
+import { abortMultipartUpload } from "robustness-core/data/file.server";
 
 /**
  * POST /api/vault/multipart-abort

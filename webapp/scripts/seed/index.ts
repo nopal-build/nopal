@@ -4,9 +4,9 @@
 // =============================================================================
 
 import { RecordId } from "surrealdb";
-import { getDb } from "../../app/data/db.server";
+import { getDb } from "robustness-core/data/db.server";
 import { humansSeed } from "./tables/humans";
-import { provisionNewUserVault } from "../../app/data/dailyLog.server";
+import { provisionNewUserVault } from "robustness-core/data/dailyLog.server";
 
 // ---------------------------------------------------------------------------
 // Types

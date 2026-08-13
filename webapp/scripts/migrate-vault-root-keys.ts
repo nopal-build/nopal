@@ -16,12 +16,12 @@
 // Idempotent — safe to re-run.
 // =============================================================================
 
-import { getDb } from "../app/data/db.server";
-import { query, formatRecord, merge } from "../app/data/generic.server";
-import { ensureVaultRootFolders } from "../app/data/vault.server";
-import type { VaultFolder, FileRef } from "../app/data/vault.types";
-import type { VaultRootKey } from "../app/data/vaultRoots";
-import type { Human } from "../app/data/humans.server";
+import { getDb } from "robustness-core/data/db.server";
+import { query, formatRecord, merge } from "robustness-core/data/generic.server";
+import { ensureVaultRootFolders } from "robustness-core/data/vault.server";
+import type { VaultFolder, FileRef } from "robustness-core/data/vault.types";
+import type { VaultRootKey } from "robustness-core/data/vaultRoots";
+import type { Human } from "robustness-core/data/humans.server";
 
 async function allHumans(): Promise<Human[]> {
   const result = await query<[Human[]]>(`SELECT * FROM humans`);

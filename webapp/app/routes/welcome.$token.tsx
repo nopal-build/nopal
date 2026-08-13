@@ -22,8 +22,8 @@ import {
   consumeInviteToken,
   deleteHuman,
   type Human,
-} from "../data/humans.server";
-import { repointRelationshipsToHuman } from "../data/relationships.server";
+} from "robustness-core/data/humans.server";
+import { repointRelationshipsToHuman } from "robustness-core/data/relationships.server";
 
 async function loadInvitedHuman(
   token: string | undefined,

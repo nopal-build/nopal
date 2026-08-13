@@ -6,8 +6,8 @@ import {
   getFoldersByHuman,
   getSharedFoldersForHuman,
   getFileRefsByFolderIds,
-} from "../data/vault.server";
-import { getHumansById } from "../data/humans.server";
+} from "robustness-core/data/vault.server";
+import { getHumansById } from "robustness-core/data/humans.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUserFromRequest(request);

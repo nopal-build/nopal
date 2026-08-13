@@ -6,8 +6,8 @@ import {
   setInviteToken,
   type Human,
   type Role,
-} from "./humans.server";
-import { provisionNewUserVault } from "./dailyLog.server";
+} from "robustness-core/data/humans.server";
+import { provisionNewUserVault } from "robustness-core/data/dailyLog.server";
 import { sendEmail } from "../util/email.server";
 import { Welcome } from "../emails/welcome";
 

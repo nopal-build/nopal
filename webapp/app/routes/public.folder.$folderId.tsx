@@ -10,9 +10,9 @@ import {
   listFolderChildren,
   getFileRefById,
   resolvePublicRootFolder,
-} from "../data/vault.server";
-import { isVaultRootFolder } from "../data/vault.types";
-import { VAULT_ROOTS, isVaultRootKey } from "../data/vaultRoots";
+} from "robustness-core/data/vault.server";
+import { isVaultRootFolder } from "robustness-core/data/vault.types";
+import { VAULT_ROOTS, isVaultRootKey } from "robustness-core/data/vaultRoots";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import MdxEditorView from "../components/MdxEditorView";

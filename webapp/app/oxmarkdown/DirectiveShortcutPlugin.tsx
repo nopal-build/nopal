@@ -50,7 +50,7 @@ import {
   KEY_ENTER_COMMAND,
 } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { isDirectiveNode, parseOxDocument } from "./document";
+import { isDirectiveNode, parseOxDocument } from "oxmarkdown-core";
 import { $createOxDirectiveNode } from "./editingNodes";
 
 // Loose candidacy check only, per this file's header — two colons, a name,

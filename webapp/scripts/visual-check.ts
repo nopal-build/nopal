@@ -27,7 +27,7 @@
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { getHumans, getHumanByEmail, type Human } from "../app/data/humans.server";
+import { getHumans, getHumanByEmail, type Human } from "robustness-core/data/humans.server";
 import { sessionStorage } from "../app/modules/auth/session.server";
 
 const BASE_URL = process.env.VISUAL_CHECK_BASE_URL ?? "http://localhost:3000";

@@ -1,6 +1,6 @@
 ---
 name: phylog
-description: PhyLog, Nopal's AI pipeline that turns a project-n01 space's daily-log Cards and synced files into written summaries, filed/organized project content, and an up-to-date README. Use when working on app/data/phylogAgent.server.ts, app/data/preCapture.server.ts, app/data/capture.server.ts, app/data/postCapture.server.ts, app/data/projectN01.server.ts, app/data/sorter.server.ts's fileCardAttachments, app/data/llmProvider.ts, app/data/anthropicProvider.server.ts, the api.phylog.* routes, or crates/cli/src/phylog.rs — or when asked about "phylog", the PhyLog pipeline, pre-capture/capture/post-capture, or project-n01 spaces.
+description: PhyLog, Nopal's AI pipeline that turns a project-n01 space's daily-log Cards and synced files into written summaries, filed/organized project content, and an up-to-date README. Use when working on packages/robustness-core/src/data/phylogAgent.server.ts, preCapture.server.ts, capture.server.ts, postCapture.server.ts, projectN01.server.ts, sorter.server.ts's fileCardAttachments, llmProvider.ts, anthropicProvider.server.ts (all in packages/robustness-core), packages/worker/worker.ts, the webapp/app/routes/api.phylog.* routes, or crates/cli/src/phylog.rs — or when asked about "phylog", the PhyLog pipeline, pre-capture/capture/post-capture, project-n01 spaces, or the robustness-core/oxmarkdown-core/worker workspace packages.
 ---
 
 # PhyLog
@@ -29,8 +29,9 @@ net for undoing a specific capture's README edit.
 ## `project-n01` spaces
 
 Every project, and the `personal` root, carries the `project-n01` Vault
-Folder Type (`webapp/app/data/vaultFolderTypes.ts` — see the `vault`
-skill's "Vault Folder Types" section for the general mechanism). The name
+Folder Type (`packages/robustness-core/src/data/vaultFolderTypes.ts` —
+see the `vault` skill's "Vault Folder Types" section for the general
+mechanism). The name
 is deliberately literal, a placeholder for "this is v1 of the concept" —
 expect it to gain a friendlier name later; that's a superficial rename,
 not an architectural one.
@@ -64,8 +65,9 @@ Rules, enforced by the vault's own write-policy chain (`canWriteToFolderId`,
   Not to be confused with the already-shipped, unrelated
   `project-newspaper` skill's VIEW of a project's README.
 
-`ensureProjectN01`/`resolveProjectN01` (`webapp/app/data/projectN01.server.ts`)
-stamp + seed a `project-n01` folder — called at CREATION time
+`ensureProjectN01`/`resolveProjectN01`
+(`packages/robustness-core/src/data/projectN01.server.ts`) stamp + seed a
+`project-n01` folder — called at CREATION time
 (`createVaultFolder` for a new project, `ensureVaultRootFolders` for
 `personal`) and LAZILY, as a self-healing retrofit for anything that
 predates this type (`getProjectFolders`, and every PhyLog CLI/API entry
@@ -306,24 +308,117 @@ nopal phylog reset --project <path> --yes
 - `reset` — destructive; requires `--yes`. Prints a reminder to run
   `capture --full` afterward.
 
-Every CLI command resolves `--project` to a folder, then makes ONE POST
-call and prints the server's own `log` array (built up via an
-`onProgress` callback threaded through every stage) followed by a
-human-readable summary of what happened — not a raw JSON dump. This is
-NOT real-time streaming (a single request/response round-trip); it's
-still meaningfully more informative than the old "silent until the final
-JSON" behavior, especially for a `run`/`capture --full` spanning many
-days.
+Every CLI command resolves `--project` to a folder, then **enqueues a job
+and polls for it** — see "Scaling & Process Isolation" below for why.
+The API route returns immediately (`202` + `{ jobId }`); the CLI then
+polls `GET /api/phylog/jobs/:jobId` on a ~1.2s interval, printing new
+progress-log lines as they arrive (the endpoint always returns the FULL
+cumulative log, not a delta — the CLI tracks how many lines it's already
+printed and slices client-side), until the job reaches `completed` (then
+prints a human-readable summary of the result, not a raw JSON dump) or
+`failed` (then prints the failure reason and exits non-zero). This is
+real progress, not real-time token-by-token streaming — a line appears
+per file/day/stage processed (via the `onProgress` callback threaded
+through every stage), which is what matters for a `run`/`capture --full`
+spanning many days.
 
 API: `POST /api/phylog/run` (`{ projectFolderId, full?, since?, until? }`),
 `POST /api/phylog/pre-capture` (`{ projectFolderId, date?, fileId? }`),
 `POST /api/phylog/capture` (`{ projectFolderId, full?, since?, until? }`),
 `POST /api/phylog/post-capture` (`{ projectFolderId }`), `POST
-/api/phylog/reset` (`{ projectFolderId }`). All require an owner-tier
-Sharing Role on the project (or being the project/`personal`'s own owner)
-— there is no lower-bar preview tier anymore now that every call commits;
-`nopal sort run` remains the lower-bar path (any role) for the Sorter's
-own, zero-inference filing.
+/api/phylog/reset` (`{ projectFolderId }`) — each of these ENQUEUES
+(`phylogQueue.server.ts`) and returns `202` immediately, never runs the
+pipeline inline. `GET /api/phylog/jobs/:jobId` polls one job's status.
+All require an owner-tier Sharing Role on the project (or being the
+project/`personal`'s own owner) — there is no lower-bar preview tier
+anymore now that every call commits; `nopal sort run` remains the
+lower-bar path (any role) for the Sorter's own, zero-inference filing.
+
+## Scaling & Process Isolation
+
+A PhyLog run can legitimately take minutes (LLM calls, vision on every
+synced photo, multi-day capture). Running that inline inside an HTTP
+request handler means one slow/hung/crashed run degrades the ENTIRE web
+server for every human, not just the one who triggered it — a
+single-process web server has no isolation between one request and
+everyone else's. So PhyLog work is queued and runs in a dedicated process:
+
+- **`phylogQueue.server.ts`** — BullMQ over Redis (a separate piece of
+  infrastructure from the app's own SurrealDB, on purpose: queue
+  infra load/failure shouldn't be entangled with the primary database's).
+  `enqueuePhylogJob(name, data)` adds a job; `getPhylogJobStatus(jobId)`/
+  `getPhylogJobOwner(jobId)` read it back. Jobs use `attempts: 1` — no
+  automatic retry, because each pipeline call is already internally
+  idempotent (see "Incremental vs full" above and pre-capture's own
+  skip-if-summary-exists check), so a human re-running the CLI is the
+  correct retry path; an automatic retry could race a still-in-flight
+  attempt and reintroduce a duplicate-write bug already fixed once.
+- **`packages/worker`** — its OWN pnpm workspace package (`worker.ts`,
+  run via `pnpm --filter worker run start`, i.e. `vite-node worker.ts`),
+  NOT part of `webapp` at all. Drains the queue and calls the exact same
+  pipeline functions (from `robustness-core`) the web app used to call
+  inline — zero rewrite of pipeline logic, only WHERE it runs (and which
+  dependency graph it ships with) changed. Runs with `concurrency: 1`
+  deliberately: scale throughput by running more worker PROCESSES/
+  machines, not by raising in-process concurrency (never run the same
+  project's pipeline twice concurrently — the same safety concern behind
+  `attempts: 1` above).
+- **The CLI polls, it doesn't stream** — see "CLI / API surface" above.
+
+**Why `packages/worker`/`packages/robustness-core`/`packages/oxmarkdown-core`
+are separate pnpm workspace packages, not just a separate process sharing
+`webapp`'s `package.json`** (an earlier, since-abandoned version of this
+setup did exactly that): the worker's own dependency graph (BullMQ, the
+Anthropic/AWS SDKs, SurrealDB, a few small markdown-parsing packages) is a
+small fraction of `webapp`'s (React, MDXEditor, PDFKit, Express, webauthn,
+etc. — none of which any pipeline file ever imports). Sharing one
+`package.json` meant the worker's deploy always carried ALL of `webapp`'s
+dependencies too, since `npm prune --omit=dev` only removes true
+devDependencies, not "unused by this specific entrypoint" — measured at
+~322MB of `node_modules` shared, of which the worker's OWN real footprint
+was only ~100MB. Splitting into real pnpm workspace packages (root
+`pnpm-workspace.yaml`; see `robustness-core/package.json`'s explicit
+`exports` map for the subset of `app/data` that moved) plus
+`pnpm --filter worker deploy --prod` (which produces a genuinely pruned,
+standalone `node_modules` for just that package) gets the real win: a
+deployed worker image with `node_modules` around 100MB, zero
+React/MDXEditor/PDFKit/etc, confirmed via `packages/worker/Dockerfile`.
+`packages/oxmarkdown-core` exists as ITS OWN third package (not folded
+into `robustness-core`) specifically because it's consumed by BOTH
+`webapp` (the editor/renderer) and `robustness-core` (the pipeline) — it
+can't live inside either one without the other reaching across a package
+boundary the wrong way.
+
+**Deployment**: `webapp` and `packages/worker` are now separate Fly
+apps (`webapp/fly.toml` / `packages/worker/fly.toml`), each with its own
+Dockerfile — but BOTH need the build context to be the REPO ROOT (not
+their own directory), since both depend on the `robustness-core`/
+`oxmarkdown-core` workspace packages:
+
+```
+fly deploy . --config webapp/fly.toml --dockerfile webapp/Dockerfile
+fly deploy . --config packages/worker/fly.toml --dockerfile packages/worker/Dockerfile
+```
+
+(`make deploy` runs both, from the repo root.) Locally, `docker-compose.yml`
+has `redis` and `worker` services alongside `webapp` — each bind-mounts
+the WHOLE repo root (pnpm needs to see every workspace package), with its
+own complete set of `node_modules` volumes so the two containers'
+`pnpm install`s never race on shared files.
+
+**Deliberately polyglot-ready**: nothing about the job schema
+(`PhylogJobName`/`PhylogJobData`, plain JSON) assumes a Node worker
+consumes it. This is a real long-term direction — the CLI (Rust) and
+future native macOS/Windows apps already live in Rust, and a Rust server
+for CPU-bound or high-throughput work is a plausible future step — but
+not one taken now for lack of concrete evidence it's needed. If a future
+job type ever earns a Rust worker, that worker would poll this SAME Redis
+queue for its own job name, running alongside the Node worker with zero
+disruption to anything else. Treat this as Phase 0 of a staged plan:
+Phase 0 (this — decouple long-running work from the request cycle, still
+all Node) → Phase 1 (split the web/API deployables further, still Node)
+→ Phase 2 (port specific hot paths to Rust, only if evidence supports
+it). Don't jump ahead of the phase the evidence supports.
 
 ## Usage tracking
 
@@ -394,34 +489,53 @@ deliberately never presented as a reconciled bill.
 
 ## Files
 
-- `webapp/app/data/projectN01.server.ts` — `project-n01` seeding/retrofit
-  (`ensureProjectN01`/`resolveProjectN01`), default skill file content,
-  `resetProjectN01Content`, `getProjectStageSkill`/`isSkipInstruction`.
-- `webapp/app/data/preCapture.server.ts` — stage 1.
-- `webapp/app/data/capture.server.ts` — stage 2 (deterministic filing via
-  `sorter.server.ts`'s `fileCardAttachments`, plus the organize/README
-  agent loop and its tools).
-- `webapp/app/data/postCapture.server.ts` — stage 3 (placeholder).
-- `webapp/app/data/phylogAgent.server.ts` — orchestrates all three stages
-  (`runPhylogPipeline`) and `resetProject`.
-- `webapp/app/data/sorter.server.ts` — `fileCardAttachments` (shared with
-  the Sorter), plus the shared `summaryFileName`/`isImageContentType`
-  helpers pre-capture also uses.
-- `webapp/app/data/llmProvider.ts` — provider-agnostic interfaces
-  (`LlmProvider`, `PhotoDescriber`), no server-only imports.
-- `webapp/app/data/anthropicProvider.server.ts` — the one real provider
-  today, implementing both interfaces.
-- `webapp/app/data/file.server.ts`'s `downloadFileBytes` — the one
-  server-side-direct (non-presigned) S3 read in the app, used only by
-  pre-capture's image summarization.
+Most of PhyLog's own logic lives in **`packages/robustness-core`**, a
+pnpm workspace package — NOT under `webapp/app/data` anymore. See
+"Scaling & Process Isolation" below for why, and its own module doc
+(`phylogQueue.server.ts`) for the full reasoning.
+
+- `packages/robustness-core/src/data/projectN01.server.ts` —
+  `project-n01` seeding/retrofit (`ensureProjectN01`/`resolveProjectN01`),
+  default skill file content, `resetProjectN01Content`,
+  `getProjectStageSkill`/`isSkipInstruction`.
+- `packages/robustness-core/src/data/preCapture.server.ts` — stage 1.
+- `packages/robustness-core/src/data/capture.server.ts` — stage 2
+  (deterministic filing via `sorter.server.ts`'s `fileCardAttachments`,
+  plus the organize/README agent loop and its tools).
+- `packages/robustness-core/src/data/postCapture.server.ts` — stage 3
+  (placeholder).
+- `packages/robustness-core/src/data/phylogAgent.server.ts` —
+  orchestrates all three stages (`runPhylogPipeline`) and `resetProject`.
+- `packages/robustness-core/src/data/sorter.server.ts` —
+  `fileCardAttachments` (shared with the Sorter), plus the shared
+  `summaryFileName`/`isImageContentType` helpers pre-capture also uses.
+- `packages/robustness-core/src/data/llmProvider.ts` — provider-agnostic
+  interfaces (`LlmProvider`, `PhotoDescriber`), no server-only imports.
+- `packages/robustness-core/src/data/anthropicProvider.server.ts` — the
+  one real provider today, implementing both interfaces.
+- `packages/robustness-core/src/data/file.server.ts`'s
+  `downloadFileBytes` — the one server-side-direct (non-presigned) S3
+  read in the app, used only by pre-capture's image summarization.
+- `packages/robustness-core/src/data/phylogQueue.server.ts` — the BullMQ
+  queue (see "Scaling & Process Isolation" below).
+- `packages/robustness-core/src/data/phylogMetrics.server.ts` — usage
+  tracking (see "Usage tracking" above).
+- `packages/robustness-core/src/data/llmPricing.ts` — static,
+  hand-maintained model pricing (see "Estimated cost" above). No
+  server-only imports.
+- `packages/oxmarkdown-core/src/` (`document.ts`/`cardDirective.ts`/
+  `mention.ts`) — the framework-agnostic markdown/directive/mention
+  parsing PhyLog needs (e.g. `fileReferences.server.ts`'s
+  `parseOxDocument`, `dailyLog.server.ts`'s `cardFileName`), shared with
+  `webapp`'s own editor/renderer — see its own module doc.
+- `packages/worker/worker.ts` — the standalone queue-worker process (see
+  "Scaling & Process Isolation" below). Imports `robustness-core`
+  directly; zero pipeline-logic duplication.
 - `webapp/app/routes/api.phylog.run.tsx` / `api.phylog.pre-capture.tsx` /
   `api.phylog.capture.tsx` / `api.phylog.post-capture.tsx` /
-  `api.phylog.reset.tsx` — API surface.
+  `api.phylog.reset.tsx` / `api.phylog.jobs.$jobId.tsx` — API surface
+  (enqueue + poll — thin, no pipeline logic of their own).
 - `crates/cli/src/phylog.rs` — CLI surface (`nopal phylog ...`).
-- `webapp/app/data/phylogMetrics.server.ts` — usage tracking (see "Usage
-  tracking" above).
-- `webapp/app/data/llmPricing.ts` — static, hand-maintained model pricing
-  (see "Estimated cost" above). No server-only imports.
 - `webapp/app/routes/api.phylog.usage-cleanup.tsx` — raw usage-event
   pruning cron.
 - `webapp/app/routes/fruits_.maker.tsx` / `fruits_.maker_.phylog.tsx` —

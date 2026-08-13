@@ -31,10 +31,10 @@
 // Idempotent — safe to re-run (a tree with no duplicates left is a no-op).
 // =============================================================================
 
-import { getDb } from "../app/data/db.server";
-import { query, formatRecord, merge, remove } from "../app/data/generic.server";
-import type { VaultFolder, FileRef } from "../app/data/vault.types";
-import type { Human } from "../app/data/humans.server";
+import { getDb } from "robustness-core/data/db.server";
+import { query, formatRecord, merge, remove } from "robustness-core/data/generic.server";
+import type { VaultFolder, FileRef } from "robustness-core/data/vault.types";
+import type { Human } from "robustness-core/data/humans.server";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const now = () => new Date().toISOString();

@@ -1,8 +1,8 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFileRefById, canViewFileRef } from "../data/vault.server";
-import { getPresignedViewUrl } from "../data/file.server";
+import { getFileRefById, canViewFileRef } from "robustness-core/data/vault.server";
+import { getPresignedViewUrl } from "robustness-core/data/file.server";
 
 /**
  * GET /api/vault/view/:fileId

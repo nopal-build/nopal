@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getRelatedHumans } from "../data/relationships.server";
+import { getRelatedHumans } from "robustness-core/data/relationships.server";
 
 /**
  * GET /api/humans/related

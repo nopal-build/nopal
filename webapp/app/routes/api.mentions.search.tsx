@@ -8,7 +8,7 @@
 // HTTP hop.
 import type { LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { searchMentions } from "../data/mentionSearch.server";
+import { searchMentions } from "robustness-core/data/mentionSearch.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUserFromRequest(request);
