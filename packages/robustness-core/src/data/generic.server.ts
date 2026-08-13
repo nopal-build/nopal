@@ -1,5 +1,5 @@
 import Surreal, { RecordId } from "surrealdb";
-import { getDb } from "./db.server";
+import { getDb, invalidateDb } from "./db.server";
 
 export type AllQueryOptions = {
   order?: "date" | "title";
@@ -75,8 +75,7 @@ export async function queryCollection<T extends Data>(
     return formatCollection(result?.[0] || [], { start, limit });
   } catch (err) {
     console.error("Failed to get data:", err);
-  } finally {
-    await db.close();
+    invalidateDb();
   }
   return formatCollection();
 }
@@ -96,8 +95,7 @@ export async function query<T extends unknown[]>(
     return result;
   } catch (err) {
     console.error("Failed to get data:", err);
-  } finally {
-    await db.close();
+    invalidateDb();
   }
   return [];
 }
@@ -126,8 +124,7 @@ export async function select<T extends Data>(thing: RecordId | string) {
     return formatRecord<T>(result);
   } catch (err) {
     console.error("Failed to get data:", err);
-  } finally {
-    await db.close();
+    invalidateDb();
   }
   return undefined;
 }
@@ -150,8 +147,7 @@ export async function remove(tb: string, id: string) {
     return result;
   } catch (err) {
     console.error("Failed to delete data:", err);
-  } finally {
-    await db.close();
+    invalidateDb();
   }
   return undefined;
 }
@@ -171,8 +167,7 @@ export async function merge(
     return result;
   } catch (err) {
     console.error("Failed to merge data:", err);
-  } finally {
-    await db.close();
+    invalidateDb();
   }
   return undefined;
 }
@@ -192,8 +187,7 @@ export async function upsert(name: string | RecordId, record: any) {
     return result;
   } catch (err) {
     console.error("Failed to upsert data:", err);
-  } finally {
-    await db.close();
+    invalidateDb();
   }
   return undefined;
 }
