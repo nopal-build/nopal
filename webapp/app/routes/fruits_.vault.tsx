@@ -645,8 +645,8 @@ function ProjectRoleBanner({
   if (!info?.yourRole) return null;
 
   const nameFor = (id: string) => {
-    const h = relatedHumans.find((h) => h._id === id);
-    return h?.name || h?.email || id;
+    const human = relatedHumans.find((entry) => entry._id === id);
+    return human?.name || human?.email || id;
   };
 
   return (
