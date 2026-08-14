@@ -593,6 +593,80 @@ function ShareModal({
   );
 }
 
+// ─── Project role banner (debug aid) ─────────────────────────────
+
+/**
+ * A thin, always-visible line at the top of a top-level project's own
+ * folder view (never in the sidebar tree — that one's cramped enough
+ * already, see the "shared by…" removal above) showing the CURRENT
+ * viewer's own resolved Sharing Role on this project, plus — for anyone
+ * with an owner-tier role, including the project's own creator — every
+ * other collaborator's role too. Reads straight from
+ * `GET /api/vault/projects/:folderId/sharing` (the exact same endpoint
+ * `ShareModal` already uses, and the exact same data `getProjectRole`/
+ * `getProjectSharing` resolve server-side for the real permission checks),
+ * so what's shown here can never drift from what actually gates a
+ * `skills`-folder edit — this exists specifically so a mismatch (wrong
+ * role saved, wrong human picked, sharing not actually saved) is visible
+ * at a glance instead of requiring a DB script to diagnose.
+ *
+ * Deliberately a plain `fetch`, not the shared `apiJson` helper — `apiJson`
+ * pops a `window.alert` on any non-2xx response, which would be obnoxious
+ * here (this fires on every project folder visit, in the background).
+ */
+function ProjectRoleBanner({
+  folderId,
+  relatedHumans,
+}: {
+  folderId: string;
+  relatedHumans: HumanEntry[];
+}) {
+  const [info, setInfo] = useState<{
+    sharing: ProjectSharingEntry[];
+    yourRole: { role: string; isOwner: boolean } | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setInfo(null);
+    (async () => {
+      const res = await fetch(`/api/vault/projects/${folderId}/sharing`);
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (!cancelled && data) {
+        setInfo({ sharing: data.sharing ?? [], yourRole: data.yourRole ?? null });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [folderId]);
+
+  if (!info?.yourRole) return null;
+
+  const nameFor = (id: string) => {
+    const h = relatedHumans.find((h) => h._id === id);
+    return h?.name || h?.email || id;
+  };
+
+  return (
+    <div className="vault-project-role-banner text-xs font-mono">
+      <span>
+        Your role: <strong>{info.yourRole.role}</strong>
+      </span>
+      {info.yourRole.isOwner && (
+        <span className="vault-project-role-banner-shared">
+          {info.sharing.length === 0
+            ? "Not shared with anyone yet"
+            : `Shared with: ${info.sharing
+                .map((e) => `${nameFor(e.human)} (${e.role})`)
+                .join(", ")}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ─── Move Folder Modal ─────────────────────────────────────────────────────────
 
 /** One selectable folder row in the move-destination picker. The subtree of
@@ -2312,7 +2386,14 @@ export default function VaultV2Page() {
             )}
           </div>
 
-          {/* ── Root view — the three root containers, no actions ───────── */}
+          {current.kind === "folder" && isTopLevelProject && (
+            <ProjectRoleBanner
+              folderId={current.folder._id}
+              relatedHumans={relatedHumans}
+            />
+          )}
+
+          {/* ── Root view ─ the three root containers, no actions ─────────────── */}
           {current.kind === "root" && (
             <div className="vault-v2-listing">
               <ListingHeader />

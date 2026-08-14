@@ -272,6 +272,24 @@
   padding-bottom: 12px;
 }
 
+/* Debug aid: the current viewer's Sharing Role (+ every collaborator's,
+   for an owner-tier viewer) at the top of a project's own folder view —
+   see `ProjectRoleBanner` in `fruits_.vault.tsx`. */
+.vault-project-role-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--text-subtle);
+  padding-bottom: 10px;
+  @media (prefers-color-scheme: dark) {
+    color: var(--text-subtle-dark);
+  }
+}
+
+.vault-project-role-banner-shared::before {
+  content: "· ";
+}
+
 /* Breadcrumb links */
 .vault-v2-crumb {
   color: inherit;
