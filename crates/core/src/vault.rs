@@ -362,8 +362,20 @@ impl Client {
         Ok(serde_json::from_str(&text)?)
     }
 
+    /// `withShared=1` always: unlike the web Vault (which shows shared
+    /// projects in a separate "Shared with me" sidebar section), the CLI
+    /// has no such second browsing mode -- a vault path should resolve
+    /// the same way whether the human owns the project or was merely
+    /// shared it (e.g. `nopal phylog capture --project "projects/nopal
+    /// o."` working the same for the owner and a shared-in Crafter). The
+    /// server only actually merges anything in when `folder_id` is the
+    /// caller's own top-level `projects` root container -- a no-op
+    /// elsewhere, so this is safe to always pass. See
+    /// `api.vault.folders.$folderId.children.tsx`'s own doc.
     pub fn children(&self, folder_id: &str) -> Result<Children> {
-        self.get_json(&format!("/api/vault/folders/{folder_id}/children"))
+        self.get_json(&format!(
+            "/api/vault/folders/{folder_id}/children?withShared=1"
+        ))
     }
 }
 
