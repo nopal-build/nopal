@@ -302,36 +302,57 @@ export async function listDailyLogEntries(projectFolder: VaultFolder): Promise<D
   const dailyLogsFolder = await findProjectDailyLogsFolder(projectFolder);
   if (!dailyLogsFolder) return [];
   const { folders } = await listFolderChildren(projectFolder.human_id, dailyLogsFolder._id);
-  const entries: DailyLogEntry[] = [];
-  for (const candidate of folders) {
-    const { files } = await listFolderChildren(projectFolder.human_id, candidate._id);
-    const metaListing = files.find((f) => f.name === DAILY_LOG_ENTRY_META_FILE);
-    if (!metaListing) continue;
-    const metaFile = await getFileRefById(metaListing._id);
-    const meta = parseDailyLogEntryMeta(metaFile?.content);
-    if (meta) entries.push({ folder: candidate, meta });
-  }
+  // PARALLEL, not sequential -- each candidate folder's own lookup is
+  // fully independent (a read, no shared mutable state), so awaiting
+  // them one at a time here just serializes M round trips' worth of
+  // network latency for no reason. See `findDailyLogEntry`'s own doc for
+  // the OTHER half of this fix (avoiding calling this whole function
+  // once PER CARD in a sweep).
+  const resolved = await Promise.all(
+    folders.map(async (candidate): Promise<DailyLogEntry | null> => {
+      const { files } = await listFolderChildren(projectFolder.human_id, candidate._id);
+      const metaListing = files.find((f) => f.name === DAILY_LOG_ENTRY_META_FILE);
+      if (!metaListing) return null;
+      const metaFile = await getFileRefById(metaListing._id);
+      const meta = parseDailyLogEntryMeta(metaFile?.content);
+      return meta ? { folder: candidate, meta } : null;
+    }),
+  );
+  const entries = resolved.filter((e): e is DailyLogEntry => e !== null);
   entries.sort(
     (a, b) => a.meta.date.localeCompare(b.meta.date) || a.meta.humanId.localeCompare(b.meta.humanId),
   );
   return entries;
 }
 
-/** Finds this (humanId, date)'s existing entry folder, or creates a fresh
- * one named `YYYY-MM-DD-<slug of humanName>` (de-duplicated against
- * sibling NAMES only when actually necessary -- the manifest, not the
- * name, is what lookup relies on). Creating implicitly also ensures the
- * `daily-logs` folder itself exists. */
-export async function getOrCreateDailyLogEntryFolder(
-  projectFolder: VaultFolder,
-  input: { humanId: string; humanName: string; date: string; cardFileId: string },
-): Promise<{ folder: VaultFolder; meta: DailyLogEntryMeta | null }> {
-  const existingEntries = await listDailyLogEntries(projectFolder);
-  const match = existingEntries.find(
-    (e) => e.meta.humanId === input.humanId && e.meta.date === input.date,
-  );
-  if (match) return match;
+/** Pure lookup against an ALREADY-FETCHED entries list -- no I/O.
+ * Callers processing MANY entries in one run (e.g.
+ * `preCapture.server.ts`'s own sweep) should fetch `listDailyLogEntries`
+ * ONCE up front and use this per individual lookup, rather than calling
+ * `getOrCreateDailyLogEntryFolder` in a loop -- that would otherwise
+ * re-run the ENTIRE `listDailyLogEntries` scan on every single Card, an
+ * O(cards * entries) blowup that gets genuinely slow once a project has
+ * real history (confirmed: this was a real, shipped perf bug, not just a
+ * theoretical one -- fixed by this split). */
+export function findDailyLogEntry(
+  entries: DailyLogEntry[],
+  humanId: string,
+  date: string,
+): DailyLogEntry | undefined {
+  return entries.find((e) => e.meta.humanId === humanId && e.meta.date === date);
+}
 
+/** Creates a fresh entry folder for a (humanId, date) pair a caller has
+ * ALREADY confirmed (via `findDailyLogEntry` against an already-fetched
+ * list) doesn't exist yet -- skips `getOrCreateDailyLogEntryFolder`'s own
+ * internal re-fetch. Named `YYYY-MM-DD-<slug of humanName>`
+ * (de-duplicated against sibling NAMES only when actually necessary --
+ * the manifest, not the name, is what lookup relies on). Implicitly
+ * ensures the `daily-logs` folder itself exists. */
+export async function createDailyLogEntryFolder(
+  projectFolder: VaultFolder,
+  input: { humanId: string; humanName: string; date: string },
+): Promise<VaultFolder> {
   const dailyLogsFolder = await ensureProjectDailyLogsFolder(projectFolder);
   const { folders: siblings } = await listFolderChildren(projectFolder.human_id, dailyLogsFolder._id);
   const baseName = `${input.date}-${slugifyForFolderName(input.humanName)}`;
@@ -346,7 +367,24 @@ export async function getOrCreateDailyLogEntryFolder(
     parent_folder_id: dailyLogsFolder._id,
   });
   if (!created) throw new Error("Failed to create a daily-logs entry folder");
-  return { folder: created, meta: null };
+  return created;
+}
+
+/** Convenience wrapper for a caller handling just ONE (humanId, date)
+ * lookup (or that doesn't already have a fetched list) -- fetches fresh,
+ * then finds-or-creates. Callers processing MANY entries in one run
+ * (pre-capture's own sweep) should fetch `listDailyLogEntries` ONCE and
+ * use `findDailyLogEntry`/`createDailyLogEntryFolder` directly instead --
+ * see those functions' own docs for why. */
+export async function getOrCreateDailyLogEntryFolder(
+  projectFolder: VaultFolder,
+  input: { humanId: string; humanName: string; date: string; cardFileId: string },
+): Promise<{ folder: VaultFolder; meta: DailyLogEntryMeta | null }> {
+  const existingEntries = await listDailyLogEntries(projectFolder);
+  const match = findDailyLogEntry(existingEntries, input.humanId, input.date);
+  if (match) return match;
+  const folder = await createDailyLogEntryFolder(projectFolder, input);
+  return { folder, meta: null };
 }
 
 /** Writes (or refreshes) an entry folder's own `_meta.md` -- the ONLY

@@ -238,6 +238,23 @@ candidate folder's own `_meta.md` front matter and matching on
 a contributor's later display-name change, or two contributors who happen
 to share a name, can never break idempotency or misattribute an entry.
 
+**A real, shipped performance bug, found and fixed**: the sweep used to
+call `getOrCreateDailyLogEntryFolder` once PER CARD, and that function
+re-ran the ENTIRE `listDailyLogEntries` scan (every existing entry
+folder, each needing its own `_meta.md` read) from scratch every time —
+an O(cards × existing entries) blowup that got genuinely slow once a
+project had real history (hundreds/thousands of sequential DB round
+trips for a sweep that should take a handful). Fixed by splitting the
+find/create halves apart: `listDailyLogEntries` is now called ONCE per
+sweep (and internally resolves every entry folder in PARALLEL via
+`Promise.all`, not one at a time), then each Card does a pure, in-memory
+lookup (`findDailyLogEntry`) against that single fetched list, only
+ever calling `createDailyLogEntryFolder` for a genuinely brand-new
+(humanId, date) pair. `getOrCreateDailyLogEntryFolder` still exists as a
+convenience wrapper around both for a caller handling just one lookup —
+any future caller processing MANY entries in a loop should use the two
+pieces directly instead, the same way `preCapture.server.ts` now does.
+
 **Invocation shapes** (all one function, `runPreCapture`, different
 options — mirrors the CLI's own flags):
 

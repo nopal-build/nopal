@@ -35,9 +35,10 @@
  *   - A CARD attachment's summary (and a visible COPY of the attachment
  *     itself) is written into the PROJECT's own
  *     `daily-logs/<date>-<person>/` entry folder (`projectN01.server.ts`'s
- *     `getOrCreateDailyLogEntryFolder`/`writeDailyLogEntryMeta`) --
- *     NEVER back into the contributing human's own personal vault. This
- *     is the actual behavior change from pre-capture's earlier design
+ *     `findDailyLogEntry`/`createDailyLogEntryFolder`/
+ *     `writeDailyLogEntryMeta`) -- NEVER back into the contributing
+ *     human's own personal vault. This is the actual behavior change
+ *     from pre-capture's earlier design
  *     (which wrote the summary as a sibling of the original attachment,
  *     in the CONTRIBUTOR's own `daily-logs/YYYY-MM-DD/` folder): now
  *     every project's own `daily-logs/` folder is a browsable, staged
@@ -91,9 +92,11 @@ import { downloadFileBytes } from "./file.server";
 import { getDailyLogCards, listCardEntriesForProject, type DailyLogCard } from "./dailyLog.server";
 import {
   CARD_COPY_FILE,
-  getOrCreateDailyLogEntryFolder,
+  createDailyLogEntryFolder,
+  findDailyLogEntry,
   getProjectStageSkill,
   isSkipInstruction,
+  listDailyLogEntries,
   writeDailyLogEntryMeta,
   type DailyLogEntryMeta,
 } from "./projectN01.server";
@@ -292,9 +295,17 @@ export async function runPreCapture(
       // Batched human-name lookup for nicer entry-folder labels (e.g.
       // "2026-08-14-gerald" instead of "2026-08-14-human_1") -- purely
       // cosmetic, never load-bearing for lookup (see
-      // `getOrCreateDailyLogEntryFolder`'s own doc).
+      // `createDailyLogEntryFolder`'s own doc).
       const humans = await getHumansById([...new Set(entries.map((e) => e.humanId))]);
       const humanNameById = new Map(humans.map((h) => [h._id, h.name || h.email]));
+
+      // Fetched ONCE for the whole sweep, then looked up per-Card via the
+      // pure `findDailyLogEntry` -- calling `getOrCreateDailyLogEntryFolder`
+      // itself once per Card would re-scan the ENTIRE daily-logs folder
+      // on every single one, an O(cards * entries) blowup that's the
+      // actual reason this stage can feel slow on a project with real
+      // history. See `findDailyLogEntry`'s own doc.
+      const existingDailyLogEntries = await listDailyLogEntries(projectFolder);
 
       for (const { humanId: cardHumanId, date } of entries) {
         const cards = await getDailyLogCards(cardHumanId, date);
@@ -302,12 +313,9 @@ export async function runPreCapture(
         if (!card) continue;
 
         const humanName = humanNameById.get(cardHumanId) ?? cardHumanId;
-        const { folder: entryFolder } = await getOrCreateDailyLogEntryFolder(projectFolder, {
-          humanId: cardHumanId,
-          humanName,
-          date,
-          cardFileId: card.fileId,
-        });
+        const entryFolder =
+          findDailyLogEntry(existingDailyLogEntries, cardHumanId, date)?.folder ??
+          (await createDailyLogEntryFolder(projectFolder, { humanId: cardHumanId, humanName, date }));
 
         // Keep the entry's own `card.md` copy current -- a plain overwrite
         // (cheap, no LLM call), so capture always reads the Card's LATEST
@@ -381,6 +389,12 @@ export async function runPreCapture(
     const destHumanId = candidate.dest?.humanId ?? source.human_id;
     const destFolderId = candidate.dest?.folderId ?? source.folder_id;
 
+    // ONE fetch of the destination folder's current children, reused for
+    // both checks below (the attachment-copy check and the
+    // already-summarized check) -- these used to be two separate
+    // `listFolderChildren` round trips against the exact same folder.
+    const { files: destFiles } = await listFolderChildren(destHumanId, destFolderId);
+
     if (candidate.dest) {
       const list = attachmentHashesByEntry.get(candidate.dest.folderId) ?? [];
       list.push(`${source._id}:${hash}`);
@@ -392,8 +406,7 @@ export async function runPreCapture(
       // the same attachment into the same entry folder twice; a genuine
       // rename upstream would be treated as a new file here, a known,
       // acceptable gap rather than tracked identity).
-      const { files: destSiblings } = await listFolderChildren(destHumanId, destFolderId);
-      if (!destSiblings.some((f) => f.name === source.name)) {
+      if (!destFiles.some((f) => f.name === source.name)) {
         await copyFileIntoFolder(source._id, destFolderId);
       }
     }
@@ -404,8 +417,7 @@ export async function runPreCapture(
     if (skipSummaries) continue;
 
     const name = summaryFileName(source.name);
-    const { files: siblings } = await listFolderChildren(destHumanId, destFolderId);
-    const existingListing = siblings.find((f) => f.name === name);
+    const existingListing = destFiles.find((f) => f.name === name);
     const existing = existingListing ? await getFileRefById(existingListing._id) : undefined;
 
     if (existing && existingSourceHash(existing.content) === hash) {
