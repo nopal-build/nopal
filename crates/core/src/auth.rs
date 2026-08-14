@@ -11,9 +11,12 @@
 //!    exchanges the short-lived one-time `code` for a real bearer token via
 //!    a direct server-to-server HTTPS call — the long-lived token itself
 //!    never appears in a browser URL/history.
-//! 4. The token is stored in the OS keychain (falling back to a
-//!    `~/.config/nopal/credentials.json` file with `0600` permissions if no
-//!    keychain is available).
+//! 4. The token is stored in `~/.config/nopal/credentials.json` (`0600`
+//!    permissions) -- deliberately NOT the OS keychain (see "Credential
+//!    storage" below for why: it triggers a macOS permission prompt on
+//!    every single command for a locally-built CLI). A credential left
+//!    over in the keychain from an older CLI version is migrated to this
+//!    file (and removed from the keychain) the first time it's loaded.
 //!
 //! `login()` is the original blocking, terminal-oriented entry point (still
 //! used by the CLI as-is). [`LoginFlow`] exposes the same steps split apart
@@ -326,31 +329,47 @@ pub fn delete_sync_credentials() -> bool {
 
 // ─── Credential storage ─────────────────────────────────────────────
 
+// Stored in a 0600 file, NOT the OS keychain -- same reasoning
+// `SyncCredentials` above already documents, just applied to the main
+// login flow too: `load_credentials()` runs at the start of EVERY
+// authenticated command (`Client::new()`), and a keychain read's
+// per-app authorization prompt fires based on the calling binary's
+// code-signing identity -- for a locally-built or frequently-rebuilt CLI
+// binary, macOS re-prompts far more often than it does for a stable,
+// notarized app, which in practice meant a permission popup on every
+// single `nopal` invocation. Every other major dev CLI (gh, fly, aws,
+// heroku, vercel, doctl, ...) makes the same call for the same reason --
+// a locally-run interactive CLI isn't really the threat model the
+// keychain's app-provenance prompt is defending against, and a
+// 0600-permissioned file gives the same "only this OS user account can
+// read it" floor without the recurring interruption. The token remains
+// scoped, has a real expiry, and `nopal logout` removes it either way.
 fn save_credentials(creds: &Credentials) -> Result<()> {
-    let json = serde_json::to_string(creds)?;
-    let keyring_result =
-        Entry::new(KEYRING_SERVICE, KEYRING_USER).and_then(|e| e.set_password(&json));
-
-    match keyring_result {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            eprintln!(
-                "Warning: couldn't use the OS keychain ({e}); falling back to a local config file."
-            );
-            save_credentials_to_file(creds)
-        }
-    }
+    save_credentials_to_file(creds)
 }
 
 pub fn load_credentials() -> Option<Credentials> {
+    if let Some(creds) = load_credentials_from_file() {
+        return Some(creds);
+    }
+
+    // One-time migration for anyone who logged in before this change: a
+    // credential may still be sitting in the keychain from an older CLI
+    // version. Pull it out, persist it to the file, and remove it from
+    // the keychain so this is the LAST time this process ever touches
+    // the keychain -- and the last keychain permission prompt `nopal`
+    // ever causes for this human, rather than one on every run.
     if let Ok(entry) = Entry::new(KEYRING_SERVICE, KEYRING_USER) {
         if let Ok(json) = entry.get_password() {
-            if let Ok(creds) = serde_json::from_str(&json) {
+            if let Ok(creds) = serde_json::from_str::<Credentials>(&json) {
+                let _ = save_credentials_to_file(&creds);
+                let _ = entry.delete_password();
                 return Some(creds);
             }
         }
     }
-    load_credentials_from_file()
+
+    None
 }
 
 fn delete_credentials() -> Result<()> {

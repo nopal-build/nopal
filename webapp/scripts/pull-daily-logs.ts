@@ -9,8 +9,9 @@
 //
 // Where to get --token: whatever bearer token your CLI is already using
 // against that host (`~/.config/nopal/credentials.json`, or your OS
-// keychain entry under service "nopal" if the CLI couldn't write the file
-// fallback) — the same token `nopal vault ls` etc. already send as
+// keychain's leftover "nopal-cli" entry if you haven't run any CLI
+// command since upgrading past the point that entry got migrated out) —
+// the same token `nopal vault ls` etc. already send as
 // `Authorization: Bearer ...`. --email should be the SAME account's email;
 // it's used only to create/update a matching local `humans` row so logging
 // into LOCAL DEV as that address surfaces this seeded data as yours.
