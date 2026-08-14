@@ -12,17 +12,26 @@
  *     next touch" convention `ensureVaultRootFolders` already established
  *     for root folders).
  *   - `resetProjectN01Content` — the "delete everything PhyLog manages and
- *     start over" operation `nopal phylog reset` calls. Deletes every
- *     direct child of a `project-n01` folder EXCEPT its `skills`/`syncs`/
- *     `newspapers` anchors (the only human-writable parts), and clears out
- *     this project's own Release Log history (see its own doc below for
- *     why that's required, not optional).
+ *     start over" operation `nopal phylog reset`/`reset-pre-capture`
+ *     call. Deletes every direct child of a `project-n01` folder EXCEPT
+ *     its `skills`/`syncs`/`newspapers` anchors (the only human-writable
+ *     parts) and, unless `wipeDailyLogs` is passed, `daily-logs` too
+ *     (pre-capture's own reusable output — see below). Clears out this
+ *     project's own Release Log history either way (see its own doc below
+ *     for why that's required, not optional).
+ *   - The `daily-logs` space's own find/create/list/manifest helpers
+ *     (`ensureProjectDailyLogsFolder`, `getOrCreateDailyLogEntryFolder`,
+ *     `listDailyLogEntries`, `writeDailyLogEntryMeta`) — pre-capture's own
+ *     staging area, one subfolder per (day, contributor), that capture
+ *     then reads to decide how to organize the project. See the `phylog`
+ *     skill's pipeline section for the full data flow.
  *
  * PhyLog's pre-capture/capture/post-capture stages (`preCapture.server.ts`,
  * `capture.server.ts`, `postCapture.server.ts`) read the three skill files
  * this module seeds — see the `phylog` skill for the full pipeline design.
  */
 
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   createFileRef,
   createVaultFolder,
@@ -31,9 +40,11 @@ import {
   getFileRefById,
   getFolderById,
   listFolderChildren,
+  updateFileRef,
   type VaultFolder,
 } from "./vault.server";
 import { merge } from "./generic.server";
+import { splitFrontmatter } from "./project.types";
 
 // ─── Default skill file content ────────────────────────────────────────
 
@@ -189,11 +200,213 @@ export async function resolveProjectN01(
   return { ok: true, folder: await ensureProjectN01(folder) };
 }
 
-// ─── Reset ──────────────────────────────────────────────────────────────
+// ─── Daily Logs space (pre-capture's own output) ─────────────────
+// A project's `daily-logs` folder type (`vaultFolderTypes.ts`) is a
+// staging area, one subfolder per (day, contributor), holding a copy of
+// that day's Card content plus any generated summaries -- see the
+// `phylog` skill's "Stage 1 -- pre-capture" section. NOT the same thing
+// as the vault-wide `daily-logs` ROOT (a completely separate concept that
+// happens to share the name) -- this one lives INSIDE a single project.
+//
+// Lookup is by MANIFEST (`_meta.md` front matter), never by folder name
+// alone -- a folder's name is a human-readable label (`YYYY-MM-DD-name`),
+// not a stable key, so a display-name change or a name collision between
+// two contributors never breaks idempotency.
 
-/** Folder types that survive a reset — the only human-writable parts of a
- * `project-n01` folder, per the `vault` skill. */
-const SURVIVES_RESET = new Set(["skills", "syncs", "newspapers"]);
+/** The manifest file every daily-logs entry folder carries -- front
+ * matter only, `parseDailyLogEntryMeta` reads it back. Leading
+ * underscore sorts it first in any listing and signals "system file,
+ * don't hand-edit". */
+export const DAILY_LOG_ENTRY_META_FILE = "_meta.md";
+
+/** The plain-text copy of that day's Card content pre-capture keeps
+ * current inside every entry folder -- capture reads THIS (not the
+ * original Card, and not the human's own vault at all) as "the day's
+ * content" for its organize/README agent loop. */
+export const CARD_COPY_FILE = "card.md";
+
+export type DailyLogEntryMeta = {
+  humanId: string;
+  humanName: string;
+  date: string;
+  /** The originating Card's own fileId -- kept for traceability, not
+   * itself the idempotency key (see `sourceHash`). */
+  cardFileId: string;
+  /** A content hash covering the Card's own text plus its attachment
+   * list, refreshed by pre-capture every run -- `capture.server.ts` uses
+   * `${entryFolderId}:${sourceHash}` as its own Release Log `source_ref`,
+   * the same "idempotent against a hash of what changed" convention the
+   * rest of PhyLog already uses. */
+  sourceHash: string;
+  updatedAt: string;
+};
+
+export type DailyLogEntry = { folder: VaultFolder; meta: DailyLogEntryMeta };
+
+function slugifyForFolderName(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "human";
+}
+
+function parseDailyLogEntryMeta(content: string | null | undefined): DailyLogEntryMeta | null {
+  if (!content) return null;
+  const { frontmatter } = splitFrontmatter(content);
+  if (!frontmatter) return null;
+  try {
+    const data = parseYaml(frontmatter) as Record<string, unknown> | null;
+    if (!data || typeof data.humanId !== "string" || typeof data.date !== "string") return null;
+    return {
+      humanId: data.humanId,
+      humanName: typeof data.humanName === "string" ? data.humanName : data.humanId,
+      date: data.date,
+      cardFileId: typeof data.cardFileId === "string" ? data.cardFileId : "",
+      sourceHash: typeof data.sourceHash === "string" ? data.sourceHash : "",
+      updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function findProjectDailyLogsFolder(projectFolder: VaultFolder): Promise<VaultFolder | null> {
+  const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
+  return folders.find((f) => f.is_folder_type_root && f.folder_type === "daily-logs") ?? null;
+}
+
+/** Idempotently ensures the project's `daily-logs` space folder exists --
+ * unlike `skills`, NOT auto-seeded at project creation; pre-capture calls
+ * this lazily, the first time it actually has something to write. */
+export async function ensureProjectDailyLogsFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
+  const existing = await findProjectDailyLogsFolder(projectFolder);
+  if (existing) return existing;
+  const created = await createVaultFolder({
+    human_id: projectFolder.human_id,
+    name: "Daily Logs",
+    parent_folder_id: projectFolder._id,
+    folder_type: "daily-logs",
+  });
+  if (!created) throw new Error("Failed to create the project's daily-logs folder");
+  return created;
+}
+
+/** Every (day, contributor) entry already staged for this project, oldest
+ * first (then humanId, for a deterministic tie-break) -- same ordering
+ * convention `dailyLog.server.ts`'s `listCardEntriesForProject` uses.
+ * Read-only: never creates the `daily-logs` folder itself, so a project
+ * that's never had pre-capture run on it just resolves to an empty list. */
+export async function listDailyLogEntries(projectFolder: VaultFolder): Promise<DailyLogEntry[]> {
+  const dailyLogsFolder = await findProjectDailyLogsFolder(projectFolder);
+  if (!dailyLogsFolder) return [];
+  const { folders } = await listFolderChildren(projectFolder.human_id, dailyLogsFolder._id);
+  const entries: DailyLogEntry[] = [];
+  for (const candidate of folders) {
+    const { files } = await listFolderChildren(projectFolder.human_id, candidate._id);
+    const metaListing = files.find((f) => f.name === DAILY_LOG_ENTRY_META_FILE);
+    if (!metaListing) continue;
+    const metaFile = await getFileRefById(metaListing._id);
+    const meta = parseDailyLogEntryMeta(metaFile?.content);
+    if (meta) entries.push({ folder: candidate, meta });
+  }
+  entries.sort(
+    (a, b) => a.meta.date.localeCompare(b.meta.date) || a.meta.humanId.localeCompare(b.meta.humanId),
+  );
+  return entries;
+}
+
+/** Finds this (humanId, date)'s existing entry folder, or creates a fresh
+ * one named `YYYY-MM-DD-<slug of humanName>` (de-duplicated against
+ * sibling NAMES only when actually necessary -- the manifest, not the
+ * name, is what lookup relies on). Creating implicitly also ensures the
+ * `daily-logs` folder itself exists. */
+export async function getOrCreateDailyLogEntryFolder(
+  projectFolder: VaultFolder,
+  input: { humanId: string; humanName: string; date: string; cardFileId: string },
+): Promise<{ folder: VaultFolder; meta: DailyLogEntryMeta | null }> {
+  const existingEntries = await listDailyLogEntries(projectFolder);
+  const match = existingEntries.find(
+    (e) => e.meta.humanId === input.humanId && e.meta.date === input.date,
+  );
+  if (match) return match;
+
+  const dailyLogsFolder = await ensureProjectDailyLogsFolder(projectFolder);
+  const { folders: siblings } = await listFolderChildren(projectFolder.human_id, dailyLogsFolder._id);
+  const baseName = `${input.date}-${slugifyForFolderName(input.humanName)}`;
+  const existingNames = new Set(siblings.map((f) => f.name));
+  let name = baseName;
+  let n = 2;
+  while (existingNames.has(name)) name = `${baseName}-${n++}`;
+
+  const created = await createVaultFolder({
+    human_id: projectFolder.human_id,
+    name,
+    parent_folder_id: dailyLogsFolder._id,
+  });
+  if (!created) throw new Error("Failed to create a daily-logs entry folder");
+  return { folder: created, meta: null };
+}
+
+/** Writes (or refreshes) an entry folder's own `_meta.md` -- the ONLY
+ * thing capture's own idempotency check and `listDailyLogEntries`'s
+ * lookup actually trust. Call this every time pre-capture finishes
+ * syncing an entry folder's content, even when nothing changed (cheap: a
+ * plain content overwrite, no version snapshotting needed for a
+ * system-managed manifest). */
+export async function writeDailyLogEntryMeta(
+  entryFolder: VaultFolder,
+  meta: DailyLogEntryMeta,
+): Promise<void> {
+  const frontmatter = stringifyYaml({
+    humanId: meta.humanId,
+    humanName: meta.humanName,
+    date: meta.date,
+    cardFileId: meta.cardFileId,
+    sourceHash: meta.sourceHash,
+    updatedAt: meta.updatedAt,
+  }).trimEnd();
+  const content = `---\n${frontmatter}\n---\n\nPre-processed daily log for ${meta.humanName} on ${meta.date}. Managed by PhyLog's pre-capture stage -- do not edit by hand.\n`;
+
+  const { files } = await listFolderChildren(entryFolder.human_id, entryFolder._id);
+  const existing = files.find((f) => f.name === DAILY_LOG_ENTRY_META_FILE);
+  if (existing) {
+    await updateFileRef(existing._id, { content });
+  } else {
+    await createFileRef({
+      human_id: entryFolder.human_id,
+      name: DAILY_LOG_ENTRY_META_FILE,
+      content,
+      content_type: "text/markdown",
+      folder_id: entryFolder._id,
+    });
+  }
+}
+
+// ─── Reset ──────────────────────────────────────────────────────
+// TWO DISTINCT reset depths, per the `phylog` skill's own "Reset" section:
+//
+//   - `nopal phylog reset` (`wipeDailyLogs: false`, the default) leaves
+//     `skills`/`syncs`/`daily-logs` alone — `daily-logs` already holds
+//     pre-capture's own staged output, so a plain `capture --full`
+//     afterward can rebuild the whole project straight from what's
+//     already there, with NO need to re-run pre-capture (no new LLM
+//     calls for summaries that haven't changed).
+//   - `nopal phylog reset-pre-capture` (`wipeDailyLogs: true`) ALSO
+//     wipes `daily-logs` — the deeper "start completely over" reset,
+//     needed when pre-capture's own output itself should be regenerated
+//     (e.g. after editing `skills/PRE_CAPTURE.md`). Requires `nopal
+//     phylog pre-capture` (to restage `daily-logs`) before `capture
+//     --full` has anything to rebuild from again.
+
+/** Folder types that survive an ORDINARY reset — the human-writable parts
+ * of a `project-n01` folder (`skills`/`syncs`), plus `daily-logs`
+ * (system-managed, but deliberately preserved so `capture --full` alone
+ * can rebuild from it — see above). `resetProjectN01Content`'s own
+ * `wipeDailyLogs` option removes `daily-logs` from this set for the
+ * deeper `reset-pre-capture` case. */
+const SURVIVES_RESET = new Set(["skills", "syncs", "newspapers", "daily-logs"]);
 
 export type ResetSummary = {
   deletedFolders: string[];
@@ -202,28 +415,44 @@ export type ResetSummary = {
 
 /**
  * Deletes every direct child of a `project-n01` folder EXCEPT its
- * `skills`/`syncs`/`newspapers` anchors (and everything nested under
- * them) — the "everything else is disposable, PhyLog-managed" rule the
- * `vault` skill defines. Also clears this project's own Release Log
- * history (`release_log_entries`/`release_log_changesets`): those rows
- * describe state (which files got filed, what the README used to say)
- * that this reset just deleted, so leaving them behind would make a
- * subsequent `capture --full` think everything was already applied and
- * silently skip re-processing it. Regenerates both release-log.md
- * reflections (now empty) afterward.
+ * `skills`/`syncs`/`newspapers`/`daily-logs` anchors (and everything
+ * nested under them) — the "everything else is disposable,
+ * PhyLog-managed" rule the `vault` skill defines. Pass `wipeDailyLogs:
+ * true` to ALSO delete `daily-logs` (the `reset-pre-capture` case
+ * above) — default `false` keeps it, since it's pre-capture's own
+ * reusable output, not throwaway organize/README state. Also clears this
+ * project's own Release Log history (`release_log_entries`/
+ * `release_log_changesets`) either way: those rows describe state (which
+ * files got filed, what the README used to say, which `daily-logs` entry
+ * was already captured) that this reset just invalidated, so leaving them
+ * behind would make a subsequent `capture --full` think everything was
+ * already applied and silently skip re-processing it. Regenerates both
+ * release-log.md reflections (now empty) afterward.
  *
  * Deliberately NOT run automatically by `capture --full` on its own
- * schedule — always an explicit, separate call (`nopal phylog reset`), so
- * a human can inspect the emptied-out state before re-running capture.
+ * schedule — always an explicit, separate call (`nopal phylog reset`/
+ * `reset-pre-capture`), so a human can inspect the emptied-out state
+ * before re-running capture.
  */
 export async function resetProjectN01Content(
   folder: VaultFolder,
+  opts: { wipeDailyLogs?: boolean } = {},
+): Promise<ResetSummary> {
+  const survives = opts.wipeDailyLogs
+    ? new Set([...SURVIVES_RESET].filter((t) => t !== "daily-logs"))
+    : SURVIVES_RESET;
+  return resetProjectN01ContentInternal(folder, survives);
+}
+
+async function resetProjectN01ContentInternal(
+  folder: VaultFolder,
+  survives: Set<string>,
 ): Promise<ResetSummary> {
   const { folders, files } = await listFolderChildren(folder.human_id, folder._id);
   const summary: ResetSummary = { deletedFolders: [], deletedFiles: [] };
 
   for (const child of folders) {
-    if (child.is_folder_type_root && SURVIVES_RESET.has(child.folder_type ?? "")) continue;
+    if (child.is_folder_type_root && survives.has(child.folder_type ?? "")) continue;
     await deleteVaultFolderCascade(child._id);
     summary.deletedFolders.push(child.name);
   }

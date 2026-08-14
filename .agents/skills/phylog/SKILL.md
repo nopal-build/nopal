@@ -8,9 +8,11 @@ description: PhyLog, Nopal's AI pipeline that turns a project-n01 space's daily-
 PhyLog is Nopal's on-demand AI pipeline for one `project-n01` space at a
 time — a project (a folder directly under `projects`), or a human's own
 `personal` space. It turns raw daily-log Cards and synced files into
-durable, organized project state: written summaries next to source files,
-that content filed and organized inside the project, and an up-to-date
-`README.md` that indexes the result. See the `vault` skill's Daily Logs /
+durable, organized project state: pre-capture STAGES that raw material
+into the project's own `daily-logs/` folder (summaries alongside a copy
+of each day's Card and its attachments), then capture reads `daily-logs/`
+and `syncs/` to decide how to file/organize content and keep
+`README.md` an up-to-date index. See the `vault` skill's Daily Logs /
 Sorter / Release Log / Vault Folder Types sections first if any of those
 terms are unfamiliar — this skill sits directly on top of that
 architecture. Deliberately standalone (not a subsection of `vault`)
@@ -21,10 +23,22 @@ Every PhyLog call costs real money and produces non-deterministic output,
 so it is **never** wired into a cron — always triggered on demand, by a
 human (or an eventual sorting agent), through the CLI or the API. There is
 **no preview/dry-run mode anywhere in this pipeline** — every call applies
-for real. `nopal phylog reset` (wipe) + `capture --full` (rebuild from
-scratch) is the "inspect before committing" workflow that used to be a
-`--apply` flag's absence; `nopal release-log revert` remains the safety
-net for undoing a specific capture's README edit.
+for real. `nopal phylog reset` (wipe, keeping `daily-logs/`) +
+`capture --full` (rebuild from scratch, straight from what's already
+staged) is the "inspect before committing" workflow that used to be a
+`--apply` flag's absence; `reset-pre-capture` goes one level deeper
+(wipes `daily-logs/` too — see "Reset" below); `nopal release-log revert`
+remains the safety net for undoing a specific capture's README edit.
+
+**Deciding WHICH daily logs need to be applied is entirely
+database-tracked, never AI-driven.** Both stages below determine their
+own work list with a plain query (`listDailyLogEntries`/`_meta.md`'s
+`sourceHash` for capture; a Card's own existence for pre-capture) plus an
+idempotency check against `release_log_entries`/`_meta.md` — an LLM is
+only ever invoked AFTER that deterministic check says "yes, this genuinely
+needs (re)processing," to decide WHAT to write, never WHETHER to run at
+all. See "Idempotency, precisely" under Stage 2 below for the exact
+mechanism.
 
 ## `project-n01` spaces
 
@@ -64,6 +78,13 @@ Rules, enforced by the vault's own write-policy chain (`canWriteToFolderId`,
   will eventually generate — not implemented yet (`comingSoon: true`).
   Not to be confused with the already-shipped, unrelated
   `project-newspaper` skill's VIEW of a project's README.
+- **`daily-logs/`** is a project-scoped space type too (NOT the same
+  concept as the vault-wide `daily-logs` ROOT — see the `vault` skill's
+  "Vault Folder Types" section) — pre-capture's own staging area, one
+  subfolder per (day, contributor), that capture reads to decide how to
+  organize the project. `writable: "system"`, same as the rest of a
+  `project-n01` — not human-editable. See "Stage 1" and "Stage 2" below
+  for the full data flow.
 
 `ensureProjectN01`/`resolveProjectN01`
 (`packages/robustness-core/src/data/projectN01.server.ts`) stamp + seed a
@@ -77,26 +98,45 @@ point's own `resolveProjectN01` call). Seeding creates a `skills` folder
 a sensible default body so a brand new project is immediately usable
 without a human writing anything first.
 
-### Reset
+### Reset — two distinct depths
 
 `resetProjectN01Content` (`projectN01.server.ts`) deletes every direct
 child of a `project-n01` folder EXCEPT its `skills`/`syncs`/`newspapers`
 anchors (and everything nested under them) — "everything else is
 disposable" made real. It ALSO clears this project's own Release Log
 history (`clearReleaseLogForProject`, `releaseLog.server.ts`): those rows
-describe state (filed attachments, past README versions) that a reset
-just deleted, so leaving them behind would make a later `capture --full`
-think everything was already applied and silently skip reprocessing it.
+describe state (filed attachments, past README versions, which
+`daily-logs` entry was already captured) that a reset just invalidated,
+so leaving them behind would make a later `capture --full` think
+everything was already applied and silently skip reprocessing it.
 
-Reset is **always an explicit, separate operation** (`nopal phylog
-reset`) — never run implicitly by anything else, including
-`capture --full` on its own initiative conceptually being "the same
-idea". This is deliberate: a human can inspect the emptied-out
-`project-n01` folder (skills/syncs still intact) before deciding to
+A `wipeDailyLogs` option controls whether `daily-logs/` (pre-capture's
+own staged output — see Stage 1 below) ALSO gets deleted, giving two
+distinct commands for two distinct depths:
+
+- **`nopal phylog reset`** (`wipeDailyLogs: false`, the default) — wipes
+  everything capture manages (organized structure, filed attachments, the
+  README), but leaves `skills`/`syncs`/`daily-logs` alone. Since
+  `daily-logs/` already holds every Card's staged content, a plain
+  `nopal phylog capture --project <path> --full` afterward rebuilds the
+  whole project straight from what's already there — no need to re-run
+  pre-capture, no new LLM calls for summaries that haven't changed.
+- **`nopal phylog reset-pre-capture`** — the DEEPER reset: everything
+  `reset` wipes, PLUS `daily-logs/` itself. Needed when pre-capture's own
+  output should be regenerated from scratch (e.g. after editing
+  `skills/PRE_CAPTURE.md` to change how summaries are written). Requires
+  `nopal phylog pre-capture` (to restage `daily-logs/`) before
+  `capture --full` has anything to rebuild from again.
+
+Either reset is **always an explicit, separate operation** — never run
+implicitly by anything else, including `capture --full` on its own
+initiative conceptually being "the same idea". This is deliberate: a
+human can inspect the emptied-out `project-n01` folder before deciding to
 rebuild. `capture --full` internally calls the exact same
-`resetProjectN01Content` itself, right before reprocessing everything —
-so running `reset` first is optional, not required, but useful whenever
-you want to verify the wipe alone.
+`resetProjectN01Content` itself (always with `wipeDailyLogs: false` — it
+only ever rebuilds FROM `daily-logs/`, never wipes it), right before
+reprocessing everything — so running `reset` first is optional, not
+required, but useful whenever you want to verify the wipe alone.
 
 ## The pipeline
 
@@ -127,76 +167,156 @@ file.
 
 ### Stage 1 — pre-capture (`preCapture.server.ts`)
 
-Gated by `skills/PRE_CAPTURE.md` (default: skip). When not skipped,
-examines every candidate source file that doesn't already have a sibling
-`<name>-summary.md` next to it (`summaryFileName`, `sorter.server.ts`) —
-candidates come from two places:
+TWO jobs, one UNCONDITIONAL and one skill-gated — this split matters, see
+below:
 
-- Every `::file{...}` attachment across this project's daily-log Cards.
-- Every file inside this project's own `syncs/` folder tree, at any depth.
+1. **STAGING (unconditional in sweep mode)** — for every (day,
+   contributor) that has a Card for this project
+   (`listCardEntriesForProject`, `dailyLog.server.ts`), ensures that
+   entry's own folder exists under the project's `daily-logs/` space
+   (`getOrCreateDailyLogEntryFolder`, named `YYYY-MM-DD-<slug of
+   contributor's name>` — cosmetic only, see below), keeps a plain-text
+   copy of the Card's own content current there (`card.md`), and drops a
+   visible COPY of every `::file{...}` attachment into that same folder
+   (`copyFileIntoFolder` — a new `file_refs` row pointing at the same S3
+   bytes, no duplication) so a human browsing `daily-logs/` sees the
+   actual files waiting to be organized, not just a description of them.
+2. **SUMMARIZATION (gated by `skills/PRE_CAPTURE.md`, default: skip)** —
+   for every candidate that doesn't already have a matching
+   `<name>-summary.md` (`summaryFileName`, `sorter.server.ts`) written for
+   its CURRENT content, an LLM decides (grounded in the skill's own
+   instructions, injected as context) whether and how to summarize it.
+   Candidates come from two places:
+   - Every Card attachment just staged above (summary written into that
+     SAME `daily-logs/<date>-<person>/` entry folder, alongside the
+     visible copy — never back into the contributor's own vault).
+   - Every file inside this project's own `syncs/` folder tree, at any
+     depth (summary written as an ordinary sibling there, unchanged from
+     before — `syncs/` has no separate "staging" concept, since
+     summarizing IS the only thing pre-capture does there).
 
-For each candidate, an LLM decides (grounded in the skill's own
-instructions, injected as context) whether and how to summarize it:
+   For each candidate:
+   - An image gets a real vision call (`PhotoDescriber.describePhoto` —
+     see "LLM provider architecture" below), the skill's instructions
+     folded into the call's own text `context` alongside the human's
+     caption (if any) and the Card's own content.
+   - A file with readable text content (`file_refs.content`) gets a plain
+     text-summarization call (`LlmProvider.complete`, no tools — just the
+     skill's instructions as the system prompt).
+   - Anything else (a binary file with no extracted text, not an image)
+     is left unsummarized and reported as `unsupported` — there's
+     genuinely nothing to feed the model.
 
-- An image gets a real vision call (`PhotoDescriber.describePhoto` — see
-  "LLM provider architecture" below), the skill's instructions folded into
-  the call's own text `context` alongside the human's caption (if any) and
-  the Card's own content.
-- A file with readable text content (`file_refs.content`) gets a plain
-  text-summarization call (`LlmProvider.complete`, no tools — just the
-  skill's instructions as the system prompt).
-- Anything else (a binary file with no extracted text, not an image) is
-  left unsummarized and reported as `unsupported` — there's genuinely
-  nothing to feed the model.
+**WHY staging is unconditional**: `skills/PRE_CAPTURE.md` is seeded
+"skip" by DEFAULT for every new project, and `capture.server.ts` now
+reads its OWN input exclusively from `daily-logs/`/`syncs/` (Stage 2
+below) — if staging were ALSO skill-gated, a brand-new, still-default
+project would never get any `daily-logs/` entries at all, and capture
+would have nothing to organize. So `skills/PRE_CAPTURE.md` only ever
+controls whether SUMMARIES get written — the raw Card text and
+attachments always make it into `daily-logs/` regardless.
 
-Writes the summary as a sibling markdown file (front matter: `source`
-fileId, `sourceHash`, `generatedAt`), in the SAME folder the source file
-already lives in — the acting human's own `daily-logs` folder for a Card
-attachment, or the project's own `syncs/<connector>/` for a synced file.
-**Never gated by anything but the skill file itself** — both destinations
-are folders the acting human/project owner already has an unconditional
-write relationship with, so there's no separate apply-gate here.
+**Idempotent, at two levels**:
+- A generated summary is keyed off a hash of the source file's own
+  bytes/content (`content_hash`, falling back to `s3_key`/id) plus, for a
+  Card attachment, its caption — stored in the summary's own front
+  matter (`sourceHash`) and re-derived fresh each call. An unchanged
+  file/caption pair is a total no-op; editing a caption or replacing a
+  file's bytes invalidates the cached summary.
+- A daily-logs entry folder's own manifest (`_meta.md`, written by
+  `writeDailyLogEntryMeta`) carries an AGGREGATE `sourceHash` — the
+  Card's own text plus every current attachment's hash, folded together
+  — refreshed every pre-capture run regardless of whether any individual
+  summary needed regenerating. This is what `capture.server.ts`'s OWN
+  idempotency check keys off (see Stage 2's "Idempotency, precisely").
 
-**Idempotent** against a hash of the source file's own bytes/content
-(`content_hash`, falling back to `s3_key`/id) plus, for a Card attachment,
-its caption — stored in the summary's own front matter (`sourceHash`) and
-re-derived fresh each call. An unchanged file/caption pair is a total
-no-op; editing a caption or replacing a file's bytes invalidates the
-cached summary.
+**Entry folder NAMING is cosmetic, never load-bearing.** A human-readable
+name (`YYYY-MM-DD-<slug>`) is assigned once at creation for browsability,
+but FINDING an existing entry again always happens by reading every
+candidate folder's own `_meta.md` front matter and matching on
+`(humanId, date)` — never by re-deriving or parsing the name. This means
+a contributor's later display-name change, or two contributors who happen
+to share a name, can never break idempotency or misattribute an entry.
 
 **Invocation shapes** (all one function, `runPreCapture`, different
 options — mirrors the CLI's own flags):
 
-- Individual file: pass `fileId` (CLI: `--file <vault-path>`).
-- One day's Card: pass `date` (CLI: `--date YYYY-MM-DD`) — plus, always, a
-  syncs sweep (cheap: only genuinely new/changed files ever call a model).
-- Everything (all history's Cards + syncs sweep): omit both — this is also
-  the natural "end of day, sweep everything new" shape, since a repeat
-  call only ever acts on what's actually new/changed.
+- Individual file: pass `fileId` (CLI: `--file <vault-path>`) — a pure
+  summarization debug path, fully skill-gated (skip means a true total
+  no-op here), with NO daily-logs staging involved — there's no (day,
+  contributor) context to stage an arbitrary single file into.
+- One day's Cards: pass `date` (CLI: `--date YYYY-MM-DD`) — stages (and,
+  unless skipped, summarizes) every contributor's Card for that specific
+  date, plus, always, a syncs summary sweep.
+- Everything (all history's Cards + syncs sweep): omit both — this is
+  also the natural "end of day, sweep everything new" shape, since a
+  repeat call only ever acts on what's actually new/changed.
+
+**CROSS-HUMAN BY DESIGN** (same as Stage 2): sweep mode processes every
+contributor's Cards for this project, not just whoever's running the
+command — see Stage 2's own "Cross-human by design" note, which applies
+identically here.
 
 ### Stage 2 — capture (`capture.server.ts`)
 
-Two parts, run per day (oldest first, across whatever date range applies):
+Reads its input exclusively from `daily-logs/` and `syncs/` — NEVER the
+live Card or a contributor's own vault directly (a real, deliberate
+behavior change from capture's earlier design, which read `card.content`
+straight off the Card). Two parts, run per DAILY-LOGS ENTRY (one per
+day+contributor Stage 1 has already staged — `listDailyLogEntries`,
+oldest first):
 
 1. **Deterministic filing** (`sorter.server.ts`'s `fileCardAttachments`,
-   unchanged, zero-inference) — every not-yet-filed `::file{...}` Card
-   attachment (and its pre-capture summary sibling, if one exists) lands
-   in the project's root. Independent of anything the model decides below.
+   unchanged, zero-inference, still sourced from the ORIGINAL Card, not
+   the daily-logs entry's own staged copy — see "Why filing still reads
+   the original Card" below) — every not-yet-filed `::file{...}` Card
+   attachment lands in the project's root. Independent of anything the
+   model decides below.
 2. **Organize + README** — an LLM agent loop, driven by
    `skills/CAPTURE.md` (default: file everything into the root, keep
    README a plain index — see `DEFAULT_CAPTURE_SKILL`). Given the
    project's CURRENT file tree (everything EXCEPT `skills/`/`syncs/`/
-   `newspapers/`, which capture never even shows the model, let alone
-   touches), the day's Card content, any pre-capture summaries for
-   today's attachments, and the current README, the model may call:
+   `newspapers/`/`daily-logs/`, which capture never even shows the model,
+   let alone touches), the entry's own staged Card text (`card.md`, read
+   straight from its `daily-logs/<date>-<person>/` folder) and pre-capture
+   summaries (same folder), and the current README, the model may call:
    - `create_folder({ path })` — mkdir -p, relative to the project root.
    - `move_file({ name, destinationPath })` — relocate an already-filed
      file by name.
    - `update_readme({ newBody, reason })` — at most meaningfully once per
-     day; replaces the README body only (front matter untouched).
-   Both `create_folder`/`move_file` refuse to target `skills`/`syncs`/
-   `newspapers` by name — those subtrees are permanently off limits to
-   this stage.
+     entry; replaces the README body only (front matter untouched).
+   `create_folder`/`move_file` refuse to target `skills`/`syncs`/
+   `newspapers`/`daily-logs` by name — those subtrees are permanently off
+   limits to this stage.
+
+**Why filing still reads the original Card, not the daily-logs entry's
+own staged copy**: `fileCardAttachments` is SHARED with the Sorter
+(`sorter.server.ts`'s `sortDailyLog`, `nopal sort run`), which files
+attachments straight from the original Card into the project root using a
+`sourceRef` keyed off the ORIGINAL attachment's own fileId. If capture
+instead filed the daily-logs entry's own COPY (a different fileId, made
+by pre-capture), the two would no longer agree on identity and could each
+file a separate copy of the same photo into the project root. Keeping
+capture's deterministic-filing step pointed at the original Card preserves
+that existing dedup guarantee untouched; only the AGENT's own context
+(Card text + summaries) moved to `daily-logs/`.
+
+**Idempotency, precisely**: each daily-logs entry's own `_meta.md` carries
+a `sourceHash` (an aggregate hash of the Card's text plus every current
+attachment, refreshed by pre-capture every run — see Stage 1). Capture's
+own Release Log `source_ref` is `${entryFolderId}:${sourceHash}` — a
+plain `findReleaseLogEntryBySource` lookup, no AI involved, decides
+whether an entry needs (re)processing at all. This replaces the OLDER
+scheme (`${cardFileId}:${hashOfCardContent}`, computed by capture itself)
+now that pre-capture already computes and stores an equivalent hash as
+part of staging — same idempotency guarantee, just relocated to where the
+content already gets touched.
+
+A Card can vanish out from under an already-staged entry (deleted, or
+edited out of that day's `readme.md`) — filing (part 1 above) is simply
+skipped when that happens; the organize/README agent (part 2) still runs
+off whatever's already staged in `daily-logs/`, since that's its only
+source of truth regardless of the live Card's own fate.
 
 **The model is told about OxMarkdown's directives** (`DIRECTIVE_GUIDE` in
 `capture.server.ts`, injected into the system prompt every call) so it can
@@ -222,39 +342,44 @@ every OTHER markdown file in the Vault renders exactly as before.
 
 **Two modes** (`runCapture`'s `full` option; CLI: `--full`):
 
-- **Incremental** (default) — walks every day this project has a Card
-  for, SKIPPING any already recorded (idempotent against a hash of that
-  day's Card content, `source_ref` — same mechanism the old single-tool
-  README-writer used). "Just the daily logs that haven't been applied
-  yet."
-- **Full** — calls `resetProjectN01Content` FIRST (see "Reset" above),
-  then walks every day from scratch (nothing is "already recorded"
-  anymore, since reset also clears this project's Release Log history).
+- **Incremental** (default) — walks every daily-logs entry this project
+  has, SKIPPING any already recorded (idempotent against that entry's own
+  `_meta.md.sourceHash` — see "Idempotency, precisely" above)."Just the
+  entries that haven't been applied yet."
+- **Full** — calls `resetProjectN01Content` FIRST with `wipeDailyLogs:
+  false` (see "Reset" above — `daily-logs/` itself is deliberately NOT
+  wiped here), then walks every entry from scratch (nothing is "already
+  recorded" anymore, since reset also clears this project's Release Log
+  history). Rebuilds straight from whatever's already staged — no need to
+  re-run pre-capture first.
 
-**CROSS-HUMAN BY DESIGN — sweeps every collaborator's Cards, not just
-whoever's running the command.** `listCardEntriesForProject`
-(`dailyLog.server.ts`) enumerates every `(humanId, date)` pair with a Card
-for this project across EVERY human who's ever written one, not merely
-the acting human passed into `runCapture`/`runPreCapture` (that parameter
-now only matters for a handful of invoker-scoped bookkeeping calls, e.g.
-the "agent not configured" early return — it no longer restricts which
-Cards get discovered). Each entry is then processed under ITS OWN
-humanId (filing via `fileCardAttachments`, the organize/README agent
-loop, usage tracking, and regenerating THAT human's own
-`daily-logs/<date>/release-log.md`) — a single date can legitimately
-produce multiple `CaptureDayResult`s if several collaborators each wrote
-their own Card for it. This isn't a new trust boundary: a Card was
-already cross-human safe by construction (any Sharing Role, including
-Observer, may write one for a project they can see — see "Cards" in the
-`vault` skill — and `sorter.server.ts`'s `fileCardAttachments` already
-filed a collaborator's attachments into the project without needing
-write access to their vault); capture used to silently defeat that by
-only ever looking at the CALLER's own Cards, which meant a project
-owner's `phylog capture` run could never see a collaborator's Card, no
-matter how many times it ran. `nopal phylog capture --project <path>` (or
-`run`/`pre-capture`) now always applies everyone's outstanding Cards for
-that project in one pass, regardless of who invokes it — always safe to
-run, same as before, just no longer scoped to one identity.
+**CROSS-HUMAN BY DESIGN — sweeps every collaborator's daily-logs entries,
+not just whoever's running the command.** `listDailyLogEntries`
+(`projectN01.server.ts`) enumerates every (day, contributor) entry staged
+for this project across EVERY human whose Card was ever pre-captured, not
+merely the acting human passed into `runCapture`/`runPreCapture` (that
+parameter now only matters for a handful of invoker-scoped bookkeeping
+calls, e.g. the "agent not configured" early return — it no longer
+restricts which entries get discovered). Each entry is then processed
+under ITS OWN humanId (filing via `fileCardAttachments`, the
+organize/README agent loop, usage tracking, and regenerating THAT
+human's own `daily-logs/<date>/release-log.md` — note this is the
+vault-wide per-HUMAN `daily-logs` root, a different concept from the
+per-PROJECT `daily-logs` folder type this whole stage reads from) — a
+single date can legitimately produce multiple `CaptureDayResult`s if
+several collaborators each wrote their own Card for it. This isn't a new
+trust boundary: a Card was already cross-human safe by construction (any
+Sharing Role, including Observer, may write one for a project they can
+see — see "Cards" in the `vault` skill — and `sorter.server.ts`'s
+`fileCardAttachments` already filed a collaborator's attachments into the
+project without needing write access to their vault); capture used to
+silently defeat that by only ever looking at the CALLER's own Cards,
+which meant a project owner's `phylog capture` run could never see a
+collaborator's Card, no matter how many times it ran. `nopal phylog
+capture --project <path>` (or `run`/`pre-capture`) now always applies
+everyone's outstanding entries for that project in one pass, regardless
+of who invokes it — always safe to run, same as before, just no longer
+scoped to one identity.
 
 **Release Log integration**: a day that produces a README change gets an
 `"ai-update"` entry with a real `content-edit` changeset (revertible via
@@ -304,7 +429,8 @@ gates on `ANTHROPIC_API_KEY` being set — same "absent env var = disabled"
 convention `SORTER_ENABLED` already established, so a fresh deploy never
 spends money on an LLM call (vision, tool-calling, or plain completion)
 until explicitly configured. `PHYLOG_ANTHROPIC_MODEL` overrides the
-default model (`claude-sonnet-4-5-20250929`) everywhere.
+default model (`claude-sonnet-5`, upgraded from `claude-sonnet-4-5-20250929`)
+everywhere.
 
 ## CLI / API surface
 
@@ -319,6 +445,7 @@ nopal phylog pre-capture --project <path> [--date YYYY-MM-DD] [--file <path>]
 nopal phylog capture --project <path> [--full] [--since YYYY-MM-DD] [--until YYYY-MM-DD]
 nopal phylog post-capture --project <path>
 nopal phylog reset --project <path> --yes
+nopal phylog reset-pre-capture --project <path> --yes
 ```
 
 - `--project` — vault path, e.g. `projects/sunny`, or `personal`.
@@ -327,11 +454,18 @@ nopal phylog reset --project <path> --yes
   their own — pre-capture already sweeps everything when `--date`/`--file`
   are omitted; post-capture is project-wide, not date-scoped).
 - `pre-capture` — omit both `--date` and `--file` to sweep everything.
-- `capture` — `--full` resets first, then reprocesses every day from
-  scratch; default is incremental (only unapplied days). `--since`/
-  `--until` bound the date range either way.
-- `reset` — destructive; requires `--yes`. Prints a reminder to run
-  `capture --full` afterward.
+  Stages `daily-logs/` content unconditionally; only summary GENERATION is
+  skill-gated (see Stage 1 above).
+- `capture` — `--full` resets (keeping `daily-logs/`) first, then
+  reprocesses every entry from scratch; default is incremental (only
+  unapplied entries). `--since`/`--until` bound the date range either way.
+- `reset` — destructive; requires `--yes`. Leaves `skills`/`syncs`/
+  `daily-logs` untouched. Prints a reminder to run `capture --full`
+  afterward.
+- `reset-pre-capture` — the DEEPER reset; also destructive, requires
+  `--yes`. ALSO wipes `daily-logs/` (still leaves `skills`/`syncs`).
+  Prints a reminder to run `pre-capture` (to restage) then
+  `capture --full` (to rebuild) afterward.
 
 Every CLI command resolves `--project` to a folder, then **enqueues a job
 and polls for it** — see "Scaling & Process Isolation" below for why.
@@ -351,7 +485,8 @@ API: `POST /api/phylog/run` (`{ projectFolderId, full?, since?, until? }`),
 `POST /api/phylog/pre-capture` (`{ projectFolderId, date?, fileId? }`),
 `POST /api/phylog/capture` (`{ projectFolderId, full?, since?, until? }`),
 `POST /api/phylog/post-capture` (`{ projectFolderId }`), `POST
-/api/phylog/reset` (`{ projectFolderId }`) — each of these ENQUEUES
+/api/phylog/reset` (`{ projectFolderId }`), `POST
+/api/phylog/reset-pre-capture` (`{ projectFolderId }`) — each of these ENQUEUES
 (`phylogQueue.server.ts`) and returns `202` immediately, never runs the
 pipeline inline. `GET /api/phylog/jobs/:jobId` polls one job's status.
 All require an owner-tier Sharing Role on the project (or being the
@@ -525,8 +660,12 @@ pnpm workspace package — NOT under `webapp/app/data` anymore. See
 
 - `packages/robustness-core/src/data/projectN01.server.ts` —
   `project-n01` seeding/retrofit (`ensureProjectN01`/`resolveProjectN01`),
-  default skill file content, `resetProjectN01Content`,
-  `getProjectStageSkill`/`isSkipInstruction`.
+  default skill file content, `resetProjectN01Content`
+  (`wipeDailyLogs` option), `getProjectStageSkill`/`isSkipInstruction`,
+  and the `daily-logs` space's own find/create/list/manifest helpers
+  (`ensureProjectDailyLogsFolder`, `getOrCreateDailyLogEntryFolder`,
+  `listDailyLogEntries`, `writeDailyLogEntryMeta`,
+  `CARD_COPY_FILE`/`DAILY_LOG_ENTRY_META_FILE`).
 - `packages/robustness-core/src/data/preCapture.server.ts` — stage 1.
 - `packages/robustness-core/src/data/capture.server.ts` — stage 2
   (deterministic filing via `sorter.server.ts`'s `fileCardAttachments`,
@@ -562,8 +701,9 @@ pnpm workspace package — NOT under `webapp/app/data` anymore. See
   directly; zero pipeline-logic duplication.
 - `webapp/app/routes/api.phylog.run.tsx` / `api.phylog.pre-capture.tsx` /
   `api.phylog.capture.tsx` / `api.phylog.post-capture.tsx` /
-  `api.phylog.reset.tsx` / `api.phylog.jobs.$jobId.tsx` — API surface
-  (enqueue + poll — thin, no pipeline logic of their own).
+  `api.phylog.reset.tsx` / `api.phylog.reset-pre-capture.tsx` /
+  `api.phylog.jobs.$jobId.tsx` — API surface (enqueue + poll — thin, no
+  pipeline logic of their own).
 - `crates/cli/src/phylog.rs` — CLI surface (`nopal phylog ...`).
 - `webapp/app/routes/api.phylog.usage-cleanup.tsx` — raw usage-event
   pruning cron.

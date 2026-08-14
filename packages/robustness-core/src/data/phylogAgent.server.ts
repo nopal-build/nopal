@@ -89,15 +89,20 @@ export type ResetProjectResult =
 
 /**
  * Deletes every direct child of a `project-n01` folder except its
- * `skills`/`syncs`/`newspapers` anchors — see `resetProjectN01Content`'s
- * own doc. A standalone, explicit operation (`nopal phylog reset`), never
- * run implicitly — a human can inspect the emptied-out state before
- * running `capture --full` (or `phylog run --full`) to rebuild.
+ * `skills`/`syncs`/`newspapers` anchors and, unless `wipeDailyLogs` is
+ * passed, `daily-logs` too — see `resetProjectN01Content`'s own doc for
+ * the two distinct reset depths (`nopal phylog reset` vs
+ * `reset-pre-capture`). A standalone, explicit operation, never run
+ * implicitly — a human can inspect the emptied-out state before running
+ * `capture --full` (or `phylog run --full`) to rebuild.
  */
-export async function resetProject(projectFolderId: string): Promise<ResetProjectResult> {
+export async function resetProject(
+  projectFolderId: string,
+  opts: { wipeDailyLogs?: boolean } = {},
+): Promise<ResetProjectResult> {
   const resolved = await resolveProjectN01(projectFolderId);
   if (!resolved.ok) return resolved;
-  const summary = await resetProjectN01Content(resolved.folder);
+  const summary = await resetProjectN01Content(resolved.folder, opts);
   return { ok: true, summary };
 }
 

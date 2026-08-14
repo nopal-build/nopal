@@ -54,6 +54,7 @@ import {
   listFolderChildren,
 } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { getProjectRoleForFolderId } from "robustness-core/data/projectSharing.server";
 import { getRelatedHumans } from "robustness-core/data/relationships.server";
 import { resolveProjectManifest, type ResolvedProject } from "robustness-core/data/project.server";
 import { AppLayout } from "../components/AppLayout";
@@ -181,6 +182,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   let current: Current = { kind: "root" };
+  // See the `skills`-ownership-role resolution below, in the `fileParam`
+  // branch — only ever true for a shared file inside a `skills` folder.
+  let viewerCanEditSharedSkillsFile = false;
 
   if (fileParam) {
     const file = await getFileRefById(fileParam);
@@ -204,6 +208,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
       isProjectN01Anchor(fileProjectFolder)
         ? await resolveProjectManifest(fileProjectFolder.human_id, fileProjectFolder)
         : null;
+    // A non-owner viewing a file inside a `skills` folder may still be able
+    // to EDIT its content, via an owner-tier project Sharing Role
+    // (Owner/Crafter) rather than file ownership — see `api.vault.$fileId.tsx`'s
+    // non-owner PATCH path and the `vault` skill. Resolved once here so the
+    // client doesn't need its own copy of the Sharing Role logic just to
+    // decide whether to render the skill editor as read-only.
+    if (
+      file.human_id !== user._id &&
+      file.folder_id &&
+      fileProjectFolder?.folder_type === "skills"
+    ) {
+      const role = await getProjectRoleForFolderId(file.folder_id, user._id);
+      viewerCanEditSharedSkillsFile = Boolean(role?.isOwner);
+    }
     current = { kind: "file", file, ancestry, projectManifest: projectManifestForFile };
   } else if (folderParam) {
     const folder = await getFolderById(folderParam);
@@ -241,6 +259,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     relatedHumans,
     topLevelSharedFolders,
     sharedFolderOwners,
+    viewerCanEditSharedSkillsFile,
   };
 }
 
@@ -1040,6 +1059,7 @@ export default function VaultV2Page() {
     relatedHumans,
     topLevelSharedFolders,
     sharedFolderOwners,
+    viewerCanEditSharedSkillsFile,
   } = useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
@@ -1969,6 +1989,20 @@ export default function VaultV2Page() {
     isOwnedByViewer &&
     canWriteToRoot(fileRootKey, user.role) &&
     canWriteToFolderType(fileFolderType, user.role);
+  // Content editability for a `skills` file is broader than
+  // `canWriteCurrentFile` above: an owner-tier collaborator (Owner/Crafter)
+  // may edit the CONTENT of a shared skills file via their project Sharing
+  // Role even though they don't own the file/folder outright (so Rename/
+  // Move/Replace/Delete — gated by `canWriteCurrentFile` — stay owner-only,
+  // matching the server's own file-vs-object-level split in
+  // `api.vault.$fileId.tsx`). `viewerCanEditSharedSkillsFile` is resolved
+  // server-side in the loader, since it depends on the project's own
+  // Sharing Role list.
+  const canEditCurrentFileContent =
+    canWriteCurrentFile ||
+    (current.kind === "file" &&
+      fileFolderType === "skills" &&
+      viewerCanEditSharedSkillsFile);
 
   // "More Actions" dropdown — management actions, gated by the same
   // policies that previously hid the standalone buttons. Unavailable actions
@@ -2367,13 +2401,6 @@ export default function VaultV2Page() {
                     </span>
                     <span className="vault-v2-row-name">
                       {folderLabel(folder)}
-                      {sharedEntryIds.has(folder._id) &&
-                        sharedFolderOwners[folder.human_id] && (
-                          <span className="vault-v2-tree-owner">
-                            {" "}
-                            — shared by {sharedFolderOwners[folder.human_id]}
-                          </span>
-                        )}
                     </span>
                     <span className="vault-v2-row-size" />
                     <span className="vault-v2-row-date">
@@ -2516,7 +2543,7 @@ export default function VaultV2Page() {
                     key={current.file._id}
                     fileId={current.file._id}
                     initialContent={current.file.content ?? ""}
-                    editable={canWriteCurrentFile}
+                    editable={canEditCurrentFileContent}
                     onSave={handleSaveSkillFile}
                   />
                 ) : current.projectManifest ? (

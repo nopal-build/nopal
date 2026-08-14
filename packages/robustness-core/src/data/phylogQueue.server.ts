@@ -57,7 +57,13 @@ export function getPhylogQueue(): Queue<PhylogJobData, unknown, PhylogJobName> {
   return queue;
 }
 
-export type PhylogJobName = "run" | "pre-capture" | "capture" | "post-capture" | "reset";
+export type PhylogJobName =
+  | "run"
+  | "pre-capture"
+  | "capture"
+  | "post-capture"
+  | "reset"
+  | "reset-pre-capture";
 
 export type PhylogJobData = {
   actingHumanId: string;

@@ -5,18 +5,16 @@ import { getProjectRole } from "robustness-core/data/projectSharing.server";
 import { enqueuePhylogJob } from "robustness-core/data/phylogQueue.server";
 
 /**
- * POST /api/phylog/reset
+ * POST /api/phylog/reset-pre-capture
  *
- * Enqueues deletion of every direct child of a `project-n01` folder
- * EXCEPT its `skills`/`syncs`/`newspapers`/`daily-logs` anchors — see
- * `resetProjectN01Content`'s own doc (`projectN01.server.ts`). Leaving
- * `daily-logs` intact means a plain `nopal phylog capture --full`
- * afterward can rebuild the whole project without re-running pre-capture
- * -- for the DEEPER reset that also wipes `daily-logs`, see
- * `POST /api/phylog/reset-pre-capture` instead. Returns immediately with
- * a job id; poll `GET /api/phylog/jobs/:jobId`. Thin client: `nopal
- * phylog reset`. Destructive and NOT run implicitly by anything else —
- * always an explicit, separate call.
+ * The DEEPER of PhyLog's two reset depths (see the `phylog` skill's
+ * "Reset" section) -- everything `POST /api/phylog/reset` wipes, PLUS the
+ * project's own `daily-logs` staging folder (pre-capture's own output).
+ * Requires `nopal phylog pre-capture` (to restage `daily-logs`) before
+ * `capture --full` has anything to rebuild from again. Returns
+ * immediately with a job id; poll `GET /api/phylog/jobs/:jobId`. Thin
+ * client: `nopal phylog reset-pre-capture`. Destructive and NOT run
+ * implicitly by anything else -- always an explicit, separate call.
  */
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -37,15 +35,15 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    const jobId = await enqueuePhylogJob("reset", {
+    const jobId = await enqueuePhylogJob("reset-pre-capture", {
       actingHumanId: user._id,
       projectFolderId,
     });
     return Response.json({ jobId }, { status: 202 });
   } catch (err) {
-    console.error("PhyLog reset enqueue error:", err);
+    console.error("PhyLog reset-pre-capture enqueue error:", err);
     return Response.json(
-      { error: err instanceof Error ? err.message : "Failed to enqueue reset" },
+      { error: err instanceof Error ? err.message : "Failed to enqueue reset-pre-capture" },
       { status: 500 },
     );
   }

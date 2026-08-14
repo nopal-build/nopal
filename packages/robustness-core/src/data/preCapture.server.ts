@@ -19,10 +19,10 @@
  *
  * WHY a separate sibling file, generated once, rather than summarizing
  * inline at capture time: the (real-money, non-deterministic) model call
- * happens exactly once per file and is cached as an ordinary vault file —
- * every later consumer (capture's own README-writing step, a human just
- * reading the daily log or syncs folder) gets a free, fast, plain-text
- * summary instead of needing its own model call.
+ * happens exactly once per file and is cached as an ordinary vault file --
+ * every later consumer (capture's own organize/README step, a human just
+ * browsing the project's daily-logs/syncs folders) gets a free, fast,
+ * plain-text summary instead of needing its own model call.
  *
  * IDEMPOTENT against a hash of the source file's own bytes/content
  * (`content_hash`, falling back to `s3_key`/id) plus, for a Card
@@ -31,13 +31,33 @@
  * replacing a file's bytes invalidates the cached summary; an unchanged
  * file is a total no-op.
  *
- * Deliberately writes into whichever folder the SOURCE file already lives
- * in -- the OWNING human's own `daily-logs` folder for a Card attachment
- * (never necessarily whoever triggered this run -- see below), or the
- * project's own `syncs/<connector>/` folder for a synced file -- never
- * gated by anything but the skill file itself (no `dryRun`, no
- * apply-gate): both are folders that file's own owner/the project owner
- * already has an existing write relationship with.
+ * TWO DIFFERENT destinations, by design:
+ *   - A CARD attachment's summary (and a visible COPY of the attachment
+ *     itself) is written into the PROJECT's own
+ *     `daily-logs/<date>-<person>/` entry folder (`projectN01.server.ts`'s
+ *     `getOrCreateDailyLogEntryFolder`/`writeDailyLogEntryMeta`) --
+ *     NEVER back into the contributing human's own personal vault. This
+ *     is the actual behavior change from pre-capture's earlier design
+ *     (which wrote the summary as a sibling of the original attachment,
+ *     in the CONTRIBUTOR's own `daily-logs/YYYY-MM-DD/` folder): now
+ *     every project's own `daily-logs/` folder is a browsable, staged
+ *     mirror of "what's pending to be organized", grouped by day AND
+ *     contributor, and `capture.server.ts` reads its organize/README
+ *     decisions FROM this staged copy (`card.md` + summaries), never
+ *     from the original Card or the human's own vault directly.
+ *   - A SYNCED file's summary (no Card involved) still writes as a
+ *     sibling right next to it, inside the project's own
+ *     `syncs/<connector>/` tree -- unchanged. `capture.server.ts` reads
+ *     `syncs/` directly too, alongside `daily-logs/`.
+ *   - The `--file <path>` single-file debug path (`opts.fileId`) is ALSO
+ *     unchanged -- writes a sibling summary next to whatever arbitrary
+ *     file was targeted, regardless of whether it happens to be a Card
+ *     attachment. A deliberate, narrow scope boundary: there's no
+ *     (day, contributor) context to stage into for an arbitrary
+ *     single-file call.
+ * Never gated by anything but the skill file itself (no `dryRun`, no
+ * apply-gate) -- every one of these destinations is a folder PhyLog's own
+ * server-side code already has an unconditional write relationship with.
  *
  * CROSS-HUMAN BY DESIGN, same as `capture.server.ts`: when sweeping
  * every day (no `date`/`fileId` given), `listCardEntriesForProject`
@@ -46,8 +66,9 @@
  * just `actingHumanId` -- a Card is already cross-human safe (any
  * Sharing Role, including Observer, may write one for a project they can
  * see), so a collaborator's attachment gets the exact same pre-capture
- * treatment the project owner's own would, regardless of who actually
- * runs `nopal phylog pre-capture`/`run`/`capture`.
+ * treatment (and the exact same `daily-logs/<date>-<person>/` staging)
+ * the project owner's own would, regardless of who actually runs
+ * `nopal phylog pre-capture`/`run`/`capture`.
  */
 
 import { createHash } from "node:crypto";
@@ -59,6 +80,7 @@ import {
   summaryFileName,
 } from "./sorter.server";
 import {
+  copyFileIntoFolder,
   createFileRef,
   getFileRefById,
   listFolderChildren,
@@ -67,7 +89,15 @@ import {
 } from "./vault.server";
 import { downloadFileBytes } from "./file.server";
 import { getDailyLogCards, listCardEntriesForProject, type DailyLogCard } from "./dailyLog.server";
-import { getProjectStageSkill, isSkipInstruction } from "./projectN01.server";
+import {
+  CARD_COPY_FILE,
+  getOrCreateDailyLogEntryFolder,
+  getProjectStageSkill,
+  isSkipInstruction,
+  writeDailyLogEntryMeta,
+  type DailyLogEntryMeta,
+} from "./projectN01.server";
+import { getHumansById } from "./humans.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
 import { classifyLlmError, recordPhylogUsage } from "./phylogMetrics.server";
 import type { LlmProvider, PhotoDescriber } from "./llmProvider";
@@ -79,6 +109,14 @@ export type PreCaptureCandidate = {
    * to ground the summary in more context; a synced file has none. */
   card?: DailyLogCard;
   caption: string;
+  /** Where the generated summary (and, for a Card attachment, a visible
+   * COPY of the attachment itself — see the loop below) gets written.
+   * Defaults to the SOURCE file's own folder/owner when omitted (syncs
+   * files, and the `--file` single-file debug path, both unaffected by
+   * the daily-logs redesign). A Card attachment instead points this at
+   * its project's own `daily-logs/<date>-<person>/` entry folder — see
+   * the module doc's "Card attachments land in daily-logs" section. */
+  dest?: { humanId: string; folderId: string };
 };
 
 export type PreCaptureSummary = {
@@ -92,8 +130,11 @@ export type PreCaptureSummary = {
 
 export type PreCaptureResult = {
   ok: true;
-  /** True when `skills/PRE_CAPTURE.md` is missing or says "skip" — a total
-   * no-op, nothing was even examined. */
+  /** True when `skills/PRE_CAPTURE.md` is missing or says "skip" —
+   * SUMMARIZATION was skipped (no LLM calls, `summaries`/`unsupported`
+   * are both empty). In sweep mode (no `fileId`), daily-logs STAGING
+   * still ran regardless — see `runPreCapture`'s own doc for why. Only
+   * ever a true total no-op for the single-`fileId` debug path. */
   skipped: boolean;
   summaries: PreCaptureSummary[];
   /** Candidates that couldn't be summarized (no readable text, not an
@@ -161,11 +202,28 @@ function buildContext(input: { skill: string; card?: DailyLogCard; caption: stri
 
 /**
  * Runs pre-capture for one project. Pass `fileId` to process a single
- * file; `date` to process just that day's Card attachments (plus, always,
- * a syncs sweep); omit both to process EVERY day this project has a Card
- * for, plus the syncs sweep — the "all history" / "end-of-day sweep for
- * everything new" case (idempotency makes a repeat call of this cheap:
- * only genuinely new/changed files ever call the model).
+ * file (a pure summarization debug path, fully skill-gated, no daily-logs
+ * staging involved); `date` to stage/summarize just that day's Card
+ * entries (plus, always, a syncs summary sweep); omit both to stage/
+ * summarize EVERY day this project has a Card for, plus the syncs sweep
+ * — the "all history" / "end-of-day sweep for everything new" case
+ * (idempotency makes a repeat call of this cheap: only genuinely
+ * new/changed files ever call the model).
+ *
+ * STAGING (populating `daily-logs/<date>-<person>/` with `card.md` +
+ * visible attachment copies) is UNCONDITIONAL in sweep mode — it always
+ * runs, regardless of `skills/PRE_CAPTURE.md`. Only SUMMARIZATION (the
+ * real-money LLM calls that generate `*-summary.md` siblings, for both
+ * Card attachments and synced files) is gated by that skill file, same as
+ * before. This split matters: `skills/PRE_CAPTURE.md` is seeded "skip" by
+ * DEFAULT for every new project (see `projectN01.server.ts`), and
+ * `capture.server.ts` now reads ITS OWN input exclusively from
+ * `daily-logs/` (see that file's module doc) — if staging were ALSO
+ * gated on the skill file, a brand new, still-default project would never
+ * get ANY daily-logs entries at all, and capture would have nothing to
+ * work from. The `--file` single-file path has no such staging concept
+ * (there's no (day, contributor) to stage into for an arbitrary file), so
+ * it stays fully skill-gated, unchanged.
  */
 export async function runPreCapture(
   actingHumanId: string,
@@ -175,7 +233,9 @@ export async function runPreCapture(
 ): Promise<PreCaptureResult> {
   const log = onProgress ?? (() => {});
   const skill = await getProjectStageSkill(projectFolder, "PRE_CAPTURE.md");
-  if (isSkipInstruction(skill)) {
+  const skipSummaries = isSkipInstruction(skill);
+
+  if (opts.fileId && skipSummaries) {
     log("pre-capture: skills/PRE_CAPTURE.md says skip — nothing to do.");
     await recordPhylogUsage({
       humanId: actingHumanId,
@@ -190,11 +250,28 @@ export async function runPreCapture(
   // Backward-compat continuity: a project may already have a general
   // skills/SKILL.md predating this pipeline — fold it in too.
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
-  if (!opts.provider && !isPhylogAgentConfigured()) {
+  if (!skipSummaries && !opts.provider && !isPhylogAgentConfigured()) {
     return { ok: false, error: "PhyLog's agent is not configured (no ANTHROPIC_API_KEY set)." };
+  }
+  if (skipSummaries) {
+    log(
+      "pre-capture: skills/PRE_CAPTURE.md says skip — staging daily-logs content, generating no summaries.",
+    );
   }
 
   const candidates: PreCaptureCandidate[] = [];
+  // One entry per (humanId, date) Card actually seen this run -- used
+  // AFTER the main summarization loop below to refresh each entry
+  // folder's own `_meta.md` (needs every attachment's hash, which the
+  // loop computes one candidate at a time -- see `attachmentHashesByEntry`).
+  const entryMetaInputs: {
+    entryFolder: VaultFolder;
+    humanId: string;
+    humanName: string;
+    date: string;
+    cardFileId: string;
+    cardContent: string;
+  }[] = [];
 
   if (opts.fileId) {
     const file = await getFileRefById(opts.fileId);
@@ -205,24 +282,79 @@ export async function runPreCapture(
     // running this call -- same reasoning as `capture.server.ts`'s own
     // `listCardEntriesForProject` usage (see that file's module doc): a
     // Card is already cross-human safe by design, so a collaborator's
-    // attachment deserves the same pre-capture summary as the project
+    // attachment deserves the same pre-capture staging the project
     // owner's own would.
     const entries = opts.date
       ? await listCardEntriesForProject(projectFolder._id, { since: opts.date, until: opts.date })
       : await listCardEntriesForProject(projectFolder._id);
-    for (const { humanId: cardHumanId, date } of entries) {
-      const cards = await getDailyLogCards(cardHumanId, date);
-      const card = cards.find((c) => c.projectFolderId === projectFolder._id);
-      if (!card) continue;
-      for (const attachment of extractFileAttachments(card.content)) {
-        candidates.push({ fileId: attachment.fileId, name: attachment.name, card, caption: attachment.caption });
+
+    if (entries.length > 0) {
+      // Batched human-name lookup for nicer entry-folder labels (e.g.
+      // "2026-08-14-gerald" instead of "2026-08-14-human_1") -- purely
+      // cosmetic, never load-bearing for lookup (see
+      // `getOrCreateDailyLogEntryFolder`'s own doc).
+      const humans = await getHumansById([...new Set(entries.map((e) => e.humanId))]);
+      const humanNameById = new Map(humans.map((h) => [h._id, h.name || h.email]));
+
+      for (const { humanId: cardHumanId, date } of entries) {
+        const cards = await getDailyLogCards(cardHumanId, date);
+        const card = cards.find((c) => c.projectFolderId === projectFolder._id);
+        if (!card) continue;
+
+        const humanName = humanNameById.get(cardHumanId) ?? cardHumanId;
+        const { folder: entryFolder } = await getOrCreateDailyLogEntryFolder(projectFolder, {
+          humanId: cardHumanId,
+          humanName,
+          date,
+          cardFileId: card.fileId,
+        });
+
+        // Keep the entry's own `card.md` copy current -- a plain overwrite
+        // (cheap, no LLM call), so capture always reads the Card's LATEST
+        // text even on a day it doesn't otherwise need re-summarizing.
+        const { files: entryFiles } = await listFolderChildren(entryFolder.human_id, entryFolder._id);
+        const cardCopyListing = entryFiles.find((f) => f.name === CARD_COPY_FILE);
+        if (cardCopyListing) {
+          const existingCopy = await getFileRefById(cardCopyListing._id);
+          if (existingCopy && existingCopy.content !== card.content) {
+            await updateFileRef(cardCopyListing._id, { content: card.content });
+          }
+        } else {
+          await createFileRef({
+            human_id: entryFolder.human_id,
+            name: CARD_COPY_FILE,
+            content: card.content,
+            content_type: "text/markdown",
+            folder_id: entryFolder._id,
+          });
+        }
+
+        const dest = { humanId: entryFolder.human_id, folderId: entryFolder._id };
+        for (const attachment of extractFileAttachments(card.content)) {
+          candidates.push({ fileId: attachment.fileId, name: attachment.name, card, caption: attachment.caption, dest });
+        }
+
+        entryMetaInputs.push({
+          entryFolder,
+          humanId: cardHumanId,
+          humanName,
+          date,
+          cardFileId: card.fileId,
+          cardContent: card.content,
+        });
       }
     }
 
-    const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
-    const syncsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "syncs");
-    if (syncsFolder) {
-      candidates.push(...(await collectSyncCandidates(projectFolder.human_id, syncsFolder._id)));
+    // Syncs has no separate "staging" concept -- summarizing IS the only
+    // thing pre-capture does there, so this whole sweep is skill-gated
+    // (unlike the Card-attachment staging above, which just ran
+    // regardless of `skipSummaries`).
+    if (!skipSummaries) {
+      const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
+      const syncsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "syncs");
+      if (syncsFolder) {
+        candidates.push(...(await collectSyncCandidates(projectFolder.human_id, syncsFolder._id)));
+      }
     }
   }
 
@@ -231,6 +363,11 @@ export async function runPreCapture(
   let photoLlm: PhotoDescriber | undefined = opts.photoDescriber;
   let textLlm: LlmProvider | undefined = opts.provider;
   const skillContent = [skill, generalSkill].filter(Boolean).join("\n\n");
+  // `${entryFolderId}:${attachmentFileId}:${hash}` strings, collected as
+  // the loop below processes each Card-attachment candidate -- folded
+  // into that entry's own `_meta.md.sourceHash` once the whole loop
+  // finishes (see `entryMetaInputs` above).
+  const attachmentHashesByEntry = new Map<string, string[]>();
 
   for (const candidate of candidates) {
     const source = await getFileRefById(candidate.fileId);
@@ -241,8 +378,33 @@ export async function runPreCapture(
     if (source.name.endsWith("-summary.md")) continue;
 
     const hash = sourceHash(source.content_hash ?? source.s3_key ?? source._id, candidate.caption);
+    const destHumanId = candidate.dest?.humanId ?? source.human_id;
+    const destFolderId = candidate.dest?.folderId ?? source.folder_id;
+
+    if (candidate.dest) {
+      const list = attachmentHashesByEntry.get(candidate.dest.folderId) ?? [];
+      list.push(`${source._id}:${hash}`);
+      attachmentHashesByEntry.set(candidate.dest.folderId, list);
+
+      // A visible COPY of the attachment itself, so a human browsing
+      // daily-logs/<date>-<person>/ sees the actual photo/file, not just
+      // its summary -- idempotent by NAME (re-running never re-copies
+      // the same attachment into the same entry folder twice; a genuine
+      // rename upstream would be treated as a new file here, a known,
+      // acceptable gap rather than tracked identity).
+      const { files: destSiblings } = await listFolderChildren(destHumanId, destFolderId);
+      if (!destSiblings.some((f) => f.name === source.name)) {
+        await copyFileIntoFolder(source._id, destFolderId);
+      }
+    }
+
+    // Everything above (hash tracking, the visible attachment copy) is
+    // UNCONDITIONAL staging -- only the summary generation below is
+    // gated by `skills/PRE_CAPTURE.md`.
+    if (skipSummaries) continue;
+
     const name = summaryFileName(source.name);
-    const { files: siblings } = await listFolderChildren(source.human_id, source.folder_id);
+    const { files: siblings } = await listFolderChildren(destHumanId, destFolderId);
     const existingListing = siblings.find((f) => f.name === name);
     const existing = existingListing ? await getFileRefById(existingListing._id) : undefined;
 
@@ -338,13 +500,17 @@ export async function runPreCapture(
       ? (await updateFileRef(existing._id, { content }))?._id
       : (
           await createFileRef({
-            human_id: source.human_id,
+            human_id: destHumanId,
             name,
             content,
             content_type: "text/markdown",
-            folder_id: source.folder_id,
-            source: source.source,
-            date: source.date,
+            folder_id: destFolderId,
+            // A daily-logs-destined summary is NOT part of anyone's own
+            // personal daily-log timeline anymore (it lives in the
+            // PROJECT's own tree) -- only carry these markers over for
+            // the unaffected sibling-write cases (syncs, --file).
+            source: candidate.dest ? undefined : source.source,
+            date: candidate.dest ? undefined : source.date,
           })
         )?._id;
     if (!summaryFileId) continue;
@@ -353,5 +519,27 @@ export async function runPreCapture(
     summaries.push({ fileId: source._id, name: source.name, summaryFileId, generated: true });
   }
 
-  return { ok: true, skipped: false, summaries, unsupported };
+  // Refresh every touched entry folder's own `_meta.md` -- ALWAYS (even
+  // when nothing needed re-summarizing this run), so `sourceHash` stays
+  // an accurate reflection of "card.md + every current attachment" for
+  // capture's own idempotency check to key off, and `updatedAt` records
+  // that pre-capture genuinely looked at this entry just now.
+  for (const input of entryMetaInputs) {
+    const attachmentHashes = (attachmentHashesByEntry.get(input.entryFolder._id) ?? []).sort();
+    const overallHash = createHash("sha256")
+      .update(`${input.cardContent}|${attachmentHashes.join(",")}`)
+      .digest("hex")
+      .slice(0, 16);
+    const meta: DailyLogEntryMeta = {
+      humanId: input.humanId,
+      humanName: input.humanName,
+      date: input.date,
+      cardFileId: input.cardFileId,
+      sourceHash: overallHash,
+      updatedAt: new Date().toISOString(),
+    };
+    await writeDailyLogEntryMeta(input.entryFolder, meta);
+  }
+
+  return { ok: true, skipped: skipSummaries, summaries, unsupported };
 }

@@ -5,17 +5,23 @@
  *   pre-capture (`preCapture.server.ts`) -> capture (this file)
  *     -> post-capture (`postCapture.server.ts`)
  *
- * Two parts, run per day, oldest first:
+ * Two parts, run per DAILY-LOGS ENTRY (one per day+contributor pre-capture
+ * has already staged — see `projectN01.server.ts`'s `listDailyLogEntries`
+ * and the `phylog` skill's "Stage 1 — pre-capture" section), oldest first:
  *
  *   1. DETERMINISTIC FILING (`sorter.server.ts`'s `fileCardAttachments`,
- *      unchanged) — every not-yet-filed `::file{...}` Card attachment
- *      (and its pre-capture summary sibling, if one exists) lands in the
- *      project's root.
+ *      unchanged, still sourced from the ORIGINAL Card) — every
+ *      not-yet-filed `::file{...}` Card attachment lands in the project's
+ *      root. Deliberately NOT re-pointed at the daily-logs entry's own
+ *      staged COPY of that attachment — see "Why filing still reads the
+ *      original Card" below.
  *   2. ORGANIZE + README (an LLM agent loop, driven by the project's own
  *      `skills/CAPTURE.md`) — given the project's CURRENT file tree
- *      (everything outside `skills/`/`syncs/`/`newspapers/`, which this
- *      stage never touches), that day's Card content, any pre-capture
- *      summaries, and the current README, the model may call
+ *      (everything outside `skills/`/`syncs/`/`newspapers/`/`daily-logs/`,
+ *      which this stage never touches), the entry's own staged Card text
+ *      (`card.md`) and pre-capture summaries (READ FROM THE ENTRY FOLDER,
+ *      never the contributor's own vault or the live Card directly — see
+ *      the `phylog` skill), and the current README, the model may call
  *      `create_folder`/`move_file` any number of times to (re)organize
  *      what's been filed, then `update_readme` at most once to keep the
  *      README a real index of the result. The model is told about
@@ -31,17 +37,35 @@
  *      an "unknown directive" marker (see the `vault` skill's Projects
  *      section).
  *
+ * WHY FILING STILL READS THE ORIGINAL CARD, not the daily-logs entry's
+ * own staged copy: `fileCardAttachments` is SHARED with the Sorter
+ * (`sorter.server.ts`'s `sortDailyLog`, `nopal sort run`), which files
+ * attachments straight from the original Card into the project root
+ * using a sourceRef keyed off the ORIGINAL attachment's own fileId. If
+ * capture instead filed the daily-logs entry's own COPY (a different
+ * fileId, made by pre-capture), the two would no longer agree on identity
+ * and could each file a separate copy of the same photo into the project
+ * root. Keeping capture's deterministic-filing step pointed at the
+ * ORIGINAL Card preserves that existing dedup guarantee untouched; only
+ * the AGENT's own context (Card text + summaries, read fresh from the
+ * daily-logs entry folder) moved.
+ *
  * TWO MODES:
- *   - Incremental (default): walks every day this project has a Card for,
- *     skipping any already recorded (idempotent against a hash of that
- *     day's Card content, exactly like the single-tool version this
- *     replaced) -- "just the daily logs that haven't been applied yet".
+ *   - Incremental (default): walks every daily-logs entry this project
+ *     has, skipping any already recorded (idempotent against a hash of
+ *     that entry's OWN staged content -- `_meta.md`'s `sourceHash`,
+ *     refreshed by pre-capture every run) -- "just the entries that
+ *     haven't been applied yet".
  *   - Full (`full: true`): first calls `resetProjectN01Content` (wiping
  *     everything this stage manages, and this project's own Release Log
  *     history -- see that function's own doc for why the latter is
- *     required), then walks EVERY day from scratch. Always an explicit,
- *     separate operation from `nopal phylog reset` alone -- reset only
- *     wipes; `capture --full` wipes AND rebuilds.
+ *     required) -- but, by DEFAULT, leaves `daily-logs` itself intact
+ *     (see the `phylog` skill's "Reset" section for the two distinct
+ *     reset depths), then walks EVERY entry from scratch. Always an
+ *     explicit, separate operation from `nopal phylog reset` alone --
+ *     reset only wipes; `capture --full` wipes AND rebuilds, straight
+ *     from whatever's already staged in `daily-logs/` -- no need to
+ *     re-run pre-capture first.
  *
  * ALWAYS APPLIES -- there is no preview/dry-run mode. The Release Log's
  * revert mechanism (`nopal release-log revert`) is the safety net.
@@ -49,21 +73,22 @@
  * CROSS-HUMAN BY DESIGN: `runCapture`'s own `actingHumanId` parameter is
  * ONLY the human who triggered this run (used for the top-level "agent
  * not configured" style bookkeeping) -- it does NOT restrict which
- * Cards get processed. `listCardEntriesForProject` (`dailyLog.server.ts`)
- * enumerates every (humanId, date) pair that has a Card for THIS project,
- * across every human who's ever written one, and each entry is processed
- * under ITS OWN humanId (filing, README-writing, usage tracking, that
- * human's own daily release-log.md). This isn't a new trust boundary --
- * a Card was already cross-human safe (any Sharing Role, including
- * Observer, may write one for a project they can see -- see the `vault`
- * skill's Cards section, and `sorter.server.ts`'s `fileCardAttachments`,
- * which already filed a collaborator's attachments into the project
- * without needing write access to their vault). Running capture used to
- * silently only sweep the CALLER's own Cards, which meant a project
- * owner's own `phylog capture` run could never see a collaborator's
- * Card at all, no matter how many times it ran -- fixed so any single
- * owner-tier human running this for a shared project applies EVERYONE's
- * outstanding Cards in one pass, not just their own.
+ * daily-logs entries get processed. `listDailyLogEntries`
+ * (`projectN01.server.ts`) enumerates every (day, contributor) entry
+ * staged for THIS project, across every human whose Card was ever
+ * pre-captured, and each entry is processed under ITS OWN humanId
+ * (filing, README-writing, usage tracking, that human's own daily
+ * release-log.md). This isn't a new trust boundary -- a Card was already
+ * cross-human safe (any Sharing Role, including Observer, may write one
+ * for a project they can see -- see the `vault` skill's Cards section,
+ * and `sorter.server.ts`'s `fileCardAttachments`, which already filed a
+ * collaborator's attachments into the project without needing write
+ * access to their vault). Running capture used to silently only sweep
+ * the CALLER's own Cards, which meant a project owner's own `phylog
+ * capture` run could never see a collaborator's Card at all, no matter
+ * how many times it ran -- fixed so any single owner-tier human running
+ * this for a shared project applies EVERYONE's outstanding entries in one
+ * pass, not just their own.
  *
  * Each day's organize/README agent loop is isolated in its own try/catch
  * (`captureOneDay`) — a failure on one day (a rate limit, a transient
@@ -82,12 +107,9 @@
  * `vault` skill's own chained-edit replay caveat).
  */
 
-import { createHash } from "node:crypto";
 import {
   getDailyLogCards,
   getDailyLogFolderAndReadmeId,
-  listCardEntriesForProject,
-  type DailyLogCard,
 } from "./dailyLog.server";
 import {
   createFileRef,
@@ -107,8 +129,10 @@ import {
 } from "./releaseLog.server";
 import { fileCardAttachments, summaryFileName, type FiledAttachment } from "./sorter.server";
 import {
+  CARD_COPY_FILE,
   DEFAULT_CAPTURE_SKILL,
   getProjectStageSkill,
+  listDailyLogEntries,
   resetProjectN01Content,
   type ResetSummary,
 } from "./projectN01.server";
@@ -117,14 +141,14 @@ import { classifyLlmError, recordPhylogUsage } from "./phylogMetrics.server";
 import { getHumansById } from "./humans.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolCall, ToolDefinition } from "./llmProvider";
 
-const MANAGED_FOLDER_TYPES = new Set(["skills", "syncs", "newspapers"]);
+const MANAGED_FOLDER_TYPES = new Set(["skills", "syncs", "newspapers", "daily-logs"]);
 
 // ─── Tools ──────────────────────────────────────────────────────────────
 
 const CREATE_FOLDER_TOOL: ToolDefinition = {
   name: "create_folder",
   description:
-    "Create a folder (and any missing parent folders) inside this project, to organize filed content. Path is relative to the project root — e.g. \"Photos/2026-08\". Never targets skills/, syncs/, or newspapers/ (reserved). If you plan to reference this folder from a ::gallery{folder=\"...\"} directive in the README, create it as a SINGLE, direct child of the project root (e.g. \"Hip Installation\", not \"Photos/Hip Installation\") — the gallery directive only resolves direct children by name, never nested paths.",
+    "Create a folder (and any missing parent folders) inside this project, to organize filed content. Path is relative to the project root — e.g. \"Photos/2026-08\". Never targets skills/, syncs/, newspapers/, or daily-logs/ (reserved). If you plan to reference this folder from a ::gallery{folder=\"...\"} directive in the README, create it as a SINGLE, direct child of the project root (e.g. \"Hip Installation\", not \"Photos/Hip Installation\") — the gallery directive only resolves direct children by name, never nested paths.",
   inputSchema: {
     type: "object",
     properties: {
@@ -137,7 +161,7 @@ const CREATE_FOLDER_TOOL: ToolDefinition = {
 const MOVE_FILE_TOOL: ToolDefinition = {
   name: "move_file",
   description:
-    "Move a file already filed in this project (by its current name) into a different folder inside the project. Creates the destination folder if it doesn't exist yet. Never targets skills/, syncs/, or newspapers/.",
+    "Move a file already filed in this project (by its current name) into a different folder inside the project. Creates the destination folder if it doesn't exist yet. Never targets skills/, syncs/, newspapers/, or daily-logs/.",
   inputSchema: {
     type: "object",
     properties: {
@@ -201,9 +225,9 @@ async function runAgentLoop(
 }
 
 /** Renders every folder/file in `projectFolder`'s tree EXCLUDING the
- * skills/syncs/newspapers subtrees — capture never touches, and never
- * even shows the model, the one human-writable part of a project-n01
- * folder. */
+ * skills/syncs/newspapers/daily-logs subtrees — capture never touches,
+ * and never even shows the model, the human-writable (skills/syncs) or
+ * pre-capture-owned (daily-logs) parts of a project-n01 folder. */
 async function renderManagedTree(
   humanId: string,
   folderId: string,
@@ -242,7 +266,7 @@ async function findManagedFileByName(
 }
 
 /** mkdir -p, relative to the project root — refuses to cross into a
- * skills/syncs/newspapers anchor by name. */
+ * skills/syncs/newspapers/daily-logs anchor by name. */
 async function resolveOrCreatePath(
   projectFolder: VaultFolder,
   relativePath: string,
@@ -256,7 +280,7 @@ async function resolveOrCreatePath(
         f.name.toLowerCase() === segment.toLowerCase(),
     );
     if (existingAnchor) {
-      return { ok: false, error: `"${segment}" is a reserved folder (skills/syncs/newspapers) and can't be used here` };
+      return { ok: false, error: `"${segment}" is a reserved folder (skills/syncs/newspapers/daily-logs) and can't be used here` };
     }
     const existing = folders.find((f) => f.name.toLowerCase() === segment.toLowerCase());
     if (existing) {
@@ -282,7 +306,7 @@ The README is rendered with OxMarkdown directive support, not plain markdown alo
 - ::csv-table{file="project.csv" title="Optional title"} — renders a CSV file (a direct child of the project root) as a table.
 - ::svg{file="<name>" title="Optional title"} — renders an SVG file (a direct child of the project root) inline.
 
-All three only resolve DIRECT children of the project root by name — never nested paths, never files/folders inside skills/syncs/newspapers.`;
+All three only resolve DIRECT children of the project root by name — never nested paths, never files/folders inside skills/syncs/newspapers/daily-logs.`;
 
 function buildSystemPrompt(skillContent: string, generalSkill: string | null): string {
   const generalSection = generalSkill ? `\n\n## Project SKILL.md (general steering)\n\n${generalSkill}` : "";
@@ -290,8 +314,8 @@ function buildSystemPrompt(skillContent: string, generalSkill: string | null): s
 
 You will be given:
 - This project's own CAPTURE.md instructions (and, if present, its general SKILL.md steering) — follow them closely.
-- The project's CURRENT file tree (excluding its skills/syncs/newspapers folders, which you can never see or touch).
-- One day's Card content for this project, and any files just filed into it today.
+- The project's CURRENT file tree (excluding its skills/syncs/newspapers/daily-logs folders, which you can never see or touch).
+- That day's staged Card content (from this project's own daily-logs/ entry), and any files just filed into the project today.
 - Pre-capture summaries for any of today's attachments, when available.
 - The project's current README.md.
 
@@ -365,18 +389,26 @@ export async function runCapture(
   }
 
   const until = opts.until ?? new Date().toISOString().slice(0, 10);
-  const entries = await listCardEntriesForProject(projectFolder._id, {
-    since: opts.since,
-    until,
+  // Every (day, contributor) entry pre-capture has already staged for
+  // this project -- see `listDailyLogEntries`'s own doc. Bounded to
+  // `since`/`until` here (that helper itself is unbounded, since
+  // `preCapture.server.ts`'s own `--date` mode needs a narrower,
+  // date-only query shape it builds itself).
+  const entries = (await listDailyLogEntries(projectFolder)).filter(({ meta }) => {
+    if (opts.since && meta.date < opts.since) return false;
+    if (meta.date > until) return false;
+    return true;
   });
   if (entries.length === 0) {
-    log("capture: no Card found for this project on any day in range.");
+    log(
+      "capture: no daily-logs entries found for this project in range -- run `nopal phylog pre-capture` first.",
+    );
     return { ok: true, full: opts.full, resetSummary, days: [] };
   }
 
   // Human-readable labels for the progress log only (never affects which
   // entries get processed) -- one batched lookup instead of one per entry.
-  const humans = await getHumansById([...new Set(entries.map((e) => e.humanId))]);
+  const humans = await getHumansById([...new Set(entries.map(({ meta }) => meta.humanId))]);
   const humanLabelById = new Map(humans.map((h) => [h._id, h.name || h.email]));
   const describeHuman = (id: string) => humanLabelById.get(id) ?? id;
 
@@ -397,25 +429,42 @@ export async function runCapture(
   const touchedHumanDates = new Map<string, string>();
   let releaseLogsDirty = false;
 
-  for (const { humanId: cardHumanId, date } of entries) {
+  for (const { folder: entryFolder, meta } of entries) {
+    const { humanId: cardHumanId, date } = meta;
+    const who = describeHuman(cardHumanId);
+
+    // Deterministic filing still reads the ORIGINAL Card (not the
+    // daily-logs entry's own staged copy) -- see this file's module doc
+    // ("Why filing still reads the original Card") for why that's
+    // required, not just convenient. A Card can vanish out from under an
+    // already-staged entry (deleted, or the day's readme.md edited to
+    // drop it) -- filing is simply skipped then, the agent step below
+    // still runs off whatever's already staged in `daily-logs/`.
     const cards = await getDailyLogCards(cardHumanId, date);
     const card = cards.find((c) => c.projectFolderId === projectFolder._id);
-    if (!card) continue;
-
-    const who = describeHuman(cardHumanId);
-    log(`capture: ${date} (${who}) -- filing attachments...`);
-    const { filed } = await fileCardAttachments(card, date, cardHumanId, { dryRun: false });
-    if (filed.length > 0) {
-      releaseLogsDirty = true;
-      touchedHumanDates.set(`${cardHumanId}:${date}`, cardHumanId);
-      for (const f of filed) log(`capture: ${date} (${who}) -- filed "${f.name}".`);
+    let filed: FiledAttachment[] = [];
+    if (card) {
+      log(`capture: ${date} (${who}) -- filing attachments...`);
+      const result = await fileCardAttachments(card, date, cardHumanId, { dryRun: false });
+      filed = result.filed;
+      if (filed.length > 0) {
+        releaseLogsDirty = true;
+        touchedHumanDates.set(`${cardHumanId}:${date}`, cardHumanId);
+        for (const f of filed) log(`capture: ${date} (${who}) -- filed "${f.name}".`);
+      }
+    } else {
+      log(`capture: ${date} (${who}) -- original Card no longer exists; organizing from staged daily-logs content only.`);
     }
 
-    const contentHash = createHash("sha256").update(card.content).digest("hex").slice(0, 16);
-    const sourceRef = `${card.fileId}:${contentHash}`;
+    // Idempotency keys off the ENTRY's own staged content hash
+    // (`_meta.md.sourceHash`, refreshed by pre-capture every run) --
+    // never the live Card directly, so this stays correct even for a
+    // Card that's since been deleted (the entry's own hash simply stops
+    // changing).
+    const sourceRef = `${entryFolder._id}:${meta.sourceHash}`;
     const existing = await findReleaseLogEntryBySource(projectFolder._id, date, "ai-update", sourceRef);
     if (existing) {
-      log(`capture: ${date} (${who}) -- already applied for this Card's current content.`);
+      log(`capture: ${date} (${who}) -- already applied for this entry's current content.`);
       await recordPhylogUsage({
         humanId: cardHumanId,
         projectFolderId: projectFolder._id,
@@ -435,7 +484,7 @@ export async function runCapture(
         actingHumanId: cardHumanId,
         projectFolder,
         date,
-        card,
+        entryFolder,
         filed,
         sourceRef,
         llm,
@@ -493,7 +542,10 @@ async function captureOneDay(input: {
   actingHumanId: string;
   projectFolder: VaultFolder;
   date: string;
-  card: DailyLogCard;
+  /** This (day, contributor)'s own daily-logs staging folder -- the
+   * SOLE source of "today's content" for the agent below (never the
+   * live Card or the contributor's own vault directly). */
+  entryFolder: VaultFolder;
   filed: FiledAttachment[];
   sourceRef: string;
   llm: LlmProvider;
@@ -501,16 +553,24 @@ async function captureOneDay(input: {
   generalSkill: string | null;
   log: (line: string) => void;
 }): Promise<{ readmeUpdated: boolean; organizeActions: string[] }> {
-  const { actingHumanId, projectFolder, date, card, filed, sourceRef, llm, skillContent, generalSkill, log } = input;
+  const { actingHumanId, projectFolder, date, entryFolder, filed, sourceRef, llm, skillContent, generalSkill, log } = input;
 
   const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
   const readmeContent = readme?.content ?? "";
   const tree = await renderManagedTree(projectFolder.human_id, projectFolder._id);
 
+  // "Today's content" is read straight from the entry's own staged
+  // files -- `card.md` (kept current by pre-capture) plus every
+  // generated `*-summary.md` sibling -- never `card.content`/the
+  // contributor's own vault. See this file's module doc.
+  const { files: entryFiles } = await listFolderChildren(entryFolder.human_id, entryFolder._id);
+  const cardCopyListing = entryFiles.find((f) => f.name === CARD_COPY_FILE);
+  const cardCopyFile = cardCopyListing ? await getFileRefById(cardCopyListing._id) : undefined;
+  const cardContent = cardCopyFile?.content ?? "";
+
   const summaries: { name: string; body: string }[] = [];
   for (const f of filed) {
-    const { files: siblings } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
-    const listing = siblings.find((s) => s.name === summaryFileName(f.name));
+    const listing = entryFiles.find((s) => s.name === summaryFileName(f.name));
     if (!listing) continue;
     const file = await getFileRefById(listing._id);
     if (file?.content) summaries.push({ name: f.name, body: splitFrontmatter(file.content).body.trim() });
@@ -541,7 +601,7 @@ async function captureOneDay(input: {
     update_readme: async () => "Recorded.",
   };
 
-  const userPrompt = buildUserPrompt({ tree, cardContent: card.content, filed, summaries, readmeContent });
+  const userPrompt = buildUserPrompt({ tree, cardContent, filed, summaries, readmeContent });
   const { toolCallsMade, usage, durationMs, model } = await runAgentLoop(
     llm,
     buildSystemPrompt(skillContent, generalSkill),

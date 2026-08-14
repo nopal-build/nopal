@@ -397,7 +397,7 @@ pub fn post_capture(project_path: &str) -> Result<(), Box<dyn Error + Send + Syn
 pub fn reset(project_path: &str, confirmed: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     if !confirmed {
         return Err(format!(
-            "This deletes everything in {project_path}/ except its skills/ and syncs/ folders. Pass --yes to confirm."
+            "This deletes everything in {project_path}/ except its skills/, syncs/, and daily-logs/ folders. Pass --yes to confirm."
         )
         .into());
     }
@@ -410,10 +410,47 @@ pub fn reset(project_path: &str, confirmed: bool) -> Result<(), Box<dyn Error + 
     let job_id = enqueue(&client, "/api/phylog/reset", &body)?;
     let result: ResetResult = poll_job(&client, &job_id)?;
     println!(
-        "Reset removed {} folder(s) and {} file(s). skills/ and syncs/ were left untouched.",
+        "Reset removed {} folder(s) and {} file(s). skills/, syncs/, and daily-logs/ were left untouched.",
         result.summary.deleted_folders.len(),
         result.summary.deleted_files.len()
     );
-    println!("Run `nopal phylog capture --project {project_path} --full` to rebuild.");
+    println!(
+        "Run `nopal phylog capture --project {project_path} --full` to rebuild from daily-logs/."
+    );
+    Ok(())
+}
+
+/// `nopal phylog reset-pre-capture --project <path> --yes`
+///
+/// The DEEPER reset -- everything `reset` wipes, PLUS the project's own
+/// `daily-logs` staging folder (pre-capture's own output). Needed when
+/// pre-capture's own output itself should be regenerated from scratch
+/// (e.g. after editing `skills/PRE_CAPTURE.md`). Requires `nopal phylog
+/// pre-capture` (to restage `daily-logs`) before `capture --full` has
+/// anything to rebuild from again.
+pub fn reset_pre_capture(
+    project_path: &str,
+    confirmed: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !confirmed {
+        return Err(format!(
+            "This deletes everything in {project_path}/ except its skills/ and syncs/ folders -- INCLUDING daily-logs/ (pre-capture's own staged output). Pass --yes to confirm."
+        )
+        .into());
+    }
+
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== PhyLog reset-pre-capture: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/phylog/reset-pre-capture", &body)?;
+    let result: ResetResult = poll_job(&client, &job_id)?;
+    println!(
+        "Reset removed {} folder(s) and {} file(s), including daily-logs/. skills/ and syncs/ were left untouched.",
+        result.summary.deleted_folders.len(),
+        result.summary.deleted_files.len()
+    );
+    println!("Run `nopal phylog pre-capture --project {project_path}` to restage daily-logs/, then `nopal phylog capture --project {project_path} --full` to rebuild.");
     Ok(())
 }

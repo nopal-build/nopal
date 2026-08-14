@@ -19,7 +19,7 @@ import type {
   ToolDefinition,
 } from "./llmProvider";
 
-const DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
+const DEFAULT_MODEL = "claude-sonnet-5";
 const DEFAULT_MAX_TOKENS = 4096;
 /** Vision calls want a paragraph, not a whole README — kept separate from
  * `DEFAULT_MAX_TOKENS` so tightening one doesn't silently affect the

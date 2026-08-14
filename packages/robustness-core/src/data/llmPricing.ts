@@ -27,7 +27,7 @@
  * against https://platform.claude.com/docs/en/about-claude/pricing —
  * whether or not the numbers actually changed, so staleness reflects
  * "last checked," not just "last edited." */
-export const PRICING_AS_OF = "2026-08-12";
+export const PRICING_AS_OF = "2026-08-14";
 
 const PRICING_MAX_AGE_DAYS = 30;
 
@@ -44,8 +44,9 @@ export type ModelPricing = {
 // need an entry — an unlisted model just can't be cost-estimated yet
 // (`estimateCostUsd` returns null, never throws).
 const MODEL_PRICING: Record<string, ModelPricing> = {
-  "claude-sonnet-4-5-20250929": { inputPerMTok: 3, outputPerMTok: 15 },
+  "claude-sonnet-5": { inputPerMTok: 2, outputPerMTok: 10 },
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
+  "claude-sonnet-4-5-20250929": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
 };
 

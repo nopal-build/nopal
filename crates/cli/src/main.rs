@@ -425,9 +425,11 @@ enum PhylogCommand {
         #[arg(long)]
         until: Option<String>,
     },
-    /// Stage 1: pre-processes daily-log Card attachments and this
-    /// project's own syncs/ files into `*-summary.md` sidecars, per
-    /// skills/PRE_CAPTURE.md's own instructions (a no-op by default).
+    /// Stage 1: stages each Card's text/attachments into this project's
+    /// own daily-logs/ folder (always, regardless of skill), and
+    /// generates `*-summary.md` sidecars for daily-logs attachments and
+    /// syncs/ files per skills/PRE_CAPTURE.md's own instructions
+    /// (summaries are skipped by default; staging never is).
     PreCapture {
         /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
         #[arg(long)]
@@ -470,10 +472,22 @@ enum PhylogCommand {
         #[arg(long)]
         project: String,
     },
-    /// Deletes everything in this project EXCEPT its skills/ and syncs/
-    /// folders — the "start over" operation, always explicit and never
-    /// run implicitly. Follow with `capture --full` to rebuild.
+    /// Deletes everything in this project EXCEPT its skills/, syncs/, and
+    /// daily-logs/ folders — the "start over" operation, always explicit
+    /// and never run implicitly. Follow with `capture --full` to rebuild
+    /// straight from what's already staged in daily-logs/.
     Reset {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually delete anything — this is destructive.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// The DEEPER reset: everything `reset` wipes, PLUS daily-logs/
+    /// itself (pre-capture's own staged output). Follow with `pre-capture`
+    /// (to restage daily-logs/) then `capture --full` (to rebuild).
+    ResetPreCapture {
         /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
         #[arg(long)]
         project: String,
@@ -750,6 +764,9 @@ fn main() {
                 } => phylog::capture(&project, full, since.as_deref(), until.as_deref()),
                 PhylogCommand::PostCapture { project } => phylog::post_capture(&project),
                 PhylogCommand::Reset { project, yes } => phylog::reset(&project, yes),
+                PhylogCommand::ResetPreCapture { project, yes } => {
+                    phylog::reset_pre_capture(&project, yes)
+                }
             };
             if let Err(e) = result {
                 eprintln!("{e}");

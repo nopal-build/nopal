@@ -29,10 +29,10 @@
  *    delete, share, trash — are a separate, still-owner-writable concern;
  *    see `vault.server.ts`'s `canWriteToFolderId` doc.
  *
- * 1. Space types (`SpaceFolderTypeKey`) — `skills`, `syncs`, and the not-
- *    yet-buildable `newspapers`. Creatable directly inside a `project-n01`
- *    folder (a project, or `personal`). SINGLETON per parent — at most one
- *    of each per `project-n01` (enforced server-side,
+ * 1. Space types (`SpaceFolderTypeKey`) — `skills`, `syncs`, `daily-logs`,
+ *    and the not-yet-buildable `newspapers`. Creatable directly inside a
+ *    `project-n01` folder (a project, or `personal`). SINGLETON per parent
+ *    — at most one of each per `project-n01` (enforced server-side,
  *    `validateFolderTypeForParent` in `vault.server.ts`).
  *      - `skills` codifies the identity of that project/space — instructions
  *        steering how it should be built, organized, and maintained (an
@@ -43,6 +43,18 @@
  *        `projectN01.server.ts`) — the ONE place a human directly steers
  *        the otherwise fully PhyLog-managed tree.
  *      - `syncs` is a data-collection container — see tier 2.
+ *      - `daily-logs` is pre-capture's own OUTPUT space (NOT to be confused
+ *        with the vault-wide `daily-logs` ROOT — this is a per-project
+ *        folder TYPE, a completely separate concept that happens to share
+ *        the name): a staging area, one subfolder per (day, contributor),
+ *        holding a copy of that day's Card plus generated summaries, which
+ *        `nopal phylog capture` then reads to decide how to organize the
+ *        project and update its README (see the `phylog` skill's "Stage 1
+ *        — pre-capture" / "Stage 2 — capture" sections). `writable:
+ *        "system"` — pre-capture populates it directly via the data layer,
+ *        never through the `api.vault.*` routes this gates. NOT created at
+ *        project creation time (unlike `skills`) — lazily created the
+ *        first time pre-capture actually has something to write.
  *      - `newspapers` is RESERVED for individual/daily newspapers PhyLog's
  *        post-capture stage will eventually generate — not implemented
  *        yet (`comingSoon: true`), and `writable: "system"` since, once
@@ -70,7 +82,7 @@ import type { Role } from "./humans.server";
 
 export type ContainerFolderTypeKey = "project-n01";
 
-export type SpaceFolderTypeKey = "skills" | "syncs" | "newspapers";
+export type SpaceFolderTypeKey = "skills" | "syncs" | "newspapers" | "daily-logs";
 
 export type SyncFolderTypeKey =
   | "sync-one-way"
@@ -150,6 +162,17 @@ export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> 
     shareable: false,
     publishable: false,
     comingSoon: true,
+  },
+  "daily-logs": {
+    label: "Daily Logs",
+    description:
+      "Pre-processed Cards and their attachments, staged by PhyLog's pre-capture stage and grouped by day and contributor. System-managed — capture reads its organizing decisions from here (and syncs/), not directly editable.",
+    // PhyLog-managed, same as the project-n01 anchor itself — pre-capture
+    // writes here directly via the data layer, never through the
+    // `api.vault.*` routes this gates.
+    writable: "system",
+    shareable: false,
+    publishable: false,
   },
 };
 

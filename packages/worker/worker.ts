@@ -79,7 +79,12 @@ async function processJob(job: Job<PhylogJobData, unknown, PhylogJobName>): Prom
       return await runPostCapture(job.data.actingHumanId, projectFolder, onProgress);
     }
     case "reset": {
-      const result = await resetProject(job.data.projectFolderId);
+      const result = await resetProject(job.data.projectFolderId, { wipeDailyLogs: false });
+      if (!result.ok) throw new Error(result.error);
+      return result;
+    }
+    case "reset-pre-capture": {
+      const result = await resetProject(job.data.projectFolderId, { wipeDailyLogs: true });
       if (!result.ok) throw new Error(result.error);
       return result;
     }
