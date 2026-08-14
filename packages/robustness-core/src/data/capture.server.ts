@@ -35,16 +35,35 @@
  *   - Incremental (default): walks every day this project has a Card for,
  *     skipping any already recorded (idempotent against a hash of that
  *     day's Card content, exactly like the single-tool version this
- *     replaced) — "just the daily logs that haven't been applied yet".
+ *     replaced) -- "just the daily logs that haven't been applied yet".
  *   - Full (`full: true`): first calls `resetProjectN01Content` (wiping
  *     everything this stage manages, and this project's own Release Log
- *     history — see that function's own doc for why the latter is
+ *     history -- see that function's own doc for why the latter is
  *     required), then walks EVERY day from scratch. Always an explicit,
- *     separate operation from `nopal phylog reset` alone — reset only
+ *     separate operation from `nopal phylog reset` alone -- reset only
  *     wipes; `capture --full` wipes AND rebuilds.
  *
- * ALWAYS APPLIES — there is no preview/dry-run mode. The Release Log's
+ * ALWAYS APPLIES -- there is no preview/dry-run mode. The Release Log's
  * revert mechanism (`nopal release-log revert`) is the safety net.
+ *
+ * CROSS-HUMAN BY DESIGN: `runCapture`'s own `actingHumanId` parameter is
+ * ONLY the human who triggered this run (used for the top-level "agent
+ * not configured" style bookkeeping) -- it does NOT restrict which
+ * Cards get processed. `listCardEntriesForProject` (`dailyLog.server.ts`)
+ * enumerates every (humanId, date) pair that has a Card for THIS project,
+ * across every human who's ever written one, and each entry is processed
+ * under ITS OWN humanId (filing, README-writing, usage tracking, that
+ * human's own daily release-log.md). This isn't a new trust boundary --
+ * a Card was already cross-human safe (any Sharing Role, including
+ * Observer, may write one for a project they can see -- see the `vault`
+ * skill's Cards section, and `sorter.server.ts`'s `fileCardAttachments`,
+ * which already filed a collaborator's attachments into the project
+ * without needing write access to their vault). Running capture used to
+ * silently only sweep the CALLER's own Cards, which meant a project
+ * owner's own `phylog capture` run could never see a collaborator's
+ * Card at all, no matter how many times it ran -- fixed so any single
+ * owner-tier human running this for a shared project applies EVERYONE's
+ * outstanding Cards in one pass, not just their own.
  *
  * Each day's organize/README agent loop is isolated in its own try/catch
  * (`captureOneDay`) — a failure on one day (a rate limit, a transient
@@ -67,7 +86,7 @@ import { createHash } from "node:crypto";
 import {
   getDailyLogCards,
   getDailyLogFolderAndReadmeId,
-  listCardDatesForProject,
+  listCardEntriesForProject,
   type DailyLogCard,
 } from "./dailyLog.server";
 import {
@@ -95,6 +114,7 @@ import {
 } from "./projectN01.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
 import { classifyLlmError, recordPhylogUsage } from "./phylogMetrics.server";
+import { getHumansById } from "./humans.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolCall, ToolDefinition } from "./llmProvider";
 
 const MANAGED_FOLDER_TYPES = new Set(["skills", "syncs", "newspapers"]);
@@ -308,6 +328,12 @@ function buildUserPrompt(input: {
 
 export type CaptureDayResult = {
   date: string;
+  /** Whose own Card this day's processing came from -- capture now walks
+   * EVERY collaborator's Cards for this project, not just whoever
+   * invoked the run (see `listCardEntriesForProject`), so a single
+   * `runCapture` call can produce several `CaptureDayResult`s for the
+   * SAME date, one per human. */
+  humanId: string;
   filed: FiledAttachment[];
   organizeActions: string[];
   readmeUpdated: boolean;
@@ -339,14 +365,20 @@ export async function runCapture(
   }
 
   const until = opts.until ?? new Date().toISOString().slice(0, 10);
-  const dates = await listCardDatesForProject(actingHumanId, projectFolder._id, {
+  const entries = await listCardEntriesForProject(projectFolder._id, {
     since: opts.since,
     until,
   });
-  if (dates.length === 0) {
+  if (entries.length === 0) {
     log("capture: no Card found for this project on any day in range.");
     return { ok: true, full: opts.full, resetSummary, days: [] };
   }
+
+  // Human-readable labels for the progress log only (never affects which
+  // entries get processed) -- one batched lookup instead of one per entry.
+  const humans = await getHumansById([...new Set(entries.map((e) => e.humanId))]);
+  const humanLabelById = new Map(humans.map((h) => [h._id, h.name || h.email]));
+  const describeHuman = (id: string) => humanLabelById.get(id) ?? id;
 
   const skillContent = (await getProjectStageSkill(projectFolder, "CAPTURE.md")) ?? DEFAULT_CAPTURE_SKILL;
   // Backward-compat continuity: a project may already have a general
@@ -356,36 +388,43 @@ export async function runCapture(
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
   const llm = opts.provider ?? new AnthropicProvider();
   const days: CaptureDayResult[] = [];
-  const touchedDates = new Set<string>();
+  // Keyed `${humanId}:${date}` -> humanId (same convention
+  // `releaseLog.server.ts`'s `clearReleaseLogForProject` already uses) --
+  // a single date can now be touched by SEVERAL different humans' own
+  // Cards, and each one's own release-log.md lives in THEIR OWN vault, so
+  // regenerating "the day's release log" has to happen per (human, date),
+  // never just per date.
+  const touchedHumanDates = new Map<string, string>();
   let releaseLogsDirty = false;
 
-  for (const date of dates) {
-    const cards = await getDailyLogCards(actingHumanId, date);
+  for (const { humanId: cardHumanId, date } of entries) {
+    const cards = await getDailyLogCards(cardHumanId, date);
     const card = cards.find((c) => c.projectFolderId === projectFolder._id);
     if (!card) continue;
 
-    log(`capture: ${date} — filing attachments…`);
-    const { filed } = await fileCardAttachments(card, date, actingHumanId, { dryRun: false });
+    const who = describeHuman(cardHumanId);
+    log(`capture: ${date} (${who}) -- filing attachments...`);
+    const { filed } = await fileCardAttachments(card, date, cardHumanId, { dryRun: false });
     if (filed.length > 0) {
       releaseLogsDirty = true;
-      touchedDates.add(date);
-      for (const f of filed) log(`capture: ${date} — filed "${f.name}".`);
+      touchedHumanDates.set(`${cardHumanId}:${date}`, cardHumanId);
+      for (const f of filed) log(`capture: ${date} (${who}) -- filed "${f.name}".`);
     }
 
     const contentHash = createHash("sha256").update(card.content).digest("hex").slice(0, 16);
     const sourceRef = `${card.fileId}:${contentHash}`;
     const existing = await findReleaseLogEntryBySource(projectFolder._id, date, "ai-update", sourceRef);
     if (existing) {
-      log(`capture: ${date} — already applied for this Card's current content.`);
+      log(`capture: ${date} (${who}) -- already applied for this Card's current content.`);
       await recordPhylogUsage({
-        humanId: actingHumanId,
+        humanId: cardHumanId,
         projectFolderId: projectFolder._id,
         stage: "capture",
         kind: "organize",
         durationMs: 0,
         outcome: "skipped",
       });
-      days.push({ date, filed, organizeActions: [], readmeUpdated: false, alreadyApplied: true });
+      days.push({ date, humanId: cardHumanId, filed, organizeActions: [], readmeUpdated: false, alreadyApplied: true });
       continue;
     }
 
@@ -393,7 +432,7 @@ export async function runCapture(
     let organizeActions: string[] = [];
     try {
       const result = await captureOneDay({
-        actingHumanId,
+        actingHumanId: cardHumanId,
         projectFolder,
         date,
         card,
@@ -408,16 +447,16 @@ export async function runCapture(
       organizeActions = result.organizeActions;
       if (readmeUpdated || organizeActions.length > 0) {
         releaseLogsDirty = true;
-        touchedDates.add(date);
+        touchedHumanDates.set(`${cardHumanId}:${date}`, cardHumanId);
       } else {
-        log(`capture: ${date} — no README update or reorganization warranted.`);
+        log(`capture: ${date} (${who}) -- no README update or reorganization warranted.`);
       }
     } catch (err) {
       log(
-        `capture: ${date} — organize/README step failed (${err instanceof Error ? err.message : "unknown error"}).`,
+        `capture: ${date} (${who}) -- organize/README step failed (${err instanceof Error ? err.message : "unknown error"}).`,
       );
       await recordPhylogUsage({
-        humanId: actingHumanId,
+        humanId: cardHumanId,
         projectFolderId: projectFolder._id,
         stage: "capture",
         kind: "organize",
@@ -427,14 +466,15 @@ export async function runCapture(
       });
     }
 
-    days.push({ date, filed, organizeActions, readmeUpdated, alreadyApplied: false });
+    days.push({ date, humanId: cardHumanId, filed, organizeActions, readmeUpdated, alreadyApplied: false });
   }
 
   if (releaseLogsDirty) {
     await regenerateProjectReleaseLog(projectFolder._id);
-    for (const date of touchedDates) {
-      const { dateFolderId } = await getDailyLogFolderAndReadmeId(actingHumanId, date);
-      await regenerateDailyReleaseLog(actingHumanId, date, dateFolderId);
+    for (const [key, humanId] of touchedHumanDates) {
+      const date = key.slice(humanId.length + 1);
+      const { dateFolderId } = await getDailyLogFolderAndReadmeId(humanId, date);
+      await regenerateDailyReleaseLog(humanId, date, dateFolderId);
     }
   }
 

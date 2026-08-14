@@ -344,25 +344,29 @@ export async function getDailyLogCards(
 }
 
 /**
- * Every date (ascending) that already has a Card for `projectFolderId` —
- * the enumeration PhyLog's pre-capture and capture stages
- * (`preCapture.server.ts`/`capture.server.ts`) walk so "run PhyLog for
- * everything" doesn't require the caller to already know which specific
- * days have anything to process. Queries `file_refs` directly (by
- * `project_folder_id`, not by folder) since Cards for the same project are
- * scattered across many different date folders.
+ * Every (humanId, date) pair that already has a Card for `projectFolderId`
+ * — across EVERY human who's ever written one for this project, not just
+ * a single acting human. PhyLog's pre-capture and capture stages
+ * (`preCapture.server.ts`/`capture.server.ts`) walk this so "run PhyLog
+ * for this project" always sweeps every collaborator's Cards, not just
+ * whoever happens to be running the CLI/API call — a Card is ALREADY
+ * cross-human safe by design (see the `vault` skill's Cards section: any
+ * Sharing Role, including Observer, may write one for a project they can
+ * see), so this simply completes that design rather than introducing a
+ * new trust boundary. Queries `file_refs` directly (by
+ * `project_folder_id`, not by folder, and with NO `human_id` filter)
+ * since Cards for the same project are scattered across many different
+ * humans' own date folders. Sorted by date, then humanId, so a caller
+ * processing entries in order gets a deterministic day-by-day (and,
+ * within a day, human-by-human) sequence — never two humans' cards for
+ * the same day interleaved unpredictably across repeated runs.
  */
-export async function listCardDatesForProject(
-  humanId: string,
+export async function listCardEntriesForProject(
   projectFolderId: string,
   { since, until }: { since?: string; until?: string } = {},
-): Promise<string[]> {
-  const conditions = [
-    "human_id = $humanId",
-    "source = 'daily_log_card'",
-    "project_folder_id = $projectFolderId",
-  ];
-  const params: Record<string, unknown> = { humanId, projectFolderId };
+): Promise<{ humanId: string; date: string }[]> {
+  const conditions = ["source = 'daily_log_card'", "project_folder_id = $projectFolderId"];
+  const params: Record<string, unknown> = { projectFolderId };
   if (since) {
     conditions.push("date >= $since");
     params.since = since;
@@ -371,11 +375,13 @@ export async function listCardDatesForProject(
     conditions.push("date <= $until");
     params.until = until;
   }
-  const result = await query<[{ date: string }[]]>(
-    `SELECT date FROM file_refs WHERE ${conditions.join(" AND ")} ORDER BY date ASC`,
+  const result = await query<[{ human_id: string; date: string }[]]>(
+    `SELECT human_id, date FROM file_refs WHERE ${conditions.join(" AND ")} ORDER BY date ASC, human_id ASC`,
     params,
   );
-  return (result?.[0] ?? []).map((r) => r.date).filter(Boolean);
+  return (result?.[0] ?? [])
+    .filter((r) => r.human_id && r.date)
+    .map((r) => ({ humanId: r.human_id, date: r.date }));
 }
 
 /**

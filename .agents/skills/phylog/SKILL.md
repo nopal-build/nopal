@@ -231,6 +231,31 @@ every OTHER markdown file in the Vault renders exactly as before.
   then walks every day from scratch (nothing is "already recorded"
   anymore, since reset also clears this project's Release Log history).
 
+**CROSS-HUMAN BY DESIGN — sweeps every collaborator's Cards, not just
+whoever's running the command.** `listCardEntriesForProject`
+(`dailyLog.server.ts`) enumerates every `(humanId, date)` pair with a Card
+for this project across EVERY human who's ever written one, not merely
+the acting human passed into `runCapture`/`runPreCapture` (that parameter
+now only matters for a handful of invoker-scoped bookkeeping calls, e.g.
+the "agent not configured" early return — it no longer restricts which
+Cards get discovered). Each entry is then processed under ITS OWN
+humanId (filing via `fileCardAttachments`, the organize/README agent
+loop, usage tracking, and regenerating THAT human's own
+`daily-logs/<date>/release-log.md`) — a single date can legitimately
+produce multiple `CaptureDayResult`s if several collaborators each wrote
+their own Card for it. This isn't a new trust boundary: a Card was
+already cross-human safe by construction (any Sharing Role, including
+Observer, may write one for a project they can see — see "Cards" in the
+`vault` skill — and `sorter.server.ts`'s `fileCardAttachments` already
+filed a collaborator's attachments into the project without needing
+write access to their vault); capture used to silently defeat that by
+only ever looking at the CALLER's own Cards, which meant a project
+owner's `phylog capture` run could never see a collaborator's Card, no
+matter how many times it ran. `nopal phylog capture --project <path>` (or
+`run`/`pre-capture`) now always applies everyone's outstanding Cards for
+that project in one pass, regardless of who invokes it — always safe to
+run, same as before, just no longer scoped to one identity.
+
 **Release Log integration**: a day that produces a README change gets an
 `"ai-update"` entry with a real `content-edit` changeset (revertible via
 `nopal release-log revert`, same machinery every other project-file
@@ -333,6 +358,10 @@ All require an owner-tier Sharing Role on the project (or being the
 project/`personal`'s own owner) — there is no lower-bar preview tier
 anymore now that every call commits; `nopal sort run` remains the
 lower-bar path (any role) for the Sorter's own, zero-inference filing.
+This gate is about who may TRIGGER a run, not whose content it processes:
+once triggered, pre-capture/capture sweep every collaborator's Cards for
+the project (see "Cross-human by design" above), not just the invoker's
+own.
 
 ## Scaling & Process Isolation
 

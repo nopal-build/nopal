@@ -154,6 +154,12 @@ struct FiledAttachment {
 #[serde(rename_all = "camelCase")]
 struct CaptureDayResult {
     date: String,
+    /// Whose own Card this entry came from -- capture sweeps EVERY
+    /// collaborator's Cards for the project, not just whoever's running
+    /// the CLI, so the same `date` can appear more than once here, one
+    /// entry per human.
+    #[serde(default)]
+    human_id: String,
     #[serde(default)]
     filed: Vec<FiledAttachment>,
     #[serde(default)]
@@ -242,24 +248,41 @@ fn print_capture(result: &CaptureResult) {
         println!("Capture: no Card found for this project on any day in range.");
         return;
     }
+
+    // Capture sweeps every collaborator's Cards, not just whoever's
+    // running this command -- only bother labeling entries with WHO wrote
+    // the Card once more than one human actually shows up, so the common
+    // single-contributor case stays exactly as quiet as before.
+    let distinct_humans: std::collections::HashSet<&str> =
+        result.days.iter().map(|d| d.human_id.as_str()).collect();
+    let multi_human = distinct_humans.len() > 1;
+    let who = |id: &str| -> String {
+        if multi_human {
+            format!(" ({id})")
+        } else {
+            String::new()
+        }
+    };
+
     for day in &result.days {
+        let label = who(&day.human_id);
         if day.already_applied {
             println!(
-                "Capture: {} — already applied for this Card's current content.",
+                "Capture: {}{label} — already applied for this Card's current content.",
                 day.date
             );
             continue;
         }
         for f in &day.filed {
-            println!("Capture: {} — filed \"{}\".", day.date, f.name);
+            println!("Capture: {}{label} — filed \"{}\".", day.date, f.name);
         }
         for action in &day.organize_actions {
-            println!("Capture: {} — {action}.", day.date);
+            println!("Capture: {}{label} — {action}.", day.date);
         }
         if day.readme_updated {
-            println!("Capture: {} — README updated.", day.date);
+            println!("Capture: {}{label} — README updated.", day.date);
         } else if day.filed.is_empty() && day.organize_actions.is_empty() {
-            println!("Capture: {} — nothing warranted a change.", day.date);
+            println!("Capture: {}{label} — nothing warranted a change.", day.date);
         }
     }
 }

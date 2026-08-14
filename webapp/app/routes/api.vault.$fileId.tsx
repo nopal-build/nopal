@@ -90,16 +90,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const isOwner = file.human_id === user._id;
 
-  // Non-owners: only a content-only PATCH is allowed, and only when the file's
-  // shared_type permits writing (workable or editable) and the file lives in a
-  // folder that is shared with this user.
+  // Non-owners: only a content-only PATCH is allowed.
   if (!isOwner) {
     if (request.method !== "PATCH") {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const sharedType = file.shared_type ?? "view";
-    if (sharedType !== "workable" && sharedType !== "editable") {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -108,21 +101,35 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const folder = await getFolderById(file.folder_id);
-    const isShared =
-      folder && Array.isArray(folder.shared_with) && folder.shared_with.includes(user._id);
-
-    if (!isShared) {
+    if (!folder) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // A `skills` folder is further gated by Sharing Role, on top of the
-    // ordinary shared_type/shared_with check above: only an owner-tier
-    // collaborator (Owner/Crafter) may edit it — an Observer's plain
-    // "editable" grant on the file itself isn't enough. See the
-    // `vault`/`oxmarkdown` skills and `projectSharing.server.ts`.
-    if (folder && folder.folder_type === "skills") {
+    if (folder.folder_type === "skills") {
+      // `skills` access is governed entirely by the project's own Sharing
+      // Role, not the ordinary per-file shared_type/shared_with grant.
+      // `skills.shareable` is `false` (a file inside it can never be
+      // individually shared), so gating this on shared_type/shared_with
+      // would make it permanently unreachable — no owner-tier collaborator
+      // could ever satisfy it. Only an owner-tier role (Owner/Crafter) may
+      // edit; Observers may not, even though they can still view a shared
+      // project. See the `vault`/`oxmarkdown` skills and
+      // `projectSharing.server.ts`.
       const role = await getProjectRoleForFolderId(folder._id, user._id);
       if (!role?.isOwner) {
+        return Response.json({ error: "Forbidden" }, { status: 403 });
+      }
+    } else {
+      // Every other shareable folder type still requires the ordinary
+      // per-file shared_type grant plus folder-level shared_with.
+      const sharedType = file.shared_type ?? "view";
+      if (sharedType !== "workable" && sharedType !== "editable") {
+        return Response.json({ error: "Forbidden" }, { status: 403 });
+      }
+
+      const isShared =
+        Array.isArray(folder.shared_with) && folder.shared_with.includes(user._id);
+      if (!isShared) {
         return Response.json({ error: "Forbidden" }, { status: 403 });
       }
     }

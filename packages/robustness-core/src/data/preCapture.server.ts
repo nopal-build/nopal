@@ -32,11 +32,22 @@
  * file is a total no-op.
  *
  * Deliberately writes into whichever folder the SOURCE file already lives
- * in — the acting human's own `daily-logs` folder for a Card attachment,
- * or the project's own `syncs/<connector>/` folder for a synced file —
- * never gated by anything but the skill file itself (no `dryRun`, no
- * apply-gate): both are folders the acting human/project owner already
- * has an existing write relationship with.
+ * in -- the OWNING human's own `daily-logs` folder for a Card attachment
+ * (never necessarily whoever triggered this run -- see below), or the
+ * project's own `syncs/<connector>/` folder for a synced file -- never
+ * gated by anything but the skill file itself (no `dryRun`, no
+ * apply-gate): both are folders that file's own owner/the project owner
+ * already has an existing write relationship with.
+ *
+ * CROSS-HUMAN BY DESIGN, same as `capture.server.ts`: when sweeping
+ * every day (no `date`/`fileId` given), `listCardEntriesForProject`
+ * (`dailyLog.server.ts`) enumerates every (humanId, date) pair with a
+ * Card for this project across EVERY human who's ever written one, not
+ * just `actingHumanId` -- a Card is already cross-human safe (any
+ * Sharing Role, including Observer, may write one for a project they can
+ * see), so a collaborator's attachment gets the exact same pre-capture
+ * treatment the project owner's own would, regardless of who actually
+ * runs `nopal phylog pre-capture`/`run`/`capture`.
  */
 
 import { createHash } from "node:crypto";
@@ -55,7 +66,7 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import { downloadFileBytes } from "./file.server";
-import { getDailyLogCards, listCardDatesForProject, type DailyLogCard } from "./dailyLog.server";
+import { getDailyLogCards, listCardEntriesForProject, type DailyLogCard } from "./dailyLog.server";
 import { getProjectStageSkill, isSkipInstruction } from "./projectN01.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
 import { classifyLlmError, recordPhylogUsage } from "./phylogMetrics.server";
@@ -190,11 +201,17 @@ export async function runPreCapture(
     if (!file) return { ok: false, error: "File not found" };
     candidates.push({ fileId: file._id, name: file.name, caption: "" });
   } else {
-    const dates = opts.date
-      ? [opts.date]
-      : await listCardDatesForProject(actingHumanId, projectFolder._id);
-    for (const date of dates) {
-      const cards = await getDailyLogCards(actingHumanId, date);
+    // Sweeps EVERY human's Cards for this project, not just whoever's
+    // running this call -- same reasoning as `capture.server.ts`'s own
+    // `listCardEntriesForProject` usage (see that file's module doc): a
+    // Card is already cross-human safe by design, so a collaborator's
+    // attachment deserves the same pre-capture summary as the project
+    // owner's own would.
+    const entries = opts.date
+      ? await listCardEntriesForProject(projectFolder._id, { since: opts.date, until: opts.date })
+      : await listCardEntriesForProject(projectFolder._id);
+    for (const { humanId: cardHumanId, date } of entries) {
+      const cards = await getDailyLogCards(cardHumanId, date);
       const card = cards.find((c) => c.projectFolderId === projectFolder._id);
       if (!card) continue;
       for (const attachment of extractFileAttachments(card.content)) {
