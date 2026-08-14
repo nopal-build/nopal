@@ -295,11 +295,19 @@ export async function createVaultFolder(data: {
     isFolderTypeRoot = true;
   }
 
+  // Same inherit-from-parent trick as vault_root_key/folder_type: a new
+  // folder is invisible to anyone the PARENT is shared with unless it
+  // starts out with the same shared_with cache — otherwise it silently
+  // vanishes from a shared project until the next time sharing is
+  // re-saved (which re-cascades to every descendant, see
+  // `cascadeShareVaultFolder`).
+  const sharedWith = data.shared_with ?? parent?.shared_with ?? [];
+
   const result = await upsert(data.id ? new RecordId("vault_folders", data.id) : "vault_folders", {
     human_id: data.human_id,
     name: data.name,
     parent_folder_id: data.parent_folder_id ?? null,
-    shared_with: data.shared_with ?? [],
+    shared_with: sharedWith,
     vault_root_key: rootKey,
     folder_type: folderType,
     is_folder_type_root: isFolderTypeRoot,

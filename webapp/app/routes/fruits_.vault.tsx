@@ -59,6 +59,7 @@ import { resolveProjectManifest, type ResolvedProject } from "robustness-core/da
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "../components/MoreMenu";
 import MdxEditorView from "../components/MdxEditorView";
+import OxEditor from "../components/OxEditor";
 import { ProjectView } from "../components/ProjectView";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
 import "../styles/vault.css";
@@ -854,7 +855,60 @@ function MoveFolderModal({
   );
 }
 
-// ─── Sidebar tree ───────────────────────────────────────────────────────────────
+// ─── Skill file editor ───────────────────────────────────────────────────
+// A project's own `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`
+// (see the `phylog`/`vault` skills) are themselves OxMarkdown documents,
+// so they get the real `OxEditor` instead of the static `MdxEditorView`
+// every other vault file still uses. `key={fileId}` at the call site
+// forces a clean remount on navigation between skill files, so this
+// component's own local state never leaks from one file to the next.
+function SkillFileEditor({
+  fileId,
+  initialContent,
+  editable,
+  onSave,
+}: {
+  fileId: string;
+  initialContent: string;
+  editable: boolean;
+  onSave: (fileId: string, content: string) => void;
+}) {
+  const [content, setContent] = useState(initialContent);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedRef = useRef(initialContent);
+
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    },
+    [],
+  );
+
+  const handleChange = useCallback(
+    (next: string) => {
+      setContent(next);
+      if (!editable) return;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        if (next === lastSavedRef.current) return;
+        lastSavedRef.current = next;
+        onSave(fileId, next);
+      }, 2000);
+    },
+    [editable, fileId, onSave],
+  );
+
+  return (
+    <OxEditor
+      mode={editable ? "editing" : "interacting"}
+      markdown={content}
+      onChange={handleChange}
+      placeholder="Write instructions for this stage..."
+    />
+  );
+}
+
+// ─── Sidebar tree ────────────────────────────────────────────────────────────
 
 function TreeNode({
   folder,
@@ -1748,6 +1802,25 @@ export default function VaultV2Page() {
     }
   };
 
+  // A skill file's own content save (see `SkillFileEditor` below) —
+  // debounced by the caller, so this fires at most every couple seconds,
+  // never per-keystroke. Deliberately skips `invalidateAndRevalidate`:
+  // unlike folder/rename/move mutations, a content-only save doesn't
+  // change anything the sidebar/breadcrumbs/listing show, and the editor's
+  // own local state is already the source of truth for what's on screen.
+  // `markOwnMutation` still runs so this tab doesn't revalidate itself away
+  // if a realtime echo for this exact save arrives back.
+  const handleSaveSkillFile = useCallback(
+    (fileId: string, content: string) => {
+      markOwnMutation(fileId);
+      void apiJson(`/api/vault/${fileId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content }),
+      });
+    },
+    [apiJson],
+  );
+
   // ─── Derived view data ──────────────────────────────────────────────────────
 
   const pendingForCurrentFolder =
@@ -2430,7 +2503,23 @@ export default function VaultV2Page() {
           {current.kind === "file" &&
             (isMarkdownFile(current.file) ? (
               <div className="vault-readme-section">
-                {current.projectManifest ? (
+                {fileFolderType === "skills" ? (
+                  // A project's own skills/PRE_CAPTURE.md, CAPTURE.md,
+                  // POST_CAPTURE.md (see the phylog/vault skills) are
+                  // themselves OxMarkdown documents — give them the real
+                  // editor instead of the static MdxEditorView every other
+                  // vault file still uses (see the oxmarkdown skill's build
+                  // status: a full Vault migration is still "not started",
+                  // this is a narrow, deliberate carve-out for skill files
+                  // specifically).
+                  <SkillFileEditor
+                    key={current.file._id}
+                    fileId={current.file._id}
+                    initialContent={current.file.content ?? ""}
+                    editable={canWriteCurrentFile}
+                    onSave={handleSaveSkillFile}
+                  />
+                ) : current.projectManifest ? (
                   <ProjectView
                     manifest={current.projectManifest.manifest}
                     body={current.projectManifest.body}

@@ -547,6 +547,21 @@ Interacting mode first, without needing that decision resolved.
      (`routes/fruits_.vault.tsx`) — still on `MdxEditorView`. These have a
      real, non-trivial directive registry (`csv-table`/`gallery`/`svg`/
      `note`) worth a careful compatibility pass rather than a rebuild.
+     **One narrow, deliberate carve-out ahead of that migration**: a
+     project's own `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`
+     files (see the `vault`/`phylog` skills' Skills folder type) are
+     plain instructions, never containing `csv-table`/`gallery`/`svg`/
+     `note` directives, so `fruits_.vault.tsx`'s file view special-cases
+     any file whose immediate containing folder's `folder_type ===
+     "skills"` and renders it with a real `<OxEditor>` instead
+     (`SkillFileEditor`, mode `"editing"` when the viewer can write to it
+     per the existing `canWriteCurrentFile` check, else `"interacting"`)
+     — debounced (2s) saves PATCH `/api/vault/:fileId`'s existing
+     `content` update path (already permission-checked server-side,
+     including the skills-folder-specific owner-tier-role gate for
+     non-owner collaborators — see the `vault` skill's Sharing Roles
+     section). Every OTHER markdown file in the Vault (README, plain
+     files, ...) is unaffected, still `MdxEditorView`.
 7. **Done — `@` mentions** (`oxmarkdown/mention.ts`, `MentionPlugin.tsx`).
    See "`@` mentions" above. Shipped first as a mock on the Design System
    page, then moved to `fruits/styles/oxmarkdown` (`#mentions`). Next:
