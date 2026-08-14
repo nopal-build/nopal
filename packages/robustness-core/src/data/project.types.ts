@@ -274,6 +274,29 @@ export function withProjectStatus(markdown: string, status: ProjectStatus): stri
 }
 
 /**
+ * Rewrites ONLY the body of a README, preserving its front matter
+ * (title/type/layout/status/sharing/...) byte-for-byte -- the general
+ * "replace generated content, keep durable metadata" operation every
+ * writer of a project's README should go through instead of hand-rolling
+ * `splitFrontmatter` + re-concatenation. `capture.server.ts`'s own
+ * organize/README agent step uses this to apply a fresh body without
+ * disturbing front matter it never even sees, and
+ * `projectN01.server.ts`'s `resetProjectN01Content` uses it (with an
+ * empty `newBody`) specifically so a project reset clears PhyLog's own
+ * generated content WITHOUT also destroying front matter that's actually
+ * durable, human-authored project metadata -- most importantly the
+ * `sharing` list (Sharing Roles), which lives ONLY here (see
+ * `projectSharing.server.ts`); a real bug, confirmed and fixed, where
+ * resetting a project silently revoked every collaborator's role because
+ * the reset deleted README.md outright instead of just its body.
+ */
+export function withReadmeBody(originalMarkdown: string, newBody: string): string {
+  const { frontmatter } = splitFrontmatter(originalMarkdown);
+  if (!frontmatter) return newBody;
+  return `---\n${frontmatter}\n---\n${newBody}`;
+}
+
+/**
  * Parses a `README.md`'s content into a `ProjectManifest`, if present.
  * Fails closed on any malformed/missing front matter — returns
  * `manifest: null` rather than throwing, so callers can always fall back to

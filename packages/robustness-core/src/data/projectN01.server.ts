@@ -44,7 +44,7 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import { merge } from "./generic.server";
-import { splitFrontmatter } from "./project.types";
+import { splitFrontmatter, withReadmeBody } from "./project.types";
 
 // ─── Default skill file content ────────────────────────────────────────
 
@@ -467,6 +467,22 @@ export type ResetSummary = {
  * already applied and silently skip re-processing it. Regenerates both
  * release-log.md reflections (now empty) afterward.
  *
+ * **`README.md` is NEVER deleted outright — only its BODY is cleared,
+ * with its front matter preserved byte-for-byte (`withReadmeBody`,
+ * `project.types.ts`).** A real, confirmed bug this fixes: README's front
+ * matter is the ONLY place a project's Sharing Roles (`sharing`, see
+ * `projectSharing.server.ts`) and lifecycle `status`
+ * (`projectStatus.server.ts`) are stored — deleting the file outright
+ * silently revoked every collaborator's role (and reset the project's
+ * status) on every `phylog reset`/`reset-pre-capture`/`capture --full`,
+ * even though NEITHER of those fields is PhyLog-generated, disposable
+ * content the way the README's BODY is. Preserving front matter here
+ * costs nothing else: `captureOneDay` already merges a fresh body into
+ * whatever front matter is already there via this same `withReadmeBody`
+ * helper, so a later capture run rebuilds correctly on top of it. Not
+ * counted in `deletedFiles` below — the file's own identity/metadata
+ * survives, only its generated content was cleared.
+ *
  * Deliberately NOT run automatically by `capture --full` on its own
  * schedule — always an explicit, separate call (`nopal phylog reset`/
  * `reset-pre-capture`), so a human can inspect the emptied-out state
@@ -495,6 +511,18 @@ async function resetProjectN01ContentInternal(
     summary.deletedFolders.push(child.name);
   }
   for (const file of files) {
+    if (file.name.toLowerCase() === "readme.md") {
+      // `listFolderChildren` only returns lightweight listings (no
+      // `content`) -- need the full record to read/preserve its front
+      // matter.
+      const full = await getFileRefById(file._id);
+      const currentContent = full?.content ?? "";
+      const blanked = withReadmeBody(currentContent, "");
+      if (full && blanked !== currentContent) {
+        await updateFileRef(file._id, { content: blanked });
+      }
+      continue;
+    }
     await deleteFileRef(file._id);
     summary.deletedFiles.push(file.name);
   }

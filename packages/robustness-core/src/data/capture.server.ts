@@ -120,7 +120,7 @@ import {
   updateFileRef,
   type VaultFolder,
 } from "./vault.server";
-import { splitFrontmatter } from "./project.types";
+import { splitFrontmatter, withReadmeBody } from "./project.types";
 import {
   createReleaseLogEntry,
   findReleaseLogEntryBySource,
@@ -186,11 +186,6 @@ const UPDATE_README_TOOL: ToolDefinition = {
   },
 };
 
-function withReadmeBody(originalMarkdown: string, newBody: string): string {
-  const { frontmatter } = splitFrontmatter(originalMarkdown);
-  if (!frontmatter) return newBody;
-  return `---\n${frontmatter}\n---\n${newBody}`;
-}
 
 async function runAgentLoop(
   provider: LlmProvider,

@@ -138,6 +138,31 @@ only ever rebuilds FROM `daily-logs/`, never wipes it), right before
 reprocessing everything — so running `reset` first is optional, not
 required, but useful whenever you want to verify the wipe alone.
 
+**`README.md` is NEVER deleted by either reset depth — only its BODY is
+cleared, with its front matter preserved byte-for-byte**
+(`withReadmeBody`, `project.types.ts`, with an empty new body). A real,
+confirmed bug this fixes: README's front matter is the ONLY place a
+project's Sharing Roles (`sharing` — see the `vault` skill's Sharing
+Roles section and `projectSharing.server.ts`) and lifecycle `status`
+(`projectStatus.server.ts`) are stored. Before this fix, `resetProjectN01Content`
+deleted README.md outright like any other disposable file — which meant
+**every single `phylog reset`/`reset-pre-capture`/`capture --full`
+silently revoked every collaborator's Sharing Role** (and reset the
+project's status back to "active"), even though neither field is
+PhyLog-generated content the way the README's BODY is. This is exactly
+why a shared collaborator (e.g. Austin, given a Crafter role) could lose
+the ability to run `phylog` commands on a project entirely after its
+owner ran an ordinary reset — `getProjectRole` reads the role list
+straight from the CURRENT README's front matter, with no caching layer,
+so the moment the file's front matter was gone, so was the role.
+Preserving front matter here costs nothing else: `captureOneDay` already
+merges a fresh body into whatever front matter is already there via this
+SAME `withReadmeBody` helper, so a later capture run rebuilds correctly
+on top of it (confirmed directly: reset → `capture --full` → the rebuilt
+README has both the newly generated body AND the original sharing list).
+Not counted in `ResetSummary.deletedFiles` — the file's own identity and
+metadata survive, only its generated content was cleared.
+
 ## The pipeline
 
 ```
