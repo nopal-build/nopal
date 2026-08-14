@@ -53,7 +53,6 @@ import {
   getSharedFoldersForHuman,
   listFolderChildren,
 } from "robustness-core/data/vault.server";
-import { getHumansById } from "robustness-core/data/humans.server";
 import { getProjectRoleForFolderId } from "robustness-core/data/projectSharing.server";
 import { getRelatedHumans } from "robustness-core/data/relationships.server";
 import { resolveProjectManifest, type ResolvedProject } from "robustness-core/data/project.server";
@@ -162,12 +161,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const topLevelSharedFolders = sharedFolders.filter(
     (f) => !f.parent_folder_id || !sharedIds.has(f.parent_folder_id),
   );
-  const sharedOwners = await getHumansById([
-    ...new Set(topLevelSharedFolders.map((f) => f.human_id)),
-  ]);
-  const sharedFolderOwners: Record<string, string> = Object.fromEntries(
-    sharedOwners.map((o) => [o._id, o.name || o.email]),
-  );
 
   const url = new URL(request.url);
   const fileParam = url.searchParams.get("file");
@@ -258,7 +251,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     current,
     relatedHumans,
     topLevelSharedFolders,
-    sharedFolderOwners,
     viewerCanEditSharedSkillsFile,
   };
 }
@@ -940,8 +932,6 @@ function TreeNode({
   onToggleExpand,
   onSelectFolder,
   onSelectFile,
-  sharedEntryIds,
-  ownerNames = {},
 }: {
   folder: VaultFolder;
   depth: number;
@@ -955,11 +945,6 @@ function TreeNode({
   onToggleExpand: (folder: VaultFolder) => void;
   onSelectFolder: (folder: VaultFolder) => void;
   onSelectFile: (file: FileRefListing) => void;
-  /** ids of top-level shared folders — only these (not their descendants)
-   * get the "shared by …" annotation, wherever they're nested. */
-  sharedEntryIds?: Set<string>;
-  /** human_id → display name, for annotating shared folders with their owner. */
-  ownerNames?: Record<string, string>;
 }) {
   const isExpanded = expanded.has(folder._id);
   const childFolders = foldersByParent[folder._id] ?? [];
@@ -986,11 +971,6 @@ function TreeNode({
         >
           {folderIcon(folder.shared_with)} {folderLabel(folder)}
         </button>
-        {sharedEntryIds?.has(folder._id) && ownerNames[folder.human_id] && (
-          <span className="vault-v2-tree-owner">
-            shared by {ownerNames[folder.human_id]}
-          </span>
-        )}
       </div>
 
       {isExpanded && (
@@ -1009,8 +989,6 @@ function TreeNode({
               onToggleExpand={onToggleExpand}
               onSelectFolder={onSelectFolder}
               onSelectFile={onSelectFile}
-              sharedEntryIds={sharedEntryIds}
-              ownerNames={ownerNames}
             />
           ))}
 
@@ -1058,7 +1036,6 @@ export default function VaultV2Page() {
     current,
     relatedHumans,
     topLevelSharedFolders,
-    sharedFolderOwners,
     viewerCanEditSharedSkillsFile,
   } = useLoaderData<typeof loader>();
 
@@ -1081,13 +1058,6 @@ export default function VaultV2Page() {
   // as if they live right inside it (see `foldersByParent` below), since
   // "projects" is the only shareable root today.
   const projectsRootId = roots.find((r) => r.vault_root_key === "projects")?._id;
-  // Only the entry points get the "shared by …" annotation — not every
-  // descendant, which would otherwise repeat it at every depth.
-  const sharedEntryIds = useMemo(
-    () => new Set(topLevelSharedFolders.map((f) => f._id)),
-    [topLevelSharedFolders],
-  );
-
   // Full folder skeleton, keyed by parent id — refreshed by every loader run,
   // so the tree renders (and stays) complete without per-folder fetches.
   // Children of a root container follow its childSort policy (daily-logs is
@@ -2166,8 +2136,6 @@ export default function VaultV2Page() {
                 onToggleExpand={toggleExpand}
                 onSelectFolder={selectFolder}
                 onSelectFile={selectFile}
-                sharedEntryIds={sharedEntryIds}
-                ownerNames={sharedFolderOwners}
               />
             ))}
           </div>
