@@ -342,11 +342,33 @@ oldest first):
    - `create_folder({ path })` — mkdir -p, relative to the project root.
    - `move_file({ name, destinationPath })` — relocate an already-filed
      file by name.
-   - `update_readme({ newBody, reason })` — at most meaningfully once per
-     entry; replaces the README body only (front matter untouched).
-   `create_folder`/`move_file` refuse to target `skills`/`syncs`/
-   `newspapers`/`daily-logs` by name -- those subtrees are permanently off
-   limits to this stage.
+   - `write_file({ path, chunk, done })` -- create or fully replace a
+     markdown REFERENCE file (any name except README.md) relative to the
+     project root, for splitting out substantial, topic-specific detail
+     (a full build log, a long spec) so it doesn't have to live inline in
+     README.md -- the README then just links to it.
+   - `update_readme({ chunk, done, reason })` -- replaces the README body
+     only (front matter untouched).
+
+   Both `write_file` and `update_readme` take their content as ONE OR
+   MORE chunks rather than a single all-at-once string: on a normal day
+   `chunk` is the whole content and `done` is `true` in one call, but a
+   long update can instead be sent as several calls in a row (each
+   `chunk` continuing directly from the last, `done: true` only on the
+   final one). This exists because both tools are otherwise single
+   responses capped at the provider's own output token limit -- a long
+   README regenerated in one shot can get cut off mid-generation (see the
+   safety net below), and chunking keeps any ONE call safely short
+   regardless of the total length. `write_file` is keyed by `path`, so
+   multiple chunk calls for the SAME file accumulate into that file's own
+   buffer; `update_readme` has exactly one target so its chunks just
+   accumulate in order. `runAgentLoop`'s `maxTurns` was raised 6 -> 16 for
+   capture specifically to leave room for a chunked update on top of any
+   `create_folder`/`move_file` calls.
+   `create_folder`/`move_file`/`write_file` refuse to target `skills`/
+   `syncs`/`newspapers`/`daily-logs` by name -- those subtrees are
+   permanently off limits to this stage, and `write_file` additionally
+   refuses `README.md` itself (use `update_readme` for that).
 
    The model has NO tool for reading an arbitrary file by name -- it only
    ever sees filenames in the tree, never their content, except for what's
@@ -355,11 +377,42 @@ oldest first):
    into the prompt directly (`listExtraSkillFiles`) rather than left for
    the model to "go read" -- see the pipeline-wide note above. When a
    day's run produces neither an `update_readme` call nor any
-   `create_folder`/`move_file` call, the model's own final turn of plain
-   text (its stated reasoning for doing nothing) is logged verbatim
-   (`capture: <date> -- no README update or reorganization; model said:
-   ...`) so "why didn't this update" is diagnosable from `nopal phylog
-   capture`'s own output, instead of a silent no-op.
+   `create_folder`/`move_file`/`write_file` call, the model's own final
+   turn of plain text (its stated reasoning for doing nothing) is logged
+   verbatim (`capture: <date> -- no README update or reorganization;
+   model said: ...`) so "why didn't this update" is diagnosable from
+   `nopal phylog capture`'s own output, instead of a silent no-op.
+
+   **`update_readme` has a safety net, not just trust**: a bad call can
+   wipe real content in one shot (confirmed live -- a project with real
+   accumulated history hit Anthropic's `stop_reason: "max_tokens"`
+   mid-generation of a single-shot tool call's JSON, which under the old
+   4096-token cap and no chunking produced an empty `newBody`, and the
+   pipeline applied it unquestioned). Two layers now prevent this:
+   - **`runAgentLoop` never executes a truncated turn's tool calls at
+     all.** If a turn's `stopReason` is `"max_tokens"`, the loop discards
+     that entire response (it may contain incomplete or corrupted
+     arguments, since its own JSON may never have finished streaming) and
+     stops -- whatever earlier, COMPLETE turns already committed stands.
+     This is what actually stops a bad chunk from ever reaching disk; the
+     `truncated` flag it returns is now purely informational, for the
+     `capture: <date> -- the model's generation was cut off ...` log line.
+   - **`captureOneDay` still refuses to APPLY an incomplete or empty
+     result** (`refusalReason` check), for cases the loop-level fix
+     doesn't cover: chunks that arrived but never got a final `done: true`
+     (ran out of turns, or the model simply stopped), and a `done: true`
+     call whose assembled body is blank while the CURRENT README or
+     today's own Card/summary content is non-empty (a legitimately empty
+     README is only possible on a brand-new project with nothing said
+     about it yet).
+   A refused call leaves the README byte-for-byte unchanged, logs why
+   (`capture: <date> -- refused to apply update_readme (...); README left
+   unchanged.`), and does NOT get recorded as "applied" in the Release
+   Log -- so the SAME entry is retried on the next `nopal phylog capture`
+   run rather than being silently skipped forever. `DEFAULT_MAX_TOKENS` in
+   `anthropicProvider.server.ts` was also raised 4096 -> 8192 to make
+   hitting this less likely in the first place, though chunking is what
+   actually removes the ceiling.
 
 **Why filing still reads the original Card, not the daily-logs entry's
 own staged copy**: `fileCardAttachments` is SHARED with the Sorter

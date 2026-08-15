@@ -20,7 +20,13 @@ import type {
 } from "./llmProvider";
 
 const DEFAULT_MODEL = "claude-sonnet-5";
-const DEFAULT_MAX_TOKENS = 4096;
+// capture's update_readme tool asks the model to re-emit the ENTIRE
+// README body every call -- on a project with real accumulated history
+// that can be long, and 4096 was observed truncating mid-generation
+// (stop_reason "max_tokens"), which capture.server.ts's runAgentLoop now
+// detects and refuses to apply -- but a bigger budget avoids hitting it
+// at all for most projects. See the phylog skill's capture section.
+const DEFAULT_MAX_TOKENS = 8192;
 /** Vision calls want a paragraph, not a whole README — kept separate from
  * `DEFAULT_MAX_TOKENS` so tightening one doesn't silently affect the
  * other. */

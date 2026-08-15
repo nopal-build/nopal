@@ -173,17 +173,45 @@ const MOVE_FILE_TOOL: ToolDefinition = {
   },
 };
 
-const UPDATE_README_TOOL: ToolDefinition = {
-  name: "update_readme",
+// Both write_file and update_readme accept their content as ONE OR MORE
+// chunks rather than a single all-at-once string -- see this file's
+// module doc / the phylog skill for why: a single response is capped at
+// the provider's own output token limit, and a large README/file
+// generated in one shot can get cut off mid-generation. Sending it as
+// several smaller tool calls, each well under that limit, keeps any ONE
+// call safely short regardless of how long the whole document ends up
+// being. Most days the whole thing still fits in a single call --
+// `chunk` is just the entire content and `done` is `true` immediately.
+const CHUNK_PROTOCOL_NOTE =
+  "Sent as one or more chunks: if the full content fits in a single call, send it all in one call with done: true. If it's long, call this tool repeatedly -- each call's chunk continues directly from your last one for this same target, in order, with no overlap -- and set done: true only on the LAST call, once everything has been sent.";
+
+const WRITE_FILE_TOOL: ToolDefinition = {
+  name: "write_file",
   description:
-    "Replace the project's README.md BODY (everything after its front matter, if any) with a new version. Call this only when today's Card content, filed attachments, or reorganization actually warrant a real update — skip it entirely on a day where nothing meaningfully changed. Never invent information that isn't grounded in the Card content, pre-capture summaries, or the README's own prior content. To display a GROUP of related photos as a photo grid instead of a bulleted list of links, use ::gallery{folder=\"<direct child folder name>\" title=\"...\"} — see the system prompt's own explanation of this directive.",
+    `Create or fully replace a markdown reference file (never README.md -- use update_readme for that) at a path relative to the project root, e.g. "Electrical/panel-notes.md". Use this to move substantial, topic-specific detail OUT of README.md when keeping it inline would make the README unwieldy, then link to the file from the README with a normal markdown link. Folders in the path are created automatically. Never targets skills/, syncs/, newspapers/, or daily-logs/, and the path must end in .md and can't be named README.md. ${CHUNK_PROTOCOL_NOTE}`,
   inputSchema: {
     type: "object",
     properties: {
-      newBody: { type: "string", description: "The full replacement README body (markdown, front matter excluded)." },
-      reason: { type: "string", description: "One sentence explaining what changed and why, for the Release Log." },
+      path: { type: "string", description: "Path relative to the project root, e.g. \"notes/electrical.md\". Must end in .md. Use the exact same path on every chunk call for the same file." },
+      chunk: { type: "string", description: "The next piece of this file's content, continuing directly from your last chunk for this path." },
+      done: { type: "boolean", description: "True once this call's chunk completes the file's full content." },
     },
-    required: ["newBody", "reason"],
+    required: ["path", "chunk", "done"],
+  },
+};
+
+const UPDATE_README_TOOL: ToolDefinition = {
+  name: "update_readme",
+  description:
+    `Replace the project's README.md BODY (everything after its front matter, if any) with a new version. Call this only when today's Card content, filed attachments, or reorganization actually warrant a real update -- skip it entirely on a day where nothing meaningfully changed. Never invent information that isn't grounded in the Card content, pre-capture summaries, or the README's own prior content. To display a GROUP of related photos as a photo grid instead of a bulleted list of links, use ::gallery{folder="<direct child folder name>" title="..."} -- see the system prompt's own explanation of this directive. ${CHUNK_PROTOCOL_NOTE}`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      chunk: { type: "string", description: "The next piece of the replacement README body (markdown, front matter excluded), continuing directly from your last chunk." },
+      done: { type: "boolean", description: "True once this call's chunk completes the full new body." },
+      reason: { type: "string", description: "One sentence explaining what changed and why, for the Release Log. Only required on the call where done is true." },
+    },
+    required: ["chunk", "done"],
   },
 };
 
@@ -195,12 +223,26 @@ async function runAgentLoop(
   tools: ToolDefinition[],
   executors: Record<string, (input: Record<string, unknown>) => Promise<string>>,
   maxTurns = 6,
-): Promise<{ toolCallsMade: ToolCall[]; usage: LlmUsage; durationMs: number; model: string | null; finalText: string | null }> {
+): Promise<{
+  toolCallsMade: ToolCall[];
+  usage: LlmUsage;
+  durationMs: number;
+  model: string | null;
+  finalText: string | null;
+  /** True if ANY turn's generation was cut off by the model's own output
+   * token limit before it finished. None of that turn's tool calls are
+   * executed (see below) -- so this is purely informational for the
+   * caller's own logging ("this run stopped early, re-run to pick up
+   * where it left off"), never a signal that already-applied work needs
+   * distrusting. */
+  truncated: boolean;
+}> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const toolCallsMade: ToolCall[] = [];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
   let model: string | null = null;
   let finalText: string | null = null;
+  let truncated = false;
   const loopStart = Date.now();
 
   for (let turn = 0; turn < maxTurns; turn++) {
@@ -210,6 +252,16 @@ async function runAgentLoop(
     model = response.model;
     if (response.text?.trim()) finalText = response.text.trim();
     messages.push({ role: "assistant", content: response.text ?? "", toolCalls: response.toolCalls });
+    if (response.stopReason === "max_tokens") {
+      // The model's generation was cut off mid-turn -- any tool call in
+      // THIS response may carry incomplete or corrupted arguments, since
+      // its own JSON may never have finished streaming (this is exactly
+      // how a single-shot update_readme call was once observed producing
+      // an empty README). None of this turn's tool calls are executed;
+      // whatever was already committed by EARLIER, complete turns stands.
+      truncated = true;
+      break;
+    }
     if (response.toolCalls.length === 0) break;
     for (const call of response.toolCalls) {
       toolCallsMade.push(call);
@@ -219,7 +271,7 @@ async function runAgentLoop(
     }
     if (response.stopReason !== "tool_use") break;
   }
-  return { toolCallsMade, usage, durationMs: Date.now() - loopStart, model, finalText };
+  return { toolCallsMade, usage, durationMs: Date.now() - loopStart, model, finalText, truncated };
 }
 
 /** Renders every folder/file in `projectFolder`'s tree EXCLUDING the
@@ -324,7 +376,9 @@ You will be given:
 - Pre-capture summaries for any of today's attachments, when available.
 - The project's current README.md.
 
-You may call create_folder / move_file any number of times to organize today's filed content, then update_readme AT MOST ONCE with the full new body if the README genuinely needs to change. Most days, especially quiet ones, need no README change — do nothing rather than making a cosmetic edit. Never fabricate progress, dates, or facts not grounded in what you were given.
+You may call create_folder / move_file any number of times to organize today's filed content, write_file any number of times to create or update a supporting markdown document, then update_readme (once its full new body has been sent -- see below) if the README genuinely needs to change. Most days, especially quiet ones, need no README change -- do nothing rather than making a cosmetic edit. Never fabricate progress, dates, or facts not grounded in what you were given.
+
+Both write_file and update_readme accept their content in one or more chunks (see each tool's own description) -- on a quiet day the whole thing is one call, but this lets a genuinely long update go out safely across several calls instead of risking one oversized response. Separately, since README.md is meant to stay navigable as an index: when a topic has built up enough sustained, specific detail that keeping it inline would make the README unwieldy (a full build log, a long spec, an extended back-and-forth), move that detail into its own file with write_file (e.g. "Electrical/panel-notes.md") and link to it from the README with a normal markdown link, instead of inlining everything into one ever-growing document. Don't fragment for its own sake -- most days still belong directly in the README, and a short project should likely never need write_file at all.
 
 ${DIRECTIVE_GUIDE}
 
@@ -588,13 +642,20 @@ async function captureOneDay(input: {
   }
 
   const organizeActions: string[] = [];
+  // Chunk buffers -- see CHUNK_PROTOCOL_NOTE above. Keyed by lowercased
+  // path for write_file (one buffer per target file this turn loop
+  // touches); README has exactly one target so it's just an array.
+  const readmeChunks: string[] = [];
+  let readmeDone = false;
+  let readmeReason = "";
+  const fileChunks = new Map<string, string[]>();
   const executors: Record<string, (input: Record<string, unknown>) => Promise<string>> = {
     create_folder: async (input) => {
       const path = String(input.path ?? "");
       const result = await resolveOrCreatePath(projectFolder, path);
       if (!result.ok) return `Error: ${result.error}`;
       organizeActions.push(`created folder "${path}"`);
-      log(`capture: ${date} — created folder "${path}".`);
+      log(`capture: ${date} -- created folder "${path}".`);
       return `Created (or already existed): ${path || "/"}`;
     },
     move_file: async (input) => {
@@ -606,20 +667,79 @@ async function captureOneDay(input: {
       if (!dest.ok) return `Error: ${dest.error}`;
       await updateFileRef(found.fileId, { folder_id: dest.folderId });
       organizeActions.push(`moved "${name}" to "${destinationPath || "/"}"`);
-      log(`capture: ${date} — moved "${name}" to "${destinationPath || "/"}".`);
+      log(`capture: ${date} -- moved "${name}" to "${destinationPath || "/"}".`);
       return `Moved "${name}" to ${destinationPath || "/"}`;
     },
-    update_readme: async () => "Recorded.",
+    write_file: async (input) => {
+      const rawPath = String(input.path ?? "").trim();
+      const chunk = String(input.chunk ?? "");
+      const done = Boolean(input.done);
+      const segments = rawPath.split("/").map((s) => s.trim()).filter(Boolean);
+      const fileName = segments[segments.length - 1];
+      if (!fileName) return "Error: no file name given";
+      if (!fileName.toLowerCase().endsWith(".md")) return "Error: write_file can only create markdown (.md) files";
+      if (fileName.toLowerCase() === "readme.md") return "Error: use update_readme to change README.md, not write_file";
+
+      const key = rawPath.toLowerCase();
+      const buffered = fileChunks.get(key) ?? [];
+      buffered.push(chunk);
+      fileChunks.set(key, buffered);
+      if (!done) {
+        return `Chunk received for "${rawPath}" (${buffered.join("").length} chars so far). Send the next chunk, or call again with done: true when finished.`;
+      }
+
+      const content = buffered.join("");
+      fileChunks.delete(key);
+      const dir = await resolveOrCreatePath(projectFolder, segments.slice(0, -1).join("/"));
+      if (!dir.ok) return `Error: ${dir.error}`;
+      const { files: dirFiles } = await listFolderChildren(projectFolder.human_id, dir.folderId);
+      const existing = dirFiles.find((f) => f.name.toLowerCase() === fileName.toLowerCase());
+      if (existing) {
+        await updateFileRef(existing._id, { content });
+      } else {
+        await createFileRef({
+          human_id: projectFolder.human_id,
+          name: fileName,
+          content,
+          content_type: "text/markdown",
+          folder_id: dir.folderId,
+        });
+      }
+      organizeActions.push(`wrote "${rawPath}"`);
+      log(`capture: ${date} -- wrote "${rawPath}".`);
+      return `${existing ? "Updated" : "Created"} ${rawPath}`;
+    },
+    update_readme: async (input) => {
+      const chunk = String(input.chunk ?? "");
+      const done = Boolean(input.done);
+      readmeChunks.push(chunk);
+      if (done) {
+        readmeDone = true;
+        readmeReason = String(input.reason ?? "").trim();
+        return "Final chunk received -- README will be updated once you're done with any other tools. Don't call update_readme again this run.";
+      }
+      return `Chunk received (${readmeChunks.join("").length} chars so far). Send the next chunk, or call again with done: true when finished.`;
+    },
   };
 
   const userPrompt = buildUserPrompt({ tree, cardContent, filed, summaries, readmeContent });
-  const { toolCallsMade, usage, durationMs, model, finalText } = await runAgentLoop(
+  const { toolCallsMade, usage, durationMs, model, finalText, truncated } = await runAgentLoop(
     llm,
     buildSystemPrompt(skillContent, generalSkill, extraSkillFiles),
     userPrompt,
-    [CREATE_FOLDER_TOOL, MOVE_FILE_TOOL, UPDATE_README_TOOL],
+    [CREATE_FOLDER_TOOL, MOVE_FILE_TOOL, WRITE_FILE_TOOL, UPDATE_README_TOOL],
     executors,
+    // Higher than runAgentLoop's own default (6): chunked README/file
+    // writes (see CHUNK_PROTOCOL_NOTE) can take several turns on their
+    // own on a big update, on top of any create_folder/move_file calls.
+    16,
   );
+
+  if (truncated) {
+    log(
+      `capture: ${date} -- the model's generation was cut off by its own output token limit before it finished; whatever it had already done this run stands, but its last, incomplete action was discarded. Re-run capture to pick up where it left off.`,
+    );
+  }
 
   await recordPhylogUsage({
     humanId: actingHumanId,
@@ -632,11 +752,28 @@ async function captureOneDay(input: {
     outcome: "success",
   });
 
-  const updateCall = toolCallsMade.find((c) => c.name === "update_readme");
+  // `readmeChunks` accumulates across every complete (non-truncated) turn
+  // that called update_readme -- see runAgentLoop's own truncation
+  // handling for why a turn that got cut off never reaches here at all.
+  const wroteReadmeChunks = readmeChunks.length > 0;
   let readmeUpdated = false;
-  if (updateCall) {
-    const newBody = String(updateCall.input.newBody ?? "");
-    const reason = String(updateCall.input.reason ?? "");
+  let refusalReason: string | null = null;
+  if (wroteReadmeChunks && !readmeDone) {
+    // The loop ended (ran out of turns, or the model just stopped) before
+    // a final done:true chunk ever arrived -- what's buffered is a
+    // deliberately incomplete fragment, never something to apply.
+    refusalReason = "it never finished sending the new body (ran out of turns before a final chunk arrived), so what it sent can't be trusted";
+  } else if (wroteReadmeChunks) {
+    const candidateBody = readmeChunks.join("").trim();
+    const oldBodyForCheck = splitFrontmatter(readmeContent).body.trim();
+    const todayHadContent = cardContent.trim().length > 0 || summaries.some((s) => s.body.trim().length > 0);
+    if (candidateBody.length === 0 && (oldBodyForCheck.length > 0 || todayHadContent)) {
+      refusalReason = "it returned an empty body while the project (or today's log) has real content";
+    }
+  }
+  if (wroteReadmeChunks && !refusalReason) {
+    const newBody = readmeChunks.join("");
+    const reason = readmeReason || "(no reason given)";
     const oldFullContent = readmeContent;
     const newFullContent = withReadmeBody(oldFullContent, newBody);
 
@@ -661,36 +798,41 @@ async function captureOneDay(input: {
         date,
         actingHumanId,
         kind: "ai-update",
-        summary: `PhyLog captured the day — [View](/fruits/vault?file=${readmeFileId}): ${reason}${actionSummary}`,
+        summary: `PhyLog captured the day -- [View](/fruits/vault?file=${readmeFileId}): ${reason}${actionSummary}`,
         sourceRef,
         changesets: [
           { fileId: readmeFileId, action: "content-edit", before: { content: oldFullContent }, after: { content: newFullContent } },
         ],
       });
       readmeUpdated = true;
-      log(`capture: ${date} — README updated: ${reason}`);
+      log(`capture: ${date} -- README updated: ${reason}`);
     }
-  } else if (organizeActions.length > 0) {
-    // Reorganization happened without a README change -- still worth a
-    // (changeset-less) Release Log entry so it's visible in the project's
-    // own receipt, using the same sourceRef so a re-run doesn't repeat it.
-    await createReleaseLogEntry({
-      projectFolderId: projectFolder._id,
-      date,
-      actingHumanId,
-      kind: "ai-update",
-      summary: `PhyLog reorganized this project: ${organizeActions.join(", ")}`,
-      sourceRef,
-    });
   } else {
-    // Nothing changed at all -- without this, "why didn't my README
-    // update" is undiagnosable, since the model's own reasoning for
-    // abstaining is otherwise thrown away. Log it verbatim.
-    log(
-      finalText
-        ? `capture: ${date} -- no README update or reorganization; model said: ${finalText}`
-        : `capture: ${date} -- no README update or reorganization (model gave no reasoning text).`,
-    );
+    if (refusalReason) {
+      log(`capture: ${date} -- refused to apply update_readme (${refusalReason}); README left unchanged.`);
+    }
+    if (organizeActions.length > 0) {
+      // Reorganization happened without a README change -- still worth a
+      // (changeset-less) Release Log entry so it's visible in the project's
+      // own receipt, using the same sourceRef so a re-run doesn't repeat it.
+      await createReleaseLogEntry({
+        projectFolderId: projectFolder._id,
+        date,
+        actingHumanId,
+        kind: "ai-update",
+        summary: `PhyLog reorganized this project: ${organizeActions.join(", ")}`,
+        sourceRef,
+      });
+    } else if (!refusalReason) {
+      // Nothing changed at all -- without this, "why didn't my README
+      // update" is undiagnosable, since the model's own reasoning for
+      // abstaining is otherwise thrown away. Log it verbatim.
+      log(
+        finalText
+          ? `capture: ${date} -- no README update or reorganization; model said: ${finalText}`
+          : `capture: ${date} -- no README update or reorganization (model gave no reasoning text).`,
+      );
+    }
   }
 
   return { readmeUpdated, organizeActions };
