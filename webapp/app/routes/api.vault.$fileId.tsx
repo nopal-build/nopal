@@ -13,7 +13,7 @@ import {
   isFolderIdShareable,
   isFolderUnderSyncs,
 } from "robustness-core/data/vault.server";
-import { getProjectRoleForFolderId } from "robustness-core/data/projectSharing.server";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 import { cacheDailyLog, deleteDailyLogCache } from "robustness-core/data/dailyLog.server";
 import { isFileRefLocked } from "robustness-core/data/vault.types";
 
@@ -89,9 +89,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   const isOwner = file.human_id === user._id;
+  // An owner-tier project Sharing Role (Owner/Crafter) acts as a full
+  // co-owner of everything inside a shared project — not just `skills`
+  // content (the first place this was implemented) but every normal
+  // action: rename/move/delete/publish/replace a file, change its
+  // `shared_type`/`is_public`, all handled identically to real ownership
+  // below. See `canActAsProjectOwner`.
+  const isEffectiveOwner =
+    isOwner || (await canActAsProjectOwner(user._id, file.human_id, file.folder_id));
 
-  // Non-owners: only a content-only PATCH is allowed.
-  if (!isOwner) {
+  // Anyone else: only a content-only PATCH is allowed, gated by the
+  // ordinary per-file shared_type/shared_with grant.
+  if (!isEffectiveOwner) {
     if (request.method !== "PATCH") {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -106,32 +115,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     if (folder.folder_type === "skills") {
-      // `skills` access is governed entirely by the project's own Sharing
-      // Role, not the ordinary per-file shared_type/shared_with grant.
-      // `skills.shareable` is `false` (a file inside it can never be
-      // individually shared), so gating this on shared_type/shared_with
-      // would make it permanently unreachable — no owner-tier collaborator
-      // could ever satisfy it. Only an owner-tier role (Owner/Crafter) may
-      // edit; Observers may not, even though they can still view a shared
-      // project. See the `vault`/`oxmarkdown` skills and
-      // `projectSharing.server.ts`.
-      const role = await getProjectRoleForFolderId(folder._id, user._id);
-      if (!role?.isOwner) {
-        return Response.json({ error: "Forbidden" }, { status: 403 });
-      }
-    } else {
-      // Every other shareable folder type still requires the ordinary
-      // per-file shared_type grant plus folder-level shared_with.
-      const sharedType = file.shared_type ?? "view";
-      if (sharedType !== "workable" && sharedType !== "editable") {
-        return Response.json({ error: "Forbidden" }, { status: 403 });
-      }
+      // Reaching here already means the acting human is NOT owner-tier on
+      // the owning project (that's `isEffectiveOwner`, checked above) —
+      // `skills` content is ONLY ever owner-tier-Role-gated, never via the
+      // ordinary per-file shared_type grant (`skills.shareable` is `false`,
+      // see the `vault` skill), so there is no path to allow this.
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-      const isShared =
-        Array.isArray(folder.shared_with) && folder.shared_with.includes(user._id);
-      if (!isShared) {
-        return Response.json({ error: "Forbidden" }, { status: 403 });
-      }
+    // Every other shareable folder type requires the ordinary per-file
+    // shared_type grant plus folder-level shared_with.
+    const sharedType = file.shared_type ?? "view";
+    if (sharedType !== "workable" && sharedType !== "editable") {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const isShared =
+      Array.isArray(folder.shared_with) && folder.shared_with.includes(user._id);
+    if (!isShared) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // Allow only a content update.
@@ -148,14 +150,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return Response.json({ fileRef: updated });
   }
 
-  // Owner-only operations below.
+  // Owner (or owner-tier collaborator) operations below.
 
   // Root/folder-type policy (`vaultRoots.ts` / `vaultFolderTypes.ts`) —
-  // today every root/type an owner can reach is "owner"-writable, so this
-  // always passes for the file's own owner; kept for future restricted
-  // types. The `skills`-specific, project-Role-aware gate lives in the
-  // non-owner branch above (an owner-tier COLLABORATOR isn't the file's
-  // owner, so it can't be checked here).
+  // today every root/type reachable here is "owner"-writable, so this
+  // always passes; kept for future restricted types.
   if (request.method === "DELETE" || request.method === "PATCH") {
     if (!(await canWriteToFolderId(file.folder_id, user.role))) {
       return Response.json(
@@ -212,9 +211,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const updates: Parameters<typeof updateFileRef>[1] = {};
 
     // Moving a file INTO a restricted root or folder type (e.g. `skills`)
-    // needs the same role as creating one directly inside it would.
+    // needs the same role as creating one directly inside it would, AND
+    // (same as any other write here) the acting human needs to actually
+    // own — or hold an owner-tier Sharing Role on — the DESTINATION folder
+    // too, not just the file's current one.
     if ("folder_id" in body && body.folder_id) {
       if (!(await canWriteToFolderId(body.folder_id, user.role))) {
+        return Response.json(
+          { error: "You don't have permission to move files here" },
+          { status: 403 },
+        );
+      }
+      const destFolder = await getFolderById(body.folder_id);
+      if (
+        !destFolder ||
+        !(await canActAsProjectOwner(user._id, destFolder.human_id, destFolder._id))
+      ) {
         return Response.json(
           { error: "You don't have permission to move files here" },
           { status: 403 },

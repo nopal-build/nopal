@@ -8,6 +8,7 @@ import {
   computeMdUpdate,
   isFolderUnderSyncs,
 } from "robustness-core/data/vault.server";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 import { isFileRefLocked } from "robustness-core/data/vault.types";
 import { merge } from "robustness-core/data/generic.server";
 import { cacheDailyLog } from "robustness-core/data/dailyLog.server";
@@ -54,7 +55,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!existing) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
-  if (existing.human_id !== user._id) {
+  // An owner-tier project Sharing Role (Owner/Crafter) may replace a file
+  // inside someone else's shared project exactly like its own owner could
+  // — see `canActAsProjectOwner`.
+  if (!(await canActAsProjectOwner(user._id, existing.human_id, existing.folder_id))) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   // Sync-scoped tokens may only replace files inside syncs/.

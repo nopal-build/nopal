@@ -190,6 +190,23 @@ asked, nothing should be defined" design: PhyLog does nothing surprising
 by default, and a project owner opts in by editing the relevant skill
 file.
 
+**Any OTHER file in `skills/`** — e.g. a `VOICE.md` a project's own
+`CAPTURE.md` tells the model to "read and follow" — is auto-folded into
+every pre-capture and capture prompt too (`listExtraSkillFiles`,
+`projectN01.server.ts`), the same way the legacy general `SKILL.md` file
+already is. This is deliberately NOT a tool call the model can skip:
+capture's agent loop only has `create_folder`/`move_file`/`update_readme`,
+nothing that reads arbitrary files, so a skill file that references a
+companion doc by name would otherwise be asking the model to do something
+it has no way to do. Reserved names (`PRE_CAPTURE.md`/`CAPTURE.md`/
+`POST_CAPTURE.md`/`SKILL.md`) are excluded since those are already fetched
+by name for their own purpose.
+
+> Prior to this, a skill file that said "read VOICE.md" was a silent
+> dead end — the model had no way to honor it, and nothing surfaced why a
+> capture run then produced no README update. See the diagnostic logging
+> note under Stage 2 below for the other half of that fix.
+
 ### Stage 1 — pre-capture (`preCapture.server.ts`)
 
 TWO jobs, one UNCONDITIONAL and one skill-gated — this split matters, see
@@ -328,8 +345,21 @@ oldest first):
    - `update_readme({ newBody, reason })` — at most meaningfully once per
      entry; replaces the README body only (front matter untouched).
    `create_folder`/`move_file` refuse to target `skills`/`syncs`/
-   `newspapers`/`daily-logs` by name — those subtrees are permanently off
+   `newspapers`/`daily-logs` by name -- those subtrees are permanently off
    limits to this stage.
+
+   The model has NO tool for reading an arbitrary file by name -- it only
+   ever sees filenames in the tree, never their content, except for what's
+   assembled into the prompt above. Any `skills/` file besides the four
+   reserved pipeline names (a `VOICE.md`, say) is therefore auto-folded
+   into the prompt directly (`listExtraSkillFiles`) rather than left for
+   the model to "go read" -- see the pipeline-wide note above. When a
+   day's run produces neither an `update_readme` call nor any
+   `create_folder`/`move_file` call, the model's own final turn of plain
+   text (its stated reasoning for doing nothing) is logged verbatim
+   (`capture: <date> -- no README update or reorganization; model said:
+   ...`) so "why didn't this update" is diagnosable from `nopal phylog
+   capture`'s own output, instead of a silent no-op.
 
 **Why filing still reads the original Card, not the daily-logs entry's
 own staged copy**: `fileCardAttachments` is SHARED with the Sorter
@@ -703,11 +733,11 @@ pnpm workspace package — NOT under `webapp/app/data` anymore. See
 - `packages/robustness-core/src/data/projectN01.server.ts` —
   `project-n01` seeding/retrofit (`ensureProjectN01`/`resolveProjectN01`),
   default skill file content, `resetProjectN01Content`
-  (`wipeDailyLogs` option), `getProjectStageSkill`/`isSkipInstruction`,
-  and the `daily-logs` space's own find/create/list/manifest helpers
-  (`ensureProjectDailyLogsFolder`, `getOrCreateDailyLogEntryFolder`,
-  `listDailyLogEntries`, `writeDailyLogEntryMeta`,
-  `CARD_COPY_FILE`/`DAILY_LOG_ENTRY_META_FILE`).
+  (`wipeDailyLogs` option), `getProjectStageSkill`/`isSkipInstruction`/
+  `listExtraSkillFiles`, and the `daily-logs` space's own
+  find/create/list/manifest helpers (`ensureProjectDailyLogsFolder`,
+  `getOrCreateDailyLogEntryFolder`, `listDailyLogEntries`,
+  `writeDailyLogEntryMeta`, `CARD_COPY_FILE`/`DAILY_LOG_ENTRY_META_FILE`).
 - `packages/robustness-core/src/data/preCapture.server.ts` — stage 1.
 - `packages/robustness-core/src/data/capture.server.ts` — stage 2
   (deterministic filing via `sorter.server.ts`'s `fileCardAttachments`,

@@ -1,7 +1,8 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { completeMultipartUpload } from "robustness-core/data/file.server";
-import { createFileRef, isFolderUnderSyncs } from "robustness-core/data/vault.server";
+import { createFileRef, getFolderById, isFolderUnderSyncs, canWriteToFolderId } from "robustness-core/data/vault.server";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 
 /**
  * POST /api/vault/multipart-complete
@@ -52,11 +53,35 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Same policy + ownership/role checks `upload.tsx` applies for a plain
+  // (non-multipart) upload — this route previously had NEITHER, since the
+  // S3-key-prefix check above only proves the RAW BYTES belong to this
+  // human's own upload session, not that folderId is theirs (or shared
+  // with them) to register a file_refs row into.
+  if (!(await canWriteToFolderId(folderId ?? null, user.role))) {
+    return Response.json(
+      { error: "You don't have permission to upload files here" },
+      { status: 403 },
+    );
+  }
+  const folder = folderId ? await getFolderById(folderId) : null;
+  if (folderId && !folder) {
+    return Response.json({ error: "Folder not found" }, { status: 404 });
+  }
+  if (folder && !(await canActAsProjectOwner(user._id, folder.human_id, folderId ?? null))) {
+    return Response.json(
+      { error: "You don't have permission to upload files here" },
+      { status: 403 },
+    );
+  }
+
   try {
     const url = await completeMultipartUpload(key, uploadId, parts);
 
+    // Filed under the FOLDER's own owner, not necessarily the acting
+    // uploader — see the matching comment in `upload.tsx`.
     const fileRef = await createFileRef({
-      human_id: user._id,
+      human_id: folder ? folder.human_id : user._id,
       name,
       s3_url: url,
       s3_key: key,

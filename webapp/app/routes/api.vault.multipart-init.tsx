@@ -1,7 +1,8 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { createMultipartUpload } from "robustness-core/data/file.server";
-import { canWriteToFolderId, isFolderUnderSyncs } from "robustness-core/data/vault.server";
+import { canWriteToFolderId, getFolderById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 
 /**
  * POST /api/vault/multipart-init
@@ -41,6 +42,20 @@ export async function action({ request }: ActionFunctionArgs) {
   // Admin/Super, even inside the OWNING human's own vault — see
   // `vaultRoots.ts` / `vaultFolderTypes.ts`.
   if (!(await canWriteToFolderId(folderId, user.role))) {
+    return Response.json(
+      { error: "You don't have permission to upload files here" },
+      { status: 403 },
+    );
+  }
+
+  // Whose folder is this actually? An owner-tier project Sharing Role
+  // (Owner/Crafter) may upload into someone else's shared project exactly
+  // like its own owner could — see `canActAsProjectOwner`.
+  const folder = folderId ? await getFolderById(folderId) : null;
+  if (folderId && !folder) {
+    return Response.json({ error: "Folder not found" }, { status: 404 });
+  }
+  if (folder && !(await canActAsProjectOwner(user._id, folder.human_id, folderId))) {
     return Response.json(
       { error: "You don't have permission to upload files here" },
       { status: 403 },

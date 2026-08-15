@@ -139,6 +139,35 @@ export async function getProjectRoleForFolderId(
   return getProjectRole(project, humanId);
 }
 
+/**
+ * Whether `actingHumanId` may act with full owner-level privileges on
+ * something owned by `ownerHumanId`, living in `folderId` — true when they
+ * genuinely ARE that owner, or when they hold an owner-tier Sharing Role
+ * (Owner/Crafter) on the project `folderId` lives under. This is what
+ * makes an owner-tier collaborator behave like a co-owner for everyday
+ * CONTENT actions on a shared project — upload, create folder, rename,
+ * move, delete, replace, publish — the same broadening `setProjectSharing`
+ * already applies to changing sharing itself.
+ *
+ * Deliberately NOT used for the project ANCHOR folder's own object-level
+ * lifecycle (renaming/deleting/publishing the whole project) — that stays
+ * creator-only, the same precedent `projectStatus.server.ts` already set
+ * for project status ("a personal organizational tool", unlike the
+ * collaborator-facing actions this function gates). Callers operating on
+ * an anchor folder should keep checking `folder.human_id === actingHumanId`
+ * directly instead.
+ */
+export async function canActAsProjectOwner(
+  actingHumanId: string,
+  ownerHumanId: string,
+  folderId: string | null | undefined,
+): Promise<boolean> {
+  if (actingHumanId === ownerHumanId) return true;
+  if (!folderId) return false;
+  const role = await getProjectRoleForFolderId(folderId, actingHumanId);
+  return !!role?.isOwner;
+}
+
 export type SetProjectSharingResult =
   | { ok: true; sharing: ProjectSharingEntry[] }
   | { ok: false; error: string };

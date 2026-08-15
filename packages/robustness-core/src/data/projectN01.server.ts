@@ -550,3 +550,31 @@ export async function getProjectStageSkill(
   const file = await getFileRefById(listing._id);
   return file?.content ?? null;
 }
+
+/** The four skill file names every pipeline stage already fetches by
+ * name (`getProjectStageSkill`) -- excluded from `listExtraSkillFiles`
+ * below so a reference file never gets folded into a prompt twice. */
+const RESERVED_SKILL_FILE_NAMES = new Set(["pre_capture.md", "capture.md", "post_capture.md", "skill.md"]);
+
+/** Any OTHER file a project owner drops into `skills/` -- e.g. a
+ * VOICE.md a CAPTURE.md says to "read and follow". Auto-folded into
+ * every stage's prompt (see `capture.server.ts`/`preCapture.server.ts`)
+ * alongside SKILL.md's own general steering, never gated behind a tool
+ * call a model might skip -- if it's in `skills/`, it's read. Sorted by
+ * name for stable prompts across runs. */
+export async function listExtraSkillFiles(
+  projectFolder: { human_id: string; _id: string },
+): Promise<{ name: string; content: string }[]> {
+  const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
+  const skillsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "skills");
+  if (!skillsFolder) return [];
+  const { files } = await listFolderChildren(projectFolder.human_id, skillsFolder._id);
+  const extras = files.filter((f) => !RESERVED_SKILL_FILE_NAMES.has(f.name.toLowerCase()));
+  const withContent = await Promise.all(
+    extras.map(async (f) => {
+      const file = await getFileRefById(f._id);
+      return { name: f.name, content: (file?.content ?? "").trim() };
+    }),
+  );
+  return withContent.filter((f) => f.content.length > 0).sort((a, b) => a.name.localeCompare(b.name));
+}

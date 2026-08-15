@@ -11,6 +11,7 @@ import {
   isFolderUnderSyncs,
   validateFolderTypeForParent,
 } from "robustness-core/data/vault.server";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 import {
   isVaultFolderTypeKey,
   type VaultFolderTypeKey,
@@ -60,7 +61,14 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const parent = await getFolderById(body.parent_folder_id);
-  if (!parent || parent.human_id !== user._id) {
+  if (!parent) {
+    return Response.json({ error: "Parent folder not found" }, { status: 404 });
+  }
+  // An owner-tier project Sharing Role (Owner/Crafter) may create folders
+  // inside someone else's shared project exactly like its own owner could
+  // — see `canActAsProjectOwner`. 404 (not 403) either way, so a stranger
+  // can't distinguish "doesn't exist" from "exists but I can't write here".
+  if (!(await canActAsProjectOwner(user._id, parent.human_id, parent._id))) {
     return Response.json({ error: "Parent folder not found" }, { status: 404 });
   }
 
@@ -91,8 +99,14 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
+  // Filed under the PARENT's own owner, not necessarily the acting human
+  // — `listFolderChildren` (and everything else that lists a folder's
+  // contents) queries by the parent owner's human_id, so a folder created
+  // by a collaborator with any other human_id would be invisible in the
+  // very tree it was just added to. Equivalent to `user._id` in the
+  // ordinary self-owned case.
   const folder = await createVaultFolder({
-    human_id: user._id,
+    human_id: parent.human_id,
     name: body.name,
     parent_folder_id: body.parent_folder_id,
     folder_type: folderType,

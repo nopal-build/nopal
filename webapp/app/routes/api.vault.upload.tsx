@@ -5,8 +5,10 @@ import { uploadFileToS3 } from "robustness-core/data/file.server";
 import {
   canWriteToFolderId,
   createFileRef,
+  getFolderById,
   isFolderUnderSyncs,
 } from "robustness-core/data/vault.server";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 
 /**
  * POST /api/vault/upload
@@ -52,6 +54,23 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
+  // Whose folder is this actually? An owner-tier project Sharing Role
+  // (Owner/Crafter) may upload into someone else's shared project exactly
+  // like its own owner could — see `canActAsProjectOwner`. This is also
+  // the ONLY place that previously checked whether folderId belongs to (or
+  // is shared with) the acting human at all; `canWriteToFolderId` above is
+  // a root/type-level policy check, not an ownership check.
+  const folder = folderId ? await getFolderById(folderId) : null;
+  if (folderId && !folder) {
+    return Response.json({ error: "Folder not found" }, { status: 404 });
+  }
+  if (folder && !(await canActAsProjectOwner(user._id, folder.human_id, folderId))) {
+    return Response.json(
+      { error: "You don't have permission to upload files here" },
+      { status: 403 },
+    );
+  }
+
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const folderSegment = folderId ?? "root";
   const s3Key = `vault/${user._id}/${folderSegment}/${Date.now()}-${safeName}`;
@@ -66,8 +85,13 @@ export async function action({ request }: ActionFunctionArgs) {
       .update(Buffer.from(await file.arrayBuffer()))
       .digest("hex");
 
+    // Filed under the FOLDER's own owner — not necessarily the acting
+    // uploader — since `listFolderChildren` (and everything else that
+    // lists a folder's contents) queries by the folder owner's human_id.
+    // A file stamped with the acting collaborator's own id instead would
+    // silently vanish from the very folder it was just uploaded into.
     const fileRef = await createFileRef({
-      human_id: user._id,
+      human_id: folder ? folder.human_id : user._id,
       name: file.name,
       s3_url: url,
       s3_key: s3Key,

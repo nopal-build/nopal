@@ -97,6 +97,7 @@ import {
   getProjectStageSkill,
   isSkipInstruction,
   listDailyLogEntries,
+  listExtraSkillFiles,
   writeDailyLogEntryMeta,
   type DailyLogEntryMeta,
 } from "./projectN01.server";
@@ -253,6 +254,7 @@ export async function runPreCapture(
   // Backward-compat continuity: a project may already have a general
   // skills/SKILL.md predating this pipeline — fold it in too.
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
+  const extraSkillFiles = await listExtraSkillFiles(projectFolder);
   if (!skipSummaries && !opts.provider && !isPhylogAgentConfigured()) {
     return { ok: false, error: "PhyLog's agent is not configured (no ANTHROPIC_API_KEY set)." };
   }
@@ -370,7 +372,13 @@ export async function runPreCapture(
   const unsupported: { fileId: string; name: string }[] = [];
   let photoLlm: PhotoDescriber | undefined = opts.photoDescriber;
   let textLlm: LlmProvider | undefined = opts.provider;
-  const skillContent = [skill, generalSkill].filter(Boolean).join("\n\n");
+  const skillContent = [
+    skill,
+    generalSkill,
+    ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   // `${entryFolderId}:${attachmentFileId}:${hash}` strings, collected as
   // the loop below processes each Card-attachment candidate -- folded
   // into that entry's own `_meta.md.sourceHash` once the whole loop

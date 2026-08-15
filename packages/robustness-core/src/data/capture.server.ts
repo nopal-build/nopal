@@ -133,6 +133,7 @@ import {
   DEFAULT_CAPTURE_SKILL,
   getProjectStageSkill,
   listDailyLogEntries,
+  listExtraSkillFiles,
   resetProjectN01Content,
   type ResetSummary,
 } from "./projectN01.server";
@@ -194,11 +195,12 @@ async function runAgentLoop(
   tools: ToolDefinition[],
   executors: Record<string, (input: Record<string, unknown>) => Promise<string>>,
   maxTurns = 6,
-): Promise<{ toolCallsMade: ToolCall[]; usage: LlmUsage; durationMs: number; model: string | null }> {
+): Promise<{ toolCallsMade: ToolCall[]; usage: LlmUsage; durationMs: number; model: string | null; finalText: string | null }> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const toolCallsMade: ToolCall[] = [];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
   let model: string | null = null;
+  let finalText: string | null = null;
   const loopStart = Date.now();
 
   for (let turn = 0; turn < maxTurns; turn++) {
@@ -206,6 +208,7 @@ async function runAgentLoop(
     usage.inputTokens += response.usage.inputTokens;
     usage.outputTokens += response.usage.outputTokens;
     model = response.model;
+    if (response.text?.trim()) finalText = response.text.trim();
     messages.push({ role: "assistant", content: response.text ?? "", toolCalls: response.toolCalls });
     if (response.toolCalls.length === 0) break;
     for (const call of response.toolCalls) {
@@ -216,7 +219,7 @@ async function runAgentLoop(
     }
     if (response.stopReason !== "tool_use") break;
   }
-  return { toolCallsMade, usage, durationMs: Date.now() - loopStart, model };
+  return { toolCallsMade, usage, durationMs: Date.now() - loopStart, model, finalText };
 }
 
 /** Renders every folder/file in `projectFolder`'s tree EXCLUDING the
@@ -303,12 +306,19 @@ The README is rendered with OxMarkdown directive support, not plain markdown alo
 
 All three only resolve DIRECT children of the project root by name — never nested paths, never files/folders inside skills/syncs/newspapers/daily-logs.`;
 
-function buildSystemPrompt(skillContent: string, generalSkill: string | null): string {
+function buildSystemPrompt(
+  skillContent: string,
+  generalSkill: string | null,
+  extraSkillFiles: { name: string; content: string }[],
+): string {
   const generalSection = generalSkill ? `\n\n## Project SKILL.md (general steering)\n\n${generalSkill}` : "";
+  const extraSection = extraSkillFiles.length > 0
+    ? `\n\n## Other reference files in this project's skills/ folder\n\nThese are additional, human-authored steering documents (e.g. a VOICE.md your CAPTURE.md instructions might tell you to follow) -- not the pipeline's own instruction files, just extra context the project owner wants every capture run to have. Follow anything in them exactly like the instructions above.\n\n${extraSkillFiles.map((f) => `### ${f.name}\n\n${f.content}`).join("\n\n")}`
+    : "";
   return `You are PhyLog, capturing a project's daily work into a well-organized structure and an up-to-date README.
 
 You will be given:
-- This project's own CAPTURE.md instructions (and, if present, its general SKILL.md steering) — follow them closely.
+- This project's own CAPTURE.md instructions (and, if present, its general SKILL.md steering, plus any other reference files kept in skills/) — follow them closely.
 - The project's CURRENT file tree (excluding its skills/syncs/newspapers/daily-logs folders, which you can never see or touch).
 - That day's staged Card content (from this project's own daily-logs/ entry), and any files just filed into the project today.
 - Pre-capture summaries for any of today's attachments, when available.
@@ -320,7 +330,7 @@ ${DIRECTIVE_GUIDE}
 
 ## Project CAPTURE.md
 
-${skillContent}${generalSection}`;
+${skillContent}${generalSection}${extraSection}`;
 }
 
 function buildUserPrompt(input: {
@@ -413,6 +423,10 @@ export async function runCapture(
   // steering file) — fold it in too, alongside CAPTURE.md's own
   // instructions, rather than silently dropping it.
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
+  // Any other file dropped into skills/ (e.g. a VOICE.md CAPTURE.md
+  // tells the model to "read and follow") -- fetched once per run and
+  // folded into every day's prompt, never gated behind a tool call.
+  const extraSkillFiles = await listExtraSkillFiles(projectFolder);
   const llm = opts.provider ?? new AnthropicProvider();
   const days: CaptureDayResult[] = [];
   // Keyed `${humanId}:${date}` -> humanId (same convention
@@ -485,6 +499,7 @@ export async function runCapture(
         llm,
         skillContent,
         generalSkill,
+        extraSkillFiles,
         log,
       });
       readmeUpdated = result.readmeUpdated;
@@ -546,9 +561,10 @@ async function captureOneDay(input: {
   llm: LlmProvider;
   skillContent: string;
   generalSkill: string | null;
+  extraSkillFiles: { name: string; content: string }[];
   log: (line: string) => void;
 }): Promise<{ readmeUpdated: boolean; organizeActions: string[] }> {
-  const { actingHumanId, projectFolder, date, entryFolder, filed, sourceRef, llm, skillContent, generalSkill, log } = input;
+  const { actingHumanId, projectFolder, date, entryFolder, filed, sourceRef, llm, skillContent, generalSkill, extraSkillFiles, log } = input;
 
   const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
   const readmeContent = readme?.content ?? "";
@@ -597,9 +613,9 @@ async function captureOneDay(input: {
   };
 
   const userPrompt = buildUserPrompt({ tree, cardContent, filed, summaries, readmeContent });
-  const { toolCallsMade, usage, durationMs, model } = await runAgentLoop(
+  const { toolCallsMade, usage, durationMs, model, finalText } = await runAgentLoop(
     llm,
-    buildSystemPrompt(skillContent, generalSkill),
+    buildSystemPrompt(skillContent, generalSkill, extraSkillFiles),
     userPrompt,
     [CREATE_FOLDER_TOOL, MOVE_FILE_TOOL, UPDATE_README_TOOL],
     executors,
@@ -655,7 +671,7 @@ async function captureOneDay(input: {
       log(`capture: ${date} — README updated: ${reason}`);
     }
   } else if (organizeActions.length > 0) {
-    // Reorganization happened without a README change — still worth a
+    // Reorganization happened without a README change -- still worth a
     // (changeset-less) Release Log entry so it's visible in the project's
     // own receipt, using the same sourceRef so a re-run doesn't repeat it.
     await createReleaseLogEntry({
@@ -666,6 +682,15 @@ async function captureOneDay(input: {
       summary: `PhyLog reorganized this project: ${organizeActions.join(", ")}`,
       sourceRef,
     });
+  } else {
+    // Nothing changed at all -- without this, "why didn't my README
+    // update" is undiagnosable, since the model's own reasoning for
+    // abstaining is otherwise thrown away. Log it verbatim.
+    log(
+      finalText
+        ? `capture: ${date} -- no README update or reorganization; model said: ${finalText}`
+        : `capture: ${date} -- no README update or reorganization (model gave no reasoning text).`,
+    );
   }
 
   return { readmeUpdated, organizeActions };

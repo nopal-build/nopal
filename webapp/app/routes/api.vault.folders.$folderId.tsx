@@ -12,6 +12,7 @@ import {
   moveVaultFolder,
 } from "robustness-core/data/vault.server";
 import { canWriteToRoot } from "robustness-core/data/vaultRoots";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 import { isFileRefLocked, isVaultRootFolder } from "robustness-core/data/vault.types";
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -29,9 +30,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!folder) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
-  if (folder.human_id !== user._id) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
 
   const isRoot = isVaultRootFolder(folder);
 
@@ -43,6 +41,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // so THIS folder's own object-level mutations only need the ROOT policy,
   // not the (necessarily stricter) folder-type content policy.
   const isProjectN01Anchor = folder.is_folder_type_root && folder.folder_type === "project-n01";
+
+  // The project ANCHOR's own object-level lifecycle (rename/delete/publish
+  // the WHOLE project) stays creator-only — same precedent
+  // `projectStatus.server.ts` already set for project status ("a personal
+  // organizational tool", unlike the collaborator-facing actions Sharing
+  // Roles govern). Every ORDINARY folder inside a shared project extends
+  // to an owner-tier collaborator (Owner/Crafter) exactly like real
+  // ownership — see `canActAsProjectOwner`.
+  const ownershipOk = isProjectN01Anchor
+    ? folder.human_id === user._id
+    : await canActAsProjectOwner(user._id, folder.human_id, folder._id);
+  if (!ownershipOk) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const permitted = isProjectN01Anchor
     ? canWriteToRoot(folder.vault_root_key, user.role)
     : await canWriteToFolderId(folderId, user.role);
@@ -143,7 +156,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }
 
       const newParent = await getFolderById(body.parent_folder_id);
-      if (!newParent || newParent.human_id !== user._id) {
+      if (
+        !newParent ||
+        !(await canActAsProjectOwner(user._id, newParent.human_id, newParent._id))
+      ) {
         return Response.json(
           { error: "Destination folder not found" },
           { status: 404 },

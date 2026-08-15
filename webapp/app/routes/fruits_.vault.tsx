@@ -175,9 +175,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   let current: Current = { kind: "root" };
-  // See the `skills`-ownership-role resolution below, in the `fileParam`
-  // branch — only ever true for a shared file inside a `skills` folder.
-  let viewerCanEditSharedSkillsFile = false;
+  // See the owner-tier-role resolution below, in the `fileParam`/`folderParam`
+  // branches — only ever true when the viewer doesn't own the current
+  // file/folder outright but holds an owner-tier Sharing Role on the
+  // project it lives under.
+  let viewerIsOwnerTierOnProject = false;
 
   if (fileParam) {
     const file = await getFileRefById(fileParam);
@@ -201,19 +203,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       isProjectN01Anchor(fileProjectFolder)
         ? await resolveProjectManifest(fileProjectFolder.human_id, fileProjectFolder)
         : null;
-    // A non-owner viewing a file inside a `skills` folder may still be able
-    // to EDIT its content, via an owner-tier project Sharing Role
-    // (Owner/Crafter) rather than file ownership — see `api.vault.$fileId.tsx`'s
-    // non-owner PATCH path and the `vault` skill. Resolved once here so the
-    // client doesn't need its own copy of the Sharing Role logic just to
-    // decide whether to render the skill editor as read-only.
-    if (
-      file.human_id !== user._id &&
-      file.folder_id &&
-      fileProjectFolder?.folder_type === "skills"
-    ) {
+    // A non-owner viewing a file may still act as a full co-owner of it,
+    // via an owner-tier project Sharing Role (Owner/Crafter) rather than
+    // file ownership — see `api.vault.$fileId.tsx`'s `isEffectiveOwner`
+    // and the `vault` skill's Sharing Roles section. Resolved once here so
+    // the client doesn't need its own copy of the Sharing Role logic just
+    // to decide whether to render actions as available.
+    if (file.human_id !== user._id && file.folder_id) {
       const role = await getProjectRoleForFolderId(file.folder_id, user._id);
-      viewerCanEditSharedSkillsFile = Boolean(role?.isOwner);
+      viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
     }
     current = { kind: "file", file, ancestry, projectManifest: projectManifestForFile };
   } else if (folderParam) {
@@ -240,6 +238,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       readme && isProjectN01Anchor(folder)
         ? await resolveProjectManifest(folder.human_id, folder)
         : null;
+    // Same owner-tier-role resolution as the file branch above, for a
+    // folder view — lets the client light up Upload/New folder/Rename/
+    // Move/Share/Publish/Delete for an owner-tier collaborator exactly
+    // like it already does for the folder's own owner.
+    if (folder.human_id !== user._id) {
+      const role = await getProjectRoleForFolderId(folder._id, user._id);
+      viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
+    }
     current = { kind: "folder", folder, ancestry, readme, projectManifest: projectManifestForFolder };
   }
 
@@ -251,7 +257,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     current,
     relatedHumans,
     topLevelSharedFolders,
-    viewerCanEditSharedSkillsFile,
+    viewerIsOwnerTierOnProject,
   };
 }
 
@@ -1110,7 +1116,7 @@ export default function VaultV2Page() {
     current,
     relatedHumans,
     topLevelSharedFolders,
-    viewerCanEditSharedSkillsFile,
+    viewerIsOwnerTierOnProject,
   } = useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
@@ -1923,51 +1929,24 @@ export default function VaultV2Page() {
       })
     : [];
 
-  // Shared (non-owned) folders/files are view-only in this UI — all
-  // mutation actions below (rename/move/share/publish/delete/upload/replace)
-  // are gated on ownership; the server enforces this too.
+  // Shared (non-owned) folders/files are view-only for anyone WITHOUT an
+  // owner-tier project Sharing Role — an Owner/Crafter collaborator acts
+  // as a full co-owner of everything below (upload/rename/move/share/
+  // publish/delete/replace), same broadening `canActAsProjectOwner`
+  // applies server-side; this ONLY controls which buttons render, the
+  // server enforces the real permission regardless (see the `vault`
+  // skill's own rule against hidden-button-only gating).
   const isOwnedByViewer =
     current.kind === "root" ||
     (current.kind === "folder"
       ? current.folder.human_id === user._id
       : current.file.human_id === user._id);
+  const isEffectiveOwner = isOwnedByViewer || viewerIsOwnerTierOnProject;
 
   const currentIsRootContainer =
     current.kind === "folder" && isVaultRootFolder(current.folder);
   const currentFolderType =
     current.kind === "folder" ? (current.folder.folder_type ?? null) : null;
-  // Sharing Roles only apply at the PROJECT level (a role is a project-
-  // wide grant stored in that project's own README.md — see
-  // `projectSharing.server.ts`), never to an arbitrary nested subfolder,
-  // so "Share" is only offered on a folder that IS a top-level project:
-  // a direct child of the `projects` root (ancestry = [root, folder]).
-  const isTopLevelProject =
-    current.kind === "folder" &&
-    current.folder.vault_root_key === "projects" &&
-    current.ancestry.length === 2;
-  const canShareCurrent =
-    isOwnedByViewer &&
-    current.kind === "folder" &&
-    !currentIsRootContainer &&
-    isTopLevelProject &&
-    isRootShareable(current.folder.vault_root_key) &&
-    isFolderTypeShareable(currentFolderType);
-  const canPublishCurrent =
-    isOwnedByViewer &&
-    current.kind === "folder" &&
-    !currentIsRootContainer &&
-    isRootPublishable(current.folder.vault_root_key) &&
-    isFolderTypePublishable(currentFolderType);
-  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
-  // Admin/Super, even inside the OWNING human's own vault — see
-  // `vaultRoots.ts` / `vaultFolderTypes.ts`. This ONLY hides the buttons;
-  // the server enforces the real restriction (see the `vault` skill's own
-  // rule against hidden-button-only gating).
-  const canWriteCurrent =
-    isOwnedByViewer &&
-    current.kind === "folder" &&
-    canWriteToRoot(current.folder.vault_root_key, user.role) &&
-    canWriteToFolderType(currentFolderType, user.role);
   // Rename/Move/Share/Publish/Delete act on the folder OBJECT itself, not
   // its content — a `project-n01` folder (a project, or Personal) is
   // `writable: "system"` at the CONTENT level (see `vaultFolderTypes.ts`),
@@ -1978,8 +1957,48 @@ export default function VaultV2Page() {
     current.kind === "folder" &&
     current.folder.is_folder_type_root &&
     currentFolderType === "project-n01";
+  // The project ANCHOR's own object-level lifecycle (rename/delete/publish
+  // the WHOLE project) stays creator-only — same precedent project status
+  // already set ("a personal organizational tool", unlike the
+  // collaborator-facing actions Sharing Roles govern); see
+  // `canActAsProjectOwner`'s doc. Doesn't affect non-anchor folders/files
+  // at all, and doesn't affect Share (below) — sharing a project is
+  // explicitly a collaborator-facing action `setProjectSharing` already
+  // allows any owner-tier role to perform, anchor or not.
+  const canManageAnchorLifecycle = !isProjectN01AnchorCurrent || isOwnedByViewer;
+  // Sharing Roles only apply at the PROJECT level (a role is a project-
+  // wide grant stored in that project's own README.md — see
+  // `projectSharing.server.ts`), never to an arbitrary nested subfolder,
+  // so "Share" is only offered on a folder that IS a top-level project:
+  // a direct child of the `projects` root (ancestry = [root, folder]).
+  const isTopLevelProject =
+    current.kind === "folder" &&
+    current.folder.vault_root_key === "projects" &&
+    current.ancestry.length === 2;
+  const canShareCurrent =
+    isEffectiveOwner &&
+    current.kind === "folder" &&
+    !currentIsRootContainer &&
+    isTopLevelProject &&
+    isRootShareable(current.folder.vault_root_key) &&
+    isFolderTypeShareable(currentFolderType);
+  const canPublishCurrent =
+    isEffectiveOwner &&
+    canManageAnchorLifecycle &&
+    current.kind === "folder" &&
+    !currentIsRootContainer &&
+    isRootPublishable(current.folder.vault_root_key) &&
+    isFolderTypePublishable(currentFolderType);
+  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
+  // Admin/Super, even inside the OWNING human's own vault — see
+  // `vaultRoots.ts` / `vaultFolderTypes.ts`.
+  const canWriteCurrent =
+    isEffectiveOwner &&
+    current.kind === "folder" &&
+    canWriteToRoot(current.folder.vault_root_key, user.role) &&
+    canWriteToFolderType(currentFolderType, user.role);
   const canManageCurrent =
-    isOwnedByViewer &&
+    isEffectiveOwner &&
     current.kind === "folder" &&
     canWriteToRoot(current.folder.vault_root_key, user.role) &&
     (isProjectN01AnchorCurrent || canWriteToFolderType(currentFolderType, user.role));
@@ -2003,7 +2022,7 @@ export default function VaultV2Page() {
   // inside one — pinned in place, see the vault skill), and folders that
   // are currently shared (the server also rejects shared descendants).
   const canMoveCurrent =
-    isOwnedByViewer &&
+    isEffectiveOwner &&
     current.kind === "folder" &&
     !currentIsRootContainer &&
     !current.folder.is_folder_type_root &&
@@ -2028,25 +2047,16 @@ export default function VaultV2Page() {
     current.kind === "file"
       ? current.ancestry[current.ancestry.length - 1]?.folder_type
       : undefined;
+  // An owner-tier project Sharing Role extends full file-level privileges
+  // (content edits, rename, move, replace, delete) exactly like real
+  // ownership — same `isEffectiveOwner` broadening as everything else on
+  // this page, matching the server's own `isEffectiveOwner` in
+  // `api.vault.$fileId.tsx`.
   const canWriteCurrentFile =
     current.kind === "file" &&
-    isOwnedByViewer &&
+    isEffectiveOwner &&
     canWriteToRoot(fileRootKey, user.role) &&
     canWriteToFolderType(fileFolderType, user.role);
-  // Content editability for a `skills` file is broader than
-  // `canWriteCurrentFile` above: an owner-tier collaborator (Owner/Crafter)
-  // may edit the CONTENT of a shared skills file via their project Sharing
-  // Role even though they don't own the file/folder outright (so Rename/
-  // Move/Replace/Delete — gated by `canWriteCurrentFile` — stay owner-only,
-  // matching the server's own file-vs-object-level split in
-  // `api.vault.$fileId.tsx`). `viewerCanEditSharedSkillsFile` is resolved
-  // server-side in the loader, since it depends on the project's own
-  // Sharing Role list.
-  const canEditCurrentFileContent =
-    canWriteCurrentFile ||
-    (current.kind === "file" &&
-      fileFolderType === "skills" &&
-      viewerCanEditSharedSkillsFile);
 
   // "More Actions" dropdown — management actions, gated by the same
   // policies that previously hid the standalone buttons. Unavailable actions
@@ -2054,7 +2064,12 @@ export default function VaultV2Page() {
   // Upload / New folder / Download stay as standalone toolbar buttons.
   const moreActions: MoreMenuItem[] = [];
   if (current.kind === "folder" && canManageCurrent) {
-    if (!currentIsRootContainer) {
+    // Rename/Delete on the project ANCHOR itself stay creator-only
+    // (`canManageAnchorLifecycle`) — Move/Share/Publish are unaffected
+    // (Move is already impossible on an anchor via `is_folder_type_root`;
+    // Share is deliberately NOT anchor-restricted; Publish bakes the same
+    // restriction into `canPublishCurrent` itself).
+    if (!currentIsRootContainer && canManageAnchorLifecycle) {
       moreActions.push({ label: "Rename", onClick: handleRenameFolder });
     }
     if (canMoveCurrent) {
@@ -2079,7 +2094,7 @@ export default function VaultV2Page() {
         });
       }
     }
-    if (!currentIsRootContainer) {
+    if (!currentIsRootContainer && canManageAnchorLifecycle) {
       moreActions.push({
         label: "Delete",
         onClick: handleDeleteFolder,
@@ -2592,7 +2607,7 @@ export default function VaultV2Page() {
                     key={current.file._id}
                     fileId={current.file._id}
                     initialContent={current.file.content ?? ""}
-                    editable={canEditCurrentFileContent}
+                    editable={canWriteCurrentFile}
                     onSave={handleSaveSkillFile}
                   />
                 ) : current.projectManifest ? (
