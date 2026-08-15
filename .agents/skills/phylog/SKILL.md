@@ -604,18 +604,28 @@ so both call sites (capture's agent loop AND pre-capture's text
 summarization) get it with zero changes at their own call sites beyond
 passing one hint. Two cache_control breakpoints:
 
-- **The system prompt is marked only when reuse is actually expected.**
+- **The system prompt is marked only from the SECOND real LLM call
+  onward, within one `runCapture`/`runPreCapture` invocation.**
   `complete`'s optional `cacheSystemPrompt` flag (`llmProvider.ts`) is a
   hint from the CALLER, who knows things a single call can't: `runCapture`
-  passes `entries.length > 1` (this project has more than one
-  day/contributor entry to process in this run, so `skillContent`'s
-  identical system prompt WILL be resent), `runPreCapture` passes
-  `candidates.length > 1` (same idea, more than one file to summarize).
-  A single-entry/single-file run passes `false` -- no reuse is coming,
-  so there's nothing to gain from paying the write premium. (Since
-  tools+system precede messages in the request, marking system ALSO
-  covers the static tool definitions as part of the same cached prefix,
-  for free, whenever it IS marked.)
+  tracks `realCaptureCallsSoFar` (incremented only for entries that
+  actually reach `captureOneDay`, never an already-applied skip),
+  `runPreCapture` tracks `realTextSummaryCallsSoFar` the same way (only
+  candidates that actually need a fresh summary, never one that already
+  matches an existing summary's hash). Both pass `false` on their first
+  real call, `true` from the second real call onward -- needing no
+  lookahead at all, and importantly NOT `entries.length`/`candidates.length`
+  directly: those count EVERY entry/candidate ever staged for a project,
+  which only grows over time and would make the hint permanently `true`
+  after a project's first couple of days even when just ONE fresh entry
+  reaches the LLM this run (a real bug, caught and fixed the same session
+  it was introduced -- see "is it worth it" below). A truly single-call
+  run correctly pays no premium; a run with 3+ real calls still gets the
+  full benefit (only the 2nd call's write is ever "wasted," same as any
+  first sighting of a new cache key has to be). Since tools+system
+  precede messages in the request, marking system ALSO covers the static
+  tool definitions as part of the same cached prefix, for free, whenever
+  it IS marked.
 - **The last message is marked once a call is already mid-multi-turn**
   (`messages.length > 1`, computed inside `complete` itself, not a
   caller hint -- a provider-level fact, not something the caller
@@ -662,6 +672,58 @@ actions).
   its own. The only way to force a miss is to change the underlying
   content, which already happens naturally whenever a skill file is
   edited.
+
+**Looking ahead: daily all-projects runs + skills shared across projects.**
+Today's hint is scoped entirely to ONE project's OWN `runCapture`/
+`runPreCapture` invocation -- it has zero visibility into any OTHER
+project being processed nearby in time. Two things are true about where
+this pipeline is headed (per the phylog skill's own design goal: every
+project gets pre-capture/capture/post-capture at least once a day) that
+cut in OPPOSITE directions for this specific mechanism:
+
+- **Reduces the within-project win.** A daily, non-backlogged cadence
+  means most projects have exactly ONE fresh entry per day, not several
+  -- the exact case the `realCaptureCallsSoFar > 0` heuristic (correctly)
+  never caches. Whatever cross-entry reuse this hint captures today
+  (multiple contributors' Cards landing on the same day, or a caught-up
+  backlog) gets rarer as runs get more frequent and backlogs shrink.
+- **Opens, but does not yet capture, a bigger CROSS-project win.** If
+  many projects share byte-identical skill files (a common template,
+  not each project's own customized CAPTURE.md), then a daily job
+  processing ALL of them in sequence has a real opportunity: project B's
+  capture call could read project A's cached system prompt, if they
+  share the exact same `skillContent`+`generalSkill`+`extraSkillFiles`
+  bytes and run within the cache's TTL of each other. Nothing today
+  detects this -- the hint is computed per-project, with no memory of
+  what any OTHER project just sent. Capturing it would need a
+  BATCH-scoped signal (e.g. a hash of each project's resolved skill
+  content, tracked in a Set/Map that persists across the WHOLE daily
+  batch, not reset per project) threaded down as the `cacheSystemPrompt`
+  hint instead of (or alongside) the current per-project call counter --
+  plus probably grouping/ordering projects by that hash within the batch
+  so shared-skill hits land close together in time, since a batch
+  spanning many projects can easily exceed the default 5-minute TTL
+  (Anthropic also supports a 1-hour tier, at a higher write premium --
+  worth it here specifically if the batch runs longer than 5 minutes and
+  sharing is real).
+- **How much this matters is entirely a function of how much skill
+  content actually ends up SHARED, not customized per project** -- the
+  phylog skill's own design goal says "the skills could be different,"
+  which is doing a lot of work here. If most projects fully customize
+  their own CAPTURE.md, there's little to share and this whole angle
+  is moot; if a large fraction opt into an org-wide default/template
+  unmodified, the cross-project win could dwarf anything achievable
+  within a single project's own daily run.
+
+Neither of the above is built. The batch-level hint doesn't exist yet
+because the "run pre-capture/capture/post-capture for every project,
+once a day" orchestrator itself doesn't exist yet -- there's no
+`POST /api/phylog/run-all`, unlike the Sorter's own `sort-all`
+(`api.daily-log.sort-all.tsx`) or the vault's `archive-cleanup`/
+`trash-cleanup`, all wired into `server.js`'s built-in daily cron. When
+that orchestrator gets built, it's the natural place to ALSO add the
+cross-project cache hint, following the exact same `CRON_SECRET`/
+`server.js` pattern those other daily jobs already establish.
 
 **Cost accounting**: `LlmUsage.cacheReadTokens`/`cacheWriteTokens`
 (already returned by `AnthropicProvider`, previously unused) now flow all

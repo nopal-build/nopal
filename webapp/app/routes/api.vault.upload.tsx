@@ -10,6 +10,22 @@ import {
 } from "robustness-core/data/vault.server";
 import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 
+// A markdown file (by name or content type -- same check the vault UI's
+// own `isMarkdownFile` uses) is stored as a DB-content ref, same as
+// README.md/skill files created directly by the app -- NOT as an S3
+// blob. Every markdown viewer/editor in the vault (MdxEditorView,
+// SkillFileEditor) reads `file.content` directly and never falls back to
+// S3, so a markdown file uploaded through the OLD s3-only path here
+// would always render empty -- confirmed, this was exactly that bug.
+// Capped so a mis-named huge binary file doesn't end up as a giant DB
+// text field; above this it just falls back to the ordinary S3 path
+// (still uploads fine, just won't render inline as editable markdown).
+const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
+
+function isMarkdownUpload(file: File): boolean {
+  return file.type === "text/markdown" || file.name.toLowerCase().endsWith(".md");
+}
+
 /**
  * POST /api/vault/upload
  *
@@ -18,7 +34,10 @@ import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server
  *   folderId — (optional) vault folder _id to place the file in
  *
  * Uploads the file to S3 server-side (no browser→S3 CORS required) and
- * creates the corresponding file_ref record.
+ * creates the corresponding file_ref record -- UNLESS it's a markdown
+ * file under `MAX_INLINE_MARKDOWN_BYTES`, in which case its text becomes
+ * the file_ref's own `content` (no S3 object at all), matching every
+ * other markdown file in the vault (README.md, skill files, Cards).
  */
 export async function action({ request }: ActionFunctionArgs) {
   const scoped = await getScopedUserFromRequest(request);
@@ -71,11 +90,31 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const folderSegment = folderId ?? "root";
-  const s3Key = `vault/${user._id}/${folderSegment}/${Date.now()}-${safeName}`;
+  // Filed under the FOLDER's own owner -- not necessarily the acting
+  // uploader -- since `listFolderChildren` (and everything else that
+  // lists a folder's contents) queries by the folder owner's human_id. A
+  // file stamped with the acting collaborator's own id instead would
+  // silently vanish from the very folder it was just uploaded into.
+  const ownerHumanId = folder ? folder.human_id : user._id;
 
   try {
+    if (isMarkdownUpload(file) && file.size <= MAX_INLINE_MARKDOWN_BYTES) {
+      const text = await file.text();
+      const fileRef = await createFileRef({
+        human_id: ownerHumanId,
+        name: file.name,
+        content: text,
+        content_type: "text/markdown",
+        content_hash: crypto.createHash("sha256").update(text, "utf8").digest("hex"),
+        size: file.size,
+        folder_id: folderId,
+      });
+      return Response.json({ fileRef }, { status: 201 });
+    }
+
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const folderSegment = folderId ?? "root";
+    const s3Key = `vault/${user._id}/${folderSegment}/${Date.now()}-${safeName}`;
     const url = await uploadFileToS3(file, s3Key);
 
     // The multipart form is already buffered in memory, so hashing here
@@ -85,13 +124,8 @@ export async function action({ request }: ActionFunctionArgs) {
       .update(Buffer.from(await file.arrayBuffer()))
       .digest("hex");
 
-    // Filed under the FOLDER's own owner — not necessarily the acting
-    // uploader — since `listFolderChildren` (and everything else that
-    // lists a folder's contents) queries by the folder owner's human_id.
-    // A file stamped with the acting collaborator's own id instead would
-    // silently vanish from the very folder it was just uploaded into.
     const fileRef = await createFileRef({
-      human_id: folder ? folder.human_id : user._id,
+      human_id: ownerHumanId,
       name: file.name,
       s3_url: url,
       s3_key: s3Key,

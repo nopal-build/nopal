@@ -23,16 +23,28 @@ import { cacheDailyLog } from "robustness-core/data/dailyLog.server";
  *   file — the replacement File
  *
  * Behavior by file kind:
- *   - S3-backed files: uploads the new object, points the ref at it, then
- *     deletes the old object.
- *   - Markdown/text refs (content stored in the DB): the uploaded file's text
- *     becomes the new content, versioned through computeMdUpdate like every
- *     other markdown write.
+ *   - Markdown replacement file (by name/type, under 5MB -- same rule
+ *     /api/vault/upload uses): the uploaded text becomes the ref's own
+ *     content, versioned through computeMdUpdate like every other
+ *     markdown write -- REGARDLESS of whether the file being replaced was
+ *     already content-only or (self-healing) still S3-backed from before
+ *     the upload route learned this, cleaning up the orphaned S3 object
+ *     either way.
+ *   - Any other replacement file: uploads the new object, points the ref
+ *     at it, then deletes the old object.
  *
  * Owner-only. Locked daily-log files cannot be replaced.
  */
 function sha256(buf: Buffer): string {
   return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+// Same cap and check as /api/vault/upload -- see that route's own doc for
+// why markdown files are stored as DB content, not S3 blobs.
+const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
+
+function isMarkdownUpload(file: File): boolean {
+  return file.type === "text/markdown" || file.name.toLowerCase().endsWith(".md");
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -93,17 +105,37 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const now = new Date().toISOString();
 
   try {
-    // DB-content refs (markdown cards, etc.): replace the stored text.
-    if (existing.content !== null && !existing.s3_key) {
+    // DB-content refs (markdown cards, skill files, etc.): replace the
+    // stored text. Also takes over for a file that's markdown-shaped
+    // NOW but was previously S3-backed (e.g. a skill file created before
+    // /api/vault/upload learned to store markdown as content -- see that
+    // route's own doc) -- self-heals it into content-only storage instead
+    // of perpetuating the old, broken S3-blob-with-null-content shape.
+    if (
+      (existing.content !== null && !existing.s3_key) ||
+      (isMarkdownUpload(file) && file.size <= MAX_INLINE_MARKDOWN_BYTES)
+    ) {
       const text = await file.text();
       const { content, md_versions } = computeMdUpdate(existing, text);
       const updated = await merge("file_refs", fileId, {
         content,
         md_versions,
         content_hash: sha256(Buffer.from(content, "utf8")),
+        content_type: "text/markdown",
+        s3_key: null,
+        s3_url: null,
         size: file.size,
         updated_at: now,
       });
+      if (existing.s3_key) {
+        // Switching a previously S3-backed file to content-only storage
+        // above -- clean up the now-orphaned object.
+        try {
+          await deleteFromS3(existing.s3_key);
+        } catch (err) {
+          console.error(`Failed to delete replaced S3 object ${existing.s3_key}:`, err);
+        }
+      }
       if (existing.source === "daily_log" && existing.date) {
         await cacheDailyLog(existing.human_id, existing.date, content);
       }

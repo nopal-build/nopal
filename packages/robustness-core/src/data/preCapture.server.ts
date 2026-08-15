@@ -368,16 +368,15 @@ export async function runPreCapture(
     }
   }
 
-  // More than one candidate means `skillContent`'s system prompt below
-  // will be resent identically across several `textLlm.complete()`
-  // calls in this same run -- worth its cache write premium. See
-  // llmProvider.ts's own doc on why a single-candidate run doesn't
-  // bother (an overestimate for cache purposes when most candidates are
-  // photos -- those go through the separate, uncached `describePhoto`
-  // path -- but a harmless one: worst case a text summary's system
-  // prompt gets marked for caching that never gets read back, the same
-  // "a bit too eager" tradeoff as any heuristic here).
-  const cacheSystemPrompt = candidates.length > 1;
+  // Counts REAL `textLlm.complete()` calls only (never a candidate
+  // that's skipped for already having a matching summary) -- see
+  // capture.server.ts's own `realCaptureCallsSoFar` for why a raw
+  // candidate count would be wrong here too (it only grows over time,
+  // via every attachment ever synced or filed, regardless of how many
+  // actually need a FRESH summary this run). Marking from the SECOND
+  // real call onward needs no lookahead: a single-call run never pays
+  // the write premium, and a 3+-call run still gets the full benefit.
+  let realTextSummaryCallsSoFar = 0;
 
   const summaries: PreCaptureSummary[] = [];
   const unsupported: { fileId: string; name: string }[] = [];
@@ -470,6 +469,8 @@ export async function runPreCapture(
         });
       } else if (source.content) {
         textLlm ??= new AnthropicProvider();
+        const cacheSystemPrompt = realTextSummaryCallsSoFar > 0;
+        realTextSummaryCallsSoFar++;
         const response = await textLlm.complete({
           system: `You are PhyLog's pre-capture step, summarizing a file per a project owner's own instructions. Follow those instructions closely; write only the summary itself, no preamble.\n\n${skillContent}`,
           messages: [

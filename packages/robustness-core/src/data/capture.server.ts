@@ -516,13 +516,6 @@ export async function runCapture(
     return { ok: true, full: opts.full, resetSummary, days: [] };
   }
 
-  // Whether THIS project's system prompt (skillContent/generalSkill/
-  // extraSkillFiles, all fixed for the whole run -- see below) will
-  // actually be resent by more than one entry, i.e. whether caching it
-  // is worth its own write premium at all. See llmProvider.ts's own doc
-  // on why a single-entry run deliberately does NOT cache it.
-  const cacheSystemPrompt = entries.length > 1;
-
   // Human-readable labels for the progress log only (never affects which
   // entries get processed) -- one batched lookup instead of one per entry.
   const humans = await getHumansById([...new Set(entries.map(({ meta }) => meta.humanId))]);
@@ -549,6 +542,18 @@ export async function runCapture(
   // never just per date.
   const touchedHumanDates = new Map<string, string>();
   let releaseLogsDirty = false;
+  // Counts REAL captureOneDay invocations only (never already-applied
+  // skips) -- see llmProvider.ts's own doc on cacheSystemPrompt. Using
+  // entries.length here instead would be wrong: it counts every entry
+  // ever staged for this project, which only grows over time and would
+  // make caching "worth it" forever after a project's first couple of
+  // days, even on a run where just ONE fresh entry actually reaches the
+  // LLM. Marking system-prompt caching from the SECOND real call onward
+  // (never the first) needs no lookahead at all -- a truly single-call
+  // run correctly never pays the write premium, and any run with 3+
+  // calls still gets the full benefit (only the 2nd call's write is ever
+  // "wasted," same as any first sighting of a new cache key has to be).
+  let realCaptureCallsSoFar = 0;
 
   for (const { folder: entryFolder, meta } of entries) {
     const { humanId: cardHumanId, date } = meta;
@@ -597,6 +602,9 @@ export async function runCapture(
       days.push({ date, humanId: cardHumanId, filed, organizeActions: [], readmeUpdated: false, alreadyApplied: true });
       continue;
     }
+
+    const cacheSystemPrompt = realCaptureCallsSoFar > 0;
+    realCaptureCallsSoFar++;
 
     let readmeUpdated = false;
     let organizeActions: string[] = [];
@@ -675,9 +683,11 @@ async function captureOneDay(input: {
   skillContent: string;
   generalSkill: string | null;
   extraSkillFiles: { name: string; content: string }[];
-  /** True when `runCapture` already knows this project's system prompt
-   * will be reused by another entry in the SAME run -- see
-   * `llmProvider.ts`'s own doc on why this can't be inferred locally. */
+  /** True once `runCapture` has already made at least one other REAL
+   * (non-skipped) `captureOneDay` call earlier in this same run -- see
+   * `runCapture`'s own `realCaptureCallsSoFar` and `llmProvider.ts`'s
+   * doc on why this can't be inferred locally (or from a raw entry
+   * count, which only grows over time). */
   cacheSystemPrompt: boolean;
   log: (line: string) => void;
 }): Promise<{ readmeUpdated: boolean; organizeActions: string[] }> {
