@@ -68,6 +68,18 @@ export interface LlmProvider {
     system: string;
     messages: LlmMessage[];
     tools: ToolDefinition[];
+    /** Hint from the CALLER -- who knows things a single `complete()` call
+     * can't, like "there are 6 more files in this same project run that
+     * will send this exact same system prompt" -- that this system
+     * prompt is worth caching for reuse by a LATER, separate call. Purely
+     * advisory: a provider with no caching support is free to ignore it,
+     * and a provider that DOES support caching should still use its own
+     * judgment for the growing conversation WITHIN this one call (see
+     * `AnthropicProvider`, which caches multi-turn history automatically
+     * once `messages.length > 1`, independent of this flag). Omit/false
+     * when a call is genuinely one-off, since caching a prefix that's
+     * never read again is pure added cost, not savings. */
+    cacheSystemPrompt?: boolean;
   }): Promise<LlmResponse>;
 }
 

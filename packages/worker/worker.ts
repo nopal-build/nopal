@@ -16,6 +16,7 @@
 import { Worker, type Job } from "bullmq";
 import {
   PHYLOG_QUEUE_NAME,
+  acquireProjectPhylogLock,
   type PhylogJobData,
   type PhylogJobName,
 } from "robustness-core/data/phylogQueue.server";
@@ -24,6 +25,7 @@ import { runPreCapture } from "robustness-core/data/preCapture.server";
 import { runCapture } from "robustness-core/data/capture.server";
 import { runPostCapture } from "robustness-core/data/postCapture.server";
 import { resolveProjectN01 } from "robustness-core/data/projectN01.server";
+import type { VaultFolder } from "robustness-core/data/vault.server";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 // Sequential per worker process on purpose — PhyLog's own concurrency
@@ -33,17 +35,19 @@ const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 // concurrently in one process is fine and could be raised later once
 // there's evidence it's worth it. Scale by running more worker
 // PROCESSES/machines (`fly scale count worker=N`), not by raising this.
+//
+// This alone only guarantees "never twice at once WITHIN one process" —
+// once there's more than one worker process, `acquireProjectPhylogLock`
+// below (a Redis lock, held for the duration of a job's actual pipeline
+// work) is what keeps two DIFFERENT processes from ever running the same
+// project's pipeline concurrently.
 const CONCURRENCY = 1;
 
-async function processJob(job: Job<PhylogJobData, unknown, PhylogJobName>): Promise<unknown> {
-  const onProgress = (line: string) => {
-    job.log(line).catch((err) => console.error("Failed to write job log line:", err));
-  };
-
-  const resolved = await resolveProjectN01(job.data.projectFolderId);
-  if (!resolved.ok) throw new Error(resolved.error);
-  const projectFolder = resolved.folder;
-
+async function runJob(
+  job: Job<PhylogJobData, unknown, PhylogJobName>,
+  projectFolder: VaultFolder,
+  onProgress: (line: string) => void,
+): Promise<unknown> {
   switch (job.name) {
     case "run": {
       const result = await runPhylogPipeline(
@@ -90,6 +94,27 @@ async function processJob(job: Job<PhylogJobData, unknown, PhylogJobName>): Prom
     }
     default:
       throw new Error(`Unknown PhyLog job name: ${job.name}`);
+  }
+}
+
+async function processJob(job: Job<PhylogJobData, unknown, PhylogJobName>): Promise<unknown> {
+  const onProgress = (line: string) => {
+    job.log(line).catch((err) => console.error("Failed to write job log line:", err));
+  };
+
+  const resolved = await resolveProjectN01(job.data.projectFolderId);
+  if (!resolved.ok) throw new Error(resolved.error);
+  const projectFolder = resolved.folder;
+
+  // Held for every job type that touches this project's PhyLog content —
+  // pre-capture/capture/post-capture/reset/reset-pre-capture all mutate
+  // the same project-n01 tree, so all of them serialize on it, not just
+  // capture. See this file's own module doc above.
+  const release = await acquireProjectPhylogLock(job.data.projectFolderId, onProgress);
+  try {
+    return await runJob(job, projectFolder, onProgress);
+  } finally {
+    await release();
   }
 }
 

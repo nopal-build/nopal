@@ -219,6 +219,31 @@ export default function FruitsMakerPhylog() {
             <StatCard label="Avg Duration" value={`${(usage.avgDurationMs / 1000).toFixed(1)}s`} />
             <StatCard label="Worst Duration" value={`${(usage.maxDurationMs / 1000).toFixed(1)}s`} hint="single call, in-range" />
           </div>
+          <div className="flex flex-wrap gap-4 mt-4">
+            <StatCard
+              label="Cache Read Tokens"
+              value={usage.cacheReadTokens.toLocaleString()}
+              hint="billed at ~10% of input price"
+            />
+            <StatCard
+              label="Cache Write Tokens"
+              value={usage.cacheWriteTokens.toLocaleString()}
+              hint="billed at ~125% of input price"
+            />
+            <StatCard
+              label="Cache Hit Rate"
+              value={
+                usage.cacheReadTokens + usage.cacheWriteTokens + usage.inputTokens > 0
+                  ? `${Math.round(
+                      (usage.cacheReadTokens /
+                        (usage.cacheReadTokens + usage.cacheWriteTokens + usage.inputTokens)) *
+                        100,
+                    )}%`
+                  : "n/a"
+              }
+              hint="share of input-side tokens served from cache"
+            />
+          </div>
         </section>
 
         {/* ── By stage ───────────────────────────────────────────────────── */}

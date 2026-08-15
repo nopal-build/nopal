@@ -69,6 +69,14 @@ export type PhylogUsageEvent = Data & {
   model?: string | null;
   input_tokens: number;
   output_tokens: number;
+  /** Tokens served from Anthropic's prompt cache (a normal READ, ~10% of
+   * base input price) -- see anthropicProvider.server.ts's own module
+   * doc. 0 for any call that didn't hit a cache, or for a provider that
+   * doesn't support caching. */
+  cache_read_tokens: number;
+  /** Tokens written INTO the cache this call (a WRITE, ~125% of base
+   * input price -- only pays off if a later call reads it back). */
+  cache_write_tokens: number;
   duration_ms: number;
   outcome: PhylogOutcome;
   error_kind?: PhylogErrorKind | null;
@@ -87,6 +95,8 @@ export type PhylogUsageDaily = Data & {
   error_count: number;
   input_tokens: number;
   output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
   duration_ms: number;
   max_duration_ms: number;
   updated_at: string;
@@ -154,6 +164,8 @@ export async function recordPhylogUsage(input: RecordPhylogUsageInput): Promise<
     const now = new Date().toISOString();
     const inputTokens = input.usage?.inputTokens ?? 0;
     const outputTokens = input.usage?.outputTokens ?? 0;
+    const cacheReadTokens = input.usage?.cacheReadTokens ?? 0;
+    const cacheWriteTokens = input.usage?.cacheWriteTokens ?? 0;
     const model = input.model ?? UNKNOWN_MODEL;
 
     await upsert("phylog_usage_events", {
@@ -165,6 +177,8 @@ export async function recordPhylogUsage(input: RecordPhylogUsageInput): Promise<
       model: input.model ?? null,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
+      cache_read_tokens: cacheReadTokens,
+      cache_write_tokens: cacheWriteTokens,
       duration_ms: input.durationMs,
       outcome: input.outcome,
       error_kind: input.outcome === "error" ? input.errorKind ?? "other" : null,
@@ -190,6 +204,8 @@ export async function recordPhylogUsage(input: RecordPhylogUsageInput): Promise<
       error_count: (existing?.error_count ?? 0) + (input.outcome === "error" ? 1 : 0),
       input_tokens: (existing?.input_tokens ?? 0) + inputTokens,
       output_tokens: (existing?.output_tokens ?? 0) + outputTokens,
+      cache_read_tokens: (existing?.cache_read_tokens ?? 0) + cacheReadTokens,
+      cache_write_tokens: (existing?.cache_write_tokens ?? 0) + cacheWriteTokens,
       duration_ms: (existing?.duration_ms ?? 0) + input.durationMs,
       max_duration_ms: Math.max(existing?.max_duration_ms ?? 0, input.durationMs),
       updated_at: now,
@@ -235,6 +251,8 @@ export type PhylogUsageSummary = {
   errorCount: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   avgDurationMs: number;
   maxDurationMs: number;
   /** Sum of `estimateCostUsd` (`llmPricing.ts`) applied per bucket's own
@@ -278,6 +296,8 @@ export async function getPhylogUsageSummary(days: number): Promise<PhylogUsageSu
     errorCount: 0,
     inputTokens: 0,
     outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     avgDurationMs: 0,
     maxDurationMs: 0,
     estimatedCostUsd: 0,
@@ -299,7 +319,9 @@ export async function getPhylogUsageSummary(days: number): Promise<PhylogUsageSu
   let totalDurationMs = 0;
 
   for (const row of rows) {
-    const rowCost = estimateCostUsd(row.model, row.input_tokens, row.output_tokens) ?? 0;
+    const rowCacheRead = row.cache_read_tokens ?? 0;
+    const rowCacheWrite = row.cache_write_tokens ?? 0;
+    const rowCost = estimateCostUsd(row.model, row.input_tokens, row.output_tokens, rowCacheRead, rowCacheWrite) ?? 0;
 
     summary.callCount += row.call_count;
     summary.successCount += row.success_count;
@@ -307,6 +329,8 @@ export async function getPhylogUsageSummary(days: number): Promise<PhylogUsageSu
     summary.errorCount += row.error_count;
     summary.inputTokens += row.input_tokens;
     summary.outputTokens += row.output_tokens;
+    summary.cacheReadTokens += rowCacheRead;
+    summary.cacheWriteTokens += rowCacheWrite;
     summary.estimatedCostUsd += rowCost;
     totalDurationMs += row.duration_ms;
     summary.maxDurationMs = Math.max(summary.maxDurationMs, row.max_duration_ms);

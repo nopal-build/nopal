@@ -3,6 +3,22 @@
  * API — PhyLog's first LLM backend, per the `vault` skill's PhyLog Agent
  * section. Translates the generic message/tool shape both directions;
  * `phylogAgent.server.ts` never touches the Anthropic SDK directly.
+ *
+ * PROMPT CACHING: on by default, no config flag -- see "Prompt caching"
+ * above `toAnthropicSystem`/`withLastMessageCacheBreakpoint` for exactly
+ * what gets marked and why. Negatives worth knowing: a cache WRITE costs
+ * ~25% more than a normal input token for that prefix (only worth it if
+ * something reads it back before the 5-minute idle TTL expires); a
+ * changed prefix (e.g. editing CAPTURE.md/VOICE.md mid-run) simply
+ * doesn't match the old cache and falls back to a normal-priced write,
+ * no penalty beyond that. There is no manual "clear the cache" operation
+ * to build or call -- Anthropic's cache is a pure function of the exact
+ * cached bytes and expires on its own (5 minutes idle by default,
+ * refreshed on every hit); the only way to force a miss is to change the
+ * content, which happens naturally whenever a skill file is edited.
+ * `llmPricing.ts`'s `estimateCostUsd` and `phylogMetrics.server.ts`'s
+ * rollup both account for cache read/write tokens separately from plain
+ * input tokens so /fruits/maker's cost estimate stays accurate.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -97,6 +113,61 @@ function toAnthropicTools(tools: ToolDefinition[]): Anthropic.Tool[] {
   }));
 }
 
+const CACHE_CONTROL_EPHEMERAL: Anthropic.CacheControlEphemeral = { type: "ephemeral" };
+
+// --- Prompt caching -------------------------------------------------------
+// See this file's own module doc for the negatives/tradeoffs; in short:
+// a cache_control breakpoint marks "everything up to and including this
+// block is worth caching for reuse." Below the ~1024-token minimum for
+// Sonnet-family models, Anthropic silently ignores the marker (no error,
+// no cost) -- so it's always safe to add, the only real cost is a ~25%
+// premium on writing a prefix that never gets read back again.
+
+/** The system prompt is identical across EVERY turn of one day's capture
+ * loop, and across EVERY file pre-capture summarizes within one project
+ * run (both build `skillContent` once, outside their own per-item loop)
+ * -- caching it (which, since tools/system precede messages in the
+ * request, also covers the (static) tool definitions for free) benefits
+ * both call sites without any call-site changes, PROVIDED the caller
+ * actually expects reuse (`cacheSystemPrompt`) or this call is already
+ * mid-multi-turn (`multiTurn`, computed in `complete` below) -- see
+ * `complete`'s own comment for why neither is assumed by default. */
+function toAnthropicSystem(system: string): string | Anthropic.TextBlockParam[] {
+  if (!system) return system;
+  return [{ type: "text", text: system, cache_control: CACHE_CONTROL_EPHEMERAL }];
+}
+
+/** Marks the LAST content block of the LAST message with a cache
+ * breakpoint. Only called from turn 2+ of a growing conversation (see
+ * `complete`'s `multiTurn`) -- a turn-1 call doesn't yet know whether
+ * there'll ever be a turn 2 to read it back, so marking it there would
+ * be a pure premium for the (likely common, given capture's own bias
+ * toward "do nothing on a quiet day") single-turn case. From turn 2 on,
+ * we're already committed to a multi-turn exchange, so the bet that a
+ * turn 3 might also happen is a much better one. */
+function withLastMessageCacheBreakpoint(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  if (messages.length === 0) return messages;
+  const out = messages.slice();
+  const lastIndex = out.length - 1;
+  const last = out[lastIndex];
+  const content: Anthropic.ContentBlockParam[] =
+    typeof last.content === "string" ? [{ type: "text", text: last.content }] : [...last.content];
+  if (content.length === 0) return out;
+  const lastBlockIndex = content.length - 1;
+  // Every block WE ever construct (text/tool_use/tool_result -- see
+  // `toAnthropicMessages` above) supports cache_control; the cast is only
+  // needed because `ContentBlockParam`'s union also includes block kinds
+  // (e.g. extended-thinking blocks) that this app never produces, which
+  // don't carry the field and make a bare spread ambiguous to the
+  // checker.
+  content[lastBlockIndex] = {
+    ...content[lastBlockIndex],
+    cache_control: CACHE_CONTROL_EPHEMERAL,
+  } as Anthropic.ContentBlockParam;
+  out[lastIndex] = { ...last, content };
+  return out;
+}
+
 function toLlmUsage(usage: Anthropic.Usage): LlmUsage {
   return {
     inputTokens: usage.input_tokens,
@@ -125,12 +196,25 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     system: string;
     messages: LlmMessage[];
     tools: ToolDefinition[];
+    cacheSystemPrompt?: boolean;
   }): Promise<LlmResponse> {
+    // `messages.length > 1` means this ISN'T the first turn of a
+    // multi-turn exchange -- there's already at least one prior
+    // assistant/tool_result round trip in the growing history, so the
+    // system prompt (and everything before this point) is GUARANTEED to
+    // be resent on this call, unlike a cold first call where we don't
+    // yet know if there'll ever be a second one. This is a strictly
+    // better signal than "has tools" alone (a single-turn, no-tool-call
+    // day -- the common quiet-day case -- used to pay a write premium on
+    // the whole first prompt for zero benefit; now it doesn't).
+    const multiTurn = input.messages.length > 1;
+    const cacheSystem = (input.cacheSystemPrompt ?? false) || multiTurn;
+    const messages = toAnthropicMessages(input.messages);
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: DEFAULT_MAX_TOKENS,
-      system: input.system,
-      messages: toAnthropicMessages(input.messages),
+      system: cacheSystem ? toAnthropicSystem(input.system) : input.system,
+      messages: multiTurn ? withLastMessageCacheBreakpoint(messages) : messages,
       tools: toAnthropicTools(input.tools),
     });
 

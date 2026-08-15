@@ -368,6 +368,17 @@ export async function runPreCapture(
     }
   }
 
+  // More than one candidate means `skillContent`'s system prompt below
+  // will be resent identically across several `textLlm.complete()`
+  // calls in this same run -- worth its cache write premium. See
+  // llmProvider.ts's own doc on why a single-candidate run doesn't
+  // bother (an overestimate for cache purposes when most candidates are
+  // photos -- those go through the separate, uncached `describePhoto`
+  // path -- but a harmless one: worst case a text summary's system
+  // prompt gets marked for caching that never gets read back, the same
+  // "a bit too eager" tradeoff as any heuristic here).
+  const cacheSystemPrompt = candidates.length > 1;
+
   const summaries: PreCaptureSummary[] = [];
   const unsupported: { fileId: string; name: string }[] = [];
   let photoLlm: PhotoDescriber | undefined = opts.photoDescriber;
@@ -468,6 +479,7 @@ export async function runPreCapture(
             },
           ],
           tools: [],
+          cacheSystemPrompt,
         });
         if (response.stopReason === "max_tokens") {
           // Same class of issue capture's runAgentLoop guards against:

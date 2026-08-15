@@ -296,6 +296,61 @@ export function withReadmeBody(originalMarkdown: string, newBody: string): strin
   return `---\n${frontmatter}\n---\n${newBody}`;
 }
 
+export type ReadmeSection = {
+  /** The H2 heading text (trimmed, exactly as written -- no normalization
+   * beyond that), or "" for the INTRO -- everything before the first H2,
+   * including any H1 title. There is always exactly one intro section
+   * (possibly empty), even for a document with no H2s at all. */
+  heading: string;
+  /** Everything between this heading and the next H2 (or end of
+   * document), NOT including the `## heading` line itself. */
+  content: string;
+};
+
+const H2_HEADING_RE = /^##[ \t]+(.+?)[ \t]*$/;
+
+/**
+ * Splits a README BODY (front matter already removed -- see
+ * `splitFrontmatter`) into its H2 (`## `) sections, for capture's
+ * `update_section`/`remove_section` tools (`capture.server.ts`) -- see
+ * the `phylog` skill for why section-scoped edits exist at all (bounding
+ * an edit's blast radius to one section, instead of `update_readme`'s
+ * whole-body replacement). Deliberately simple LINE-based splitting, not
+ * a full markdown parser -- a line matching `^## text$` starts a new
+ * section; anything else (including deeper headings like `###`, or `##`
+ * appearing inside a fenced code block) is just content. This matches
+ * the level of rigor `splitFrontmatter` above already uses for the same
+ * kind of tradeoff (simple regex over a real parser).
+ */
+export function splitReadmeSections(body: string): ReadmeSection[] {
+  const lines = body.split("\n");
+  const sections: ReadmeSection[] = [];
+  let heading = "";
+  let current: string[] = [];
+  for (const line of lines) {
+    const match = line.match(H2_HEADING_RE);
+    if (match) {
+      sections.push({ heading, content: current.join("\n") });
+      heading = match[1].trim();
+      current = [];
+    } else {
+      current.push(line);
+    }
+  }
+  sections.push({ heading, content: current.join("\n") });
+  return sections;
+}
+
+/** Inverse of `splitReadmeSections` -- reassembles a README body from its
+ * sections, in array order. The intro (`heading: ""`) never gets a `##`
+ * line of its own; every other section does. */
+export function joinReadmeSections(sections: ReadmeSection[]): string {
+  return sections
+    .map((s) => (s.heading ? `## ${s.heading}\n${s.content}` : s.content))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n\n");
+}
+
 /**
  * Parses a `README.md`'s content into a `ProjectManifest`, if present.
  * Fails closed on any malformed/missing front matter — returns

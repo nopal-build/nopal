@@ -138,9 +138,12 @@ only ever rebuilds FROM `daily-logs/`, never wipes it), right before
 reprocessing everything — so running `reset` first is optional, not
 required, but useful whenever you want to verify the wipe alone.
 
-**`README.md` is NEVER deleted by either reset depth — only its BODY is
+**`README.md` is NEVER deleted by either reset depth -- only its BODY is
 cleared, with its front matter preserved byte-for-byte**
-(`withReadmeBody`, `project.types.ts`, with an empty new body). A real,
+(`withReadmeBody`, `project.types.ts`, with an empty new body -- the
+same file also has `splitReadmeSections`/`joinReadmeSections`, the
+line-based `## Heading` splitter/joiner capture's `update_section`/
+`remove_section` tools are built on, see "Stage 2" above). A real,
 confirmed bug this fixes: README's front matter is the ONLY place a
 project's Sharing Roles (`sharing` — see the `vault` skill's Sharing
 Roles section and `projectSharing.server.ts`) and lifecycle `status`
@@ -346,29 +349,45 @@ oldest first):
      markdown REFERENCE file (any name except README.md) relative to the
      project root, for splitting out substantial, topic-specific detail
      (a full build log, a long spec) so it doesn't have to live inline in
-     README.md -- the README then just links to it.
-   - `update_readme({ chunk, done, reason })` -- replaces the README body
-     only (front matter untouched).
+     a section -- link to it from there instead.
+   - `update_section({ heading, chunk, done })` -- **the PRIMARY way to
+     change the README.** Replaces (or creates) ONE section, identified
+     by its exact `## Heading` text (`heading: ""` addresses the INTRO --
+     everything before the first `## `, including any title). Most days
+     touch one or a few sections, not the whole document; this bounds an
+     edit's blast radius to just the section that actually changed.
+   - `remove_section({ heading })` -- deletes one section entirely. A
+     deliberate, EXPLICIT action, distinct from `update_section` with
+     empty content (which is refused -- see the safety net below).
+   - `update_readme({ chunk, done, reason })` -- replaces the ENTIRE
+     README body at once. Reserved for genuine full reorganizations (the
+     file has become hard to navigate, section boundaries themselves
+     need to change) or the very first pass on an empty README --
+     the system prompt explicitly tells the model NOT to reach for this
+     as the default way to make an ordinary update.
 
-   Both `write_file` and `update_readme` take their content as ONE OR
-   MORE chunks rather than a single all-at-once string: on a normal day
-   `chunk` is the whole content and `done` is `true` in one call, but a
-   long update can instead be sent as several calls in a row (each
-   `chunk` continuing directly from the last, `done: true` only on the
-   final one). This exists because both tools are otherwise single
-   responses capped at the provider's own output token limit -- a long
-   README regenerated in one shot can get cut off mid-generation (see the
-   safety net below), and chunking keeps any ONE call safely short
-   regardless of the total length. `write_file` is keyed by `path`, so
-   multiple chunk calls for the SAME file accumulate into that file's own
-   buffer; `update_readme` has exactly one target so its chunks just
-   accumulate in order. `runAgentLoop`'s `maxTurns` was raised 6 -> 16 for
-   capture specifically to leave room for a chunked update on top of any
-   `create_folder`/`move_file` calls.
+   `write_file`/`update_section`/`update_readme` all take their content
+   as ONE OR MORE chunks rather than a single all-at-once string: on a
+   normal day `chunk` is the whole content and `done` is `true` in one
+   call, but a long update can instead be sent as several calls in a row
+   (each `chunk` continuing directly from the last, `done: true` only on
+   the final one). This exists because these tools are otherwise single
+   responses capped at the provider's own output token limit -- content
+   regenerated in one shot can get cut off mid-generation (see the safety
+   net below), and chunking keeps any ONE call safely short regardless of
+   the total length. `write_file`/`update_section` are keyed by
+   `path`/`heading` respectively, so multiple chunk calls for the SAME
+   target accumulate into that target's own buffer; `update_readme` has
+   exactly one target so its chunks just accumulate in order.
+   `runAgentLoop`'s `maxTurns` was raised 6 -> 16 for capture
+   specifically to leave room for a chunked update on top of any
+   `create_folder`/`move_file` calls. `remove_section` takes no content,
+   so it never needs chunking.
    `create_folder`/`move_file`/`write_file` refuse to target `skills`/
    `syncs`/`newspapers`/`daily-logs` by name -- those subtrees are
    permanently off limits to this stage, and `write_file` additionally
-   refuses `README.md` itself (use `update_readme` for that).
+   refuses `README.md` itself (use `update_section`/`update_readme` for
+   that).
 
    The model has NO tool for reading an arbitrary file by name -- it only
    ever sees filenames in the tree, never their content, except for what's
@@ -376,43 +395,62 @@ oldest first):
    reserved pipeline names (a `VOICE.md`, say) is therefore auto-folded
    into the prompt directly (`listExtraSkillFiles`) rather than left for
    the model to "go read" -- see the pipeline-wide note above. When a
-   day's run produces neither an `update_readme` call nor any
-   `create_folder`/`move_file`/`write_file` call, the model's own final
-   turn of plain text (its stated reasoning for doing nothing) is logged
-   verbatim (`capture: <date> -- no README update or reorganization;
-   model said: ...`) so "why didn't this update" is diagnosable from
-   `nopal phylog capture`'s own output, instead of a silent no-op.
+   day's run produces no README change and no `create_folder`/
+   `move_file`/`write_file` call, the model's own final turn of plain
+   text (its stated reasoning for doing nothing) is logged verbatim
+   (`capture: <date> -- no README update or reorganization; model said:
+   ...`) so "why didn't this update" is diagnosable from `nopal phylog
+   capture`'s own output, instead of a silent no-op.
 
-   **`update_readme` has a safety net, not just trust**: a bad call can
-   wipe real content in one shot (confirmed live -- a project with real
-   accumulated history hit Anthropic's `stop_reason: "max_tokens"`
-   mid-generation of a single-shot tool call's JSON, which under the old
-   4096-token cap and no chunking produced an empty `newBody`, and the
-   pipeline applied it unquestioned). Two layers now prevent this:
+   **README-mutating tools commit IMMEDIATELY, sharing one mutable
+   `currentReadmeContent`/`currentReadmeFileId` pair** (`captureOneDay`)
+   -- calling `update_section` twice, or `update_section` then
+   `update_readme`, in one day's loop always builds on the PREVIOUS
+   tool's own result, never a stale pre-loop snapshot. This is also WHY
+   the safety net below no longer needs a separate "apply afterward"
+   step: nothing commits until a complete, validated result arrives, so
+   an incomplete/truncated attempt simply never writes anything, by
+   construction. At the end of the day's loop, ONE Release Log entry
+   covers the CUMULATIVE change (`readmeContent` before vs.
+   `currentReadmeContent` after), with a summary combining every
+   individual edit description (`readmeEditSummaries`) -- not one entry
+   per section touched.
+
+   **The safety net (a bad call can wipe real content -- confirmed
+   live, back when `update_readme` was the ONLY, single-shot way to
+   change the README: a project with real accumulated history hit
+   Anthropic's `stop_reason: "max_tokens"` mid-generation of that one
+   tool call's JSON, which under the old 4096-token cap produced an
+   empty `newBody`, applied unquestioned):**
    - **`runAgentLoop` never executes a truncated turn's tool calls at
      all.** If a turn's `stopReason` is `"max_tokens"`, the loop discards
      that entire response (it may contain incomplete or corrupted
      arguments, since its own JSON may never have finished streaming) and
      stops -- whatever earlier, COMPLETE turns already committed stands.
      This is what actually stops a bad chunk from ever reaching disk; the
-     `truncated` flag it returns is now purely informational, for the
+     `truncated` flag it returns is purely informational, for the
      `capture: <date> -- the model's generation was cut off ...` log line.
-   - **`captureOneDay` still refuses to APPLY an incomplete or empty
-     result** (`refusalReason` check), for cases the loop-level fix
-     doesn't cover: chunks that arrived but never got a final `done: true`
-     (ran out of turns, or the model simply stopped), and a `done: true`
-     call whose assembled body is blank while the CURRENT README or
-     today's own Card/summary content is non-empty (a legitimately empty
-     README is only possible on a brand-new project with nothing said
-     about it yet).
-   A refused call leaves the README byte-for-byte unchanged, logs why
-   (`capture: <date> -- refused to apply update_readme (...); README left
-   unchanged.`), and does NOT get recorded as "applied" in the Release
-   Log -- so the SAME entry is retried on the next `nopal phylog capture`
-   run rather than being silently skipped forever. `DEFAULT_MAX_TOKENS` in
+   - **Each tool refuses to commit an incomplete or empty result.** A
+     chunk sequence that never gets a final `done: true` (ran out of
+     turns, or the model simply stopped) just leaves its buffer
+     un-flushed -- nothing is ever written for it. A `done: true` call
+     whose assembled content is blank is refused OUTRIGHT (`hadRefusal`)
+     whenever it would erase real, existing content (a section that
+     currently has text, or the whole README when the CURRENT body or
+     today's own Card/summary content is non-empty) -- a legitimately
+     empty target is only possible when there was nothing there yet.
+     Because the blast radius is now ONE SECTION instead of the whole
+     document, a refusal (or an incomplete attempt on one section) never
+     blocks other sections' edits from committing in the same run.
+   A refused/incomplete call leaves its target byte-for-byte unchanged,
+   is logged inline as it happens, and (via the `incomplete` flag on that
+   day's `phylogMetrics` event -- see "A refusal is an error too" under
+   Usage tracking) does NOT get recorded as fully "applied" -- so the
+   SAME entry is retried on the next `nopal phylog capture` run rather
+   than being silently skipped forever. `DEFAULT_MAX_TOKENS` in
    `anthropicProvider.server.ts` was also raised 4096 -> 8192 to make
-   hitting this less likely in the first place, though chunking is what
-   actually removes the ceiling.
+   hitting this less likely in the first place, though section-scoped
+   edits (chunked when needed) are what actually remove the ceiling.
 
 **Why filing still reads the original Card, not the daily-logs entry's
 own staged copy**: `fileCardAttachments` is SHARED with the Sorter
@@ -557,6 +595,87 @@ until explicitly configured. `PHYLOG_ANTHROPIC_MODEL` overrides the
 default model (`claude-sonnet-5`, upgraded from `claude-sonnet-4-5-20250929`)
 everywhere.
 
+### Prompt caching
+
+On by default, no config flag, but DELIBERATELY SELECTIVE -- see "is
+it worth it" below for why blanket-always-on was tried and reconsidered.
+Entirely inside `AnthropicProvider.complete` (`anthropicProvider.server.ts`),
+so both call sites (capture's agent loop AND pre-capture's text
+summarization) get it with zero changes at their own call sites beyond
+passing one hint. Two cache_control breakpoints:
+
+- **The system prompt is marked only when reuse is actually expected.**
+  `complete`'s optional `cacheSystemPrompt` flag (`llmProvider.ts`) is a
+  hint from the CALLER, who knows things a single call can't: `runCapture`
+  passes `entries.length > 1` (this project has more than one
+  day/contributor entry to process in this run, so `skillContent`'s
+  identical system prompt WILL be resent), `runPreCapture` passes
+  `candidates.length > 1` (same idea, more than one file to summarize).
+  A single-entry/single-file run passes `false` -- no reuse is coming,
+  so there's nothing to gain from paying the write premium. (Since
+  tools+system precede messages in the request, marking system ALSO
+  covers the static tool definitions as part of the same cached prefix,
+  for free, whenever it IS marked.)
+- **The last message is marked once a call is already mid-multi-turn**
+  (`messages.length > 1`, computed inside `complete` itself, not a
+  caller hint -- a provider-level fact, not something the caller
+  decides). A turn-1 call doesn't yet know if there'll be a turn 2, so
+  marking it there would risk a wasted premium on the (likely dominant,
+  given capture's own "do nothing on a quiet day" bias) single-turn
+  case. From turn 2 on, we're already committed to a multi-turn
+  exchange -- marking the newest message means turn 2 reads everything
+  through turn 1 from cache, turn 3 reads through turn 2, and so on.
+
+**"Is it worth it, or should we only cache specific scenarios" -- yes,
+and this IS the specific-scenarios version**, arrived at after
+reconsidering an earlier always-on design: a project processing exactly
+one fresh entry, whose agent loop finishes in exactly one turn (the
+most common case by the pipeline's own design -- most days need no
+README change) would have paid TWO write premiums (system AND the
+whole first user prompt, likely the bulk of that call's input tokens)
+for ZERO read benefit under blanket caching. The two conditions above
+exist specifically to eliminate that loss while keeping the real wins:
+backlog processing (many days/files sharing one project run) and any
+genuinely multi-turn day (a chunked large update, several organize
+actions).
+
+**Negatives, plainly:**
+
+- A cache WRITE costs ~25% MORE than an ordinary input token for that
+  prefix -- only worth it if something reads it back before the cache
+  expires. This is exactly what the two conditions above exist to avoid
+  paying when there's no realistic chance of a read.
+- `photoDescriber.describePhoto` (vision calls) is DELIBERATELY NOT
+  wired into any of this -- its system prompt is a short, fixed ~100
+  tokens, almost certainly under Anthropic's ~1024-token minimum for
+  caching to engage at all, so there was nothing to gain from touching
+  it.
+- The cache is an exact-content match with a short idle TTL (5 minutes
+  by default, refreshed on every hit). A gap longer than that between
+  calls, or ANY change anywhere in the cached prefix (editing
+  CAPTURE.md/VOICE.md mid-run, a different day's tree/README content),
+  is simply a miss -- falls back to a normal-priced write, no penalty
+  beyond that.
+- **There is no manual "clear the cache" operation, and none is needed.**
+  Anthropic's cache is a pure function of the exact cached bytes; it
+  can't go stale in a way that serves wrong content, and it expires on
+  its own. The only way to force a miss is to change the underlying
+  content, which already happens naturally whenever a skill file is
+  edited.
+
+**Cost accounting**: `LlmUsage.cacheReadTokens`/`cacheWriteTokens`
+(already returned by `AnthropicProvider`, previously unused) now flow all
+the way through: `recordPhylogUsage` persists them on both
+`phylog_usage_events` and the `phylog_usage_daily` rollup, and
+`llmPricing.ts`'s `estimateCostUsd` takes them as two extra (optional,
+default-0) arguments, pricing a cache write at 1.25x and a cache read at
+0.1x the model's own `inputPerMTok` -- Anthropic's fixed ratios, the same
+across every model that supports caching, so they live once in
+`llmPricing.ts` rather than per-model. `/fruits/maker/phylog` shows Cache
+Read/Write Tokens and a Cache Hit Rate stat alongside the existing
+token/cost cards, so the savings (or a write-heavy, rarely-reused pattern
+that ISN'T saving anything) are visible, not just assumed.
+
 ## CLI / API surface
 
 All thin clients over the pipeline stage functions — all real logic lives
@@ -649,9 +768,26 @@ everyone else's. So PhyLog work is queued and runs in a dedicated process:
   inline — zero rewrite of pipeline logic, only WHERE it runs (and which
   dependency graph it ships with) changed. Runs with `concurrency: 1`
   deliberately: scale throughput by running more worker PROCESSES/
-  machines, not by raising in-process concurrency (never run the same
-  project's pipeline twice concurrently — the same safety concern behind
-  `attempts: 1` above).
+  machines, not by raising in-process concurrency.
+- **`acquireProjectPhylogLock` (`phylogQueue.server.ts`)** — a plain
+  Redis `SET NX PX` lock, keyed by `projectFolderId`, held by
+  `worker.ts`'s `processJob` for the ENTIRE duration of a job's actual
+  pipeline work (run/pre-capture/capture/post-capture/reset/
+  reset-pre-capture all take it — every one of them mutates the same
+  project-n01 tree). `concurrency: 1` alone only guarantees "never twice
+  at once WITHIN one process" — this is what keeps two DIFFERENT worker
+  PROCESSES (the documented scaling path above) from ever running the
+  SAME project's pipeline concurrently and racing on the same
+  README/daily-logs content. A second job for an already-locked project
+  POLLS (every 3s, logging a "waiting..." line) rather than failing or
+  running anyway, giving up only after 30 minutes (almost certainly a
+  wedged holder, not a real run). The lock's own TTL (10 minutes) is the
+  backstop for that case — a crashed holder can't wedge a project's
+  pipeline forever. Validated directly against a scratch Redis: a second
+  acquire genuinely waits for the first's release, a double-release is a
+  safe no-op, and two DIFFERENT projects never block each other.
+  DELIBERATELY simple (a hand-rolled lock, not BullMQ Pro's paid "job
+  groups" feature) — revisit only if evidence shows it's insufficient.
 - **The CLI polls, it doesn't stream** — see "CLI / API surface" above.
 
 **Why `packages/worker`/`packages/robustness-core`/`packages/oxmarkdown-core`

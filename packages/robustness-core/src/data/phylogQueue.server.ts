@@ -137,3 +137,72 @@ export async function getPhylogJobOwner(jobId: string): Promise<PhylogJobData | 
   const job = await getPhylogQueue().getJob(jobId);
   return job?.data ?? null;
 }
+
+// --- Per-project run lock -------------------------------------------------
+// worker.ts runs with concurrency: 1 PER PROCESS on purpose (see its own
+// module doc), so a single worker process already never runs two PhyLog
+// jobs at once. This only matters once MORE THAN ONE worker process is
+// deployed (the documented scaling path, e.g. `fly scale count worker=N`)
+// -- then two DIFFERENT processes could each pick up a job for the SAME
+// project at the same time and race on the same README/daily-logs
+// content. A plain Redis SET-NX lock, held for the duration of a job's
+// actual pipeline work and waited on (polled) by anyone else who wants
+// the same project, is enough to make that impossible without needing
+// BullMQ Pro's paid "job groups" feature.
+
+const PROJECT_LOCK_TTL_MS = 10 * 60 * 1000; // generous vs. the longest real run; bounds how long a CRASHED holder can wedge a project
+const PROJECT_LOCK_POLL_MS = 3000;
+const PROJECT_LOCK_MAX_WAIT_MS = 30 * 60 * 1000; // give up rather than let a worker hang forever behind a stuck project
+
+function projectLockKey(projectFolderId: string): string {
+  return `phylog:lock:${projectFolderId}`;
+}
+
+/**
+ * Waits for (polling), then acquires, an exclusive lock for one project's
+ * PhyLog pipeline -- see the module doc above. Call this ONCE at the top
+ * of a job's actual work, and ALWAYS call the returned release function
+ * in a `finally`. TTL-bounded so a process that crashes mid-job can't
+ * wedge the project's lock forever; a still-running holder simply keeps
+ * renewing by virtue of releasing (and re-acquiring, if it ever needed
+ * to) rather than needing an explicit heartbeat, since real PhyLog runs
+ * are well under the TTL in practice.
+ *
+ * Throws if `PROJECT_LOCK_MAX_WAIT_MS` passes without acquiring it --
+ * this should be rare (it means some other run has held this project's
+ * lock for 30+ minutes straight), and surfaces as a normal job failure
+ * rather than hanging a worker indefinitely.
+ */
+export async function acquireProjectPhylogLock(
+  projectFolderId: string,
+  onWaiting?: (line: string) => void,
+): Promise<() => Promise<void>> {
+  const redis = getConnection();
+  const token = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  const key = projectLockKey(projectFolderId);
+  const deadline = Date.now() + PROJECT_LOCK_MAX_WAIT_MS;
+  let announced = false;
+
+  for (;;) {
+    const acquired = await redis.set(key, token, "PX", PROJECT_LOCK_TTL_MS, "NX");
+    if (acquired) break;
+    if (!announced) {
+      onWaiting?.("waiting for another PhyLog run already in progress for this project to finish...");
+      announced = true;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Timed out waiting for this project's PhyLog lock (another run has held it for over ${Math.round(PROJECT_LOCK_MAX_WAIT_MS / 60000)} minutes).`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, PROJECT_LOCK_POLL_MS));
+  }
+
+  return async () => {
+    // Only release if we still hold OUR OWN token -- if the TTL already
+    // expired and someone else has since acquired the lock, releasing
+    // unconditionally would delete THEIR lock instead of ours.
+    const releaseScript = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
+    await redis.eval(releaseScript, 1, key, token);
+  };
+}
