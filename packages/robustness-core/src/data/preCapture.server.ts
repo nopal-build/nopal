@@ -469,6 +469,28 @@ export async function runPreCapture(
           ],
           tools: [],
         });
+        if (response.stopReason === "max_tokens") {
+          // Same class of issue capture's runAgentLoop guards against:
+          // the model's own output limit cut generation off mid-summary,
+          // so whatever text came back may be an incomplete fragment.
+          // Never persist it as if it were a finished summary -- log it,
+          // record it as an error (visible on /fruits/maker), and leave
+          // this file unsummarized so the next pre-capture run retries it.
+          log(`pre-capture: "${source.name}"'s summary was cut off by the model's own output limit -- skipped, will retry next run.`);
+          await recordPhylogUsage({
+            humanId: actingHumanId,
+            projectFolderId: projectFolder._id,
+            stage: "pre-capture",
+            kind,
+            model: response.model,
+            usage: response.usage,
+            durationMs: Date.now() - callStart,
+            outcome: "error",
+            errorKind: "incomplete",
+          });
+          unsupported.push({ fileId: source._id, name: source.name });
+          continue;
+        }
         body = response.text?.trim() || null;
         await recordPhylogUsage({
           humanId: actingHumanId,

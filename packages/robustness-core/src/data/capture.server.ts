@@ -236,6 +236,12 @@ async function runAgentLoop(
    * where it left off"), never a signal that already-applied work needs
    * distrusting. */
   truncated: boolean;
+  /** True if the loop ran all the way to maxTurns while the model's LAST
+   * turn still ended with stopReason "tool_use" -- i.e. it looked like it
+   * had more to do, and we simply stopped asking. Distinct from
+   * `truncated` (a single response cut off by the PROVIDER's own output
+   * limit); this is OUR OWN turn budget running out instead. */
+  hitMaxTurns: boolean;
 }> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const toolCallsMade: ToolCall[] = [];
@@ -243,6 +249,7 @@ async function runAgentLoop(
   let model: string | null = null;
   let finalText: string | null = null;
   let truncated = false;
+  let hitMaxTurns = false;
   const loopStart = Date.now();
 
   for (let turn = 0; turn < maxTurns; turn++) {
@@ -270,8 +277,14 @@ async function runAgentLoop(
       messages.push({ role: "tool_result", toolCallId: call.id, content: resultText });
     }
     if (response.stopReason !== "tool_use") break;
+    if (turn === maxTurns - 1) {
+      // The for-loop's own condition ends things here -- but the model's
+      // last turn wanted to keep going (stopReason "tool_use"), so
+      // whatever it intended to do next never happened.
+      hitMaxTurns = true;
+    }
   }
-  return { toolCallsMade, usage, durationMs: Date.now() - loopStart, model, finalText, truncated };
+  return { toolCallsMade, usage, durationMs: Date.now() - loopStart, model, finalText, truncated, hitMaxTurns };
 }
 
 /** Renders every folder/file in `projectFolder`'s tree EXCLUDING the
@@ -673,7 +686,11 @@ async function captureOneDay(input: {
     write_file: async (input) => {
       const rawPath = String(input.path ?? "").trim();
       const chunk = String(input.chunk ?? "");
-      const done = Boolean(input.done);
+      // Strict `=== true`, not `Boolean(...)` -- a model that emits the
+      // STRING "false" (schema violation, but seen from LLMs) would
+      // otherwise coerce to true (any non-empty string is truthy in JS),
+      // wrongly treating an unfinished write as complete.
+      const done = input.done === true;
       const segments = rawPath.split("/").map((s) => s.trim()).filter(Boolean);
       const fileName = segments[segments.length - 1];
       if (!fileName) return "Error: no file name given";
@@ -711,7 +728,7 @@ async function captureOneDay(input: {
     },
     update_readme: async (input) => {
       const chunk = String(input.chunk ?? "");
-      const done = Boolean(input.done);
+      const done = input.done === true; // see write_file's own note on why not Boolean(...)
       readmeChunks.push(chunk);
       if (done) {
         readmeDone = true;
@@ -723,7 +740,7 @@ async function captureOneDay(input: {
   };
 
   const userPrompt = buildUserPrompt({ tree, cardContent, filed, summaries, readmeContent });
-  const { toolCallsMade, usage, durationMs, model, finalText, truncated } = await runAgentLoop(
+  const { toolCallsMade, usage, durationMs, model, finalText, truncated, hitMaxTurns } = await runAgentLoop(
     llm,
     buildSystemPrompt(skillContent, generalSkill, extraSkillFiles),
     userPrompt,
@@ -740,17 +757,11 @@ async function captureOneDay(input: {
       `capture: ${date} -- the model's generation was cut off by its own output token limit before it finished; whatever it had already done this run stands, but its last, incomplete action was discarded. Re-run capture to pick up where it left off.`,
     );
   }
-
-  await recordPhylogUsage({
-    humanId: actingHumanId,
-    projectFolderId: projectFolder._id,
-    stage: "capture",
-    kind: "organize",
-    model: model ?? undefined,
-    usage,
-    durationMs,
-    outcome: "success",
-  });
+  if (hitMaxTurns) {
+    log(
+      `capture: ${date} -- hit this run's own turn limit while the model still had more queued up; whatever it had already done stands, but it may not have finished. Re-run capture to pick up where it left off.`,
+    );
+  }
 
   // `readmeChunks` accumulates across every complete (non-truncated) turn
   // that called update_readme -- see runAgentLoop's own truncation
@@ -771,6 +782,26 @@ async function captureOneDay(input: {
       refusalReason = "it returned an empty body while the project (or today's log) has real content";
     }
   }
+
+  // Surfaced on /fruits/maker's "Errors" count -- a refusal or a run that
+  // hit its own turn/token bounds is a real signal something needs
+  // attention (a project outgrowing its budget, a skill file provoking
+  // runaway generation), not a quiet no-op day. Never a thrown exception
+  // (see runCapture's own try/catch for those), so without this the
+  // dashboard would have no way to distinguish this from a normal day.
+  const incomplete = truncated || hitMaxTurns || !!refusalReason;
+  await recordPhylogUsage({
+    humanId: actingHumanId,
+    projectFolderId: projectFolder._id,
+    stage: "capture",
+    kind: "organize",
+    model: model ?? undefined,
+    usage,
+    durationMs,
+    outcome: incomplete ? "error" : "success",
+    errorKind: incomplete ? "incomplete" : undefined,
+  });
+
   if (wroteReadmeChunks && !refusalReason) {
     const newBody = readmeChunks.join("");
     const reason = readmeReason || "(no reason given)";

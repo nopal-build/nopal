@@ -738,15 +738,33 @@ same as the rest of the Maker dashboard).
 
 Each stage records exactly one event per meaningful unit of work: one per
 file pre-capture attempts to summarize (`preCapture.server.ts`), one per
-day capture runs its organize/README agent loop for (`capture.server.ts`—
-usage/duration accumulated across every turn of that loop, via
+day capture runs its organize/README agent loop for (`capture.server.ts`
+-- usage/duration accumulated across every turn of that loop, via
 `runAgentLoop`'s own return value), and one per post-capture invocation.
 Capture's per-day agent loop is wrapped in its own try/catch
 (`captureOneDay`) so one bad day (a rate limit, a transient error) can't
-abort the rest of a multi-day run — mirrors the per-file resilience
+abort the rest of a multi-day run -- mirrors the per-file resilience
 `preCapture.server.ts` already had. A metrics write failing never breaks
 the PhyLog run it's describing (`recordPhylogUsage` swallows its own
 errors).
+
+**A refusal is an error too, not a quiet no-op.** A thrown exception
+(a real API failure, a network blip) is the only case `classifyLlmError`
+handles -- but capture's own safety net (refusing a truncated, never-
+finished, or wrongly-empty `update_readme`/`write_file` result -- see
+Stage 2 above) and a run hitting its own turn budget (`hitMaxTurns`)
+BOTH return normally, without throwing. Left alone, those would look
+identical to a legitimately quiet day on `/fruits/maker` -- no error,
+just nothing happened. `captureOneDay` now decides this event's outcome
+AFTER computing its own refusal/truncation/turn-limit checks, not before:
+any of `truncated`, `hitMaxTurns`, or a non-null `refusalReason` makes it
+`outcome: "error", errorKind: "incomplete"` instead of `"success"`, so it
+counts against the SAME "Errors" stat both Maker pages already show --
+no new UI was needed. `preCapture.server.ts`'s text-summary path got the
+analogous fix: a summary generation that hits `stop_reason: "max_tokens"`
+is now discarded and recorded as `"incomplete"` rather than saved as if
+it were a finished summary (the file is simply left unsummarized, so the
+next pre-capture run retries it).
 
 **Known limitation**: the daily rollup stores sums and a `maxDurationMs`
 per bucket, not a real distribution — a true p95/p99 needs the raw

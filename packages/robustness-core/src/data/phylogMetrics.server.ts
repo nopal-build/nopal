@@ -43,8 +43,14 @@ export type PhylogStage = "pre-capture" | "capture" | "post-capture";
 export type PhylogEventKind = "photo-summary" | "text-summary" | "organize" | "pipeline";
 export type PhylogOutcome = "success" | "skipped" | "error";
 /** Short, closed categories — never the raw error message (see this
- * file's own module doc on why). */
-export type PhylogErrorKind = "rate_limited" | "oversized_image" | "other";
+ * file's own module doc on why). "incomplete" is distinct from the
+ * others: it's never a THROWN error (those go through `classifyLlmError`
+ * below) -- it's capture's own agent loop finishing without throwing, but
+ * producing output the pipeline deliberately chose not to trust (a
+ * truncated or never-finished multi-chunk update_readme/write_file, or
+ * the loop exhausting its own turn budget mid-task). See
+ * `capture.server.ts`'s `runAgentLoop`/`captureOneDay`. */
+export type PhylogErrorKind = "rate_limited" | "oversized_image" | "incomplete" | "other";
 
 let tablesEnsured = false;
 async function ensureTables(): Promise<void> {
