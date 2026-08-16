@@ -406,12 +406,22 @@
 
 /* ── Code ───────────────────────────────────────────────────────────────── */
 
+/* `line-height: 1` is load-bearing, not cosmetic: this inline element's
+   own vertical `padding` (2px top/bottom) otherwise inflates whichever
+   LINE it sits on past the grid — confirmed by direct measurement (a
+   wrapped paragraph/heading containing this element rendered 2px taller
+   per affected line than a plain-text one, breaking the 41px rhythm only
+   on multi-line content containing inline code, single-line content
+   masked the bug since there's nothing to accumulate against). Collapsing
+   its own line-height to 1 keeps its padded box from ever exceeding the
+   41px strut the surrounding text already establishes. */
 .ox-content code {
   background: var(--ox-color-code-bg);
   border-radius: 4px;
   padding: 2px 6px;
   font-size: 0.875em;
   font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  line-height: 1;
 }
 .ox-code-block {
   background: var(--ox-color-code-bg);
@@ -428,6 +438,14 @@
   font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
   color: var(--ox-color-text);
   border-radius: 0;
+  /* Undoes `.ox-content code`'s own `line-height: 1` (meant for INLINE
+     code's padded box specifically — see that rule's comment) for this
+     nested block-code case: same specificity, later in the cascade, so
+     this wins outright — without it, the block's own multi-line rhythm
+     (`.ox-code-block`'s `line-height: calc(var(--ox-grid) - 2px)`) would
+     get silently overridden on the nested element that actually renders
+     the text, collapsing every code-block line to single spacing. */
+  line-height: inherit;
 }
 
 /* ── Links / images / thematic break ───────────────────────────────────── */
