@@ -314,6 +314,20 @@ export async function runPreCapture(
         const card = cards.find((c) => c.projectFolderId === projectFolder._id);
         if (!card) continue;
 
+        // An empty (or whitespace/blank-lines-only) Card has nothing to
+        // stage -- no text, and (since an attachment is only ever
+        // represented as a `::file{...}` directive INSIDE `content`
+        // itself, see `extractFileAttachments`) necessarily no
+        // attachments either. Skip it entirely rather than creating a
+        // daily-logs entry folder capture would later have to look at
+        // and find nothing in (previously it staged unconditionally, so
+        // an empty day still produced a real entry, and capture then
+        // burned an LLM call concluding "nothing here" -- see the phylog
+        // skill's own note on this). Quiet on purpose, same as the
+        // `!card` skip just above -- an empty day is an expected, common
+        // case, not something worth a log line on every sweep.
+        if (card.content.trim().length === 0) continue;
+
         const humanName = humanNameById.get(cardHumanId) ?? cardHumanId;
         const entryFolder =
           findDailyLogEntry(existingDailyLogEntries, cardHumanId, date)?.folder ??

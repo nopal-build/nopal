@@ -185,6 +185,21 @@ struct CaptureResult {
     reset_summary: Option<ResetSummary>,
     #[serde(default)]
     days: Vec<CaptureDayResult>,
+    #[serde(default)]
+    duration_ms: u64,
+}
+
+/// Matches `formatDurationMs` in `capture.server.ts` -- kept in sync by
+/// hand since this is the only Rust-side consumer of that value.
+fn format_duration_ms(ms: u64) -> String {
+    let total_seconds = ms as f64 / 1000.0;
+    if total_seconds < 60.0 {
+        format!("{total_seconds:.1}s")
+    } else {
+        let minutes = (total_seconds / 60.0).floor();
+        let seconds = total_seconds - minutes * 60.0;
+        format!("{minutes}m {seconds:.1}s")
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -261,6 +276,8 @@ fn print_capture(result: &CaptureResult) {
         return;
     }
 
+    let entry_count = result.days.len();
+
     // Capture sweeps every collaborator's Cards, not just whoever's
     // running this command -- only bother labeling entries with WHO wrote
     // the Card once more than one human actually shows up, so the common
@@ -297,6 +314,12 @@ fn print_capture(result: &CaptureResult) {
             println!("Capture: {}{label} — nothing warranted a change.", day.date);
         }
     }
+
+    println!(
+        "Capture: done in {} ({entry_count} entr{} processed).",
+        format_duration_ms(result.duration_ms),
+        if entry_count == 1 { "y" } else { "ies" }
+    );
 }
 
 fn print_post_capture(result: &PostCaptureResult) {

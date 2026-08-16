@@ -146,6 +146,18 @@ import type { LlmMessage, LlmProvider, LlmUsage, ToolCall, ToolDefinition } from
 
 const MANAGED_FOLDER_TYPES = new Set(["skills", "syncs", "newspapers", "daily-logs"]);
 
+/** Human-readable wall-clock duration for `runCapture`'s own completion
+ * log line -- e.g. "1m 12.3s" or "8.4s". Not reused elsewhere; if a
+ * second caller needs this, promote it to a shared util instead of
+ * copying. */
+function formatDurationMs(ms: number): string {
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds - minutes * 60;
+  return `${minutes}m ${seconds.toFixed(1)}s`;
+}
+
 // ─── Tools ──────────────────────────────────────────────────────────────
 
 const CREATE_FOLDER_TOOL: ToolDefinition = {
@@ -549,7 +561,7 @@ export type CaptureDayResult = {
 };
 
 export type CaptureResult =
-  | { ok: true; full: boolean; resetSummary?: ResetSummary; days: CaptureDayResult[] }
+  | { ok: true; full: boolean; resetSummary?: ResetSummary; days: CaptureDayResult[]; durationMs: number }
   | { ok: false; error: string };
 
 export async function runCapture(
@@ -562,6 +574,14 @@ export async function runCapture(
   if (!opts.provider && !isPhylogAgentConfigured()) {
     return { ok: false, error: "PhyLog's agent is not configured (no ANTHROPIC_API_KEY set)." };
   }
+
+  // Wall-clock time for the WHOLE invocation (queue wait time isn't part
+  // of this -- the job's already been picked up by the worker by the
+  // time this function starts -- but a `--full` reset, walking every
+  // daily-logs entry, and every real LLM call along the way all are).
+  // Purely informational, logged and returned alongside the rest of this
+  // run's result -- never affects any decision this function makes.
+  const startedAt = Date.now();
 
   let resetSummary: ResetSummary | undefined;
   if (opts.full) {
@@ -587,7 +607,7 @@ export async function runCapture(
     log(
       "capture: no daily-logs entries found for this project in range -- run `nopal phylog pre-capture` first.",
     );
-    return { ok: true, full: opts.full, resetSummary, days: [] };
+    return { ok: true, full: opts.full, resetSummary, days: [], durationMs: Date.now() - startedAt };
   }
 
   // Human-readable labels for the progress log only (never affects which
@@ -777,7 +797,10 @@ export async function runCapture(
     }
   }
 
-  return { ok: true, full: opts.full, resetSummary, days };
+  const durationMs = Date.now() - startedAt;
+  log(`capture: done in ${formatDurationMs(durationMs)} (${days.length} entr${days.length === 1 ? "y" : "ies"} processed).`);
+
+  return { ok: true, full: opts.full, resetSummary, days, durationMs };
 }
 
 /**

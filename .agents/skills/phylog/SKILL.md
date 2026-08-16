@@ -150,7 +150,17 @@ Two jobs, one unconditional and one skill-gated:
    `YYYY-MM-DD-<slug>` — cosmetic only, see below), keeps a plain-text
    copy of the Card (`card.md`) current there, and copies every
    `::file{...}` attachment into that folder (`copyFileIntoFolder` — a
-   new `file_refs` row over the same S3 bytes, no duplication).
+   new `file_refs` row over the same S3 bytes, no duplication). A Card
+   whose `content` is empty or whitespace/blank-lines-only is skipped
+   entirely, before any of that — no entry folder gets created for it.
+   Since an attachment is only ever represented as a `::file{...}`
+   directive INSIDE `content` itself, blank content also means zero
+   attachments, so this is a safe, total skip, not just a text-only
+   check. Quiet on purpose (no log line), same as the pre-existing
+   "Card no longer exists" skip right next to it — an empty day is
+   common, not an error. Without this, an empty day still produced a
+   real `daily-logs/` entry, and capture then burned a full LLM call
+   just to conclude "nothing here."
 2. **Summarization (gated by `skills/PRE_CAPTURE.md`, default: skip)** —
    for every candidate without a matching `<name>-summary.md` for its
    CURRENT content, an LLM decides whether/how to summarize, per the
@@ -363,6 +373,17 @@ renders through `ProjectView` instead of a directive-blind
 - **Full** — calls `resetProjectN01Content` first (`wipeDailyLogs:
   false`), then walks every entry from scratch. Rebuilds from whatever's
   already staged — no need to re-run pre-capture.
+
+**Timed end to end**: `runCapture` returns `durationMs` (wall clock from
+right after the config/agent-configured check to just before returning —
+so it includes a `--full` reset, every entry's own filing + agent loop,
+and the final Release Log regeneration) on the `ok: true` result,
+including the early "nothing in range" return. Also logged as a final
+progress line (`capture: done in <Xs|Xm Ys> (N entries processed).`),
+visible in both the polled job log and the CLI's own output. The CLI's
+`print_capture` (`crates/cli/src/phylog.rs`) prints the same line from
+the structured result; `nopal phylog run` shows it too, since it reuses
+`print_capture` for capture's own portion of the combined summary.
 
 **Cross-human by design** — sweeps every collaborator's daily-logs
 entries for this project, not just whoever runs the command
