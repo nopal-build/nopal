@@ -187,7 +187,7 @@ const MOVE_FILE_TOOL: ToolDefinition = {
 // is `true` immediately. (`remove_section` takes no content at all, so
 // it never needs this.)
 const CHUNK_PROTOCOL_NOTE =
-  "Sent as one or more chunks: if the full content fits in a single call, send it all in one call with done: true. If it's long, call this tool repeatedly -- each call's chunk continues directly from your last one for this same target, in order, with no overlap -- and set done: true only on the LAST call, once everything has been sent.";
+  "Sent as one or more chunks: if the full content fits in a single call, send it all in one call with done: true. Don't try to judge whether it 'fits' -- as a concrete rule of thumb, if a section/file's content would run longer than roughly 600-800 words (about a page), split it into multiple chunk calls rather than attempting it in one. When you do split, call this tool repeatedly -- each call's chunk continues directly from your last one for this same target, in order, with no overlap -- and set done: true only on the LAST call, once everything has been sent. If a turn would also need other tool calls (create_folder, move_file, etc.) alongside a long write, make those in a separate turn from the long write so the write has that turn's full output budget to itself.";
 
 const WRITE_FILE_TOOL: ToolDefinition = {
   name: "write_file",
@@ -268,6 +268,23 @@ const REQUEST_REORGANIZE_TOOL: ToolDefinition = {
 };
 
 
+// A single turn hitting the provider's own per-call output limit
+// (`stopReason: "max_tokens"") used to just end the WHOLE agent loop on
+// the spot -- a real, confirmed problem: re-running `capture` from
+// scratch afterward hands the model the exact same content and the exact
+// same (vague, self-judged) chunking instructions, so it frequently made
+// the exact same oversized attempt and truncated again, for MULTIPLE
+// separate `capture` invocations in a row, on MULTIPLE different days,
+// with zero progress made between them. Retrying IN-LOOP, with an
+// explicit correction ("that was too big, split it smaller -- here's
+// roughly how much room you actually have"), fixes this at the source
+// instead of pushing an unfixable retry onto a future, unrelated run.
+// Bounded (not unlimited) so a model that keeps mis-judging its own
+// output regardless of correction still eventually falls through to the
+// existing safety net below (discard + `truncated: true`, retried on a
+// future `capture` run) rather than looping forever.
+const MAX_TRUNCATION_RETRIES = 2;
+
 async function runAgentLoop(
   provider: LlmProvider,
   system: string,
@@ -294,6 +311,15 @@ async function runAgentLoop(
    * where it left off"), never a signal that already-applied work needs
    * distrusting. */
   truncated: boolean;
+  /** How many times a turn hit the output-token ceiling AND was
+   * automatically retried with a smaller-chunks correction (see
+   * `MAX_TRUNCATION_RETRIES` above) -- regardless of whether a retry
+   * eventually succeeded (`truncated: false`) or every retry was
+   * exhausted (`truncated: true`). Purely informational, for the
+   * caller's own logging -- lets "this ran cleanly" and "this ran, but
+   * only after the model overshot and had to be corrected" stay
+   * distinguishable, without treating the latter as an error. */
+  truncationRetries: number;
   /** True if the loop ran all the way to maxTurns while the model's LAST
    * turn still ended with stopReason "tool_use" -- i.e. it looked like it
    * had more to do, and we simply stopped asking. Distinct from
@@ -307,6 +333,7 @@ async function runAgentLoop(
   let model: string | null = null;
   let finalText: string | null = null;
   let truncated = false;
+  let truncationRetries = 0;
   let hitMaxTurns = false;
   const loopStart = Date.now();
 
@@ -315,18 +342,41 @@ async function runAgentLoop(
     usage.inputTokens += response.usage.inputTokens;
     usage.outputTokens += response.usage.outputTokens;
     model = response.model;
-    if (response.text?.trim()) finalText = response.text.trim();
-    messages.push({ role: "assistant", content: response.text ?? "", toolCalls: response.toolCalls });
     if (response.stopReason === "max_tokens") {
       // The model's generation was cut off mid-turn -- any tool call in
       // THIS response may carry incomplete or corrupted arguments, since
       // its own JSON may never have finished streaming (this is exactly
       // how a single-shot update_readme call was once observed producing
-      // an empty README). None of this turn's tool calls are executed;
-      // whatever was already committed by EARLIER, complete turns stands.
+      // an empty README). None of this turn's tool calls are executed.
+      if (truncationRetries < MAX_TRUNCATION_RETRIES) {
+        truncationRetries++;
+        // Deliberately DO NOT push this turn's own (incomplete, possibly
+        // corrupted) assistant message -- an unexecuted `tool_use` block
+        // with no matching `tool_result` would make the NEXT API call
+        // invalid. Instead, just tell the model what happened and retry.
+        // Sized off what THIS call actually, observably fit before
+        // running out -- self-discovering the real ceiling instead of
+        // hardcoding a provider-specific number into this provider-
+        // agnostic loop.
+        const observedBudget = response.usage.outputTokens || 0;
+        const targetChunkTokens = Math.max(400, Math.floor(observedBudget / 3));
+        messages.push({
+          role: "user",
+          content: `Your last response was cut off by this call's own output limit after about ${observedBudget} tokens, before it finished -- nothing from it was applied. Retry the same work, but this time send it in noticeably smaller pieces: aim for roughly ${targetChunkTokens} tokens (very roughly ${targetChunkTokens * 4} characters) per tool call at most, calling the relevant tool repeatedly with done: false until everything is sent, and done: true only on the truly last piece. If you were also making other tool calls (create_folder, move_file, etc.) in the same turn as the long write, do those separately so the write has that turn's full output budget to itself.`,
+        });
+        continue;
+      }
+      // Retries exhausted (or none configured) -- fall back to the
+      // existing safety net: whatever was already committed by EARLIER,
+      // complete turns stands, this turn's own tool calls are discarded,
+      // and the caller retries on a future run.
+      if (response.text?.trim()) finalText = response.text.trim();
+      messages.push({ role: "assistant", content: response.text ?? "", toolCalls: response.toolCalls });
       truncated = true;
       break;
     }
+    if (response.text?.trim()) finalText = response.text.trim();
+    messages.push({ role: "assistant", content: response.text ?? "", toolCalls: response.toolCalls });
     if (response.toolCalls.length === 0) break;
     for (const call of response.toolCalls) {
       toolCallsMade.push(call);
@@ -342,7 +392,7 @@ async function runAgentLoop(
       hitMaxTurns = true;
     }
   }
-  return { toolCallsMade, usage, durationMs: Date.now() - loopStart, model, finalText, truncated, hitMaxTurns };
+  return { toolCallsMade, usage, durationMs: Date.now() - loopStart, model, finalText, truncated, truncationRetries, hitMaxTurns };
 }
 
 /** Renders every folder/file in `projectFolder`'s tree EXCLUDING the
@@ -1044,7 +1094,7 @@ async function captureOneDay(input: {
   };
 
   const userPrompt = buildUserPrompt({ tree, cardContent, filed, summaries, readmeContent });
-  const { usage, durationMs, model, finalText, truncated, hitMaxTurns } = await runAgentLoop(
+  const { usage, durationMs, model, finalText, truncated, truncationRetries, hitMaxTurns } = await runAgentLoop(
     llm,
     buildSystemPrompt(skillContent, generalSkill, extraSkillFiles),
     userPrompt,
@@ -1057,9 +1107,14 @@ async function captureOneDay(input: {
     cacheSystemPrompt,
   );
 
+  if (truncationRetries > 0 && !truncated) {
+    log(
+      `capture: ${date} -- the model hit its own output token limit ${truncationRetries} time${truncationRetries > 1 ? "s" : ""} but recovered after being asked to use smaller chunks; continuing normally.`,
+    );
+  }
   if (truncated) {
     log(
-      `capture: ${date} -- the model's generation was cut off by its own output token limit before it finished; whatever it had already done this run stands, but its last, incomplete action was discarded. Re-run capture to pick up where it left off.`,
+      `capture: ${date} -- the model's generation was cut off by its own output token limit before it finished${truncationRetries > 0 ? ` (even after ${truncationRetries} retr${truncationRetries > 1 ? "ies" : "y"} with smaller chunks)` : ""}; whatever it had already done this run stands, but its last, incomplete action was discarded. Re-run capture to pick up where it left off.`,
     );
   }
   if (hitMaxTurns) {
@@ -1257,7 +1312,7 @@ export async function runReorganize(
   });
 
   const userPrompt = buildReorganizeUserPrompt({ tree, readmeContent });
-  const { usage, durationMs, model, finalText, truncated, hitMaxTurns } = await runAgentLoop(
+  const { usage, durationMs, model, finalText, truncated, truncationRetries, hitMaxTurns } = await runAgentLoop(
     llm,
     buildReorganizeSystemPrompt(skillContent, generalSkill, extraSkillFiles, opts.reason ?? null),
     userPrompt,
@@ -1269,9 +1324,14 @@ export async function runReorganize(
     false,
   );
 
+  if (truncationRetries > 0 && !truncated) {
+    log(
+      `reorganize: the model hit its own output token limit ${truncationRetries} time${truncationRetries > 1 ? "s" : ""} but recovered after being asked to use smaller chunks; continuing normally.`,
+    );
+  }
   if (truncated) {
     log(
-      "reorganize: the model's generation was cut off by its own output token limit before it finished; whatever it had already done stands, but its last, incomplete action was discarded. Re-run to pick up where it left off.",
+      `reorganize: the model's generation was cut off by its own output token limit before it finished${truncationRetries > 0 ? ` (even after ${truncationRetries} retr${truncationRetries > 1 ? "ies" : "y"} with smaller chunks)` : ""}; whatever it had already done stands, but its last, incomplete action was discarded. Re-run to pick up where it left off.`,
     );
   }
   if (hitMaxTurns) {

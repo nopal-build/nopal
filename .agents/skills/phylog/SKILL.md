@@ -266,6 +266,24 @@ entry (`listDailyLogEntries`, oldest first):
    Usage tracking), and is retried on the next `capture` run.
    `DEFAULT_MAX_TOKENS` is 8192.
 
+   **Hitting `max_tokens` no longer ends the run** — a truncated turn is
+   now retried IN-LOOP, up to `MAX_TRUNCATION_RETRIES` (2) times, with a
+   corrective user message telling the model roughly how much room it
+   actually had (derived from that turn's own `usage.outputTokens`, not a
+   hardcoded number) and asking for smaller chunks next time. The
+   incomplete turn itself is never pushed to message history (an
+   unexecuted `tool_use` block with no `tool_result` would break the next
+   call), so this is a clean retry, not a resend of broken state. Before
+   this, a truncated day just ended right there, and a later `capture`
+   run handed the model the exact same content and the exact same
+   self-judged chunking call, so it often truncated again — sometimes for
+   several days in a row across several runs, with no progress. Only
+   once retries are exhausted does the old behavior apply (discard,
+   `truncated: true`, retried on a future `capture` run).
+   `CHUNK_PROTOCOL_NOTE` also now gives a concrete rule of thumb (split
+   past ~600-800 words, don't try to eyeball "does this fit") instead of
+   leaving "is this long" entirely to the model's own judgment.
+
 **The base system prompt defers to the project's own `CAPTURE.md`** on
 how much a day should change, rather than asserting a hardcoded caution
 that would fight a project's own organization strategy — only falls back
@@ -577,8 +595,13 @@ the run it's describing (`recordPhylogUsage` swallows its own errors).
 `hitMaxTurns`, or a non-null refusal reason (see Stage 2's safety net)
 makes an event `outcome: "error", errorKind: "incomplete"` rather than
 `"success"`, so it shows up under the same "Errors" stat both Maker
-pages already surface. Pre-capture's text-summary path applies the same
-rule — a summary that hits `stop_reason: "max_tokens"` is discarded and
+pages already surface. Since `truncated` only reflects the FINAL outcome
+(after `runAgentLoop`'s own in-loop retries against `max_tokens` are
+exhausted — see Stage 2's safety net), a day that hit the ceiling but
+recovered on retry is correctly counted as `"success"`, not an error.
+Pre-capture's text-summary path applies the same truncated-is-an-error
+rule (no retry loop there yet, just single-shot summarization) — a
+summary that hits `stop_reason: "max_tokens"` is discarded and
 recorded `"incomplete"` rather than saved as finished.
 
 **Known limitation**: the daily rollup stores sums and a
