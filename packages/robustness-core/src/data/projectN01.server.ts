@@ -239,6 +239,22 @@ export type DailyLogEntryMeta = {
    * rest of PhyLog already uses. */
   sourceHash: string;
   updatedAt: string;
+  /** Set by CAPTURE (never pre-capture) when it looked at this entry and
+   * genuinely decided nothing needed to change -- a real decision, not
+   * an error/refusal/truncation (those are deliberately NEVER recorded
+   * here, so they keep retrying on the next run -- see capture.server.ts's
+   * own doc). Equal to `sourceHash` at the moment that decision was made;
+   * `runCapture`'s own skip check treats `capturedNoOpSourceHash ===
+   * sourceHash` the same as an applied Release Log entry. Without this,
+   * a day with nothing to say would never be recorded ANYWHERE (no
+   * Release Log entry either, since nothing changed) and would get a
+   * fresh, wasted LLM call on every single future run forever -- a real,
+   * confirmed bug this fixes. Preserved automatically by
+   * `writeDailyLogEntryMeta` across pre-capture's own routine refreshes
+   * (which never set this field themselves) as long as `sourceHash`
+   * hasn't changed; a genuinely new/changed entry naturally stops
+   * matching and gets a fresh look. */
+  capturedNoOpSourceHash?: string;
 };
 
 export type DailyLogEntry = { folder: VaultFolder; meta: DailyLogEntryMeta };
@@ -266,6 +282,7 @@ function parseDailyLogEntryMeta(content: string | null | undefined): DailyLogEnt
       cardFileId: typeof data.cardFileId === "string" ? data.cardFileId : "",
       sourceHash: typeof data.sourceHash === "string" ? data.sourceHash : "",
       updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : "",
+      capturedNoOpSourceHash: typeof data.capturedNoOpSourceHash === "string" ? data.capturedNoOpSourceHash : undefined,
     };
   } catch {
     return null;
@@ -397,6 +414,19 @@ export async function writeDailyLogEntryMeta(
   entryFolder: VaultFolder,
   meta: DailyLogEntryMeta,
 ): Promise<void> {
+  const { files } = await listFolderChildren(entryFolder.human_id, entryFolder._id);
+  const existing = files.find((f) => f.name === DAILY_LOG_ENTRY_META_FILE);
+
+  // `capturedNoOpSourceHash` is only ever SET by capture, never by
+  // pre-capture -- if this call's own `meta` doesn't specify it (pre-capture's
+  // routine refreshes never do), carry forward whatever was already on
+  // disk rather than silently dropping it. This is what lets a
+  // pre-capture re-run (which always rebuilds `meta` from scratch) leave
+  // capture's own "nothing needed to change" memory intact.
+  const existingFile = existing ? await getFileRefById(existing._id) : undefined;
+  const existingMeta = parseDailyLogEntryMeta(existingFile?.content);
+  const capturedNoOpSourceHash = meta.capturedNoOpSourceHash ?? existingMeta?.capturedNoOpSourceHash;
+
   const frontmatter = stringifyYaml({
     humanId: meta.humanId,
     humanName: meta.humanName,
@@ -404,11 +434,10 @@ export async function writeDailyLogEntryMeta(
     cardFileId: meta.cardFileId,
     sourceHash: meta.sourceHash,
     updatedAt: meta.updatedAt,
+    ...(capturedNoOpSourceHash ? { capturedNoOpSourceHash } : {}),
   }).trimEnd();
   const content = `---\n${frontmatter}\n---\n\nPre-processed daily log for ${meta.humanName} on ${meta.date}. Managed by PhyLog's pre-capture stage -- do not edit by hand.\n`;
 
-  const { files } = await listFolderChildren(entryFolder.human_id, entryFolder._id);
-  const existing = files.find((f) => f.name === DAILY_LOG_ENTRY_META_FILE);
   if (existing) {
     await updateFileRef(existing._id, { content });
   } else {

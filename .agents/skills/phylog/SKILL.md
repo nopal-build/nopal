@@ -549,6 +549,48 @@ skipped when that happens; the organize/README agent (part 2) still runs
 off whatever's already staged in `daily-logs/`, since that's its only
 source of truth regardless of the live Card's own fate.
 
+**A second, INDEPENDENT way an entry counts as "already done": a
+genuinely CLEAN no-op, tracked on the entry's own `_meta.md` as
+`capturedNoOpSourceHash`.** Before this field existed, only a REAL
+change (a Release Log entry) was ever recorded anywhere -- a day where
+the model looked at the content and correctly decided nothing needed to
+change produced no Release Log entry, so it was never recorded as
+"done" either. The result (a real, confirmed bug): a quiet day got a
+fresh, wasted LLM call on every single future `capture` run, forever,
+for as long as that entry existed -- an incremental run that should
+touch only brand-new entries instead re-examined the project's entire
+quiet history every time. `runCapture`'s own skip check now treats
+`capturedNoOpSourceHash === sourceHash` exactly like an applied Release
+Log entry (logged as "already reviewed... nothing needed to change,"
+distinct from "already applied" so the two are diagnosable apart).
+Set ONLY by `captureOneDay`'s own final branch, and ONLY when the day's
+run was a genuinely clean no-op -- explicitly excludes `truncated`,
+`hitMaxTurns`, a refusal, or an incomplete chunk attempt, all of which
+must keep retrying on the next run rather than being memorized as
+"nothing to do here." Because it's set to the CURRENT `sourceHash`, a
+later change to the entry's own content (a caption edit, a new
+attachment) naturally invalidates it with no explicit clearing step --
+the hash simply stops matching and the entry gets a fresh look.
+`writeDailyLogEntryMeta` (`projectN01.server.ts`) preserves whatever is
+already on disk here across pre-capture's own routine `_meta.md`
+rewrites (which never set this field themselves), so pre-capture can
+stay entirely unaware this field exists.
+
+**Interaction with `request_reorganize`:** when a day's log triggers a
+reorganization (this same section, above), `captureOneDay` deliberately
+does NOT set `capturedNoOpSourceHash` for that entry, even though its
+own loop otherwise looks like a clean no-op (no README edit, no organize
+action). The reorganize pass itself hasn't run yet at that point --
+`runCapture` invokes it as a separate step right after `captureOneDay`
+returns -- and marking the triggering entry "done" before knowing
+whether that pass finishes cleanly would mean a truncated/incomplete
+reorganize attempt could never be retried (the triggering entry would
+already look done and get skipped outright next run). Instead,
+`runCapture` itself writes this same marker for the triggering entry,
+and only once `runReorganize`'s own result confirms the pass completed
+without truncation, hitting its turn limit, a refusal, or an incomplete
+chunk attempt (`ReorganizeResult`'s own `incomplete` flag).
+
 **The model is told about OxMarkdown's directives** (`DIRECTIVE_GUIDE` in
 `capture.server.ts`, injected into the system prompt every call) so it can
 write real directive syntax instead of plain bullet-list links —

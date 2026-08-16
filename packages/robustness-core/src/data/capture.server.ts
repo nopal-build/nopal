@@ -135,6 +135,8 @@ import {
   listDailyLogEntries,
   listExtraSkillFiles,
   resetProjectN01Content,
+  writeDailyLogEntryMeta,
+  type DailyLogEntryMeta,
   type ResetSummary,
 } from "./projectN01.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
@@ -613,11 +615,22 @@ export async function runCapture(
     // (`_meta.md.sourceHash`, refreshed by pre-capture every run) --
     // never the live Card directly, so this stays correct even for a
     // Card that's since been deleted (the entry's own hash simply stops
-    // changing).
+    // changing). TWO independent ways an entry can already be "done":
+    // a real change was applied (a Release Log entry exists), or capture
+    // already looked at this EXACT content and genuinely decided nothing
+    // needed to change (`capturedNoOpSourceHash` on the entry's own
+    // `_meta.md` -- see that field's own doc for why this exists: without
+    // it, a quiet day was never recorded ANYWHERE and got a fresh, wasted
+    // LLM call on every single future run forever, a real, confirmed bug).
     const sourceRef = `${entryFolder._id}:${meta.sourceHash}`;
     const existing = await findReleaseLogEntryBySource(projectFolder._id, date, "ai-update", sourceRef);
-    if (existing) {
-      log(`capture: ${date} (${who}) -- already applied for this entry's current content.`);
+    const alreadyDecidedNoOp = !existing && !!meta.capturedNoOpSourceHash && meta.capturedNoOpSourceHash === meta.sourceHash;
+    if (existing || alreadyDecidedNoOp) {
+      log(
+        existing
+          ? `capture: ${date} (${who}) -- already applied for this entry's current content.`
+          : `capture: ${date} (${who}) -- already reviewed this entry's current content; nothing needed to change.`,
+      );
       await recordPhylogUsage({
         humanId: cardHumanId,
         projectFolderId: projectFolder._id,
@@ -641,6 +654,7 @@ export async function runCapture(
         projectFolder,
         date,
         entryFolder,
+        entryMeta: meta,
         filed,
         sourceRef,
         llm,
@@ -675,9 +689,14 @@ export async function runCapture(
           );
           if (!reorgResult.ok) {
             log(`capture: ${date} (${who}) -- reorganization pass failed: ${reorgResult.error}`);
-          } else if (reorgResult.changed) {
-            releaseLogsDirty = true;
-            touchedHumanDates.set(`${cardHumanId}:${date}`, cardHumanId);
+          } else {
+            if (reorgResult.changed) {
+              releaseLogsDirty = true;
+              touchedHumanDates.set(`${cardHumanId}:${date}`, cardHumanId);
+            }
+            if (!reorgResult.incomplete) {
+              await writeDailyLogEntryMeta(entryFolder, { ...meta, capturedNoOpSourceHash: meta.sourceHash });
+            }
           }
         }
       }
@@ -945,6 +964,12 @@ async function captureOneDay(input: {
    * SOLE source of "today's content" for the agent below (never the
    * live Card or the contributor's own vault directly). */
   entryFolder: VaultFolder;
+  /** This entry's own current `_meta.md` -- used ONLY to record
+   * `capturedNoOpSourceHash` when today's run concludes with a genuine
+   * no-op (see that field's own doc, `projectN01.server.ts`), never read
+   * for anything else here (the caller already used its `sourceHash` to
+   * decide whether to call this function at all). */
+  entryMeta: DailyLogEntryMeta;
   filed: FiledAttachment[];
   sourceRef: string;
   llm: LlmProvider;
@@ -967,7 +992,7 @@ async function captureOneDay(input: {
    * this day's own edits, still within the same capture cycle. */
   reorganizeRequested: { reason: string } | null;
 }> {
-  const { actingHumanId, projectFolder, date, entryFolder, filed, sourceRef, llm, skillContent, generalSkill, extraSkillFiles, cacheSystemPrompt, log } = input;
+  const { actingHumanId, projectFolder, date, entryFolder, entryMeta, filed, sourceRef, llm, skillContent, generalSkill, extraSkillFiles, cacheSystemPrompt, log } = input;
 
   const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
   const readmeContent = readme?.content ?? "";
@@ -1096,15 +1121,40 @@ async function captureOneDay(input: {
       summary: `PhyLog reorganized this project: ${organizeActions.join(", ")}`,
       sourceRef,
     });
-  } else if (!hadRefusal() && !hadIncompleteAttempt()) {
+  } else if (!truncated && !hitMaxTurns && !hadRefusal() && !hadIncompleteAttempt()) {
     // Nothing changed at all -- without this, "why didn't my README
     // update" is undiagnosable, since the model's own reasoning for
     // abstaining is otherwise thrown away. Log it verbatim.
-    log(
-      finalText
-        ? `capture: ${date} -- no README update or reorganization; model said: ${finalText}`
-        : `capture: ${date} -- no README update or reorganization (model gave no reasoning text).`,
-    );
+    if (!reorganizeRequested) {
+      log(
+        finalText
+          ? `capture: ${date} -- no README update or reorganization; model said: ${finalText}`
+          : `capture: ${date} -- no README update or reorganization (model gave no reasoning text).`,
+      );
+    }
+
+    // A CLEAN no-op -- no truncation, no refusal, no incomplete chunk
+    // attempt, just a genuine "nothing needed to change" for this exact
+    // content. Record it so this entry doesn't get a fresh, wasted LLM
+    // call on every single future run forever (a real, confirmed bug --
+    // a quiet day was previously never recorded anywhere, since only a
+    // REAL change gets a Release Log entry). Deliberately excludes the
+    // truncated/hitMaxTurns/refusal/incomplete cases above, which should
+    // keep retrying instead of being memorized as "nothing to do here."
+    //
+    // Also excludes the case where THIS day's own log asked for a
+    // reorganization (`reorganizeRequested`): `runCapture` runs that pass
+    // right after this function returns, separately from this entry's own
+    // Release Log bookkeeping. Marking this entry reviewed here, before
+    // that pass has even run, would mean a truncated/incomplete
+    // reorganization attempt could never be retried on a later run (this
+    // entry would already look "done" and get skipped outright). Instead,
+    // `runCapture` itself writes this same marker for the triggering entry,
+    // but only once the reorganize pass it kicks off has been confirmed to
+    // finish cleanly.
+    if (!reorganizeRequested) {
+      await writeDailyLogEntryMeta(entryFolder, { ...entryMeta, capturedNoOpSourceHash: entryMeta.sourceHash });
+    }
   }
 
   return { readmeUpdated, organizeActions, reorganizeRequested };
@@ -1146,7 +1196,7 @@ function buildReorganizeUserPrompt(input: { tree: string; readmeContent: string 
 }
 
 export type ReorganizeResult =
-  | { ok: true; changed: boolean; summary: string[] }
+  | { ok: true; changed: boolean; summary: string[]; incomplete: boolean }
   | { ok: false; error: string };
 
 /**
@@ -1281,5 +1331,6 @@ export async function runReorganize(
     ok: true,
     changed: readmeChanged || organizeActions.length > 0,
     summary: [...readmeEditSummaries, ...organizeActions],
+    incomplete,
   };
 }
