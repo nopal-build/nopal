@@ -255,6 +255,26 @@ export type DailyLogEntryMeta = {
    * hasn't changed; a genuinely new/changed entry naturally stops
    * matching and gets a fresh look. */
   capturedNoOpSourceHash?: string;
+  /** The COUNTERPART to `capturedNoOpSourceHash` above, for when a real
+   * change WAS applied (a Release Log entry got created) rather than a
+   * no-op. Set by `runCapture` right after that happens, equal to
+   * `sourceHash` at that moment. Exists purely as a FAST PATH: without
+   * it, confirming "was this entry already applied" means a
+   * `findReleaseLogEntryBySource` database round trip for every single
+   * already-settled historical entry, on every single incremental run,
+   * forever -- the real cost behind capture feeling slow on a project
+   * with a long history, since the vast majority of entries on any given
+   * run are ones that will never need to be looked at again.
+   * `runCapture`'s skip check tries this in-memory comparison FIRST
+   * (`capturedAppliedSourceHash === sourceHash`, no I/O at all beyond
+   * what `listDailyLogEntries` already fetched) and only falls back to
+   * the database check for an entry that doesn't have it set yet -- at
+   * which point, if that slower check finds a real applied entry after
+   * all (e.g. one processed before this field existed), it backfills
+   * this field so every FUTURE run hits the fast path instead. Preserved
+   * across pre-capture's own routine `_meta.md` rewrites the same way
+   * `capturedNoOpSourceHash` is. */
+  capturedAppliedSourceHash?: string;
 };
 
 export type DailyLogEntry = { folder: VaultFolder; meta: DailyLogEntryMeta };
@@ -283,6 +303,7 @@ function parseDailyLogEntryMeta(content: string | null | undefined): DailyLogEnt
       sourceHash: typeof data.sourceHash === "string" ? data.sourceHash : "",
       updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : "",
       capturedNoOpSourceHash: typeof data.capturedNoOpSourceHash === "string" ? data.capturedNoOpSourceHash : undefined,
+      capturedAppliedSourceHash: typeof data.capturedAppliedSourceHash === "string" ? data.capturedAppliedSourceHash : undefined,
     };
   } catch {
     return null;
@@ -417,15 +438,16 @@ export async function writeDailyLogEntryMeta(
   const { files } = await listFolderChildren(entryFolder.human_id, entryFolder._id);
   const existing = files.find((f) => f.name === DAILY_LOG_ENTRY_META_FILE);
 
-  // `capturedNoOpSourceHash` is only ever SET by capture, never by
-  // pre-capture -- if this call's own `meta` doesn't specify it (pre-capture's
-  // routine refreshes never do), carry forward whatever was already on
-  // disk rather than silently dropping it. This is what lets a
-  // pre-capture re-run (which always rebuilds `meta` from scratch) leave
-  // capture's own "nothing needed to change" memory intact.
+  // `capturedNoOpSourceHash`/`capturedAppliedSourceHash` are only ever SET
+  // by capture, never by pre-capture -- if this call's own `meta` doesn't
+  // specify either (pre-capture's routine refreshes never do), carry
+  // forward whatever was already on disk rather than silently dropping
+  // it. This is what lets a pre-capture re-run (which always rebuilds
+  // `meta` from scratch) leave capture's own memory of this entry intact.
   const existingFile = existing ? await getFileRefById(existing._id) : undefined;
   const existingMeta = parseDailyLogEntryMeta(existingFile?.content);
   const capturedNoOpSourceHash = meta.capturedNoOpSourceHash ?? existingMeta?.capturedNoOpSourceHash;
+  const capturedAppliedSourceHash = meta.capturedAppliedSourceHash ?? existingMeta?.capturedAppliedSourceHash;
 
   const frontmatter = stringifyYaml({
     humanId: meta.humanId,
@@ -435,6 +457,7 @@ export async function writeDailyLogEntryMeta(
     sourceHash: meta.sourceHash,
     updatedAt: meta.updatedAt,
     ...(capturedNoOpSourceHash ? { capturedNoOpSourceHash } : {}),
+    ...(capturedAppliedSourceHash ? { capturedAppliedSourceHash } : {}),
   }).trimEnd();
   const content = `---\n${frontmatter}\n---\n\nPre-processed daily log for ${meta.humanName} on ${meta.date}. Managed by PhyLog's pre-capture stage -- do not edit by hand.\n`;
 

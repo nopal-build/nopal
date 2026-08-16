@@ -421,6 +421,13 @@ pub fn capture(
     );
     let job_id = enqueue(&client, "/api/phylog/capture", &body)?;
     let result: CaptureResult = poll_job(&client, &job_id)?;
+    // A clear break before the summary -- without it, the live
+    // "capture: ..." progress lines (printed as they streamed in, one
+    // per action) run directly into the final, per-day "Capture: ..."
+    // recap (printed all at once from the structured result), and at a
+    // glance they read as one continuous, doubled-up log.
+    println!();
+    println!("--- Summary ---");
     print_capture(&result);
     Ok(())
 }

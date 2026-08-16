@@ -207,16 +207,24 @@ contributor's Cards for this project, not just whoever runs the command.
 
 Reads its input exclusively from `daily-logs/` and `syncs/` — never the
 live Card or a contributor's own vault directly. Runs per daily-logs
-entry (`listDailyLogEntries`, oldest first):
+entry (`listDailyLogEntries`, oldest first), and for EACH entry, in this
+order:
 
-1. **Deterministic filing** (`sorter.server.ts`'s `fileCardAttachments`,
-   zero-inference, shared with the Sorter) — every not-yet-filed
-   `::file{...}` Card attachment lands in the project root. This reads
-   the ORIGINAL Card, not the daily-logs entry's staged copy, so its
-   `sourceRef`/dedup identity matches what the Sorter already uses —
-   filing the staged copy instead would risk double-filing the same
-   photo under two different fileIds.
-2. **Organize + README** — an LLM agent loop driven by
+1. **Idempotency check FIRST** — see "Idempotency, precisely" below.
+   Deliberately ahead of filing, not after: an already-settled entry's
+   `sourceHash` already covers every current attachment (see Stage 1's
+   doc), so there's nothing new to file for it either. A settled entry
+   skips straight to the next one, doing zero filing work and, on the
+   common fast path, zero database work beyond what was already fetched.
+2. **Deterministic filing** (`sorter.server.ts`'s `fileCardAttachments`,
+   zero-inference, shared with the Sorter) — only reached for an entry
+   that ISN'T already settled. Every not-yet-filed `::file{...}` Card
+   attachment lands in the project root. This reads the ORIGINAL Card,
+   not the daily-logs entry's staged copy, so its `sourceRef`/dedup
+   identity matches what the Sorter already uses — filing the staged
+   copy instead would risk double-filing the same photo under two
+   different fileIds.
+3. **Organize + README** — an LLM agent loop driven by
    `skills/CAPTURE.md` (default: file everything into the root, keep
    README a plain index — `DEFAULT_CAPTURE_SKILL`). Given the project's
    current file tree (everything except `skills`/`syncs`/`newspapers`/
@@ -277,7 +285,7 @@ entry (`listDailyLogEntries`, oldest first):
    `DEFAULT_MAX_TOKENS` is 8192.
 
    **Hitting `max_tokens` no longer ends the run** — a truncated turn is
-   now retried IN-LOOP, up to `MAX_TRUNCATION_RETRIES` (2) times, with a
+   now retried IN-LOOP, up to `MAX_TRUNCATION_RETRIES` (3) times, with a
    corrective user message telling the model roughly how much room it
    actually had (derived from that turn's own `usage.outputTokens`, not a
    hardcoded number) and asking for smaller chunks next time. The
@@ -293,6 +301,23 @@ entry (`listDailyLogEntries`, oldest first):
    `CHUNK_PROTOCOL_NOTE` also now gives a concrete rule of thumb (split
    past ~600-800 words, don't try to eyeball "does this fit") instead of
    leaving "is this long" entirely to the model's own judgment.
+
+   **The retry target ESCALATES, it doesn't repeat** — a real, confirmed
+   gap found right after the above shipped: `observedBudget` (what a
+   turn actually generated before getting cut off) lands at roughly the
+   SAME provider ceiling every time a turn truncates, so computing the
+   next target from it alone gave every retry the exact same "aim for
+   ~1/3 of that" instruction. A day whose content still didn't fit at
+   that size just truncated identically on every retry, and then
+   identically again on the NEXT whole `capture` invocation, forever, with
+   zero progress (observed directly: the same entry failing the same way
+   across two separate `nopal phylog capture` runs). Fixed by dividing by
+   a GROWING factor per retry (3, 4, 5, ...) instead of a fixed 3, and by
+   telling the model explicitly on retry 2+ that its previous, larger
+   target also failed and to make only ONE tool call this turn. Confirmed
+   directly: an always-truncating fake provider produces three strictly
+   shrinking targets across the three retries, never the same value
+   twice.
 
 **The base system prompt defers to the project's own `CAPTURE.md`** on
 how much a day should change, rather than asserting a hardcoded caution
@@ -336,22 +361,57 @@ incomplete reorganize could never be retried.
 
 **Idempotency, precisely**: each daily-logs entry's `_meta.md` carries a
 `sourceHash` (from pre-capture, see Stage 1). Capture's Release Log
-`source_ref` is `${entryFolderId}:${sourceHash}` — a plain
-`findReleaseLogEntryBySource` lookup decides whether an entry needs
-(re)processing, no AI involved. A Card can vanish out from under an
-already-staged entry (deleted/edited away) — filing is simply skipped,
-but the organize/README agent still runs off whatever's staged.
+`source_ref` is `${entryFolderId}:${sourceHash}`. A Card can vanish out
+from under an already-staged entry (deleted/edited away) — filing is
+simply skipped, but the organize/README agent still runs off whatever's
+staged.
 
-A second, independent way an entry counts "done": `capturedNoOpSourceHash`
-on `_meta.md`, set only when a day's run is a genuinely clean no-op (the
-model correctly decided nothing needed to change) — set ONLY by
-`captureOneDay`'s final branch, and never when `truncated`/
-`hitMaxTurns`/a refusal/an incomplete chunk occurred (those must keep
-retrying). Since it's set to the current `sourceHash`, a later content
-change naturally invalidates it. `runCapture`'s skip check treats this
-the same as an applied Release Log entry, logged distinctly ("already
-reviewed... nothing needed to change" vs. "already applied") so a quiet
-day isn't re-examined by every future `capture` run forever.
+**THREE ways an entry can already be "done," checked cheapest-first** (a
+real, confirmed perf fix -- see below for why order matters here):
+
+1. `capturedAppliedSourceHash` on `_meta.md` matches the entry's CURRENT
+   `sourceHash`. Set by `runCapture` the moment a REAL change (a
+   README/organize action) is committed for that entry. A pure in-memory
+   comparison against data `listDailyLogEntries` already fetched -- no
+   database call at all.
+2. `capturedNoOpSourceHash` on `_meta.md` matches `sourceHash`. Set ONLY
+   by `captureOneDay`'s final branch, ONLY for a genuinely clean no-op
+   (the model correctly decided nothing needed to change) -- never when
+   `truncated`/`hitMaxTurns`/a refusal/an incomplete chunk occurred
+   (those must keep retrying) or when the day triggered a reorganize
+   (see below). Also a pure in-memory comparison, no database call.
+3. Otherwise, fall back to a `findReleaseLogEntryBySource` lookup (the
+   ORIGINAL, and until recently the ONLY, check) -- needed for an entry
+   that predates the two fast markers above, or that got applied through
+   a path that hasn't backfilled them yet. A match here immediately
+   backfills `capturedAppliedSourceHash` so this exact entry never needs
+   this slower check again on any future run.
+
+Either marker matching, or a real Release Log entry found, all skip the
+same way (`runCapture`'s progress log distinguishes "already applied"
+from "already reviewed... nothing needed to change" purely cosmetically
+-- both are equally settled). Since `sourceHash` is set to the CURRENT
+hash at the moment either marker is written, a later content change
+(a caption edit, a new attachment -- see Stage 1) naturally invalidates
+it with no explicit clearing step needed.
+
+**Why this had to become a fast path, not just a correctness fix**:
+before `capturedAppliedSourceHash` existed, confirming "was this entry
+already applied" meant a `findReleaseLogEntryBySource` database round
+trip for literally EVERY entry on EVERY incremental run, forever --
+including the entries that will never need looking at again. On a
+project with hundreds of days of history, that's hundreds of sequential
+round trips just to conclude "nothing to do here," and it's the direct
+cause of `capture` feeling slow at scale even when nothing new has
+happened. The fast-path checks above make that cost O(new-or-changed
+entries) instead of O(everything-ever-staged) after one warming pass.
+
+This is also why the idempotency check now runs BEFORE filing, not
+after (see Stage 2's own numbered list above): filing used to run
+unconditionally for every entry, even ones about to be skipped as
+already-applied one line later -- redundant work, since an
+already-settled entry's `sourceHash` already covers every attachment it
+could ever need to file.
 
 **Directives**: the model is told about OxMarkdown directive syntax
 (`DIRECTIVE_GUIDE`, injected into the system prompt) so it writes real
@@ -384,6 +444,16 @@ visible in both the polled job log and the CLI's own output. The CLI's
 `print_capture` (`crates/cli/src/phylog.rs`) prints the same line from
 the structured result; `nopal phylog run` shows it too, since it reuses
 `print_capture` for capture's own portion of the combined summary.
+
+**CLI output has a clear break before its own summary**: `nopal phylog
+capture` prints a `--- Summary ---` line before calling `print_capture`.
+Without it, the LIVE `capture: ...` progress lines (streamed in as the
+job runs, one per action) ran directly into the final, per-day recap
+`print_capture` prints all at once from the structured result -- at a
+glance the two looked like one continuous, doubled-up log. `nopal phylog
+run` already had an analogous `--- Results ---` header ahead of all
+three stages' own summaries, so only the standalone `capture` command
+needed this.
 
 **Cross-human by design** — sweeps every collaborator's daily-logs
 entries for this project, not just whoever runs the command

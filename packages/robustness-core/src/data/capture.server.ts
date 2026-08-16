@@ -295,7 +295,7 @@ const REQUEST_REORGANIZE_TOOL: ToolDefinition = {
 // output regardless of correction still eventually falls through to the
 // existing safety net below (discard + `truncated: true`, retried on a
 // future `capture` run) rather than looping forever.
-const MAX_TRUNCATION_RETRIES = 2;
+const MAX_TRUNCATION_RETRIES = 3;
 
 async function runAgentLoop(
   provider: LlmProvider,
@@ -369,12 +369,25 @@ async function runAgentLoop(
         // Sized off what THIS call actually, observably fit before
         // running out -- self-discovering the real ceiling instead of
         // hardcoding a provider-specific number into this provider-
-        // agnostic loop.
+        // agnostic loop. ESCALATES with each successive retry (divisor
+        // grows: 3, 4, 5, ...) rather than repeating the same target
+        // every time -- `observedBudget` alone doesn't escalate on its
+        // own, since a turn that truncates lands at roughly the SAME
+        // provider ceiling every time, retry after retry, so giving the
+        // model the exact same (already-ignored) instruction twice in a
+        // row was a real, confirmed gap: a day whose content genuinely
+        // needed a smaller target than the first correction asked for
+        // just kept truncating identically, retry after retry, run after
+        // run, with zero progress.
         const observedBudget = response.usage.outputTokens || 0;
-        const targetChunkTokens = Math.max(400, Math.floor(observedBudget / 3));
+        const divisor = 2 + truncationRetries;
+        const targetChunkTokens = Math.max(200, Math.floor(observedBudget / divisor));
+        const escalation = truncationRetries > 1
+          ? ` This is retry ${truncationRetries} -- your previous, larger target ALSO got cut off, so go smaller still, and make ONLY ONE tool call this turn (nothing else), even if that means several more turns are needed to finish.`
+          : "";
         messages.push({
           role: "user",
-          content: `Your last response was cut off by this call's own output limit after about ${observedBudget} tokens, before it finished -- nothing from it was applied. Retry the same work, but this time send it in noticeably smaller pieces: aim for roughly ${targetChunkTokens} tokens (very roughly ${targetChunkTokens * 4} characters) per tool call at most, calling the relevant tool repeatedly with done: false until everything is sent, and done: true only on the truly last piece. If you were also making other tool calls (create_folder, move_file, etc.) in the same turn as the long write, do those separately so the write has that turn's full output budget to itself.`,
+          content: `Your last response was cut off by this call's own output limit after about ${observedBudget} tokens, before it finished -- nothing from it was applied. Retry the same work, but this time send it in noticeably smaller pieces: aim for roughly ${targetChunkTokens} tokens (very roughly ${targetChunkTokens * 4} characters) per tool call at most, calling the relevant tool repeatedly with done: false until everything is sent, and done: true only on the truly last piece. If you were also making other tool calls (create_folder, move_file, etc.) in the same turn as the long write, do those separately so the write has that turn's full output budget to itself.${escalation}`,
         });
         continue;
       }
@@ -658,13 +671,68 @@ export async function runCapture(
     const { humanId: cardHumanId, date } = meta;
     const who = describeHuman(cardHumanId);
 
+    // Idempotency keys off the ENTRY's own staged content hash
+    // (`_meta.md.sourceHash`, refreshed by pre-capture every run) --
+    // never the live Card directly, so this stays correct even for a
+    // Card that's since been deleted (the entry's own hash simply stops
+    // changing). Checked BEFORE filing, not after -- see below.
+    const sourceRef = `${entryFolder._id}:${meta.sourceHash}`;
+
+    // THREE ways an entry can already be "done," checked cheapest-first:
+    //   1. `capturedAppliedSourceHash`/`capturedNoOpSourceHash` (see their
+    //      own docs, `projectN01.server.ts`) match the entry's CURRENT
+    //      `sourceHash` -- a pure in-memory comparison against data
+    //      `listDailyLogEntries` already fetched, no extra I/O at all.
+    //      This is the fast path, and it's the ONLY check that runs for
+    //      the overwhelming majority of entries on any incremental run
+    //      against a project with real history: once an entry is
+    //      settled, it costs nothing ever again, instead of one database
+    //      round trip per entry on every single future run forever.
+    //   2. Otherwise, fall back to a `findReleaseLogEntryBySource` lookup
+    //      -- needed for an entry that predates these markers, or that
+    //      got applied through some path that hasn't backfilled them
+    //      yet. A match here backfills `capturedAppliedSourceHash` so
+    //      every FUTURE run for this exact entry hits the fast path
+    //      instead of repeating this same database round trip.
+    const fastPathApplied = meta.capturedAppliedSourceHash === meta.sourceHash;
+    const fastPathNoOp = !fastPathApplied && meta.capturedNoOpSourceHash === meta.sourceHash;
+    let alreadySettled = fastPathApplied || fastPathNoOp;
+    if (!alreadySettled) {
+      const existingEntry = await findReleaseLogEntryBySource(projectFolder._id, date, "ai-update", sourceRef);
+      if (existingEntry) {
+        alreadySettled = true;
+        await writeDailyLogEntryMeta(entryFolder, { ...meta, capturedAppliedSourceHash: meta.sourceHash });
+      }
+    }
+    if (alreadySettled) {
+      log(
+        fastPathNoOp
+          ? `capture: ${date} (${who}) -- already reviewed this entry's current content; nothing needed to change.`
+          : `capture: ${date} (${who}) -- already applied for this entry's current content.`,
+      );
+      await recordPhylogUsage({
+        humanId: cardHumanId,
+        projectFolderId: projectFolder._id,
+        stage: "capture",
+        kind: "organize",
+        durationMs: 0,
+        outcome: "skipped",
+      });
+      days.push({ date, humanId: cardHumanId, filed: [], organizeActions: [], readmeUpdated: false, alreadyApplied: true });
+      continue;
+    }
+
     // Deterministic filing still reads the ORIGINAL Card (not the
     // daily-logs entry's own staged copy) -- see this file's module doc
     // ("Why filing still reads the original Card") for why that's
     // required, not just convenient. A Card can vanish out from under an
     // already-staged entry (deleted, or the day's readme.md edited to
     // drop it) -- filing is simply skipped then, the agent step below
-    // still runs off whatever's already staged in `daily-logs/`.
+    // still runs off whatever's already staged in `daily-logs/`. Only
+    // reached once we know above that this entry ISN'T already settled --
+    // an already-settled entry's `sourceHash` already covers every
+    // current attachment (see Stage 1's own doc), so there's nothing new
+    // to file for it either.
     const cards = await getDailyLogCards(cardHumanId, date);
     const card = cards.find((c) => c.projectFolderId === projectFolder._id);
     let filed: FiledAttachment[] = [];
@@ -679,38 +747,6 @@ export async function runCapture(
       }
     } else {
       log(`capture: ${date} (${who}) -- original Card no longer exists; organizing from staged daily-logs content only.`);
-    }
-
-    // Idempotency keys off the ENTRY's own staged content hash
-    // (`_meta.md.sourceHash`, refreshed by pre-capture every run) --
-    // never the live Card directly, so this stays correct even for a
-    // Card that's since been deleted (the entry's own hash simply stops
-    // changing). TWO independent ways an entry can already be "done":
-    // a real change was applied (a Release Log entry exists), or capture
-    // already looked at this EXACT content and genuinely decided nothing
-    // needed to change (`capturedNoOpSourceHash` on the entry's own
-    // `_meta.md` -- see that field's own doc for why this exists: without
-    // it, a quiet day was never recorded ANYWHERE and got a fresh, wasted
-    // LLM call on every single future run forever, a real, confirmed bug).
-    const sourceRef = `${entryFolder._id}:${meta.sourceHash}`;
-    const existing = await findReleaseLogEntryBySource(projectFolder._id, date, "ai-update", sourceRef);
-    const alreadyDecidedNoOp = !existing && !!meta.capturedNoOpSourceHash && meta.capturedNoOpSourceHash === meta.sourceHash;
-    if (existing || alreadyDecidedNoOp) {
-      log(
-        existing
-          ? `capture: ${date} (${who}) -- already applied for this entry's current content.`
-          : `capture: ${date} (${who}) -- already reviewed this entry's current content; nothing needed to change.`,
-      );
-      await recordPhylogUsage({
-        humanId: cardHumanId,
-        projectFolderId: projectFolder._id,
-        stage: "capture",
-        kind: "organize",
-        durationMs: 0,
-        outcome: "skipped",
-      });
-      days.push({ date, humanId: cardHumanId, filed, organizeActions: [], readmeUpdated: false, alreadyApplied: true });
-      continue;
     }
 
     const cacheSystemPrompt = realCaptureCallsSoFar > 0;
@@ -739,6 +775,12 @@ export async function runCapture(
       if (readmeUpdated || organizeActions.length > 0) {
         releaseLogsDirty = true;
         touchedHumanDates.set(`${cardHumanId}:${date}`, cardHumanId);
+        // Fast-path marker for every FUTURE run -- see this field's own
+        // doc (`projectN01.server.ts`) and the skip check at the top of
+        // this loop. Written the moment a real change is committed, so a
+        // future run never needs the slower `findReleaseLogEntryBySource`
+        // fallback for this entry at all.
+        await writeDailyLogEntryMeta(entryFolder, { ...meta, capturedAppliedSourceHash: meta.sourceHash });
       } else if (!result.reorganizeRequested) {
         log(`capture: ${date} (${who}) -- no README update or reorganization warranted.`);
       }
