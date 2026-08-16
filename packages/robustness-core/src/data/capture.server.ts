@@ -245,6 +245,26 @@ const UPDATE_README_TOOL: ToolDefinition = {
   },
 };
 
+// Daily capture's own signal for triggering the SEPARATE, dedicated
+// `runReorganize` pass (below) -- deliberately NOT the same thing as the
+// daily agent deciding on its own that structure could be better. This
+// tool exists so an EXPLICIT request in that day's own log (someone
+// journaling "we should reorganize this project") reliably kicks off a
+// pass with full visibility into the whole README, rather than hoping
+// the day's own narrow, one-log-at-a-time pass does that work itself.
+const REQUEST_REORGANIZE_TOOL: ToolDefinition = {
+  name: "request_reorganize",
+  description:
+    'Call this if -- and ONLY if -- today\'s own log content explicitly asks for the project\'s structure or organization to be reconsidered (e.g. "we should reorganize this project" or "the README is getting messy, let\'s restructure by phase"). This queues a SEPARATE, dedicated reorganization pass with full visibility into the entire current README, run right after today\'s own edits -- it is NOT the same as you personally deciding the structure could be improved; only call it when today\'s log itself is asking for it. Call it at most once per day.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      reason: { type: "string", description: "A short quote or paraphrase of what in today's log is asking for this, for the Release Log." },
+    },
+    required: ["reason"],
+  },
+};
+
 
 async function runAgentLoop(
   provider: LlmProvider,
@@ -425,11 +445,13 @@ You will be given:
 - Pre-capture summaries for any of today's attachments, when available.
 - The project's current README.md.
 
-You may call create_folder / move_file any number of times to organize today's filed content, write_file any number of times to create or update a supporting markdown document, and update_section / remove_section any number of times to edit README.md one section at a time. Most days, especially quiet ones, need no README change at all -- do nothing rather than making a cosmetic edit. Never fabricate progress, dates, or facts not grounded in what you were given.
+You may call create_folder / move_file any number of times to organize today's filed content, write_file any number of times to create or update a supporting markdown document, and update_section / remove_section any number of times to edit README.md one section at a time. Never fabricate progress, dates, or facts not grounded in what you were given.
 
-update_section, identified by its exact "## Heading" text (or "" for the intro before the first heading), is the PRIMARY way to change the README -- it only touches the one section that actually changed. Reach for the whole-document update_readme only for a genuine full reorganization (the file has become hard to navigate, section boundaries themselves need to change) or the very first pass on an empty README -- never as the default way to make an ordinary update.
+update_section, identified by its exact "## Heading" text (or "" for the intro before the first heading), touches only the one section that actually changed -- reach for the whole-document update_readme instead when section boundaries themselves need to change, not just their content.
 
-update_section/remove_section/update_readme/write_file all accept their content in one or more chunks (see each tool's own description) -- on a quiet day the whole thing is one call, but this lets a genuinely long update go out safely across several calls instead of risking one oversized response. Separately, since README.md is meant to stay navigable as an index: when a topic has built up enough sustained, specific detail that keeping it inline would make even ONE section unwieldy (a full build log, a long spec, an extended back-and-forth), move that detail into its own file with write_file (e.g. "Electrical/panel-notes.md") and link to it from the section with a normal markdown link, instead of inlining everything. Don't fragment for its own sake -- most sections still belong inline, and a short project should likely never need write_file at all.
+update_section/remove_section/update_readme/write_file all accept their content in one or more chunks (see each tool's own description) -- on a quiet day the whole thing is one call, but this lets a genuinely long update go out safely across several calls instead of risking one oversized response.
+
+How much a given day changes -- whether that's nothing, a section edit, moving detail into its own file with write_file, or reorganizing section boundaries entirely -- is a judgment call this project's OWN CAPTURE.md instructions below are the real authority on. Take them at their word: if they describe an organization strategy, a threshold for splitting content out, or when reorganizing is warranted, follow that directly rather than defaulting to caution. Only fall back to "most days need no change, and a short project rarely needs write_file" as a general default when CAPTURE.md doesn't say anything more specific.
 
 ${DIRECTIVE_GUIDE}
 
@@ -499,7 +521,7 @@ export async function runCapture(
   }
 
   const until = opts.until ?? new Date().toISOString().slice(0, 10);
-  // Every (day, contributor) entry pre-capture has already staged for
+  // Every (day, contributor) entry pre-ckapture has already staged for
   // this project -- see `listDailyLogEntries`'s own doc. Bounded to
   // `since`/`until` here (that helper itself is unbounded, since
   // `preCapture.server.ts`'s own `--date` mode needs a narrower,
@@ -554,6 +576,11 @@ export async function runCapture(
   // calls still gets the full benefit (only the 2nd call's write is ever
   // "wasted," same as any first sighting of a new cache key has to be).
   let realCaptureCallsSoFar = 0;
+  // At most one dedicated reorganization pass per runCapture invocation,
+  // even if multiple days/entries each request one -- see runReorganize's
+  // own doc. Tracks the request that WON so the log can say what
+  // triggered it even if a later request was the one that got skipped.
+  let reorganizeRanThisRun = false;
 
   for (const { folder: entryFolder, meta } of entries) {
     const { humanId: cardHumanId, date } = meta;
@@ -628,8 +655,31 @@ export async function runCapture(
       if (readmeUpdated || organizeActions.length > 0) {
         releaseLogsDirty = true;
         touchedHumanDates.set(`${cardHumanId}:${date}`, cardHumanId);
-      } else {
+      } else if (!result.reorganizeRequested) {
         log(`capture: ${date} (${who}) -- no README update or reorganization warranted.`);
+      }
+
+      if (result.reorganizeRequested) {
+        if (reorganizeRanThisRun) {
+          log(
+            `capture: ${date} (${who}) -- also requested a reorganization, but one already ran this invocation; skipping the duplicate.`,
+          );
+        } else {
+          reorganizeRanThisRun = true;
+          log(`capture: ${date} (${who}) -- running the requested reorganization pass...`);
+          const reorgResult = await runReorganize(
+            cardHumanId,
+            projectFolder,
+            { llm, reason: result.reorganizeRequested.reason, date, sourceRef: `${sourceRef}:reorganize` },
+            log,
+          );
+          if (!reorgResult.ok) {
+            log(`capture: ${date} (${who}) -- reorganization pass failed: ${reorgResult.error}`);
+          } else if (reorgResult.changed) {
+            releaseLogsDirty = true;
+            touchedHumanDates.set(`${cardHumanId}:${date}`, cardHumanId);
+          }
+        }
       }
     } catch (err) {
       log(
@@ -662,73 +712,47 @@ export async function runCapture(
 }
 
 /**
- * Runs the organize/README agent loop for ONE day — split out so
- * `runCapture`'s own per-day try/catch can isolate a failure to just that
- * day (see this file's own module doc). Records exactly one
- * `phylogMetrics` usage event for the day's agent loop on success; the
- * caller records "skipped" (already applied) and "error" cases itself,
- * since those never reach this function at all or throw out of it.
+ * The README/file-mutating tool executors (write_file/update_section/
+ * remove_section/update_readme) -- shared by `captureOneDay`'s daily
+ * agent loop AND `runReorganize`'s dedicated pass (below), so the exact
+ * same safety nets (chunk buffering, the empty-content refusal, everything
+ * committing immediately and building on the PREVIOUS tool's own result --
+ * see this file's module doc) exist in exactly ONE place instead of two
+ * copies that could drift out of sync. `create_folder`/`move_file` are
+ * included too since they're already generic (no per-day state), even
+ * though they're not README-specific -- keeping all six tools' executors
+ * together in one factory is simpler than splitting further.
  */
-async function captureOneDay(input: {
-  actingHumanId: string;
+function createReadmeAndFileExecutors(input: {
   projectFolder: VaultFolder;
-  date: string;
-  /** This (day, contributor)'s own daily-logs staging folder -- the
-   * SOLE source of "today's content" for the agent below (never the
-   * live Card or the contributor's own vault directly). */
-  entryFolder: VaultFolder;
-  filed: FiledAttachment[];
-  sourceRef: string;
-  llm: LlmProvider;
-  skillContent: string;
-  generalSkill: string | null;
-  extraSkillFiles: { name: string; content: string }[];
-  /** True once `runCapture` has already made at least one other REAL
-   * (non-skipped) `captureOneDay` call earlier in this same run -- see
-   * `runCapture`'s own `realCaptureCallsSoFar` and `llmProvider.ts`'s
-   * doc on why this can't be inferred locally (or from a raw entry
-   * count, which only grows over time). */
-  cacheSystemPrompt: boolean;
   log: (line: string) => void;
-}): Promise<{ readmeUpdated: boolean; organizeActions: string[] }> {
-  const { actingHumanId, projectFolder, date, entryFolder, filed, sourceRef, llm, skillContent, generalSkill, extraSkillFiles, cacheSystemPrompt, log } = input;
-
-  const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
-  const readmeContent = readme?.content ?? "";
-  const tree = await renderManagedTree(projectFolder.human_id, projectFolder._id);
-
-  // "Today's content" is read straight from the entry's own staged
-  // files -- `card.md` (kept current by pre-capture) plus every
-  // generated `*-summary.md` sibling -- never `card.content`/the
-  // contributor's own vault. See this file's module doc.
-  const { files: entryFiles } = await listFolderChildren(entryFolder.human_id, entryFolder._id);
-  const cardCopyListing = entryFiles.find((f) => f.name === CARD_COPY_FILE);
-  const cardCopyFile = cardCopyListing ? await getFileRefById(cardCopyListing._id) : undefined;
-  const cardContent = cardCopyFile?.content ?? "";
-
-  const summaries: { name: string; body: string }[] = [];
-  for (const f of filed) {
-    const listing = entryFiles.find((s) => s.name === summaryFileName(f.name));
-    if (!listing) continue;
-    const file = await getFileRefById(listing._id);
-    if (file?.content) summaries.push({ name: f.name, body: splitFrontmatter(file.content).body.trim() });
-  }
-
+  /** Prefixes every inline log line -- `capture: ${date}` for the daily
+   * pass, `reorganize` for the dedicated pass. */
+  logPrefix: string;
+  initialReadmeContent: string;
+  initialReadmeFileId: string | undefined;
+  /** Extra justification for refusing an empty update_section/update_readme
+   * result, alongside "the CURRENT target already has content" -- the
+   * daily pass also refuses when today's own Card/summary content is
+   * non-empty (something to lose even if the target itself was already
+   * blank); the reorganize pass has no "today" and always passes false. */
+  freshContentPresent: boolean;
+}): {
+  executors: Record<string, (input: Record<string, unknown>) => Promise<string>>;
+  organizeActions: string[];
+  readmeEditSummaries: string[];
+  hadRefusal: () => boolean;
+  /** A chunk sequence that received at least one chunk but never a final
+   * done: true before the loop ended -- see runAgentLoop's own
+   * turn-level truncation skip for why this can still happen even though
+   * nothing partial ever actually commits. */
+  hadIncompleteAttempt: () => boolean;
+  getCurrentReadme: () => { content: string; fileId: string | undefined };
+} {
+  const { projectFolder, log, logPrefix, initialReadmeContent, initialReadmeFileId, freshContentPresent } = input;
   const organizeActions: string[] = [];
-
-  // --- Shared README-editing state -----------------------------------
-  // ALL THREE README-mutating tools (update_section/remove_section/
-  // update_readme) commit IMMEDIATELY when a complete result arrives
-  // (mirroring write_file), reading from and writing to this SAME
-  // mutable state -- so calling update_section twice, or update_section
-  // then update_readme, in one day's loop always builds on the
-  // PREVIOUS tool's own result, never a stale pre-loop snapshot. This
-  // also means an incomplete/truncated attempt (see runAgentLoop's own
-  // turn-level truncation skip, and the leftover-buffer check below)
-  // simply never commits anything -- there is no separate "apply
-  // afterward" step left to get wrong.
-  let currentReadmeContent = readmeContent;
-  let currentReadmeFileId = readme?._id;
+  let currentReadmeContent = initialReadmeContent;
+  let currentReadmeFileId = initialReadmeFileId;
   const readmeEditSummaries: string[] = [];
   let hadRefusal = false;
 
@@ -750,22 +774,17 @@ async function captureOneDay(input: {
     return true;
   }
 
-  // Chunk buffers -- see CHUNK_PROTOCOL_NOTE above. Keyed by lowercased
-  // path/heading for write_file/update_section (one buffer per target
-  // this turn loop touches); update_readme has exactly one target so
-  // it's just an array. A buffer left non-empty after the loop ends
-  // (never reached its own `done: true`) is simply discarded --
-  // never committed, see the leftover-buffer check below.
   const fileChunks = new Map<string, string[]>();
   const sectionChunks = new Map<string, string[]>();
   const readmeWholeChunks: string[] = [];
+
   const executors: Record<string, (input: Record<string, unknown>) => Promise<string>> = {
     create_folder: async (input) => {
       const path = String(input.path ?? "");
       const result = await resolveOrCreatePath(projectFolder, path);
       if (!result.ok) return `Error: ${result.error}`;
       organizeActions.push(`created folder "${path}"`);
-      log(`capture: ${date} -- created folder "${path}".`);
+      log(`${logPrefix} -- created folder "${path}".`);
       return `Created (or already existed): ${path || "/"}`;
     },
     move_file: async (input) => {
@@ -777,7 +796,7 @@ async function captureOneDay(input: {
       if (!dest.ok) return `Error: ${dest.error}`;
       await updateFileRef(found.fileId, { folder_id: dest.folderId });
       organizeActions.push(`moved "${name}" to "${destinationPath || "/"}"`);
-      log(`capture: ${date} -- moved "${name}" to "${destinationPath || "/"}".`);
+      log(`${logPrefix} -- moved "${name}" to "${destinationPath || "/"}".`);
       return `Moved "${name}" to ${destinationPath || "/"}`;
     },
     write_file: async (input) => {
@@ -820,7 +839,7 @@ async function captureOneDay(input: {
         });
       }
       organizeActions.push(`wrote "${rawPath}"`);
-      log(`capture: ${date} -- wrote "${rawPath}".`);
+      log(`${logPrefix} -- wrote "${rawPath}".`);
       return `${existing ? "Updated" : "Created"} ${rawPath}`;
     },
     update_section: async (input) => {
@@ -844,7 +863,7 @@ async function captureOneDay(input: {
       if (content.trim().length === 0 && existing && existing.content.trim().length > 0) {
         hadRefusal = true;
         const label = heading || "(intro)";
-        log(`capture: ${date} -- refused update_section "${label}" (would erase real content with an empty section); left unchanged.`);
+        log(`${logPrefix} -- refused update_section "${label}" (would erase real content with an empty section); left unchanged.`);
         return `Error: refused -- section "${label}" currently has real content; sending empty content would erase it. Use remove_section if you genuinely want to delete it.`;
       }
 
@@ -855,7 +874,7 @@ async function captureOneDay(input: {
       if (!ok) return "Error: failed to save section update";
       const label = heading || "(intro)";
       readmeEditSummaries.push(existing ? `updated "${label}"` : `added "${label}"`);
-      log(`capture: ${date} -- ${existing ? "updated" : "added"} README section "${label}".`);
+      log(`${logPrefix} -- ${existing ? "updated" : "added"} README section "${label}".`);
       return `${existing ? "Updated" : "Added"} section "${label}".`;
     },
     remove_section: async (input) => {
@@ -868,7 +887,7 @@ async function captureOneDay(input: {
       const ok = await commitReadmeContent(withReadmeBody(currentReadmeContent, joinReadmeSections(updatedSections)));
       if (!ok) return "Error: failed to remove section";
       readmeEditSummaries.push(`removed "${heading}"`);
-      log(`capture: ${date} -- removed README section "${heading}".`);
+      log(`${logPrefix} -- removed README section "${heading}".`);
       return `Removed section "${heading}".`;
     },
     update_readme: async (input) => {
@@ -882,28 +901,129 @@ async function captureOneDay(input: {
       const newBody = readmeWholeChunks.join("");
       readmeWholeChunks.length = 0;
       const reason = String(input.reason ?? "").trim() || "(no reason given)";
-      const todayHadContent = cardContent.trim().length > 0 || summaries.some((s) => s.body.trim().length > 0);
       const oldBody = splitFrontmatter(currentReadmeContent).body.trim();
-      if (newBody.trim().length === 0 && (oldBody.length > 0 || todayHadContent)) {
+      if (newBody.trim().length === 0 && (oldBody.length > 0 || freshContentPresent)) {
         hadRefusal = true;
-        log(`capture: ${date} -- refused full update_readme rewrite (empty body while the project or today's log has real content); left unchanged.`);
+        log(`${logPrefix} -- refused full update_readme rewrite (empty body while the project or today's log has real content); left unchanged.`);
         return "Error: refused -- an empty body was returned while the project (or today's log) has real content. README left unchanged.";
       }
 
       const ok = await commitReadmeContent(withReadmeBody(currentReadmeContent, newBody));
       if (!ok) return "Error: failed to save README rewrite";
       readmeEditSummaries.push(`rewrote the full README (${reason})`);
-      log(`capture: ${date} -- full README rewrite: ${reason}`);
+      log(`${logPrefix} -- full README rewrite: ${reason}`);
       return "README rewritten.";
     },
   };
 
+  return {
+    executors,
+    organizeActions,
+    readmeEditSummaries,
+    hadRefusal: () => hadRefusal,
+    hadIncompleteAttempt: () =>
+      readmeWholeChunks.length > 0 ||
+      [...sectionChunks.values()].some((buffered) => buffered.length > 0) ||
+      [...fileChunks.values()].some((buffered) => buffered.length > 0),
+    getCurrentReadme: () => ({ content: currentReadmeContent, fileId: currentReadmeFileId }),
+  };
+}
+
+/**
+ * Runs the organize/README agent loop for ONE day — split out so
+ * `runCapture`'s own per-day try/catch can isolate a failure to just that
+ * day (see this file's own module doc). Records exactly one
+ * `phylogMetrics` usage event for the day's agent loop on success; the
+ * caller records "skipped" (already applied) and "error" cases itself,
+ * since those never reach this function at all or throw out of it.
+ */
+async function captureOneDay(input: {
+  actingHumanId: string;
+  projectFolder: VaultFolder;
+  date: string;
+  /** This (day, contributor)'s own daily-logs staging folder -- the
+   * SOLE source of "today's content" for the agent below (never the
+   * live Card or the contributor's own vault directly). */
+  entryFolder: VaultFolder;
+  filed: FiledAttachment[];
+  sourceRef: string;
+  llm: LlmProvider;
+  skillContent: string;
+  generalSkill: string | null;
+  extraSkillFiles: { name: string; content: string }[];
+  /** True once `runCapture` has already made at least one other REAL
+   * (non-skipped) `captureOneDay` call earlier in this same run -- see
+   * `runCapture`'s own `realCaptureCallsSoFar` and `llmProvider.ts`'s
+   * doc on why this can't be inferred locally (or from a raw entry
+   * count, which only grows over time). */
+  cacheSystemPrompt: boolean;
+  log: (line: string) => void;
+}): Promise<{
+  readmeUpdated: boolean;
+  organizeActions: string[];
+  /** Set when the model called request_reorganize because TODAY's own
+   * log explicitly asked for the project's structure to be reconsidered
+   * -- `runCapture` acts on this by running `runReorganize` right after
+   * this day's own edits, still within the same capture cycle. */
+  reorganizeRequested: { reason: string } | null;
+}> {
+  const { actingHumanId, projectFolder, date, entryFolder, filed, sourceRef, llm, skillContent, generalSkill, extraSkillFiles, cacheSystemPrompt, log } = input;
+
+  const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
+  const readmeContent = readme?.content ?? "";
+  const tree = await renderManagedTree(projectFolder.human_id, projectFolder._id);
+
+  // "Today's content" is read straight from the entry's own staged
+  // files -- `card.md` (kept current by pre-capture) plus every
+  // generated `*-summary.md` sibling -- never `card.content`/the
+  // contributor's own vault. See this file's module doc.
+  const { files: entryFiles } = await listFolderChildren(entryFolder.human_id, entryFolder._id);
+  const cardCopyListing = entryFiles.find((f) => f.name === CARD_COPY_FILE);
+  const cardCopyFile = cardCopyListing ? await getFileRefById(cardCopyListing._id) : undefined;
+  const cardContent = cardCopyFile?.content ?? "";
+
+  const summaries: { name: string; body: string }[] = [];
+  for (const f of filed) {
+    const listing = entryFiles.find((s) => s.name === summaryFileName(f.name));
+    if (!listing) continue;
+    const file = await getFileRefById(listing._id);
+    if (file?.content) summaries.push({ name: f.name, body: splitFrontmatter(file.content).body.trim() });
+  }
+
+  const freshContentPresent = cardContent.trim().length > 0 || summaries.some((s) => s.body.trim().length > 0);
+  const {
+    executors: readmeExecutors,
+    organizeActions,
+    readmeEditSummaries,
+    hadRefusal,
+    hadIncompleteAttempt,
+    getCurrentReadme,
+  } = createReadmeAndFileExecutors({
+    projectFolder,
+    log,
+    logPrefix: `capture: ${date}`,
+    initialReadmeContent: readmeContent,
+    initialReadmeFileId: readme?._id,
+    freshContentPresent,
+  });
+
+  let reorganizeRequested: { reason: string } | null = null;
+  const executors: Record<string, (input: Record<string, unknown>) => Promise<string>> = {
+    ...readmeExecutors,
+    request_reorganize: async (input) => {
+      const reason = String(input.reason ?? "").trim() || "(no reason given)";
+      reorganizeRequested = { reason };
+      log(`capture: ${date} -- today's log requested a reorganization: ${reason}`);
+      return "Noted -- a dedicated reorganization pass will run after today's edits.";
+    },
+  };
+
   const userPrompt = buildUserPrompt({ tree, cardContent, filed, summaries, readmeContent });
-  const { toolCallsMade, usage, durationMs, model, finalText, truncated, hitMaxTurns } = await runAgentLoop(
+  const { usage, durationMs, model, finalText, truncated, hitMaxTurns } = await runAgentLoop(
     llm,
     buildSystemPrompt(skillContent, generalSkill, extraSkillFiles),
     userPrompt,
-    [CREATE_FOLDER_TOOL, MOVE_FILE_TOOL, WRITE_FILE_TOOL, UPDATE_SECTION_TOOL, REMOVE_SECTION_TOOL, UPDATE_README_TOOL],
+    [CREATE_FOLDER_TOOL, MOVE_FILE_TOOL, WRITE_FILE_TOOL, UPDATE_SECTION_TOOL, REMOVE_SECTION_TOOL, UPDATE_README_TOOL, REQUEST_REORGANIZE_TOOL],
     executors,
     // Higher than runAgentLoop's own default (6): chunked README/file
     // writes (see CHUNK_PROTOCOL_NOTE) can take several turns on their
@@ -923,14 +1043,6 @@ async function captureOneDay(input: {
     );
   }
 
-  // Any buffer still non-empty here got at least one chunk but never a
-  // final done:true before the loop ended (ran out of turns, or a
-  // truncated final turn -- see runAgentLoop's own turn-level skip) --
-  // an incomplete attempt that (correctly) never got committed, but
-  // still worth surfacing as a metrics signal, same as a refusal.
-  const hadIncompleteAttempt =
-    readmeWholeChunks.length > 0 || [...sectionChunks.values()].some((buffered) => buffered.length > 0);
-
   // Surfaced on /fruits/maker's "Errors" count -- a refusal, an
   // incomplete attempt, or a run that hit its own turn/token bounds is a
   // real signal something needs attention (a project outgrowing its
@@ -938,7 +1050,7 @@ async function captureOneDay(input: {
   // no-op day. Never a thrown exception (see runCapture's own try/catch
   // for those), so without this the dashboard would have no way to
   // distinguish this from a normal day.
-  const incomplete = truncated || hitMaxTurns || hadRefusal || hadIncompleteAttempt;
+  const incomplete = truncated || hitMaxTurns || hadRefusal() || hadIncompleteAttempt();
   await recordPhylogUsage({
     humanId: actingHumanId,
     projectFolderId: projectFolder._id,
@@ -952,22 +1064,23 @@ async function captureOneDay(input: {
   });
 
   // Every README-mutating tool already committed its own change (or
-  // didn't) DURING the loop above -- `currentReadmeContent` reflects the
-  // cumulative result of everything that succeeded. A single before/after
-  // changeset for the whole day reads better in the Release Log than one
-  // entry per section touched.
-  const readmeUpdated = currentReadmeContent !== readmeContent;
-  if (readmeUpdated && currentReadmeFileId) {
+  // didn't) DURING the loop above -- the factory's own current-readme
+  // state reflects the cumulative result of everything that succeeded. A
+  // single before/after changeset for the whole day reads better in the
+  // Release Log than one entry per section touched.
+  const { content: finalReadmeContent, fileId: finalReadmeFileId } = getCurrentReadme();
+  const readmeUpdated = finalReadmeContent !== readmeContent;
+  if (readmeUpdated && finalReadmeFileId) {
     const actionSummary = organizeActions.length > 0 ? ` (also: ${organizeActions.join(", ")})` : "";
     await createReleaseLogEntry({
       projectFolderId: projectFolder._id,
       date,
       actingHumanId,
       kind: "ai-update",
-      summary: `PhyLog captured the day -- [View](/fruits/vault?file=${currentReadmeFileId}): ${readmeEditSummaries.join(", ")}${actionSummary}`,
+      summary: `PhyLog captured the day -- [View](/fruits/vault?file=${finalReadmeFileId}): ${readmeEditSummaries.join(", ")}${actionSummary}`,
       sourceRef,
       changesets: [
-        { fileId: currentReadmeFileId, action: "content-edit", before: { content: readmeContent }, after: { content: currentReadmeContent } },
+        { fileId: finalReadmeFileId, action: "content-edit", before: { content: readmeContent }, after: { content: finalReadmeContent } },
       ],
     });
     log(`capture: ${date} -- README updated: ${readmeEditSummaries.join(", ")}`);
@@ -983,7 +1096,7 @@ async function captureOneDay(input: {
       summary: `PhyLog reorganized this project: ${organizeActions.join(", ")}`,
       sourceRef,
     });
-  } else if (!hadRefusal && !hadIncompleteAttempt) {
+  } else if (!hadRefusal() && !hadIncompleteAttempt()) {
     // Nothing changed at all -- without this, "why didn't my README
     // update" is undiagnosable, since the model's own reasoning for
     // abstaining is otherwise thrown away. Log it verbatim.
@@ -994,5 +1107,179 @@ async function captureOneDay(input: {
     );
   }
 
-  return { readmeUpdated, organizeActions };
+  return { readmeUpdated, organizeActions, reorganizeRequested };
+}
+
+function buildReorganizeSystemPrompt(
+  skillContent: string,
+  generalSkill: string | null,
+  extraSkillFiles: { name: string; content: string }[],
+  reason: string | null,
+): string {
+  const generalSection = generalSkill ? `\n\n## Project SKILL.md (general steering)\n\n${generalSkill}` : "";
+  const extraSection = extraSkillFiles.length > 0
+    ? `\n\n## Other reference files in this project's skills/ folder\n\n${extraSkillFiles.map((f) => `### ${f.name}\n\n${f.content}`).join("\n\n")}`
+    : "";
+  const trigger = reason
+    ? `This pass was triggered because a daily log explicitly asked for it: "${reason}"`
+    : "This pass was triggered manually.";
+  return `You are PhyLog, running a DEDICATED reorganization pass for one project -- separate from the normal day-by-day capture loop, which only ever sees one day's log plus the current README and never gets a moment to step back and evaluate the whole structure. You are being given the ENTIRE current README specifically so you can do that now.
+
+${trigger}
+
+Your job: read the whole README, decide whether its current structure (section boundaries, and what's inlined versus already split into its own file) still serves the project well, and make the changes needed -- freely use create_folder / move_file / write_file / update_section / remove_section / update_readme. Restructuring IS the point of this pass, not a rare exception -- don't hold back the way a normal day's pass would. If the structure genuinely already serves the project well, it's fine to make no changes at all -- say so, don't restructure for its own sake.
+
+Never invent, remove, or alter the SUBSTANCE of anything. Move, split, merge, and re-file freely, but every fact, quote, number, and attribution that already exists in the README must survive exactly as it already reads. This pass is about WHERE things live and how they're organized, never about rewriting what they say.
+
+${DIRECTIVE_GUIDE}
+
+## Project CAPTURE.md
+
+${skillContent}${generalSection}${extraSection}`;
+}
+
+function buildReorganizeUserPrompt(input: { tree: string; readmeContent: string }): string {
+  return [
+    `## Current project tree\n\n${input.tree || "(empty)"}`,
+    `## Current README.md (full)\n\n${input.readmeContent || "(empty)"}`,
+  ].join("\n\n---\n\n");
+}
+
+export type ReorganizeResult =
+  | { ok: true; changed: boolean; summary: string[] }
+  | { ok: false; error: string };
+
+/**
+ * A dedicated, whole-README structure pass -- distinct from
+ * `captureOneDay`'s narrow, one-day-at-a-time loop. Given the ENTIRE
+ * current README (not one day's log), explicitly asked to evaluate and
+ * fix the project's overall structure. Two ways to reach this:
+ *
+ *   - Automatically, from `runCapture`'s own loop, when a day's log
+ *     explicitly asks for it (`request_reorganize`, `captureOneDay`).
+ *   - On demand, via `nopal phylog reorganize` / `POST /api/phylog/reorganize`
+ *     (see the `phylog` skill), for a human who wants to trigger this
+ *     without waiting for (or writing) a daily-log request.
+ *
+ * Reuses `createReadmeAndFileExecutors` -- the EXACT same safety nets
+ * (chunk buffering, the empty-content refusal, immediate-commit) as the
+ * daily pass, just with `freshContentPresent: false` (no "today" to
+ * justify refusing an empty target against -- only the target's own
+ * current content matters here).
+ */
+export async function runReorganize(
+  actingHumanId: string,
+  projectFolder: VaultFolder,
+  opts: { llm?: LlmProvider; reason?: string; date?: string; sourceRef?: string },
+  onProgress?: (line: string) => void,
+): Promise<ReorganizeResult> {
+  const log = onProgress ?? (() => {});
+  if (!opts.llm && !isPhylogAgentConfigured()) {
+    return { ok: false, error: "PhyLog's agent is not configured (no ANTHROPIC_API_KEY set)." };
+  }
+
+  const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
+  const readmeContent = readme?.content ?? "";
+  const tree = await renderManagedTree(projectFolder.human_id, projectFolder._id);
+  const skillContent = (await getProjectStageSkill(projectFolder, "CAPTURE.md")) ?? DEFAULT_CAPTURE_SKILL;
+  const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
+  const extraSkillFiles = await listExtraSkillFiles(projectFolder);
+  const llm = opts.llm ?? new AnthropicProvider();
+  const date = opts.date ?? new Date().toISOString().slice(0, 10);
+  const sourceRef = opts.sourceRef ?? `reorganize:${projectFolder._id}:${Date.now()}`;
+
+  log(`reorganize: reviewing "${projectFolder.name}"'s current structure...`);
+
+  const {
+    executors,
+    organizeActions,
+    readmeEditSummaries,
+    hadRefusal,
+    hadIncompleteAttempt,
+    getCurrentReadme,
+  } = createReadmeAndFileExecutors({
+    projectFolder,
+    log,
+    logPrefix: "reorganize",
+    initialReadmeContent: readmeContent,
+    initialReadmeFileId: readme?._id,
+    freshContentPresent: false,
+  });
+
+  const userPrompt = buildReorganizeUserPrompt({ tree, readmeContent });
+  const { usage, durationMs, model, finalText, truncated, hitMaxTurns } = await runAgentLoop(
+    llm,
+    buildReorganizeSystemPrompt(skillContent, generalSkill, extraSkillFiles, opts.reason ?? null),
+    userPrompt,
+    [CREATE_FOLDER_TOOL, MOVE_FILE_TOOL, WRITE_FILE_TOOL, UPDATE_SECTION_TOOL, REMOVE_SECTION_TOOL, UPDATE_README_TOOL],
+    executors,
+    // Higher than the daily pass's own 16 -- a real whole-project
+    // restructure can touch many sections/files in one pass.
+    24,
+    false,
+  );
+
+  if (truncated) {
+    log(
+      "reorganize: the model's generation was cut off by its own output token limit before it finished; whatever it had already done stands, but its last, incomplete action was discarded. Re-run to pick up where it left off.",
+    );
+  }
+  if (hitMaxTurns) {
+    log(
+      "reorganize: hit this run's own turn limit while the model still had more queued up; whatever it had already done stands, but it may not have finished. Re-run to pick up where it left off.",
+    );
+  }
+
+  const incomplete = truncated || hitMaxTurns || hadRefusal() || hadIncompleteAttempt();
+  await recordPhylogUsage({
+    humanId: actingHumanId,
+    projectFolderId: projectFolder._id,
+    stage: "capture",
+    kind: "organize",
+    model: model ?? undefined,
+    usage,
+    durationMs,
+    outcome: incomplete ? "error" : "success",
+    errorKind: incomplete ? "incomplete" : undefined,
+  });
+
+  const { content: finalReadmeContent, fileId: finalReadmeFileId } = getCurrentReadme();
+  const readmeChanged = finalReadmeContent !== readmeContent;
+  if (readmeChanged && finalReadmeFileId) {
+    const actionSummary = organizeActions.length > 0 ? ` (also: ${organizeActions.join(", ")})` : "";
+    await createReleaseLogEntry({
+      projectFolderId: projectFolder._id,
+      date,
+      actingHumanId,
+      kind: "ai-update",
+      summary: `PhyLog reorganized this project's structure -- [View](/fruits/vault?file=${finalReadmeFileId}): ${readmeEditSummaries.join(", ")}${actionSummary}`,
+      sourceRef,
+      changesets: [
+        { fileId: finalReadmeFileId, action: "content-edit", before: { content: readmeContent }, after: { content: finalReadmeContent } },
+      ],
+    });
+    log(`reorganize: README restructured: ${readmeEditSummaries.join(", ")}`);
+  } else if (organizeActions.length > 0) {
+    await createReleaseLogEntry({
+      projectFolderId: projectFolder._id,
+      date,
+      actingHumanId,
+      kind: "ai-update",
+      summary: `PhyLog reorganized this project: ${organizeActions.join(", ")}`,
+      sourceRef,
+    });
+    log(`reorganize: ${organizeActions.join(", ")}`);
+  } else if (!hadRefusal() && !hadIncompleteAttempt()) {
+    log(
+      finalText
+        ? `reorganize: no changes made; model said: ${finalText}`
+        : "reorganize: no changes made (model gave no reasoning text).",
+    );
+  }
+
+  return {
+    ok: true,
+    changed: readmeChanged || organizeActions.length > 0,
+    summary: [...readmeEditSummaries, ...organizeActions],
+  };
 }

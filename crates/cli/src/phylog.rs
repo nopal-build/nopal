@@ -212,6 +212,18 @@ struct ResetResult {
     summary: ResetSummary,
 }
 
+// `ok` is omitted on purpose -- the worker throws on `{ ok: false }`
+// before this ever reaches a completed job's `result`, same convention
+// every other job result here already relies on.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ReorganizeResult {
+    #[serde(default)]
+    changed: bool,
+    #[serde(default)]
+    summary: Vec<String>,
+}
+
 // ─── Printing ───────────────────────────────────────────────────────────
 
 fn print_pre_capture(result: &PreCaptureResult) {
@@ -292,6 +304,16 @@ fn print_post_capture(result: &PostCaptureResult) {
         println!("Post-capture: skipped (skills/POST_CAPTURE.md says skip).");
     } else if let Some(note) = &result.note {
         println!("Post-capture: {note}");
+    }
+}
+
+fn print_reorganize(result: &ReorganizeResult) {
+    if !result.changed {
+        println!("Reorganize: no changes made -- the current structure already looked fine.");
+        return;
+    }
+    for action in &result.summary {
+        println!("Reorganize: {action}.");
     }
 }
 
@@ -452,5 +474,28 @@ pub fn reset_pre_capture(
         result.summary.deleted_files.len()
     );
     println!("Run `nopal phylog pre-capture --project {project_path}` to restage daily-logs/, then `nopal phylog capture --project {project_path} --full` to rebuild.");
+    Ok(())
+}
+
+/// `nopal phylog reorganize --project <path>`
+///
+/// A DEDICATED, whole-README structure pass -- distinct from `capture`'s
+/// own one-day-at-a-time loop. Given the entire current README at once
+/// (not one day's log), explicitly asked to evaluate and fix the
+/// project's overall structure -- section boundaries, and what's inlined
+/// versus already split into its own file. `capture` also runs this
+/// automatically, mid-cycle, whenever a daily log explicitly asks for a
+/// reorganization (`request_reorganize`, `capture.server.ts`); this
+/// command is for triggering it directly, without writing (or waiting
+/// for) such a request.
+pub fn reorganize(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== PhyLog reorganize: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/phylog/reorganize", &body)?;
+    let result: ReorganizeResult = poll_job(&client, &job_id)?;
+    print_reorganize(&result);
     Ok(())
 }

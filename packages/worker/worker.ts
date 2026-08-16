@@ -22,7 +22,7 @@ import {
 } from "robustness-core/data/phylogQueue.server";
 import { runPhylogPipeline, resetProject } from "robustness-core/data/phylogAgent.server";
 import { runPreCapture } from "robustness-core/data/preCapture.server";
-import { runCapture } from "robustness-core/data/capture.server";
+import { runCapture, runReorganize } from "robustness-core/data/capture.server";
 import { runPostCapture } from "robustness-core/data/postCapture.server";
 import { resolveProjectN01 } from "robustness-core/data/projectN01.server";
 import type { VaultFolder } from "robustness-core/data/vault.server";
@@ -89,6 +89,11 @@ async function runJob(
     }
     case "reset-pre-capture": {
       const result = await resetProject(job.data.projectFolderId, { wipeDailyLogs: true });
+      if (!result.ok) throw new Error(result.error);
+      return result;
+    }
+    case "reorganize": {
+      const result = await runReorganize(job.data.actingHumanId, projectFolder, {}, onProgress);
       if (!result.ok) throw new Error(result.error);
       return result;
     }

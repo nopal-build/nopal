@@ -63,7 +63,8 @@ export type PhylogJobName =
   | "capture"
   | "post-capture"
   | "reset"
-  | "reset-pre-capture";
+  | "reset-pre-capture"
+  | "reorganize";
 
 export type PhylogJobData = {
   actingHumanId: string;

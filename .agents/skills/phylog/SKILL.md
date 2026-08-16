@@ -452,6 +452,74 @@ oldest first):
    hitting this less likely in the first place, though section-scoped
    edits (chunked when needed) are what actually remove the ceiling.
 
+**The base system prompt defers to the project's own CAPTURE.md on
+how much a day should change, rather than asserting its own default.**
+Earlier wording ("never as the default way," "a short project should
+likely never need write_file at all") was found to actively work against
+a project's own written organization strategy -- no matter how clearly
+CAPTURE.md described when to split content out or reorganize, the
+hardcoded wrapper was ALSO telling the model to avoid exactly that. Fixed
+by making the hardcoded text explicitly secondary: "this project's OWN
+CAPTURE.md instructions... are the real authority... take them at their
+word... only fall back to \[the cautious default\] when CAPTURE.md
+doesn't say anything more specific." `buildSystemPrompt`,
+`capture.server.ts`.
+
+**`createReadmeAndFileExecutors` (`capture.server.ts`) is the shared
+factory behind ALL SIX tools** (`create_folder`/`move_file`/`write_file`/
+`update_section`/`remove_section`/`update_readme`) -- both
+`captureOneDay`'s daily loop and `runReorganize` (below) call it, so the
+exact same safety nets (chunk buffering, the empty-content refusal,
+immediate-commit-building-on-the-previous-tool's-own-result) live in
+ONE place, not two copies that could drift. Takes a `logPrefix` (e.g.
+`capture: 2026-08-01` or `reorganize`) and `freshContentPresent` (the
+daily pass's "today also had content" justification for refusing an
+empty result; `runReorganize` always passes `false`, since it has no
+"today").
+
+### Reorganizing: a dedicated, whole-README pass
+
+The daily loop's fundamental limit: it only ever sees ONE day's log plus
+the current README, never the whole picture at once, so "should the
+structure change" is a side judgment squeezed into a narrow, incremental
+pass -- not its own deliberate question. `runReorganize` (`capture.server.ts`)
+is a SEPARATE pass that exists specifically to ask that question
+properly: given the ENTIRE current README (not one day's log) and an
+explicit charter inviting real restructuring ("don't hold back the way a
+normal day's pass would"), it freely uses all six tools above to fix
+section boundaries and what's inlined vs. split into its own file --
+while still never inventing, removing, or altering the SUBSTANCE of
+anything already written (move/split/merge only; every fact and quote
+must survive intact).
+
+Two ways to reach it:
+
+- **Automatically, mid-capture-cycle, when a day's log asks for it.**
+  `captureOneDay`'s agent loop has a seventh tool, `request_reorganize
+  ({ reason })`, described to the model as: call this ONLY when today's
+  own log explicitly asks for the project to be reorganized (someone
+  journaling "we should restructure this"), never just because the model
+  itself thinks the structure could be better. When called,
+  `runCapture`'s own loop runs `runReorganize` right after that day's
+  edits finish, tagged with a `sourceRef` of `${entry's own
+  sourceRef}:reorganize` and that day's own `date` (so it groups
+  correctly in the Release Log). At most ONE reorganize pass runs per
+  `runCapture` invocation even if several entries each request one
+  (`reorganizeRanThisRun`) -- a later request in the same run is logged
+  as a skipped duplicate, not silently dropped.
+- **On demand.** `nopal phylog reorganize --project <path>` /
+  `POST /api/phylog/reorganize` (job name `"reorganize"`,
+  `phylogQueue.server.ts`/`worker.ts`) runs the exact same pass directly,
+  for triggering it without writing (or waiting for) a daily-log request.
+
+Either way it's the SAME `runReorganize` call -- own `phylogMetrics`
+event (`stage: "capture", kind: "organize"`, the same `"incomplete"`
+error-kind convention as the daily pass), own Release Log entry
+(`"PhyLog reorganized this project's structure -- ..."`), and the exact
+same truncation/turn-limit/refusal safety nets -- just with a higher
+turn budget (24 vs. the daily pass's 16), since a real whole-project
+restructure can reasonably touch more sections/files in one pass.
+
 **Why filing still reads the original Card, not the daily-logs entry's
 own staged copy**: `fileCardAttachments` is SHARED with the Sorter
 (`sorter.server.ts`'s `sortDailyLog`, `nopal sort run`), which files
@@ -750,6 +818,7 @@ nopal phylog run --project <path> [--full] [--since YYYY-MM-DD] [--until YYYY-MM
 nopal phylog pre-capture --project <path> [--date YYYY-MM-DD] [--file <path>]
 nopal phylog capture --project <path> [--full] [--since YYYY-MM-DD] [--until YYYY-MM-DD]
 nopal phylog post-capture --project <path>
+nopal phylog reorganize --project <path>
 nopal phylog reset --project <path> --yes
 nopal phylog reset-pre-capture --project <path> --yes
 ```
@@ -765,6 +834,12 @@ nopal phylog reset-pre-capture --project <path> --yes
 - `capture` — `--full` resets (keeping `daily-logs/`) first, then
   reprocesses every entry from scratch; default is incremental (only
   unapplied entries). `--since`/`--until` bound the date range either way.
+  Also runs `reorganize` automatically, mid-cycle, for any day whose log
+  explicitly asks for it -- see "Reorganizing" under Stage 2 above.
+- `reorganize` — the SAME dedicated whole-README pass `capture` can
+  trigger automatically, run directly instead of waiting for (or
+  writing) a daily-log request. Not destructive -- never resets or
+  deletes anything, only reorganizes what's already there.
 - `reset` — destructive; requires `--yes`. Leaves `skills`/`syncs`/
   `daily-logs` untouched. Prints a reminder to run `capture --full`
   afterward.
@@ -1010,7 +1085,9 @@ pnpm workspace package — NOT under `webapp/app/data` anymore. See
 - `packages/robustness-core/src/data/preCapture.server.ts` — stage 1.
 - `packages/robustness-core/src/data/capture.server.ts` — stage 2
   (deterministic filing via `sorter.server.ts`'s `fileCardAttachments`,
-  plus the organize/README agent loop and its tools).
+  the organize/README agent loop and its tools, the shared
+  `createReadmeAndFileExecutors` factory, and `runReorganize` -- the
+  dedicated whole-README pass, see "Reorganizing" above).
 - `packages/robustness-core/src/data/postCapture.server.ts` — stage 3
   (placeholder).
 - `packages/robustness-core/src/data/phylogAgent.server.ts` —
@@ -1042,9 +1119,9 @@ pnpm workspace package — NOT under `webapp/app/data` anymore. See
   directly; zero pipeline-logic duplication.
 - `webapp/app/routes/api.phylog.run.tsx` / `api.phylog.pre-capture.tsx` /
   `api.phylog.capture.tsx` / `api.phylog.post-capture.tsx` /
-  `api.phylog.reset.tsx` / `api.phylog.reset-pre-capture.tsx` /
-  `api.phylog.jobs.$jobId.tsx` — API surface (enqueue + poll — thin, no
-  pipeline logic of their own).
+  `api.phylog.reorganize.tsx` / `api.phylog.reset.tsx` /
+  `api.phylog.reset-pre-capture.tsx` / `api.phylog.jobs.$jobId.tsx` — API
+  surface (enqueue + poll — thin, no pipeline logic of their own).
 - `crates/cli/src/phylog.rs` — CLI surface (`nopal phylog ...`).
 - `webapp/app/routes/api.phylog.usage-cleanup.tsx` — raw usage-event
   pruning cron.

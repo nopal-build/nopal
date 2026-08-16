@@ -472,6 +472,17 @@ enum PhylogCommand {
         #[arg(long)]
         project: String,
     },
+    /// A DEDICATED, whole-README structure pass -- distinct from
+    /// `capture`'s own one-day-at-a-time loop. Given the entire current
+    /// README at once, explicitly asked to evaluate and fix the
+    /// project's overall structure. `capture` also runs this
+    /// automatically, mid-cycle, whenever a daily log explicitly asks
+    /// for a reorganization -- this is for triggering it directly.
+    Reorganize {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
     /// Deletes everything in this project EXCEPT its skills/, syncs/, and
     /// daily-logs/ folders — the "start over" operation, always explicit
     /// and never run implicitly. Follow with `capture --full` to rebuild
@@ -763,6 +774,7 @@ fn main() {
                     until,
                 } => phylog::capture(&project, full, since.as_deref(), until.as_deref()),
                 PhylogCommand::PostCapture { project } => phylog::post_capture(&project),
+                PhylogCommand::Reorganize { project } => phylog::reorganize(&project),
                 PhylogCommand::Reset { project, yes } => phylog::reset(&project, yes),
                 PhylogCommand::ResetPreCapture { project, yes } => {
                     phylog::reset_pre_capture(&project, yes)
