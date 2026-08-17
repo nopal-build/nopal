@@ -354,9 +354,59 @@ skill was born from:
      `content_hash` changes. Also confirmed both `packages/worker`
      BullMQ workers (`"phylog"` and `"graphlog"` queues) start cleanly
      side by side against the local Redis.
-5. **Not started — `sync-graph`.** Needs: `graph-log-*.md` writing (using
-   `buildRefDirectiveMarkdown`), the delete-and-regenerate idempotency
-   check, and the backward-only cross-day linking.
+5. **Done — `sync-graph`.** `syncGraph.server.ts` (`runSyncGraph`) walks
+   every file under `syncs/` that carries a `date` (today, only
+   `daily-log-sync`'s own output does — it now stamps `date: entryDate`
+   on every synced Card copy), groups by date, and for each day whose
+   aggregate hash (every candidate's `content_hash` PLUS its
+   `_knowledge/` sidecar's own hash, if any) has changed, asks an LLM
+   (per `skills/GRAPH.md`'s own real starter instructions — NOT "skip") to
+   extract citable nodes into `Graph/graph-log-YYYY-MM-DD.md`.
+   - **Citations are PRE-COMPUTED, never left to the model** — each
+     candidate's exact `:ref{...verbose="true"}` markdown
+     (`buildRefDirectiveMarkdown`) is handed to the model as "copy this
+     verbatim if you quote this source," so a citation's name/datetime/
+     location can never be hallucinated. `location` is a real, working
+     `/fruits/vault?file=<fileId>` link into the SYNCED COPY inside this
+     project's own vault (never the original Card in a contributor's
+     personal vault, which other project viewers may not have access
+     to). `datetime` is `<date>T12:00:00Z` (noon UTC) — a deliberate
+     simplification since a Card carries a calendar date, never a
+     sub-day timestamp; flagged here as a known limitation, not silently
+     fabricated precision.
+   - **Contributor attribution** is recovered from the synced copy's own
+     FILENAME (`dailyLogSync.server.ts`'s new `parseSyncedCardFileName`,
+     the reverse of `syncedCardFileName`) — the file's own `human_id` is
+     always the PROJECT's owner (whoever's vault it's synced into), never
+     the actual contributor, since the copy lives in the project's own
+     tree. Falls back to "Unknown"/no `human-id` for any future non-
+     daily-log sync source's file that doesn't match this naming shape —
+     `:ref{...}`'s `human-id` is optional for exactly this reason.
+   - **Cross-day links point only backward** — before processing a day,
+     every EARLIER day's already-written `### heading`s (best-effort
+     GFM-style slugified) are handed to the model as ready-to-use
+     markdown links ("copy one of these verbatim, never invent a link
+     that isn't in this list"); a day currently being processed is never
+     told about later days, even within the same run. Confirmed directly:
+     a later day's prompt correctly included an earlier day's heading
+     link; the earliest day correctly saw "no earlier nodes exist yet."
+   - **Delete-and-regenerate, never partial-patch** — a day whose
+     aggregate hash changed has its existing `graph-log-*.md` deleted
+     BEFORE the model is asked to redo it from scratch; a day the model
+     decides has "nothing worth capturing" (a literal `NOTHING_TO_CAPTURE`
+     sentinel it can return) ends up with NO file at all, even if an
+     earlier run had written one for that same day.
+   - `POST /api/graphlog/sync-graph` (enqueue) + the SAME
+     `GET /api/graphlog/jobs/:jobId` sync-knowledge already uses (one
+     polling route for every GraphLog job name). `nopal graphlog
+     sync-graph --project <path>`.
+   - **Verified directly** (not just typechecked) against the real local
+     dev SurrealDB with a FAKE `LlmProvider` (no real Anthropic calls, no
+     cost): two days processed with correct cross-day linking; a second
+     run made zero new LLM calls (fully idempotent); changing one day's
+     `content_hash` regenerated ONLY that day; the `NOTHING_TO_CAPTURE`
+     sentinel correctly deleted that day's file while leaving the other
+     day's untouched.
 6. **Not started — `graph-project-view`.** Needs: the incremental
    README-synthesis agent loop (can likely reuse `capture.server.ts`'s
    `createReadmeAndFileExecutors`-style tool factory pattern).

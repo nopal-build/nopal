@@ -85,6 +85,23 @@ function syncedCardFileName(date: string, humanId: string): string {
   return `${date}-${humanId}.md`;
 }
 
+/** The reverse of `syncedCardFileName` — recovers `{date, humanId}` from a
+ * synced Card copy's own filename, for `sync-graph` (`syncGraph.server.ts`)
+ * to resolve WHO actually contributed a candidate's content (the file's
+ * own `human_id` is always the PROJECT's owner, since the synced copy
+ * lives in the project's own vault, not the contributor's). Relies on a
+ * SurrealDB-generated human id never containing a hyphen (true for every
+ * id this app has ever generated) to unambiguously split `date` from
+ * `humanId` — returns `null` for anything that doesn't match this exact
+ * shape (any other file under `syncs/`, including a future non-daily-log
+ * sync source's own naming, which has no reason to follow this
+ * convention at all). */
+export function parseSyncedCardFileName(name: string): { date: string; humanId: string } | null {
+  const match = /^(\d{4}-\d{2}-\d{2})-([^-]+)\.md$/.exec(name);
+  if (!match) return null;
+  return { date: match[1], humanId: match[2] };
+}
+
 /** Deterministic name for a Card attachment once copied into
  * `syncs/Daily Logs/` — prefixed with the same `${date}-${humanId}` the
  * Card's own copy uses, so two different days' (or contributors')
@@ -165,6 +182,10 @@ export async function runDailyLogSync(
         content_type: "text/markdown",
         content_hash: hash,
         folder_id: dailyLogsFolder._id,
+        // Stamped so `sync-graph` (`syncGraph.server.ts`) can group
+        // candidates by day generically (reading this field), rather than
+        // re-parsing it back out of `targetName`'s own convention.
+        date: entryDate,
       });
       if (created) {
         result.synced.push({ date: entryDate, humanId, fileId: created._id });

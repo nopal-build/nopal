@@ -232,3 +232,61 @@ pub fn sync_knowledge(project_path: &str) -> Result<(), Box<dyn Error + Send + S
 
     Ok(())
 }
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct GraphDayResult {
+    date: String,
+    #[serde(default)]
+    changed: bool,
+    #[serde(default)]
+    empty: bool,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SyncGraphResult {
+    #[serde(default)]
+    skipped: bool,
+    #[serde(default)]
+    days: Vec<GraphDayResult>,
+}
+
+/// Runs `sync-graph` for `project_path` — see the `graphlog` skill.
+/// Agentic (real LLM calls), so this enqueues and polls rather than
+/// blocking on one request.
+pub fn sync_graph(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog sync-graph: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/sync-graph", &body)?;
+    let result: SyncGraphResult = poll_job(&client, &job_id)?;
+
+    if result.skipped {
+        println!("sync-graph: skipped (skills/GRAPH.md says skip).");
+        return Ok(());
+    }
+    if result.days.is_empty() {
+        println!("sync-graph: nothing new to process.");
+        return Ok(());
+    }
+
+    for day in &result.days {
+        if !day.changed {
+            continue;
+        }
+        if day.empty {
+            println!("sync-graph: {} — nothing worth capturing.", day.date);
+        } else {
+            println!("sync-graph: wrote graph-log-{}.md.", day.date);
+        }
+    }
+    let unchanged = result.days.iter().filter(|d| !d.changed).count();
+    if unchanged > 0 {
+        println!("{unchanged} day(s) already up to date, left unchanged.");
+    }
+
+    Ok(())
+}

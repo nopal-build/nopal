@@ -37,10 +37,9 @@ export function getGraphLogQueue(): Queue<GraphLogJobData, unknown, GraphLogJobN
   return queue;
 }
 
-/** Only `sync-knowledge` exists so far — `sync-graph`/`graph-project-view`
- * are expected to join this same union once built (see the `graphlog`
- * skill's Build status). */
-export type GraphLogJobName = "sync-knowledge";
+/** `graph-project-view` is expected to join this same union once built
+ * (see the `graphlog` skill's Build status). */
+export type GraphLogJobName = "sync-knowledge" | "sync-graph";
 
 export type GraphLogJobData = {
   actingHumanId: string;

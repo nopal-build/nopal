@@ -152,7 +152,10 @@ export async function resolveProjectN02(
 
 // ─── Graph space (`sync-graph`'s output) ───────────────────────────────
 
-async function findProjectGraphFolder(projectFolder: VaultFolder): Promise<VaultFolder | null> {
+/** Read-only lookup, no side effect — exported so `sync-graph` can check
+ * whether ANY graph-log history already exists yet without forcing the
+ * folder into existence just to look. */
+export async function findProjectGraphFolder(projectFolder: VaultFolder): Promise<VaultFolder | null> {
   const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
   return folders.find((f) => f.is_folder_type_root && f.folder_type === "graph") ?? null;
 }

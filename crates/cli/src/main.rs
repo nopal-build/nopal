@@ -431,6 +431,14 @@ enum GraphlogCommand {
         #[arg(long)]
         project: String,
     },
+    /// Extracts citable nodes from each day's synced content, per
+    /// `skills/GRAPH.md`'s own instructions, into
+    /// `Graph/graph-log-YYYY-MM-DD.md`. Agentic (real LLM calls).
+    SyncGraph {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -773,6 +781,7 @@ fn main() {
                     graphlog::daily_log_sync(&project, date.as_deref())
                 }
                 GraphlogCommand::SyncKnowledge { project } => graphlog::sync_knowledge(&project),
+                GraphlogCommand::SyncGraph { project } => graphlog::sync_graph(&project),
             };
             if let Err(e) = result {
                 eprintln!("{e}");
