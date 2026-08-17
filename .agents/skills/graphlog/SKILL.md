@@ -306,10 +306,54 @@ skill was born from:
    own carefully-scoped, separately-tested follow-up — see "The 'Daily
    Logs' symlink" above for the full design and what's still open
    (sidebar navigation polish, per-request caching).
-4. **Not started — `sync-knowledge`.** Needs: the `_knowledge/` reserved-
-   subfolder convention actually enforced/created, and the agentic stage
-   itself (reuses `LlmProvider`/`PhotoDescriber` from `phylog`'s provider
-   seam — no new LLM infra expected).
+4. **Done — `sync-knowledge`.** `syncKnowledge.server.ts`
+   (`runSyncKnowledge`) walks a project's `syncs/` tree recursively
+   (skipping `_knowledge/` folders themselves), and for every file without
+   an up-to-date sidecar, asks an LLM (per `skills/KNOWLEDGE.md`'s own
+   instructions — default "skip", a total no-op) to extract concrete
+   metadata into `_knowledge/<name>.knowledge.md`, right inside the SAME
+   folder the source lives in. Idempotent via a stored `content_hash` in
+   the sidecar's own front matter, same convention pre-capture uses.
+   Reuses `LlmProvider`/`PhotoDescriber`/`AnthropicProvider` from PhyLog's
+   provider seam unchanged — no new LLM infra needed.
+   - **Own usage-tracking + queue infra, deliberately NOT shared with
+     PhyLog's** — `graphLogMetrics.server.ts` (`graphlog_usage_events`/
+     `graphlog_usage_daily` tables, `recordGraphLogUsage`) and
+     `graphLogQueue.server.ts` (its own BullMQ queue `"graphlog"`, own
+     per-project Redis lock keyed `graphlog:lock:...`) mirror
+     `phylogMetrics.server.ts`/`phylogQueue.server.ts`'s shapes closely but
+     stay fully independent, so retiring PhyLog later never touches
+     GraphLog's own code. `classifyLlmError`/`SKIP_MARKER`/
+     `getProjectStageSkill`/`listExtraSkillFiles`/`isSkipInstruction` are
+     likewise small, deliberate DUPLICATIONS (into `graphLogMetrics.server.ts`/
+     `projectN02.server.ts`) rather than cross-pipeline imports, same
+     reasoning `graphLogDefaults.server.ts` already established.
+   - **Runs in the SAME worker process as PhyLog**, as a second,
+     independent BullMQ `Worker` in `packages/worker/worker.ts` against
+     the `"graphlog"` queue — no new deploy target needed. Deliberately
+     does NOT resolve through `resolveProjectN01`/`resolveProjectN02`
+     (unlike PhyLog's own dispatch) — GraphLog's stages are
+     container-type-agnostic by design (a plain `getFolderById` is enough,
+     same as `dailyLogSync.server.ts`'s own resolution), so sync-knowledge
+     can be exercised against an ordinary `project-n01` project today,
+     ahead of any real n01→n02 migration tooling existing.
+   - `POST /api/graphlog/sync-knowledge` (enqueue) + `GET
+     /api/graphlog/jobs/:jobId` (poll) — agentic, so this follows PhyLog's
+     own enqueue-then-poll shape, unlike `daily-log-sync`'s synchronous
+     one. `nopal graphlog sync-knowledge --project <path>`
+     (`crates/cli/src/graphlog.rs`, mirroring `phylog.rs`'s own
+     enqueue/poll helpers).
+   - **Verified directly** (not just typechecked): a throwaway script
+     exercised `runSyncKnowledge` against the real local dev SurrealDB
+     with a FAKE `LlmProvider`/`PhotoDescriber` (no real Anthropic calls,
+     no cost) via its own `opts.provider`/`opts.photoDescriber` override
+     seam (the same one PhyLog's `runPreCapture` already supports for
+     testability) — confirmed the skip-gate (no `KNOWLEDGE.md` -> zero
+     calls), correct `_knowledge/<name>.knowledge.md` naming, idempotency
+     on an unchanged file, and correct regeneration once a source file's
+     `content_hash` changes. Also confirmed both `packages/worker`
+     BullMQ workers (`"phylog"` and `"graphlog"` queues) start cleanly
+     side by side against the local Redis.
 5. **Not started — `sync-graph`.** Needs: `graph-log-*.md` writing (using
    `buildRefDirectiveMarkdown`), the delete-and-regenerate idempotency
    check, and the backward-only cross-day linking.

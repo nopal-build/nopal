@@ -27,6 +27,7 @@
 import {
   createFileRef,
   createVaultFolder,
+  getFileRefById,
   getFolderById,
   listFolderChildren,
   type VaultFolder,
@@ -172,4 +173,70 @@ export async function ensureProjectGraphFolder(projectFolder: VaultFolder): Prom
   });
   if (!created) throw new Error("Failed to create the project's Graph folder");
   return created;
+}
+
+// ─── Skill files (read by every GraphLog stage) ─────────────────────
+// Deliberately DUPLICATED from `projectN01.server.ts` (same names, same
+// logic) rather than imported — kept fully independent so retiring PhyLog
+// later (see the `graphlog` skill) never has to touch GraphLog code. Same
+// reasoning `graphLogDefaults.server.ts` already gives for duplicating
+// `SKIP_MARKER`.
+
+const SKIP_MARKER = "skip";
+
+/** True when `content` means "do nothing" for a given GraphLog stage — the
+ * first non-blank line is exactly "skip", case-insensitive. Missing/empty
+ * content is ALSO treated as skip. */
+export function isSkipInstruction(content: string | null | undefined): boolean {
+  if (!content) return true;
+  const firstLine = content.split("\n").find((line) => line.trim().length > 0);
+  return (firstLine?.trim().toLowerCase() ?? "") === SKIP_MARKER;
+}
+
+/** Reads a project-n02's `skills/<name>` file content, or null if it (or
+ * the skills folder itself) doesn't exist — malformed/missing is always
+ * treated as "no instructions", never a hard failure. Shared by every
+ * GraphLog stage. */
+export async function getProjectStageSkill(
+  projectFolder: { human_id: string; _id: string },
+  name: string,
+): Promise<string | null> {
+  const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
+  const skillsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "skills");
+  if (!skillsFolder) return null;
+  const { files } = await listFolderChildren(projectFolder.human_id, skillsFolder._id);
+  const listing = files.find((f) => f.name.toLowerCase() === name.toLowerCase());
+  if (!listing) return null;
+  const file = await getFileRefById(listing._id);
+  return file?.content ?? null;
+}
+
+/** The GraphLog skill file names every stage already fetches by name —
+ * excluded from `listExtraSkillFiles` below so a reference file never gets
+ * folded into a prompt twice. */
+const RESERVED_SKILL_FILE_NAMES = new Set([
+  "knowledge.md",
+  "graph.md",
+  "project_view.md",
+  "skill.md",
+]);
+
+/** Any OTHER file a project owner drops into `skills/` — auto-folded into
+ * every GraphLog stage's prompt, never gated behind a tool call a model
+ * might skip. Sorted by name for stable prompts across runs. */
+export async function listExtraSkillFiles(
+  projectFolder: { human_id: string; _id: string },
+): Promise<{ name: string; content: string }[]> {
+  const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
+  const skillsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "skills");
+  if (!skillsFolder) return [];
+  const { files } = await listFolderChildren(projectFolder.human_id, skillsFolder._id);
+  const extras = files.filter((f) => !RESERVED_SKILL_FILE_NAMES.has(f.name.toLowerCase()));
+  const withContent = await Promise.all(
+    extras.map(async (f) => {
+      const file = await getFileRefById(f._id);
+      return { name: f.name, content: (file?.content ?? "").trim() };
+    }),
+  );
+  return withContent.filter((f) => f.content.length > 0).sort((a, b) => a.name.localeCompare(b.name));
 }

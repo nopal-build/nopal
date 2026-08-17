@@ -423,6 +423,14 @@ enum GraphlogCommand {
         #[arg(long)]
         date: Option<String>,
     },
+    /// Extracts concrete metadata (names, dates, decisions) from every file
+    /// under `syncs/`, per `skills/KNOWLEDGE.md`'s own instructions, into
+    /// `_knowledge/<name>.knowledge.md` sidecars. Agentic (real LLM calls).
+    SyncKnowledge {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -764,6 +772,7 @@ fn main() {
                 GraphlogCommand::DailyLogSync { project, date } => {
                     graphlog::daily_log_sync(&project, date.as_deref())
                 }
+                GraphlogCommand::SyncKnowledge { project } => graphlog::sync_knowledge(&project),
             };
             if let Err(e) = result {
                 eprintln!("{e}");

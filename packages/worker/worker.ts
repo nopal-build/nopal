@@ -25,7 +25,14 @@ import { runPreCapture } from "robustness-core/data/preCapture.server";
 import { runCapture, runReorganize } from "robustness-core/data/capture.server";
 import { runPostCapture } from "robustness-core/data/postCapture.server";
 import { resolveProjectN01 } from "robustness-core/data/projectN01.server";
-import type { VaultFolder } from "robustness-core/data/vault.server";
+import {
+  GRAPHLOG_QUEUE_NAME,
+  acquireProjectGraphLogLock,
+  type GraphLogJobData,
+  type GraphLogJobName,
+} from "robustness-core/data/graphLogQueue.server";
+import { runSyncKnowledge } from "robustness-core/data/syncKnowledge.server";
+import { getFolderById, type VaultFolder } from "robustness-core/data/vault.server";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 // Sequential per worker process on purpose — PhyLog's own concurrency
@@ -137,16 +144,81 @@ worker.on("failed", (job, err) => {
 
 console.log(`[worker] PhyLog worker listening on queue "${PHYLOG_QUEUE_NAME}" (concurrency ${CONCURRENCY}).`);
 
+// ─── GraphLog ───────────────────────────────────────────────────────────────────
+// A SECOND, independent `Worker` in this SAME process, against GraphLog's
+// OWN queue (see `graphLogQueue.server.ts`) — running two BullMQ workers
+// in one Node process is cheap and keeps this package's whole "one worker
+// process, no separate deploy target" story intact for GraphLog too (see
+// the `graphlog` skill). Unlike PhyLog's own dispatch, this does NOT
+// resolve through `resolveProjectN01`/`resolveProjectN02` — GraphLog's
+// stages are deliberately container-type-agnostic (see
+// `syncKnowledge.server.ts`'s own doc), so a plain `getFolderById` is all
+// that's needed here, same as `dailyLogSync.server.ts`'s own resolution.
+
+async function runGraphLogJob(
+  job: Job<GraphLogJobData, unknown, GraphLogJobName>,
+  projectFolder: VaultFolder,
+  onProgress: (line: string) => void,
+): Promise<unknown> {
+  switch (job.name) {
+    case "sync-knowledge": {
+      const result = await runSyncKnowledge(projectFolder, job.data.actingHumanId, {
+        log: onProgress,
+      });
+      if (!result.ok) throw new Error(result.error);
+      return result;
+    }
+    default:
+      throw new Error(`Unknown GraphLog job name: ${job.name}`);
+  }
+}
+
+async function processGraphLogJob(job: Job<GraphLogJobData, unknown, GraphLogJobName>): Promise<unknown> {
+  const onProgress = (line: string) => {
+    job.log(line).catch((err) => console.error("Failed to write job log line:", err));
+  };
+
+  const projectFolder = await getFolderById(job.data.projectFolderId);
+  if (!projectFolder) throw new Error("Project not found");
+
+  const release = await acquireProjectGraphLogLock(job.data.projectFolderId, onProgress);
+  try {
+    return await runGraphLogJob(job, projectFolder, onProgress);
+  } finally {
+    await release();
+  }
+}
+
+const graphLogWorker = new Worker<GraphLogJobData, unknown, GraphLogJobName>(
+  GRAPHLOG_QUEUE_NAME,
+  processGraphLogJob,
+  {
+    connection: { url: REDIS_URL, maxRetriesPerRequest: null },
+    concurrency: CONCURRENCY,
+  },
+);
+
+graphLogWorker.on("completed", (job) => {
+  console.log(`[worker] ${job.name} ${job.id} completed (project ${job.data.projectFolderId}).`);
+});
+graphLogWorker.on("failed", (job, err) => {
+  console.error(`[worker] ${job?.name} ${job?.id} failed:`, err);
+});
+
+console.log(`[worker] GraphLog worker listening on queue "${GRAPHLOG_QUEUE_NAME}" (concurrency ${CONCURRENCY}).`);
+
 // Graceful shutdown — let an in-flight job finish (or fail cleanly) rather
 // than abandon it mid-run, same rationale as this file's own module doc:
 // PhyLog's own idempotency makes a clean re-run of an ABANDONED job safe,
-// but an UNGRACEFULLY killed one can leave partial writes mid-flight.
+// but an UNGRACEFULLY killed one can leave partial writes mid-flight. Same
+// idempotency property holds for GraphLog's own stages, so both workers
+// close together here.
 let shuttingDown = false;
 async function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[worker] received ${signal}, finishing in-flight jobs before exit…`);
-  await worker.close();
+  await Promise.all([worker.close(), graphLogWorker.close()]);
   process.exit(0);
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
