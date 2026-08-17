@@ -1,7 +1,11 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { uploadFileToS3 } from "robustness-core/data/file.server";
-import { createFileRef, getOrCreateVaultFolder } from "robustness-core/data/vault.server";
+import {
+  createFileRef,
+  getOrCreateVaultFolder,
+  resolveDailyLogsFolder,
+} from "robustness-core/data/vault.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUser(request);
@@ -28,11 +32,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const dateStr = new Date().toISOString().slice(0, 10);
     s3Key = `daily-log/${user._id}/${dateStr}/${Date.now()}-${safeName}`;
 
-    const rootFolder = await getOrCreateVaultFolder(
-      user._id,
-      "daily-logs",
-      null,
-    );
+    const rootFolder = await resolveDailyLogsFolder(user._id);
     const dateFolder = await getOrCreateVaultFolder(
       user._id,
       dateStr,

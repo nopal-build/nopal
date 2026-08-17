@@ -2,7 +2,11 @@ import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { uploadFileToS3 } from "robustness-core/data/file.server";
-import { createFileRef, getOrCreateVaultFolder } from "robustness-core/data/vault.server";
+import {
+  createFileRef,
+  getOrCreateVaultFolder,
+  resolveDailyLogsFolder,
+} from "robustness-core/data/vault.server";
 
 /**
  * POST /api/daily-log/upload
@@ -45,7 +49,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Invalid or missing date" }, { status: 400 });
   }
 
-  const rootFolder = await getOrCreateVaultFolder(user._id, "daily-logs", null);
+  const rootFolder = await resolveDailyLogsFolder(user._id);
   const dateFolder = await getOrCreateVaultFolder(user._id, date, rootFolder._id);
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");

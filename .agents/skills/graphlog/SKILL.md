@@ -136,20 +136,66 @@ children, everything else (including the new `Graph` space) is
 
 **Decision: Option A (the low-cost path), not a new Vault symlink
 primitive.** The vault-wide `daily-logs` ROOT (see the `vault` skill's
-"Vault Root Folders") is being retired as its own container; a human's
-daily log content instead resolves to their `personal` project-n02
-space's own `syncs/Daily Logs` connector folder. The root-level "Daily
-Logs" entry point becomes a plain UI shortcut that navigates straight
-into that resolved folder — no general-purpose folder-alias/symlink
-concept was added to the Vault data model. A real symlink primitive
-(`target_folder_id`, proxying reads/writes) was considered and explicitly
-deferred — revisit only if a second real symlink need shows up; this one
-didn't justify the added complexity (listing/breadcrumb/move/share code
-all having to know how to see through an alias).
+"Vault Root Folders") is retired as its own container; a human's daily
+log content instead resolves to their `personal` space's own
+`syncs/Daily Logs` folder. A real symlink primitive (`target_folder_id`,
+proxying reads/writes) was considered and explicitly deferred — revisit
+only if a second real symlink need shows up; this one didn't justify the
+added complexity (listing/breadcrumb/move/share code all having to know
+how to see through an alias).
 
-**Not yet implemented** — `dailyLog.server.ts`'s folder-resolution helper
-still points at the old `daily-logs` root. This is Phase 1 work (see
-"Build status").
+**Done — the data-layer resolution + migration.**
+`vault.server.ts`'s `resolveDailyLogsFolder(humanId)` is the single
+chokepoint every daily-log read/write path now goes through (replacing
+every direct `getOrCreateVaultFolder(humanId, "daily-logs", null)` call):
+
+- Canonically resolves to `personal/syncs/Daily Logs` (lazily created).
+- **A legacy vault-wide `daily-logs` ROOT (anyone who used Nopal before
+  this shipped) is MOVED there in place** via the existing
+  `moveVaultFolder` primitive — re-parented, never recreated, so every
+  file's own id (a day's `readme.md`, a Card, an attachment) and every
+  date subfolder's own id survives completely unchanged. This is what
+  makes the migration safe: `::card{file="..."}` references, the
+  `daily_logs` cache table (keyed by humanId+date, never by folder path),
+  and anything else addressed by fileId keep working with no separate
+  content migration step.
+- `ensureVaultRootFolders` (`vault.server.ts`) no longer auto-creates a
+  `daily-logs` root if one doesn't already exist — the one behavior
+  change needed to stop a migrated human's old root from being silently
+  RESURRECTED (empty) on their very next page load, since by then no
+  root-level folder named `daily-logs` exists for that function's own
+  check to find. A human who still has one gets it left alone there
+  (`ensureVaultRootFolders` only backfills its `vault_root_key` tag if
+  missing) until `resolveDailyLogsFolder` migrates it away.
+- `VAULT_ROOTS`/`VaultRootKey` (`vaultRoots.ts`) were deliberately left
+  UNTOUCHED (still include `"daily-logs"`) — only `ensureVaultRootFolders`'s
+  runtime behavior changed, not the type system, so every place that
+  reads a not-yet-migrated folder's `vault_root_key` (`canWriteToRoot`,
+  `isRootShareable`, the Vault sidebar's `folderLabel`, ...) keeps working
+  unchanged for the transitional period.
+- **Verified directly against the local dev SurrealDB** (not just
+  typechecked): a synthetic human's simulated legacy root+history was
+  migrated, confirmed same folder id / same date-folder id / same
+  readme fileId / unchanged content, confirmed idempotent on a second
+  call, and confirmed `ensureVaultRootFolders` no longer resurrects the
+  old root afterward.
+- **Known, accepted follow-up, not yet done**: the Vault sidebar
+  (`fruits_.vault.tsx`) doesn't yet turn the root-level "Daily Logs" entry
+  into an explicit shortcut/redirect into `personal/syncs/Daily Logs` —
+  today it simply stops appearing in the sidebar once a human is
+  migrated (an already-migrated human has no `daily-logs`-keyed root
+  folder left at all), rather than redirecting there. Purely a navigation/
+  discoverability polish item, not a data-integrity concern — the actual
+  Daily Log editing page (`fruits_.daily-log.tsx`) doesn't go through the
+  Vault sidebar at all, so this doesn't affect daily-log editing itself.
+- **Known, accepted perf tradeoff, not yet optimized**:
+  `resolveDailyLogsFolder` does several sequential lookups (root
+  provisioning, personal lookup, syncs lookup/create, legacy-root check)
+  versus the old resolution's single query — and every daily-log read/
+  write path calls it independently, with no per-request caching/
+  memoization yet. Not addressed in this pass; revisit if it shows up as
+  a real bottleneck, same "don't optimize until it's proven to matter"
+  approach the rest of this codebase already takes.
 
 ## The `:ref{...}` directive
 
@@ -244,28 +290,22 @@ skill was born from:
    still tags every brand new project `project-n01` by default (that
    cutover is a deliberate later step, not a side effect of this type
    existing).
-3. **Partially done — `daily-log-sync`'s copy step, WITHOUT the Option-A
-   root retirement.** `dailyLogSync.server.ts` (`ensureDailyLogsSyncFolder`,
-   `runDailyLogSync`) mirrors `fileCardAttachments`'s zero-inference shape:
-   for every (day, contributor) with a Card for a project, mirrors that
-   Card's content into `syncs/Daily Logs/<date>-<humanId>.md` and copies
-   every `::file{...}` attachment alongside it
-   (`<date>-<humanId>-<name>`), idempotent via a stored `content_hash` for
-   the Card text and a deterministic destination name for attachments.
+3. **Done — `daily-log-sync`, including the Option-A root retirement.**
+   `dailyLogSync.server.ts` (`ensureDailyLogsSyncFolder`, `runDailyLogSync`)
+   mirrors `fileCardAttachments`'s zero-inference shape: for every (day,
+   contributor) with a Card for a project, mirrors that Card's content
+   into `syncs/Daily Logs/<date>-<humanId>.md` and copies every
+   `::file{...}` attachment alongside it (`<date>-<humanId>-<name>`),
+   idempotent via a stored `content_hash` for the Card text and a
+   deterministic destination name for attachments.
    `POST /api/graphlog/daily-log-sync` (synchronous, no job queue — see
    its own doc for why this differs from PhyLog's enqueue-then-poll
    shape), `nopal graphlog daily-log-sync --project <path> [--date]`.
-   **Deliberately still reads from the CURRENT, unchanged `daily-logs`
-   root** — the Option-A root retirement (`dailyLog.server.ts`'s folder
-   resolution pointing at `personal`'s own `syncs/Daily Logs` instead of
-   the vault-wide root) was scoped OUT of this pass on purpose: at least 7
-   call sites across `dailyLog.server.ts`/`vault.server.ts`/three upload
-   routes all independently resolve `getOrCreateVaultFolder(humanId,
-   "daily-logs", null)` today, and flipping that resolution would silently
-   orphan every existing human's real daily-log history without a real
-   data-migration script moving it first. Treat that as its own dedicated,
-   carefully-tested follow-up, not something to fold into a later change
-   incidentally.
+   The Option-A root retirement (`vault.server.ts`'s `resolveDailyLogsFolder`
+   + `ensureVaultRootFolders`'s "daily-logs" special case) shipped as its
+   own carefully-scoped, separately-tested follow-up — see "The 'Daily
+   Logs' symlink" above for the full design and what's still open
+   (sidebar navigation polish, per-request caching).
 4. **Not started — `sync-knowledge`.** Needs: the `_knowledge/` reserved-
    subfolder convention actually enforced/created, and the agentic stage
    itself (reuses `LlmProvider`/`PhotoDescriber` from `phylog`'s provider

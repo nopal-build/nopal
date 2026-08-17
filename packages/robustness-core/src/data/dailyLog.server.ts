@@ -8,6 +8,7 @@ import {
   getFoldersByIds,
   getOrCreateVaultFolder,
   ensureVaultRootFolders,
+  resolveDailyLogsFolder,
 } from "./vault.server";
 import type { FileRef } from "./vault.types";
 import { cardFileName } from "oxmarkdown-core";
@@ -126,11 +127,7 @@ export async function workableSaveDailyLog(
 ): Promise<{ entry: DailyLog | undefined; fileId: string | null }> {
   let fileId: string | null = null;
   try {
-    const rootFolder = await getOrCreateVaultFolder(
-      humanId,
-      "daily-logs",
-      null,
-    );
+    const rootFolder = await resolveDailyLogsFolder(humanId);
     const dateFolder = await getOrCreateVaultFolder(
       humanId,
       date,
@@ -240,7 +237,7 @@ export async function getDailyLogFolderAndReadmeId(
   humanId: string,
   date: string,
 ): Promise<{ dateFolderId: string; readmeFileId: string | null }> {
-  const rootFolder = await getOrCreateVaultFolder(humanId, "daily-logs", null);
+  const rootFolder = await resolveDailyLogsFolder(humanId);
   const dateFolder = await getOrCreateVaultFolder(humanId, date, rootFolder._id);
   const result = await query<[FileRef[]]>(
     `SELECT * FROM file_refs
@@ -306,7 +303,7 @@ export async function getDailyLogCards(
   humanId: string,
   date: string,
 ): Promise<DailyLogCard[]> {
-  const rootFolder = await getOrCreateVaultFolder(humanId, "daily-logs", null);
+  const rootFolder = await resolveDailyLogsFolder(humanId);
   const dateFolder = await getOrCreateVaultFolder(humanId, date, rootFolder._id);
   const result = await query<[FileRef[]]>(
     `SELECT * FROM file_refs
@@ -398,7 +395,7 @@ export async function createDailyLogCard(
   date: string,
   projectFolderId: string,
 ): Promise<DailyLogCard> {
-  const rootFolder = await getOrCreateVaultFolder(humanId, "daily-logs", null);
+  const rootFolder = await resolveDailyLogsFolder(humanId);
   const dateFolder = await getOrCreateVaultFolder(humanId, date, rootFolder._id);
   const fileName = cardFileName(projectFolderId);
 
@@ -541,7 +538,10 @@ Happy logging! ✨
  */
 export async function provisionNewUserVault(humanId: string): Promise<void> {
   try {
-    // Locked Vault Root Folders (daily-logs, projects, personal, …)
+    // Locked Vault Root Folders (projects, personal, …) — "daily-logs" is
+    // no longer one of them; `saveDailyLog` below resolves that human's
+    // daily-log storage itself (`resolveDailyLogsFolder`, always under
+    // `personal/syncs/Daily Logs` for a brand new human like this one).
     await ensureVaultRootFolders(humanId);
     // "Yesterday" in local wall-clock time — one day before account creation.
     // Deliberately avoids UTC methods: the seed runs on the host machine and

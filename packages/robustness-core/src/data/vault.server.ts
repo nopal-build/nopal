@@ -964,6 +964,17 @@ export async function ensureVaultRootFolders(
       continue;
     }
 
+    // `daily-logs` is being retired as an auto-provisioned root — see
+    // `resolveDailyLogsFolder`'s own doc (the `graphlog` skill's "Daily
+    // Logs symlink" section). A human who already has one gets it
+    // backfilled (above) or migrated (by `resolveDailyLogsFolder`);
+    // nobody — new or already-migrated — gets a fresh EMPTY one created
+    // here anymore. Without this, a migrated human would get one silently
+    // resurrected the very next time this function runs (e.g. their next
+    // page load), since by then no root-level folder named "daily-logs"
+    // exists for this check to find.
+    if (key === "daily-logs") continue;
+
     const created = await createVaultFolder({
       human_id: humanId,
       name: key,
@@ -987,6 +998,98 @@ export async function ensureVaultRootFolders(
   }
 
   return roots;
+}
+
+// Same literal `dailyLogSync.server.ts`'s `DAILY_LOGS_SYNC_FOLDER_NAME`
+// uses for every OTHER project's synced-in copy of a Card — duplicated
+// here (not imported) to avoid a circular import (`dailyLogSync.server.ts`
+// already imports FROM this file). Both names must stay "Daily Logs" if
+// either ever changes.
+const PERSONAL_DAILY_LOGS_FOLDER_NAME = "Daily Logs";
+
+/**
+ * Resolves the human's own daily-log storage folder — see the `graphlog`
+ * skill's "Daily Logs symlink" section for the full design. Canonically
+ * `personal/syncs/Daily Logs` going forward, replacing the old vault-wide
+ * `daily-logs` ROOT (see `VAULT_ROOTS`) as the actual place reads/writes
+ * happen; the root entry itself becomes a plain UI shortcut into this
+ * folder (not yet wired up on the client — see the skill's Build status).
+ *
+ * A human who still has the legacy root (anyone who used Nopal before this
+ * shipped) has it MOVED here the first time this runs for them —
+ * re-parented via `moveVaultFolder`, never recreated, so every file's own
+ * id (a day's `readme.md`, a Card, an attachment) and every date
+ * subfolder's own id survives completely unchanged; only
+ * `parent_folder_id`/`vault_root_key`/`folder_type`/`name` change. This is
+ * what keeps `::card{file="..."}` references, the `daily_logs` cache table
+ * (keyed by humanId+date, never by folder path), and anything else
+ * addressed by fileId working with no separate content migration needed.
+ *
+ * Idempotent and safe to call from every daily-log read/write path
+ * (`getDailyLogFolderAndReadmeId`/`getDailyLogCards`/`createDailyLogCard`/
+ * `workableSaveDailyLog` in `dailyLog.server.ts`, `upsertDailyLogReadme`
+ * below, and the daily-log upload routes) — an already-migrated human
+ * gets a fast "already there" lookup; a legacy human gets migrated exactly
+ * once, the first time any of those paths runs for them after this ships.
+ * `ensureVaultRootFolders`'s own "daily-logs" special case (above) is what
+ * keeps a migrated human's old root from being silently resurrected on
+ * their very next page load.
+ *
+ * A theoretical, accepted race: two fully concurrent first-calls for the
+ * same never-before-migrated human could both reach the "nothing to
+ * migrate, create fresh" branch and each create a folder — same class of
+ * risk `getOrCreateVaultFolder`'s own doc already accepts for this vault's
+ * check-then-create pattern generally, not a new one introduced here.
+ */
+export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFolder> {
+  const roots = await ensureVaultRootFolders(humanId);
+  const personal = roots.find((r) => r.vault_root_key === "personal");
+  if (!personal) throw new Error(`No personal root found for human ${humanId}`);
+
+  const { folders: personalChildren } = await listFolderChildren(humanId, personal._id);
+  let syncsFolder = personalChildren.find(
+    (f) => f.is_folder_type_root && f.folder_type === "syncs",
+  );
+  if (!syncsFolder) {
+    syncsFolder = await createVaultFolder({
+      human_id: humanId,
+      name: "Syncs",
+      parent_folder_id: personal._id,
+      folder_type: "syncs",
+    });
+  }
+  if (!syncsFolder) throw new Error("Failed to create personal's syncs folder");
+
+  const { folders: syncsChildren } = await listFolderChildren(humanId, syncsFolder._id);
+  const alreadyMigrated = syncsChildren.find((f) => f.name === PERSONAL_DAILY_LOGS_FOLDER_NAME);
+  if (alreadyMigrated) return alreadyMigrated;
+
+  const legacyResult = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders
+     WHERE human_id = $humanId AND parent_folder_id = null AND vault_root_key = $key
+     ORDER BY created_at ASC
+     LIMIT 1`,
+    { humanId, key: "daily-logs" },
+  );
+  const legacyRoot = legacyResult?.[0]?.[0] ? formatRecord(legacyResult[0][0]) : null;
+
+  if (legacyRoot) {
+    const moved = await moveVaultFolder(legacyRoot, syncsFolder);
+    if (!moved) throw new Error("Failed to migrate the legacy daily-logs root");
+    const renamed = await merge("vault_folders", moved._id, {
+      name: PERSONAL_DAILY_LOGS_FOLDER_NAME,
+      updated_at: new Date().toISOString(),
+    });
+    return renamed ? formatRecord(renamed as unknown as VaultFolder) : moved;
+  }
+
+  const created = await createVaultFolder({
+    human_id: humanId,
+    name: PERSONAL_DAILY_LOGS_FOLDER_NAME,
+    parent_folder_id: syncsFolder._id,
+  });
+  if (!created) throw new Error("Failed to create personal's syncs/Daily Logs folder");
+  return created;
 }
 
 /**
@@ -1334,13 +1437,13 @@ export async function deleteVaultFolderCascade(
  * Upserts the `readme.md` vault file for a given daily-log date.
  *
  * Folder structure created on-demand:
- *   daily-logs  (root, parent_folder_id = null)
+ *   personal/syncs/Daily Logs  (see `resolveDailyLogsFolder`)
  *     └── YYYY-MM-DD
  *           └── readme.md  (content_type text/markdown, source daily_log)
  *
  * On the same calendar day the content is overwritten in-place.
  * On subsequent days the old content is pushed to `md_versions` first
- * (same logic as computeMdUpdate — shouldn't normally happen because the
+ * (same logic as computeMdUpdate - shouldn't normally happen because the
  * daily-log lock prevents editing past days, but it's handled gracefully).
  */
 export async function upsertDailyLogReadme(
@@ -1350,11 +1453,7 @@ export async function upsertDailyLogReadme(
 ): Promise<FileRef | undefined> {
   try {
     // Ensure folder tree
-    const rootFolder = await getOrCreateVaultFolder(
-      humanId,
-      "daily-logs",
-      null,
-    );
+    const rootFolder = await resolveDailyLogsFolder(humanId);
     const dateFolder = await getOrCreateVaultFolder(
       humanId,
       dateStr,
