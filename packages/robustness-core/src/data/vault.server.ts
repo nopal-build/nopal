@@ -352,11 +352,18 @@ export async function validateFolderTypeForParent(
   if (isSpaceFolderTypeKey(folderType)) {
     const def = SPACE_FOLDER_TYPES[folderType];
 
-    // Every project and `personal` is itself tagged `project-n01` (see
-    // `ensureProjectN01`) — a space type may only be created directly
-    // inside one of those, never nested any deeper.
-    const isProjectN01 = parent.folder_type === "project-n01" && parent.is_folder_type_root;
-    if (!isProjectN01) {
+    // Every project and `personal` is itself tagged `project-n01` OR its
+    // successor `project-n02` (see `ensureProjectN01`/`ensureProjectN02`,
+    // the `graphlog` skill) — a space type may only be created directly
+    // inside one of those, never nested any deeper. Both containers accept
+    // the same space types (`skills`/`syncs` are reused as-is by `project-
+    // n02`; `graph` is new and only ever gets created by GraphLog itself,
+    // never through this human-facing "New folder" path, but there's no
+    // harm in the picker technically allowing it).
+    const isProjectContainer =
+      (parent.folder_type === "project-n01" || parent.folder_type === "project-n02") &&
+      parent.is_folder_type_root;
+    if (!isProjectContainer) {
       return `${def.label} folders can only be created directly inside a project or your Personal space`;
     }
 

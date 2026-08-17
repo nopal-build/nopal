@@ -10,24 +10,30 @@
  * Three tiers, each created via the same "New folder → pick a type" flow
  * (container types are the one exception — see below):
  *
- * 0. Container types (`ContainerFolderTypeKey`) — today just `project-n01`.
- *    This is the type every `projects/<name>` folder AND the `personal`
- *    root itself now carry (see the `vault` skill's "project-n01 spaces"
- *    section). Unlike the other two tiers, a human never picks this from
- *    the "New folder" dialog — it's stamped automatically the moment a
- *    project (or `personal`) is created (`createVaultFolder`/
- *    `ensureVaultRootFolders`, `vault.server.ts`), and lazily backfilled
- *    onto any project that predates this type. `README.md` is that space's
- *    index; a human may only directly write into its `skills`/`syncs`
- *    child folders — everything else in the tree is managed entirely by
- *    the PhyLog pipeline (pre-capture/capture/post-capture — see the
- *    `phylog` skill). Hence `writable: "system"` (see below) — no human
- *    role can write CONTENT directly into a `project-n01` folder; PhyLog's
- *    own server functions bypass this check entirely (they call the data
- *    layer directly, never through the `api.vault.*` write routes this
- *    gates). Folder-OBJECT-level operations on the anchor itself — rename,
- *    delete, share, trash — are a separate, still-owner-writable concern;
- *    see `vault.server.ts`'s `canWriteToFolderId` doc.
+ * 0. Container types (`ContainerFolderTypeKey`) — `project-n01` and its
+ *    successor `project-n02` (see the `graphlog` skill). This is the type
+ *    every `projects/<name>` folder AND the `personal` root itself now
+ *    carry (see the `vault` skill's "project-n01 spaces" section). Unlike
+ *    the other two tiers, a human never picks this from the "New folder"
+ *    dialog — it's stamped automatically the moment a project (or
+ *    `personal`) is created (`createVaultFolder`/`ensureVaultRootFolders`,
+ *    `vault.server.ts`), and lazily backfilled onto any project that
+ *    predates this type. `README.md` is that space's index; a human may
+ *    only directly write into its `skills`/`syncs` child folders —
+ *    everything else in the tree is managed entirely by the pipeline
+ *    (`project-n01`: PhyLog's pre-capture/capture/post-capture, see the
+ *    `phylog` skill; `project-n02`: GraphLog's sync-knowledge/sync-graph/
+ *    graph-project-view, see the `graphlog` skill). Hence
+ *    `writable: "system"` (see below) — no human role can write CONTENT
+ *    directly into either container; the pipeline's own server functions
+ *    bypass this check entirely (they call the data layer directly, never
+ *    through the `api.vault.*` write routes this gates). Folder-OBJECT-
+ *    level operations on the anchor itself — rename, delete, share, trash
+ *    — are a separate, still-owner-writable concern; see
+ *    `vault.server.ts`'s `canWriteToFolderId` doc. `createVaultFolder`
+ *    still tags every brand new project `project-n01` today — the cutover
+ *    to `project-n02` by default is a deliberate later migration step, not
+ *    a side effect of this type existing (see the `graphlog` skill).
  *
  * 1. Space types (`SpaceFolderTypeKey`) — `skills`, `syncs`, `daily-logs`,
  *    and the not-yet-buildable `newspapers`. Creatable directly inside a
@@ -80,9 +86,9 @@
 
 import type { Role } from "./humans.server";
 
-export type ContainerFolderTypeKey = "project-n01";
+export type ContainerFolderTypeKey = "project-n01" | "project-n02";
 
-export type SpaceFolderTypeKey = "skills" | "syncs" | "newspapers" | "daily-logs";
+export type SpaceFolderTypeKey = "skills" | "syncs" | "newspapers" | "daily-logs" | "graph";
 
 export type SyncFolderTypeKey =
   | "sync-one-way"
@@ -174,6 +180,20 @@ export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> 
     shareable: false,
     publishable: false,
   },
+  // `graph` — a `project-n02` space type (see the `graphlog` skill),
+  // holding one `graph-log-YYYY-MM-DD.md` file per day GraphLog's
+  // `sync-graph` stage actually finds new content for. Same policy as
+  // `daily-logs` above (system-managed, not directly editable) and the
+  // same "lazily created the first time there's something to write"
+  // convention — NOT seeded at project creation time, unlike `skills`.
+  graph: {
+    label: "Graph",
+    description:
+      "Daily graph-log files GraphLog's sync-graph stage writes here, one per day with new content — the durable record graph-project-view reads to build README.md. System-managed, not directly editable.",
+    writable: "system",
+    shareable: false,
+    publishable: false,
+  },
 };
 
 export const CONTAINER_FOLDER_TYPES: Record<ContainerFolderTypeKey, VaultFolderTypeDef> = {
@@ -181,6 +201,25 @@ export const CONTAINER_FOLDER_TYPES: Record<ContainerFolderTypeKey, VaultFolderT
     label: "Project",
     description:
       "A PhyLog-managed space — a project folder, or your Personal space. README.md is its index; only its skills/syncs folders are directly human-editable, everything else is managed by the PhyLog pipeline.",
+    writable: "system",
+    shareable: true,
+    publishable: true,
+  },
+  // `project-n02` — the GraphLog-managed successor to `project-n01` (see
+  // the `graphlog` skill). Same shape/policy as `project-n01` (README.md
+  // is the index, `skills`/`syncs` are the only human-writable children,
+  // everything else is system-managed) — GraphLog's `sync-knowledge`/
+  // `sync-graph`/`graph-project-view` stages replace PhyLog's pre-capture/
+  // capture/post-capture as the thing managing everything outside those
+  // two folders, including the new `Graph` space type below. Deliberately
+  // NOT yet wired into `createVaultFolder`'s "every new project is a
+  // container" default — that cutover is its own migration step (see the
+  // `graphlog` skill's phased plan), not a side effect of adding this
+  // type definition.
+  "project-n02": {
+    label: "Project",
+    description:
+      "A GraphLog-managed space — a project folder, or your Personal space. README.md is its index; only its skills/syncs folders are directly human-editable, everything else (including Graph/) is managed by the GraphLog pipeline.",
     writable: "system",
     shareable: true,
     publishable: true,

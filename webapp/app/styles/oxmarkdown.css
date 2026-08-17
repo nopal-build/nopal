@@ -507,6 +507,47 @@
   line-height: 1.4;
 }
 
+/* ── Ref directive (`:ref{...}`) ─────────────────────────── */
+/* See `oxmarkdown-core/src/refDirective.ts` + `components/OxRenderer.tsx`'s
+   `RefDirectiveStatic`/`RefDirectiveMarker`. `.ox-ref` is shared by both
+   the verbose (plain text) and non-verbose (`*` marker) renderings; the
+   marker additionally gets `.ox-ref-marker` for its own clickable-glyph
+   styling. */
+
+.ox-ref {
+  font-size: 0.85em;
+  color: var(--ox-color-subtle);
+}
+.ox-ref a {
+  color: var(--ox-color-link);
+}
+.ox-ref-marker {
+  display: inline-block;
+  cursor: pointer;
+  padding: 0 3px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+.ox-ref-marker:hover,
+.ox-ref-marker:focus-visible {
+  background: var(--ox-color-selected-bg);
+  outline: none;
+}
+.ox-ref-popover-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.ox-ref-popover-row:last-child {
+  margin-bottom: 0;
+}
+.ox-ref-popover-row > span:first-child {
+  opacity: 0.6;
+  font-size: 0.85em;
+}
+
+/* ── Directive-authoring utilities ────────────────── */
 /* ── Directive-authoring utilities ────────────────────────────── */
 /* A directive's registry renderer (see `oxmarkdown/directiveRegistry.ts`)
    often needs a small "title" line above its content (a gallery caption, a

@@ -13,3 +13,4 @@
 export * from "./document";
 export * from "./cardDirective";
 export * from "./mention";
+export * from "./refDirective";

@@ -706,6 +706,26 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title:
+      'A read-only attribution mark: :ref{name="..." datetime="..." location="..." verbose="true"}',
+    body: (
+      <>
+        Built for GraphLog (see the <code>graphlog</code> skill) — a citation, not a caller-
+        registered directive, same built-in tier as <code>::file</code>/<code>::card</code>. A{" "}
+        <strong>text directive</strong> (inline, no children), since it sits inline in a
+        sentence rather than taking its own row. Never editable — GraphLog is the only writer,
+        so unlike every other directive it does NOT get the generic attrs-editing popover. Two
+        renderings decided purely by the static <code>verbose</code> attribute, never by where
+        it's rendered: <code>verbose="true"</code> (graph-log entries only) is fully spelled-out
+        plain text with a linked name/source, no popover; omitted (everywhere else) renders as a
+        single <code>*</code> — click/tap opens a small read-only popover with Name/Datetime/
+        Source. See <code>oxmarkdown-core/src/refDirective.ts</code> for the attribute shape and
+        <code>components/OxRenderer.tsx</code>'s <code>RefDirectiveStatic</code>/
+        <code>RefDirectiveMarker</code>.
+      </>
+    ),
+  },
 ];
 
 // ─── Sample content for the playground ──────────────────────────────────────────────────────────────────
@@ -746,6 +766,12 @@ Third cell.
 
 1. Ordered
 2. List
+
+Decided to use cedar for the fence :ref{name="Jane Doe" human-id="h_demo" datetime="2026-08-17T14:30:00Z" location="/h_demo:personal/syncs/Daily Logs/2026-08-17.md"}
+non-verbose — click the asterisk.
+
+Decided to use cedar for the fence :ref{name="Jane Doe" human-id="h_demo" datetime="2026-08-17T14:30:00Z" location="/h_demo:personal/syncs/Daily Logs/2026-08-17.md" verbose="true"}
+verbose — always fully spelled out, no popover.
 `;
 
 const DEMO_DIRECTIVES: DirectiveRegistry = {

@@ -26,6 +26,7 @@ import {
   countExtraBlankLines,
   directiveAttrs,
   isDirectiveNode,
+  parseRefAttrs,
   type OxDocument,
   type DirectiveNode,
 } from "oxmarkdown-core";
@@ -492,6 +493,16 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     return <FileDirectiveStatic key={key} node={node} directives={ctx.directives} />;
   }
 
+  // `:ref{...}` — same built-in category, see
+  // `oxmarkdown-core/src/refDirective.ts`. A TEXT directive (inline, no
+  // children) rather than a leaf/container one, since it's a citation
+  // sitting inline in a sentence, not its own row. Never editable — no
+  // `ctx.interactive` branch at all, unlike the generic directive-attrs
+  // popover other directives get further down.
+  if (node.type === "textDirective" && node.name === "ref") {
+    return <RefDirectiveStatic key={key} node={node} />;
+  }
+
   // `::card{file="..."}` — same category, see `oxmarkdown/cardDirective.ts`.
   if (node.type === "leafDirective" && node.name === "card") {
     return (
@@ -918,6 +929,140 @@ function CardDirectiveStatic({
       projectHref={resolved.projectHref}
       content={<OxStaticNodes nodes={cardDoc.children} directives={directives} />}
     />
+  );
+}
+
+// ── Ref directive (`:ref{...}`) ─────────────────────────────────────────
+// A read-only attribution mark — see `oxmarkdown-core/src/refDirective.ts`
+// for the attribute shape and the `graphlog` skill for who writes these
+// (GraphLog's `sync-graph` stage, into `Graph/graph-log-YYYY-MM-DD.md`).
+// Two renderings, both decided purely by the `verbose` attribute (never by
+// rendering context) per the skill's own resolved decision:
+//   - verbose="true" (graph-log entries only): fully spelled-out plain
+//     inline text, no popover — there's nothing hidden to reveal.
+//   - omitted/false (everywhere else): a single `*` glyph; click/tap opens
+//     a small read-only popover with Name/Datetime/Location. This directive
+//     is never editable by a human (GraphLog is the only writer), so unlike
+//     every OTHER directive it does NOT go through `InteractiveDirective`'s
+//     generic attrs-editing popover further below — the popover here has no
+//     input fields, just plain text/links, and open/close is purely local
+//     component state rather than `ctx.interactive`'s selection model.
+
+/** Formats an ISO datetime for display — e.g. "Aug 17, 2026, 2:30 PM".
+ * Falls back to the raw string if it doesn't parse, rather than showing
+ * "Invalid Date" for a malformed/foreign `:ref{...}`.
+ *
+ * Pinned to an explicit locale AND `timeZone: "UTC"` (never the viewer's
+ * own, and never `undefined`) — `toLocaleString(undefined, ...)` resolves
+ * to whatever locale/timezone the RUNTIME is in, which is the server's
+ * during SSR and the browser's during hydration; those two disagree
+ * (confirmed directly — this shipped as a real hydration-mismatch bug on
+ * `/fruits/styles/oxmarkdown` once already), so React throws a hydration
+ * error the moment the client's re-render produces different text than
+ * what the server sent down. Same fix `fruits_.profile.tsx`'s
+ * `formatSignedAt` already applies for the same reason — see its own
+ * comment. */
+function formatRefDatetime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
+}
+
+/** Best-effort link target for a cited human's name — same `/humanId:path`
+ * shape the oxmarkdown skill documents for `@`-mentions (see `mention.ts`),
+ * scoped to that human's own vault root rather than a specific file. Shares
+ * mentions' own known, not-yet-wired-up gap: this is a literal href, not
+ * yet resolved to real in-app navigation to an actual profile page (no such
+ * page exists yet) — whoever finishes that TODO for mentions should cover
+ * this the same way. */
+function humanProfileHref(humanId: string): string {
+  return `/${humanId}:root`;
+}
+
+function RefDirectiveStatic({ node }: { node: DirectiveNode }) {
+  const parsed = parseRefAttrs(node);
+  if (!parsed) {
+    return <span className="ox-directive-unknown">:ref</span>;
+  }
+  const { name, humanId, datetime, location, verbose } = parsed;
+  const nameNode = humanId ? (
+    <a href={humanProfileHref(humanId)}>{name}</a>
+  ) : (
+    <span>{name}</span>
+  );
+
+  if (verbose) {
+    return (
+      <span className="ox-ref ox-ref--verbose">
+        {nameNode} · {formatRefDatetime(datetime)} ·{" "}
+        <a href={location}>source</a>
+      </span>
+    );
+  }
+
+  return (
+    <RefDirectiveMarker
+      name={name}
+      humanId={humanId}
+      datetime={formatRefDatetime(datetime)}
+      location={location}
+    />
+  );
+}
+
+function RefDirectiveMarker({
+  name,
+  humanId,
+  datetime,
+  location,
+}: {
+  name: string;
+  humanId?: string;
+  datetime: string;
+  location: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const toggle = () => setOpen((o) => !o);
+  return (
+    <span
+      ref={setAnchorEl as React.Ref<never>}
+      className="ox-ref ox-ref-marker"
+      role="button"
+      tabIndex={0}
+      aria-label={`Reference: ${name}`}
+      onClick={toggle}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggle();
+        }
+      }}
+    >
+      *
+      <OxPopover anchorEl={anchorEl} open={open} onDismiss={() => setOpen(false)}>
+        <div className="ox-popover-title">Reference</div>
+        <div className="ox-ref-popover-row">
+          <span>Name</span>
+          {humanId ? <a href={humanProfileHref(humanId)}>{name}</a> : <span>{name}</span>}
+        </div>
+        <div className="ox-ref-popover-row">
+          <span>When</span>
+          <span>{datetime}</span>
+        </div>
+        <div className="ox-ref-popover-row">
+          <span>Source</span>
+          <a href={location}>{location}</a>
+        </div>
+      </OxPopover>
+    </span>
   );
 }
 
