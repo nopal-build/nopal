@@ -74,6 +74,40 @@ three default files — `PRE_CAPTURE.md`, `CAPTURE.md`, `POST_CAPTURE.md`
 — one per pipeline stage, each with a sensible default so a new project
 is usable without any human editing.
 
+**Those defaults are admin-reviewable and editable, not just hardcoded
+source** (`phylogDefaults.server.ts`, `/fruits/maker/phylog/defaults`
+-- its own page, linked from `/fruits/maker/phylog`'s "Default Prompts →",
+rather than a section of that usage dashboard, Admin/Super only).
+`DEFAULT_PRE_CAPTURE_SKILL`/
+`DEFAULT_CAPTURE_SKILL`/`DEFAULT_POST_CAPTURE_SKILL` live there now (moved
+from `projectN01.server.ts`, which has no more reason to own them than
+any other consumer -- see that file's own module doc for why the move
+avoids an import cycle). A single DB row (`phylog_default_skills`, fixed
+id `main`) carries one OPTIONAL field per stage; unset means "use the
+hardcoded constant," so a fresh deploy with no overrides behaves exactly
+like before this existed. `getAllEffectiveDefaultSkills()`/
+`getEffectiveDefaultSkill(stage)` resolve override-or-hardcoded;
+`setDefaultSkillOverride(stage, content|null, humanId)` writes one
+stage's override (or clears it back to the built-in) without ever
+disturbing the OTHER two stages' overrides (a real, confirmed pitfall:
+SurrealDB's `upsert` here is a full-record replace, not a merge, so
+setting one field means re-specifying all three from a fresh read first).
+
+**Deliberately NOT retroactive.** Editing a default only changes (a) what
+a BRAND NEW project gets seeded with from that point on
+(`ensureProjectN01` now calls `getAllEffectiveDefaultSkills()` instead of
+using the raw constants directly), and (b) the rare runtime fallback
+`capture.server.ts` uses if a project's own `CAPTURE.md` is somehow
+missing (`getEffectiveDefaultSkill("capture")`, replacing the old
+`?? DEFAULT_CAPTURE_SKILL`). It never reaches into an EXISTING project's
+own already-seeded `skills/*.md` -- that file is that project's own copy
+from the moment it's created, and rewriting it out from under a project
+owner because an admin tuned the org-wide default would be silent data
+loss, not a feature. `DEFAULT_PRE_CAPTURE_SKILL`/`DEFAULT_POST_CAPTURE_SKILL`
+are ONLY ever used as seed content (pre-capture/post-capture treat a
+missing file as "skip," never falling back to these at runtime the way
+capture does).
+
 ### Reset — two distinct depths
 
 `resetProjectN01Content` (`projectN01.server.ts`) deletes every direct
@@ -722,10 +756,13 @@ workspace package — not under `webapp/app/data` (see "Scaling & Process
 Isolation" above for why).
 
 - `packages/robustness-core/src/data/projectN01.server.ts` —
-  `project-n01` seeding/retrofit, default skill content,
-  `resetProjectN01Content`, `getProjectStageSkill`/`isSkipInstruction`/
-  `listExtraSkillFiles`, and the `daily-logs` space's find/create/list/
-  manifest helpers.
+  `project-n01` seeding/retrofit, `resetProjectN01Content`,
+  `getProjectStageSkill`/`isSkipInstruction`/`listExtraSkillFiles`, and
+  the `daily-logs` space's find/create/list/manifest helpers.
+- `packages/robustness-core/src/data/phylogDefaults.server.ts` — the
+  hardcoded `DEFAULT_PRE_CAPTURE_SKILL`/`DEFAULT_CAPTURE_SKILL`/
+  `DEFAULT_POST_CAPTURE_SKILL` constants AND the admin-editable override
+  layer on top of them (see "project-n01 spaces" above).
 - `packages/robustness-core/src/data/preCapture.server.ts` — stage 1.
 - `packages/robustness-core/src/data/capture.server.ts` — stage 2
   (deterministic filing, the organize/README agent loop and its tools,
@@ -760,6 +797,15 @@ Isolation" above for why).
   `api.phylog.reorganize.tsx` / `api.phylog.reset.tsx` /
   `api.phylog.reset-pre-capture.tsx` / `api.phylog.jobs.$jobId.tsx` — API
   surface (enqueue + poll only).
+- `webapp/app/routes/fruits_.maker_.phylog.tsx` — usage dashboard (see
+  "Usage tracking" below), with a "Default Prompts →" link to the page
+  below.
+- `webapp/app/routes/fruits_.maker_.phylog_.defaults.tsx` — the
+  review/edit UI for `phylogDefaults.server.ts`'s overrides (its own
+  `action` handles `save-default-skill`/`reset-default-skill`). Split
+  into its own page rather than a section of the usage dashboard above --
+  three full-height textareas made that page feel dominated by an editor
+  rather than stats.
 - `crates/cli/src/phylog.rs` — CLI surface (`nopal phylog ...`).
 - `webapp/app/routes/api.phylog.usage-cleanup.tsx` — raw usage-event
   pruning cron.

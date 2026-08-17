@@ -45,10 +45,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const project = await resolveProjectManifest(folder.human_id, folder);
 
   return {
+    // Every other route surfaces `user` in its own loader data for
+    // `useUser()`/`permissions.isAdmin()` to find via `useMatches()` --
+    // there's no shared `/fruits` layout loader that provides it
+    // centrally. Omitting it here was a real, confirmed bug: `AppLayout`'s
+    // nav silently hid the Maker link (and anything else gated on
+    // `isAdmin`) for an Admin/Super viewing this specific page, since
+    // `useUser()` found no ancestor match with a `user` key and fell back
+    // to `null`.
+    user,
     folder,
     project,
     status: getProjectStatus(folder),
-    // Status is a personal organizational tool, not a Sharing Role — only
+    // Status is a personal organizational tool, not a Sharing Role -- only
     // the project's own creator may change it (see `projectStatus.server.ts`).
     canEditStatus: folder.human_id === user._id,
   };

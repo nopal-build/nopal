@@ -130,7 +130,6 @@ import {
 import { fileCardAttachments, summaryFileName, type FiledAttachment } from "./sorter.server";
 import {
   CARD_COPY_FILE,
-  DEFAULT_CAPTURE_SKILL,
   getProjectStageSkill,
   listDailyLogEntries,
   listExtraSkillFiles,
@@ -139,6 +138,7 @@ import {
   type DailyLogEntryMeta,
   type ResetSummary,
 } from "./projectN01.server";
+import { getEffectiveDefaultSkill } from "./phylogDefaults.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
 import { classifyLlmError, recordPhylogUsage } from "./phylogMetrics.server";
 import { getHumansById } from "./humans.server";
@@ -629,7 +629,7 @@ export async function runCapture(
   const humanLabelById = new Map(humans.map((h) => [h._id, h.name || h.email]));
   const describeHuman = (id: string) => humanLabelById.get(id) ?? id;
 
-  const skillContent = (await getProjectStageSkill(projectFolder, "CAPTURE.md")) ?? DEFAULT_CAPTURE_SKILL;
+  const skillContent = (await getProjectStageSkill(projectFolder, "CAPTURE.md")) ?? (await getEffectiveDefaultSkill("capture"));
   // Backward-compat continuity: a project may already have a general
   // skills/SKILL.md predating this pipeline (the old README-writer's own
   // steering file) — fold it in too, alongside CAPTURE.md's own
@@ -1351,7 +1351,7 @@ export async function runReorganize(
   const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
   const readmeContent = readme?.content ?? "";
   const tree = await renderManagedTree(projectFolder.human_id, projectFolder._id);
-  const skillContent = (await getProjectStageSkill(projectFolder, "CAPTURE.md")) ?? DEFAULT_CAPTURE_SKILL;
+  const skillContent = (await getProjectStageSkill(projectFolder, "CAPTURE.md")) ?? (await getEffectiveDefaultSkill("capture"));
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
   const extraSkillFiles = await listExtraSkillFiles(projectFolder);
   const llm = opts.llm ?? new AnthropicProvider();

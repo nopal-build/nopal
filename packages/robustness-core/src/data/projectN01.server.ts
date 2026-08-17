@@ -45,59 +45,22 @@ import {
 } from "./vault.server";
 import { merge } from "./generic.server";
 import { splitFrontmatter, withReadmeBody } from "./project.types";
+import { getAllEffectiveDefaultSkills } from "./phylogDefaults.server";
 
-// ─── Default skill file content ────────────────────────────────────────
+// ─── Default skill file content ──────────────────────────────────
+//
+// The hardcoded DEFAULT_*_SKILL constants themselves, and the
+// admin-editable overrides layered on top of them (reviewed/edited from
+// `/fruits/maker/phylog`), now live in `phylogDefaults.server.ts` --
+// this file just consumes the RESOLVED result (`getAllEffectiveDefaultSkills`)
+// when seeding a brand new project's `skills/` folder below. Moved there
+// specifically to avoid an import cycle (`phylogDefaults.server.ts` has
+// no reason to depend on anything in THIS file).
 
 /** The exact marker a skill file's body must START WITH (after any front
  * matter) to mean "do nothing" — checked case-insensitively against the
  * first non-blank line. Shared by all three stages. */
 const SKIP_MARKER = "skip";
-
-export const DEFAULT_PRE_CAPTURE_SKILL = `${SKIP_MARKER}
-
-PhyLog's pre-capture stage does nothing until you replace this with real
-instructions. When it runs, it looks at every file attached to this
-project's daily-log Cards, and every file inside this project's own
-\`syncs/\` folder, that doesn't already have a sibling \`*-summary.md\` next
-to it — and asks an AI to decide (per the instructions you write here)
-whether to write one, and what it should focus on.
-
-For example, you might replace this with something like:
-
-- Describe every photo attachment factually — what it shows, not what it
-  means.
-- Summarize any PDF or text file dropped into syncs/ in 2-3 sentences.
-- Skip anything that's just a screenshot of a chat.
-
-Leaving this file as "skip" means pre-capture is a complete no-op — capture
-will still run, it just won't have any pre-written summaries to draw on.
-`;
-
-export const DEFAULT_CAPTURE_SKILL = `File every new attachment from this project's daily-log Cards into this
-project, and keep README.md as a clear, organized index linking to
-everything that's been filed. Reorganize into subfolders only when it
-clearly helps keep things navigable — don't create structure for its own
-sake. Never invent progress, dates, or facts that aren't grounded in the
-Card content, any pre-capture summaries, or README.md's own existing
-content.
-
-When presenting a GROUP of related photos, use the ::gallery{folder="..."}
-directive (group them into a single subfolder, then reference it by name)
-so they display as a photo grid instead of a bulleted list of links.
-
-Replace this file with your own instructions to change how this project
-gets organized — e.g. "group photos by month" or "keep a running task
-list at the top of the README."
-`;
-
-export const DEFAULT_POST_CAPTURE_SKILL = `${SKIP_MARKER}
-
-Post-capture is reserved for processing that happens after this project's
-structure and README have already been captured — for example, the
-planned "newspapers" space (a generated daily/individual digest). Nothing
-runs here yet; replace this file once there's something you want done
-after every capture.
-`;
 
 /** True when `content`'s body (front matter already stripped by the
  * caller, if any) means "do nothing" for a given stage — the first
@@ -159,10 +122,15 @@ export async function ensureProjectN01(folder: VaultFolder): Promise<VaultFolder
     });
   }
   if (skillsFolder) {
+    // Seeds with the CURRENT effective defaults (an admin's override, if
+    // set, else the hardcoded built-in) -- not a stale hardcoded string,
+    // so a change made on /fruits/maker/phylog applies to every project
+    // created from that point on, same as intended.
+    const effective = await getAllEffectiveDefaultSkills();
     await Promise.all([
-      ensureSkillFile(current.human_id, skillsFolder._id, "PRE_CAPTURE.md", DEFAULT_PRE_CAPTURE_SKILL),
-      ensureSkillFile(current.human_id, skillsFolder._id, "CAPTURE.md", DEFAULT_CAPTURE_SKILL),
-      ensureSkillFile(current.human_id, skillsFolder._id, "POST_CAPTURE.md", DEFAULT_POST_CAPTURE_SKILL),
+      ensureSkillFile(current.human_id, skillsFolder._id, "PRE_CAPTURE.md", effective.preCapture.content),
+      ensureSkillFile(current.human_id, skillsFolder._id, "CAPTURE.md", effective.capture.content),
+      ensureSkillFile(current.human_id, skillsFolder._id, "POST_CAPTURE.md", effective.postCapture.content),
     ]);
   }
 

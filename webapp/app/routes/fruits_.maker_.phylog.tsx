@@ -22,12 +22,17 @@ import { getHumansById } from "robustness-core/data/humans.server";
 
 type MakerRangeDays = 7 | 30;
 
-export async function loader({ request }: LoaderFunctionArgs) {
+async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
-  if (!user) return redirect("/login");
+  if (!user) throw redirect("/login");
   if (user.role !== "Admin" && user.role !== "Super") {
     throw data("Forbidden", { status: 403 });
   }
+  return user;
+}
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await requireMakerAccess(request);
 
   const url = new URL(request.url);
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
@@ -170,7 +175,7 @@ function BarRow({
   );
 }
 
-// ─── Main ───────────────────────────────────────────────────────────────────
+// ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function FruitsMakerPhylog() {
   const { days, usage, projectNameById, humanById } = useLoaderData<typeof loader>();
@@ -185,6 +190,9 @@ export default function FruitsMakerPhylog() {
         <div className="flex items-center justify-between flex-wrap gap-4 mb-2">
           <Link to="/fruits/maker" className="link text-sm font-mono">
             ← Maker
+          </Link>
+          <Link to="/fruits/maker/phylog/defaults" className="link text-sm font-mono">
+            Default Prompts →
           </Link>
         </div>
         <div className="flex items-center justify-between flex-wrap gap-4 mb-8">

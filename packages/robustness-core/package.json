@@ -22,6 +22,7 @@
     "./data/mentionSearch.server": "./src/data/mentionSearch.server.ts",
     "./data/passkeys.server": "./src/data/passkeys.server.ts",
     "./data/phylogAgent.server": "./src/data/phylogAgent.server.ts",
+    "./data/phylogDefaults.server": "./src/data/phylogDefaults.server.ts",
     "./data/phylogMetrics.server": "./src/data/phylogMetrics.server.ts",
     "./data/phylogQueue.server": "./src/data/phylogQueue.server.ts",
     "./data/postCapture.server": "./src/data/postCapture.server.ts",
