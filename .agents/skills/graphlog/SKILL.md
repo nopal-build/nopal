@@ -244,11 +244,28 @@ skill was born from:
    still tags every brand new project `project-n01` by default (that
    cutover is a deliberate later step, not a side effect of this type
    existing).
-3. **Not started — `daily-log-sync`.** Needs: the Option-A `daily-logs`
-   root retirement (`dailyLog.server.ts`'s folder resolution pointing at
-   `personal`'s own `syncs/Daily Logs` instead of the vault-wide root),
-   and the deterministic Card→project copy itself (mirrors
-   `fileCardAttachments`'s zero-inference shape).
+3. **Partially done — `daily-log-sync`'s copy step, WITHOUT the Option-A
+   root retirement.** `dailyLogSync.server.ts` (`ensureDailyLogsSyncFolder`,
+   `runDailyLogSync`) mirrors `fileCardAttachments`'s zero-inference shape:
+   for every (day, contributor) with a Card for a project, mirrors that
+   Card's content into `syncs/Daily Logs/<date>-<humanId>.md` and copies
+   every `::file{...}` attachment alongside it
+   (`<date>-<humanId>-<name>`), idempotent via a stored `content_hash` for
+   the Card text and a deterministic destination name for attachments.
+   `POST /api/graphlog/daily-log-sync` (synchronous, no job queue — see
+   its own doc for why this differs from PhyLog's enqueue-then-poll
+   shape), `nopal graphlog daily-log-sync --project <path> [--date]`.
+   **Deliberately still reads from the CURRENT, unchanged `daily-logs`
+   root** — the Option-A root retirement (`dailyLog.server.ts`'s folder
+   resolution pointing at `personal`'s own `syncs/Daily Logs` instead of
+   the vault-wide root) was scoped OUT of this pass on purpose: at least 7
+   call sites across `dailyLog.server.ts`/`vault.server.ts`/three upload
+   routes all independently resolve `getOrCreateVaultFolder(humanId,
+   "daily-logs", null)` today, and flipping that resolution would silently
+   orphan every existing human's real daily-log history without a real
+   data-migration script moving it first. Treat that as its own dedicated,
+   carefully-tested follow-up, not something to fold into a later change
+   incidentally.
 4. **Not started — `sync-knowledge`.** Needs: the `_knowledge/` reserved-
    subfolder convention actually enforced/created, and the agentic stage
    itself (reuses `LlmProvider`/`PhotoDescriber` from `phylog`'s provider

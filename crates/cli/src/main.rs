@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 mod auth;
+mod graphlog;
 mod image;
 mod phylog;
 mod record;
@@ -92,6 +93,13 @@ enum Command {
     Phylog {
         #[command(subcommand)]
         command: PhylogCommand,
+    },
+    /// GraphLog's pipeline for one `project-n02` project (see the
+    /// `graphlog` skill): daily-log-sync -> sync-knowledge -> sync-graph
+    /// -> graph-project-view. Only daily-log-sync exists so far.
+    Graphlog {
+        #[command(subcommand)]
+        command: GraphlogCommand,
     },
     /// Reference docs for how to write things in Nopal (OxMarkdown syntax,
     /// the Vault, etc). Lists available skills by default.
@@ -399,6 +407,21 @@ enum SortCommand {
         /// Re-run even if this day was already sorted.
         #[arg(long)]
         force: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GraphlogCommand {
+    /// Deterministic Card→project copy into `syncs/Daily Logs/` — no LLM
+    /// call, always applies for real (see the `graphlog` skill).
+    DailyLogSync {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Only sync this one day, YYYY-MM-DD. Omit to sweep every day this
+        /// project has ever had a Card for.
+        #[arg(long)]
+        date: Option<String>,
     },
 }
 
@@ -730,6 +753,17 @@ fn main() {
                     WatchCommand::Status {} => watch::status(),
                     WatchCommand::Logs { lines } => watch::logs(lines),
                 },
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Graphlog { command } => {
+            let result = match command {
+                GraphlogCommand::DailyLogSync { project, date } => {
+                    graphlog::daily_log_sync(&project, date.as_deref())
+                }
             };
             if let Err(e) = result {
                 eprintln!("{e}");

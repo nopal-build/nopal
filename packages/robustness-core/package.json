@@ -8,6 +8,7 @@
     "./data/apiTokens.server": "./src/data/apiTokens.server.ts",
     "./data/capture.server": "./src/data/capture.server.ts",
     "./data/dailyLog.server": "./src/data/dailyLog.server.ts",
+    "./data/dailyLogSync.server": "./src/data/dailyLogSync.server.ts",
     "./data/db.server": "./src/data/db.server.ts",
     "./data/file.server": "./src/data/file.server.ts",
     "./data/fileReferences.server": "./src/data/fileReferences.server.ts",
