@@ -25,14 +25,17 @@
  * see `GRAPH.md`) and a verbose `:ref{...}` citation (`oxmarkdown-core`'s
  * `buildRefDirectiveMarkdown`) — PRE-COMPUTED here, never left for the
  * model to hand-format, so a citation's name/datetime/location can never
- * be hallucinated. Cross-day links point only BACKWARD (older days'
- * headings are handed to the model as ready-to-use markdown links,
- * labeled with their date since "Node 1" alone is ambiguous across many
- * days — see the `${d} ${h.heading}` link text below; a day currently
- * being processed is never told about days after it). A node may ALSO
- * link to another node from the SAME day's file, in either direction —
- * the model handles that itself, entirely within its one completion for
- * that day, since nothing else could supply that list ahead of time.
+ * be hallucinated. Cross-day links point only BACKWARD. The candidate
+ * list for those backward links is `Graph/graph-structure.md` (see
+ * `graphStructure.server.ts`) — a real, glossed, weighted index of the
+ * whole graph, not just a bare `[date Node N](...)` link with no content
+ * to judge relevance against — falling back to a plain scan of every
+ * existing graph-log file's headings for a project that's never had
+ * graph-structure run yet. Either way, a day currently being processed is
+ * never told about days after it. A node may ALSO link to another node
+ * from the SAME day's file, in either direction — the model handles that
+ * itself, entirely within its one completion for that day, since nothing
+ * else could supply that list ahead of time.
  *
  * IDEMPOTENT via an aggregate hash of that day's candidates' own
  * `content_hash` PLUS each one's knowledge-sidecar hash (so a
@@ -266,22 +269,45 @@ export async function runSyncGraph(
     .filter(Boolean)
     .join("\n\n");
 
-  // Seeded from whatever graph-log history already exists (read-only —
-  // never forces the Graph folder into existence just to check), then
-  // kept current as this run itself regenerates/writes days below, so a
-  // LATER date in the SAME run can link to a day this run just wrote.
+  // `graph-structure.md` (if it exists) is now the PRIMARY source for
+  // "nodes from a previous run you may link back to" -- a real, glossed,
+  // weighted index instead of the bare `[date Node N](...)` link list
+  // this used to be limited to (see `graphStructure.server.ts`'s own
+  // module doc for why: a heading of just "Node 3" gives the model
+  // nothing to actually judge relevance against). It's necessarily ONE
+  // CYCLE STALE -- it reflects the graph as of the last time graph-
+  // structure ran, not this exact moment -- which is fine in practice
+  // since `nopal graphlog run` always runs graph-structure immediately
+  // after sync-graph, so it catches up again before the next invocation.
+  //
+  // `headingsByDate` stays for exactly one job now: nodes written EARLIER
+  // IN THIS SAME RUN, which graph-structure.md can never reflect yet (it
+  // hasn't regenerated). A brand new project that's never had
+  // graph-structure run at all falls back to the OLD behavior (scan every
+  // existing graph-log file's headings) so early history isn't invisible
+  // just because graph-structure hasn't run yet -- read-only (never
+  // forces the Graph folder into existence just to check), then kept
+  // current as this run itself regenerates/writes days below, so a LATER
+  // date in the SAME run can link to a day this run just wrote.
   const existingGraphFolder = await findProjectGraphFolder(projectFolder);
+  let graphStructureBody: string | null = null;
   const headingsByDate = new Map<string, NodeHeading[]>();
   if (existingGraphFolder) {
     const { files: existingFiles } = await listFolderChildren(
       projectFolder.human_id,
       existingGraphFolder._id,
     );
-    for (const f of existingFiles) {
-      const date = dateFromGraphLogFileName(f.name);
-      if (!date) continue;
-      const full = await getFileRefById(f._id);
-      if (full?.content) headingsByDate.set(date, extractHeadings(full.content));
+    const structureListing = existingFiles.find((f) => f.name === "graph-structure.md");
+    const structureFile = structureListing ? await getFileRefById(structureListing._id) : undefined;
+    graphStructureBody = structureFile?.content ? splitFrontmatter(structureFile.content).body.trim() : null;
+
+    if (!graphStructureBody) {
+      for (const f of existingFiles) {
+        const date = dateFromGraphLogFileName(f.name);
+        if (!date) continue;
+        const full = await getFileRefById(f._id);
+        if (full?.content) headingsByDate.set(date, extractHeadings(full.content));
+      }
     }
   }
 
@@ -349,7 +375,13 @@ export async function runSyncGraph(
       await deleteFileRef(existing._id);
     }
 
-    const priorNodes = [...headingsByDate.entries()]
+    // Nodes written EARLIER IN THIS RUN -- graph-structure.md can't
+    // reflect these yet (see this function's own comment above), so
+    // they're tracked live and offered as their own, separate candidate
+    // source, still as bare links (a same-run node's content is already
+    // fresh in the model's own context from processing that earlier day,
+    // if this is a multi-day catch-up run -- no gloss needed).
+    const sameRunPriorNodes = [...headingsByDate.entries()]
       .filter(([d]) => d < date)
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .flatMap(([d, headings]) =>
@@ -359,12 +391,17 @@ export async function runSyncGraph(
     const userMessage = [
       `Today's date being processed: ${date}`,
       candidateBlocks.join("\n\n---\n\n"),
-      priorNodes.length > 0
-        ? `Earlier days' nodes you may link back to (never invent a link to an earlier day that isn't in this list):\n${priorNodes.join("\n")}`
-        : "No earlier days' nodes exist yet to link back to.",
-      "You may also link a node to another node you write today, in either direction (e.g. today's \"Node 2\" may link to today's \"Node 1\", or the reverse) \u2014 use that node's own heading/anchor, with today's date alongside it, same as any other link.",
+      graphStructureBody
+        ? `The graph's existing nodes, organized and glossed (from graph-structure.md, current as of its own last run -- you may link back to any node named here):\n\n${graphStructureBody}`
+        : "No graph-structure.md exists yet -- see the plain list below for what you may link back to instead.",
+      sameRunPriorNodes.length > 0
+        ? `Earlier days' nodes you may also link back to (never invent a link to a day that isn't in this list either):\n${sameRunPriorNodes.join("\n")}`
+        : null,
+      "You may also link a node to another node you write today, in either direction (e.g. today's \"Node 2\" may link to today's \"Node 1\", or the reverse) — use that node's own heading/anchor, with today's date alongside it, same as any other link.",
       `If nothing from today is worth capturing as a node, respond with exactly: ${NOTHING_SENTINEL}`,
-    ].join("\n\n");
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     const callStart = Date.now();
     try {

@@ -96,7 +96,7 @@ enum Command {
     },
     /// GraphLog's pipeline for one `project-n02` project (see the
     /// `graphlog` skill): daily-log-sync -> sync-knowledge -> sync-graph
-    /// -> graph-project-view. Only daily-log-sync exists so far.
+    /// -> graph-structure -> graph-project-view.
     Graphlog {
         #[command(subcommand)]
         command: GraphlogCommand,
@@ -413,7 +413,8 @@ enum SortCommand {
 #[derive(Debug, Subcommand)]
 enum GraphlogCommand {
     /// Runs the full pipeline, in order: daily-log-sync -> sync-knowledge
-    /// -> sync-graph -> graph-project-view. See the `graphlog` skill.
+    /// -> sync-graph -> graph-structure -> graph-project-view. See the
+    /// `graphlog` skill.
     Run {
         /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
         #[arg(long)]
@@ -465,13 +466,64 @@ enum GraphlogCommand {
         #[arg(long)]
         project: String,
     },
-    /// Applies each not-yet-applied `Graph/graph-log-*.md` file, oldest
-    /// first, to README.md per `skills/PROJECT_VIEW.md`'s own
-    /// instructions. Agentic (real LLM calls).
+    /// Organizes the whole graph into one weighted, clustered index, per
+    /// `skills/GRAPH_STRUCTURE.md`'s own instructions, into
+    /// `Graph/graph-structure.md`. Agentic (real LLM calls).
+    GraphStructure {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Reconciles README.md against `Graph/graph-structure.md`, per
+    /// `skills/PROJECT_VIEW.md`'s own instructions, whenever the graph has
+    /// changed since the last run. Agentic (real LLM calls).
     GraphProjectView {
         /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
         #[arg(long)]
         project: String,
+    },
+    /// Runs all three resets below, in order: reset-project-view ->
+    /// reset-graph -> reset-knowledge. DESTRUCTIVE — requires --yes. See
+    /// the `graphlog` skill.
+    Reset {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Deletes everything in the project folder except skills/, syncs/,
+    /// and Graph/ (clears README.md's body, front matter preserved).
+    /// DESTRUCTIVE — requires --yes. See the `graphlog` skill.
+    ResetProjectView {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Deletes the project's Graph folder outright — every
+    /// graph-log-*.md file. DESTRUCTIVE — requires --yes. See the
+    /// `graphlog` skill.
+    ResetGraph {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Deletes every _knowledge/ sidecar folder nested anywhere under
+    /// syncs/. DESTRUCTIVE — requires --yes. See the `graphlog` skill.
+    ResetKnowledge {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -825,8 +877,19 @@ fn main() {
                 }
                 GraphlogCommand::SyncKnowledge { project } => graphlog::sync_knowledge(&project),
                 GraphlogCommand::SyncGraph { project } => graphlog::sync_graph(&project),
+                GraphlogCommand::GraphStructure { project } => graphlog::graph_structure(&project),
                 GraphlogCommand::GraphProjectView { project } => {
                     graphlog::graph_project_view(&project)
+                }
+                GraphlogCommand::Reset { project, yes } => graphlog::reset(&project, yes),
+                GraphlogCommand::ResetProjectView { project, yes } => {
+                    graphlog::reset_project_view(&project, yes)
+                }
+                GraphlogCommand::ResetGraph { project, yes } => {
+                    graphlog::reset_graph(&project, yes)
+                }
+                GraphlogCommand::ResetKnowledge { project, yes } => {
+                    graphlog::reset_knowledge(&project, yes)
                 }
             };
             if let Err(e) = result {

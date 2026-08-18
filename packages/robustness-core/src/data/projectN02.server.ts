@@ -9,8 +9,9 @@
  *
  * This file owns:
  *
- *   - The DEFAULT `skills/KNOWLEDGE.md` / `GRAPH.md` / `PROJECT_VIEW.md`
- *     content every `project-n02` gets seeded with (`graphLogDefaults.server.ts`),
+ *   - The DEFAULT `skills/KNOWLEDGE.md` / `GRAPH.md` / `GRAPH_STRUCTURE.md` /
+ *     `PROJECT_VIEW.md` content every `project-n02` gets seeded with
+ *     (`graphLogDefaults.server.ts`),
  *     and the seeding logic itself (`ensureProjectN02`).
  *   - The `Graph` space's own find/ensure helpers (`ensureProjectGraphFolder`)
  *     — `sync-graph`'s output location, lazily created the first time
@@ -104,6 +105,12 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
     await Promise.all([
       ensureSkillFile(current.human_id, skillsFolder._id, "KNOWLEDGE.md", effective.knowledge.content),
       ensureSkillFile(current.human_id, skillsFolder._id, "GRAPH.md", effective.graph.content),
+      ensureSkillFile(
+        current.human_id,
+        skillsFolder._id,
+        "GRAPH_STRUCTURE.md",
+        effective.graphStructure.content,
+      ),
       ensureSkillFile(
         current.human_id,
         skillsFolder._id,
@@ -244,6 +251,7 @@ export async function getProjectStageSkill(
 const RESERVED_SKILL_FILE_NAMES = new Set([
   "knowledge.md",
   "graph.md",
+  "graph_structure.md",
   "project_view.md",
   "skill.md",
 ]);

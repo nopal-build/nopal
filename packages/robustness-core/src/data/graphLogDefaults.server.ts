@@ -1,14 +1,15 @@
 /**
- * Starter default content for GraphLog's three agentic skill files —
- * `skills/KNOWLEDGE.md` / `GRAPH.md` / `PROJECT_VIEW.md`, seeded into every
- * brand new `project-n02` space (see `projectN02.server.ts`'s
- * `ensureProjectN02`, and the `graphlog` skill for the full pipeline).
+ * Starter default content for GraphLog's four agentic skill files —
+ * `skills/KNOWLEDGE.md` / `GRAPH.md` / `GRAPH_STRUCTURE.md` /
+ * `PROJECT_VIEW.md`, seeded into every brand new `project-n02` space (see
+ * `projectN02.server.ts`'s `ensureProjectN02`, and the `graphlog` skill
+ * for the full pipeline).
  *
  * These are genuinely STARTER drafts, not finished prompts — written now so
  * `project-n02` has something usable the moment its pipeline stages exist,
  * expected to change as the actual `sync-knowledge`/`sync-graph`/
- * `graph-project-view` stages get built and iterated on against real
- * content.
+ * `graph-structure`/`graph-project-view` stages get built and iterated on
+ * against real content.
  *
  * Also mirrors `phylogDefaults.server.ts`'s admin-editable-override layer
  * (a single DB row, `graphlog_default_skills`, one OPTIONAL field per
@@ -202,40 +203,233 @@ Do not link because two nodes share a topic word. Surface similarity is the easi
 - No node from a day with nothing worth capturing — say so plainly rather than inventing one to have something to show.
 `;
 
-export const DEFAULT_PROJECT_VIEW_SKILL = `Read this project's \`Graph/graph-log-*.md\` files, oldest-not-yet-applied
-first, and use each one to keep \`README.md\` an accurate, organized index
-of what this project actually is and where it stands — never inventing
-progress, dates, or facts that aren't grounded in a graph-log node's own
-content.
+export const DEFAULT_GRAPH_STRUCTURE_SKILL = `Your job is to organize the WHOLE graph into a single index file, \`Graph/graph-structure.md\` — grouped by topic/thread, weighted, and glossed. You do not write the README. Something else (graph-project-view) reads what you leave behind and decides what's worth featuring there; a THIRD stage (sync-graph, extracting tomorrow's new nodes) also reads what you leave behind, to decide what existing nodes tomorrow's content might connect to. Both depend on this file being complete — every node needs a home here, not just the ones that feel important.
 
-Default structure for a new project's README:
+# What you receive
 
-- A short intro paragraph: what this project is, in plain language.
-- A "Latest" section summarizing the most recent graph-log entries you've
-  processed so far.
-- One section per recurring topic/theme that emerges across multiple
-  days' nodes (e.g. "Budget," "Timeline," "People Involved") — only
-  create a section once there's enough real content to justify it, not
-  preemptively.
+Every node in the graph, in full: its verbatim quote, its author, its date, and its own outbound links. Alongside each node, you're given REAL, PRE-COMPUTED facts — never estimate or recount these yourself:
 
-Update incrementally: a single new day's graph-log file should only ever
-touch the sections it actually has something new to say about, not
-trigger a full README rewrite. Reorganize sections only when the
-existing structure has clearly stopped making sense, not on every run.
+- How many other nodes link to it (inbound count).
+- How many DISTINCT people wrote those linking nodes.
+- The date span those links were made across.
 
-Replace this file with your own instructions to change what sections a
-README should have, or how much a single day's update should touch.
+If a previous \`graph-structure.md\` exists, you're given that too. Rebuild fresh from the current graph every time — don't patch it — but keep a continuing thread's NAME the same across runs where it still fits, so the file downstream (README sections, sync-graph's own linking) doesn't churn just because you reworded a heading. Only rename a thread once its old name has clearly stopped fitting what's in it.
+
+# Every node gets a home
+
+This is an index, not a highlight reel. A node with zero inbound links still needs to be findable — it might be the FIRST of two mentions, and the second one hasn't happened yet. Group it into whatever thread it's closest to, even a thread of one. Nothing gets left out, and nothing gets left for "later" — there is no later pass that adds missing nodes back in.
+
+# Grouping
+
+Group by what the nodes are actually about, not by date, not by who wrote them. Two people's nodes on the same real thing belong in the same group even when they used different words — that's the connection this file exists to make visible.
+
+A thread's name is a short, plain label for what it's about — 2-5 words, no punctuation flourish, not a sentence. \`Task friction\`, not \`Thoughts on how tasks might create friction over time\`.
+
+# Weight and status
+
+For each thread, restate the facts you were given — never invent a number, never round up a feeling into a count:
+
+\`\`\`
+Weight: 7 inbound links, 3 people, 2026-07-29 → 2026-08-15
+\`\`\`
+
+A thread with no inbound links yet still gets a weight line — just say so plainly (\`Weight: no inbound links yet\`) rather than omitting it.
+
+Status is your one real judgment call in this pass. Follow a thread's own nodes forward in time and decide which of these it currently is:
+
+- **active** — still being added to, no resolution in sight.
+- **open, unowned/owned, opened <date>** — a concrete piece of work nobody's finished; name who owns it only if a node itself says so, never guess.
+- **settled, <date>** — a later node in the thread closed it out (a decision made, a task done, a question answered). Say what closed it and when.
+- **superseded by <node>** — a later node in the thread replaced an earlier claim rather than just adding to it. Point at the node that did the superseding.
+
+Never mark something settled or superseded on a hunch — only when a later node in the graph actually says so.
+
+# Node format
+
+One line per node, under its thread's heading, in this exact shape:
+
+\`\`\`
+## <Thread name>
+Weight: <N> inbound link(s), <M> people, <earliest> \u2192 <latest> \u00b7 Status: <status>
+- <date> Node <N> (<author>) \u2014 <one-line gloss>
+- <date> Node <N> (<author>) \u2014 <one-line gloss>
+\`\`\`
+
+**The gloss is a short, plain phrase pointing at what the node says — never a quote, never a full sentence restating the node, never your own opinion of it.** \`bullet journaling as a model for deliberate task friction\`, not \`Gerald thinks that bullet journaling could work well because it adds deliberate friction to task management which he finds valuable\`. The full words are already in the graph; this file only has to help someone (or the next stage) decide whether to go look.
+
+Order threads heaviest-first within the file — inbound link count, then people, then span, same priority order \`GRAPH.md\`'s own linking guidance implies. A thread with no inbound links yet goes at the bottom, under a plain \`## Unclustered\` heading if it doesn't yet belong anywhere else — still one line per node, same format.
+
+# What never happens in this pass
+
+- No prose, no summaries, no narrative. A gloss is a phrase, not a sentence written for a reader.
+- No picking a side in a disagreement, no deciding what the project should do. That's graph-project-view's job, working from what you hand it.
+- No inventing a link, a count, a person, or a date that isn't already in the graph or in the facts you were given.
+- No dropping a node because it seems minor. Minor now is not minor forever, and this file is the only place that would ever notice it came back.
+`;
+
+export const DEFAULT_PROJECT_VIEW_SKILL = `Your job is to write this project's README from \`Graph/graph-structure.md\` — GraphLog's own clustered, weighted index of the whole graph (see \`GRAPH_STRUCTURE.md\`). You never read graph-log files or daily logs directly, and you never count links or judge weight yourself — that's already been done for you, in the "Weight" line under every thread you're handed. Your job is deciding what's worth featuring in a short, honest README, and writing it in the people's own words.
+
+The README is where someone goes to understand the project without reading the graph. It answers two questions at once: what has to get done, and what the group is actually thinking about. Both belong here, and they are different kinds of material.
+
+## The graph is the record. This file is a view.
+
+Nothing in this file is precious, because nothing in it is the only copy of anything: every line traces to a node in \`graph-structure.md\`, and every node traces to a graph-log file with the words themselves. That's what makes it safe to drop, reorder, and rewrite a section here in a way it never was upstream. You're only shown the sections you're touching, but treat each one you DO touch as fully rewritable — never patch around old, sloppy structure inside a section just because it's already there.
+
+You are handed \`graph-structure.md\` fresh each run, and you decide what changed enough to be worth touching. A thread whose membership, weight, or status hasn't meaningfully moved since last time needs no edit at all.
+
+# Before you write
+
+**Read the comments first.** Any reader corrections are handed to you as plain text, already separated out — treat every one as a correction that outranks your own reading of the graph. You never edit the "Notes on this view" section yourself; something else stamps and preserves it. Just make sure whatever it says is reflected in the sections you touch.
+
+# Gravity, not recency
+
+Weight orders the ideas. It does not order everything.
+
+An idea earns its place by sticking around and pulling other things toward it — that's exactly what a thread's "Weight" line already tells you. A concept people keep picking up over weeks outranks one that arrived this morning. But a deadline landing next month, a decision somebody is waiting on, a bug found yesterday: those are live state, and they matter because of when they are rather than how much has gathered around them. Weight would rank them near zero and be wrong.
+
+So order the thinking sections by weight (read straight off \`graph-structure.md\`) and the action sections by what is actually live. Never let a heavy thread push a hard constraint down the page.
+
+**A heavy idea marked superseded is the worst thing this file can carry.** \`graph-structure.md\` already tracks this in its Status line — where a thread is marked \`superseded by <node>\`, the weight that gathered around the OLD version never transfers to the new one. Say what it is now, and say that it changed.
+
+Weight is countable and comes from three places, strongest first (all already reflected in \`graph-structure.md\`'s own Weight line):
+
+1. **Inbound links from a different person than the one who wrote the node.** Two people arriving at the same thing from different directions is the strongest signal this system produces. When it happens, say so plainly and quote both.
+2. **Inbound links across many days.** An idea people keep returning to over weeks outweighs one that got four links in one afternoon.
+3. **Chains.** A node that later nodes depend on, or that only makes sense as the start of a run of them, is load-bearing even when its own count is modest.
+
+A thread with no inbound links is a single mention. Keep it if it belongs, but never let it set the shape of the file.
+
+**Write the count when it supports a claim.** "Both of you have come back to this six times since 7/29" is a finding about where the group's attention actually is, it is checkable, and it is worth far more than asserting that something matters and expecting the reader to take your word. Give the number, name who and across what span (straight from \`graph-structure.md\`'s Weight line), and move on.
+
+**Never order by date.** Housekeeping and status belong below the material that carries weight, however recently they arrived.
+
+# How long this should be
+
+Short enough that nobody dreads opening it. Our industry has enough documents that feel like a code manual and does not need another one.
+
+Without navigation, the whole file should be readable in one sitting. With a linked table of contents that lets someone drop straight into the section they came for, it can run longer and carry more context per section, because nobody has to read past what they want.
+
+That is a ceiling on the file, not on any one section. If it is running long, take the length out of Settled and out of anything a single mention put there, never out of the quotes.
+
+# Their words carry it. Yours connect it.
+
+Any line doing real work is a person's own sentence, quoted from the node itself (go read the real node in its graph-log file — \`graph-structure.md\` only gives you a gloss and a pointer, never the words to quote). Copy its \`:ref{...}\` directive exactly as it appears in that graph-log file. Never build a citation, never reformat one, never move one to a different quote.
+
+Write in your own voice to connect one thought to another, to head a section, or to state a plain fact of record.
+
+**Don't gloss a quote.** A good line doesn't need an interpreter. Say what changed because of it, or say nothing.
+
+**Quote the working-out, not only the conclusion.** When a node holds someone reasoning their way to an answer, including the false start and the correction, that is the material. Compressing it into the tidy sentence at the end is the single most expensive thing this file can do, and it looks like good editing the whole time it is happening.
+
+**Say it once.** Before adding a line, check whether the file already says it somewhere. If it does, deepen it where it lives rather than restating it in a second section. A point that appears twice reads as two facts.
+
+# Still true?
+
+A node is permanent. What it says may not be.
+
+\`graph-structure.md\`'s own Status line already tells you when a thread has moved — settled, superseded, or still open. Trust it; it was built by following the graph's own links forward, the same check you'd otherwise have to do by hand.
+
+Where a thread is marked superseded, say what it is now and when it changed. Where a thread is still open and visibly moving, write it as what was said and when, not as the current state.
+
+**A selection still in progress reads most like a settled decision exactly when it is least settled.** Vendor picks, hires, who is doing what this week, prices, dates. Treat any of these as open unless \`graph-structure.md\` marks the thread settled. Nobody mentioning something again is not the same as it being resolved.
+
+# The shape
+
+This shape is a working hypothesis. If a project's threads keep straining against it, propose a better cut rather than forcing the content into these boxes.
+
+\`\`\`markdown
+# <Project>
+
+One or two sentences: where this actually stands and what everything hinges on. A position, not a recap. A reader who stops here should know what matters.
+
+## What's carrying weight
+
+The threads with real weight in \`graph-structure.md\`, heaviest first. Quote the people. Where two people arrived at the same thing in different words, lead with that and show both.
+
+## Where we pull apart
+
+Open disagreements and unresolved tensions, both sides quoted, left standing.
+
+## Get shit done
+
+What is actually open, phrased so a reader can pick something up. Who owes it, where a node names someone. How long it has been open.
+
+## Settled
+
+Decided or done, with the operative fact: a date, a number, a name.
+
+## Open questions
+
+Things nobody has answered yet.
+
+## Notes on this view
+
+*Comment freely below. Corrections, missing context, "this section is wrong," anything. The next build reads these first. Nothing you write here is ever overwritten or reworded by GraphLog.*
+\`\`\`
+
+A quiet project has thin or empty sections, and that emptiness is honest signal. Don't manufacture depth to fill a heading.
+
+## On the two lanes
+
+Some projects are mostly physical work and some are mostly thinking, and most are both at once. The same project changes character over months. Let \`graph-structure.md\`'s own threads decide which sections carry the file, and never announce the choice in the file itself. The reader wants the project, not a note about how this was assembled.
+
+But surface both lanes even when one dominates. A build project still has ideas worth holding, and a thinking project still has things somebody has to do. A file that shows only one of them has dropped half its job.
+
+## Get shit done is a surface, not an assignment
+
+List what is open and let people pick it up. Never assign anything to anyone.
+
+Where a node names who owes something, say so, because that is a fact of record. Where no node does, describe the work rather than inventing an owner.
+
+**Stamp the age on every open item.** You're given today's real date separately from any node's own date — compute the age from that, not from memory. "Nobody has replied" is information; "open nine days" is a prompt. Never estimate an age: if a thread's opening date is unclear, write \`age unknown\` rather than guessing.
+
+## Settled is a staging area, not an archive
+
+Every other section empties itself. Settled only accretes, and a growing list of things that stopped mattering makes the whole file less worth opening.
+
+Because the graph is the record, dropping something here loses nothing. Each pass, take each item out by one of three exits:
+
+1. **It was live and stopped mattering.** A bug that got fixed, a blocker that cleared, a status that was true for a week. Drop it.
+2. **It was dated and the date passed.** Keep it while it is ahead, drop it once it is history.
+3. **It still explains something.** A decision later work rests on stays, stated once, in its shortest useful form.
+
+If an item has sat in Settled through several builds and \`graph-structure.md\` shows nothing has linked back to it since, let it go.
+
+# Hold the disagreements open
+
+Where two people pull against each other is the most valuable material in the file. Do not resolve it into one smooth position, and do not pick a winner.
+
+Give it a section, placed high, since by the weight rule it usually belongs there. Quote both sides with their citations and leave the tension standing so someone can pick it up in tomorrow's log.
+
+Separate thoughts are allowed to stay separate. Only join what is actually about the same thing.
+
+# What never happens in this pass
+
+- No claim that isn't grounded in a thread \`graph-structure.md\` actually gives you. If something obvious seems missing, it is missing, and the file should read that way.
+- No citation you built yourself, and no name or date from anywhere but a node's own directive.
+- No deciding who is right, or what the project should do next.
+- No merging two people's statements into one position.
+- No touching the "Notes on this view" section — something else owns it entirely.
+- No commentary about this process. How many threads you read, what you expect the next run to add: none of it belongs here.
+- **This file has no today.** Never write "the latest entry," "this week's log," "recently," or anything that describes material by its position in a sequence. Give the date or say nothing about when it arrived.
+
+# Voice
+
+Read \`VOICE.md\` and follow it. It governs how sentences are written, never how much is kept.
+
+If it isn't available: write from inside the work rather than above it, keep the honest record of what failed and what got tried first, and use no em dashes.
 `;
 
 // ─── Overrides ───────────────────────────────────────────────
 // Mirrors `phylogDefaults.server.ts`'s override layer exactly — see this
 // file's own module doc above for the full reasoning.
 
-export type GraphLogDefaultStage = "knowledge" | "graph" | "projectView";
+export type GraphLogDefaultStage = "knowledge" | "graph" | "graphStructure" | "projectView";
 
 const STAGE_HARDCODED_DEFAULT: Record<GraphLogDefaultStage, string> = {
   knowledge: DEFAULT_KNOWLEDGE_SKILL,
   graph: DEFAULT_GRAPH_SKILL,
+  graphStructure: DEFAULT_GRAPH_STRUCTURE_SKILL,
   projectView: DEFAULT_PROJECT_VIEW_SKILL,
 };
 
@@ -245,6 +439,7 @@ const ROW_ID = "main";
 type GraphLogDefaultSkillsRow = Data & {
   knowledge?: string | null;
   graph?: string | null;
+  graphStructure?: string | null;
   projectView?: string | null;
   updatedAt?: string;
   updatedByHumanId?: string;
@@ -283,9 +478,9 @@ export async function getEffectiveGraphLogDefaultSkill(stage: GraphLogDefaultSta
   return override && override.trim().length > 0 ? override : STAGE_HARDCODED_DEFAULT[stage];
 }
 
-/** All three at once, each labeled with whether it's overridden — what
+/** All four at once, each labeled with whether it's overridden — what
  * `/fruits/maker/graphlog/defaults`'s own loader uses to render the
- * review/edit UI in a single round trip instead of three. */
+ * review/edit UI in a single round trip instead of four. */
 export async function getAllEffectiveGraphLogDefaultSkills(): Promise<
   Record<GraphLogDefaultStage, EffectiveGraphLogDefaultSkill>
 > {
@@ -300,6 +495,7 @@ export async function getAllEffectiveGraphLogDefaultSkills(): Promise<
   return {
     knowledge: resolve("knowledge"),
     graph: resolve("graph"),
+    graphStructure: resolve("graphStructure"),
     projectView: resolve("projectView"),
   };
 }
@@ -307,8 +503,7 @@ export async function getAllEffectiveGraphLogDefaultSkills(): Promise<
 /** Sets (or clears, when `content` is `null`) this stage's override.
  * Clearing reverts every future new project's seed content back to the
  * hardcoded built-in — this row is never deleted outright, just has that
- * one field unset, so the OTHER two stages' overrides (if any) are
- * untouched. */
+ * one field unset, so the OTHER stages' overrides (if any) are untouched. */
 export async function setGraphLogDefaultSkillOverride(
   stage: GraphLogDefaultStage,
   content: string | null,
@@ -319,6 +514,7 @@ export async function setGraphLogDefaultSkillOverride(
   await upsert(new RecordId(TABLE, ROW_ID), {
     knowledge: existing?.knowledge ?? null,
     graph: existing?.graph ?? null,
+    graphStructure: existing?.graphStructure ?? null,
     projectView: existing?.projectView ?? null,
     [stage]: content && content.trim().length > 0 ? content : null,
     updatedAt: new Date().toISOString(),

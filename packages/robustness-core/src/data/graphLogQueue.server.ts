@@ -41,8 +41,13 @@ export type GraphLogJobName =
   | "run"
   | "sync-knowledge"
   | "sync-graph"
+  | "graph-structure"
   | "graph-project-view"
-  | "migrate-to-n02";
+  | "migrate-to-n02"
+  | "reset"
+  | "reset-project-view"
+  | "reset-graph"
+  | "reset-knowledge";
 
 export type GraphLogJobData = {
   actingHumanId: string;

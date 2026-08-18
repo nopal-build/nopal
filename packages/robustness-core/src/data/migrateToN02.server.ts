@@ -21,7 +21,8 @@
  *      front matter, and deleting the whole file would silently revoke
  *      every collaborator's role.
  *   3. Retags the folder `project-n02` and seeds `skills/KNOWLEDGE.md`/
- *      `GRAPH.md`/`PROJECT_VIEW.md` (`applyProjectN02Shape`) — REPLACING
+ *      `GRAPH.md`/`GRAPH_STRUCTURE.md`/`PROJECT_VIEW.md`
+ *      (`applyProjectN02Shape`) — REPLACING
  *      PhyLog's own `PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md` (which
  *      have no meaning for GraphLog) but PRESERVING everything else
  *      already in `skills/` (a general `SKILL.md` project-identity file,

@@ -1,13 +1,14 @@
 //! `nopal graphlog ...` — GraphLog's pipeline for one `project-n02` project
 //! (see the `graphlog` skill for the full design):
 //!
-//!   daily-log-sync -> sync-knowledge -> sync-graph -> graph-project-view
+//!   daily-log-sync -> sync-knowledge -> sync-graph -> graph-structure
+//!     -> graph-project-view
 //!
 //! `daily-log-sync` is deterministic and fast (a plain Card→project copy,
 //! no LLM call), so it's ONE synchronous request/response (see
 //! `api.graphlog.daily-log-sync.tsx`'s own doc — same shape as
 //! `POST /api/daily-log/sort`, not `POST /api/phylog/*`). Every AGENTIC
-//! stage from here on (`sync-knowledge`, and later `sync-graph`/
+//! stage from here on (`sync-knowledge`, `sync-graph`, `graph-structure`,
 //! `graph-project-view`) follows PhyLog's own enqueue-then-poll shape
 //! instead (`phylog.rs`'s pattern, mirrored here against GraphLog's own
 //! queue/job routes).
@@ -293,10 +294,34 @@ pub fn sync_graph(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct ProjectViewDayResult {
-    date: String,
+struct GraphStructureResult {
+    #[serde(default)]
+    skipped: bool,
     #[serde(default)]
     changed: bool,
+}
+
+/// Runs `graph-structure` for `project_path` — see the `graphlog` skill.
+/// Agentic (real LLM calls), so this enqueues and polls rather than
+/// blocking on one request.
+pub fn graph_structure(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog graph-structure: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/graph-structure", &body)?;
+    let result: GraphStructureResult = poll_job(&client, &job_id)?;
+
+    if result.skipped {
+        println!("graph-structure: skipped (skills/GRAPH_STRUCTURE.md says skip).");
+    } else if result.changed {
+        println!("graph-structure: rebuilt graph-structure.md.");
+    } else {
+        println!("graph-structure: nothing new to process.");
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -305,7 +330,9 @@ struct GraphProjectViewResult {
     #[serde(default)]
     skipped: bool,
     #[serde(default)]
-    days: Vec<ProjectViewDayResult>,
+    changed: bool,
+    #[serde(default)]
+    summary: Vec<String>,
 }
 
 /// Runs `graph-project-view` for `project_path` — see the `graphlog`
@@ -324,33 +351,23 @@ pub fn graph_project_view(project_path: &str) -> Result<(), Box<dyn Error + Send
         println!("graph-project-view: skipped (skills/PROJECT_VIEW.md says skip).");
         return Ok(());
     }
-    if result.days.is_empty() {
-        println!("graph-project-view: nothing new to process.");
+    if !result.changed {
+        println!("graph-project-view: nothing new to apply (README.md already up to date).");
         return Ok(());
     }
-
-    let changed: Vec<&ProjectViewDayResult> = result.days.iter().filter(|d| d.changed).collect();
-    if changed.is_empty() {
-        println!("graph-project-view: nothing new to apply (every day already up to date).");
-        return Ok(());
-    }
-    for day in &changed {
-        println!("graph-project-view: applied {} to README.md.", day.date);
-    }
-    let unchanged = result.days.len() - changed.len();
-    if unchanged > 0 {
-        println!("{unchanged} day(s) already up to date, left unchanged.");
+    for line in &result.summary {
+        println!("graph-project-view: {line}.");
     }
 
     Ok(())
 }
 
 /// Runs GraphLog's full pipeline for `project_path`, in order:
-/// daily-log-sync -> sync-knowledge -> sync-graph -> graph-project-view.
-/// See the `graphlog` skill. Enqueues one job covering all four stages
-/// and polls it — the individual stage commands above remain useful for
-/// iterating on one project's own skill files without paying for the
-/// others every time.
+/// daily-log-sync -> sync-knowledge -> sync-graph -> graph-structure ->
+/// graph-project-view. See the `graphlog` skill. Enqueues one job
+/// covering all five stages and polls it — the individual stage commands
+/// above remain useful for iterating on one project's own skill files
+/// without paying for the others every time.
 pub fn run(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let folder = resolve_project(&client, project_path)?;
@@ -518,6 +535,200 @@ pub fn migrate_to_n02_full(yes: bool) -> Result<(), Box<dyn Error + Send + Sync>
         println!();
         println!("Run `nopal graphlog run --project <path>` on each migrated space to build its Graph and README.md.");
     }
+
+    Ok(())
+}
+
+// ─── Reset ───────────────────────────────────────────────────────────
+// `nopal graphlog reset` and its three narrower siblings — see the
+// `graphlog` skill and `graphLogReset.server.ts`'s own module doc for
+// exactly what each depth deletes. Same "destructive, requires --yes"
+// philosophy as `phylog.rs`'s `reset`/`reset-pre-capture`.
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ProjectViewResetResult {
+    #[serde(default)]
+    deleted_folders: Vec<String>,
+    #[serde(default)]
+    deleted_files: Vec<String>,
+    #[serde(default)]
+    readme_cleared: bool,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct GraphResetResult {
+    #[serde(default)]
+    deleted_folders: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgeResetResult {
+    #[serde(default)]
+    deleted_folders: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct FullResetResult {
+    #[serde(default)]
+    project_view: ProjectViewResetResult,
+    #[serde(default)]
+    graph: GraphResetResult,
+    #[serde(default)]
+    knowledge: KnowledgeResetResult,
+}
+
+fn print_project_view_reset(result: &ProjectViewResetResult) {
+    if !result.deleted_folders.is_empty() {
+        println!("Deleted folders: {}", result.deleted_folders.join(", "));
+    }
+    if !result.deleted_files.is_empty() {
+        println!("Deleted files: {}", result.deleted_files.join(", "));
+    }
+    if result.readme_cleared {
+        println!("README.md's body was cleared (front matter preserved).");
+    }
+    if result.deleted_folders.is_empty()
+        && result.deleted_files.is_empty()
+        && !result.readme_cleared
+    {
+        println!("Nothing to reset — project view was already empty.");
+    }
+}
+
+fn print_graph_reset(result: &GraphResetResult) {
+    if result.deleted_folders.is_empty() {
+        println!("Nothing to reset — no Graph folder exists yet.");
+    } else {
+        println!("Deleted the Graph folder.");
+    }
+}
+
+fn print_knowledge_reset(result: &KnowledgeResetResult) {
+    if result.deleted_folders.is_empty() {
+        println!("Nothing to reset — no _knowledge folders exist yet.");
+    } else {
+        println!(
+            "Deleted _knowledge folder(s): {}",
+            result.deleted_folders.join(", ")
+        );
+    }
+}
+
+/// `nopal graphlog reset-project-view --project <path> --yes`
+///
+/// Deletes everything in the project folder EXCEPT `skills`/`syncs`/
+/// `graph`, and clears `README.md`'s body (front matter preserved).
+pub fn reset_project_view(
+    project_path: &str,
+    confirmed: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !confirmed {
+        return Err(format!(
+            "This deletes everything in {project_path}/ except its skills/, syncs/, and Graph/ folders (README.md's body is cleared, not the file itself). Pass --yes to confirm."
+        )
+        .into());
+    }
+
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog reset-project-view: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/reset-project-view", &body)?;
+    let result: ProjectViewResetResult = poll_job(&client, &job_id)?;
+    print_project_view_reset(&result);
+
+    Ok(())
+}
+
+/// `nopal graphlog reset-graph --project <path> --yes`
+///
+/// Deletes the project's `Graph` folder outright — every
+/// `graph-log-*.md` file, and every `graph-project-view` idempotency
+/// marker they carry.
+pub fn reset_graph(
+    project_path: &str,
+    confirmed: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !confirmed {
+        return Err(format!(
+            "This deletes the entire Graph/ folder in {project_path}/ — every graph-log-*.md file. Pass --yes to confirm."
+        )
+        .into());
+    }
+
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog reset-graph: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/reset-graph", &body)?;
+    let result: GraphResetResult = poll_job(&client, &job_id)?;
+    print_graph_reset(&result);
+
+    Ok(())
+}
+
+/// `nopal graphlog reset-knowledge --project <path> --yes`
+///
+/// Deletes every `_knowledge/` sidecar folder nested anywhere under the
+/// project's `syncs/` tree.
+pub fn reset_knowledge(
+    project_path: &str,
+    confirmed: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !confirmed {
+        return Err(format!(
+            "This deletes every _knowledge/ folder nested under {project_path}/syncs/. Pass --yes to confirm."
+        )
+        .into());
+    }
+
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog reset-knowledge: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/reset-knowledge", &body)?;
+    let result: KnowledgeResetResult = poll_job(&client, &job_id)?;
+    print_knowledge_reset(&result);
+
+    Ok(())
+}
+
+/// `nopal graphlog reset --project <path> --yes`
+///
+/// Runs all three resets above, in order: reset-project-view ->
+/// reset-graph -> reset-knowledge (`resetProjectAll`,
+/// `graphLogReset.server.ts`). The single deepest "start completely
+/// over" reset — a fresh `nopal graphlog run` afterward rebuilds
+/// everything from `syncs/`'s remaining raw content.
+pub fn reset(project_path: &str, confirmed: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !confirmed {
+        return Err(format!(
+            "This runs reset-project-view, reset-graph, and reset-knowledge on {project_path}/, in order — deleting everything GraphLog has generated except the skill files themselves. Pass --yes to confirm."
+        )
+        .into());
+    }
+
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog reset: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/reset", &body)?;
+    let result: FullResetResult = poll_job(&client, &job_id)?;
+
+    println!("-- reset-project-view --");
+    print_project_view_reset(&result.project_view);
+    println!("-- reset-graph --");
+    print_graph_reset(&result.graph);
+    println!("-- reset-knowledge --");
+    print_knowledge_reset(&result.knowledge);
 
     Ok(())
 }

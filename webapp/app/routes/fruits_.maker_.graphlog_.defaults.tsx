@@ -39,7 +39,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return { defaultSkills };
 }
 
-const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "graph", "projectView"]);
+const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "graph", "graphStructure", "projectView"]);
 
 /**
  * Saves or resets one stage's default-skill override -- see
@@ -126,10 +126,15 @@ const STAGE_META: Record<GraphLogDefaultStage, { title: string; file: string; bl
     file: "skills/GRAPH.md",
     blurb: "Seeded into a brand new project's GRAPH.md — sync-graph's own real starter instructions (not \"skip\"), extracting citable nodes into Graph/graph-log-*.md.",
   },
+  graphStructure: {
+    title: "Graph Structure",
+    file: "skills/GRAPH_STRUCTURE.md",
+    blurb: "Seeded into a brand new project's GRAPH_STRUCTURE.md — graph-structure's own real starter instructions, organizing the whole graph into Graph/graph-structure.md.",
+  },
   projectView: {
     title: "Project View",
     file: "skills/PROJECT_VIEW.md",
-    blurb: "Seeded into a brand new project's PROJECT_VIEW.md — graph-project-view's own real starter instructions, synthesizing graph-log files into README.md.",
+    blurb: "Seeded into a brand new project's PROJECT_VIEW.md — graph-project-view's own real starter instructions, synthesizing graph-structure.md into README.md.",
   },
 };
 
@@ -284,6 +289,11 @@ export default function FruitsMakerGraphLogDefaults() {
             stage="graph"
             initialContent={defaultSkills.graph.content}
             overridden={defaultSkills.graph.overridden}
+          />
+          <DefaultSkillEditor
+            stage="graphStructure"
+            initialContent={defaultSkills.graphStructure.content}
+            overridden={defaultSkills.graphStructure.overridden}
           />
           <DefaultSkillEditor
             stage="projectView"

@@ -1,6 +1,6 @@
 ---
 name: graphlog
-description: GraphLog, the AI pipeline for `project-n02` spaces — the planned successor to PhyLog/`project-n01`. Turns synced content into a `Graph/` of cited, linkable nodes, then into an up-to-date `README.md` Project View. Use when working on `project-n02`, `projectN02.server.ts`, `graphLogDefaults.server.ts`, the `Graph`/`project-n02` Vault Folder Types, the `:ref{...}` directive (`oxmarkdown-core/src/refDirective.ts`), or when asked about "GraphLog", daily-log-sync, sync-knowledge, sync-graph, or graph-project-view.
+description: GraphLog, the AI pipeline for `project-n02` spaces — the planned successor to PhyLog/`project-n01`. Turns synced content into a `Graph/` of cited, linkable nodes, organizes the whole graph into a weighted `graph-structure.md` index, then into an up-to-date `README.md` Project View. Use when working on `project-n02`, `projectN02.server.ts`, `graphLogDefaults.server.ts`, the `Graph`/`project-n02` Vault Folder Types, the `:ref{...}` directive (`oxmarkdown-core/src/refDirective.ts`), or when asked about "GraphLog", daily-log-sync, sync-knowledge, sync-graph, graph-structure, or graph-project-view.
 ---
 
 # GraphLog
@@ -14,7 +14,7 @@ synced content into a daily `Graph/` log, then synthesizes those into a
 README. Read the `vault` and `phylog` skills first for the Vault Folder Type
 system and PhyLog's own pipeline shape — this skill assumes both.
 
-**Status: all four pipeline stages, the migration tool (including a
+**Status: all five pipeline stages, the migration tool (including a
 `--full` discover-everything sweep), and a Maker usage/defaults page are
 built and verified.** Only running the migration for real across existing
 projects, and PhyLog/`project-n01`'s eventual code retirement, remain —
@@ -22,6 +22,20 @@ see "Build status" below for exactly what exists today. Written as a
 living design doc, same convention as `oxmarkdown`'s skill — update it as
 GraphLog gets built, don't let it drift into describing a design that was
 later changed without a matching code change.
+
+**A real architecture change, not in the original design**: a fifth
+stage, `graph-structure`, was added between `sync-graph` and
+`graph-project-view` after the ORIGINAL `graph-project-view` design (read
+one graph-log day at a time, patch README sections incrementally) turned
+out to have real, unfixable-in-place problems — no way to see real
+cross-graph link weight, no way to reorder sections, no protection for
+the reader-comment section. `graph-structure` does the expensive
+whole-graph read ONCE per run and produces a compact, weighted,
+clustered index (`Graph/graph-structure.md`) that BOTH `graph-project-view`
+AND `sync-graph` now read, instead of each stage trying to re-derive its
+own partial view of the whole graph. See "The pipeline" and "Build
+status" item 7 below for the full design and what changed in the other
+two stages as a result.
 
 **TWO real, confirmed data-integrity bugs were found and fixed while
 building the `--full` migration sweep — read "Migration from
@@ -52,7 +66,7 @@ migration" below. Until then, both systems coexist; nothing here changes
 
 ## The pipeline
 
-`nopal graphlog run --project <path>` runs all four stages in order, in
+`nopal graphlog run --project <path>` runs all five stages in order, in
 one job (`graphLogAgent.server.ts`'s `runGraphLogPipeline`, mirroring
 `phylogAgent.server.ts`'s own `runPhylogPipeline`); each stage below is
 ALSO independently runnable via its own CLI subcommand/API route.
@@ -62,7 +76,8 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   -> STAGE 1: daily-log-sync    (deterministic copy, NOT agentic)
   -> STAGE 2: sync-knowledge     (agentic, skills/KNOWLEDGE.md)
   -> STAGE 3: sync-graph         (agentic, skills/GRAPH.md)
-  -> STAGE 4: graph-project-view (agentic, skills/PROJECT_VIEW.md)
+  -> STAGE 4: graph-structure    (agentic, skills/GRAPH_STRUCTURE.md)
+  -> STAGE 5: graph-project-view (agentic, skills/PROJECT_VIEW.md)
 ```
 
 - **daily-log-sync** — the Sorter's counterpart for GraphLog: zero-inference,
@@ -109,15 +124,117 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     (`- [...](...)`) with no reason text attached (a deliberate
     simplification over an earlier draft that required one) and omitted
     entirely when a node has none.
-- **graph-project-view** — reads `Graph/graph-log-*.md` files, per
-  `skills/PROJECT_VIEW.md`, and keeps `README.md` an accurate, organized
-  synthesis. **Incremental**: walks oldest-not-yet-applied graph-log file
-  first, each one only touching the README sections it actually has
-  something new to say about — same "bound the blast radius to what
-  changed" philosophy as PhyLog's `update_section` tool. A full project
-  reset rebuilds by walking every graph-log file again, in order, from
-  scratch — never a from-scratch resynthesis driven by anything other
-  than replaying the graph-log history.
+  - **Candidate list for backward links is `Graph/graph-structure.md`**,
+    not a bare list of past headings — see the `graph-structure` bullet
+    below for why a heading of just "Node 3" gave the model nothing to
+    judge relevance against. One cycle stale by construction (reflects
+    the graph as of `graph-structure`'s last run, not this exact moment)
+    — fine in practice since `nopal graphlog run` always runs
+    `graph-structure` immediately after `sync-graph`. Falls back to the
+    OLD flat heading-scan for a project that's never had `graph-structure`
+    run yet. Nodes written EARLIER IN THE SAME `sync-graph` run (which
+    `graph-structure.md` can never reflect yet) are still tracked live,
+    exactly as before.
+- **graph-structure** — reads EVERY `Graph/graph-log-*.md` file (the
+  whole graph, not incrementally) and, per `skills/GRAPH_STRUCTURE.md`,
+  organizes every node into ONE file, `Graph/graph-structure.md`:
+  clustered by topic/thread, weighted, and status-annotated (active /
+  open / settled / superseded). Sits between `sync-graph` and
+  `graph-project-view` specifically to solve a problem neither neighbor
+  can solve alone without reading the whole graph every time it does
+  anything — see the header's "real architecture change" note and Build
+  status item 7.
+  - **Inbound link counts are PRE-COMPUTED, never left to the model**
+    (`graphNodeIndex.server.ts`'s `computeBacklinkIndex`) — same
+    "citations are pre-computed" reasoning `sync-graph` already applies
+    to a node's own `:ref{...}`, just applied to arithmetic instead of a
+    citation.
+  - **Expensive input, cheap output, on purpose** — every node's full
+    text is read every run; the output is a compact index, not prose.
+    Accepted cost tradeoff for the whole pipeline, not hidden.
+  - **Thread naming continuity**: rebuilds fresh from the current graph
+    every run (never patches), but is handed its own previous version and
+    told to keep a continuing thread's name where it still fits, so
+    downstream churn (README sections, `sync-graph`'s own candidate list)
+    doesn't reset just because a heading got reworded.
+- **graph-project-view** — reads `Graph/graph-structure.md` (not
+  graph-log files directly), per `skills/PROJECT_VIEW.md`, and keeps
+  `README.md` an accurate, organized synthesis. **NOT per-day anymore** —
+  a real architecture change from this stage's original shape: since
+  `graph-structure` already did the expensive whole-graph read, this
+  stage runs ONCE per invocation, gated on `graph-structure.md`'s own
+  `asOfGraphHash` versus the `appliedByProjectView` marker this stage
+  stamps onto that SAME file once an update completes cleanly.
+  - **"Notes on this view" is never touched by the model** — the
+    reader-comment section at the bottom of the README. `update_section`/
+    `remove_section` both hard-refuse any attempt to target it. Reading
+    unstamped comments and stamping them ` → read <date>` is
+    deterministic, code-owned pre/post-processing, never a tool call the
+    model could skip, mangle, or reorder — same "never trust the model
+    with exact/sacred text" reasoning a node's own citation already gets.
+  - **Section order is enforced by code, not the model** — `update_section`
+    appends a brand-new heading to the end of the README's own section
+    list, which would otherwise leave order however sections happened to
+    get created over a project's life. A deterministic reorder pass runs
+    after every clean finish (whether or not the model made any edits
+    this run), re-sorting the six canonical headings
+    (`PROJECT_VIEW.md`'s own prescribed shape: What's carrying weight →
+    Where we pull apart → Get shit done → Settled → Open questions →
+    Notes on this view) into place.
+  - **A full project reset** now means: reset `graph-structure.md` (its
+    `asOfGraphHash` disappears with the file), which naturally makes
+    `graph-project-view`'s own `appliedByProjectView` marker meaningless
+    the next time either stage runs — no separate "full" mode needed,
+    same idempotent-by-construction property the old per-day design had.
+
+## Reset
+
+Unlike PhyLog's two reset depths (`nopal phylog reset`/`reset-pre-capture`),
+GraphLog has THREE independent, narrower resets — `graphLogReset.server.ts`
+— since it has three separate kinds of generated content worth being able
+to wipe on their own, plus one combined command that runs all three in
+order:
+
+- **`nopal graphlog reset-project-view`** (`resetProjectView`) — deletes
+  every direct child of the project folder EXCEPT `skills`/`syncs`/
+  `graph`, and clears `README.md`'s BODY (front matter preserved
+  byte-for-byte, same Sharing-Roles/`status` reasoning as PhyLog's own
+  reset and `migrateToN02.server.ts`'s README handling). In practice
+  there's rarely anything else at the project root to delete here yet
+  (GraphLog doesn't file loose content at the root the way PhyLog does) —
+  this exists mainly to clear a stale README body and catch anything
+  unexpected left there.
+- **`nopal graphlog reset-graph`** (`resetGraph`) — deletes the `Graph`
+  space folder outright: every `graph-log-*.md` file AND
+  `graph-structure.md`, so both `graph-structure`'s own `asOfGraphHash`
+  and `graph-project-view`'s `appliedByProjectView` marker (co-located on
+  that same file — see `graphStructure.server.ts`) go with it. A no-op if
+  the project has no `Graph` folder yet. A fresh `sync-graph` run
+  afterward regenerates every day from scratch.
+- **`nopal graphlog reset-knowledge`** (`resetKnowledge`) — recursively
+  deletes every `_knowledge/` sidecar folder nested anywhere under
+  `syncs/`. A fresh `sync-knowledge` run afterward regenerates every
+  sidecar from scratch.
+- **`nopal graphlog reset`** (`resetProjectAll`) — runs all three above,
+  in order (project-view first, so `graph`/`syncs` are still there to
+  reset next; then `graph`; then `knowledge`, nested inside whatever's
+  left of `syncs`) — the single deepest "start completely over" reset.
+
+All four are destructive, require `--yes` at the CLI layer (same
+convention as `phylog reset`/`migrate-to-n02`), and are deliberately NOT
+run automatically by anything else — always an explicit, separate call,
+so a human can inspect the emptied-out state before re-running `nopal
+graphlog run`. Deterministic and free (no LLM calls, no `{ ok, error }`
+wrapper) — same `runDailyLogSync`-style "a missing project folder just
+throws" convention, since these don't need `resolveProjectN02`'s
+container-type validation either (container-type-agnostic, like every
+other GraphLog stage). Each has its own job name on the `graphlog` queue
+(`reset`/`reset-project-view`/`reset-graph`/`reset-knowledge`) and its own
+`POST /api/graphlog/reset*` route, all following the same
+enqueue-then-poll shape (`GET /api/graphlog/jobs/:jobId`) every other
+agentic-shaped stage uses, even though these three are actually
+deterministic — kept consistent with the rest of the CLI/API surface
+rather than special-cased as synchronous like `daily-log-sync`.
 
 ## `project-n02` spaces
 
@@ -139,8 +256,8 @@ children, everything else (including the new `Graph` space) is
   type.
 - `projectN02.server.ts` mirrors `projectN01.server.ts`'s shape closely:
   - `ensureProjectN02(folder)` — tags `folder` `project-n02` and seeds
-    `skills/KNOWLEDGE.md`/`GRAPH.md`/`PROJECT_VIEW.md` from
-    `graphLogDefaults.server.ts`. **Refuses to touch a folder that's
+    `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`PROJECT_VIEW.md`
+    from `graphLogDefaults.server.ts`. **Refuses to touch a folder that's
     already a `project-n01` anchor** — retagging is the explicit
     migration step (not yet built), never an implicit side effect.
   - `resolveProjectN02(folderId)` — the same "resolve + validate + retrofit"
@@ -149,9 +266,9 @@ children, everything else (including the new `Graph` space) is
   - `ensureProjectGraphFolder(projectFolder)` — lazy `Graph` folder
     creation, mirroring `ensureProjectDailyLogsFolder`. Not yet called by
     anything (`sync-graph` doesn't exist yet).
-- `graphLogDefaults.server.ts` holds the three starter
-  `DEFAULT_KNOWLEDGE_SKILL`/`DEFAULT_GRAPH_SKILL`/`DEFAULT_PROJECT_VIEW_SKILL`
-  constants — genuinely early drafts, expected to change once the stages
+- `graphLogDefaults.server.ts` holds the four starter
+  `DEFAULT_KNOWLEDGE_SKILL`/`DEFAULT_GRAPH_SKILL`/`DEFAULT_GRAPH_STRUCTURE_SKILL`/
+  `DEFAULT_PROJECT_VIEW_SKILL` constants — genuinely early drafts, expected to change once the stages
   reading them are real. Deliberately does NOT have `phylogDefaults.server.ts`'s
   admin-editable-override layer (a DB row + Maker review UI) yet — add that
   once a real Maker page exists to review these from, not before.
@@ -324,7 +441,7 @@ What it actually does, in order:
    live ONLY in that front matter and deleting the whole file would
    silently revoke every collaborator's role.
 2. Retags the folder `project-n02` and seeds
-   `skills/KNOWLEDGE.md`/`GRAPH.md`/`PROJECT_VIEW.md`
+   `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`PROJECT_VIEW.md`
    (`applyProjectN02Shape` — `ensureProjectN02`'s retag+seed mechanics,
    split out so migration can call it directly, deliberately bypassing
    `ensureProjectN02`'s own n01-refusal guard, since performing exactly
@@ -653,24 +770,24 @@ skill was born from:
      day's file, counting up across every contributor's content that
      day (never restarted per contributor).
    - **Links point backward across days, OR sideways within the same
-     day** — before processing a day, every EARLIER day's already-written
-     `### Node <N>` headings are handed to the model as ready-to-use
-     markdown links, each one prefixed with its own date
-     (`[2026-08-10 Node 3](./graph-log-2026-08-10.md#node-3)` — the date
-     prefix is built by the code, not the model, so it's never
-     inconsistent) — "copy one of these verbatim, never invent a link to
-     an earlier day that isn't in this list." A node may ALSO link to
-     another node from the SAME day's file, in either direction (a later
-     node linking back to an earlier one, or vice versa) — this one the
-     model handles entirely on its own within one completion, since
-     nothing could hand it a same-day list ahead of time; verified
+     day.** The candidate list for backward links is now
+     `Graph/graph-structure.md`'s own clustered, glossed, weighted
+     content (see item 7 below) — a real upgrade from the original
+     design, which only ever handed the model a bare, gloss-free list of
+     `[2026-08-10 Node 3](./graph-log-2026-08-10.md#node-3)`-style links
+     with literally nothing to judge relevance against (a node's heading
+     is just "Node 3"). One cycle stale by construction (reflects the
+     graph as of `graph-structure`'s last run), falling back to the OLD
+     flat heading scan for a project that's never had `graph-structure`
+     run yet. A node may ALSO link to another node from the SAME day's
+     file, in either direction (a later node linking back to an earlier
+     one, or vice versa) — this one the model handles entirely on its own
+     within one completion, tracked live via `headingsByDate` regardless
+     of which candidate source is in play, since `graph-structure.md`
+     could never reflect a node written earlier in the SAME run; verified
      directly that a same-day link (`Node 2` → `Node 1`, same file)
      round-trips through the pipeline with no issue. Still never forward
      to a day that hasn't been processed yet, even within the same run.
-     Confirmed directly (a real `runSyncGraph` call against a scratch
-     project, fake provider): day 2's prompt correctly included day 1's
-     node as a date-prefixed link; the earliest day correctly saw "no
-     earlier days' nodes exist yet."
    - **Delete-and-regenerate, never partial-patch** — a day whose
      aggregate hash changed has its existing `graph-log-*.md` deleted
      BEFORE the model is asked to redo it from scratch; a day the model
@@ -701,50 +818,107 @@ skill was born from:
      marking each list item's own text separately when the verbatim
      words are/contain a list, keeping each item's own `1.`/`-` marker
      outside the highlight.
-6. **Done — `graph-project-view`.** `graphProjectView.server.ts`
-   (`runGraphProjectView`) walks every `Graph/graph-log-*.md` file whose
-   `sourceHash` doesn't yet match a stored `appliedSourceHash`, oldest
-   first, and hands each one to a bounded tool-calling loop
-   (`update_section`/`remove_section` only for v1 — see the file's own
-   "Deliberately deferred" note for what's intentionally NOT built yet:
-   `write_file`/`update_readme`/a reorganize pass/truncation-retry
-   escalation) grounded in `skills/PROJECT_VIEW.md`.
+6. **Done — `graph-project-view`, REDESIGNED from its original per-day
+   shape** (see the header's "real architecture change" note).
+   `graphProjectView.server.ts` (`runGraphProjectView`) now reads
+   `Graph/graph-structure.md` (not graph-log files directly) and runs
+   ONCE per invocation — not once per graph-log day — gated on
+   `graph-structure.md`'s own `asOfGraphHash` versus the
+   `appliedByProjectView` marker this stage stamps onto that SAME file
+   once an update completes cleanly. A single bounded tool-calling loop
+   (`update_section`/`remove_section`, same "Deliberately deferred" note
+   on `write_file`/`update_readme`/truncation-retry as before) reconciles
+   the whole README against the current graph-structure.md, grounded in
+   `skills/PROJECT_VIEW.md`.
    - **Reuses `project.types.ts`'s `splitFrontmatter`/`splitReadmeSections`/
      `joinReadmeSections`/`withReadmeBody` directly** (the same primitives
      `capture.server.ts` uses) — these are neutral README-SHAPE utilities,
      not PhyLog pipeline code, so sharing them doesn't compromise
      GraphLog's independence the way importing `capture.server.ts` itself
      would have.
-   - **Idempotency marker lives on the graph-log file's OWN front matter**
-     (`appliedSourceHash`, stamped alongside — never overwriting —
-     `sync-graph`'s own `date`/`sourceHash`/`generatedAt` fields), not a
-     separate tracking file or PhyLog's Release Log. A day is reprocessed
-     whenever its current `sourceHash` no longer matches. **This is what
-     makes the whole stage incremental by construction** — no separate
-     "full rebuild" mode is needed the way PhyLog's `capture --full`
-     needs one: resetting means every graph-log file's marker no longer
-     matches (or is absent), so the very next run naturally replays
-     history from scratch, oldest first.
+   - **"Notes on this view" is protected, code-owned, never a tool
+     target.** `update_section`/`remove_section` both hard-refuse (a
+     `hadRefusal` state, same signal a bad edit anywhere already uses to
+     block marking the run applied) any attempt to target that heading.
+     The section is guaranteed to exist — created with the standard
+     placeholder text the FIRST time this stage ever runs for a project,
+     since the model can never create it itself. Reading unstamped
+     comment LINES (anything not already ending ` → read <date>`) and
+     stamping them after a clean run is deterministic pre/post-processing
+     code (`extractReaderComments`/`stampAppliedDate`), never delegated to
+     the model — the unstamped text is handed to the model as read-only
+     context ("treat this as ground truth"), not something it edits.
+   - **Section order is enforced by a deterministic `reorderSections`
+     pass**, run unconditionally on a clean finish (not just when a
+     section was actually edited) — re-sorts the six canonical headings
+     from `PROJECT_VIEW.md`'s prescribed shape into place; anything else
+     (a heading the model invented despite the fixed shape) lands just
+     before "Notes on this view" rather than being silently dropped.
+   - **A real bug found and fixed by direct testing**: the executors were
+     originally constructed with the OLD (pre-run) file id before the
+     "ensure Notes on this view exists" step had a chance to create the
+     README for a brand new project — the model's first `update_section`
+     call then created a SECOND, duplicate README instead of editing the
+     one just created. Fixed by creating/updating the real file FIRST,
+     then constructing the executors with that real id.
    - `POST /api/graphlog/graph-project-view` (enqueue) + the shared
      `GET /api/graphlog/jobs/:jobId`. `nopal graphlog graph-project-view
      --project <path>`.
    - **Verified directly** (not just typechecked) against the real local
-     dev SurrealDB with a FAKE `LlmProvider` issuing real tool calls: two
-     days processed incrementally (day 1 ADDED a section, day 2 UPDATED
-     that same section — confirmed the README reflects day 2's content,
-     not a duplicate of day 1's stale version), full idempotency on a
-     no-op re-run (zero new LLM calls), and correct reprocessing (with a
-     freshly-stamped marker) after simulating `sync-graph` regenerating
-     one day with a new hash.
+     dev SurrealDB with a scripted fake `LlmProvider`: a first run adds a
+     section and auto-creates "Notes on this view"; a no-op re-run against
+     an unchanged `graph-structure.md` makes zero new LLM calls; an
+     attempt to edit "Notes on this view" alongside a legitimate edit in
+     the SAME turn commits the legitimate one and rejects the other
+     (confirmed by inspecting the saved file, not just the return value),
+     leaving the run unmarked-applied so it retries; a later clean retry
+     succeeds; and an unstamped reader comment is both included in the
+     next prompt verbatim AND stamped ` → read <date>` in place afterward.
+7. **Done — `graph-structure`** (see the header's "real architecture
+   change" note for why this exists at all). `graphStructure.server.ts`
+   (`runGraphStructure`) reads EVERY `Graph/graph-log-*.md` file every run
+   (not incrementally), parses each into structured node records
+   (`graphNodeIndex.server.ts`'s `parseGraphLogNodes` — deliberately
+   simple line/regex parsing over the generated node format, same
+   tradeoff `extractHeadings` already made), and asks an LLM (per
+   `skills/GRAPH_STRUCTURE.md`) to organize the whole graph into ONE file,
+   `Graph/graph-structure.md`: every node clustered by topic/thread,
+   weighted, and status-annotated.
+   - **Inbound link counts are PRE-COMPUTED, never left to the model**
+     (`graphNodeIndex.server.ts`'s `computeBacklinkIndex` walks every
+     node's own outbound links and builds the reverse index: count,
+     distinct author NAMES, date span) — handed to the model as grounding
+     facts per node, same "never trust the model with arithmetic it's
+     shown" reasoning `sync-graph`'s own pre-built citations already
+     follow.
+   - **Idempotent via an aggregate hash of every graph-log file's OWN
+     `sourceHash`**, stored as `asOfGraphHash` on `graph-structure.md`'s
+     own front matter — an unchanged graph is a total no-op, zero LLM
+     calls. `graph-project-view` stamps its OWN `appliedByProjectView`
+     marker onto that SAME file (`markGraphStructureApplied`, exported
+     from this file for that stage to call directly) — co-located, same
+     convention `sourceHash`/`appliedSourceHash` used on graph-log files
+     before this stage existed.
+   - **Thread-naming continuity**: handed its own previous version (if
+     any) and told to keep a continuing thread's name where it still
+     fits, even though it rebuilds fresh from the current graph every
+     run — keeps downstream churn (README sections, `sync-graph`'s own
+     candidate list) low without needing real incremental patching.
+   - `POST /api/graphlog/graph-structure` (enqueue) + the shared
+     `GET /api/graphlog/jobs/:jobId`. `nopal graphlog graph-structure
+     --project <path>`.
+   - **Verified directly** against the real local dev SurrealDB with a
+     scripted fake `LlmProvider`: a two-node, two-day graph (day 2's node
+     linking back to day 1's) produced a prompt with the correct
+     precomputed inbound-link count/author for day 1's node and "none
+     yet" for day 2's; a no-op re-run against an unchanged graph made
+     zero new LLM calls.
    - **`nopal graphlog run`** (`graphLogAgent.server.ts`'s
      `runGraphLogPipeline`, mirroring `phylogAgent.server.ts`'s
-     `runPhylogPipeline`) now ties all four stages together in one job —
+     `runPhylogPipeline`) ties all FIVE stages together in one job —
      `POST /api/graphlog/run`, job name `"run"` on the same `graphlog`
-     queue. **Verified end-to-end** with fake providers: a real Card
-     flowed through daily-log-sync → sync-knowledge → sync-graph →
-     graph-project-view in one call, each stage hitting exactly the file
-     the previous one produced, zero failures.
-7. **Done — the migration tool itself** (`nopal graphlog migrate-to-n02`,
+     queue.
+8. **Done — the migration tool itself** (`nopal graphlog migrate-to-n02`,
    plus `--full` to discover and convert every space a human owns in one
    command). See "Migration from `project-n01`" above for exactly what it
    does, how it was verified, AND two real data-integrity bugs this work
@@ -756,9 +930,19 @@ skill was born from:
    "Skills" folders, found on three real projects and fixed at the root
    with a deterministic folder id, same pattern `getOrCreateVaultFolder`
    already established elsewhere in `vault.server.ts`.
-8. **Done — the Maker usage/defaults pages** (`/fruits/maker/graphlog`,
+9. **Done — the Maker usage/defaults pages** (`/fruits/maker/graphlog`,
    `/fruits/maker/graphlog/defaults`, plus a summary section on
-   `/fruits/maker` itself). See "Maker pages" above.
+   `/fruits/maker` itself). See "Maker pages" above. The defaults page now
+   has a fourth editor (`graphStructure`) alongside `knowledge`/`graph`/
+   `projectView`.
+10. **Done — the four reset commands** (`nopal graphlog reset`/
+    `reset-project-view`/`reset-graph`/`reset-knowledge`,
+    `graphLogReset.server.ts`). Not part of the original phased plan above
+    — added afterward once the lack of any reset became a real gap. See
+    "Reset" above for exactly what each depth deletes. `reset-graph` now
+    also clears `graph-structure.md` (it lives in the same `Graph`
+    folder), taking both its own `asOfGraphHash` and `graph-project-view`'s
+    `appliedByProjectView` marker with it.
 
 **Not yet done: running the migration for real across every existing
 project/`personal` space, and the actual PhyLog/`project-n01` code

@@ -22,11 +22,12 @@ import { query, upsert, remove, formatRecord, defineTable, type Data } from "./g
 import type { LlmUsage } from "./llmProvider";
 import { estimateCostUsd, isPricingStale, pricingAgeDays } from "./llmPricing";
 
-export type GraphLogStage = "sync-knowledge" | "sync-graph" | "graph-project-view";
+export type GraphLogStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view";
 export type GraphLogEventKind =
   | "photo-knowledge"
   | "text-knowledge"
   | "graph-extract"
+  | "graph-structure"
   | "project-view";
 export type GraphLogOutcome = "success" | "skipped" | "error";
 export type GraphLogErrorKind = "rate_limited" | "oversized_image" | "incomplete" | "other";
@@ -268,6 +269,7 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
     byStage: {
       "sync-knowledge": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
       "sync-graph": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
+      "graph-structure": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
       "graph-project-view": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
     },
     byProject: [],

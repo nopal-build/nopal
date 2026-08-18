@@ -141,6 +141,7 @@ function RangeToggle({ days }: { days: MakerRangeDays }) {
 const STAGE_LABELS: Record<GraphLogStage, string> = {
   "sync-knowledge": "Sync Knowledge",
   "sync-graph": "Sync Graph",
+  "graph-structure": "Graph Structure",
   "graph-project-view": "Graph Project View",
 };
 
