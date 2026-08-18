@@ -14,11 +14,12 @@ synced content into a daily `Graph/` log, then synthesizes those into a
 README. Read the `vault` and `phylog` skills first for the Vault Folder Type
 system and PhyLog's own pipeline shape — this skill assumes both.
 
-**Status: early build-out, most pipeline stages not yet implemented.** See
-"Build status" below for exactly what exists today vs. what's still
-planned. Written as a living design doc, same convention as `oxmarkdown`'s
-skill — update it as GraphLog gets built, don't let it drift into
-describing a design that was later changed without a matching code change.
+**Status: all four pipeline stages built and verified.** Only migration
+tooling + PhyLog/`project-n01` retirement remains — see "Build status"
+below for exactly what exists today. Written as a living design doc, same
+convention as `oxmarkdown`'s skill — update it as GraphLog gets built,
+don't let it drift into describing a design that was later changed without
+a matching code change.
 
 ## Why a new name instead of extending PhyLog
 
@@ -39,6 +40,11 @@ migration" below. Until then, both systems coexist; nothing here changes
 `project-n01`'s existing behavior.
 
 ## The pipeline
+
+`nopal graphlog run --project <path>` runs all four stages in order, in
+one job (`graphLogAgent.server.ts`'s `runGraphLogPipeline`, mirroring
+`phylogAgent.server.ts`'s own `runPhylogPipeline`); each stage below is
+ALSO independently runnable via its own CLI subcommand/API route.
 
 ```
 personal/syncs/Daily Logs (real Cards, one per project per day)
@@ -407,11 +413,53 @@ skill was born from:
      `content_hash` regenerated ONLY that day; the `NOTHING_TO_CAPTURE`
      sentinel correctly deleted that day's file while leaving the other
      day's untouched.
-6. **Not started — `graph-project-view`.** Needs: the incremental
-   README-synthesis agent loop (can likely reuse `capture.server.ts`'s
-   `createReadmeAndFileExecutors`-style tool factory pattern).
+6. **Done — `graph-project-view`.** `graphProjectView.server.ts`
+   (`runGraphProjectView`) walks every `Graph/graph-log-*.md` file whose
+   `sourceHash` doesn't yet match a stored `appliedSourceHash`, oldest
+   first, and hands each one to a bounded tool-calling loop
+   (`update_section`/`remove_section` only for v1 — see the file's own
+   "Deliberately deferred" note for what's intentionally NOT built yet:
+   `write_file`/`update_readme`/a reorganize pass/truncation-retry
+   escalation) grounded in `skills/PROJECT_VIEW.md`.
+   - **Reuses `project.types.ts`'s `splitFrontmatter`/`splitReadmeSections`/
+     `joinReadmeSections`/`withReadmeBody` directly** (the same primitives
+     `capture.server.ts` uses) — these are neutral README-SHAPE utilities,
+     not PhyLog pipeline code, so sharing them doesn't compromise
+     GraphLog's independence the way importing `capture.server.ts` itself
+     would have.
+   - **Idempotency marker lives on the graph-log file's OWN front matter**
+     (`appliedSourceHash`, stamped alongside — never overwriting —
+     `sync-graph`'s own `date`/`sourceHash`/`generatedAt` fields), not a
+     separate tracking file or PhyLog's Release Log. A day is reprocessed
+     whenever its current `sourceHash` no longer matches. **This is what
+     makes the whole stage incremental by construction** — no separate
+     "full rebuild" mode is needed the way PhyLog's `capture --full`
+     needs one: resetting means every graph-log file's marker no longer
+     matches (or is absent), so the very next run naturally replays
+     history from scratch, oldest first.
+   - `POST /api/graphlog/graph-project-view` (enqueue) + the shared
+     `GET /api/graphlog/jobs/:jobId`. `nopal graphlog graph-project-view
+     --project <path>`.
+   - **Verified directly** (not just typechecked) against the real local
+     dev SurrealDB with a FAKE `LlmProvider` issuing real tool calls: two
+     days processed incrementally (day 1 ADDED a section, day 2 UPDATED
+     that same section — confirmed the README reflects day 2's content,
+     not a duplicate of day 1's stale version), full idempotency on a
+     no-op re-run (zero new LLM calls), and correct reprocessing (with a
+     freshly-stamped marker) after simulating `sync-graph` regenerating
+     one day with a new hash.
+   - **`nopal graphlog run`** (`graphLogAgent.server.ts`'s
+     `runGraphLogPipeline`, mirroring `phylogAgent.server.ts`'s
+     `runPhylogPipeline`) now ties all four stages together in one job —
+     `POST /api/graphlog/run`, job name `"run"` on the same `graphlog`
+     queue. **Verified end-to-end** with fake providers: a real Card
+     flowed through daily-log-sync → sync-knowledge → sync-graph →
+     graph-project-view in one call, each stage hitting exactly the file
+     the previous one produced, zero failures.
 7. **Not started — migration tooling + PhyLog/`project-n01` retirement.**
-   See "Planned: migration" above.
+   See "Planned: migration" above. **This is the only remaining phase.**
+   With all four pipeline stages now built and verified, `project-n02` is
+   otherwise feature-complete relative to the original phased plan.
 
 ## Related skills
 

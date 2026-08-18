@@ -33,6 +33,8 @@ import {
 } from "robustness-core/data/graphLogQueue.server";
 import { runSyncKnowledge } from "robustness-core/data/syncKnowledge.server";
 import { runSyncGraph } from "robustness-core/data/syncGraph.server";
+import { runGraphProjectView } from "robustness-core/data/graphProjectView.server";
+import { runGraphLogPipeline } from "robustness-core/data/graphLogAgent.server";
 import { getFolderById, type VaultFolder } from "robustness-core/data/vault.server";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -173,6 +175,23 @@ async function runGraphLogJob(
       const result = await runSyncGraph(projectFolder, job.data.actingHumanId, {
         log: onProgress,
       });
+      if (!result.ok) throw new Error(result.error);
+      return result;
+    }
+    case "graph-project-view": {
+      const result = await runGraphProjectView(projectFolder, job.data.actingHumanId, {
+        log: onProgress,
+      });
+      if (!result.ok) throw new Error(result.error);
+      return result;
+    }
+    case "run": {
+      const result = await runGraphLogPipeline(
+        job.data.actingHumanId,
+        job.data.projectFolderId,
+        {},
+        onProgress,
+      );
       if (!result.ok) throw new Error(result.error);
       return result;
     }

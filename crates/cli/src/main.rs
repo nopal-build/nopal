@@ -412,6 +412,13 @@ enum SortCommand {
 
 #[derive(Debug, Subcommand)]
 enum GraphlogCommand {
+    /// Runs the full pipeline, in order: daily-log-sync -> sync-knowledge
+    /// -> sync-graph -> graph-project-view. See the `graphlog` skill.
+    Run {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
     /// Deterministic Card→project copy into `syncs/Daily Logs/` — no LLM
     /// call, always applies for real (see the `graphlog` skill).
     DailyLogSync {
@@ -435,6 +442,14 @@ enum GraphlogCommand {
     /// `skills/GRAPH.md`'s own instructions, into
     /// `Graph/graph-log-YYYY-MM-DD.md`. Agentic (real LLM calls).
     SyncGraph {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Applies each not-yet-applied `Graph/graph-log-*.md` file, oldest
+    /// first, to README.md per `skills/PROJECT_VIEW.md`'s own
+    /// instructions. Agentic (real LLM calls).
+    GraphProjectView {
         /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
         #[arg(long)]
         project: String,
@@ -777,11 +792,15 @@ fn main() {
         }
         Command::Graphlog { command } => {
             let result = match command {
+                GraphlogCommand::Run { project } => graphlog::run(&project),
                 GraphlogCommand::DailyLogSync { project, date } => {
                     graphlog::daily_log_sync(&project, date.as_deref())
                 }
                 GraphlogCommand::SyncKnowledge { project } => graphlog::sync_knowledge(&project),
                 GraphlogCommand::SyncGraph { project } => graphlog::sync_graph(&project),
+                GraphlogCommand::GraphProjectView { project } => {
+                    graphlog::graph_project_view(&project)
+                }
             };
             if let Err(e) = result {
                 eprintln!("{e}");

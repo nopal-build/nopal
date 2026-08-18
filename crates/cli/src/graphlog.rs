@@ -290,3 +290,79 @@ pub fn sync_graph(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>
 
     Ok(())
 }
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ProjectViewDayResult {
+    date: String,
+    #[serde(default)]
+    changed: bool,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct GraphProjectViewResult {
+    #[serde(default)]
+    skipped: bool,
+    #[serde(default)]
+    days: Vec<ProjectViewDayResult>,
+}
+
+/// Runs `graph-project-view` for `project_path` — see the `graphlog`
+/// skill. Agentic (real LLM calls), so this enqueues and polls rather
+/// than blocking on one request.
+pub fn graph_project_view(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog graph-project-view: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/graph-project-view", &body)?;
+    let result: GraphProjectViewResult = poll_job(&client, &job_id)?;
+
+    if result.skipped {
+        println!("graph-project-view: skipped (skills/PROJECT_VIEW.md says skip).");
+        return Ok(());
+    }
+    if result.days.is_empty() {
+        println!("graph-project-view: nothing new to process.");
+        return Ok(());
+    }
+
+    let changed: Vec<&ProjectViewDayResult> = result.days.iter().filter(|d| d.changed).collect();
+    if changed.is_empty() {
+        println!("graph-project-view: nothing new to apply (every day already up to date).");
+        return Ok(());
+    }
+    for day in &changed {
+        println!("graph-project-view: applied {} to README.md.", day.date);
+    }
+    let unchanged = result.days.len() - changed.len();
+    if unchanged > 0 {
+        println!("{unchanged} day(s) already up to date, left unchanged.");
+    }
+
+    Ok(())
+}
+
+/// Runs GraphLog's full pipeline for `project_path`, in order:
+/// daily-log-sync -> sync-knowledge -> sync-graph -> graph-project-view.
+/// See the `graphlog` skill. Enqueues one job covering all four stages
+/// and polls it — the individual stage commands above remain useful for
+/// iterating on one project's own skill files without paying for the
+/// others every time.
+pub fn run(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog run: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/run", &body)?;
+    // The combined result's exact shape isn't printed piece by piece here
+    // (each stage already logs its own progress lines, printed live by
+    // `poll_job` as they arrive) — just confirm it finished.
+    let _: serde_json::Value = poll_job(&client, &job_id)?;
+    println!("run: finished.");
+
+    Ok(())
+}
