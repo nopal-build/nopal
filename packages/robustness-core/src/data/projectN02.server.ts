@@ -33,11 +33,8 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import { merge } from "./generic.server";
-import {
-  DEFAULT_KNOWLEDGE_SKILL,
-  DEFAULT_GRAPH_SKILL,
-  DEFAULT_PROJECT_VIEW_SKILL,
-} from "./graphLogDefaults.server";
+import { getAllEffectiveGraphLogDefaultSkills } from "./graphLogDefaults.server";
+import { systemVaultFolderKey } from "./vault.server";
 
 // ─── Seeding ────────────────────────────────────────────────────────────
 
@@ -79,24 +76,39 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
   }
 
   const { folders } = await listFolderChildren(current.human_id, current._id);
-  let skillsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "skills");
+  // Same deterministic-pick + deterministic-id fix as
+  // `projectN01.server.ts`'s `ensureProjectN01` — see its own comment for
+  // the real, confirmed duplicate-"Skills"-folder bug this closes. The id
+  // formula is IDENTICAL to `ensureProjectN01`'s (same `humanId`/`"Skills"`/
+  // folder id) on purpose: whichever of n01/n02 seeding ever runs against
+  // this project, both converge on the exact same Skills folder row.
+  let skillsFolder: VaultFolder | undefined = folders
+    .filter((f) => f.is_folder_type_root && f.folder_type === "skills")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
   if (!skillsFolder) {
     skillsFolder = await createVaultFolder({
       human_id: current.human_id,
       name: "Skills",
       parent_folder_id: current._id,
       folder_type: "skills",
+      id: systemVaultFolderKey(current.human_id, "Skills", current._id),
     });
   }
   if (skillsFolder) {
+    // Seeds with the CURRENT effective defaults (an admin's override, if
+    // set, else the hardcoded built-in) -- not a stale hardcoded string,
+    // so a change made on /fruits/maker/graphlog/defaults applies to
+    // every project created from that point on, same as PhyLog's own
+    // `ensureProjectN01` already does.
+    const effective = await getAllEffectiveGraphLogDefaultSkills();
     await Promise.all([
-      ensureSkillFile(current.human_id, skillsFolder._id, "KNOWLEDGE.md", DEFAULT_KNOWLEDGE_SKILL),
-      ensureSkillFile(current.human_id, skillsFolder._id, "GRAPH.md", DEFAULT_GRAPH_SKILL),
+      ensureSkillFile(current.human_id, skillsFolder._id, "KNOWLEDGE.md", effective.knowledge.content),
+      ensureSkillFile(current.human_id, skillsFolder._id, "GRAPH.md", effective.graph.content),
       ensureSkillFile(
         current.human_id,
         skillsFolder._id,
         "PROJECT_VIEW.md",
-        DEFAULT_PROJECT_VIEW_SKILL,
+        effective.projectView.content,
       ),
     ]);
   }

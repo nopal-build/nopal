@@ -21,10 +21,6 @@ const SKILLS: &[Skill] = &[
         source: include_str!("../../../.agents/skills/oxmarkdown/SKILL.md"),
     },
     Skill {
-        id: "mdx-editor",
-        source: include_str!("../../../.agents/skills/mdx-editor/SKILL.md"),
-    },
-    Skill {
         id: "vault",
         source: include_str!("../../../.agents/skills/vault/SKILL.md"),
     },

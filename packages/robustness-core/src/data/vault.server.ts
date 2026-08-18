@@ -617,7 +617,7 @@ export async function removeFolderSharingBetweenHumans(
  * single statement at the database level) makes creating the "same"
  * folder twice a no-op rather than a duplicate, closing the race
  * entirely, regardless of how many requests race for it. */
-function systemVaultFolderKey(
+export function systemVaultFolderKey(
   humanId: string,
   name: string,
   parentFolderId: string | null,

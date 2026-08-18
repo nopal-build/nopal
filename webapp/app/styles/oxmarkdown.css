@@ -732,6 +732,83 @@
   padding-bottom: 0;
 }
 
+/* ── File image zoom modal (`components/OxRenderer.tsx`'s
+   `FileImageModal`) — clicking a `::file{...}` image thumbnail opens
+   this, on a dimmed backdrop, same z-index tier as `Modal.tsx`'s own
+   overlay (1000; both are app-level modals, never open at once). Shares
+   `.good-box` for its panel background/border so it flips for dark mode
+   the same way every other panel does, with no override needed here. */
+img.ox-file-thumb {
+  cursor: zoom-in;
+}
+.ox-file-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ox-grid);
+  background: rgba(0, 0, 0, 0.75);
+}
+.ox-file-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: min(1200px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+}
+/* Sits ON TOP of the image (absolute, not a flex child) with its own
+   background so it stays legible over a bright photo regardless of what
+   the image itself looks like right under it. */
+.ox-file-modal-close-slot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  border-radius: 9999px;
+  background: var(--farground);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+@media (prefers-color-scheme: dark) {
+  .ox-file-modal-close-slot {
+    background: var(--dark-farground);
+  }
+}
+.ox-file-modal-image-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: var(--ox-grid);
+}
+/* "Fit" state (the default) — never upscales past the image's real size,
+   only ever constrains it down to fit. A further click swaps in
+   `.ox-file-modal-image--full` below, which is only ever offered
+   (`canZoomFurther`) when this actually had to scale the image down. */
+.ox-file-modal-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+.ox-file-modal-image--full {
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+}
+.ox-file-modal-caption {
+  flex-shrink: 0;
+  padding: var(--ox-grid);
+  border-top: 1px solid var(--ox-color-border);
+}
+
 /* The persistent "add file" trigger below the editor
    (`oxmarkdown/AddFileLinkPlugin.tsx`) — a themed link (accent color +
    underline), even though it's really a `<button>` (it triggers an

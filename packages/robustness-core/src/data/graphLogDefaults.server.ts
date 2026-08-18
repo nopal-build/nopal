@@ -8,13 +8,20 @@
  * `project-n02` has something usable the moment its pipeline stages exist,
  * expected to change as the actual `sync-knowledge`/`sync-graph`/
  * `graph-project-view` stages get built and iterated on against real
- * content. Deliberately NOT given the admin-editable-override layer
- * `phylogDefaults.server.ts` has yet (a DB row + `/fruits/maker/...` review
- * UI) — that's worth adding once a real Maker page exists to review these
- * from, same as PhyLog's own defaults got theirs after, not before, the
- * pipeline was real. Until then, `ensureProjectN02` seeds directly from
- * these hardcoded constants.
+ * content.
+ *
+ * Also mirrors `phylogDefaults.server.ts`'s admin-editable-override layer
+ * (a single DB row, `graphlog_default_skills`, one OPTIONAL field per
+ * stage) — added once `/fruits/maker/graphlog/defaults` existed to review
+ * these from, same as PhyLog's own defaults got theirs after, not before,
+ * a real Maker page existed. See that module's own doc for the full
+ * reasoning (deliberately NOT retroactive — only affects a brand new
+ * project's seed content going forward, never an existing project's own
+ * already-seeded `skills/*.md` file).
  */
+
+import { RecordId } from "surrealdb";
+import { defineTable, formatRecord, query, upsert, type Data } from "./generic.server";
 
 /** Same marker `projectN01.server.ts`'s `isSkipInstruction` checks for.
  * Not imported from there — see that module's own doc for why duplicating
@@ -105,3 +112,102 @@ existing structure has clearly stopped making sense, not on every run.
 Replace this file with your own instructions to change what sections a
 README should have, or how much a single day's update should touch.
 `;
+
+// ─── Overrides ───────────────────────────────────────────────
+// Mirrors `phylogDefaults.server.ts`'s override layer exactly — see this
+// file's own module doc above for the full reasoning.
+
+export type GraphLogDefaultStage = "knowledge" | "graph" | "projectView";
+
+const STAGE_HARDCODED_DEFAULT: Record<GraphLogDefaultStage, string> = {
+  knowledge: DEFAULT_KNOWLEDGE_SKILL,
+  graph: DEFAULT_GRAPH_SKILL,
+  projectView: DEFAULT_PROJECT_VIEW_SKILL,
+};
+
+const TABLE = "graphlog_default_skills";
+const ROW_ID = "main";
+
+type GraphLogDefaultSkillsRow = Data & {
+  knowledge?: string | null;
+  graph?: string | null;
+  projectView?: string | null;
+  updatedAt?: string;
+  updatedByHumanId?: string;
+};
+
+let tableEnsured = false;
+async function ensureTable(): Promise<void> {
+  if (tableEnsured) return;
+  await defineTable(TABLE);
+  tableEnsured = true;
+}
+
+async function getOverrideRow(): Promise<GraphLogDefaultSkillsRow | null> {
+  await ensureTable();
+  const result = await query<[GraphLogDefaultSkillsRow[]]>(`SELECT * FROM ${TABLE} LIMIT 1`);
+  const record = result?.[0]?.[0];
+  return record ? formatRecord(record) : null;
+}
+
+export type EffectiveGraphLogDefaultSkill = {
+  content: string;
+  /** True when this is an admin-set override, not the hardcoded built-in
+   * — drives the "Reset to built-in default" affordance on
+   * `/fruits/maker/graphlog/defaults`. */
+  overridden: boolean;
+};
+
+/** The single value `ensureProjectN02`/`applyProjectN02Shape` actually
+ * need: what should a new `project-n02`'s `skills/<STAGE>.md` be seeded
+ * with right now. Falls back to the hardcoded constant whenever no
+ * override row exists, or this specific stage's field on it is
+ * unset/blank. */
+export async function getEffectiveGraphLogDefaultSkill(stage: GraphLogDefaultStage): Promise<string> {
+  const row = await getOverrideRow();
+  const override = row?.[stage];
+  return override && override.trim().length > 0 ? override : STAGE_HARDCODED_DEFAULT[stage];
+}
+
+/** All three at once, each labeled with whether it's overridden — what
+ * `/fruits/maker/graphlog/defaults`'s own loader uses to render the
+ * review/edit UI in a single round trip instead of three. */
+export async function getAllEffectiveGraphLogDefaultSkills(): Promise<
+  Record<GraphLogDefaultStage, EffectiveGraphLogDefaultSkill>
+> {
+  const row = await getOverrideRow();
+  const resolve = (stage: GraphLogDefaultStage): EffectiveGraphLogDefaultSkill => {
+    const override = row?.[stage];
+    if (override && override.trim().length > 0) {
+      return { content: override, overridden: true };
+    }
+    return { content: STAGE_HARDCODED_DEFAULT[stage], overridden: false };
+  };
+  return {
+    knowledge: resolve("knowledge"),
+    graph: resolve("graph"),
+    projectView: resolve("projectView"),
+  };
+}
+
+/** Sets (or clears, when `content` is `null`) this stage's override.
+ * Clearing reverts every future new project's seed content back to the
+ * hardcoded built-in — this row is never deleted outright, just has that
+ * one field unset, so the OTHER two stages' overrides (if any) are
+ * untouched. */
+export async function setGraphLogDefaultSkillOverride(
+  stage: GraphLogDefaultStage,
+  content: string | null,
+  updatedByHumanId: string,
+): Promise<void> {
+  await ensureTable();
+  const existing = await getOverrideRow();
+  await upsert(new RecordId(TABLE, ROW_ID), {
+    knowledge: existing?.knowledge ?? null,
+    graph: existing?.graph ?? null,
+    projectView: existing?.projectView ?? null,
+    [stage]: content && content.trim().length > 0 ? content : null,
+    updatedAt: new Date().toISOString(),
+    updatedByHumanId,
+  });
+}

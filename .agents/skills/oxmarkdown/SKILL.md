@@ -585,6 +585,27 @@ Interacting mode first, without needing that decision resolved.
       edge to mirror the thumbnail's left overhang — only works because
       `.ox-content`'s `padding-right` is `--ox-grid` too (see Design
       language's gutter-markers note).
+    - **Done — click-to-zoom modal**, `FileImageModal` (`OxRenderer.tsx`),
+      shared by both rendering paths via `FileDirectiveLayout` itself
+      (owns its own open/closed state, no per-caller wiring). Clicking an
+      image thumbnail opens a `good-box`-panel modal on a dimmed backdrop
+      (closes on Escape or a backdrop click); the SAME `caption` node
+      (live nested `<OxEditor>` in Editing mode, plain rendered markdown
+      otherwise) moves into the modal below the image while it's open —
+      never rendered in both the inline row AND the modal at once, since
+      two mounted copies of the same live caption editor would drift out
+      of sync the moment either is typed in (each mounts independent
+      Lexical state from the same initial `markdown` prop). Moving it
+      costs a remount (loses cursor position, not content) on open/close,
+      an accepted trade-off. Two-step zoom: opens "fit" (`object-fit:
+      contain`, never upscales past the image's real size), and a further
+      click on the image enlarges to true 100% (`canZoomFurther`, compares
+      `naturalWidth`/`naturalHeight` against the fit-rendered
+      `clientWidth`/`clientHeight`) — an image that was never scaled down
+      to fit in the first place skips this second state entirely and just
+      always renders at its real size, per product decision (never
+      artificially upscale a small image, and don't offer a meaningless
+      second zoom click).
     - `AddFileLinkPlugin.tsx`'s link is excluded
       (`:not(.ox-add-file-link)`) from `.ox-content`'s own
       `*:not(:first-child) { margin-top: var(--ox-grid) }` static-rhythm

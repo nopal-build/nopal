@@ -425,8 +425,15 @@ enum GraphlogCommand {
     /// "Planned: migration" section.
     MigrateToN02 {
         /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        /// Required unless --full is given.
         #[arg(long)]
-        project: String,
+        project: Option<String>,
+        /// Discover and convert EVERY project-n01 space you own (your own
+        /// `personal` root plus every owned project) in one command,
+        /// instead of one path at a time. Mutually exclusive with
+        /// --project.
+        #[arg(long)]
+        full: bool,
         /// Required to actually run — this is destructive.
         #[arg(long)]
         yes: bool,
@@ -805,9 +812,14 @@ fn main() {
         Command::Graphlog { command } => {
             let result = match command {
                 GraphlogCommand::Run { project } => graphlog::run(&project),
-                GraphlogCommand::MigrateToN02 { project, yes } => {
-                    graphlog::migrate_to_n02(&project, yes)
-                }
+                GraphlogCommand::MigrateToN02 { project, full, yes } => match (project, full) {
+                    (Some(_), true) => Err("Pass either --project or --full, not both.".into()),
+                    (Some(project), false) => graphlog::migrate_to_n02(&project, yes),
+                    (None, true) => graphlog::migrate_to_n02_full(yes),
+                    (None, false) => Err(
+                        "Pass --project <path>, or --full to convert everything you own.".into(),
+                    ),
+                },
                 GraphlogCommand::DailyLogSync { project, date } => {
                     graphlog::daily_log_sync(&project, date.as_deref())
                 }

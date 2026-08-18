@@ -46,11 +46,13 @@
 import {
   deleteFileRef,
   deleteVaultFolderCascade,
+  ensureVaultRootFolders,
   getFolderById,
   getReadmeFileForFolder,
   listFolderChildren,
   updateFileRef,
 } from "./vault.server";
+import type { VaultFolder } from "./vault.types";
 import { splitFrontmatter, withReadmeBody } from "./project.types";
 import { applyProjectN02Shape } from "./projectN02.server";
 import { runDailyLogSync, type DailyLogSyncResult } from "./dailyLogSync.server";
@@ -73,6 +75,58 @@ export type MigrateToN02Result =
       dailyLogSync: DailyLogSyncResult;
     }
   | { ok: false; error: string };
+
+/** One `project-n01` anchor `humanId` owns, ready to migrate — `path` is a
+ * display-only label (`"personal"` or `"projects/<name>"`), never parsed
+ * back; every real reference is by `folderId`. */
+export type ProjectN01Anchor = {
+  folderId: string;
+  name: string;
+  path: string;
+};
+
+/**
+ * Every `project-n01` anchor `humanId` OWNS — their own `personal` root
+ * (if still `project-n01`) plus every direct child of their own `projects`
+ * root that's still `project-n01` — for `nopal graphlog migrate-to-n02
+ * --full` to discover and convert in one command, without a human having
+ * to enumerate paths themselves. Deliberately scoped to OWNED anchors
+ * only, same boundary the single-project migration route already enforces
+ * (`getProjectRole(folder, user._id)?.isOwner`) — a project shared with
+ * `humanId` should be migrated by whoever actually owns it, not a
+ * collaborator's own `--full` sweep.
+ *
+ * Deliberately does NOT go through `getProjectFolders` (which retrofits
+ * anything not already `project-n01` INTO `project-n01` as a side effect
+ * — see `ensureProjectN01`'s own guard against doing that to an already-
+ * migrated `project-n02` folder) — this function only ever READS, never
+ * retags anything, so a folder that's neither n01 nor n02 (impossible in
+ * practice once `ensureVaultRootFolders`/`createVaultFolder` have run, but
+ * not asserted here) is simply not listed, not silently converted.
+ */
+export async function listOwnedProjectN01Anchors(humanId: string): Promise<ProjectN01Anchor[]> {
+  const roots = await ensureVaultRootFolders(humanId);
+  const anchors: ProjectN01Anchor[] = [];
+
+  const isN01Anchor = (f: VaultFolder) => f.folder_type === "project-n01" && f.is_folder_type_root;
+
+  const personal = roots.find((r) => r.vault_root_key === "personal");
+  if (personal && isN01Anchor(personal)) {
+    anchors.push({ folderId: personal._id, name: personal.name, path: "personal" });
+  }
+
+  const projectsRoot = roots.find((r) => r.vault_root_key === "projects");
+  if (projectsRoot) {
+    const { folders } = await listFolderChildren(humanId, projectsRoot._id);
+    for (const f of folders) {
+      if (isN01Anchor(f)) {
+        anchors.push({ folderId: f._id, name: f.name, path: `projects/${f.name}` });
+      }
+    }
+  }
+
+  return anchors;
+}
 
 /**
  * Migrates `folderId` (a project, or `personal`) from `project-n01` to

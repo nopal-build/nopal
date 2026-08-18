@@ -380,31 +380,26 @@ struct MigrateToN02Result {
     daily_log_sync: DailyLogSyncResult,
 }
 
-/// Converts one existing `project-n01` space into `project-n02` — see
-/// the `graphlog` skill's "Planned: migration" section for exactly what
-/// this does. DESTRUCTIVE and irreversible; requires `--yes`. Does NOT
-/// run any of GraphLog's agentic stages itself (no LLM cost) — run
-/// `nopal graphlog run` as a separate, explicit follow-up once this
-/// finishes.
-pub fn migrate_to_n02(project_path: &str, yes: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if !yes {
-        return Err(concat!(
-            "This deletes everything in this project except its skills/ and syncs/ folders ",
-            "(README.md's body is cleared, not the file itself), then re-seeds skills/ with ",
-            "GraphLog's own KNOWLEDGE.md/GRAPH.md/PROJECT_VIEW.md (PhyLog's own PRE_CAPTURE.md/",
-            "CAPTURE.md/POST_CAPTURE.md are removed; SKILL.md and any other custom file are kept). ",
-            "Pass --yes to confirm."
-        )
-        .into());
-    }
+const MIGRATE_CONFIRM_TEXT: &str = concat!(
+    "This deletes everything in this project except its skills/ and syncs/ folders ",
+    "(README.md's body is cleared, not the file itself), then re-seeds skills/ with ",
+    "GraphLog's own KNOWLEDGE.md/GRAPH.md/PROJECT_VIEW.md (PhyLog's own PRE_CAPTURE.md/",
+    "CAPTURE.md/POST_CAPTURE.md are removed; SKILL.md and any other custom file are kept). ",
+    "Pass --yes to confirm."
+);
 
-    let client = Client::new()?;
-    let folder = resolve_project(&client, project_path)?;
-
-    println!("=== GraphLog migrate-to-n02: {project_path}/ ===");
-    let body = json!({ "projectFolderId": folder._id });
-    let job_id = enqueue(&client, "/api/graphlog/migrate-to-n02", &body)?;
-    let result: MigrateToN02Result = poll_job(&client, &job_id)?;
+/// The actual enqueue+poll+print for ONE folder — shared by the single-
+/// project command and `--full`'s sweep below, so both go through the
+/// exact same request shape and print the exact same per-project detail.
+fn migrate_one(
+    client: &Client,
+    label: &str,
+    folder_id: &str,
+) -> Result<MigrateToN02Result, Box<dyn Error + Send + Sync>> {
+    println!("=== GraphLog migrate-to-n02: {label}/ ===");
+    let body = json!({ "projectFolderId": folder_id });
+    let job_id = enqueue(client, "/api/graphlog/migrate-to-n02", &body)?;
+    let result: MigrateToN02Result = poll_job(client, &job_id)?;
 
     if !result.deleted_folders.is_empty() {
         println!("Deleted folders: {}", result.deleted_folders.join(", "));
@@ -420,9 +415,109 @@ pub fn migrate_to_n02(project_path: &str, yes: bool) -> Result<(), Box<dyn Error
         result.daily_log_sync.synced.len(),
         result.daily_log_sync.attachments_copied.len()
     );
+
+    Ok(result)
+}
+
+/// Converts one existing `project-n01` space into `project-n02` — see
+/// the `graphlog` skill's "Planned: migration" section for exactly what
+/// this does. DESTRUCTIVE and irreversible; requires `--yes`. Does NOT
+/// run any of GraphLog's agentic stages itself (no LLM cost) — run
+/// `nopal graphlog run` as a separate, explicit follow-up once this
+/// finishes.
+pub fn migrate_to_n02(project_path: &str, yes: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !yes {
+        return Err(MIGRATE_CONFIRM_TEXT.into());
+    }
+
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    migrate_one(&client, project_path, &folder._id)?;
+
     println!();
     println!("Migration complete. This project is now project-n02.");
     println!("Run `nopal graphlog run --project {project_path}` to build its Graph and README.md.");
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct N01Anchor {
+    folder_id: String,
+    path: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct N01AnchorsResponse {
+    #[serde(default)]
+    anchors: Vec<N01Anchor>,
+}
+
+/// Discovers and converts EVERY `project-n01` space the authenticated
+/// human owns in one command — their own `personal` root, plus every
+/// owned project under `projects/` still on `project-n01`
+/// (`GET /api/graphlog/n01-projects`, `listOwnedProjectN01Anchors`).
+/// DESTRUCTIVE and irreversible, same as the single-project form; requires
+/// `--yes` ONCE up front for the whole sweep, not per project. One
+/// project's failure doesn't abort the rest — every anchor is attempted,
+/// and a summary of what succeeded/failed prints at the end.
+pub fn migrate_to_n02_full(yes: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let anchors = client
+        .get_json::<N01AnchorsResponse>("/api/graphlog/n01-projects")?
+        .anchors;
+
+    if anchors.is_empty() {
+        println!("Nothing to migrate — no project-n01 spaces found.");
+        return Ok(());
+    }
+
+    println!("Found {} project-n01 space(s) to migrate:", anchors.len());
+    for a in &anchors {
+        println!("  - {}", a.path);
+    }
+    println!();
+
+    if !yes {
+        return Err(MIGRATE_CONFIRM_TEXT.into());
+    }
+
+    let mut succeeded: Vec<String> = Vec::new();
+    let mut failed: Vec<(String, String)> = Vec::new();
+
+    for anchor in &anchors {
+        match migrate_one(&client, &anchor.path, &anchor.folder_id) {
+            Ok(_) => succeeded.push(anchor.path.clone()),
+            Err(err) => {
+                println!("FAILED: {} — {}", anchor.path, err);
+                failed.push((anchor.path.clone(), err.to_string()));
+            }
+        }
+        println!();
+    }
+
+    println!("=== Summary ===");
+    println!(
+        "Migrated: {}",
+        if succeeded.is_empty() {
+            "none".to_string()
+        } else {
+            succeeded.join(", ")
+        }
+    );
+    if !failed.is_empty() {
+        println!("Failed:");
+        for (path, err) in &failed {
+            println!("  - {path}: {err}");
+        }
+    }
+    if !succeeded.is_empty() {
+        println!();
+        println!("Run `nopal graphlog run --project <path>` on each migrated space to build its Graph and README.md.");
+    }
 
     Ok(())
 }

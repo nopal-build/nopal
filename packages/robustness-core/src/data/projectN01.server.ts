@@ -46,6 +46,7 @@ import {
 import { merge } from "./generic.server";
 import { splitFrontmatter, withReadmeBody } from "./project.types";
 import { getAllEffectiveDefaultSkills } from "./phylogDefaults.server";
+import { systemVaultFolderKey } from "./vault.server";
 
 // ─── Default skill file content ──────────────────────────────────
 //
@@ -99,6 +100,17 @@ async function ensureSkillFile(
  * everything already exists). Returns the up-to-date folder record.
  */
 export async function ensureProjectN01(folder: VaultFolder): Promise<VaultFolder> {
+  // `project-n02` is a DIFFERENT, equally-valid tagged container state
+  // (see the `graphlog` skill's migration section) — never retag it back
+  // to `project-n01` as a side effect of an ordinary read. Without this
+  // guard, every call site that treats "not project-n01" as "needs
+  // retrofitting" (this function's own callers: `getProjectFolders`,
+  // `ensureVaultRootFolders`'s personal-root backfill, both called on
+  // essentially every page load) would silently flip a migrated project
+  // straight back to `project-n01` — a REAL bug, confirmed to exist until
+  // this fix, that would have made the migration non-permanent.
+  if (folder.folder_type === "project-n02" && folder.is_folder_type_root) return folder;
+
   let current = folder;
   if (current.folder_type !== "project-n01" || !current.is_folder_type_root) {
     const updated = await merge("vault_folders", current._id, {
@@ -110,15 +122,25 @@ export async function ensureProjectN01(folder: VaultFolder): Promise<VaultFolder
   }
 
   const { folders } = await listFolderChildren(current.human_id, current._id);
-  let skillsFolder = folders.find(
-    (f) => f.is_folder_type_root && f.folder_type === "skills",
-  );
+  // `.sort()` before picking: a REAL, confirmed check-then-create race
+  // (this exact "look for it, create if missing" shape, with no
+  // deterministic id) has already produced duplicate "Skills" folders on
+  // two real projects — same class of bug `getOrCreateVaultFolder`'s own
+  // doc already describes for daily-log folders. Sorting oldest-first
+  // means every caller converges on the SAME pick even where a duplicate
+  // still exists (doesn't merge it, just makes behavior consistent until
+  // it's cleaned up) — the `id:` below is what actually stops NEW
+  // duplicates from forming.
+  let skillsFolder: VaultFolder | undefined = folders
+    .filter((f) => f.is_folder_type_root && f.folder_type === "skills")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
   if (!skillsFolder) {
     skillsFolder = await createVaultFolder({
       human_id: current.human_id,
       name: "Skills",
       parent_folder_id: current._id,
       folder_type: "skills",
+      id: systemVaultFolderKey(current.human_id, "Skills", current._id),
     });
   }
   if (skillsFolder) {
@@ -162,6 +184,17 @@ export async function resolveProjectN01(
     return {
       ok: false,
       error: "This isn't a project — pass a path like 'projects/sunny' or 'personal'",
+    };
+  }
+
+  // Refuse outright once migrated — PhyLog must never run against a
+  // `project-n02` space (it would write PRE_CAPTURE/CAPTURE output into a
+  // GraphLog-managed structure). Symmetric with `migrateProjectToN02`'s
+  // own refusal in the OTHER direction (only touches `project-n01`).
+  if (folder.folder_type === "project-n02" && folder.is_folder_type_root) {
+    return {
+      ok: false,
+      error: "This project has been migrated to project-n02 (GraphLog) — PhyLog no longer applies here.",
     };
   }
 

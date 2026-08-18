@@ -18,7 +18,7 @@
  * instead, modeled off the same design language.
  */
 
-import { createContext, Fragment, useContext, useMemo, useState } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { Definition, RootContent } from "mdast";
 import {
@@ -778,6 +778,18 @@ export function FileDirectiveLayout({
   onRemove?: () => void;
 }) {
   const isImage = !!fileId && !!contentType?.startsWith("image/");
+  // The modal owns its own "is it open" state right here rather than in
+  // either caller (`FileDirectiveStatic`/`OxDirectiveDecorator`) — both
+  // paths get the zoom behavior for free this way, with zero per-caller
+  // wiring. While open, the caption moves INTO the modal (see below) —
+  // it's the exact same `caption` node either place, so it must never be
+  // rendered in both slots at once (two mounted copies of the same live
+  // `<OxEditor>` caption would drift out of sync the moment either one is
+  // typed in, since each mounts its own independent Lexical state from
+  // the same initial `markdown` prop). Moving it costs a remount (a
+  // typing cursor mid-caption resets), an acceptable trade-off for reusing
+  // the one real editor instance instead of running two.
+  const [zoomed, setZoomed] = useState(false);
   return (
     <div className="ox-file-directive" contentEditable={false}>
       {isImage ? (
@@ -787,6 +799,15 @@ export function FileDirectiveLayout({
           alt={name}
           title={name}
           draggable={false}
+          role="button"
+          tabIndex={0}
+          onClick={() => setZoomed(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setZoomed(true);
+            }
+          }}
         />
       ) : (
         <div
@@ -796,7 +817,7 @@ export function FileDirectiveLayout({
           aria-hidden="true"
         />
       )}
-      <div className="ox-file-caption">{caption}</div>
+      <div className="ox-file-caption">{zoomed ? null : caption}</div>
       {onRemove && (
         // A dedicated `--ox-grid`-wide (41px) slot, centering the 36px
         // button within it — CircleButton sets its own width/height via
@@ -813,6 +834,108 @@ export function FileDirectiveLayout({
           </CircleButton>
         </div>
       )}
+      {zoomed && isImage && fileId && (
+        <FileImageModal
+          name={name}
+          fileId={fileId}
+          caption={caption}
+          onClose={() => setZoomed(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The enlarged view opened by clicking a `::file{...}` image thumbnail —
+ * see the oxmarkdown skill's file-directive section. Two independent
+ * concerns:
+ *
+ *   1. A modal overlay (`good-box` panel on a dimmed backdrop, closes on
+ *      Escape or a backdrop click — same conventions as `Modal.tsx`,
+ *      though this needs its own shell rather than reusing that
+ *      component: `Modal.tsx`'s panel caps out at a fixed 400px width,
+ *      wrong for a photo that should get as much of the screen as it can).
+ *   2. Two-step zoom: opens "fit" (as large as it can get without ever
+ *      upscaling past the image's real size — plain `max-width`/
+ *      `max-height: 100%` on the `<img>`), then a click enlarges to true
+ *      100% (1 image pixel = 1 screen pixel), which can then need
+ *      scrolling. If the image was never scaled down to fit in the first
+ *      place (it's simply smaller than the space available), "fit" and
+ *      "100%" are the same picture — `canZoomFurther` stays false and no
+ *      second click/zoom-cursor is offered at all, per the product
+ *      requirement: a small image should just always show at its real
+ *      size, never artificially upscaled.
+ */
+function FileImageModal({
+  name,
+  fileId,
+  caption,
+  onClose,
+}: {
+  name: string;
+  fileId: string;
+  caption: ReactNode;
+  onClose: () => void;
+}) {
+  const [zoomedIn, setZoomedIn] = useState(false);
+  const [canZoomFurther, setCanZoomFurther] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  // Re-checked on load (natural size just became known) and on resize
+  // (whether "fit" needs to downscale at all can change with the
+  // viewport) — never while `zoomedIn` (the image renders at its natural
+  // size then, so it'd always read as "can't zoom further" and could
+  // otherwise flip `canZoomFurther` off mid-zoom on a resize, stranding
+  // the user unable to zoom back out). Memoized on `zoomedIn` specifically
+  // so the resize listener below always sees the CURRENT value rather than
+  // whatever it was when the listener was first attached.
+  const checkZoomable = useCallback(() => {
+    const img = imgRef.current;
+    if (!img || zoomedIn) return;
+    setCanZoomFurther(img.naturalWidth > img.clientWidth || img.naturalHeight > img.clientHeight);
+  }, [zoomedIn]);
+
+  useEffect(() => {
+    checkZoomable();
+    window.addEventListener("resize", checkZoomable);
+    return () => window.removeEventListener("resize", checkZoomable);
+  }, [checkZoomable]);
+
+  return (
+    <div className="ox-file-modal-backdrop" onClick={onClose}>
+      <div
+        className="ox-file-modal good-box"
+        role="dialog"
+        aria-modal="true"
+        aria-label={name}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="ox-file-modal-close-slot">
+          <CircleButton onClick={onClose} aria-label="Close">
+            <RemoveFileIcon />
+          </CircleButton>
+        </div>
+        <div className="ox-file-modal-image-area">
+          <img
+            ref={imgRef}
+            src={`/api/vault/view/${fileId}`}
+            alt={name}
+            className={`ox-file-modal-image${zoomedIn ? " ox-file-modal-image--full" : ""}`}
+            onLoad={checkZoomable}
+            onClick={() => canZoomFurther && setZoomedIn((z) => !z)}
+            style={{ cursor: canZoomFurther ? (zoomedIn ? "zoom-out" : "zoom-in") : "default" }}
+          />
+        </div>
+        <div className="ox-file-modal-caption">{caption}</div>
+      </div>
     </div>
   );
 }

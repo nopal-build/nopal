@@ -14,13 +14,23 @@ synced content into a daily `Graph/` log, then synthesizes those into a
 README. Read the `vault` and `phylog` skills first for the Vault Folder Type
 system and PhyLog's own pipeline shape — this skill assumes both.
 
-**Status: all four pipeline stages AND the migration tool are built and
-verified.** Only running the migration for real across existing projects,
-and PhyLog/`project-n01`'s eventual code retirement, remain — see "Build
-status" below for exactly what exists today. Written as a living design
-doc, same convention as `oxmarkdown`'s skill — update it as GraphLog gets
-built, don't let it drift into describing a design that was later changed
-without a matching code change.
+**Status: all four pipeline stages, the migration tool (including a
+`--full` discover-everything sweep), and a Maker usage/defaults page are
+built and verified.** Only running the migration for real across existing
+projects, and PhyLog/`project-n01`'s eventual code retirement, remain —
+see "Build status" below for exactly what exists today. Written as a
+living design doc, same convention as `oxmarkdown`'s skill — update it as
+GraphLog gets built, don't let it drift into describing a design that was
+later changed without a matching code change.
+
+**TWO real, confirmed data-integrity bugs were found and fixed while
+building the `--full` migration sweep — read "Migration from
+`project-n01`"'s two bug write-ups below before touching
+`ensureProjectN01`/`resolveProjectN01`/`applyProjectN02Shape`/
+`getProjectFolders`/`ensureVaultRootFolders` again, and before assuming
+ANY project currently reading as `project-n01` hasn't actually been
+migrated before, or that a project's `skills/` folder is unique. Both
+were found against real data, both already repaired.**
 
 ## Why a new name instead of extending PhyLog
 
@@ -332,12 +342,176 @@ README.md, and a real Card, then migrated it and confirmed every behavior
 above — including that a SECOND migration attempt on the now-`project-n02`
 folder is correctly refused.
 
-**Not yet done**: running this across every REAL existing project +
-every human's `personal` space, then retiring PhyLog/`project-n01`
-entirely (delete `phylogAgent.server.ts`/`preCapture`/`capture`/
-`postCapture`/`projectN01.server.ts`/`phylogDefaults.server.ts`,
-`api.phylog.*`, `crates/cli/src/phylog.rs`, the Maker PhyLog pages) once
-every space has been migrated and verified for real.
+**Done — `--full`, a discover-and-convert-everything sweep**, so running
+the real migration doesn't mean enumerating every path by hand.
+`migrateToN02.server.ts`'s `listOwnedProjectN01Anchors(humanId)` finds
+every `project-n01` anchor the CALLER owns (their own `personal` root, if
+still `project-n01`, plus every owned direct child of their own
+`projects` root still on `project-n01`) — deliberately scoped to OWNED
+anchors only, same boundary the single-project route already enforces, so
+a collaborator's own `--full` sweep never touches a project they don't
+own. Deliberately does NOT go through `getProjectFolders` (see the next
+section for why that would have been actively dangerous) — it's a pure
+read via `ensureVaultRootFolders`/`listFolderChildren`, never retagging
+anything itself.
+
+- `GET /api/graphlog/n01-projects` — returns the caller's own anchors as
+  `{ folderId, name, path }` (`path` is a display label only, e.g.
+  `"projects/Sunny"` or `"personal"`; every real reference is by
+  `folderId`, never re-resolved from the path string).
+- `nopal graphlog migrate-to-n02 --full --yes` (`crates/cli/src/graphlog.rs`'s
+  `migrate_to_n02_full`) — lists anchors, prints them, requires `--yes`
+  ONCE for the whole sweep (not per project), then migrates each one
+  through the exact same single-project enqueue-then-poll path
+  (`migrate_one`, extracted from the original `migrate_to_n02` so both
+  forms share identical request/print behavior). One project failing
+  doesn't abort the rest — every anchor is attempted, with a final
+  succeeded/failed summary. `--project <path>` and `--full` are mutually
+  exclusive; exactly one is required.
+- **Verified directly** against the real local dev SurrealDB (not just
+  typechecked): `listOwnedProjectN01Anchors` against a real human
+  correctly listed their real `personal` root plus every real
+  still-n01 project, correctly excluding ones already on `project-n02`.
+
+### A real bug: `ensureProjectN01` retagging an already-migrated `project-n02` folder back to `project-n01`
+
+**Found while building `--full`, confirmed against real data, now
+fixed.** `ensureProjectN01`'s own guard was `if (folder_type !==
+"project-n01" || !is_folder_type_root)` — true for a `project-n02`
+folder too (it's a DIFFERENT type, not `"project-n01"`), so it would
+silently retag ANY `project-n02` folder back to `project-n01` and
+re-seed PhyLog's `PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md` into its
+`skills/` folder — as an unintended side effect of `getProjectFolders`
+(called by the Daily Log page, Sorter, `@mention` resolution) and
+`ensureVaultRootFolders`'s own `personal`-root retrofit (called on
+virtually every vault-touching request). Neither call site was ever
+trying to migrate anything back — they only meant "backfill an UNTYPED
+legacy folder," but their own guard couldn't tell "untyped" apart from
+"validly typed as something else."
+
+**Fixed** by adding an early-return guard directly inside
+`ensureProjectN01` (`projectN01.server.ts`) — a `project-n02` anchor is
+now left completely untouched, no DB call attempted at all. Also hardened
+`resolveProjectN01` to REFUSE outright (matching `migrateProjectToN02`'s
+own refusal in the opposite direction) rather than silently coerce, so
+PhyLog's own CLI/API entry points (`runPhylogPipeline`/`resetProject`)
+can never run against a migrated space either.
+
+**Confirmed this bug had ALREADY corrupted real data**, discovered by
+running `listOwnedProjectN01Anchors` for real: `projects/Nopal O.` —
+migrated to `project-n02` and used for a real (billed) `nopal graphlog
+run` earlier in this same project's life (real `sync-graph`/
+`graph-project-view` usage rows exist, ~$0.33 in real Anthropic calls) —
+was found back on `folder_type: "project-n01"`, with BOTH skill sets
+present in `skills/` simultaneously (`KNOWLEDGE.md`/`GRAPH.md`/
+`PROJECT_VIEW.md` from the original migration, PLUS a freshly re-added
+`PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md` from this bug), while its
+real `Graph/` folder (containing actual graph-log content from that paid
+run) was still sitting there, untouched but now orphaned from a data
+model that no longer thought this was a `project-n02` folder at all.
+
+**Repaired directly against the real DB** (not via `migrate-to-n02` —
+that would have DELETED the real `Graph/` folder and cleared `README.md`'s
+body, since `migrateProjectToN02`'s deletion step only preserves children
+typed `skills`/`syncs`, and a true never-migrated `project-n01` folder
+could never have a `Graph` folder to need preserving in the first place).
+The actual fix: called `applyProjectN02Shape` directly (safe — no-ops on
+skill files that already exist) to retag the folder back to `project-n02`,
+then deleted ONLY the three re-added PhyLog files
+(`PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`). `Graph/`, `Syncs/`, and
+`README.md` were never touched. Confirmed after: `skills/` holds exactly
+`KNOWLEDGE.md`/`GRAPH.md`/`PROJECT_VIEW.md`, folder is `project-n02`
+again, `Graph/`'s real content is untouched.
+
+### A second, SEPARATE real bug: duplicate "Skills" folders from a check-then-create race
+
+**Also found while investigating the above (a human noticed two Skills
+folders on one project during a real migration run) — confirmed, and
+fixed.** `ensureProjectN01`'s (and `applyProjectN02Shape`'s identical
+shape) own "does a Skills folder already exist?" check had no
+concurrency protection at all — the exact same class of bug
+`getOrCreateVaultFolder`'s own doc already describes and fixes elsewhere
+in `vault.server.ts` (a deterministic `id` via `systemVaultFolderKey`,
+so creating "the same" folder twice is a no-op instead of a duplicate
+row), just never applied to THIS check-then-create call site.
+
+**Confirmed this had ALREADY produced real duplicates** on THREE real
+projects (`Sunny`, `Crouch Casita`, `Hot box` — found via a direct query
+for every `vault_folders` row named/typed `skills` across ALL humans, not
+just the one project a human happened to notice it on). Each pair held
+BYTE-IDENTICAL PhyLog skill content (verified before deleting anything) —
+consistent with two separate `ensureProjectN01` calls each finding "no
+Skills folder yet" and independently creating/seeding one. Repaired by
+deleting the newer duplicate in each pair (verified identical content
+first, kept the older row so its `_id` — potentially already referenced
+elsewhere — survives) and re-swept every human's vault afterward to
+confirm zero remaining duplicates anywhere, not just on the three found.
+
+**Fixed at the root** in both `projectN01.server.ts`'s `ensureProjectN01`
+and `projectN02.server.ts`'s `applyProjectN02Shape`: (1) the existing-folder
+lookup now sorts oldest-first before picking (deterministic behavior even
+if a duplicate somehow exists again), and (2) a brand new Skills folder
+is now created with `id: systemVaultFolderKey(humanId, "Skills",
+projectFolderId)` — exported from `vault.server.ts` for this reuse — so
+a concurrent create can never produce a second row. Deliberately the
+SAME key formula in both files: whichever of n01/n02 seeding ever runs
+against a given project, both converge on the identical Skills folder
+row, never two.
+
+**Known, NOT yet checked**: the same unprotected check-then-create shape
+likely also exists in `ensureProjectGraphFolder`'s `Graph` folder
+creation and `dailyLogSync.server.ts`'s sync-folder creation — not
+confirmed broken (no evidence found), not fixed preemptively here since
+that would be guessing rather than confirming a real problem. Worth an
+explicit audit pass if either ever shows the same duplicate-folder
+symptom.
+
+**Not yet done**: running the (now-safe) migration across every REAL
+existing project + every human's `personal` space, repairing
+`projects/Nopal O.` specifically (see above), then retiring
+PhyLog/`project-n01` entirely (delete `phylogAgent.server.ts`/
+`preCapture`/`capture`/`postCapture`/`projectN01.server.ts`/
+`phylogDefaults.server.ts`, `api.phylog.*`, `crates/cli/src/phylog.rs`,
+the Maker PhyLog pages) once every space has been migrated and verified
+for real.
+
+## Maker pages
+
+Mirrors PhyLog's own `/fruits/maker` surface exactly (see the `phylog`
+skill's "Usage tracking" section) — same gate (Admin/Super only), same
+layout, same range-toggle convention, just against GraphLog's own
+tables/stage set.
+
+- **`graphLogMetrics.server.ts`'s `getGraphLogUsageSummary(days)`/
+  `pruneOldGraphLogUsageEvents`** — added alongside the existing
+  `recordGraphLogUsage`, mirroring `phylogMetrics.server.ts`'s
+  aggregation layer exactly (byStage/byProject/byHuman/byDate, cost
+  estimation via the same `llmPricing.ts`). This file's own header used
+  to say this was deliberately deferred "until a real Maker page exists"
+  — added once that page actually existed.
+- **`graphLogDefaults.server.ts`'s admin-editable-override layer**
+  (`getEffectiveGraphLogDefaultSkill`/`getAllEffectiveGraphLogDefaultSkills`/
+  `setGraphLogDefaultSkillOverride`, table `graphlog_default_skills`) —
+  mirrors `phylogDefaults.server.ts` exactly (one DB row, one OPTIONAL
+  field per stage, unset means "use the hardcoded constant"; NEVER
+  retroactive — only changes a brand new project's seed content going
+  forward). `projectN02.server.ts`'s `applyProjectN02Shape` now seeds
+  from these effective values instead of the raw `DEFAULT_*_SKILL`
+  constants directly, same as `ensureProjectN01` already does for PhyLog.
+- **`/fruits/maker`'s "GraphLog Usage" summary section** — same card
+  layout as the existing "PhyLog Usage" section, right below it.
+- **`/fruits/maker/graphlog`** — the full usage breakdown page (Overview/
+  By Stage/Calls Per Day/By Project/By Human), a direct structural mirror
+  of `/fruits/maker/phylog`.
+- **`/fruits/maker/graphlog/defaults`** — the default-skill-text review/
+  edit UI (Knowledge/Graph/Project View), a direct structural mirror of
+  `/fruits/maker/phylog/defaults`.
+- **Verified directly** against the real local dev SurrealDB: `projects/Nopal
+  O.`'s real earlier `nopal graphlog run` already left real
+  `graphlog_usage_daily` rows (16 calls, sync-graph + graph-project-view,
+  ~$0.33 estimated) — `getGraphLogUsageSummary(30)` correctly aggregated
+  them end to end (byStage/byProject/byHuman/byDate all populated
+  correctly) on the first real call, not just against synthetic data.
 
 ## Local dev gotcha: the worker doesn't hot-reload
 
@@ -533,12 +707,26 @@ skill was born from:
      flowed through daily-log-sync → sync-knowledge → sync-graph →
      graph-project-view in one call, each stage hitting exactly the file
      the previous one produced, zero failures.
-7. **Done — the migration tool itself** (`nopal graphlog migrate-to-n02`).
-   See "Migration from `project-n01`" above for exactly what it does and
-   how it was verified. **Not yet done: running it for real across every
-   existing project/`personal` space, and the actual PhyLog/`project-n01`
-   code retirement once that's complete** — the only remaining work
-   against the original phased plan.
+7. **Done — the migration tool itself** (`nopal graphlog migrate-to-n02`,
+   plus `--full` to discover and convert every space a human owns in one
+   command). See "Migration from `project-n01`" above for exactly what it
+   does, how it was verified, AND two real data-integrity bugs this work
+   uncovered and fixed: (1) `ensureProjectN01` silently retagging an
+   already-migrated `project-n02` folder back to `project-n01`
+   (`projects/Nopal O.` was found corrupted this way, then repaired
+   directly — NOT via re-migration, which would have deleted its real
+   `Graph/` content); (2) a check-then-create race producing duplicate
+   "Skills" folders, found on three real projects and fixed at the root
+   with a deterministic folder id, same pattern `getOrCreateVaultFolder`
+   already established elsewhere in `vault.server.ts`.
+8. **Done — the Maker usage/defaults pages** (`/fruits/maker/graphlog`,
+   `/fruits/maker/graphlog/defaults`, plus a summary section on
+   `/fruits/maker` itself). See "Maker pages" above.
+
+**Not yet done: running the migration for real across every existing
+project/`personal` space, and the actual PhyLog/`project-n01` code
+retirement once that's complete** — the only remaining work against the
+original phased plan.
 
 ## Related skills
 

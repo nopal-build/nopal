@@ -9,16 +9,18 @@
  * `graphLogDefaults.server.ts` duplicates PhyLog's `SKIP_MARKER` — small,
  * self-contained, not worth a cross-pipeline dependency.
  *
- * Deliberately minimal for now: just `recordGraphLogUsage` (what
- * `syncKnowledge.server.ts` needs immediately). No `getGraphLogUsageSummary`/
- * dashboard/pruning-cron yet — those are worth building once a real Maker
- * page exists to review them from (mirroring PhyLog's own history: it
- * shipped usage tracking well before `/fruits/maker/phylog` existed too).
+ * Also mirrors PhyLog's aggregation layer: `getGraphLogUsageSummary`
+ * (read by `/fruits/maker`'s "GraphLog Usage" section and
+ * `/fruits/maker/graphlog`) and `pruneOldGraphLogUsageEvents` (same
+ * `CRON_SECRET` cleanup pattern PhyLog's own events table uses) — added
+ * once the Maker GraphLog page this file's own header used to say was a
+ * precondition actually existed.
  */
 
 import { RecordId } from "surrealdb";
-import { query, upsert, formatRecord, defineTable, type Data } from "./generic.server";
+import { query, upsert, remove, formatRecord, defineTable, type Data } from "./generic.server";
 import type { LlmUsage } from "./llmProvider";
+import { estimateCostUsd, isPricingStale, pricingAgeDays } from "./llmPricing";
 
 export type GraphLogStage = "sync-knowledge" | "sync-graph" | "graph-project-view";
 export type GraphLogEventKind =
@@ -174,4 +176,158 @@ export async function recordGraphLogUsage(input: RecordGraphLogUsageInput): Prom
   } catch (err) {
     console.error("GraphLog usage tracking failed (non-fatal):", err);
   }
+}
+
+const DEFAULT_RETENTION_DAYS = 30;
+
+/** Deletes raw `graphlog_usage_events` rows older than `retentionDays` —
+ * safe to run anytime, since the durable daily rollup those events already
+ * incremented is entirely independent of their continued existence. */
+export async function pruneOldGraphLogUsageEvents(
+  retentionDays: number = DEFAULT_RETENTION_DAYS,
+): Promise<{ deleted: number }> {
+  await ensureTables();
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const result = await query<[GraphLogUsageEvent[]]>(
+    `SELECT id FROM graphlog_usage_events WHERE date < $cutoff`,
+    { cutoff },
+  );
+  const rows = (result?.[0] ?? []).map(formatRecord);
+  for (const row of rows) {
+    await remove("graphlog_usage_events", row._id);
+  }
+  return { deleted: rows.length };
+}
+
+// ─── Aggregation for the /fruits/maker dashboards ──────────────────
+
+type UsageTotals = { callCount: number; inputTokens: number; outputTokens: number; estimatedCostUsd: number };
+
+export type GraphLogUsageSummary = {
+  callCount: number;
+  successCount: number;
+  skippedCount: number;
+  errorCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  avgDurationMs: number;
+  maxDurationMs: number;
+  /** Sum of `estimateCostUsd` (`llmPricing.ts`) applied per bucket's own
+   * model — a rough gauge, not reconciled against real Anthropic billing.
+   * See `pricingStale`/`pricingAgeDays` before trusting it blindly. */
+  estimatedCostUsd: number;
+  pricingStale: boolean;
+  pricingAgeDays: number;
+  byStage: Record<GraphLogStage, { callCount: number; inputTokens: number; outputTokens: number; durationMs: number; estimatedCostUsd: number }>;
+  byProject: ({ projectFolderId: string } & UsageTotals)[];
+  byHuman: ({ humanId: string } & UsageTotals)[];
+  byDate: ({ date: string } & UsageTotals)[];
+};
+
+function startOfRange(days: number): string {
+  const cutoff = new Date();
+  cutoff.setUTCDate(cutoff.getUTCDate() - days);
+  return cutoff.toISOString().slice(0, 10);
+}
+
+function emptyTotals(): UsageTotals {
+  return { callCount: 0, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
+}
+
+/** Reads entirely from the durable daily rollup — works the same whether
+ * the underlying raw events for that range still exist or were already
+ * pruned. Mirrors `phylogMetrics.server.ts`'s `getPhylogUsageSummary`
+ * exactly, just against GraphLog's own tables/stage set. */
+export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsageSummary> {
+  await ensureTables();
+  const since = startOfRange(days);
+  const result = await query<[GraphLogUsageDaily[]]>(
+    `SELECT * FROM graphlog_usage_daily WHERE date >= $since ORDER BY date ASC`,
+    { since },
+  );
+  const rows = (result?.[0] ?? []).map(formatRecord);
+
+  const summary: GraphLogUsageSummary = {
+    callCount: 0,
+    successCount: 0,
+    skippedCount: 0,
+    errorCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    avgDurationMs: 0,
+    maxDurationMs: 0,
+    estimatedCostUsd: 0,
+    pricingStale: isPricingStale(),
+    pricingAgeDays: pricingAgeDays(),
+    byStage: {
+      "sync-knowledge": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
+      "sync-graph": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
+      "graph-project-view": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
+    },
+    byProject: [],
+    byHuman: [],
+    byDate: [],
+  };
+
+  const byProject = new Map<string, UsageTotals>();
+  const byHuman = new Map<string, UsageTotals>();
+  const byDate = new Map<string, UsageTotals>();
+  let totalDurationMs = 0;
+
+  for (const row of rows) {
+    const rowCacheRead = row.cache_read_tokens ?? 0;
+    const rowCacheWrite = row.cache_write_tokens ?? 0;
+    const rowCost = estimateCostUsd(row.model, row.input_tokens, row.output_tokens, rowCacheRead, rowCacheWrite) ?? 0;
+
+    summary.callCount += row.call_count;
+    summary.successCount += row.success_count;
+    summary.skippedCount += row.skipped_count;
+    summary.errorCount += row.error_count;
+    summary.inputTokens += row.input_tokens;
+    summary.outputTokens += row.output_tokens;
+    summary.cacheReadTokens += rowCacheRead;
+    summary.cacheWriteTokens += rowCacheWrite;
+    summary.estimatedCostUsd += rowCost;
+    totalDurationMs += row.duration_ms;
+    summary.maxDurationMs = Math.max(summary.maxDurationMs, row.max_duration_ms);
+
+    const stageBucket = summary.byStage[row.stage];
+    stageBucket.callCount += row.call_count;
+    stageBucket.inputTokens += row.input_tokens;
+    stageBucket.outputTokens += row.output_tokens;
+    stageBucket.durationMs += row.duration_ms;
+    stageBucket.estimatedCostUsd += rowCost;
+
+    for (const [map, key] of [
+      [byProject, row.project_folder_id],
+      [byHuman, row.human_id],
+      [byDate, row.date],
+    ] as const) {
+      const existing = map.get(key) ?? emptyTotals();
+      existing.callCount += row.call_count;
+      existing.inputTokens += row.input_tokens;
+      existing.outputTokens += row.output_tokens;
+      existing.estimatedCostUsd += rowCost;
+      map.set(key, existing);
+    }
+  }
+
+  summary.avgDurationMs = summary.callCount > 0 ? Math.round(totalDurationMs / summary.callCount) : 0;
+  summary.byProject = [...byProject.entries()]
+    .map(([projectFolderId, v]) => ({ projectFolderId, ...v }))
+    .sort((a, b) => b.callCount - a.callCount);
+  summary.byHuman = [...byHuman.entries()]
+    .map(([humanId, v]) => ({ humanId, ...v }))
+    .sort((a, b) => b.callCount - a.callCount);
+  summary.byDate = [...byDate.entries()]
+    .map(([date, v]) => ({ date, ...v }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return summary;
 }
