@@ -26,6 +26,7 @@
     "./data/makerStats.server": "./src/data/makerStats.server.ts",
     "./data/mentionHistory.server": "./src/data/mentionHistory.server.ts",
     "./data/mentionSearch.server": "./src/data/mentionSearch.server.ts",
+    "./data/migrateToN02.server": "./src/data/migrateToN02.server.ts",
     "./data/passkeys.server": "./src/data/passkeys.server.ts",
     "./data/phylogAgent.server": "./src/data/phylogAgent.server.ts",
     "./data/phylogDefaults.server": "./src/data/phylogDefaults.server.ts",

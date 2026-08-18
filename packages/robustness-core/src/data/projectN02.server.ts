@@ -59,21 +59,15 @@ async function ensureSkillFile(
 }
 
 /**
- * Idempotently ensures `folder` (a project, or the `personal` root) is
- * tagged `project-n02` and has a `skills` folder seeded with the three
- * default GraphLog skill files — safe to call on every access (a no-op
- * once everything already exists). Refuses to touch a folder that's
- * already a `project-n01` anchor — retagging that is the explicit
- * migration step, never an implicit side effect of this function. Returns
- * the up-to-date folder record.
+ * The actual retag+seed mechanics, with NO opinion on whether `folder` was
+ * previously a `project-n01` anchor — split out from `ensureProjectN02` so
+ * `migrateToN02.server.ts` can call this directly (explicitly bypassing
+ * `ensureProjectN02`'s own n01-refusal guard, since performing exactly
+ * that retag IS what migration means) without duplicating the seeding
+ * logic a second time. Idempotent either way — safe to call on a folder
+ * that's already fully project-n02-shaped.
  */
-export async function ensureProjectN02(folder: VaultFolder): Promise<VaultFolder> {
-  if (folder.folder_type === "project-n01" && folder.is_folder_type_root) {
-    throw new Error(
-      "This is a project-n01 space — migrate it to project-n02 explicitly before calling ensureProjectN02",
-    );
-  }
-
+export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFolder> {
   let current = folder;
   if (current.folder_type !== "project-n02" || !current.is_folder_type_root) {
     const updated = await merge("vault_folders", current._id, {
@@ -108,6 +102,24 @@ export async function ensureProjectN02(folder: VaultFolder): Promise<VaultFolder
   }
 
   return current;
+}
+
+/**
+ * Idempotently ensures `folder` (a project, or the `personal` root) is
+ * tagged `project-n02` and has a `skills` folder seeded with the three
+ * default GraphLog skill files — safe to call on every access (a no-op
+ * once everything already exists). Refuses to touch a folder that's
+ * already a `project-n01` anchor — retagging that is the explicit
+ * migration step (see `migrateToN02.server.ts`), never an implicit side
+ * effect of this function. Returns the up-to-date folder record.
+ */
+export async function ensureProjectN02(folder: VaultFolder): Promise<VaultFolder> {
+  if (folder.folder_type === "project-n01" && folder.is_folder_type_root) {
+    throw new Error(
+      "This is a project-n01 space — migrate it to project-n02 explicitly before calling ensureProjectN02",
+    );
+  }
+  return applyProjectN02Shape(folder);
 }
 
 /**

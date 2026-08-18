@@ -1007,6 +1007,51 @@ export async function ensureVaultRootFolders(
 // either ever changes.
 const PERSONAL_DAILY_LOGS_FOLDER_NAME = "Daily Logs";
 
+/** Recursively merges every child of `source` into `dest` (both already-
+ * existing folders) — the self-healing path `resolveDailyLogsFolder` uses
+ * to recover from its own now-fixed bug (see that function's own doc). A
+ * same-named child FOLDER (e.g. the same date, present in both because
+ * saves landed in both places for a while) merges recursively, then the
+ * now-empty source-side folder is deleted by the caller. A same-named
+ * child FILE is kept alongside its sibling via the same auto-dedupe
+ * suffix `copyFileIntoFolder` uses (`Name (2).ext`) — favors never
+ * silently losing either file over a perfectly clean result; a human can
+ * manually reconcile an actual duplicate pair afterward. `source` itself
+ * is left empty, never deleted here — callers decide that. */
+async function mergeFolderContentsInto(source: VaultFolder, dest: VaultFolder): Promise<void> {
+  const { files: sourceFiles, folders: sourceFolders } = await listFolderChildren(
+    source.human_id,
+    source._id,
+  );
+  const { files: destFilesInitial } = await listFolderChildren(dest.human_id, dest._id);
+  const destNames = new Set(destFilesInitial.map((f) => f.name));
+
+  for (const file of sourceFiles) {
+    let name = file.name;
+    if (destNames.has(name)) {
+      const dot = name.lastIndexOf(".");
+      const base = dot > 0 ? name.slice(0, dot) : name;
+      const ext = dot > 0 ? name.slice(dot) : "";
+      let n = 2;
+      while (destNames.has(`${base} (${n})${ext}`)) n++;
+      name = `${base} (${n})${ext}`;
+    }
+    await updateFileRef(file._id, name === file.name ? { folder_id: dest._id } : { folder_id: dest._id, name });
+    destNames.add(name);
+  }
+
+  const { folders: destFoldersFresh } = await listFolderChildren(dest.human_id, dest._id);
+  for (const sub of sourceFolders) {
+    const matching = destFoldersFresh.find((f) => f.name === sub.name);
+    if (matching) {
+      await mergeFolderContentsInto(sub, matching);
+      await deleteVaultFolderCascade(sub._id);
+    } else {
+      await moveVaultFolder(sub, dest);
+    }
+  }
+}
+
 /**
  * Resolves the human's own daily-log storage folder — see the `graphlog`
  * skill's "Daily Logs symlink" section for the full design. Canonically
@@ -1035,11 +1080,23 @@ const PERSONAL_DAILY_LOGS_FOLDER_NAME = "Daily Logs";
  * keeps a migrated human's old root from being silently resurrected on
  * their very next page load.
  *
- * A theoretical, accepted race: two fully concurrent first-calls for the
- * same never-before-migrated human could both reach the "nothing to
- * migrate, create fresh" branch and each create a folder — same class of
- * risk `getOrCreateVaultFolder`'s own doc already accepts for this vault's
- * check-then-create pattern generally, not a new one introduced here.
+ * **The legacy root's own EXISTENCE is checked FIRST, always** — a REAL,
+ * CONFIRMED bug (found via real local-dev usage, not just review) had
+ * this backwards: checking "does a `Daily Logs` destination already
+ * exist" before ever looking for the legacy root meant that once ANY
+ * folder happened to be created at that destination — including from the
+ * exact race the previous version of this doc called "theoretical,
+ * accepted" — the real legacy root became PERMANENTLY invisible to every
+ * later call, silently orphaning a human's entire daily-log history
+ * (confirmed: real `readme.md`/Card files sitting under the untouched
+ * legacy root while new saves kept landing in a freshly-created, mostly-
+ * empty folder next to it). That's a materially worse outcome than the
+ * cosmetic duplicate-folder race `getOrCreateVaultFolder` accepts, so it
+ * doesn't get the same "accepted" treatment here — fixed by always
+ * resolving the legacy root FIRST, and self-healing an already-bad state
+ * (a destination that got created before its own legacy root was ever
+ * found) by MERGING the legacy root's real content into it
+ * (`mergeFolderContentsInto`) rather than leaving either one stale.
  */
 export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFolder> {
   const roots = await ensureVaultRootFolders(humanId);
@@ -1060,10 +1117,6 @@ export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFold
   }
   if (!syncsFolder) throw new Error("Failed to create personal's syncs folder");
 
-  const { folders: syncsChildren } = await listFolderChildren(humanId, syncsFolder._id);
-  const alreadyMigrated = syncsChildren.find((f) => f.name === PERSONAL_DAILY_LOGS_FOLDER_NAME);
-  if (alreadyMigrated) return alreadyMigrated;
-
   const legacyResult = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders
      WHERE human_id = $humanId AND parent_folder_id = null AND vault_root_key = $key
@@ -1073,7 +1126,19 @@ export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFold
   );
   const legacyRoot = legacyResult?.[0]?.[0] ? formatRecord(legacyResult[0][0]) : null;
 
+  const { folders: syncsChildren } = await listFolderChildren(humanId, syncsFolder._id);
+  const existingDestination = syncsChildren.find((f) => f.name === PERSONAL_DAILY_LOGS_FOLDER_NAME);
+
   if (legacyRoot) {
+    if (existingDestination) {
+      // Self-healing path: a destination already exists (an earlier,
+      // buggy/raced run) -- merge the legacy root's real content into it
+      // rather than trying to move/rename the legacy root itself (which
+      // would collide with it).
+      await mergeFolderContentsInto(legacyRoot, existingDestination);
+      await deleteVaultFolderCascade(legacyRoot._id);
+      return existingDestination;
+    }
     const moved = await moveVaultFolder(legacyRoot, syncsFolder);
     if (!moved) throw new Error("Failed to migrate the legacy daily-logs root");
     const renamed = await merge("vault_folders", moved._id, {
@@ -1082,6 +1147,8 @@ export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFold
     });
     return renamed ? formatRecord(renamed as unknown as VaultFolder) : moved;
   }
+
+  if (existingDestination) return existingDestination;
 
   const created = await createVaultFolder({
     human_id: humanId,

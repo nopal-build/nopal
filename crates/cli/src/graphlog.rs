@@ -366,3 +366,63 @@ pub fn run(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     Ok(())
 }
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct MigrateToN02Result {
+    #[serde(default)]
+    deleted_folders: Vec<String>,
+    #[serde(default)]
+    deleted_files: Vec<String>,
+    #[serde(default)]
+    readme_cleared: bool,
+    #[serde(default)]
+    daily_log_sync: DailyLogSyncResult,
+}
+
+/// Converts one existing `project-n01` space into `project-n02` — see
+/// the `graphlog` skill's "Planned: migration" section for exactly what
+/// this does. DESTRUCTIVE and irreversible; requires `--yes`. Does NOT
+/// run any of GraphLog's agentic stages itself (no LLM cost) — run
+/// `nopal graphlog run` as a separate, explicit follow-up once this
+/// finishes.
+pub fn migrate_to_n02(project_path: &str, yes: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !yes {
+        return Err(concat!(
+            "This deletes everything in this project except its skills/ and syncs/ folders ",
+            "(README.md's body is cleared, not the file itself), then re-seeds skills/ with ",
+            "GraphLog's own KNOWLEDGE.md/GRAPH.md/PROJECT_VIEW.md (PhyLog's own PRE_CAPTURE.md/",
+            "CAPTURE.md/POST_CAPTURE.md are removed; SKILL.md and any other custom file are kept). ",
+            "Pass --yes to confirm."
+        )
+        .into());
+    }
+
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog migrate-to-n02: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/migrate-to-n02", &body)?;
+    let result: MigrateToN02Result = poll_job(&client, &job_id)?;
+
+    if !result.deleted_folders.is_empty() {
+        println!("Deleted folders: {}", result.deleted_folders.join(", "));
+    }
+    if !result.deleted_files.is_empty() {
+        println!("Deleted files: {}", result.deleted_files.join(", "));
+    }
+    if result.readme_cleared {
+        println!("README.md's body was cleared (front matter preserved).");
+    }
+    println!(
+        "daily-log-sync: synced {} day(s), copied {} attachment(s).",
+        result.daily_log_sync.synced.len(),
+        result.daily_log_sync.attachments_copied.len()
+    );
+    println!();
+    println!("Migration complete. This project is now project-n02.");
+    println!("Run `nopal graphlog run --project {project_path}` to build its Graph and README.md.");
+
+    Ok(())
+}

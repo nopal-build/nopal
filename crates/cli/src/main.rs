@@ -419,6 +419,18 @@ enum GraphlogCommand {
         #[arg(long)]
         project: String,
     },
+    /// Converts an existing project-n01 space into project-n02.
+    /// DESTRUCTIVE (deletes everything except skills/ and syncs/, clears
+    /// README.md's body) — requires --yes. See the `graphlog` skill's
+    /// "Planned: migration" section.
+    MigrateToN02 {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Deterministic Card→project copy into `syncs/Daily Logs/` — no LLM
     /// call, always applies for real (see the `graphlog` skill).
     DailyLogSync {
@@ -793,6 +805,9 @@ fn main() {
         Command::Graphlog { command } => {
             let result = match command {
                 GraphlogCommand::Run { project } => graphlog::run(&project),
+                GraphlogCommand::MigrateToN02 { project, yes } => {
+                    graphlog::migrate_to_n02(&project, yes)
+                }
                 GraphlogCommand::DailyLogSync { project, date } => {
                     graphlog::daily_log_sync(&project, date.as_deref())
                 }

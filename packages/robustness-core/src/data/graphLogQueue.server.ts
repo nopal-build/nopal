@@ -37,7 +37,12 @@ export function getGraphLogQueue(): Queue<GraphLogJobData, unknown, GraphLogJobN
   return queue;
 }
 
-export type GraphLogJobName = "run" | "sync-knowledge" | "sync-graph" | "graph-project-view";
+export type GraphLogJobName =
+  | "run"
+  | "sync-knowledge"
+  | "sync-graph"
+  | "graph-project-view"
+  | "migrate-to-n02";
 
 export type GraphLogJobData = {
   actingHumanId: string;

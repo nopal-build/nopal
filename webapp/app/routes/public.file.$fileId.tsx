@@ -13,10 +13,9 @@ import { isVaultRootFolder } from "robustness-core/data/vault.types";
 import { VAULT_ROOTS, isVaultRootKey } from "robustness-core/data/vaultRoots";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
-import MdxEditorView from "../components/MdxEditorView";
+import OxRenderer from "../components/OxRenderer";
 import { fileIcon, formatSize, isMarkdownFile } from "../util/publicVaultDisplay";
 import "../styles/vault.css";
-import "../styles/mdxeditor.css";
 
 type Crumb = { id: string; label: string };
 
@@ -188,7 +187,7 @@ export default function PublicFilePage() {
 
           {isMarkdownFile(file) ? (
             <div className="vault-readme-section">
-              <MdxEditorView markdown={file.content ?? ""} />
+              <OxRenderer markdown={file.content ?? ""} />
             </div>
           ) : file.content_type.startsWith("image/") ? (
             <img

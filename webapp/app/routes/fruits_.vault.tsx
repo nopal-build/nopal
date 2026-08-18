@@ -58,8 +58,8 @@ import { getRelatedHumans } from "robustness-core/data/relationships.server";
 import { resolveProjectManifest, type ResolvedProject } from "robustness-core/data/project.server";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "../components/MoreMenu";
-import MdxEditorView from "../components/MdxEditorView";
 import OxEditor from "../components/OxEditor";
+import OxRenderer from "../components/OxRenderer";
 import { ProjectView } from "../components/ProjectView";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
 import "../styles/vault.css";
@@ -949,10 +949,10 @@ function MoveFolderModal({
 // ─── Skill file editor ───────────────────────────────────────────────────
 // A project's own `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`
 // (see the `phylog`/`vault` skills) are themselves OxMarkdown documents,
-// so they get the real `OxEditor` instead of the static `MdxEditorView`
-// every other vault file still uses. `key={fileId}` at the call site
-// forces a clean remount on navigation between skill files, so this
-// component's own local state never leaks from one file to the next.
+// so they get the real `OxEditor` (editable) instead of the plain static
+// `OxRenderer` used elsewhere. `key={fileId}` at the call site forces a
+// clean remount on navigation between skill files, so this component's
+// own local state never leaks from one file to the next.
 function SkillFileEditor({
   fileId,
   initialContent,
@@ -2583,7 +2583,7 @@ export default function VaultV2Page() {
                       csvFields={current.projectManifest.csvFields}
                     />
                   ) : (
-                    <MdxEditorView markdown={current.readme.content ?? ""} />
+                    <OxRenderer markdown={current.readme.content ?? ""} />
                   )}
                 </div>
               )}
@@ -2597,12 +2597,9 @@ export default function VaultV2Page() {
                 {fileFolderType === "skills" ? (
                   // A project's own skills/PRE_CAPTURE.md, CAPTURE.md,
                   // POST_CAPTURE.md (see the phylog/vault skills) are
-                  // themselves OxMarkdown documents — give them the real
-                  // editor instead of the static MdxEditorView every other
-                  // vault file still uses (see the oxmarkdown skill's build
-                  // status: a full Vault migration is still "not started",
-                  // this is a narrow, deliberate carve-out for skill files
-                  // specifically).
+                  // themselves OxMarkdown documents — give them the real,
+                  // editable OxEditor rather than the plain read-only
+                  // OxRenderer used elsewhere.
                   <SkillFileEditor
                     key={current.file._id}
                     fileId={current.file._id}
@@ -2610,7 +2607,22 @@ export default function VaultV2Page() {
                     editable={canWriteCurrentFile}
                     onSave={handleSaveSkillFile}
                   />
+                ) : fileFolderType === "graph" ? (
+                  // A project's own `Graph/graph-log-*.md` files (see the
+                  // `graphlog` skill) are GraphLog-managed, read-only
+                  // (`writable: "system"`) OxMarkdown documents — plain
+                  // `OxRenderer`, never `OxEditor`.
+                  <OxRenderer markdown={current.file.content ?? ""} />
                 ) : current.projectManifest ? (
+                  // Legacy project-n01 anchor folders only (see
+                  // `isProjectN01Anchor` above) — ProjectView still resolves
+                  // the old csv-table/gallery/svg/note directive registry via
+                  // MdxEditorView. Left as-is rather than ported to
+                  // OxMarkdown: n01 is being retired via the graphlog skill's
+                  // migration tooling, so this whole branch (plus
+                  // ProjectView.tsx/nopalDirectives.ts/MdxEditorView) goes
+                  // away together once n01 folders are gone, instead of
+                  // being half-migrated now.
                   <ProjectView
                     manifest={current.projectManifest.manifest}
                     body={current.projectManifest.body}
@@ -2619,7 +2631,7 @@ export default function VaultV2Page() {
                     csvFields={current.projectManifest.csvFields}
                   />
                 ) : (
-                  <MdxEditorView markdown={current.file.content ?? ""} />
+                  <OxRenderer markdown={current.file.content ?? ""} />
                 )}
               </div>
             ) : current.file.content_type.startsWith("image/") ? (

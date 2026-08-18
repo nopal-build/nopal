@@ -15,10 +15,9 @@ import { isVaultRootFolder } from "robustness-core/data/vault.types";
 import { VAULT_ROOTS, isVaultRootKey } from "robustness-core/data/vaultRoots";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
-import MdxEditorView from "../components/MdxEditorView";
+import OxRenderer from "../components/OxRenderer";
 import { fileIcon, formatDate, formatSize } from "../util/publicVaultDisplay";
 import "../styles/vault.css";
-import "../styles/mdxeditor.css";
 
 type Crumb = { id: string; label: string };
 
@@ -188,7 +187,7 @@ export default function PublicFolderPage() {
 
           {readme && (
             <div className="vault-readme-section" style={{ marginTop: "16px" }}>
-              <MdxEditorView markdown={readme.content ?? ""} />
+              <OxRenderer markdown={readme.content ?? ""} />
             </div>
           )}
         </div>

@@ -7,8 +7,7 @@ import { getFileRefById } from "robustness-core/data/vault.server";
 import type { FileRef } from "robustness-core/data/vault.types";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
-import MdxEditorView from "../components/MdxEditorView";
-import "../styles/mdxeditor.css";
+import OxRenderer from "../components/OxRenderer";
 import "../styles/vault.css";
 
 export async function loader({ params }: LoaderFunctionArgs) {
@@ -37,7 +36,7 @@ export default function PublicCardPage() {
             {file.name.replace(/\.md$/i, "")}
           </h1>
           <div className="vault-readme-section">
-            <MdxEditorView markdown={file.content ?? ""} />
+            <OxRenderer markdown={file.content ?? ""} />
           </div>
         </div>
       </div>

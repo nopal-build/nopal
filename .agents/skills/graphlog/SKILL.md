@@ -14,12 +14,13 @@ synced content into a daily `Graph/` log, then synthesizes those into a
 README. Read the `vault` and `phylog` skills first for the Vault Folder Type
 system and PhyLog's own pipeline shape — this skill assumes both.
 
-**Status: all four pipeline stages built and verified.** Only migration
-tooling + PhyLog/`project-n01` retirement remains — see "Build status"
-below for exactly what exists today. Written as a living design doc, same
-convention as `oxmarkdown`'s skill — update it as GraphLog gets built,
-don't let it drift into describing a design that was later changed without
-a matching code change.
+**Status: all four pipeline stages AND the migration tool are built and
+verified.** Only running the migration for real across existing projects,
+and PhyLog/`project-n01`'s eventual code retirement, remain — see "Build
+status" below for exactly what exists today. Written as a living design
+doc, same convention as `oxmarkdown`'s skill — update it as GraphLog gets
+built, don't let it drift into describing a design that was later changed
+without a matching code change.
 
 ## Why a new name instead of extending PhyLog
 
@@ -185,6 +186,32 @@ every direct `getOrCreateVaultFolder(humanId, "daily-logs", null)` call):
   readme fileId / unchanged content, confirmed idempotent on a second
   call, and confirmed `ensureVaultRootFolders` no longer resurrects the
   old root afterward.
+- **A REAL, CONFIRMED bug found via actual local-dev usage (not caught by
+  the synthetic-human test above), since fixed**: the original code
+  checked "does a `Daily Logs` destination already exist under `syncs`"
+  BEFORE ever looking for the legacy root. The doc here originally called
+  the underlying race "theoretical, accepted" (same class as
+  `getOrCreateVaultFolder`'s own documented one) — that assessment was
+  WRONG: once any folder happened to be created at that destination (a
+  real account hit this from ordinary concurrent usage — the Daily Log
+  page plus a GraphLog CLI command both touching the same human around
+  the same time), the real legacy root became PERMANENTLY invisible to
+  every later call, silently orphaning that human's entire daily-log
+  history (confirmed directly: real `readme.md`/Card/attachment files
+  sitting untouched under the old root while new saves kept landing in a
+  freshly-created, mostly-empty folder next to it — a materially worse
+  outcome than a cosmetic duplicate folder). Fixed by always resolving
+  the legacy root FIRST, and self-healing an already-bad state via a new
+  `mergeFolderContentsInto` helper: a same-named child folder (a date
+  that got touched under BOTH locations during the bad window) merges
+  recursively; a same-named child file keeps both copies via the same
+  auto-dedupe suffix `copyFileIntoFolder` already uses
+  (`image.jpg`/`image (2).jpg`) rather than silently dropping either one.
+  **Confirmed fixed against the real broken account**: re-running
+  resolution merged 20+ real date folders (some moved wholesale, some
+  merged with a genuine filename collision preserved via the dedupe
+  suffix) with zero data loss, and `daily-log-sync` immediately found and
+  synced every real historical Card afterward.
 - **Known, accepted follow-up, not yet done**: the Vault sidebar
   (`fruits_.vault.tsx`) doesn't yet turn the root-level "Daily Logs" entry
   into an explicit shortcut/redirect into `personal/syncs/Daily Logs` —
@@ -257,25 +284,75 @@ Demoed in `routes/fruits_.styles_.oxmarkdown.tsx`'s "Try it" playground.
   navigation" is still a TODO there too). Whoever finishes that for
   mentions should cover this the same way, rather than solving it twice.
 
-## Planned: migration from `project-n01`
+## Migration from `project-n01`
 
-Not yet built. Intended shape (`nopal project migrate-to-n02 --project
-<path> --yes`, destructive, requires explicit confirmation like `phylog
-reset`):
+**Done — the structural conversion.** `migrateToN02.server.ts`'s
+`migrateProjectToN02`, `nopal graphlog migrate-to-n02 --project <path>
+--yes` (destructive, requires explicit `--yes` like `phylog reset`;
+refuses outright if the folder isn't currently a `project-n01` anchor —
+already migrated, or not a real project). Runs on the SAME `graphlog`
+queue as every other GraphLog job (deterministic/free, but potentially
+slow for a project with a lot of history, so it still goes through
+enqueue-then-poll rather than blocking one request) — `POST
+/api/graphlog/migrate-to-n02`.
 
-1. Replace the project's `skills/*` with GraphLog's defaults
-   (`KNOWLEDGE.md`/`GRAPH.md`/`PROJECT_VIEW.md`).
-2. Delete every direct child EXCEPT `skills`/`syncs` (mirrors
-   `resetProjectN01Content`'s own exclusion list).
-3. Run `daily-log-sync` to backfill `syncs/Daily Logs` from history.
-4. Run the full GraphLog pipeline to rebuild `Graph/` and `README.md`
-   from scratch.
+What it actually does, in order:
 
-Run once across every project + every human's `personal` space, then
-retire PhyLog/`project-n01` entirely (delete `phylogAgent.server.ts`/
-`preCapture`/`capture`/`postCapture`/`projectN01.server.ts`/
-`phylogDefaults.server.ts`, `api.phylog.*`, `crates/cli/src/phylog.rs`,
-the Maker PhyLog pages) once every space has been migrated and verified.
+1. Deletes every direct child EXCEPT the `skills`/`syncs` folders —
+   including PhyLog's own project-scoped `daily-logs` staging folder,
+   `newspapers`, and any organized content PhyLog ever filed at the
+   project root. **`README.md` is a special case**: the FILE survives,
+   only its BODY is cleared (front matter preserved byte-for-byte) —
+   same reasoning as PhyLog's own reset, since Sharing Roles/`status`
+   live ONLY in that front matter and deleting the whole file would
+   silently revoke every collaborator's role.
+2. Retags the folder `project-n02` and seeds
+   `skills/KNOWLEDGE.md`/`GRAPH.md`/`PROJECT_VIEW.md`
+   (`applyProjectN02Shape` — `ensureProjectN02`'s retag+seed mechanics,
+   split out so migration can call it directly, deliberately bypassing
+   `ensureProjectN02`'s own n01-refusal guard, since performing exactly
+   that retag IS what migration means).
+3. Removes PhyLog's own `PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`
+   from `skills/` — but PRESERVES everything else already there (a
+   general `SKILL.md` project-identity file, or any other custom file a
+   human dropped in), since those aren't PhyLog-specific.
+4. Runs `daily-log-sync` once, unconditionally, across the project's
+   ENTIRE history (no date filter) — backfills `syncs/Daily Logs`
+   immediately so the agentic stages have real history to work from.
+
+**Deliberately does NOT run any agentic stage itself** (no LLM cost) —
+same "never wired into anything automatic" philosophy PhyLog holds for
+real-money calls. `nopal graphlog run` is a separate, explicit follow-up
+step the CLI itself prints as a reminder once migration finishes.
+
+**Verified directly** against the real local dev SurrealDB: built a
+realistic `project-n01` space (via the real `ensureProjectN01` seeding)
+with PhyLog clutter, a custom skill file, Sharing-Roles front matter on
+README.md, and a real Card, then migrated it and confirmed every behavior
+above — including that a SECOND migration attempt on the now-`project-n02`
+folder is correctly refused.
+
+**Not yet done**: running this across every REAL existing project +
+every human's `personal` space, then retiring PhyLog/`project-n01`
+entirely (delete `phylogAgent.server.ts`/`preCapture`/`capture`/
+`postCapture`/`projectN01.server.ts`/`phylogDefaults.server.ts`,
+`api.phylog.*`, `crates/cli/src/phylog.rs`, the Maker PhyLog pages) once
+every space has been migrated and verified for real.
+
+## Local dev gotcha: the worker doesn't hot-reload
+
+`packages/worker`'s `vite-node worker.ts` (see the `phylog` skill's
+"Scaling & Process Isolation") is a plain, long-running process — unlike
+the webapp's own Vite dev server, it does NOT watch for file changes.
+After editing `worker.ts` OR ANY `robustness-core` file a GraphLog/PhyLog
+job transitively imports, the running `nopal-worker-1` container is still
+serving the OLD code until restarted: `docker restart nopal-worker-1`
+(confirmed directly — a job enqueued right after a code change failed
+with `Unknown GraphLog job name: ...` until the container was restarted).
+`make reset` also fixes this (a full `docker compose down -v` + fresh
+`up`), but wipes every named volume — including the local SurrealDB/MinIO
+data — so it's a much bigger hammer than needed just to pick up a code
+change.
 
 ## Build status
 
@@ -456,10 +533,12 @@ skill was born from:
      flowed through daily-log-sync → sync-knowledge → sync-graph →
      graph-project-view in one call, each stage hitting exactly the file
      the previous one produced, zero failures.
-7. **Not started — migration tooling + PhyLog/`project-n01` retirement.**
-   See "Planned: migration" above. **This is the only remaining phase.**
-   With all four pipeline stages now built and verified, `project-n02` is
-   otherwise feature-complete relative to the original phased plan.
+7. **Done — the migration tool itself** (`nopal graphlog migrate-to-n02`).
+   See "Migration from `project-n01`" above for exactly what it does and
+   how it was verified. **Not yet done: running it for real across every
+   existing project/`personal` space, and the actual PhyLog/`project-n01`
+   code retirement once that's complete** — the only remaining work
+   against the original phased plan.
 
 ## Related skills
 

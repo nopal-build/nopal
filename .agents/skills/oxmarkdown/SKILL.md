@@ -449,16 +449,34 @@ Interacting mode first, without needing that decision resolved.
      by widening `.ox-content`'s own border-box with a small negative
      margin + matching inward padding increase (so text position doesn't
      shift), giving the bleeding child a wider edge to land against.
-   - **Not started**: `ProjectView.tsx` and the Vault file-view page
-     (`routes/fruits_.vault.tsx`) — still on `MdxEditorView`. These have a
-     real, non-trivial directive registry (`csv-table`/`gallery`/`svg`/
-     `note`) worth a careful compatibility pass rather than a rebuild. One
-     carve-out already migrated ahead of that: a project's own
-     `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md` files (see the
-     `vault`/`phylog` skills) render via a real `<OxEditor>`
-     (`SkillFileEditor` in `fruits_.vault.tsx`, mode `"editing"`/
-     `"interacting"` per the existing write-permission check), since they
-     never contain the legacy directive registry's directives.
+   - **Done — every plain (non-directive-registry) markdown view in the
+     Vault and its public/card routes.** `fruits_.vault.tsx` (folder README
+     fallback, file-view fallback, `skills`/`graph` carve-outs),
+     `card.$fileId.tsx`, `public.file.$fileId.tsx`,
+     `public.folder.$folderId.tsx` all render via `OxRenderer` now — zero
+     remaining `MdxEditorView` usage in any of these. Explicit product
+     decision, not an oversight: legacy `::csv-table`/`::gallery`/`::svg`/
+     `:::note` directives in old content are NOT ported — they render as
+     OxRenderer's generic "unknown directive" marker unless rewritten.
+     `MdxEditorClient`/`MdxEditorEditable` were confirmed to already have
+     zero real importers (`fruits_.styles.tsx` only mentions them in
+     descriptive text) — dead code, safe to delete in a future cleanup pass.
+   - **Deliberately NOT migrated — `ProjectView.tsx`
+     (`csv-table`/`gallery`/`svg`/`note` directive registry, still on
+     `MdxEditorView`), used only for legacy `project-n01` anchor folders**
+     (`isProjectN01Anchor`) in both `fruits_.vault.tsx` and the separate
+     Newspaper route (`fruits_.newspaper.$folderId.tsx`). Since `n01` is
+     being retired via the `graphlog` skill's `migrate-to-n02` tooling, this
+     branch is left alone rather than half-ported — it goes away as one
+     clean deletion (`ProjectView.tsx`, `robustness-core/util/
+     nopalDirectives.ts`, `MdxEditorView`/`MdxRenderer`/
+     `MdxEditorWorkable`/`MdxEditorClient`/`MdxEditorEditable`,
+     `styles/mdxeditor.css`) once no `n01` folders remain, not before. A
+     project's own `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`
+     files (see the `vault`/`phylog` skills) already render via a real
+     `<OxEditor>` (`SkillFileEditor` in `fruits_.vault.tsx`, mode
+     `"editing"`/`"interacting"` per the existing write-permission check),
+     since they never contain the legacy directive registry's directives.
 7. **Done — `@` mentions** (`oxmarkdown/mention.ts`, `MentionPlugin.tsx`).
    See "`@` mentions" above. Next: a real Vault-backed `mentionSearch`
    (including real "create a page on the fly" behavior) and resolving a
