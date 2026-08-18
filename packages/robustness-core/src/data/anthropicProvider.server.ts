@@ -197,6 +197,7 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     messages: LlmMessage[];
     tools: ToolDefinition[];
     cacheSystemPrompt?: boolean;
+    maxTokens?: number;
   }): Promise<LlmResponse> {
     // `messages.length > 1` means this ISN'T the first turn of a
     // multi-turn exchange -- there's already at least one prior
@@ -212,7 +213,7 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     const messages = toAnthropicMessages(input.messages);
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: DEFAULT_MAX_TOKENS,
+      max_tokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
       system: cacheSystem ? toAnthropicSystem(input.system) : input.system,
       messages: multiTurn ? withLastMessageCacheBreakpoint(messages) : messages,
       tools: toAnthropicTools(input.tools),

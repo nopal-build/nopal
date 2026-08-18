@@ -80,6 +80,12 @@ export interface LlmProvider {
      * when a call is genuinely one-off, since caching a prefix that's
      * never read again is pure added cost, not savings. */
     cacheSystemPrompt?: boolean;
+    /** Overrides the provider's own default output budget -- for a call
+     * whose output size scales with something other than "one project's
+     * one section/day" (e.g. `graph-structure`, whose output scales with
+     * a WHOLE graph's total node count and keeps growing for as long as
+     * the project exists). Omit for the provider's own normal default. */
+    maxTokens?: number;
   }): Promise<LlmResponse>;
 }
 

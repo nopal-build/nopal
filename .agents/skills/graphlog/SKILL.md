@@ -874,6 +874,21 @@ skill was born from:
      leaving the run unmarked-applied so it retries; a later clean retry
      succeeds; and an unstamped reader comment is both included in the
      next prompt verbatim AND stamped ` → read <date>` in place afterward.
+   - **A SECOND real bug, found against real production data** (`nopal
+     o.`, 88 nodes, a real Anthropic call — not the fake-provider tests
+     above): `update_section`'s own tool description told the model to
+     pass `heading: ""` for the intro, and the model sometimes read that
+     as "pass the literal two-character string of two quote marks"
+     rather than "pass an actually-empty string" — the real README came
+     back with a literal `## ""` heading holding the intro, sorted next
+     to "Open questions" instead of leading the file. Fixed two ways:
+     the tool description was reworded to remove the ambiguous quote
+     marks entirely, AND `normalizeIntroHeading` now treats both
+     spellings (`""` the value, `'""'` the two-character string) as the
+     same intro regardless of prompt wording, since a clearer prompt
+     reduces the odds without ever guaranteeing them. The already-broken
+     README on `nopal o.` was repaired directly (a pure section-reorder,
+     no new LLM call needed) rather than via re-migration.
 7. **Done — `graph-structure`** (see the header's "real architecture
    change" note for why this exists at all). `graphStructure.server.ts`
    (`runGraphStructure`) reads EVERY `Graph/graph-log-*.md` file every run
@@ -907,6 +922,33 @@ skill was born from:
    - `POST /api/graphlog/graph-structure` (enqueue) + the shared
      `GET /api/graphlog/jobs/:jobId`. `nopal graphlog graph-structure
      --project <path>`.
+   - **A real bug, found running this against `nopal o.`'s real history
+     (88 nodes, a real Anthropic call)**: the shared provider default
+     output budget (8192 tokens, sized elsewhere in GraphLog/PhyLog for a
+     single day's/section's worth of output) isn't enough here, because
+     THIS stage's output scales with the WHOLE graph's node count, which
+     only grows as a project ages — confirmed via the failed call's own
+     recorded usage (`output_tokens: 8192`, exactly the old ceiling).
+     Fixed two ways: `LlmProvider.complete()` gained an optional
+     `maxTokens` override (used only by this stage, `GRAPH_STRUCTURE_MAX_TOKENS`),
+     AND `GRAPH_STRUCTURE.md`'s own gloss-length instruction was
+     tightened ("aim for well under 12 words") to address the likely
+     ROOT cause — a compact index for 88 nodes should only need ~2-3k
+     tokens, so hitting 8192 pointed at the model being far more verbose
+     than instructed, not a genuine need for more room. **A THIRD real
+     issue surfaced picking the override's actual value**: the Anthropic
+     SDK refuses a non-streaming call outright once `max_tokens` implies
+     more than 10 minutes of generation (`expectedTime = 60min *
+     maxTokens / 128000`, throwing instead of ever making the request) —
+     hit directly at 32000; `GRAPH_STRUCTURE_MAX_TOKENS = 20000` stays
+     safely under that ~21333 ceiling without needing to add streaming
+     support for what's still a once-a-run, no-tool-calls completion.
+     Even with both fixes, a single run can still hit the ceiling
+     (confirmed: one real retry did, immediately followed by a real
+     retry that didn't, same content, illustrating real non-determinism
+     rather than a deterministic failure) — "leave it, retry next run"
+     remains the accepted handling per this file's own "Deliberately
+     deferred" note, now just genuinely rare instead of a permanent wall.
    - **Verified directly** against the real local dev SurrealDB with a
      scripted fake `LlmProvider`: a two-node, two-day graph (day 2's node
      linking back to day 1's) produced a prompt with the correct

@@ -201,7 +201,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: "update_section",
     description:
-      'Replace or create one "## Heading" section in README.md with the given full content. Use heading: "" for the intro (everything before the first heading). Never target "Notes on this view" — that section is off-limits to this tool.',
+      'Replace or create one "## Heading" section in README.md with the given full content. For the intro (everything before the first heading), set heading to a zero-length empty string -- not any literal text, and not quote characters. Never target "Notes on this view" — that section is off-limits to this tool.',
     inputSchema: {
       type: "object",
       properties: {
@@ -221,6 +221,19 @@ const TOOLS: ToolDefinition[] = [
     },
   },
 ];
+
+/** A real bug, found in real production output: the tool description's
+ * \`heading: ""\` example for the intro was sometimes misread by the
+ * model as "pass the literal two-character string of two quote marks"
+ * rather than "pass an actually-empty string" -- confirmed directly, a
+ * real README came back with a literal \`## ""\` heading holding the
+ * intro, sorted alongside other unrecognized headings instead of
+ * leading the file. The tool description was reworded to be less
+ * ambiguous, but this normalizes both spellings regardless, since a
+ * clearer prompt reduces the odds without ever guaranteeing them. */
+function normalizeIntroHeading(heading: string): string {
+  return heading === '""' || heading === "''" ? "" : heading;
+}
 
 function createReadmeExecutors(input: {
   projectFolder: VaultFolder;
@@ -259,7 +272,7 @@ function createReadmeExecutors(input: {
 
   const executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>> = {
     update_section: async (toolInput) => {
-      const heading = String(toolInput.heading ?? "").trim();
+      const heading = normalizeIntroHeading(String(toolInput.heading ?? "").trim());
       const content = String(toolInput.content ?? "");
       const key = heading.toLowerCase();
 
@@ -291,7 +304,7 @@ function createReadmeExecutors(input: {
       return `${existing ? "Updated" : "Added"} section "${label}".`;
     },
     remove_section: async (toolInput) => {
-      const heading = String(toolInput.heading ?? "").trim();
+      const heading = normalizeIntroHeading(String(toolInput.heading ?? "").trim());
       const key = heading.toLowerCase();
 
       if (key === PROTECTED_HEADING) {

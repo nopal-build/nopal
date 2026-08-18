@@ -72,6 +72,28 @@ import type { LlmProvider } from "./llmProvider";
 const GRAPH_STRUCTURE_FILE_NAME = "graph-structure.md";
 const GRAPH_LOG_RE = /^graph-log-(\d{4}-\d{2}-\d{2})\.md$/;
 
+/** A real bug, found running this against a real project's real history
+ * (88 nodes): the provider's own shared default output budget (8192
+ * tokens, sized for a single day's/section's worth of output elsewhere
+ * in GraphLog/PhyLog) isn't enough here, because THIS stage's output
+ * scales with the WHOLE graph's node count -- something no other stage
+ * does, and something that only grows as a project ages. Confirmed via
+ * the real failed call's own recorded usage (`output_tokens: 8192`,
+ * exactly the old ceiling) that this was a genuine truncation, not a
+ * separate bug. A generous, stage-specific override -- tightening
+ * `GRAPH_STRUCTURE.md`'s own gloss-length instruction is the other,
+ * complementary half of this fix (see `graphLogDefaults.server.ts`).
+ *
+ * CANNOT simply go arbitrarily high: the Anthropic SDK refuses a
+ * non-streaming call outright once `max_tokens` implies more than 10
+ * minutes of generation (`expectedTime = 60min * maxTokens / 128000`,
+ * throwing "Streaming is required..." instead of ever making the
+ * request) -- confirmed directly by hitting exactly this error at
+ * 32000. That formula caps a safe non-streaming value at ~21333;
+ * 20000 leaves real margin without needing to add streaming support
+ * for what's still a once-a-run, no-tool-calls completion. */
+const GRAPH_STRUCTURE_MAX_TOKENS = 20000;
+
 type GraphStructureFrontmatter = {
   asOfGraphHash?: string;
   generatedAt?: string;
@@ -233,10 +255,14 @@ export async function runGraphStructure(
       system: `You are GraphLog's graph-structure step, organizing the whole graph into one weighted, clustered index per a project owner's own instructions. Follow those instructions closely; write only the graph-structure.md file's body itself, no preamble.\n\n${skillContent}`,
       messages: [{ role: "user", content: userMessage }],
       tools: [],
+      maxTokens: GRAPH_STRUCTURE_MAX_TOKENS,
     });
 
     if (response.stopReason === "max_tokens") {
-      log("graph-structure: output was cut off by the model's own output limit — skipped, will retry next run.");
+      const text = response.text ?? "";
+      log(`graph-structure: output was cut off by the model's own output limit (${text.length} chars generated) — skipped, will retry next run.`);
+      log(`graph-structure: truncated output START:\n${text.slice(0, 500)}`);
+      log(`graph-structure: truncated output END:\n${text.slice(-500)}`);
       await recordGraphLogUsage({
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
