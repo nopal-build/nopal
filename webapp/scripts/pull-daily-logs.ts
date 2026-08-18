@@ -515,6 +515,16 @@ async function main() {
             human_id: humanId,
             name: remoteProject.name,
             parent_folder_id: localProjectsRoot._id,
+            // Mirror the REMOTE project's own current container type
+            // (project-n01 or project-n02) instead of letting
+            // `createVaultFolder` default a brand new project to n01 --
+            // a real bug this fixes: pulling an already-migrated remote
+            // project used to always recreate it locally as project-n01,
+            // auto-seeding PhyLog's stage skills that had no business
+            // being there. Omit entirely for an untyped legacy project
+            // (falls back to createVaultFolder's own n01 default, same
+            // self-healing backfill every other untyped project gets).
+            folder_type: remoteProject.is_folder_type_root ? remoteProject.folder_type ?? undefined : undefined,
           }))!;
         if (!existingLocal) projectsCreated++;
         console.log(`  → ${remoteProject.name}`);

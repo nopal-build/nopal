@@ -297,13 +297,18 @@ export async function createVaultFolder(data: {
     folderType = parent.folder_type ?? null;
   }
 
-  // A direct child of the `projects` root IS a project — every project is
-  // a `project-n01` container, never anything else (the `personal` root
-  // itself is tagged separately, see `ensureProjectN01`/
-  // `ensureVaultRootFolders`). Forced here, not just in the "New folder"
-  // API route, so it's true regardless of caller.
+  // A direct child of the `projects` root IS a project — defaults to
+  // `project-n01` (forced here, not just in the "New folder" API route, so
+  // it's true regardless of caller) UNLESS the caller explicitly asked for
+  // a different container type (`project-n02`) — e.g.
+  // `scripts/pull-daily-logs.ts` mirroring a REMOTE project's own real
+  // current type, which must never be silently overridden back to n01
+  // (a REAL bug this fixes: pulling an already-migrated remote project
+  // used to always recreate it locally as project-n01, auto-seeding
+  // PhyLog's stage skills alongside whatever GraphLog state got layered
+  // on top afterward).
   const isNewProject = !!parent && !parent.parent_folder_id && parent.vault_root_key === "projects";
-  if (isNewProject) {
+  if (isNewProject && !data.folder_type) {
     folderType = "project-n01";
     isFolderTypeRoot = true;
   }
@@ -333,7 +338,10 @@ export async function createVaultFolder(data: {
   // Seed the new project's default skills/PRE_CAPTURE.md, CAPTURE.md,
   // POST_CAPTURE.md (`projectN01.server` itself calls back into this
   // function to create that Skills folder — see the import comment above).
-  if (folder && isNewProject) {
+  // Gated on the folder's ACTUAL resulting type, not just `isNewProject`
+  // — a caller that explicitly created this as `project-n02` (see above)
+  // must never get PhyLog's skills seeded onto it.
+  if (folder && folder.folder_type === "project-n01" && folder.is_folder_type_root) {
     await ensureProjectN01(folder);
   }
 
