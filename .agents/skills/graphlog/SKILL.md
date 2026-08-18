@@ -55,7 +55,7 @@ different goal: build a durable, linkable GRAPH of specific statements
 ("who said/decided what, when, sourced from where") that a README is later
 synthesized FROM, rather than directly written to. Different enough in
 both data model (a new `Graph/` space, cross-day node links, the `:ref{...}`
-citation directive) and pipeline shape (four stages, not three, with the
+citation directive) and pipeline shape (five stages, not three, with the
 first one deliberately NOT agentic) to warrant a new name rather than a
 fourth PhyLog stage.
 
