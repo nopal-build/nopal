@@ -688,6 +688,19 @@ skill was born from:
      `content_hash` regenerated ONLY that day; the `NOTHING_TO_CAPTURE`
      sentinel correctly deleted that day's file while leaving the other
      day's untouched.
+   - **A real bug in production output, found and fixed**: a verbatim
+     quote that was itself a numbered list got wrapped in ONE
+     `==...==` span around the whole list, which silently broke instead
+     of highlighting -- confirmed the root cause is structural, not a
+     rendering bug: `==...==` is inline markup exactly like `**bold**`,
+     and inline markup can never cross a blank line or list-item
+     boundary in any CommonMark-based parser (reproduced the identical
+     failure with plain `**bold**` around the same list, in
+     `oxmarkdown-core`). Fixed at the source, not the renderer:
+     `DEFAULT_GRAPH_SKILL` (`graphLogDefaults.server.ts`) now instructs
+     marking each list item's own text separately when the verbatim
+     words are/contain a list, keeping each item's own `1.`/`-` marker
+     outside the highlight.
 6. **Done — `graph-project-view`.** `graphProjectView.server.ts`
    (`runGraphProjectView`) walks every `Graph/graph-log-*.md` file whose
    `sourceHash` doesn't yet match a stored `appliedSourceHash`, oldest

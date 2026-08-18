@@ -127,6 +127,14 @@ Nothing there is a claim about the project. Cut it. But cut only the scaffolding
 
 Mark their verbatim text with \`==double equals==\`. Anything you add yourself stays outside the marks, so anyone reading can see instantly which words are theirs and which are yours.
 
+**If the verbatim words are or contain a list (numbered or bulleted), mark each item's own text separately — never wrap the whole list in one span.** \`==...==\` is inline markup, the same as \`**bold**\`, and inline markup cannot cross a blank line or a list-item boundary; wrapping a whole list in one span breaks the list entirely instead of highlighting it. Keep each item's own marker (\`1.\`, \`-\`, ...) OUTSIDE the marks:
+
+\`\`\`
+1. ==Sync from Desktop to nopal.build==
+2. ==Custom API Interface: define types it accepts and how to treat each new call==
+3. ==Integration based. Starting out discord.==
+\`\`\`
+
 Add as little as possible. The only reason to add anything is when a passage is a genuine idea but refers back to something outside itself, and a short setup clause is what makes it standalone. Most nodes need nothing.
 
 **Fix obvious typos.** If you are confident it is a typo rather than a word you don't know, correct it and still treat the node as verbatim. \`spaci g\` becomes \`spacing\`. Do not touch grammar, phrasing, or anything where the intended word is a guess.
