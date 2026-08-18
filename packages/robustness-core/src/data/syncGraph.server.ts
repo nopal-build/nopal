@@ -20,13 +20,19 @@
  * file per day that has anything worth capturing (a day can legitimately
  * produce none at all).
  *
- * Each node gets a stable `### heading` (so a LATER day can link back to
- * it) and a verbose `:ref{...}` citation (`oxmarkdown-core`'s
+ * Each node gets a plain, predictable `### Node <N>` heading (an
+ * incrementing counter per day's file, never an LLM-generated title —
+ * see `GRAPH.md`) and a verbose `:ref{...}` citation (`oxmarkdown-core`'s
  * `buildRefDirectiveMarkdown`) — PRE-COMPUTED here, never left for the
  * model to hand-format, so a citation's name/datetime/location can never
  * be hallucinated. Cross-day links point only BACKWARD (older days'
- * headings are handed to the model as ready-to-use markdown links; a day
- * currently being processed is never told about days after it).
+ * headings are handed to the model as ready-to-use markdown links,
+ * labeled with their date since "Node 1" alone is ambiguous across many
+ * days — see the `${d} ${h.heading}` link text below; a day currently
+ * being processed is never told about days after it). A node may ALSO
+ * link to another node from the SAME day's file, in either direction —
+ * the model handles that itself, entirely within its one completion for
+ * that day, since nothing else could supply that list ahead of time.
  *
  * IDEMPOTENT via an aggregate hash of that day's candidates' own
  * `content_hash` PLUS each one's knowledge-sidecar hash (so a
@@ -347,15 +353,16 @@ export async function runSyncGraph(
       .filter(([d]) => d < date)
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .flatMap(([d, headings]) =>
-        headings.map((h) => `[${h.heading}](./${graphLogFileName(d)}#${h.slug})`),
+        headings.map((h) => `[${d} ${h.heading}](./${graphLogFileName(d)}#${h.slug})`),
       );
 
     const userMessage = [
       `Today's date being processed: ${date}`,
       candidateBlocks.join("\n\n---\n\n"),
       priorNodes.length > 0
-        ? `Earlier nodes you may link back to (never invent a link that isn't in this list):\n${priorNodes.join("\n")}`
-        : "No earlier nodes exist yet to link back to.",
+        ? `Earlier days' nodes you may link back to (never invent a link to an earlier day that isn't in this list):\n${priorNodes.join("\n")}`
+        : "No earlier days' nodes exist yet to link back to.",
+      "You may also link a node to another node you write today, in either direction (e.g. today's \"Node 2\" may link to today's \"Node 1\", or the reverse) \u2014 use that node's own heading/anchor, with today's date alongside it, same as any other link.",
       `If nothing from today is worth capturing as a node, respond with exactly: ${NOTHING_SENTINEL}`,
     ].join("\n\n");
 

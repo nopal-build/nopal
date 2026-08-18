@@ -40,6 +40,25 @@ import {
 } from "./vaultFolderTypes";
 import { isVaultRootFolder } from "./vault.types";
 import type { Role } from "./humans.server";
+// File Referencing & Renaming (`fileReferences.server.ts`) and `project-n01`
+// seeding (`projectN01.server.ts`) both statically import several read
+// helpers back from THIS file — a real mutual cycle, but a safe one: every
+// name involved on both sides is a hoisted `function` declaration, and
+// nothing in either module calls one of these functions at top-level
+// (module-evaluation) time, only later from inside other async functions.
+// A DYNAMIC `import()` here bought nothing beyond exactly the same safety,
+// while adding a real bug of its own — concurrent first-ever dynamic
+// imports of the same not-yet-cached module (e.g. the three parallel
+// `ensureSkillFile` calls in `ensureProjectN01`) could race and hand one
+// caller back a not-fully-populated module namespace.
+import {
+  syncFileReferences,
+  dropOutgoingReferences,
+  propagateTargetDeletion,
+  collectFolderAndDescendantTargets,
+  propagateTargetChange,
+} from "./fileReferences.server";
+import { ensureProjectN01 } from "./projectN01.server";
 
 // ─── FileRef CRUD ─────────────────────────────────────────────────────────────
 
@@ -88,10 +107,7 @@ export async function createFileRef(data: {
   const record = Array.isArray(result) ? result[0] : result;
   const created = record ? formatRecord(record as unknown as FileRef) : undefined;
   if (created) {
-    // File Referencing & Renaming (see `fileReferences.server.ts`) — a
-    // dynamic import avoids a static circular dependency (that module
-    // imports several read helpers back from THIS file).
-    const { syncFileReferences } = await import("./fileReferences.server");
+    // File Referencing & Renaming — see the import comment above.
     await syncFileReferences(created);
   }
   return created;
@@ -165,12 +181,11 @@ export async function updateFileRef(
   });
   const updated = result ? formatRecord(result as unknown as FileRef) : undefined;
   if (updated) {
-    const fileReferences = await import("./fileReferences.server");
     if ("content" in updates) {
-      await fileReferences.syncFileReferences(updated);
+      await syncFileReferences(updated);
     }
     if ("name" in updates || "folder_id" in updates) {
-      await fileReferences.propagateTargetChange([{ type: "file", id: updated._id }]);
+      await propagateTargetChange([{ type: "file", id: updated._id }]);
     }
   }
   return updated;
@@ -232,8 +247,6 @@ export async function deleteFileRef(id: string): Promise<void> {
   if (file) {
     // File Referencing & Renaming: mark any dead mention pointing at this
     // now-gone file, and drop its own outgoing/incoming reference rows.
-    const { dropOutgoingReferences, propagateTargetDeletion } =
-      await import("./fileReferences.server");
     await propagateTargetDeletion({ type: "file", id }, file.name);
     await dropOutgoingReferences(id);
   }
@@ -318,10 +331,9 @@ export async function createVaultFolder(data: {
   const folder = record ? formatRecord(record as unknown as VaultFolder) : undefined;
 
   // Seed the new project's default skills/PRE_CAPTURE.md, CAPTURE.md,
-  // POST_CAPTURE.md — dynamic import to avoid a cycle (`projectN01.server`
-  // itself calls back into this function to create that Skills folder).
+  // POST_CAPTURE.md (`projectN01.server` itself calls back into this
+  // function to create that Skills folder — see the import comment above).
   if (folder && isNewProject) {
-    const { ensureProjectN01 } = await import("./projectN01.server");
     await ensureProjectN01(folder);
   }
 
@@ -505,8 +517,6 @@ export async function updateVaultFolder(
     // File Referencing & Renaming: a folder rename changes the computed
     // mention path of itself AND every descendant folder/file, not just
     // its own name.
-    const { collectFolderAndDescendantTargets, propagateTargetChange } =
-      await import("./fileReferences.server");
     await propagateTargetChange(await collectFolderAndDescendantTargets(id));
   }
   return updated;
@@ -914,8 +924,6 @@ export async function moveVaultFolder(
     // File Referencing & Renaming: a move changes the computed mention
     // path of the folder AND every descendant just as much as a rename
     // does — same propagation call, see `updateVaultFolder` above.
-    const { collectFolderAndDescendantTargets, propagateTargetChange } =
-      await import("./fileReferences.server");
     await propagateTargetChange(await collectFolderAndDescendantTargets(folder._id));
   }
   return result;
@@ -989,11 +997,10 @@ export async function ensureVaultRootFolders(
   // The `personal` root is itself a `project-n01` container (see the
   // vault skill) — stamp + seed it here, self-healing for any vault that
   // predates this type, same convention as the `vault_root_key` backfill
-  // above. Dynamic import to avoid a cycle (`projectN01.server` imports
-  // from this file).
+  // above (see the top-of-file import comment for why a static import
+  // of `projectN01.server`'s mutual dependency on this file is safe).
   const personalIndex = roots.findIndex((r) => r.vault_root_key === "personal");
   if (personalIndex !== -1) {
-    const { ensureProjectN01 } = await import("./projectN01.server");
     roots[personalIndex] = await ensureProjectN01(roots[personalIndex]);
   }
 
@@ -1178,7 +1185,6 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
 
   // Self-healing retrofit for any project created before `project-n01`
   // existed — same lazy-backfill convention as the root keys above.
-  const { ensureProjectN01 } = await import("./projectN01.server");
   return Promise.all(
     folders.map((f) =>
       f.folder_type === "project-n01" && f.is_folder_type_root ? f : ensureProjectN01(f),
@@ -1468,7 +1474,6 @@ export async function deleteVaultFolderCascade(
   // File Referencing & Renaming: mark any dead mention pointing at each
   // about-to-be-deleted folder BEFORE it (and its name) are gone —
   // deliberately fetched up front, not interleaved with the deletes below.
-  const { propagateTargetDeletion } = await import("./fileReferences.server");
   const foldersById = new Map(
     (await Promise.all(allFolderIds.map((fid) => getFolderById(fid))))
       .filter((f): f is VaultFolder => !!f)

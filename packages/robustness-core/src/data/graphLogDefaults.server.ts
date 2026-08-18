@@ -57,35 +57,141 @@ sync-graph will still run, it just won't have any knowledge files to draw
 on beyond the raw synced content itself.
 `;
 
-export const DEFAULT_GRAPH_SKILL = `Read everything new under this project's \`syncs/\` tree (including any
-\`_knowledge/*.knowledge.md\` files sync-knowledge has already written) and
-pull out the statements worth remembering as their own, independently
-citable nodes — not a summary of the day, a small set of verbatim or
-near-verbatim quotes that matter on their own.
+export const DEFAULT_GRAPH_SKILL = `Your job is to read this project's synced content for one day and add its ideas to that day's graph-log file as nodes.
 
-For each node:
+You do not write summaries, project overviews, or newspapers. Something else does that, later, reading what you leave behind. Your output is the material that layer works from, so the graph has to hold what people actually said, in their words, findable and connected.
 
-- Quote the source material directly wherever possible. Don't paraphrase
-  something that was said plainly just to make it sound more polished.
-- Give it a short, stable heading so later days can link back to it, e.g.
-  \`### Decided to use cedar for the fence\`.
-- Cite where it came from with a verbose ref directive right after the
-  quote, e.g.:
-  \`:ref{name="Jane Doe" human-id="h_abc123" datetime="2026-08-17T14:30:00Z" location="/h_abc123:personal/syncs/Daily Logs/2026-08-17.md" verbose="true"}\`
-- If this node clearly follows up on, contradicts, or resolves an earlier
-  node from a PREVIOUS day's graph log, link to it by heading, e.g.
-  \`See [Decided to use cedar for the fence](./graph-log-2026-08-10.md#decided-to-use-cedar-for-the-fence)\`.
-  Only link BACKWARD to earlier days — never forward to a day that hasn't
-  happened yet.
-- Leave out anything that's small talk, purely logistical with no lasting
-  relevance, or already fully captured by an existing node with nothing
-  new added.
+The daily logs are the permanent record. The graph is a pointer into them: every node carries the words themselves and a way back to the log they came from.
 
-If a day has genuinely nothing worth turning into a node, don't force
-one — it's fine for sync-graph to produce no file for that day at all.
+## What you receive
 
-Replace this file with your own instructions to change what counts as
-worth capturing, or how nodes should be written/linked.
+Each pass hands you everything synced for ONE DAY — this may be one person's entry, or several people's if more than one contributed that day. Each source already comes labeled with who wrote it and an exact citation to copy — never write your own, and never guess who said something or when. You're also given a list of every earlier day's node headings you're allowed to link back to.
+
+## One file per day
+
+Today's graph-log file (\`Graph/graph-log-YYYY-MM-DD.md\`) holds every node from today's sources. If today's file already exists but its source content changed since it was last written, you're re-extracting it from scratch — don't try to preserve or diff against your own prior output, just do the extraction fresh.
+
+You never touch a PAST day's file — only ever add nodes to today's.
+
+# What a node is
+
+A node is one atomic idea, in the writer's own words.
+
+Atomic means it is a complete thought, not a sentence. Some thoughts take one sentence and some take four. The length is set by the idea, never by grammar.
+
+The test is **standalone**: someone reading only the node, with no access to the log, knows what it says. A node never depends on the sentence before it to make sense.
+
+Here is a whole passage that is one node, because it is one thought worked out across several sentences:
+
+> ==Tasks are a challenge I've yet to see a project management get right. The closest thing I've seen to working is bullet journaling for their deliberate added friction. I have this working for my use in obsidian and it's just a way to deliberately track the most important things that need to get done across days, months weeks and months. I'm not sure it's right here but it's probably the right start.==
+
+Splitting that into three nodes would be wrong. The hedge at the end is part of the claim, and separated from what it hedges it reads as a different and weaker statement.
+
+Here is one paragraph that is two nodes, because it holds two separate mechanisms:
+
+> ==If we add tasks we need to avoid task creep where the default is adding more. The system can suggest a task but adding a todo is totally human dependent and should require friction to keep around as important over building.==
+
+> ==If a task gets on boarded to someone and then dropped before complete it somehow resurfaces to see if it's still important.==
+
+The way to tell: ask whether one could be true and the other false. Two mechanisms, two nodes. One thought developed at length, one node.
+
+## What earns a node
+
+Take the decisions, the claims about how something works, the constraints, the open questions, the plans, the observations of what happened, the preferences that will get applied again, the reasoning someone worked through, and the places two people pull against each other.
+
+Take the reversals. When someone writes their way to a different answer, the turn is the material. ==We had debated separate skills for task heavy projects like sunny vs more abstract thinking like this one but I'm feeling each project needs both to some extent== is one node holding both positions, not a node for the new answer.
+
+Take the working-out and not only the conclusion. A paragraph of someone thinking on the page compressed into one tidy sentence is the single most expensive thing this system can lose, and it is the loss that looks most like good editing while it happens.
+
+Take the uncertain and the half-formed. ==I'm not sure where the video part goes but I'm curious to see if video, writing and photos and call work together to build on each other== is a node. So is a question nobody answered.
+
+Take the personal, when it bears on the work. Someone writing that they worry they aren't a good writer is not a project fact, and it is firsthand evidence about what this practice asks of people, which is one of the open questions on the project. Keep it.
+
+Be generous. The graph is allowed to be large. A missing node is invisible forever, and everything downstream is built from what you leave.
+
+## What does not earn a node
+
+**The writer narrating their own writing.** Deciding what to write next, announcing a section, restating a heading as a sentence. This is scaffolding, not thought:
+
+> "What we are doing now is each journaling our thoughts, we could figure out how to capture this, or we could figure out how to describe it in a metaphorical way. Let me start with the more metaphorical, or maybe I could describe a real project in how I see it coming to life?"
+
+Nothing there is a claim about the project. Cut it. But cut only the scaffolding: the sentence right after it, where they actually start describing the thing, usually is a node.
+
+**The same point made twice in one day's own content.** People restate themselves as they warm up. When one source says a thing two ways, write one node using the clearer wording, or combine them if each half carries something the other doesn't.
+
+**This applies within one day only.** When someone says the same thing again on a different day, that is a new node. Write it. It is not a duplicate, it is the same idea coming back, and how often an idea comes back is the most valuable measurement this graph produces. Collapsing it would delete that signal at the moment it is created. Link the new node to the earlier one and let the graph speak.
+
+# Writing the node
+
+**The words are the person's.** Quote them. Do not smooth, tighten, modernize, or fix their grammar. Their sentence rhythm and word choice are data.
+
+Mark their verbatim text with \`==double equals==\`. Anything you add yourself stays outside the marks, so anyone reading can see instantly which words are theirs and which are yours.
+
+Add as little as possible. The only reason to add anything is when a passage is a genuine idea but refers back to something outside itself, and a short setup clause is what makes it standalone. Most nodes need nothing.
+
+**Fix obvious typos.** If you are confident it is a typo rather than a word you don't know, correct it and still treat the node as verbatim. \`spaci g\` becomes \`spacing\`. Do not touch grammar, phrasing, or anything where the intended word is a guess.
+
+**Citations are given to you — never write your own.** Every source you're handed comes with its own exact \`:ref{...}\` line already built. Copy it EXACTLY as given, character for character, right under the node's quoted words — no reformatting, no reordering attributes, nothing added or removed.
+
+## Node format
+
+\`\`\`
+### Node <N>
+==the verbatim words==
+:ref{name="..." human-id="..." datetime="..." location="..." verbose="true"}
+- [<date> Node <N>](./graph-log-<date>.md#node-<n>)
+- [<date> Node <N>](./graph-log-<date>.md#node-<n>)
+\`\`\`
+
+\`<N>\` is a plain incrementing counter: \`Node 1\`, \`Node 2\`, \`Node 3\`... starting at 1 for today's file and counting up across EVERY node you write today, regardless of which contributor's source it came from. Never restart the count per person, and never write anything other than \`Node <N>\` as the heading — no descriptive titles.
+
+A bare number is ambiguous once there are many days' worth of "Node 1"s, which is why every LINK to a node always carries its date alongside it (see Links below) — the node's own heading doesn't need the date, only links to it do.
+
+Append new nodes to the end of the file, in the order they occur to you as you read through today's sources.
+
+# Links
+
+A link says *look here too*. It never says these two mean the same thing, or that one is right.
+
+**Each node may link to at most three other nodes.** Fewer is normal — most nodes will have one or none.
+
+A node may link to:
+
+- **An earlier day's node** — only using one of the exact links you're given for that day. Never invent one that isn't in the list.
+- **Another node you're writing today** — in either direction. A node may link to one written earlier in today's file, or to one written later.
+
+**Never link forward to a day that hasn't happened yet.**
+
+Write links as a plain bullet list right under the \`:ref{...}\` line, one per link, always with the date alongside the node number so it's clear at a glance which day's "Node 1" you mean — even for a same-day link:
+
+\`\`\`
+- [2026-08-17 Node 1](./graph-log-2026-08-17.md#node-1)
+- [2026-08-18 Node 2](./graph-log-2026-08-18.md#node-2)
+\`\`\`
+
+Omit the list entirely when a node has no links — never write an empty one.
+
+Link when:
+
+- The new node returns to something already in the graph, in different words or from a different angle. This is the most valuable link there is, especially when the two people are different.
+- The new node answers, contradicts, or complicates an earlier one.
+- The new node depends on an earlier one, or only makes sense because of it.
+- The new node is a concrete instance of something stated earlier in the abstract, or the reverse.
+- Two nodes from today clearly belong together — different people responding to each other, or one idea leading directly into the next.
+
+Do not link because two nodes share a topic word. Surface similarity is the easiest link to make and the least useful one, and a graph full of them buries the connections that matter.
+
+**Never write how strong a link is.** No counts, no scores, no "recurring" labels. A link is an event: on this date, this node pointed at that one. Strength is a state, states go stale, and anything that wants to know how much weight a thread carries can count the links itself.
+
+# What never happens in this pass
+
+- No summarizing, no synthesis, no project overview. Something else does that from what you write.
+- No judging which ideas matter more, which person is right, or what the project should do next.
+- No merging two people's statements into one position.
+- No touching a past day's file, ever.
+- No inventing. Nothing enters the graph that isn't in the sources you were handed. Silence in a source is not permission to fill a gap.
+- No commentary about this process. How many nodes you wrote, what you could or couldn't read, what you expect later passes to add: none of it belongs in the graph.
+- No node from a day with nothing worth capturing — say so plainly rather than inventing one to have something to show.
 `;
 
 export const DEFAULT_PROJECT_VIEW_SKILL = `Read this project's \`Graph/graph-log-*.md\` files, oldest-not-yet-applied

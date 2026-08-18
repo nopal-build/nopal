@@ -88,8 +88,9 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   citable nodes — verbatim or near-verbatim statements worth remembering
   on their own — into `Graph/graph-log-YYYY-MM-DD.md`, one file per day
   with new content (no file at all for a day with nothing worth
-  capturing). Each node gets a stable heading (so later days can link to
-  it) and a `:ref{...verbose="true"}` citation. Runs once a day IN INTENT
+  capturing). Each node gets a plain, predictable `### Node <N>` heading
+  (an incrementing counter per day's file, never an LLM-generated title)
+  and a `:ref{...verbose="true"}` citation. Runs once a day IN INTENT
   (matches the day a new Daily Log/sync content landed) but, like PhyLog,
   is **never wired to run automatically yet** — every stage is CLI-only
   for now (see "CLI surface" below), same "always on-demand, never a
@@ -98,10 +99,16 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   - **Regeneration, not append**: if a day's underlying source content
     changed after its `graph-log-*.md` was already written, DELETE that
     file and fully regenerate it — no partial-append logic.
-  - **Cross-day links point only backward**: a day's nodes may link to an
-    EARLIER day's node by heading anchor
-    (`[...](./graph-log-2026-08-10.md#some-heading)`); never forward to a
-    day that hasn't been processed yet.
+  - **Links**: a node may link to an EARLIER day's node by heading anchor
+    (`[<date> Node <N>](./graph-log-2026-08-10.md#node-n)` — the date is
+    always part of the link TEXT, since a bare "Node 1" is ambiguous
+    across many days; the node's own heading doesn't carry the date,
+    only links to it do), or to ANOTHER node from the SAME day's file, in
+    either direction — never forward to a day that hasn't been processed
+    yet. Max 3 links per node, written as a plain bullet list
+    (`- [...](...)`) with no reason text attached (a deliberate
+    simplification over an earlier draft that required one) and omitted
+    entirely when a node has none.
 - **graph-project-view** — reads `Graph/graph-log-*.md` files, per
   `skills/PROJECT_VIEW.md`, and keeps `README.md` an accurate, organized
   synthesis. **Incremental**: walks oldest-not-yet-applied graph-log file
@@ -639,14 +646,31 @@ skill was born from:
      tree. Falls back to "Unknown"/no `human-id` for any future non-
      daily-log sync source's file that doesn't match this naming shape —
      `:ref{...}`'s `human-id` is optional for exactly this reason.
-   - **Cross-day links point only backward** — before processing a day,
-     every EARLIER day's already-written `### heading`s (best-effort
-     GFM-style slugified) are handed to the model as ready-to-use
-     markdown links ("copy one of these verbatim, never invent a link
-     that isn't in this list"); a day currently being processed is never
-     told about later days, even within the same run. Confirmed directly:
-     a later day's prompt correctly included an earlier day's heading
-     link; the earliest day correctly saw "no earlier nodes exist yet."
+   - **Node headings are `### Node <N>` — a plain incrementing counter,
+     never an LLM-generated title.** Decided this way specifically
+     because a free-form title is one more thing the model could get
+     wrong/inconsistent, where a counter can't. Resets to 1 for each new
+     day's file, counting up across every contributor's content that
+     day (never restarted per contributor).
+   - **Links point backward across days, OR sideways within the same
+     day** — before processing a day, every EARLIER day's already-written
+     `### Node <N>` headings are handed to the model as ready-to-use
+     markdown links, each one prefixed with its own date
+     (`[2026-08-10 Node 3](./graph-log-2026-08-10.md#node-3)` — the date
+     prefix is built by the code, not the model, so it's never
+     inconsistent) — "copy one of these verbatim, never invent a link to
+     an earlier day that isn't in this list." A node may ALSO link to
+     another node from the SAME day's file, in either direction (a later
+     node linking back to an earlier one, or vice versa) — this one the
+     model handles entirely on its own within one completion, since
+     nothing could hand it a same-day list ahead of time; verified
+     directly that a same-day link (`Node 2` → `Node 1`, same file)
+     round-trips through the pipeline with no issue. Still never forward
+     to a day that hasn't been processed yet, even within the same run.
+     Confirmed directly (a real `runSyncGraph` call against a scratch
+     project, fake provider): day 2's prompt correctly included day 1's
+     node as a date-prefixed link; the earliest day correctly saw "no
+     earlier days' nodes exist yet."
    - **Delete-and-regenerate, never partial-patch** — a day whose
      aggregate hash changed has its existing `graph-log-*.md` deleted
      BEFORE the model is asked to redo it from scratch; a day the model
