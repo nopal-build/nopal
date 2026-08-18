@@ -136,27 +136,68 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     `graph-structure.md` can never reflect yet) are still tracked live,
     exactly as before.
 - **graph-structure** — reads EVERY `Graph/graph-log-*.md` file (the
-  whole graph, not incrementally) and, per `skills/GRAPH_STRUCTURE.md`,
-  organizes every node into ONE file, `Graph/graph-structure.md`:
-  clustered by topic/thread, weighted, and status-annotated (active /
-  open / settled / superseded). Sits between `sync-graph` and
-  `graph-project-view` specifically to solve a problem neither neighbor
-  can solve alone without reading the whole graph every time it does
-  anything — see the header's "real architecture change" note and Build
-  status item 7.
-  - **Inbound link counts are PRE-COMPUTED, never left to the model**
-    (`graphNodeIndex.server.ts`'s `computeBacklinkIndex`) — same
+  whole graph, not incrementally) and keeps ONE file,
+  `Graph/graph-structure.md`, an organized, weighted, status-annotated
+  index of every node (clustered by topic/thread; active / open /
+  settled / superseded), per `skills/GRAPH_STRUCTURE.md`. Sits between
+  `sync-graph` and `graph-project-view` specifically to solve a problem
+  neither neighbor can solve alone without reading the whole graph every
+  time it does anything — see the header's "real architecture change"
+  note and Build status item 7.
+  - **A SECOND real architecture change, not in the original design**:
+    this stage used to REBUILD `graph-structure.md` from scratch, in one
+    non-tool, non-streaming completion, every run — a genuine scaling
+    problem, confirmed against a real project's real history (88 nodes
+    truncated the shared 8192-token output default; even a generous
+    stage-specific override, 20000, was already brushing against the
+    Anthropic SDK's own hard non-streaming ceiling, ~21333 tokens, a WALL
+    that any further graph growth would eventually hit again — not a
+    dial that can just be turned up further). Now a bounded tool-calling
+    loop (`update_cluster`/`remove_cluster`/`get_node`, mirroring
+    `graph-project-view`'s own `update_section`/`remove_section` shape
+    closely) edits `graph-structure.md` ONE CLUSTER AT A TIME, and the
+    model is handed only the node(s) genuinely NEW since the last run —
+    not the whole graph's full text — plus the CURRENT
+    `graph-structure.md` itself (already compact by design) for context.
+    `get_node` lets it pull an older node's full original text on demand
+    if it's weighing a merge/split/rename, rather than that text being
+    resent eagerly every run. A first-ever build (or a fallback full
+    rebuild against an unparseable previous file) still happens, but
+    spread across many small, bounded tool calls instead of one
+    unbounded completion, so the old hard ceiling is no longer reachable
+    in ordinary operation. Full design/rationale in `graphStructure.server.ts`'s
+    own module doc.
+  - **Inbound link counts, AND NOW every cluster's "Weight: ..." line,
+    are fully code-computed, never left to the model**
+    (`graphNodeIndex.server.ts`'s `computeBacklinkIndex`, plus
+    `graphStructure.server.ts`'s own `refreshClusterWeight`) — same
     "citations are pre-computed" reasoning `sync-graph` already applies
     to a node's own `:ref{...}`, just applied to arithmetic instead of a
-    citation.
-  - **Expensive input, cheap output, on purpose** — every node's full
-    text is read every run; the output is a compact index, not prose.
-    Accepted cost tradeoff for the whole pipeline, not hidden.
-  - **Thread naming continuity**: rebuilds fresh from the current graph
-    every run (never patches), but is handed its own previous version and
-    told to keep a continuing thread's name where it still fits, so
-    downstream churn (README sections, `sync-graph`'s own candidate list)
-    doesn't reset just because a heading got reworded.
+    citation. Every cluster's Weight line is recomputed from live
+    backlink data as a deterministic pass after the tool loop finishes —
+    whether the model touched that cluster this run or not — and
+    clusters are then re-sorted heaviest-first the same way, so a node
+    gaining an inbound link elsewhere in the graph never requires the
+    model to revisit its own cluster just to keep its Weight line
+    honest. `GRAPH_STRUCTURE.md`'s own instructions tell the model it
+    doesn't need to get these numbers right at all.
+  - **A safety net, never trusting the model's own sense that it's
+    done**: before stamping a run's `asOfGraphHash` applied, code
+    confirms every node in the graph actually has a home in some
+    cluster; if any are still unplaced (a turn limit hit, an interrupted
+    run, or the model simply stopping early), the hash is left
+    unstamped so the NEXT run picks up exactly the still-missing nodes
+    (already-committed placements are reflected in the file it re-reads,
+    so this is naturally idempotent, not a full retry).
+  - **Known, accepted gap**: a node whose own TEXT changes without its
+    id changing (a past day's graph-log file regenerated with the same
+    date/number but different wording) won't be detected as "new" by the
+    placement-delta logic, since only node IDS are diffed, not content —
+    not fixed, no evidence yet that this has happened in practice.
+  - **Thread naming continuity**: still handed its own previous version
+    every run and told to keep a continuing thread's name where it
+    still fits, so downstream churn (README sections, `sync-graph`'s own
+    candidate list) doesn't reset just because a heading got reworded.
 - **graph-project-view** — reads `Graph/graph-structure.md` (not
   graph-log files directly), per `skills/PROJECT_VIEW.md`, and keeps
   `README.md` an accurate, organized synthesis. **NOT per-day anymore** —
@@ -889,72 +930,116 @@ skill was born from:
      reduces the odds without ever guaranteeing them. The already-broken
      README on `nopal o.` was repaired directly (a pure section-reorder,
      no new LLM call needed) rather than via re-migration.
-7. **Done — `graph-structure`** (see the header's "real architecture
-   change" note for why this exists at all). `graphStructure.server.ts`
-   (`runGraphStructure`) reads EVERY `Graph/graph-log-*.md` file every run
-   (not incrementally), parses each into structured node records
-   (`graphNodeIndex.server.ts`'s `parseGraphLogNodes` — deliberately
-   simple line/regex parsing over the generated node format, same
-   tradeoff `extractHeadings` already made), and asks an LLM (per
-   `skills/GRAPH_STRUCTURE.md`) to organize the whole graph into ONE file,
-   `Graph/graph-structure.md`: every node clustered by topic/thread,
-   weighted, and status-annotated.
-   - **Inbound link counts are PRE-COMPUTED, never left to the model**
-     (`graphNodeIndex.server.ts`'s `computeBacklinkIndex` walks every
-     node's own outbound links and builds the reverse index: count,
-     distinct author NAMES, date span) — handed to the model as grounding
-     facts per node, same "never trust the model with arithmetic it's
-     shown" reasoning `sync-graph`'s own pre-built citations already
-     follow.
+7. **Done — `graph-structure`, since REDESIGNED a second time from its
+   original whole-graph-rebuild shape** (see the header's "real
+   architecture change" note for why this stage exists at all, and "The
+   pipeline"'s own graph-structure bullet above for the SECOND
+   architecture change described here). `graphStructure.server.ts`
+   (`runGraphStructure`) still reads EVERY `Graph/graph-log-*.md` file
+   every run (not incrementally) and parses each into structured node
+   records (`graphNodeIndex.server.ts`'s `parseGraphLogNodes` —
+   deliberately simple line/regex parsing over the generated node
+   format, same tradeoff `extractHeadings` already made) — that part is
+   unchanged and still cheap (parsing, not an LLM call).
+   - **What changed**: this used to hand EVERY node's full text to the
+     model and ask for the ENTIRE `graph-structure.md` rebuilt in one
+     non-tool, non-streaming completion. Confirmed against a real
+     project's real history (88 nodes, a real Anthropic call) that this
+     doesn't scale — the shared provider default output budget (8192
+     tokens) truncated outright (`output_tokens: 8192` in the failed
+     call's own recorded usage), and even a generous stage-specific
+     override (20000) was already brushing against the Anthropic SDK's
+     own HARD non-streaming ceiling (`expectedTime = 60min * maxTokens /
+     128000`, throwing outright above ~21333 tokens, confirmed hit
+     directly at 32000) — a wall that any further graph growth would
+     eventually hit again, not a dial that could keep being turned up.
+     Now: `graphStructure.server.ts` diffs the CURRENT graph's node ids
+     against whichever ones `graph-structure.md` already has homes for
+     (`buildMembershipIndex`, scanning the file's own `- <date> Node <N>`
+     lines — deterministic, same simple-regex tradeoff as the parsing
+     above), and only the DIFFERENCE is handed to the model, one cluster
+     at a time, via a bounded tool-calling loop (`update_cluster`/
+     `remove_cluster`/`get_node` — `TOOLS`/`createStructureExecutors`/
+     `runStructureAgentLoop`, mirroring `graph-project-view`'s own
+     `update_section`/`remove_section` shape closely, including
+     persisting each tool call's edit immediately rather than only at
+     the end, so a crash mid-run keeps whatever was already placed and
+     the next run's diff naturally picks up only what's still missing).
+     A first-ever build (or a fallback full rebuild against an
+     unparseable previous file) still needs to place every node, but
+     now spread across many small, bounded tool calls (`MAX_TURNS = 40`,
+     generous versus `graph-project-view`'s own 8, since a real project
+     can have dozens of threads) instead of one unbounded completion —
+     the old hard ceiling is no longer reachable in ordinary operation.
+     `GRAPH_STRUCTURE_MAX_TOKENS` and its whole override mechanism were
+     REMOVED — no longer needed once no single completion's output
+     scales with the whole graph anymore.
+   - **Inbound link counts, AND NOW every cluster's "Weight: ..." line,
+     are fully code-computed, never left to the model**
+     (`graphNodeIndex.server.ts`'s `computeBacklinkIndex`, plus this
+     file's own new `refreshClusterWeight`) — same "never trust the
+     model with arithmetic it's shown" reasoning `sync-graph`'s own
+     pre-built citations already follow, now extended from "facts handed
+     to the model" to "the model's own output gets overwritten
+     regardless of what it writes there." Every cluster's Weight line is
+     recomputed from live backlink data as a deterministic pass
+     (`refreshClusterWeight`) after the tool loop finishes — whether the
+     model touched that cluster this run or not — and clusters are then
+     re-sorted heaviest-first the same way (`sortClustersByWeight`), so a
+     node gaining an inbound link elsewhere in the graph never requires
+     the model to revisit its own cluster just to keep its Weight line
+     honest. `GRAPH_STRUCTURE.md`'s own instructions were updated to
+     tell the model it doesn't need to get these numbers right at all.
+   - **A safety net, never trusting the model's own sense that it's
+     done**: before stamping a run's `asOfGraphHash` applied, code
+     confirms every node in the graph actually has a home in some
+     cluster (re-parsing the just-committed file, same
+     `buildMembershipIndex` used for the initial diff); if any are still
+     unplaced, the hash is left unstamped so the run is retried, and the
+     next attempt's diff naturally finds only the still-missing ones.
    - **Idempotent via an aggregate hash of every graph-log file's OWN
      `sourceHash`**, stored as `asOfGraphHash` on `graph-structure.md`'s
-     own front matter — an unchanged graph is a total no-op, zero LLM
-     calls. `graph-project-view` stamps its OWN `appliedByProjectView`
-     marker onto that SAME file (`markGraphStructureApplied`, exported
-     from this file for that stage to call directly) — co-located, same
-     convention `sourceHash`/`appliedSourceHash` used on graph-log files
-     before this stage existed.
-   - **Thread-naming continuity**: handed its own previous version (if
-     any) and told to keep a continuing thread's name where it still
-     fits, even though it rebuilds fresh from the current graph every
-     run — keeps downstream churn (README sections, `sync-graph`'s own
-     candidate list) low without needing real incremental patching.
+     own front matter — UNCHANGED from before this redesign. What
+     changed is WHEN it's written: interim tool-call commits during a
+     run persist the file's BODY immediately, but `asOfGraphHash` itself
+     is only stamped once the whole run finishes cleanly AND the safety
+     net above confirms every node placed. `graph-project-view` stamps
+     its OWN `appliedByProjectView` marker onto that SAME file
+     (`markGraphStructureApplied`, exported from this file for that
+     stage to call directly) — co-located, same convention
+     `sourceHash`/`appliedSourceHash` used on graph-log files before this
+     stage existed.
+   - **Thread-naming continuity**: still handed the CURRENT
+     `graph-structure.md` every run and told to keep a continuing
+     thread's name where it still fits — unchanged in spirit, though the
+     mechanism is now "edit the existing file's cluster" rather than
+     "rebuild fresh and try to match old names."
+   - **Known, accepted gap, not yet fixed**: a node whose own TEXT
+     changes without its id changing (a past day's graph-log file
+     regenerated with the same date/number but different wording —
+     possible, if rare, since `sync-graph` deletes and fully regenerates
+     a changed day) won't be detected as "new" by the id-based diff, so
+     its stale gloss in `graph-structure.md` could go unnoticed until
+     something else touches that cluster. No evidence yet this has
+     happened in practice; worth an audit if a gloss is ever found
+     describing the wrong words for a node.
    - `POST /api/graphlog/graph-structure` (enqueue) + the shared
      `GET /api/graphlog/jobs/:jobId`. `nopal graphlog graph-structure
-     --project <path>`.
-   - **A real bug, found running this against `nopal o.`'s real history
-     (88 nodes, a real Anthropic call)**: the shared provider default
-     output budget (8192 tokens, sized elsewhere in GraphLog/PhyLog for a
-     single day's/section's worth of output) isn't enough here, because
-     THIS stage's output scales with the WHOLE graph's node count, which
-     only grows as a project ages — confirmed via the failed call's own
-     recorded usage (`output_tokens: 8192`, exactly the old ceiling).
-     Fixed two ways: `LlmProvider.complete()` gained an optional
-     `maxTokens` override (used only by this stage, `GRAPH_STRUCTURE_MAX_TOKENS`),
-     AND `GRAPH_STRUCTURE.md`'s own gloss-length instruction was
-     tightened ("aim for well under 12 words") to address the likely
-     ROOT cause — a compact index for 88 nodes should only need ~2-3k
-     tokens, so hitting 8192 pointed at the model being far more verbose
-     than instructed, not a genuine need for more room. **A THIRD real
-     issue surfaced picking the override's actual value**: the Anthropic
-     SDK refuses a non-streaming call outright once `max_tokens` implies
-     more than 10 minutes of generation (`expectedTime = 60min *
-     maxTokens / 128000`, throwing instead of ever making the request) —
-     hit directly at 32000; `GRAPH_STRUCTURE_MAX_TOKENS = 20000` stays
-     safely under that ~21333 ceiling without needing to add streaming
-     support for what's still a once-a-run, no-tool-calls completion.
-     Even with both fixes, a single run can still hit the ceiling
-     (confirmed: one real retry did, immediately followed by a real
-     retry that didn't, same content, illustrating real non-determinism
-     rather than a deterministic failure) — "leave it, retry next run"
-     remains the accepted handling per this file's own "Deliberately
-     deferred" note, now just genuinely rare instead of a permanent wall.
-   - **Verified directly** against the real local dev SurrealDB with a
-     scripted fake `LlmProvider`: a two-node, two-day graph (day 2's node
-     linking back to day 1's) produced a prompt with the correct
-     precomputed inbound-link count/author for day 1's node and "none
-     yet" for day 2's; a no-op re-run against an unchanged graph made
-     zero new LLM calls.
+     --project <path>` — unchanged by the redesign.
+   - **NOT yet re-verified against a real DB after this redesign** —
+     the ORIGINAL (pre-redesign) whole-graph-rebuild shape WAS verified
+     directly (see the now-superseded bullet this replaced, still true
+     of the code as it stood then): a two-node, two-day graph produced a
+     prompt with the correct precomputed inbound-link count/author, and
+     a no-op re-run made zero new LLM calls. The new tool-driven
+     diff/placement/weight-refresh/safety-net logic described above has
+     been carefully self-reviewed against the exact shape
+     `graph-project-view`'s own already-proven tool loop uses, but has
+     NOT yet been exercised against the real local dev SurrealDB with a
+     scripted fake `LlmProvider` the way every other stage's own
+     redesign was before being marked verified here — that's the
+     concrete next step before trusting this over the old, already-proven
+     shape in production.
    - **`nopal graphlog run`** (`graphLogAgent.server.ts`'s
      `runGraphLogPipeline`, mirroring `phylogAgent.server.ts`'s
      `runPhylogPipeline`) ties all FIVE stages together in one job —

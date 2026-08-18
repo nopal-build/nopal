@@ -203,17 +203,17 @@ Do not link because two nodes share a topic word. Surface similarity is the easi
 - No node from a day with nothing worth capturing — say so plainly rather than inventing one to have something to show.
 `;
 
-export const DEFAULT_GRAPH_STRUCTURE_SKILL = `Your job is to organize the WHOLE graph into a single index file, \`Graph/graph-structure.md\` — grouped by topic/thread, weighted, and glossed. You do not write the README. Something else (graph-project-view) reads what you leave behind and decides what's worth featuring there; a THIRD stage (sync-graph, extracting tomorrow's new nodes) also reads what you leave behind, to decide what existing nodes tomorrow's content might connect to. Both depend on this file being complete — every node needs a home here, not just the ones that feel important.
+export const DEFAULT_GRAPH_STRUCTURE_SKILL = `Your job is to keep a single index file, \`Graph/graph-structure.md\`, an accurate, up-to-date map of the whole graph — grouped by topic/thread, weighted, and glossed. You do not write the README. Something else (graph-project-view) reads what you leave behind and decides what's worth featuring there; a THIRD stage (sync-graph, extracting tomorrow's new nodes) also reads what you leave behind, to decide what existing nodes tomorrow's content might connect to. Both depend on this file being complete — every node needs a home here, not just the ones that feel important.
 
 # What you receive
 
-Every node in the graph, in full: its verbatim quote, its author, its date, and its own outbound links. Alongside each node, you're given REAL, PRE-COMPUTED facts — never estimate or recount these yourself:
+You are handed the CURRENT \`graph-structure.md\` exactly as it stands (every existing thread, already organized) plus only the node(s) that are NEW since your last run — not the whole graph. Each new node comes in full: its verbatim quote, its author, its date, its own outbound links, and its id. Alongside it, you're given REAL, PRE-COMPUTED facts about it — never estimate or recount these yourself:
 
 - How many other nodes link to it (inbound count).
 - How many DISTINCT people wrote those linking nodes.
 - The date span those links were made across.
 
-If a previous \`graph-structure.md\` exists, you're given that too. Rebuild fresh from the current graph every time — don't patch it — but keep a continuing thread's NAME the same across runs where it still fits, so the file downstream (README sections, sync-graph's own linking) doesn't churn just because you reworded a heading. Only rename a thread once its old name has clearly stopped fitting what's in it.
+You are editing this file, one thread at a time, via \`update_cluster\`/\`remove_cluster\` calls — not rewriting it from scratch every run. Place each new node into whichever existing thread it belongs to, or start a new one if it doesn't fit anywhere yet. Keep a continuing thread's NAME the same across runs where it still fits, so the file downstream (README sections, sync-graph's own linking) doesn't churn just because you reworded a heading — only rename a thread once its old name has clearly stopped fitting what's in it. If you need an OLDER node's exact original wording (deciding whether to merge, split, or rename a thread), call \`get_node\` with its id — every id you're shown (in brackets after a new node, or embedded in any \`- <date> Node <N>\` line in the current file) works.
 
 # Every node gets a home
 
@@ -227,7 +227,7 @@ A thread's name is a short, plain label for what it's about — 2-5 words, no pu
 
 # Weight and status
 
-For each thread, restate the facts you were given — never invent a number, never round up a feeling into a count:
+Still write a \`Weight: ...\` line in the shape shown below, but you don't need to get the numbers exactly right — they're recomputed automatically from real data after every run, regardless of what you write there. Write a placeholder if it's easier (\`Weight: (recomputed)\`) and spend your real effort on Status instead, which is never recomputed for you:
 
 \`\`\`
 Weight: 7 inbound links, 3 people, 2026-07-29 → 2026-08-15
@@ -257,7 +257,7 @@ Weight: <N> inbound link(s), <M> people, <earliest> \u2192 <latest> \u00b7 Statu
 
 **The gloss is a short, plain phrase pointing at what the node says — never a quote, never a full sentence restating the node, never your own opinion of it. Aim for well under 12 words — a phrase, not a clause.** \`bullet journaling as a model for deliberate task friction\`, not \`Gerald thinks that bullet journaling could work well because it adds deliberate friction to task management which he finds valuable\`. The full words are already in the graph; this file only has to help someone (or the next stage) decide whether to go look. **This file's own length scales with the WHOLE graph's node count, and a graph accumulates for months** — a gloss that runs long by a sentence multiplies into real bloat once there are a hundred nodes, in a way it never would for a single day's output. Keep every gloss short even when a node's own idea took the writer four sentences to work out.
 
-Order threads heaviest-first within the file — inbound link count, then people, then span, same priority order \`GRAPH.md\`'s own linking guidance implies. A thread with no inbound links yet goes at the bottom, under a plain \`## Unclustered\` heading if it doesn't yet belong anywhere else — still one line per node, same format.
+Threads are automatically re-sorted heaviest-first after every run, so you don't need to place a new cluster in any particular position yourself. A thread with no inbound links yet still belongs under a plain \`## Unclustered\` heading if it doesn't yet belong anywhere else — still one line per node, same format; it'll sort to the bottom on its own.
 
 # What never happens in this pass
 
