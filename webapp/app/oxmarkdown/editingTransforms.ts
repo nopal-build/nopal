@@ -268,9 +268,19 @@ function convertInline(
   const out: LexicalNode[] = [];
   for (const node of nodes) {
     switch (node.type) {
-      case "text":
-        out.push(applyMarks($createTextNode(node.value), marks));
+      case "text": {
+        // A bare single \n inside a text run parses as ONE mdast text node
+        // whose value contains a literal newline (see OxRenderer.tsx's
+        // `renderTextWithBreaks` for the from-markdown confirmation) --
+        // split it back into text/line-break pieces so Editing mode shows
+        // every line as typed, same as static rendering.
+        const parts = String(node.value).split("\n");
+        parts.forEach((part, i) => {
+          if (part.length > 0) out.push(applyMarks($createTextNode(part), marks));
+          if (i < parts.length - 1) out.push($createLineBreakNode());
+        });
         break;
+      }
       case "strong":
         out.push(...convertInline(node.children, defs, [...marks, "bold"]));
         break;
@@ -279,6 +289,9 @@ function convertInline(
         break;
       case "delete":
         out.push(...convertInline(node.children, defs, [...marks, "strikethrough"]));
+        break;
+      case "mark":
+        out.push(...convertInline(node.children, defs, [...marks, "highlight"]));
         break;
       case "inlineCode":
         out.push(applyMarks($createTextNode(node.value), [...marks, "code"]));
@@ -491,11 +504,39 @@ function exportListItem(li: OxListItemNode): MdastListItem {
   return { type: "listItem", checked: hasCheckbox ? (li.getChecked() as boolean) : null, spread: false, children: itemChildren };
 }
 
+/** Pushes a plain (unformatted) text node, merging it into the previous
+ * output entry when that's ALSO a plain text node -- used for both real
+ * text runs and line breaks (see below), so a run like
+ * [text("Hello"), LineBreak, text("World")] exports as the single mdast
+ * text node `"Hello\nWorld"` rather than three separate sibling nodes.
+ * This keeps the exported tree shaped exactly like what `fromMarkdown`
+ * itself would produce for the same source, which is what makes the
+ * round-trip lossless (see the `$isLineBreakNode` branch below for why
+ * this matters). */
+function pushPlainText(out: PhrasingContent[], value: string) {
+  const prev = out[out.length - 1];
+  if (prev && prev.type === "text") {
+    prev.value += value;
+  } else {
+    out.push({ type: "text", value });
+  }
+}
+
 function exportInline(nodes: LexicalNode[]): PhrasingContent[] {
   const out: PhrasingContent[] = [];
   for (const node of nodes) {
     if ($isLineBreakNode(node)) {
-      out.push({ type: "break" });
+      // NEVER emit a mdast `break` node here: `mdast-util-to-markdown`
+      // serializes an explicit `break` as a backslash line continuation
+      // (`"a\\\nb"`), not a bare newline -- so doing this would silently
+      // rewrite every ordinary soft-wrapped line into escaped syntax the
+      // instant a document with one was loaded and re-saved. A bare `\n`
+      // merged into the surrounding text is what `fromMarkdown` itself
+      // produces for a plain single newline, and it's what both static
+      // and Editing-mode rendering already treat as a line break -- so
+      // soft/hard breaks both simply normalize to this on save, since
+      // nothing downstream distinguishes them anymore.
+      pushPlainText(out, "\n");
     } else if ($isLinkNode(node)) {
       out.push({
         type: "link",
@@ -508,7 +549,12 @@ function exportInline(nodes: LexicalNode[]): PhrasingContent[] {
     } else if ($isOxOpaqueNode(node) && node.isInline()) {
       out.push(node.getMdastNode() as PhrasingContent);
     } else if ($isTextNode(node)) {
-      out.push(wrapMarks(node));
+      const wrapped = wrapMarks(node);
+      if (wrapped.type === "text") {
+        pushPlainText(out, wrapped.value);
+      } else {
+        out.push(wrapped);
+      }
     }
   }
   return out;
@@ -519,6 +565,7 @@ function wrapMarks(node: TextNode): PhrasingContent {
   if (node.hasFormat("code")) return { type: "inlineCode", value: text };
   let inner: PhrasingContent = { type: "text", value: text };
   if (node.hasFormat("strikethrough")) inner = { type: "delete", children: [inner] };
+  if (node.hasFormat("highlight")) inner = { type: "mark", children: [inner] } as unknown as PhrasingContent;
   if (node.hasFormat("italic")) inner = { type: "emphasis", children: [inner] };
   if (node.hasFormat("bold")) inner = { type: "strong", children: [inner] };
   return inner;

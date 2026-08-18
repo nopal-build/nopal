@@ -60,6 +60,7 @@
   --ox-color-subtle: var(--text-subtle, #817186);
   --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 60%, transparent);
   --ox-color-code-bg: var(--midground, #ece7f3);
+  --ox-color-mark-bg: var(--yellow-light, #fcf0c4);
   --ox-color-border: var(--midground, #ece7f3);
   --ox-color-selected-bg: color-mix(in srgb, var(--ox-color-accent) 8%, transparent);
   --ox-color-selected-border: var(--ox-color-accent);
@@ -110,6 +111,12 @@
        darker fixes it for that one case without touching anything else
        that depends on `--ox-color-code-bg`. */
     --ox-color-code-bg: var(--dark-farground, #221a28);
+    /* Full-strength `--yellow-light` reads as a jarring, near-white slab against
+       the dark palette (and the marked text's own color is already a
+       light tone, so full-opacity yellow washes it out) -- mixed down
+       against the dark background keeps the same "highlighter" hue as
+       light mode while staying a background, not a spotlight. */
+    --ox-color-mark-bg: color-mix(in srgb, var(--yellow-light, #fcf0c4) 35%, var(--dark-farground, #221a28));
     --ox-color-border: var(--dark-midground, #6d6e99);
     --ox-color-unknown: var(--red-light, #f6c8c3);
   }
@@ -423,6 +430,17 @@
   font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
   line-height: 1;
 }
+
+/* `==highlighted==` (GraphLog's `GRAPH.md` skill wraps every verbatim
+   quote in this) -- horizontal-only padding, unlike `.ox-content code`
+   above, so there's no vertical inflation to guard against: nothing here
+   adds height to the line it sits on. */
+.ox-content mark {
+  background: var(--ox-color-mark-bg);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 4px;
+}
 .ox-code-block {
   background: var(--ox-color-code-bg);
   border-radius: 8px;
@@ -514,9 +532,23 @@
    marker additionally gets `.ox-ref-marker` for its own clickable-glyph
    styling. */
 
+/* Same class of bug as `.ox-content code`'s own `line-height: 1` note
+   above, different cause: at `0.85em`, this element's font naturally
+   needs slightly more than the inherited `--ox-grid` (41px) line-height
+   to fit its own glyphs without clipping, so the browser silently grows
+   the LINE it sits on by 1px to compensate -- confirmed by direct
+   measurement (a paragraph containing either the verbose text or the
+   `*` marker rendered 42px tall instead of 41px, even completely alone
+   on its own line with no other content to interact with, and 83px
+   instead of 82px across two wrapped lines). Collapsing this element's
+   own line-height to 1 removes that slop entirely, letting the
+   paragraph's own `--ox-grid` line-height be the only thing that
+   determines the line's actual height — confirmed fixed by the same
+   direct measurement. */
 .ox-ref {
   font-size: 0.85em;
   color: var(--ox-color-subtle);
+  line-height: 1;
 }
 .ox-ref a {
   color: var(--ox-color-link);

@@ -801,6 +801,81 @@ Interacting mode first, without needing that decision resolved.
     - Renders nothing at all (not an empty box, not an error marker) when
       `resolveGalleryFolder` is omitted, the name doesn't resolve, or it
       resolves to zero images.
+16. **Done — `==highlighted==` syntax, all three surfaces (static,
+    Interacting, Editing).** Needed because GraphLog's `GRAPH.md` skill
+    wraps every verbatim quote it pulls from a daily log in `==...==`
+    (see the `graphlog` skill) — nothing parsed this at all before.
+    - Hand-rolled, not a package (`micromark-extension-highlight-mark`
+      exists but wasn't used) — `oxmarkdown-core/src/highlightMark.ts` is a
+      real micromark tokenizer + `mdast-util-from/to-markdown` extension
+      pair, modeled on the shape of the already-vendored
+      `micromark-extension-gfm-strikethrough`/`mdast-util-gfm-
+      strikethrough` (`~~text~~` → mdast `delete`), just with a fixed
+      two-character delimiter instead of `~`'s one-or-two-character one.
+      Produces a new mdast node type, `mark` (`children:
+      PhrasingContent[]`, same shape as `delete`/`strong`/`emphasis`),
+      registered into `mdast`'s own `PhrasingContentMap`/`RootContentMap`
+      via a local `declare module` augmentation in that same file (see its
+      comment for why `RootContentMap` needs it too, not just
+      `PhrasingContentMap`).
+    - The small `micromark-util-*` packages the tokenizer needs (character
+      classification, event splicing, resolver chaining) are declared as
+      direct `oxmarkdown-core` dependencies rather than imported as
+      undeclared transitives of `micromark-extension-gfm` — pnpm's strict
+      linking would otherwise make that a phantom-dependency break waiting
+      to happen.
+    - Static/Interacting: `OxRenderer.tsx`'s `renderNode` gets a `case
+      "mark"`, identical shape to `case "delete"`. Editing: uses Lexical's
+      OWN built-in `"highlight"` `TextFormatType` (confirmed present,
+      `IS_HIGHLIGHT`) exactly like `delete` uses `"strikethrough"` — no
+      custom Lexical node or theme class needed, since Lexical already
+      maps `IS_HIGHLIGHT` to a real `<mark>` element on its own
+      (`getElementOuterTag`), which `.ox-content mark` (`oxmarkdown.css`)
+      then styles the same as the static path.
+    - An unmatched/unpaired `==` (no closing partner) is left as plain
+      text by the resolver, then defensively backslash-escaped on
+      serialize (`\=\=`) — confirmed this is pre-existing, identical
+      behavior to an unmatched `~` today, not a new footgun.
+17. **Done — bare single `\n` inside a paragraph renders as a real line
+    break, all three surfaces.** Previously collapsed into flowing prose
+    (`"a\nb"` rendered as `"a b"`), which didn't match what the editor
+    actually stores or what a hard-wrapped source file looks like.
+    - No parser/mdast changes: `fromMarkdown` already turns a bare `\n`
+      into a literal `\n` character INSIDE a `text` node's `.value`
+      (confirmed directly against `mdast-util-from-markdown`, not
+      assumed) — never a separate `break` node, never collapsed to a
+      space. This is the single source of truth in both directions; only
+      the rendering/editing-transform layers needed to change.
+    - Static/Interacting: `OxRenderer.tsx`'s `case "text"` now calls
+      `renderTextWithBreaks`, splitting on `\n` and interleaving `<br />`.
+    - Editing import: `editingTransforms.ts`'s `convertInline`'s `case
+      "text"` splits on `\n` and interleaves `$createLineBreakNode()`
+      between `$createTextNode()` pieces, mirroring the existing real-hard-
+      break (`case "break"`) handling so both look identical once in the
+      editor.
+    - Editing export: the risky direction. `exportInline` NEVER emits an
+      mdast `break` node for a Lexical `LineBreakNode` anymore — confirmed
+      directly that `mdast-util-to-markdown` serializes an explicit
+      `break` node as a backslash line continuation (`"a\\\nb"`), NOT a
+      bare newline, which would have silently rewritten every ordinary
+      soft-wrapped line into escaped syntax the instant a file containing
+      one was loaded and re-saved. Instead a `LineBreakNode` merges into a
+      bare `\n` joined onto the surrounding plain-text run
+      (`pushPlainText`), matching what `fromMarkdown` itself would have
+      produced for the same source.
+    - **Known pre-existing limitation, not introduced by this work**:
+      confirmed a formatted run (bold, highlight, ...) that itself spans
+      an embedded line break re-exports as two separate adjacent runs
+      instead of one run with an embedded newline (e.g. `"a **bold\ntext**
+      b"` round-trips as `"a **bold**\n**text** b"`) — reproduced
+      identically with plain `**bold**` with zero `mark`/highlight
+      involved, so this predates both features above. Only matters for
+      Editing mode (load-and-save); static/Interacting rendering is
+      unaffected. Would need `exportInline` to merge adjacent
+      identically-formatted Lexical text/line-break runs into one mdast
+      node before wrapping, rather than wrapping node-by-node as it does
+      today — not attempted here since it's pre-existing and out of this
+      change's actual scope (`==...==`/line-break rendering).
 
 ## Testing convention — verify three things together, never one alone
 
@@ -825,6 +900,6 @@ side by side, every time.
 
 ## Related skills
 
-- `mdx-editor` — the current, live system this replaces. Keep both skills
-  in sync as work progresses; concepts move from "current" to "carried
-  over" or get explicitly superseded here.
+- `graphlog` — GraphLog's `GRAPH.md` skill is the main real-world producer
+  of `==highlighted==` text (16, above) today; its daily `graph-log-*.md`
+  files are also the main real-world use of the `:ref{...}` directive.

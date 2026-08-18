@@ -203,6 +203,28 @@ function renderBlockNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode 
   return out;
 }
 
+/** A bare single `\n` inside a paragraph's source text parses into ONE
+ * mdast text node whose `.value` contains the literal newline character
+ * (confirmed against `mdast-util-from-markdown` directly — it is neither
+ * stripped to a space nor split into a `break` node). This renders every
+ * line as the author actually typed it, matching Editing mode's own
+ * line-break handling (see `editingTransforms.ts`), instead of collapsing
+ * hard-wrapped text into one flowing paragraph. */
+function renderTextWithBreaks(value: string, key: number): ReactNode {
+  const lines = value.split("\n");
+  if (lines.length === 1) return value;
+  return (
+    <Fragment key={key}>
+      {lines.map((line, i) => (
+        <Fragment key={i}>
+          {i > 0 && <br />}
+          {line}
+        </Fragment>
+      ))}
+    </Fragment>
+  );
+}
+
 const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -222,7 +244,7 @@ function renderNode(node: any, key: number, ctx: RenderCtx): ReactNode {
     }
 
     case "text":
-      return node.value;
+      return renderTextWithBreaks(node.value, key);
 
     case "strong":
       return <strong key={key}>{renderNodes(node.children, ctx)}</strong>;
@@ -232,6 +254,9 @@ function renderNode(node: any, key: number, ctx: RenderCtx): ReactNode {
 
     case "delete":
       return <del key={key}>{renderNodes(node.children, ctx)}</del>;
+
+    case "mark":
+      return <mark key={key}>{renderNodes(node.children, ctx)}</mark>;
 
     case "break":
       return <br key={key} />;

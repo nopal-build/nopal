@@ -35,6 +35,11 @@ import {
 } from "mdast-util-frontmatter";
 import { gfm } from "micromark-extension-gfm";
 import { gfmFromMarkdown, gfmToMarkdown } from "mdast-util-gfm";
+import {
+  highlightMark,
+  highlightMarkFromMarkdown,
+  highlightMarkToMarkdown,
+} from "./highlightMark.js";
 import type {
   BlockContent,
   DefinitionContent,
@@ -102,11 +107,12 @@ export function getFrontmatterNode(doc: OxDocument): Yaml | null {
 
 export function parseOxDocument(markdown: string): OxDocument {
   return fromMarkdown(markdown, {
-    extensions: [directive(), frontmatter("yaml"), gfm()],
+    extensions: [directive(), frontmatter("yaml"), gfm(), highlightMark()],
     mdastExtensions: [
       directiveFromMarkdown(),
       frontmatterFromMarkdown("yaml"),
       gfmFromMarkdown(),
+      highlightMarkFromMarkdown(),
     ],
   });
 }
@@ -117,6 +123,7 @@ export function serializeOxDocument(doc: OxDocument, extraJoin?: Join): string {
       directiveToMarkdown(),
       frontmatterToMarkdown("yaml"),
       gfmToMarkdown(),
+      highlightMarkToMarkdown(),
     ],
     bullet: "-",
     fences: true,
