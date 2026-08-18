@@ -2,26 +2,30 @@
  * Resolves a project folder (a folder under the `projects` vault root) into
  * a `ResolvedProject` — the manifest parsed from its `README.md` front
  * matter (defaulted, never required — see `resolveProjectManifest`'s own
- * doc below), the README's body (rendered as-is via MdxEditorView), and
- * every file/subfolder referenced by a `file="..."`/`folder="..."`
- * attribute on a directive in that body, fetched and shaped into plain
- * JSON-serializable Records so it can be returned directly as loader data.
+ * doc below), the README's body (rendered as-is via `OxRenderer`), and
+ * every folder referenced by a `::gallery{folder="..."}` leaf directive in
+ * the body (see `oxmarkdown-core/galleryDirective.ts`), resolved into that
+ * folder's own images.
  *
- * Deliberately generic about directive names: this doesn't hardcode
- * "csv-table"/"gallery"/"svg" — it just scans every leaf directive
- * (`::name{...}`) for `file`/`folder` attributes and resolves whatever it
- * finds. New block kinds that reference vault content don't need any
- * changes here, only a renderer registered in `ProjectView.tsx`.
+ * Used to also resolve `file="..."` attributes on OTHER directive names
+ * (the old `::csv-table{...}`/`::svg{...}`, feeding `ProjectView.tsx`'s
+ * now-deleted `MdxEditorView`-based directive registry) — dropped when
+ * `MdxEditor` was retired, since nothing renders those anymore (see the
+ * `oxmarkdown` skill's Build status). `::gallery{folder="..."}` survives
+ * (re-added, this time as a real OxMarkdown built-in — see
+ * `OxRenderer.tsx`'s `resolveGalleryFolder`), since it's the one directive
+ * PhyLog's capture stage actually still writes.
  *
- * Deliberately shallow: `file`/`folder` attribute values only match direct
- * children of the project folder (no nested paths), and galleries are
- * exactly one level deep. Revisit once a real project needs more nesting.
+ * Deliberately shallow: a `folder` attribute value only matches a DIRECT
+ * child of the project folder (no nested paths), and a gallery folder's
+ * images are exactly one level deep. Revisit once a real project needs
+ * more nesting.
  */
 
-import { extractLeafDirectives } from "../util/nopalDirectives";
-import { PROJECT_CSV_NAME, csvFieldsToRecord, parseCsvFields } from "../util/projectCsv";
-import type { ProjectManifest, ResolvedFile, ResolvedProject } from "./project.types";
+import { findLeafDirectiveOccurrences } from "../util/nopalDirectives";
+import type { ProjectManifest, ResolvedProject } from "./project.types";
 import { parseProjectManifest } from "./project.types";
+import type { ResolvedGalleryImage } from "oxmarkdown-core";
 import { getFileRefById, listFolderChildren } from "./vault.server";
 import type { VaultFolder } from "./vault.types";
 
@@ -59,53 +63,22 @@ export async function resolveProjectManifest(
   const { manifest, body } = parseProjectManifest(rawContent);
   const resolvedManifest: ProjectManifest = manifest ?? {};
 
-  const directives = extractLeafDirectives(body);
-  const filesByName = new Map(children.files.map((f) => [f.name, f]));
   const foldersByName = new Map(children.folders.map((f) => [f.name, f]));
+  const galleryFolders: Record<string, ResolvedGalleryImage[]> = {};
 
-  // `project.csv` — the optional flat key/value "facts" file `:csv-key{...}`
-  // resolves against. Not a directive target itself, so it's not picked up
-  // by the directive scan below; resolve it separately when present.
-  let csvFields: Record<string, string> | undefined;
-  const projectCsvListing = filesByName.get(PROJECT_CSV_NAME);
-  if (projectCsvListing) {
-    const full = await getFileRefById(projectCsvListing._id);
-    if (full?.content) csvFields = csvFieldsToRecord(parseCsvFields(full.content));
+  for (const directive of findLeafDirectiveOccurrences(body)) {
+    if (directive.name !== "gallery") continue;
+    const folderName = directive.attrs.folder;
+    if (!folderName || folderName in galleryFolders) continue;
+    const subfolder = foldersByName.get(folderName);
+    if (!subfolder) continue;
+    const subChildren = await listFolderChildren(humanId, subfolder._id);
+    galleryFolders[folderName] = subChildren.files
+      .filter((f) => f.content_type.startsWith("image/"))
+      .map((f) => ({ url: fileUrl(f._id), name: f.name }));
   }
 
-  const files: Record<string, ResolvedFile> = {};
-  const folders: Record<string, ResolvedFile[]> = {};
-
-  for (const directive of directives) {
-    const filePath = directive.attrs.file;
-    if (filePath && !(filePath in files)) {
-      const listing = filesByName.get(filePath);
-      if (listing) {
-        // Text-based files (markdown/csv/...) need their content fetched;
-        // everything else (svg/image/pdf/...) only needs a URL.
-        const isText = listing.content_type.startsWith("text/");
-        const full = isText ? await getFileRefById(listing._id) : null;
-        files[filePath] = {
-          url: fileUrl(listing._id),
-          name: listing.name,
-          content: full?.content ?? undefined,
-        };
-      }
-    }
-
-    const folderPath = directive.attrs.folder;
-    if (folderPath && !(folderPath in folders)) {
-      const subfolder = foldersByName.get(folderPath);
-      if (subfolder) {
-        const subChildren = await listFolderChildren(humanId, subfolder._id);
-        folders[folderPath] = subChildren.files
-          .filter((f) => f.content_type.startsWith("image/"))
-          .map((f) => ({ url: fileUrl(f._id), name: f.name }));
-      }
-    }
-  }
-
-  return { manifest: resolvedManifest, body, files, folders, csvFields };
+  return { manifest: resolvedManifest, body, galleryFolders };
 }
 
 /** Convenience re-export so route files only need one import for the type. */

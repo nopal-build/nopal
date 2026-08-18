@@ -1,16 +1,20 @@
 ---
 name: oxmarkdown
-description: Vision, syntax, and design-language spec for OxMarkdown (OxRenderer + OxEditor), the planned successor to MdxEditor/MdxRenderer. Use when discussing or building the new nopal editor/renderer, its markdown conventions (generic directives, @ mentions, slash commands), or its visual design (dot grid, typography, mobile UX). Also consult the mdx-editor skill for what's carried over from the current system.
+description: Vision, syntax, and design-language spec for OxMarkdown (OxRenderer + OxEditor), nopal's markdown editor/renderer. Use when discussing or building the nopal editor/renderer, its markdown conventions (generic directives, @ mentions, slash commands), or its visual design (dot grid, typography, mobile UX).
 ---
 
 # OxMarkdown
 
-**Status: actively being built, incrementally replacing MdxEditor.** This
-skill is a living design doc — read AND update it as thinking evolves, same
-as `mdx-editor`'s skill is kept current for the system it describes. Before
-writing `OxEditor`/`OxRenderer` code, re-read both skills. Keep entries here
-terse: a fact + a file pointer + the one-line "why," not a forensic replay of
-how a bug was found — the "Related skills" section still applies.
+**Status: fully built and rolled out — `MdxEditor`/`MdxRenderer` are
+retired and deleted.** This skill is a living design doc — read AND update
+it as thinking evolves. Keep entries here terse: a fact + a file pointer +
+the one-line "why," not a forensic replay of how a bug was found.
+
+The old `mdx-editor` skill (describing the now-deleted `MdxRenderer`/
+`MdxEditorView`/`MdxEditorClient`/`MdxEditorWorkable`/`MdxEditorEditable`/
+`mdxeditor.css` system) has been deleted along with the code it described —
+references to it below are historical context for why OxMarkdown exists,
+not a pointer to a real skill anymore.
 
 The umbrella name is **OxMarkdown**: **OxRenderer** is the fully static,
 non-interactive renderer (replaces `MdxRenderer` for public/SSR pages).
@@ -95,7 +99,7 @@ applies when an interactable is the exact, sole selection target.
   inline. Directives are the general mechanism for this; csv-key chips are
   the first concrete case.
 
-## Generic directives (shipped on both MdxRenderer and OxRenderer)
+## Generic directives (shipped on OxRenderer)
 
 Inspired by `remark-directive`/the CommonMark directives proposal:
 
@@ -107,14 +111,17 @@ content
 :::
 ```
 
-- On the legacy path (`webapp/app/util/nopalDirectives.ts`), this is a
-  hand-rolled regex preprocessor, wired into `MdxRenderer.tsx` and
-  `project.server.ts` (server-side `file=`/`folder=` resolution for Vault's
-  project rollup views — see the `vault` skill's "Projects" section). It
-  doesn't support container directives spanning blank lines.
-- On OxRenderer/OxEditor, directives are real mdast nodes via
-  `mdast-util-directive`/`micromark-extension-directive`, so container
-  directives work with arbitrary nested content.
+- Directives are real mdast nodes via `mdast-util-directive`/
+  `micromark-extension-directive`, so container directives work with
+  arbitrary nested content.
+- The old legacy path (`webapp/app/util/nopalDirectives.ts`'s
+  `preprocessDirectives`/`extractLeafDirectives`, wired into `MdxRenderer`
+  and `project.server.ts`'s old `resolveProjectManifest`) is deleted along
+  with `MdxEditor` — a hand-rolled regex preprocessor that didn't support
+  container directives spanning blank lines. `nopalDirectives.ts` itself
+  survives, trimmed to just the leaf-directive matcher
+  `fileReferences.server.ts` uses for rename propagation (unrelated to
+  rendering).
 - `csv-key` (the old `[key]` bracket syntax) is fully retired in favor of
   `:csv-key{key="..."}` — the template for how new conventions replace old
   ones: build the primitive, prove it in one real feature, then delete the
@@ -420,15 +427,23 @@ Interacting mode first, without needing that decision resolved.
      renderer, except `:::toggle` — see step 12); checklist visuals are
      matched, not pixel-identical, to Interacting mode's static rendering.
    - Bundle cost: `OxEditor`'s own code is ~23 KB gzip; the shared Lexical
-     vendor chunk is ~108 KB gzip (shared with `MdxEditorEditable` while
-     both coexist) — well under half the old fat chunk's 287 KB gzip once
-     MdxEditor is fully retired.
+     vendor chunk is ~108 KB gzip — well under half the old (deleted)
+     `MdxEditorEditable` chunk's 287 KB gzip.
 5. **Not started — dedicated mobile UX pass.** Quick-actions bar and
    grid-sized tap targets (see "Mobile UX" above). Deliberately last —
    needs real-device iteration, not a spec implemented blind.
-6. **In progress — incremental migration**, route by route, not a
-   big-bang cutover. `MdxEditorClient`/`MdxEditorEditable` stay in place
-   until every route needing them is migrated.
+6. **Done — full migration, `MdxEditor` fully deleted.** Was incremental,
+   route by route; the whole `MdxEditor*`/`MdxRenderer` family (plus
+   supporting files: `csvRefPlugin.tsx`, `refPopoverPlugin.tsx`,
+   `wikiLinkPlugin.tsx`, `util/nopalEditorState.ts`, `util/nopalMarkdown.ts`,
+   `util/decodeMarkdownEntities.ts`, `styles/mdxeditor.css`, the
+   `@mdxeditor/editor`/`react-markdown`/`rehype-raw`/`remark-gfm` npm deps,
+   and the `mdx-editor` skill itself) is deleted now that every consumer is
+   migrated. `robustness-core/util/nopalDirectives.ts` is the one survivor —
+   trimmed down to just the leaf-directive matcher
+   (`findLeafDirectiveOccurrences`/`replaceDirectiveAttrInMatch`)
+   `fileReferences.server.ts` still uses for File Referencing & Renaming's
+   rename propagation, independent of rendering.
    - **Done**: Daily Log (`routes/fruits_.daily-log.tsx`) — rebuilt fresh on
      `OxEditor` (today's entry `mode="editing"`, past entries
      `mode="interacting"`), not a compatibility-preserving port. `@`
@@ -449,34 +464,26 @@ Interacting mode first, without needing that decision resolved.
      by widening `.ox-content`'s own border-box with a small negative
      margin + matching inward padding increase (so text position doesn't
      shift), giving the bleeding child a wider edge to land against.
-   - **Done — every plain (non-directive-registry) markdown view in the
-     Vault and its public/card routes.** `fruits_.vault.tsx` (folder README
-     fallback, file-view fallback, `skills`/`graph` carve-outs),
+   - **Done — every markdown view in the Vault and its public/card routes,
+     including `ProjectView.tsx`.** `fruits_.vault.tsx` (folder README
+     fallback, file-view fallback, `skills`/`graph` carve-outs, and the
+     `project-n01` anchor README branch via `ProjectView`),
      `card.$fileId.tsx`, `public.file.$fileId.tsx`,
-     `public.folder.$folderId.tsx` all render via `OxRenderer` now — zero
-     remaining `MdxEditorView` usage in any of these. Explicit product
-     decision, not an oversight: legacy `::csv-table`/`::gallery`/`::svg`/
-     `:::note` directives in old content are NOT ported — they render as
-     OxRenderer's generic "unknown directive" marker unless rewritten.
-     `MdxEditorClient`/`MdxEditorEditable` were confirmed to already have
-     zero real importers (`fruits_.styles.tsx` only mentions them in
-     descriptive text) — dead code, safe to delete in a future cleanup pass.
-   - **Deliberately NOT migrated — `ProjectView.tsx`
-     (`csv-table`/`gallery`/`svg`/`note` directive registry, still on
-     `MdxEditorView`), used only for legacy `project-n01` anchor folders**
-     (`isProjectN01Anchor`) in both `fruits_.vault.tsx` and the separate
-     Newspaper route (`fruits_.newspaper.$folderId.tsx`). Since `n01` is
-     being retired via the `graphlog` skill's `migrate-to-n02` tooling, this
-     branch is left alone rather than half-ported — it goes away as one
-     clean deletion (`ProjectView.tsx`, `robustness-core/util/
-     nopalDirectives.ts`, `MdxEditorView`/`MdxRenderer`/
-     `MdxEditorWorkable`/`MdxEditorClient`/`MdxEditorEditable`,
-     `styles/mdxeditor.css`) once no `n01` folders remain, not before. A
-     project's own `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`
-     files (see the `vault`/`phylog` skills) already render via a real
-     `<OxEditor>` (`SkillFileEditor` in `fruits_.vault.tsx`, mode
-     `"editing"`/`"interacting"` per the existing write-permission check),
-     since they never contain the legacy directive registry's directives.
+     `public.folder.$folderId.tsx`, and the Newspaper route
+     (`fruits_.newspaper.$folderId.tsx`) all render via plain `OxRenderer`
+     now. `ProjectView.tsx` dropped its whole `csv-table`/`gallery`/`svg`/
+     `note` directive registry and `layout: "grid"`/per-block `size`
+     support entirely, rather than porting it — an explicit product
+     decision, not an oversight: legacy directives in old `project-n01`
+     README content render as `OxRenderer`'s generic "unknown directive"
+     marker unless rewritten. `project.server.ts`'s `resolveProjectManifest`
+     was trimmed to match (`ResolvedProject` is now just `{ manifest, body
+     }` — no more `files`/`folders`/`csvFields` directive resolution).
+     A project's own `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`
+     files (see the `vault`/`phylog` skills) render via a real `<OxEditor>`
+     (`SkillFileEditor` in `fruits_.vault.tsx`, mode `"editing"`/
+     `"interacting"` per the existing write-permission check), since they
+     never contained the legacy directive registry's directives at all.
 7. **Done — `@` mentions** (`oxmarkdown/mention.ts`, `MentionPlugin.tsx`).
    See "`@` mentions" above. Next: a real Vault-backed `mentionSearch`
    (including real "create a page on the fly" behavior) and resolving a
@@ -740,6 +747,39 @@ Interacting mode first, without needing that decision resolved.
       optional `<figcaption>`.
     - **Deliberately, explicitly NOT given an Editing-mode rendering** —
       identical mechanism and reasoning to Grid.
+15. **Done — a folder-based gallery (`::gallery{folder="..." title="..."}`),
+    the LEAF-directive sibling of 14 above, same name, distinguished by
+    mdast node TYPE (`leafDirective` vs `containerDirective`), same
+    deliberate STATIC/Interacting-mode-only scope.** Added after
+    discovering PhyLog's capture stage (see the `phylog` skill) had been
+    instructing its AI to write exactly this syntax the whole time, under
+    the mistaken assumption it was an MdxEditor-only directive being
+    retired along with everything else — it wasn't; OxMarkdown just didn't
+    have it yet.
+    - Resolved from OUTSIDE via `resolveGalleryFolder`
+      (`GalleryFolderResolver`, `oxmarkdown-core/galleryDirective.ts`),
+      same "resolved externally" shape as `::card{file="..."}`'s
+      `CardResolver` — threaded through `OxRendererProps`/
+      `OxTreeRendererProps`/`RenderCtx`/`OxEditorProps` (Interacting mode
+      only, mirroring `resolveCard`'s own threading) exactly in parallel.
+    - `project.server.ts`'s `resolveProjectManifest` is the one real
+      implementation today: scans the body for `::gallery{folder="..."}`
+      occurrences via `nopalDirectives.ts`'s (still-alive)
+      `findLeafDirectiveOccurrences`, resolves each named folder's direct
+      children images, returns them as `ResolvedProject.galleryFolders`.
+      `ProjectView.tsx` closes over that map to build the resolver it
+      hands `OxRenderer`.
+    - Shares `renderGalleryGrid`/`computeGalleryColumns`/
+      `.ox-gallery-directive`/`.ox-gallery-item` with the container form —
+      same visual result either way, they only differ in where `images`
+      came from. Adds an optional `title` attribute (rendered via the
+      existing generic `.ox-directive-title` class) since a named-folder
+      reference has no natural place to write a heading inline the way the
+      container form does (a heading just above `:::gallery{...}` in the
+      surrounding markdown).
+    - Renders nothing at all (not an empty box, not an error marker) when
+      `resolveGalleryFolder` is omitted, the name doesn't resolve, or it
+      resolves to zero images.
 
 ## Testing convention — verify three things together, never one alone
 

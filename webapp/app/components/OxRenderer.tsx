@@ -34,7 +34,7 @@ import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
 import type { OxInteractive } from "../oxmarkdown/interactive";
 import OxPopover from "../oxmarkdown/OxPopover";
-import type { CardResolver } from "oxmarkdown-core";
+import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import { CircleButton } from "./CircleButton";
@@ -56,6 +56,12 @@ export interface OxRendererProps {
    * project/content data — see `oxmarkdown/cardDirective.ts`. Supplied by
    * `OxEditor`. */
   resolveCard?: CardResolver;
+  /** Resolves a `::gallery{folder="..."}` LEAF directive's `folder`
+   * attribute to that folder's images — see
+   * `oxmarkdown-core/galleryDirective.ts`. Omit entirely for a page with
+   * no vault-backed folder resolution at all (e.g. the styles/demo page);
+   * the directive then renders nothing rather than an empty box. */
+  resolveGalleryFolder?: GalleryFolderResolver;
   className?: string;
 }
 
@@ -65,6 +71,7 @@ export default function OxRenderer({
   theme,
   interactive,
   resolveCard,
+  resolveGalleryFolder,
   className,
 }: OxRendererProps) {
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
@@ -76,7 +83,13 @@ export default function OxRenderer({
       style={style}
     >
       <div className="ox-dot-grid">
-        <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} resolveCard={resolveCard} />
+        <OxTreeRenderer
+          doc={doc}
+          directives={directives}
+          interactive={interactive}
+          resolveCard={resolveCard}
+          resolveGalleryFolder={resolveGalleryFolder}
+        />
       </div>
     </div>
   );
@@ -130,14 +143,15 @@ export interface OxTreeRendererProps {
   directives?: DirectiveRegistry;
   interactive?: OxInteractive;
   resolveCard?: CardResolver;
+  resolveGalleryFolder?: GalleryFolderResolver;
 }
 
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
-export function OxTreeRenderer({ doc, directives, interactive, resolveCard }: OxTreeRendererProps) {
+export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
   return (
-    <>{renderBlockNodes(doc.children, { directives, definitions, interactive, resolveCard })}</>
+    <>{renderBlockNodes(doc.children, { directives, definitions, interactive, resolveCard, resolveGalleryFolder })}</>
   );
 }
 
@@ -146,6 +160,7 @@ interface RenderCtx {
   definitions: Map<string, Definition>;
   interactive?: OxInteractive;
   resolveCard?: CardResolver;
+  resolveGalleryFolder?: GalleryFolderResolver;
 }
 
 function collectDefinitions(doc: OxDocument): Map<string, Definition> {
@@ -484,6 +499,41 @@ function computeGalleryColumns(photoCount: number, maxColumnsAttr: string | unde
   return Math.min(auto, maxColumns);
 }
 
+/** The actual grid markup, shared by both the container (`:::gallery{...}`)
+ * and leaf (`::gallery{folder="..."}`) forms — same visual result either
+ * way, they only differ in WHERE `images` came from. `title` is only ever
+ * non-null from the leaf form today (the container form has no attribute
+ * for it — a caller who wants a heading just writes one in the
+ * surrounding markdown, same as any other block). */
+function renderGalleryGrid(
+  images: GalleryImage[],
+  maxColumnsAttr: string | undefined,
+  key: number,
+  title: string | null,
+): ReactNode {
+  const columns = computeGalleryColumns(images.length, maxColumnsAttr);
+  const grid = (
+    <div
+      className="ox-gallery-directive"
+      style={{ "--ox-gallery-columns": columns } as CSSProperties}
+    >
+      {images.map((img, i) => (
+        <figure key={i} className="ox-gallery-item">
+          <img src={img.url} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
+          {img.alt && <figcaption>{img.alt}</figcaption>}
+        </figure>
+      ))}
+    </div>
+  );
+  if (!title) return <Fragment key={key}>{grid}</Fragment>;
+  return (
+    <div key={key}>
+      <div className="ox-directive-title">{title}</div>
+      {grid}
+    </div>
+  );
+}
+
 function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): ReactNode {
   // `::file{...}` is a BUILT-IN interactable, not a caller-registered
   // directive (same category as task checkboxes, not "gallery"/"csv-table")
@@ -593,20 +643,32 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     if (images.length === 0) {
       return <Fragment key={key}>{renderBlockNodes(node.children, ctx)}</Fragment>;
     }
-    const columns = computeGalleryColumns(images.length, directiveAttrs(node)["max-columns"]);
-    return (
-      <div
-        key={key}
-        className="ox-gallery-directive"
-        style={{ "--ox-gallery-columns": columns } as CSSProperties}
-      >
-        {images.map((img, i) => (
-          <figure key={i} className="ox-gallery-item">
-            <img src={img.url} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
-            {img.alt && <figcaption>{img.alt}</figcaption>}
-          </figure>
-        ))}
-      </div>
+    return renderGalleryGrid(images, directiveAttrs(node)["max-columns"], key, null);
+  }
+
+  // `::gallery{folder="..."}` — the LEAF-directive sibling of the
+  // container form just above: same visual result (a titled photo grid),
+  // but the photos are resolved from a named vault FOLDER instead of
+  // being written out as inline `![alt](url)` images — see
+  // `oxmarkdown-core/galleryDirective.ts`'s header for why both exist
+  // under the same name. Built-in, same category as `::file`/`::card`
+  // above (not a caller-registered directive), and STATIC/Interacting-mode
+  // ONLY like the container form — Editing mode shows the generic
+  // "Unknown block" placeholder instead, same deliberate limitation.
+  // Renders nothing (not an empty box, not an error marker) when
+  // `resolveGalleryFolder` is omitted, the folder name doesn't resolve, or
+  // it resolves to zero images — the folder may just not exist yet, or
+  // this render context (e.g. the styles/demo page) may have no vault
+  // behind it at all.
+  if (node.type === "leafDirective" && node.name === "gallery") {
+    const attrs = directiveAttrs(node);
+    const images = ctx.resolveGalleryFolder?.(attrs.folder ?? "");
+    if (!images || images.length === 0) return null;
+    return renderGalleryGrid(
+      images.map((img) => ({ url: img.url, alt: img.name, title: null })),
+      undefined,
+      key,
+      attrs.title ?? null,
     );
   }
 

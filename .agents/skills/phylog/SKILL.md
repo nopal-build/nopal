@@ -453,12 +453,21 @@ directives instead of plain links — especially
 `::gallery{folder="<name>" title="..."}` (renders every image in a
 project-root subfolder as a photo grid; only resolves direct children of
 the root, never nested paths) via `create_folder` + `move_file` +
-referencing the folder from `update_readme`/`update_section`.
-`::csv-table{file="..."}`/`::svg{file="..."}` also exist. All three are
-resolved server-side by `project.server.ts`'s `resolveProjectManifest` —
-viewing a `project-n01` folder's README (browsing in, or `?file=<id>`)
-renders through `ProjectView` instead of a directive-blind
-`MdxEditorView`.
+referencing the folder from `update_readme`/`update_section`. Resolved
+server-side by `project.server.ts`'s `resolveProjectManifest` and rendered
+by OxRenderer's own built-in `::gallery{folder="..."}` leaf directive (see
+the `oxmarkdown` skill's Build status, item 15) — briefly stale for one
+cleanup pass while `MdxEditor` was being retired (the directive existed
+only as a container form, `:::gallery{...}`, needing inline images PhyLog
+had no way to embed), fixed by adding the leaf form as a proper OxMarkdown
+built-in rather than reworking PhyLog's prompt to fit a shape it can't
+support (PhyLog only ever knows file/folder NAMES, never stable URLs it
+could write inline). `DIRECTIVE_GUIDE` used to also mention
+`::csv-table{file="..."}`/`::svg{file="..."}` — removed from the prompt
+entirely (not brought back) rather than left telling the AI to write
+syntax nothing renders; a `project-n01` folder still holding OLD content
+with those directives (written before this fix) still shows OxRenderer's
+generic "unknown directive" marker for them.
 
 **Two modes** (`runCapture`'s `full` option; CLI `--full`):
 

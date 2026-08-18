@@ -13,7 +13,7 @@ import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server
 // A markdown file (by name or content type -- same check the vault UI's
 // own `isMarkdownFile` uses) is stored as a DB-content ref, same as
 // README.md/skill files created directly by the app -- NOT as an S3
-// blob. Every markdown viewer/editor in the vault (MdxEditorView,
+// blob. Every markdown viewer/editor in the vault (OxRenderer/OxEditor,
 // SkillFileEditor) reads `file.content` directly and never falls back to
 // S3, so a markdown file uploaded through the OLD s3-only path here
 // would always render empty -- confirmed, this was exactly that bug.

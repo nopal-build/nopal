@@ -496,13 +496,11 @@ async function resolveOrCreatePath(
 
 const DIRECTIVE_GUIDE = `## Available markdown directives
 
-The README is rendered with OxMarkdown directive support, not plain markdown alone — use these where they genuinely help instead of always writing plain bullet lists of links:
+The README is rendered with OxMarkdown directive support, not plain markdown alone — use this where it genuinely helps instead of always writing plain bullet lists of links:
 
-- ::gallery{folder="<name>" title="Optional title"} — renders EVERY image inside a folder as a titled photo grid, instead of one link per photo. The folder MUST be a SINGLE, direct child of this project's root (create it with create_folder using a plain name like "Hip Installation", never a nested path like "Photos/Hip Installation" — the directive can't resolve nested paths). Use this whenever you're presenting a GROUP of related photos (e.g. everything from one day, or one phase of work) — create the folder, move the relevant photos into it with move_file, then reference it by name. A single, standout photo can still just be an ordinary markdown link.
-- ::csv-table{file="project.csv" title="Optional title"} — renders a CSV file (a direct child of the project root) as a table.
-- ::svg{file="<name>" title="Optional title"} — renders an SVG file (a direct child of the project root) inline.
+- ::gallery{folder="<name>" title="Optional title"} — renders EVERY image inside a folder as a titled photo grid, instead of one link per photo. The folder MUST be a SINGLE, direct child of this project's root (create it with create_folder using a plain name like "Hip Installation", never a nested path like "Photos/Hip Installation" — the directive can't resolve nested paths). Use this whenever you're presenting a GROUP of related photos (e.g. everything from one day, or one phase of work) — create the folder, move the relevant photos into it with move_file, then reference it by name. A single, standout photo can still just be an ordinary markdown link. Only resolves DIRECT children of the project root by name — never a nested path, never a file/folder inside skills/syncs/newspapers/daily-logs.
 
-All three only resolve DIRECT children of the project root by name — never nested paths, never files/folders inside skills/syncs/newspapers/daily-logs.`;
+No other directives are available today — a CSV/table or inline-SVG equivalent doesn't exist yet (an earlier version of this guide mentioned ::csv-table/::svg, but nothing renders them; don't write them).`;
 
 function buildSystemPrompt(
   skillContent: string,

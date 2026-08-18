@@ -63,7 +63,6 @@ import OxRenderer from "../components/OxRenderer";
 import { ProjectView } from "../components/ProjectView";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
 import "../styles/vault.css";
-import "../styles/mdxeditor.css";
 
 // ─── Upload constants (ported from vault v1 — the flow that “worked well”) ───
 
@@ -107,10 +106,10 @@ type Current =
       ancestry: VaultFolder[];
       readme: FileRef | null;
       /** Non-null exactly when `readme` is a `project-n01` folder's own
-       * README.md — resolves ⁠`::gallery{folder="..."}`/`::csv-table{...}`/
-       * `::svg{...}` the same way the Newspaper page does, so a human
-       * looking at the README right here in the Vault sees the same thing,
-       * not "unknown directive" markers (see the `phylog`/`vault` skills). */
+       * README.md — gives its front-matter-stripped body, same as the
+       * Newspaper page (see the `phylog`/`vault` skills). Rendered via plain
+       * `OxRenderer`/`ProjectView`, same as any other markdown file — no
+       * directive resolution happens here (see `project.server.ts`). */
       projectManifest: ResolvedProject | null;
     }
   | {
@@ -2576,11 +2575,8 @@ export default function VaultV2Page() {
                 <div className="vault-readme-section">
                   {current.projectManifest ? (
                     <ProjectView
-                      manifest={current.projectManifest.manifest}
                       body={current.projectManifest.body}
-                      files={current.projectManifest.files}
-                      folders={current.projectManifest.folders}
-                      csvFields={current.projectManifest.csvFields}
+                      galleryFolders={current.projectManifest.galleryFolders}
                     />
                   ) : (
                     <OxRenderer markdown={current.readme.content ?? ""} />
@@ -2614,21 +2610,13 @@ export default function VaultV2Page() {
                   // `OxRenderer`, never `OxEditor`.
                   <OxRenderer markdown={current.file.content ?? ""} />
                 ) : current.projectManifest ? (
-                  // Legacy project-n01 anchor folders only (see
-                  // `isProjectN01Anchor` above) — ProjectView still resolves
-                  // the old csv-table/gallery/svg/note directive registry via
-                  // MdxEditorView. Left as-is rather than ported to
-                  // OxMarkdown: n01 is being retired via the graphlog skill's
-                  // migration tooling, so this whole branch (plus
-                  // ProjectView.tsx/nopalDirectives.ts/MdxEditorView) goes
-                  // away together once n01 folders are gone, instead of
-                  // being half-migrated now.
+                  // Legacy project-n01 anchor README files only (see
+                  // `isProjectN01Anchor` above) — `ProjectView` gives the
+                  // front-matter-stripped body to `OxRenderer`, plus any
+                  // `::gallery{folder="..."}` folders it references.
                   <ProjectView
-                    manifest={current.projectManifest.manifest}
                     body={current.projectManifest.body}
-                    files={current.projectManifest.files}
-                    folders={current.projectManifest.folders}
-                    csvFields={current.projectManifest.csvFields}
+                    galleryFolders={current.projectManifest.galleryFolders}
                   />
                 ) : (
                   <OxRenderer markdown={current.file.content ?? ""} />

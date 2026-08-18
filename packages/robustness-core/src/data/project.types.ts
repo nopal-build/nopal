@@ -8,42 +8,38 @@
  * (title/type/layout) — the traditional, idiomatic use of front matter (see
  * Jekyll/Hugo/Astro/Obsidian's Properties panel). It deliberately does NOT
  * hold the project's content blocks; those live inline in the README's own
- * body as generic directives (see `util/nopalDirectives.ts`), so the body
+ * body as ordinary markdown plus OxMarkdown directives (see
+ * `oxmarkdown-core/galleryDirective.ts` for `::gallery{folder="..."}`, the
+ * one directive `resolveProjectManifest` still resolves), so the body
  * reads as one continuous document instead of a manifest pointing at a
  * separate `overview.md`. A folder with no front matter, or malformed front
  matter, simply renders with sensible defaults (see `resolveProjectManifest` in `project.server.ts`, which never fails closed on this).
+ *
+ * `layout` is currently unused by rendering (`ProjectView.tsx` dropped its
+ * old grid/per-block-size layout when `MdxEditor` was retired — see the
+ * `oxmarkdown` skill's Build status) but still parses/round-trips through
+ * front matter for a future revisit.
  *
  * Example `README.md`:
  *
  *   ---
  *   title: Casa Verde Remodel
  *   type: client-deliverable
- *   layout: grid
  *   ---
  *
  *   # Casa Verde Remodel
  *
  *   Full kitchen and primary bath remodel for the Verde family.
  *
- *   ::csv-table{file="budget.csv" title="Budget"}
+ *   ::gallery{folder="photos" title="Progress Photos"}
  *
- *   ::gallery{folder="photos" title="Progress Photos" size="half"}
- *
- *   ::svg{file="floorplan.svg" title="Floor Plan" size="half"}
- *
- * This file has NO server-only imports — safe on both client and server.
+ * This file has NO server-only imports (the `oxmarkdown-core` type import
+ * below is a pure, framework-agnostic type) — safe on both client and
+ * server.
  */
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-
-/**
- * How much horizontal space a directive block wants on wide viewports.
- * Ignored below the `md` breakpoint — every block stacks full-width on
- * mobile regardless, so a badly-chosen size never breaks the small-screen
- * reading experience. See `ProjectView.tsx` for how this maps to CSS grid
- * spans.
- */
-export type ProjectBlockSize = "third" | "half" | "full";
+import type { ResolvedGalleryImage } from "oxmarkdown-core";
 
 /**
  * "document": single column, always — the blog/docs feel. This is just the
@@ -99,29 +95,25 @@ export type ProjectManifest = {
  * `human_id` instead. */
 export type ProjectSharingEntry = { human: string; role: string };
 
-/** Resolved data a directive block needs to render — deliberately narrow (a
- * URL/name plus optional inline text) rather than a full `FileRef`, so the
- * renderer has no vault-specific coupling and this shape is trivially
- * JSON-serializable as loader data (no Map/Set — plain Records keyed by the
- * `file`/`folder` attribute value as written in the directive). */
-export type ResolvedFile = { url: string; name: string; content?: string };
-
-/** The fully-resolved payload a project view needs to render. Built
- * server-side by `resolveProjectManifest` in `project.server.ts`. */
+/** The payload a project view needs to render. Built server-side by
+ * `resolveProjectManifest` in `project.server.ts`. Deliberately narrow —
+ * this used to also carry `files`/`csvFields` resolved from
+ * `::name{file="..."}` directives in the body (the old
+ * `MdxEditorView`/`nopalDirectives.ts` extension mechanism), dropped once
+ * `ProjectView.tsx` moved to plain `OxRenderer` and stopped resolving those
+ * directives at all — see the `oxmarkdown` skill's Build status.
+ * `galleryFolders` survives (re-added, this time built the right way) for
+ * OxMarkdown's own real `::gallery{folder="..."}` leaf directive — see
+ * `oxmarkdown-core/galleryDirective.ts`. */
 export type ResolvedProject = {
   manifest: ProjectManifest;
   /** The README's body, with front matter stripped — rendered as-is via
-   * MdxEditorView; directives inside it are resolved against `files`/`folders`. */
+   * `OxRenderer`. */
   body: string;
-  /** Keyed by a directive's `file="..."` attribute value. */
-  files: Record<string, ResolvedFile>;
-  /** Keyed by a directive's `folder="..."` attribute value — every image
-   * file found directly inside that subfolder. */
-  folders: Record<string, ResolvedFile[]>;
-  /** Flat key/value facts parsed from `project.csv`, if present in the
-   * folder — what `:csv-key{key="..."}` resolves against (see
-   * `util/projectCsv.ts`). Absent/empty when there's no such file. */
-  csvFields?: Record<string, string>;
+  /** Keyed by a `::gallery{folder="..."}` directive's `folder` attribute
+   * value — every image found directly inside that subfolder. What
+   * `ProjectView.tsx`'s `resolveGalleryFolder` closes over. */
+  galleryFolders: Record<string, ResolvedGalleryImage[]>;
 };
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;

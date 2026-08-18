@@ -12,5 +12,6 @@
 // package boundary the wrong way.
 export * from "./document";
 export * from "./cardDirective";
+export * from "./galleryDirective";
 export * from "./mention";
 export * from "./refDirective";

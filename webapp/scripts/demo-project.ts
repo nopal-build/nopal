@@ -1,9 +1,17 @@
 // =============================================================================
 // One-off demo: creates a sample project folder with a manifest-driven
 // README.md so the `/fruits/newspaper/:folderId` view has something real to
-// render. Exercises all 3 directive forms (text/leaf/container) — see
-// `app/util/nopalDirectives.ts`. Safe to re-run — deletes and recreates the
-// demo folder each time.
+// render. Exercises the `::gallery{folder="..."}` leaf directive — see
+// `oxmarkdown-core/galleryDirective.ts`. Safe to re-run — deletes and
+// recreates the demo folder each time.
+//
+// Used to also exercise `:csv-key{...}`/`:::note{...}`/`::csv-table{...}`/
+// `::svg{...}` (the old `MdxEditorView`/`nopalDirectives.ts` directive
+// registry) — dropped from the README template when `MdxEditor` was
+// retired, since none of them render anymore (see the `oxmarkdown` skill's
+// Build status). `budget.csv`/`floorplan.svg` are still uploaded below as
+// plain vault files (viewable directly), just no longer referenced from
+// the README's own body.
 //
 // Run via: npx vite-node scripts/demo-project.ts [email]
 // (defaults to gerald@nopal.build; DB/S3 connection comes from the same
@@ -26,7 +34,6 @@ const PROJECT_NAME = "Casa Verde Remodel";
 const README_MD = `---
 title: Casa Verde Remodel
 type: client-deliverable
-layout: grid
 ---
 
 # Casa Verde Remodel
@@ -34,22 +41,16 @@ layout: grid
 Full kitchen and primary bath remodel for the Verde family. Scope covers
 demo, framing, electrical/plumbing rough-in, cabinetry, and finish work.
 
-**Client:** :csv-key{key="name"} · **Location:** :csv-key{key="location"} · **Status:** :csv-key{key="status"}
+**Client:** Verde family · **Location:** 142 Calle Verde · **Status:** in-progress
 
 ## Latest update
 
 Framing inspection passed. Cabinet order confirmed for delivery in three
 weeks. Waiting on tile selection before finish carpentry can start.
 
-:::note{title="Heads up"}
 Tile selection is the long pole right now — client walkthrough is booked for next Tuesday.
-:::
 
-::csv-table{file="budget.csv" title="Budget"}
-
-::gallery{folder="photos" title="Progress Photos" size="half"}
-
-::svg{file="floorplan.svg" title="Floor Plan" size="half"}
+::gallery{folder="photos" title="Progress Photos"}
 `;
 
 const PROJECT_CSV = serializeCsvFields([

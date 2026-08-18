@@ -102,7 +102,7 @@ import FileCaptionArrowPlugin from "../oxmarkdown/FileCaptionArrowPlugin";
 import CardDirectiveArrowPlugin from "../oxmarkdown/CardDirectiveArrowPlugin";
 import CardEditorArrowPlugin from "../oxmarkdown/CardEditorArrowPlugin";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
-import type { CardResolver } from "oxmarkdown-core";
+import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import "../styles/oxmarkdown.css";
 
@@ -169,6 +169,11 @@ export interface OxEditorProps {
    * placeholder (e.g. a caption or other nested editor that never needs
    * to resolve cards itself). */
   resolveCard?: CardResolver;
+  /** Resolves a `::gallery{folder="..."}` LEAF directive's `folder`
+   * attribute to that folder's images — see
+   * `oxmarkdown-core/galleryDirective.ts`. STATIC/Interacting-mode only,
+   * same as the directive itself — ignored in Editing mode. */
+  resolveGalleryFolder?: GalleryFolderResolver;
   /** How many rows tall this editor's minimum clickable canvas is — see
    * `oxmarkdown/MinRowsPlugin.tsx`. Defaults to a full 4-row canvas (a
    * card/prose editor); a `::file{...}` directive's caption editor passes
@@ -209,6 +214,7 @@ function OxInteractingSurface({
   theme,
   className,
   resolveCard,
+  resolveGalleryFolder,
 }: OxEditorProps) {
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
   const [selected, setSelected] = useState<object | null>(null);
@@ -249,7 +255,13 @@ function OxInteractingSurface({
       <DirectiveRegistryContext.Provider value={directives}>
         <CardResolverContext.Provider value={resolveCard}>
           <OxEditorContext.Provider value={OxEditor}>
-            <OxTreeRenderer doc={doc} directives={directives} interactive={interactive} resolveCard={resolveCard} />
+            <OxTreeRenderer
+              doc={doc}
+              directives={directives}
+              interactive={interactive}
+              resolveCard={resolveCard}
+              resolveGalleryFolder={resolveGalleryFolder}
+            />
           </OxEditorContext.Provider>
         </CardResolverContext.Provider>
         </DirectiveRegistryContext.Provider>

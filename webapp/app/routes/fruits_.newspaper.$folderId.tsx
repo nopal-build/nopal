@@ -26,7 +26,6 @@ import { getProjectStatus } from "robustness-core/data/projectStatus.server";
 import type { ProjectStatus } from "robustness-core/data/project.types";
 import { AppLayout } from "../components/AppLayout";
 import { ProjectView } from "../components/ProjectView";
-import "../styles/mdxeditor.css";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -112,7 +111,7 @@ function ProjectStatusControl({
 
 export default function NewspaperRoute() {
   const { folder, project, status, canEditStatus } = useLoaderData<typeof loader>();
-  const { manifest, body, files, folders, csvFields } = project;
+  const { manifest, body, galleryFolders } = project;
 
   return (
     <AppLayout>
@@ -146,13 +145,7 @@ export default function NewspaperRoute() {
           </div>
         </div>
 
-        <ProjectView
-          manifest={manifest}
-          body={body}
-          files={files}
-          folders={folders}
-          csvFields={csvFields}
-        />
+        <ProjectView body={body} galleryFolders={galleryFolders} />
       </div>
     </AppLayout>
   );
