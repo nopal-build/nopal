@@ -257,12 +257,33 @@ const TOOLS: ToolDefinition[] = [
   {
     name: "add_node",
     description:
-      'Add one citable node to today\'s graph-log file. `sourceIndex` must be one of today\'s numbered sources (shown as "Source 0:", "Source 1:", etc) -- its citation is attached automatically from real data, never write a :ref{...} yourself. `quote` is the verbatim/near-verbatim excerpt (marked with ==...== per your own instructions) plus any short surrounding prose. `sameDayLinks`/`backwardLinks` are optional -- at most 3 links total are kept (any more, or any id you weren\'t actually given as a candidate, are dropped and reported back to you), so only send the ones that matter most.',
+      'Add one citable node to today\'s graph-log file. `sourceIndex` must be one of today\'s numbered sources (shown as "Source 0:", "Source 1:", etc) -- its citation is attached automatically from real data, never write a :ref{...} yourself. `blocks` is the verbatim words, broken into one or more paragraph/list blocks in order -- code applies ==...== highlighting itself (per-item for a list, so a marker never ends up inside the highlight, and per-paragraph, so a highlight never spans a blank line and breaks) -- never include == yourself. `sameDayLinks`/`backwardLinks` are optional -- at most 3 links total are kept (any more, or any id you weren\'t actually given as a candidate, are dropped and reported back to you), so only send the ones that matter most.',
     inputSchema: {
       type: "object",
       properties: {
         sourceIndex: { type: "number" },
-        quote: { type: "string" },
+        setup: {
+          type: "string",
+          description: "Optional short scaffolding clause BEFORE the verbatim words, only when needed to make the quote standalone. Never highlighted -- add as little as possible, most nodes need none.",
+        },
+        blocks: {
+          type: "array",
+          description: 'The verbatim words, in order. Use a "list" block for anything that was a numbered/bulleted list OR an indented/nested outline in the source -- never reproduce indentation as literal leading spaces (it renders as a broken code block).',
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["paragraph", "list"] },
+              text: { type: "string", description: 'Required for a "paragraph" block -- one verbatim paragraph, no leading indentation.' },
+              items: {
+                type: "array",
+                items: { type: "string" },
+                description: 'Required for a "list" block -- one verbatim string per item, WITHOUT its own "1."/"-" marker (code adds that).',
+              },
+              ordered: { type: "boolean", description: 'For a "list" block only -- true for a numbered list, omit/false for a bulleted one.' },
+            },
+            required: ["type"],
+          },
+        },
         sameDayLinks: {
           type: "array",
           items: { type: "number" },
@@ -274,10 +295,43 @@ const TOOLS: ToolDefinition[] = [
           description: 'Ids of earlier days\' nodes, e.g. "2026-07-29#3" -- from the candidates you were shown.',
         },
       },
-      required: ["sourceIndex", "quote"],
+      required: ["sourceIndex", "blocks"],
     },
   },
 ];
+
+/** Renders `add_node`'s own `blocks` parameter into the final `==...==`-
+ * marked markdown, entirely in code -- the model never writes `==` itself
+ * (see the header's "real architecture change" note: a real, confirmed
+ * rendering bug came from the model wrapping a whole multi-paragraph/
+ * indented passage in ONE `==...==` span, which CommonMark's inline
+ * markup can never cross a blank line to close correctly). A "paragraph"
+ * block becomes one `==text==`; a "list" block becomes one highlighted
+ * item per entry, with its own `-`/`N.` marker kept OUTSIDE the highlight
+ * (matching `GRAPH.md`'s own long-standing instruction for lists, now
+ * structurally guaranteed instead of merely requested). Blocks are joined
+ * with a blank line, since separate `==...==` spans are exactly how a
+ * multi-paragraph verbatim passage must be represented at all. */
+function renderQuoteBlocks(rawBlocks: unknown): string | null {
+  if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) return null;
+  const parts: string[] = [];
+  for (const raw of rawBlocks) {
+    if (!raw || typeof raw !== "object") continue;
+    const block = raw as Record<string, unknown>;
+    if (block.type === "paragraph") {
+      const text = String(block.text ?? "").trim();
+      if (text) parts.push(`==${text}==`);
+    } else if (block.type === "list") {
+      const items = Array.isArray(block.items)
+        ? block.items.map((i) => String(i).trim()).filter(Boolean)
+        : [];
+      if (items.length === 0) continue;
+      const ordered = block.ordered === true;
+      parts.push(items.map((item, i) => `${ordered ? `${i + 1}.` : "-"} ==${item}==`).join("\n"));
+    }
+  }
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
 
 function createSyncGraphExecutors(input: {
   date: string;
@@ -293,11 +347,13 @@ function createSyncGraphExecutors(input: {
   const executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>> = {
     add_node: async (toolInput) => {
       const sourceIndex = Number(toolInput.sourceIndex);
-      const quote = String(toolInput.quote ?? "").trim();
-      if (!quote) return "Error: quote is required";
       if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= input.sourceCitations.length) {
         return `Error: sourceIndex must be an integer between 0 and ${input.sourceCitations.length - 1}`;
       }
+      const quoteBody = renderQuoteBlocks(toolInput.blocks);
+      if (!quoteBody) return "Error: blocks must include at least one non-empty paragraph or list block";
+      const setup = typeof toolInput.setup === "string" ? toolInput.setup.trim() : "";
+      const quote = [setup || null, quoteBody].filter(Boolean).join("\n\n");
 
       const number = nextNumber;
       const rawSameDay = Array.isArray(toolInput.sameDayLinks) ? toolInput.sameDayLinks : [];

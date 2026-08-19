@@ -328,7 +328,16 @@ function createReadmeExecutors(input: {
   return { executors, summaries, hadRefusal: () => hadRefusal, getCurrent: () => ({ content: currentContent, fileId: currentFileId }) };
 }
 
-const MAX_TURNS = 8;
+// Bumped from the original 8 as a defensive measure -- graph-structure's
+// own truncation (see that file's own module doc: a real bootstrap run
+// exceeded its output budget on the very first turn, spending it on
+// planning/narration text before ever calling a tool) is a real, proven
+// failure mode for a tool-calling loop asked to build a lot from scratch
+// in one go, and this stage hasn't yet been exercised against a real,
+// substantial graph-structure.md the way that one was. A first bootstrap
+// needs at minimum ~5-6 update_section calls (one per canonical section);
+// extra headroom here is free unless actually used.
+const MAX_TURNS = 20;
 
 async function runReadmeAgentLoop(
   provider: LlmProvider,
@@ -400,7 +409,11 @@ export interface RunGraphProjectViewOptions {
 }
 
 function buildSystemPrompt(skillContent: string): string {
-  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index). Never invent progress, dates, or facts that aren't grounded in a thread graph-structure.md actually gives you or the README's own existing content. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.\n\n${skillContent}`;
+  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index). Never invent progress, dates, or facts that aren't grounded in a thread graph-structure.md actually gives you or the README's own existing content. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
+
+Do not write any planning, reasoning, or summary text outside of a tool call -- go straight to calling update_section/remove_section with no preamble and no narration in between calls either. Your own output budget per turn is limited, and explanatory text spends it on nothing that ends up in the README.
+
+${skillContent}`;
 }
 
 function buildUserPrompt(input: {

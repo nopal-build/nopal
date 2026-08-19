@@ -163,6 +163,30 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     day; now it's paid for once, then cheaply cache-read for the rest of
     the run, via the SAME `cacheSystemPrompt` mechanism already used
     elsewhere in GraphLog/PhyLog for exactly this reason.
+  - **A real rendering bug, found in real production output, fixed at
+    the tool-schema level rather than by re-explaining the rule in
+    prose**: a verbatim quote that was a multi-paragraph, indented
+    outline (not a classic numbered/bulleted list) got wrapped in ONE
+    `==...==` span across several blank lines, which OxMarkdown's real
+    `mark` mdast node (an inline construct, same rule as `**bold**`) can
+    never close correctly across — confirmed rendering broke exactly the
+    way the ALREADY-DOCUMENTED list version of this bug did (see Build
+    status item 5's own earlier bug writeup), just for a source shape
+    that instruction never covered. Fixed by taking `==...==` OUT OF the
+    model's hands entirely: `add_node`'s `quote` string parameter was
+    replaced with a structured `blocks` array (`{type: "paragraph",
+    text}` / `{type: "list", items, ordered}`) plus an optional `setup`
+    clause — `renderQuoteBlocks` (`syncGraph.server.ts`) applies
+    `==...==` itself, per paragraph and per list item, with a list
+    item's own `-`/`N.` marker always kept outside the highlight by
+    construction. The model now only describes STRUCTURE (is this a
+    paragraph or a list, how many items), never highlight syntax — the
+    same "never trust the model with formatting a citation/weight-line/
+    link can already just compute" reasoning applied one layer further
+    down, to markup itself. `GRAPH.md` was updated to describe the new
+    parameters (including "never reproduce a person's own indentation as
+    literal leading spaces — that's its own markdown syntax, a code
+    block, and it's exactly what triggered this").
 - **graph-structure** — reads EVERY `Graph/graph-log-*.md` file (the
   whole graph, not incrementally) and keeps ONE file,
   `Graph/graph-structure.md`, an organized, weighted, status-annotated
@@ -195,6 +219,26 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     unbounded completion, so the old hard ceiling is no longer reachable
     in ordinary operation. Full design/rationale in `graphStructure.server.ts`'s
     own module doc.
+  - **A real finding from the FIRST live run of this redesign, fixed
+    directly**: a real 61-node bootstrap (a freshly-reset project)
+    truncated anyway — on the very FIRST turn, before any tool call ever
+    completed, meaning the model spent its whole per-turn output budget
+    on plain narration/planning text rather than calling a tool at all.
+    Fixed two ways: (1) the system prompt now explicitly forbids any
+    text outside a tool call ("go straight to calling
+    update_cluster/remove_cluster/get_node with no preamble"); (2) a
+    large new-node delta is now split into separate, smaller batched
+    conversations (`NEW_NODE_BATCH_SIZE = 15`) rather than one
+    conversation holding all 61 nodes at once — each batch still sees
+    whatever the PREVIOUS batch already committed (via the same
+    executors' own persisted state), so the end result is unchanged,
+    only how much the model has to hold in mind in any one conversation.
+    The system prompt's own skill-instruction portion is now ALSO cached
+    (`cacheSystemPrompt`, via a run-wide call counter) across every
+    turn/batch — a real gap in the original redesign (never enabled at
+    all), same convention `sync-graph`'s own larger cached block uses.
+    Same open item as before: this fix itself hasn't yet been re-run for
+    real (see Build status item 7's own note).
   - **Inbound link counts, AND NOW every cluster's "Weight: ..." line,
     are fully code-computed, never left to the model**
     (`graphNodeIndex.server.ts`'s `computeBacklinkIndex`, plus
@@ -255,6 +299,23 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     `graph-project-view`'s own `appliedByProjectView` marker meaningless
     the next time either stage runs — no separate "full" mode needed,
     same idempotent-by-construction property the old per-day design had.
+  - **Preemptively hardened, not yet proven against a real run**: this
+    stage hasn't actually built a real README from a substantial
+    `graph-structure.md` yet (every real run so far has hit "no
+    graph-structure.md yet" because the upstream stage never finished —
+    see `graph-structure`'s own "real finding" bullet above), but shares
+    the exact same tool-calling-loop shape that JUST proved vulnerable to
+    a real bootstrap truncating on its first turn's own narration text.
+    Applied the same two defensive fixes ahead of time rather than
+    waiting to hit the identical failure for real: the system prompt now
+    explicitly forbids text outside a tool call, and `MAX_TURNS` is
+    raised from 8 to 20 (a first bootstrap needs a minimum of ~5-6
+    `update_section` calls, one per canonical heading, leaving little
+    margin at the old ceiling). No batching equivalent to
+    `graph-structure`'s own `NEW_NODE_BATCH_SIZE` was added here since
+    there's no analogous "list of many things" to chunk — this stage
+    always writes to the same fixed six sections, not a growing
+    per-cluster set.
 
 ## Reset
 

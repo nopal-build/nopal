@@ -415,10 +415,26 @@ function createStructureExecutors(input: {
  * higher ceiling here costs proportionally more calls, not more risk. */
 const MAX_TURNS = 40;
 
+/** Splits a large new-node delta (a first-ever build, or a fallback full
+ * rebuild against an unparseable previous file) into separate, smaller
+ * conversations rather than handing the model everything at once. Found
+ * necessary directly: a real 61-node bootstrap run truncated on its very
+ * FIRST turn, before any tool call completed at all -- consistent with
+ * the model spending its per-turn output budget on planning/narration
+ * text for the whole batch before ever calling a tool, an easier trap to
+ * fall into the more there is to organize at once. Each batch still
+ * benefits from `createStructureExecutors`'s own persisted state (the
+ * NEXT batch's prompt reflects whatever the previous one already placed),
+ * so this doesn't change the end result, only how much the model is
+ * asked to hold in mind in any one conversation. A steady-state run (a
+ * handful of new nodes) is always exactly one batch, unaffected. */
+const NEW_NODE_BATCH_SIZE = 15;
+
 async function runStructureAgentLoop(
   provider: LlmProvider,
   system: string,
   userPrompt: string,
+  callCounter: { count: number },
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>,
 ): Promise<{ usage: LlmUsage; model: string | null; truncated: boolean; hitMaxTurns: boolean }> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
@@ -428,7 +444,13 @@ async function runStructureAgentLoop(
   let hitMaxTurns = false;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const response = await provider.complete({ system, messages, tools: TOOLS });
+    // The system prompt (skill instructions -- stable across every turn
+    // AND every batch of this whole run) is worth caching from the
+    // second real completion onward, same convention `sync-graph` uses
+    // for its own (larger) cached block.
+    const cacheSystemPrompt = callCounter.count > 0;
+    const response = await provider.complete({ system, messages, tools: TOOLS, cacheSystemPrompt });
+    callCounter.count++;
     usage.inputTokens += response.usage.inputTokens;
     usage.outputTokens += response.usage.outputTokens;
     model = response.model;
@@ -455,7 +477,11 @@ async function runStructureAgentLoop(
 }
 
 function buildSystemPrompt(skillContent: string): string {
-  return `You are GraphLog's graph-structure step, keeping Graph/graph-structure.md an accurate, organized, weighted index of the whole graph. You're handed the CURRENT graph-structure.md (already organized from every earlier run) plus only the node(s) that are genuinely new since last time -- place each new node into whichever existing cluster it belongs to, or start a new one via update_cluster if it doesn't fit anywhere yet. Only touch clusters that actually need a change, one update_cluster/remove_cluster call per cluster -- never try to redescribe the whole file in one call. If real restructuring is warranted (renaming, merging, or splitting threads), do it, but only through update_cluster/remove_cluster calls on the specific clusters involved. Call get_node if you need an older node's exact original wording before deciding to merge or split. Stop making tool calls once every new node has a home and any warranted restructuring is done -- if nothing needs to change at all, make no tool calls. Every node must end up with a home somewhere; never drop one because it seems minor.\n\n${skillContent}`;
+  return `You are GraphLog's graph-structure step, keeping Graph/graph-structure.md an accurate, organized, weighted index of the whole graph. You're handed the CURRENT graph-structure.md (already organized from every earlier run) plus only the node(s) that are genuinely new since last time -- place each new node into whichever existing cluster it belongs to, or start a new one via update_cluster if it doesn't fit anywhere yet. Only touch clusters that actually need a change, one update_cluster/remove_cluster call per cluster -- never try to redescribe the whole file in one call. If real restructuring is warranted (renaming, merging, or splitting threads), do it, but only through update_cluster/remove_cluster calls on the specific clusters involved. Call get_node if you need an older node's exact original wording before deciding to merge or split. Stop making tool calls once every new node has a home and any warranted restructuring is done -- if nothing needs to change at all, make no tool calls. Every node must end up with a home somewhere; never drop one because it seems minor.
+
+Do not write any planning, reasoning, or summary text outside of a tool call -- go straight to calling update_cluster/remove_cluster/get_node with no preamble and no narration in between calls either. Your own output budget per turn is limited, and explanatory text spends it on nothing that ends up in the file.
+
+${skillContent}`;
 }
 
 function buildUserPrompt(input: { existingStructureBody: string | null; newNodeBlocks: string[] }): string {
@@ -591,11 +617,13 @@ export async function runGraphStructure(
     .join("\n\n");
   const system = buildSystemPrompt(skillContent);
 
-  const newNodeBlocks = newNodes
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.number - b.number))
-    .map((n) => buildNodeBlock(n, backlinks));
-  const existingStructureBody = existingSections.length > 0 ? joinReadmeSections(existingSections).trim() : null;
-  const userPrompt = buildUserPrompt({ existingStructureBody, newNodeBlocks });
+  const sortedNewNodes = newNodes.sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : a.number - b.number,
+  );
+  const batches: GraphLogNode[][] = [];
+  for (let i = 0; i < sortedNewNodes.length; i += NEW_NODE_BATCH_SIZE) {
+    batches.push(sortedNewNodes.slice(i, i + NEW_NODE_BATCH_SIZE));
+  }
 
   const { executors, hadRefusal, anyCommitted, getCurrent } = createStructureExecutors({
     projectFolder,
@@ -608,34 +636,57 @@ export async function runGraphStructure(
     backlinks,
   });
 
-  const callStart = Date.now();
+  const runCallStart = Date.now();
   try {
     const llm = opts.provider ?? new AnthropicProvider();
-    const { usage, model, truncated, hitMaxTurns } = await runStructureAgentLoop(llm, system, userPrompt, executors);
+    const callCounter = { count: 0 };
 
-    await recordGraphLogUsage({
-      humanId: actingHumanId,
-      projectFolderId: projectFolder._id,
-      stage: "graph-structure",
-      kind: "graph-structure",
-      model: model ?? undefined,
-      usage,
-      durationMs: Date.now() - callStart,
-      outcome: truncated ? "error" : "success",
-      errorKind: truncated ? "incomplete" : undefined,
-    });
+    for (const [batchIndex, batchNodes] of batches.entries()) {
+      // Reflects whatever the PREVIOUS batch (or a prior run) already
+      // committed -- each batch is a fresh, small conversation, never a
+      // single giant one trying to place every new node from scratch,
+      // which is what let a large bootstrap run's own planning/narration
+      // balloon a single turn's output past the provider's limit.
+      const { sections: currentSections } = getCurrent();
+      const existingStructureBody =
+        currentSections.length > 0 ? joinReadmeSections(currentSections).trim() : null;
+      const newNodeBlocks = batchNodes.map((n) => buildNodeBlock(n, backlinks));
+      const userPrompt = buildUserPrompt({ existingStructureBody, newNodeBlocks });
+      const batchLabel = batches.length > 1 ? ` (batch ${batchIndex + 1}/${batches.length})` : "";
 
-    if (truncated) {
-      log("graph-structure: a turn was cut off by the model's own output limit — will retry next run.");
-      return { ok: true, skipped: false, changed: anyCommitted() };
-    }
-    if (hitMaxTurns) {
-      log("graph-structure: hit its turn limit before finishing — will retry next run.");
-      return { ok: true, skipped: false, changed: anyCommitted() };
-    }
-    if (hadRefusal()) {
-      log("graph-structure: had at least one refused edit — will retry next run.");
-      return { ok: true, skipped: false, changed: anyCommitted() };
+      const callStart = Date.now();
+      const { usage, model, truncated, hitMaxTurns } = await runStructureAgentLoop(
+        llm,
+        system,
+        userPrompt,
+        callCounter,
+        executors,
+      );
+
+      await recordGraphLogUsage({
+        humanId: actingHumanId,
+        projectFolderId: projectFolder._id,
+        stage: "graph-structure",
+        kind: "graph-structure",
+        model: model ?? undefined,
+        usage,
+        durationMs: Date.now() - callStart,
+        outcome: truncated ? "error" : "success",
+        errorKind: truncated ? "incomplete" : undefined,
+      });
+
+      if (truncated) {
+        log(`graph-structure: a turn was cut off by the model's own output limit${batchLabel} — will retry next run.`);
+        return { ok: true, skipped: false, changed: anyCommitted() };
+      }
+      if (hitMaxTurns) {
+        log(`graph-structure: hit its turn limit before finishing${batchLabel} — will retry next run.`);
+        return { ok: true, skipped: false, changed: anyCommitted() };
+      }
+      if (hadRefusal()) {
+        log(`graph-structure: had at least one refused edit${batchLabel} — will retry next run.`);
+        return { ok: true, skipped: false, changed: anyCommitted() };
+      }
     }
 
     // Safety net, never trusting the model's own sense that it's done:
@@ -674,7 +725,7 @@ export async function runGraphStructure(
       projectFolderId: projectFolder._id,
       stage: "graph-structure",
       kind: "graph-structure",
-      durationMs: Date.now() - callStart,
+      durationMs: Date.now() - runCallStart,
       outcome: "error",
       errorKind: classifyGraphLogError(err),
     });
