@@ -20,22 +20,55 @@
  * file per day that has anything worth capturing (a day can legitimately
  * produce none at all).
  *
+ * A REAL ARCHITECTURE CHANGE FROM THIS STAGE'S ORIGINAL SHAPE: one day's
+ * worth of node extraction used to be ONE non-tool completion producing
+ * the ENTIRE day's `graph-log-*.md` body in one shot. Confirmed against a
+ * real project's real history that this genuinely truncates on a busy day
+ * (`2026-08-13`'s output cut off at the shared 8192-token default) — the
+ * exact same class of "one completion's output scales with how much
+ * content there is" problem `graph-structure.server.ts` already hit and
+ * fixed at the whole-graph level (see that file's own module doc). NOW: a
+ * bounded tool-calling loop (`add_node`, one tool call per node) builds
+ * the day up incrementally, accumulated in memory and written ONCE the
+ * day is fully processed — a day's file is still all-or-nothing (an
+ * interrupted/truncated day still writes nothing and is retried whole
+ * next run, exactly as before), but the OUTPUT of any single completion
+ * is now just one node's worth of text, not a whole day's, so the
+ * original truncation mode is no longer reachable in ordinary use.
+ *
  * Each node gets a plain, predictable `### Node <N>` heading (an
  * incrementing counter per day's file, never an LLM-generated title —
- * see `GRAPH.md`) and a verbose `:ref{...}` citation (`oxmarkdown-core`'s
- * `buildRefDirectiveMarkdown`) — PRE-COMPUTED here, never left for the
- * model to hand-format, so a citation's name/datetime/location can never
- * be hallucinated. Cross-day links point only BACKWARD. The candidate
- * list for those backward links is `Graph/graph-structure.md` (see
- * `graphStructure.server.ts`) — a real, glossed, weighted index of the
- * whole graph, not just a bare `[date Node N](...)` link with no content
- * to judge relevance against — falling back to a plain scan of every
- * existing graph-log file's headings for a project that's never had
- * graph-structure run yet. Either way, a day currently being processed is
- * never told about days after it. A node may ALSO link to another node
- * from the SAME day's file, in either direction — the model handles that
- * itself, entirely within its one completion for that day, since nothing
- * else could supply that list ahead of time.
+ * see `GRAPH.md`) and a verbose `:ref{...}` citation
+ * (`oxmarkdown-core`'s `buildRefDirectiveMarkdown`) — PRE-COMPUTED here,
+ * ATTACHED BY CODE THROUGH `add_node`'s OWN `sourceIndex` PARAMETER, so
+ * the model never has to write (or copy) a citation's markdown at all —
+ * a step further than the original design's "hand it verbatim text to
+ * copy," which still left room for a long attribute string to get
+ * mangled in transcription. Links (`sameDayLinks`/`backwardLinks`,
+ * by node id) are VALIDATED by code against the actual candidate set
+ * before being accepted — an id not in that list is silently dropped
+ * and reported back to the model, rather than a hallucinated link
+ * quietly ending up in the file the way free-form markdown could before.
+ * Cross-day links point only BACKWARD (enforced here, not just
+ * instructed) — the candidate list is `Graph/graph-structure.md` (see
+ * `graphStructure.server.ts`), folded into the CACHED system prompt
+ * (stable across every day this run touches, so it's only paid for once
+ * per run, not resent per day — see "Prompt caching" below), falling
+ * back to a plain scan of every existing graph-log file's headings for a
+ * project that's never had graph-structure run yet. A node may ALSO link
+ * to another node from the SAME day's file, in either direction, via
+ * `sameDayLinks` — validated against node numbers already added earlier
+ * in the SAME turn/day.
+ *
+ * PROMPT CACHING: `graph-structure.md`'s own content (and the shared
+ * skill instructions) are now part of the SYSTEM prompt, which is
+ * byte-identical across every day AND every turn this run touches —
+ * `cacheSystemPrompt` (already used for exactly this reason elsewhere in
+ * GraphLog/PhyLog) means a multi-day run pays full price for that block
+ * ONCE, then a cheap cache-read for every day/turn after. Previously this
+ * (often large) block lived in the per-day USER message and was resent
+ * at full price on every single day of a run — a real, avoidable cost a
+ * multi-day catch-up run would otherwise pay repeatedly for no reason.
  *
  * IDEMPOTENT via an aggregate hash of that day's candidates' own
  * `content_hash` PLUS each one's knowledge-sidecar hash (so a
@@ -45,8 +78,11 @@
  * existing `graph-log-*.md` is DELETED and fully regenerated — never
  * partially patched (see the `graphlog` skill's own doc on why: node
  * extraction is a single holistic judgment over the whole day, not
- * something that composes incrementally the way PhyLog's `update_section`
- * does for a README).
+ * something that composes incrementally the way `graph-project-view`'s
+ * `update_section` does for a README, or `graph-structure`'s own
+ * `update_cluster` does for an existing thread — a day's raw source
+ * content doesn't have the kind of stable identity a graph NODE or a
+ * README SECTION already has to diff against).
  */
 
 import { createHash } from "node:crypto";
@@ -72,7 +108,7 @@ import { parseSyncedCardFileName } from "./dailyLogSync.server";
 import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
-import type { LlmProvider } from "./llmProvider";
+import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
 
 const GRAPH_LOG_PREFIX = "graph-log-";
 
@@ -179,6 +215,210 @@ function aggregateHash(parts: string[]): string {
   return createHash("sha256").update([...parts].sort().join("|")).digest("hex").slice(0, 16);
 }
 
+// ─── Backward-link candidate ids — deterministic, parsed the same
+// simple-regex way `graphStructure.server.ts`'s own parsing does ────────
+
+const STRUCTURE_NODE_LINE_RE = /^-\s*(\d{4}-\d{2}-\d{2})\s+Node\s+(\d+)\b/;
+const HEADING_NODE_NUMBER_RE = /^Node\s+(\d+)$/;
+
+/** Scans `graph-structure.md`'s raw body (any cluster) for every
+ * `- <date> Node <N> ...` line and returns a `date#number -> display
+ * label` map — used only to VALIDATE a day's `backwardLinks`, not a real
+ * parse of that file's structure (that's `graphStructure.server.ts`'s own
+ * job). */
+function extractStructureNodeIds(body: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const line of body.split("\n")) {
+    const trimmed = line.trim();
+    const match = STRUCTURE_NODE_LINE_RE.exec(trimmed);
+    if (match) map.set(`${match[1]}#${Number(match[2])}`, trimmed.replace(/^-\s*/, ""));
+  }
+  return map;
+}
+
+/** Same shape as `extractStructureNodeIds`, but over `headingsByDate`'s
+ * live/fallback heading lists (see `runSyncGraph`'s own module doc on
+ * when each source is used). */
+function headingsByDateToIds(headingsByDate: Map<string, NodeHeading[]>): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [date, headings] of headingsByDate) {
+    for (const h of headings) {
+      const match = HEADING_NODE_NUMBER_RE.exec(h.heading);
+      if (!match) continue;
+      map.set(`${date}#${Number(match[1])}`, `${date} ${h.heading}`);
+    }
+  }
+  return map;
+}
+
+// ─── The per-day add_node tool-calling loop ────────────────────────────
+
+const TOOLS: ToolDefinition[] = [
+  {
+    name: "add_node",
+    description:
+      'Add one citable node to today\'s graph-log file. `sourceIndex` must be one of today\'s numbered sources (shown as "Source 0:", "Source 1:", etc) -- its citation is attached automatically from real data, never write a :ref{...} yourself. `quote` is the verbatim/near-verbatim excerpt (marked with ==...== per your own instructions) plus any short surrounding prose. `sameDayLinks`/`backwardLinks` are optional -- at most 3 links total are kept (any more, or any id you weren\'t actually given as a candidate, are dropped and reported back to you), so only send the ones that matter most.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        sourceIndex: { type: "number" },
+        quote: { type: "string" },
+        sameDayLinks: {
+          type: "array",
+          items: { type: "number" },
+          description: "Node numbers you already added earlier this same day/turn.",
+        },
+        backwardLinks: {
+          type: "array",
+          items: { type: "string" },
+          description: 'Ids of earlier days\' nodes, e.g. "2026-07-29#3" -- from the candidates you were shown.',
+        },
+      },
+      required: ["sourceIndex", "quote"],
+    },
+  },
+];
+
+function createSyncGraphExecutors(input: {
+  date: string;
+  sourceCitations: string[];
+  knownBackwardIds: Map<string, string>;
+}): {
+  executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>;
+  getNodeBlocks: () => string[];
+} {
+  const nodeBlocks: string[] = [];
+  let nextNumber = 1;
+
+  const executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>> = {
+    add_node: async (toolInput) => {
+      const sourceIndex = Number(toolInput.sourceIndex);
+      const quote = String(toolInput.quote ?? "").trim();
+      if (!quote) return "Error: quote is required";
+      if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= input.sourceCitations.length) {
+        return `Error: sourceIndex must be an integer between 0 and ${input.sourceCitations.length - 1}`;
+      }
+
+      const number = nextNumber;
+      const rawSameDay = Array.isArray(toolInput.sameDayLinks) ? toolInput.sameDayLinks : [];
+      const validSameDay = rawSameDay
+        .map((n) => Number(n))
+        .filter((n) => Number.isInteger(n) && n >= 1 && n < number);
+      const rawBackward = Array.isArray(toolInput.backwardLinks) ? toolInput.backwardLinks : [];
+      const validBackward = rawBackward.map((id) => String(id)).filter((id) => input.knownBackwardIds.has(id));
+      const invalidCount =
+        rawSameDay.length - validSameDay.length + (rawBackward.length - validBackward.length);
+
+      // A node may link to at most three others (per GRAPH.md's own
+      // instructions) -- enforced here rather than left as a soft
+      // instruction, same "never trust the model with a rule code can
+      // just apply" reasoning the rest of this pipeline already follows.
+      // Same-day links are kept first (they're rarer and more deliberate
+      // -- a cross-day link is comparatively easy to over-produce).
+      const MAX_LINKS = 3;
+      const sameDayNumbers = validSameDay.slice(0, MAX_LINKS);
+      const backwardIds = validBackward.slice(0, Math.max(0, MAX_LINKS - sameDayNumbers.length));
+      const overCapCount = validSameDay.length + validBackward.length - sameDayNumbers.length - backwardIds.length;
+      const droppedCount = invalidCount + overCapCount;
+
+      const linkLines = [
+        ...sameDayNumbers.map((n) => `- [${input.date} Node ${n}](./${graphLogFileName(input.date)}#node-${n})`),
+        ...backwardIds.map((id) => {
+          const [date, num] = id.split("#");
+          return `- [${date} Node ${num}](./${graphLogFileName(date)}#node-${num})`;
+        }),
+      ];
+
+      nodeBlocks.push(
+        [
+          `### Node ${number}`,
+          quote,
+          input.sourceCitations[sourceIndex],
+          linkLines.length > 0 ? linkLines.join("\n") : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+      nextNumber++;
+
+      return `Added Node ${number}.${droppedCount > 0 ? ` (dropped ${droppedCount} link id(s) -- invalid, or over the 3-link cap)` : ""}`;
+    },
+  };
+
+  return { executors, getNodeBlocks: () => nodeBlocks };
+}
+
+/** Generous relative to a single day's realistic node count — a very
+ * prolific day might have 10-20 nodes; 30 turns leaves real headroom
+ * without being unbounded. Each turn's own output is small (one node),
+ * so a higher ceiling here costs more calls, not more truncation risk. */
+const MAX_TURNS = 30;
+
+async function runSyncGraphDayLoop(
+  provider: LlmProvider,
+  system: string,
+  userPrompt: string,
+  callCounter: { count: number },
+  executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>,
+): Promise<{ usage: LlmUsage; model: string | null; truncated: boolean; hitMaxTurns: boolean }> {
+  const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
+  const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
+  let model: string | null = null;
+  let truncated = false;
+  let hitMaxTurns = false;
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // The system prompt (skill instructions + graph-structure.md) is
+    // byte-identical across every day AND every turn of this whole run —
+    // see this file's own "Prompt caching" module doc. The FIRST ever
+    // completion in the run doesn't yet know if there'll be a second one
+    // worth reading the cache back for; every one after does.
+    const cacheSystemPrompt = callCounter.count > 0;
+    const response = await provider.complete({ system, messages, tools: TOOLS, cacheSystemPrompt });
+    callCounter.count++;
+    usage.inputTokens += response.usage.inputTokens;
+    usage.outputTokens += response.usage.outputTokens;
+    model = response.model;
+
+    if (response.stopReason === "max_tokens") {
+      truncated = true;
+      break;
+    }
+
+    messages.push({ role: "assistant", content: response.text ?? "", toolCalls: response.toolCalls });
+    if (response.toolCalls.length === 0) break;
+    for (const call of response.toolCalls) {
+      const executor = executors[call.name];
+      const resultText = executor ? await executor(call.input) : `Unknown tool: ${call.name}`;
+      messages.push({ role: "tool_result", toolCallId: call.id, content: resultText });
+    }
+    if (response.stopReason !== "tool_use") break;
+    if (turn === MAX_TURNS - 1) hitMaxTurns = true;
+  }
+
+  return { usage, model, truncated, hitMaxTurns };
+}
+
+function buildSystemPrompt(skillContent: string, graphStructureBody: string | null): string {
+  const structureSection = graphStructureBody
+    ? `The graph's existing nodes, organized and glossed (from graph-structure.md, current as of its own last run — every "<date> Node <N>" you see here is a valid backwardLinks id, as "date#N"):\n\n${graphStructureBody}`
+    : "No graph-structure.md exists yet for this project — see the plain candidate list you're given per day instead.";
+  return `You are GraphLog's sync-graph step, extracting citable nodes from one day's synced content at a time, per a project owner's own instructions. Call add_node once per node worth capturing today, citing it by its sourceIndex — never write a :ref{...} yourself, it's attached automatically from real data. Only use sameDayLinks/backwardLinks ids you were actually shown as candidates; an invented one is silently dropped and reported back to you. Stop calling add_node once you've captured everything worth capturing today — if nothing from today is worth capturing at all, make no tool calls.\n\n${skillContent}\n\n---\n\n${structureSection}`;
+}
+
+function buildUserPrompt(input: { date: string; sourceBlocks: string[]; liveCandidates: string[] }): string {
+  return [
+    `Today's date being processed: ${input.date}`,
+    input.sourceBlocks.join("\n\n---\n\n"),
+    input.liveCandidates.length > 0
+      ? `Earlier days' nodes not yet reflected in graph-structure.md, which you may also link back to by id (never invent one not listed here):\n${input.liveCandidates.map((c) => `- ${c}`).join("\n")}`
+      : null,
+    "You may also link a node to another node you add earlier this same day, in either direction, via sameDayLinks.",
+  ]
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
 export type SyncGraphDayResult = {
   date: string;
   /** True when a day's graph-log file was newly written or regenerated
@@ -205,8 +445,6 @@ export interface RunSyncGraphOptions {
   provider?: LlmProvider;
   log?: (line: string) => void;
 }
-
-const NOTHING_SENTINEL = "NOTHING_TO_CAPTURE";
 
 /**
  * Runs sync-graph for one project. Sweeps every day with a dated
@@ -269,26 +507,23 @@ export async function runSyncGraph(
     .filter(Boolean)
     .join("\n\n");
 
-  // `graph-structure.md` (if it exists) is now the PRIMARY source for
-  // "nodes from a previous run you may link back to" -- a real, glossed,
-  // weighted index instead of the bare `[date Node N](...)` link list
-  // this used to be limited to (see `graphStructure.server.ts`'s own
-  // module doc for why: a heading of just "Node 3" gives the model
-  // nothing to actually judge relevance against). It's necessarily ONE
-  // CYCLE STALE -- it reflects the graph as of the last time graph-
-  // structure ran, not this exact moment -- which is fine in practice
-  // since `nopal graphlog run` always runs graph-structure immediately
-  // after sync-graph, so it catches up again before the next invocation.
+  // `graph-structure.md` (if it exists) is the PRIMARY source for "nodes
+  // from a previous run you may link back to" -- a real, glossed,
+  // weighted index instead of a bare `[date Node N](...)` link list with
+  // nothing to judge relevance against (see `graphStructure.server.ts`'s
+  // own module doc). It's necessarily ONE CYCLE STALE -- reflects the
+  // graph as of the last time graph-structure ran, not this exact moment
+  // -- which is fine in practice since `nopal graphlog run` always runs
+  // graph-structure immediately after sync-graph. It's folded into the
+  // CACHED system prompt below (see this file's own "Prompt caching"
+  // module doc) since it's stable across every day this run touches.
   //
-  // `headingsByDate` stays for exactly one job now: nodes written EARLIER
-  // IN THIS SAME RUN, which graph-structure.md can never reflect yet (it
-  // hasn't regenerated). A brand new project that's never had
-  // graph-structure run at all falls back to the OLD behavior (scan every
-  // existing graph-log file's headings) so early history isn't invisible
-  // just because graph-structure hasn't run yet -- read-only (never
-  // forces the Graph folder into existence just to check), then kept
-  // current as this run itself regenerates/writes days below, so a LATER
-  // date in the SAME run can link to a day this run just wrote.
+  // `headingsByDate` stays for two jobs now: (1) nodes written EARLIER IN
+  // THIS SAME RUN, which graph-structure.md can never reflect yet (it
+  // hasn't regenerated) — shown to the model per day as a plain
+  // additional candidate list; (2) a project that's never had
+  // graph-structure run at all falls back to scanning every existing
+  // graph-log file's headings, so early history isn't invisible.
   const existingGraphFolder = await findProjectGraphFolder(projectFolder);
   let graphStructureBody: string | null = null;
   const headingsByDate = new Map<string, NodeHeading[]>();
@@ -310,16 +545,19 @@ export async function runSyncGraph(
       }
     }
   }
+  const structureIds = graphStructureBody ? extractStructureNodeIds(graphStructureBody) : new Map<string, string>();
+  const system = buildSystemPrompt(skillContent, graphStructureBody);
 
   let textLlm: LlmProvider | undefined = opts.provider;
-  let realCallsSoFar = 0;
+  const callCounter = { count: 0 };
   const days: SyncGraphDayResult[] = [];
 
   for (const date of dates) {
     const dayCandidates = byDate.get(date)!;
 
     const hashParts: string[] = [];
-    const candidateBlocks: string[] = [];
+    const sourceBlocks: string[] = [];
+    const sourceCitations: string[] = [];
     for (const candidate of dayCandidates) {
       const source = await getFileRefById(candidate.fileId);
       if (!source) continue;
@@ -338,20 +576,22 @@ export async function runSyncGraph(
       const contributorName = contributorHumanId
         ? humanNameById.get(contributorHumanId) ?? "Unknown"
         : "Unknown";
-      const citation = buildRefDirectiveMarkdown({
-        name: contributorName,
-        humanId: contributorHumanId,
-        datetime: `${date}T12:00:00Z`,
-        location: `/fruits/vault?file=${source._id}`,
-        verbose: true,
-      });
 
-      candidateBlocks.push(
+      const sourceIndex = sourceBlocks.length;
+      sourceCitations.push(
+        buildRefDirectiveMarkdown({
+          name: contributorName,
+          humanId: contributorHumanId,
+          datetime: `${date}T12:00:00Z`,
+          location: `/fruits/vault?file=${source._id}`,
+          verbose: true,
+        }),
+      );
+      sourceBlocks.push(
         [
-          `Source: "${source.name}" (by ${contributorName})`,
+          `Source ${sourceIndex}: "${source.name}" (by ${contributorName})`,
           `Content:\n${source.content ?? "(no readable text content)"}`,
           knowledgeContent ? `Extracted knowledge about this source:\n${knowledgeContent}` : null,
-          `If you quote this source, cite it EXACTLY like this (copy verbatim, do not reformat): ${citation}`,
         ]
           .filter(Boolean)
           .join("\n\n"),
@@ -375,55 +615,55 @@ export async function runSyncGraph(
       await deleteFileRef(existing._id);
     }
 
-    // Nodes written EARLIER IN THIS RUN -- graph-structure.md can't
-    // reflect these yet (see this function's own comment above), so
-    // they're tracked live and offered as their own, separate candidate
-    // source, still as bare links (a same-run node's content is already
-    // fresh in the model's own context from processing that earlier day,
-    // if this is a multi-day catch-up run -- no gloss needed).
-    const sameRunPriorNodes = [...headingsByDate.entries()]
-      .filter(([d]) => d < date)
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .flatMap(([d, headings]) =>
-        headings.map((h) => `[${d} ${h.heading}](./${graphLogFileName(d)}#${h.slug})`),
-      );
+    // Combine graph-structure.md's own ids with this run's own live/
+    // fallback ones, restricted to STRICTLY earlier days — enforced here
+    // via validation, not just instructed, unlike the original design.
+    const liveIds = headingsByDateToIds(headingsByDate);
+    const knownBackwardIds = new Map(
+      [...structureIds, ...liveIds].filter(([id]) => id.split("#")[0] < date),
+    );
+    const liveCandidates = [...liveIds.entries()]
+      .filter(([id]) => id.split("#")[0] < date)
+      .map(([, label]) => label);
 
-    const userMessage = [
-      `Today's date being processed: ${date}`,
-      candidateBlocks.join("\n\n---\n\n"),
-      graphStructureBody
-        ? `The graph's existing nodes, organized and glossed (from graph-structure.md, current as of its own last run -- you may link back to any node named here):\n\n${graphStructureBody}`
-        : "No graph-structure.md exists yet -- see the plain list below for what you may link back to instead.",
-      sameRunPriorNodes.length > 0
-        ? `Earlier days' nodes you may also link back to (never invent a link to a day that isn't in this list either):\n${sameRunPriorNodes.join("\n")}`
-        : null,
-      "You may also link a node to another node you write today, in either direction (e.g. today's \"Node 2\" may link to today's \"Node 1\", or the reverse) — use that node's own heading/anchor, with today's date alongside it, same as any other link.",
-      `If nothing from today is worth capturing as a node, respond with exactly: ${NOTHING_SENTINEL}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    const userPrompt = buildUserPrompt({ date, sourceBlocks, liveCandidates });
+    const { executors, getNodeBlocks } = createSyncGraphExecutors({ date, sourceCitations, knownBackwardIds });
 
     const callStart = Date.now();
     try {
       textLlm ??= new AnthropicProvider();
-      const cacheSystemPrompt = realCallsSoFar > 0;
-      realCallsSoFar++;
-      const response = await textLlm.complete({
-        system: `You are GraphLog's sync-graph step, extracting citable nodes from one day's synced content per a project owner's own instructions. Follow those instructions closely; write only the graph-log file's body itself, no preamble.\n\n${skillContent}`,
-        messages: [{ role: "user", content: userMessage }],
-        tools: [],
-        cacheSystemPrompt,
-      });
+      const { usage, model, truncated, hitMaxTurns } = await runSyncGraphDayLoop(
+        textLlm,
+        system,
+        userPrompt,
+        callCounter,
+        executors,
+      );
 
-      if (response.stopReason === "max_tokens") {
+      if (truncated) {
         log(`sync-graph: ${date}'s output was cut off by the model's own output limit — skipped, will retry next run.`);
         await recordGraphLogUsage({
           humanId: actingHumanId,
           projectFolderId: projectFolder._id,
           stage: "sync-graph",
           kind: "graph-extract",
-          model: response.model,
-          usage: response.usage,
+          model: model ?? undefined,
+          usage,
+          durationMs: Date.now() - callStart,
+          outcome: "error",
+          errorKind: "incomplete",
+        });
+        continue;
+      }
+      if (hitMaxTurns) {
+        log(`sync-graph: ${date} hit its turn limit before finishing — skipped, will retry next run.`);
+        await recordGraphLogUsage({
+          humanId: actingHumanId,
+          projectFolderId: projectFolder._id,
+          stage: "sync-graph",
+          kind: "graph-extract",
+          model: model ?? undefined,
+          usage,
           durationMs: Date.now() - callStart,
           outcome: "error",
           errorKind: "incomplete",
@@ -436,14 +676,14 @@ export async function runSyncGraph(
         projectFolderId: projectFolder._id,
         stage: "sync-graph",
         kind: "graph-extract",
-        model: response.model,
-        usage: response.usage,
+        model: model ?? undefined,
+        usage,
         durationMs: Date.now() - callStart,
         outcome: "success",
       });
 
-      const body = response.text?.trim() ?? "";
-      if (!body || body.toUpperCase().startsWith(NOTHING_SENTINEL)) {
+      const nodeBlocks = getNodeBlocks();
+      if (nodeBlocks.length === 0) {
         log(`sync-graph: ${date} — nothing worth capturing.`);
         headingsByDate.delete(date);
         days.push({ date, changed: true, empty: true });
@@ -451,7 +691,7 @@ export async function runSyncGraph(
       }
 
       const graphFolder = await ensureProjectGraphFolder(projectFolder);
-      const content = buildGraphLogContent({ date, hash: newHash, body });
+      const content = buildGraphLogContent({ date, hash: newHash, body: nodeBlocks.join("\n\n") });
       const created = await createFileRef({
         human_id: projectFolder.human_id,
         name: graphLogFileName(date),
@@ -462,7 +702,7 @@ export async function runSyncGraph(
       if (!created) continue;
 
       headingsByDate.set(date, extractHeadings(content));
-      log(`sync-graph: wrote ${graphLogFileName(date)}.`);
+      log(`sync-graph: wrote ${graphLogFileName(date)} (${nodeBlocks.length} node(s)).`);
       days.push({ date, changed: true, empty: false });
     } catch (err) {
       log(`sync-graph: ${date} couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);

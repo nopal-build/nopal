@@ -111,19 +111,39 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   for now (see "CLI surface" below), same "always on-demand, never a
   cron" philosophy the `phylog` skill's header establishes for the same
   cost/non-determinism reasons.
+  - **A THIRD real architecture change, not in the original design**:
+    one day's extraction used to be ONE non-tool completion producing
+    the WHOLE day's file body in one shot — confirmed to genuinely
+    truncate on a busy day (a real project's `2026-08-13` cut off at the
+    shared 8192-token default), the exact same class of problem
+    `graph-structure` already hit and fixed at the whole-graph level.
+    Now a bounded tool loop (`add_node`, one call per node) builds a
+    day's nodes up incrementally, accumulated in memory and written ONCE
+    the day finishes cleanly — a day is still all-or-nothing (an
+    interrupted/truncated day still writes nothing and is retried whole
+    next run), but any single completion's output is now just one
+    node's worth of text, so the original truncation mode is no longer
+    reachable in ordinary use. The model never writes a citation OR a
+    `### Node <N>` heading itself anymore — `add_node`'s own
+    `sourceIndex` parameter identifies which numbered source a quote
+    came from, and CODE attaches that source's exact `:ref{...}` and
+    assigns the next number, a step further than the original "hand it
+    verbatim text to copy" design (which still left room for a long
+    citation string to get mangled in transcription).
   - **Regeneration, not append**: if a day's underlying source content
     changed after its `graph-log-*.md` was already written, DELETE that
     file and fully regenerate it — no partial-append logic.
-  - **Links**: a node may link to an EARLIER day's node by heading anchor
-    (`[<date> Node <N>](./graph-log-2026-08-10.md#node-n)` — the date is
-    always part of the link TEXT, since a bare "Node 1" is ambiguous
-    across many days; the node's own heading doesn't carry the date,
-    only links to it do), or to ANOTHER node from the SAME day's file, in
-    either direction — never forward to a day that hasn't been processed
-    yet. Max 3 links per node, written as a plain bullet list
-    (`- [...](...)`) with no reason text attached (a deliberate
-    simplification over an earlier draft that required one) and omitted
-    entirely when a node has none.
+  - **Links, now VALIDATED by code, not just instructed**: a node may
+    link to an EARLIER day's node by id (`add_node`'s `backwardLinks`,
+    e.g. `"2026-07-29#3"`), or to ANOTHER node from the SAME day via
+    `sameDayLinks` (plain numbers already added earlier that turn) — an
+    id/number not actually in the candidate set offered is silently
+    dropped and reported back to the model, rather than a hallucinated
+    link quietly ending up in the file the way free-form markdown could
+    before. Max 3 links per node is now an enforced CAP (extras dropped),
+    not just a skill instruction; forward-to-an-unprocessed-day links are
+    now structurally impossible (a future day's ids are never in the
+    candidate set to begin with) rather than merely told not to happen.
   - **Candidate list for backward links is `Graph/graph-structure.md`**,
     not a bare list of past headings — see the `graph-structure` bullet
     below for why a heading of just "Node 3" gave the model nothing to
@@ -134,7 +154,15 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     OLD flat heading-scan for a project that's never had `graph-structure`
     run yet. Nodes written EARLIER IN THE SAME `sync-graph` run (which
     `graph-structure.md` can never reflect yet) are still tracked live,
-    exactly as before.
+    exactly as before. Now folded into the CACHED system prompt (see the
+    next bullet) rather than resent raw per day.
+  - **Prompt caching**: `graph-structure.md`'s content (plus the shared
+    skill instructions) now live in the SYSTEM prompt, byte-identical
+    across every day AND every turn a run touches — a multi-day catch-up
+    run used to resend this (often large) block at full price on EVERY
+    day; now it's paid for once, then cheaply cache-read for the rest of
+    the run, via the SAME `cacheSystemPrompt` mechanism already used
+    elsewhere in GraphLog/PhyLog for exactly this reason.
 - **graph-structure** — reads EVERY `Graph/graph-log-*.md` file (the
   whole graph, not incrementally) and keeps ONE file,
   `Graph/graph-structure.md`, an organized, weighted, status-annotated
@@ -776,89 +804,111 @@ skill was born from:
      `content_hash` changes. Also confirmed both `packages/worker`
      BullMQ workers (`"phylog"` and `"graphlog"` queues) start cleanly
      side by side against the local Redis.
-5. **Done — `sync-graph`.** `syncGraph.server.ts` (`runSyncGraph`) walks
-   every file under `syncs/` that carries a `date` (today, only
-   `daily-log-sync`'s own output does — it now stamps `date: entryDate`
-   on every synced Card copy), groups by date, and for each day whose
-   aggregate hash (every candidate's `content_hash` PLUS its
-   `_knowledge/` sidecar's own hash, if any) has changed, asks an LLM
-   (per `skills/GRAPH.md`'s own real starter instructions — NOT "skip") to
-   extract citable nodes into `Graph/graph-log-YYYY-MM-DD.md`.
-   - **Citations are PRE-COMPUTED, never left to the model** — each
-     candidate's exact `:ref{...verbose="true"}` markdown
-     (`buildRefDirectiveMarkdown`) is handed to the model as "copy this
-     verbatim if you quote this source," so a citation's name/datetime/
-     location can never be hallucinated. `location` is a real, working
-     `/fruits/vault?file=<fileId>` link into the SYNCED COPY inside this
-     project's own vault (never the original Card in a contributor's
-     personal vault, which other project viewers may not have access
-     to). `datetime` is `<date>T12:00:00Z` (noon UTC) — a deliberate
-     simplification since a Card carries a calendar date, never a
-     sub-day timestamp; flagged here as a known limitation, not silently
-     fabricated precision.
+5. **Done — `sync-graph`, since REDESIGNED a second time from a
+   whole-day, single-completion shape** (see "The pipeline"'s own
+   sync-graph bullet's "A THIRD real architecture change" note above).
+   `syncGraph.server.ts` (`runSyncGraph`) still walks every file under
+   `syncs/` that carries a `date` (today, only `daily-log-sync`'s own
+   output does), groups by date, and for each day whose aggregate hash
+   (every candidate's `content_hash` PLUS its `_knowledge/` sidecar's
+   own hash, if any) has changed, extracts citable nodes into
+   `Graph/graph-log-YYYY-MM-DD.md` per `skills/GRAPH.md`'s own real
+   starter instructions (NOT "skip").
+   - **What changed**: this used to ask an LLM, in ONE non-tool
+     completion, to produce a whole day's file body at once. Confirmed
+     against `nopal o.`'s real history that this genuinely truncates on
+     a busy day (`2026-08-13`'s output cut off at the shared 8192-token
+     default) — the same class of problem `graph-structure` already hit
+     and fixed at the whole-graph level (see item 7 below). Now a
+     bounded tool loop (`add_node`, `TOOLS`/`createSyncGraphExecutors`/
+     `runSyncGraphDayLoop`) calls one tool per node, accumulated in
+     memory and written ONCE the day finishes cleanly — still
+     all-or-nothing per day (an interrupted/truncated day still writes
+     nothing, retried whole next run — no partial-file complexity added,
+     unlike `graph-structure`'s own per-cluster durability, since a raw
+     day's source content has no stable per-node identity to resume
+     against the way an already-existing graph node or README section
+     does), but any single completion's own output is now just one
+     node's worth of text, so the original truncation mode is no longer
+     reachable in ordinary use. `MAX_TURNS = 30` per day (generous for a
+     realistic day's node count).
+   - **Citations are now ATTACHED BY CODE, not copied by the model at
+     all** — a step further than the original "pre-computed, hand it
+     verbatim text to copy" design (which still left room for a long
+     `:ref{...}` attribute string to get mangled in transcription).
+     `add_node`'s own `sourceIndex` parameter identifies which of the
+     day's numbered sources ( "Source 0", "Source 1", ...) a quote came
+     from; the executor attaches that source's exact citation and the
+     next `### Node <N>` number itself — the model never sees or writes
+     a citation's markdown, or a node heading/number, at all anymore.
+     `location` is still a real, working `/fruits/vault?file=<fileId>`
+     link into the SYNCED COPY inside this project's own vault; `datetime`
+     is still `<date>T12:00:00Z` (noon UTC) — a deliberate simplification
+     since a Card carries a calendar date, never a sub-day timestamp.
    - **Contributor attribution** is recovered from the synced copy's own
-     FILENAME (`dailyLogSync.server.ts`'s new `parseSyncedCardFileName`,
-     the reverse of `syncedCardFileName`) — the file's own `human_id` is
-     always the PROJECT's owner (whoever's vault it's synced into), never
-     the actual contributor, since the copy lives in the project's own
-     tree. Falls back to "Unknown"/no `human-id` for any future non-
-     daily-log sync source's file that doesn't match this naming shape —
-     `:ref{...}`'s `human-id` is optional for exactly this reason.
-   - **Node headings are `### Node <N>` — a plain incrementing counter,
-     never an LLM-generated title.** Decided this way specifically
-     because a free-form title is one more thing the model could get
-     wrong/inconsistent, where a counter can't. Resets to 1 for each new
-     day's file, counting up across every contributor's content that
-     day (never restarted per contributor).
-   - **Links point backward across days, OR sideways within the same
-     day.** The candidate list for backward links is now
-     `Graph/graph-structure.md`'s own clustered, glossed, weighted
-     content (see item 7 below) — a real upgrade from the original
-     design, which only ever handed the model a bare, gloss-free list of
-     `[2026-08-10 Node 3](./graph-log-2026-08-10.md#node-3)`-style links
-     with literally nothing to judge relevance against (a node's heading
-     is just "Node 3"). One cycle stale by construction (reflects the
-     graph as of `graph-structure`'s last run), falling back to the OLD
-     flat heading scan for a project that's never had `graph-structure`
-     run yet. A node may ALSO link to another node from the SAME day's
-     file, in either direction (a later node linking back to an earlier
-     one, or vice versa) — this one the model handles entirely on its own
-     within one completion, tracked live via `headingsByDate` regardless
-     of which candidate source is in play, since `graph-structure.md`
-     could never reflect a node written earlier in the SAME run; verified
-     directly that a same-day link (`Node 2` → `Node 1`, same file)
-     round-trips through the pipeline with no issue. Still never forward
-     to a day that hasn't been processed yet, even within the same run.
+     FILENAME (`dailyLogSync.server.ts`'s `parseSyncedCardFileName`, the
+     reverse of `syncedCardFileName`) — the file's own `human_id` is
+     always the PROJECT's owner, never the actual contributor, since the
+     copy lives in the project's own tree. Falls back to "Unknown"/no
+     `human-id` for any future non-daily-log sync source's file that
+     doesn't match this naming shape — `:ref{...}`'s `human-id` is
+     optional for exactly this reason.
+   - **Links are now VALIDATED, not just instructed** — `backwardLinks`
+     (ids like `"2026-07-29#3"`, from `Graph/graph-structure.md`'s own
+     clustered, glossed, weighted content, one cycle stale by
+     construction, falling back to a flat heading scan for a project
+     that's never had `graph-structure` run at all) and `sameDayLinks`
+     (plain numbers already added earlier the same turn, tracked live via
+     `headingsByDate` since `graph-structure.md` can never reflect a node
+     written earlier in the SAME run) are both checked against the real
+     candidate set before being accepted — an invented id/number is
+     silently dropped and reported back to the model, rather than a
+     hallucinated link quietly ending up in the file. The max-3-links
+     rule (`GRAPH.md`'s own instruction) is now an enforced CAP, not just
+     a request; a forward link to an unprocessed day is now structurally
+     impossible (its id is never in the candidate set) rather than merely
+     told not to happen.
+   - **Prompt caching**: `graph-structure.md`'s content (plus the shared
+     skill instructions) now live in the SYSTEM prompt instead of being
+     resent raw in every day's own user message — byte-identical across
+     every day/turn a run touches, so a multi-day catch-up run pays full
+     price for that block once, then a cheap cache-read for the rest,
+     via the same `cacheSystemPrompt` mechanism already used elsewhere.
    - **Delete-and-regenerate, never partial-patch** — a day whose
      aggregate hash changed has its existing `graph-log-*.md` deleted
-     BEFORE the model is asked to redo it from scratch; a day the model
-     decides has "nothing worth capturing" (a literal `NOTHING_TO_CAPTURE`
-     sentinel it can return) ends up with NO file at all, even if an
-     earlier run had written one for that same day.
+     BEFORE the model is asked to redo it from scratch; a day where the
+     model makes NO `add_node` calls at all (replacing the original
+     design's literal `NOTHING_TO_CAPTURE` sentinel string, which needed
+     its own parsing/matching logic) ends up with NO file at all, even if
+     an earlier run had written one for that same day.
    - `POST /api/graphlog/sync-graph` (enqueue) + the SAME
      `GET /api/graphlog/jobs/:jobId` sync-knowledge already uses (one
      polling route for every GraphLog job name). `nopal graphlog
-     sync-graph --project <path>`.
-   - **Verified directly** (not just typechecked) against the real local
-     dev SurrealDB with a FAKE `LlmProvider` (no real Anthropic calls, no
-     cost): two days processed with correct cross-day linking; a second
-     run made zero new LLM calls (fully idempotent); changing one day's
-     `content_hash` regenerated ONLY that day; the `NOTHING_TO_CAPTURE`
-     sentinel correctly deleted that day's file while leaving the other
-     day's untouched.
-   - **A real bug in production output, found and fixed**: a verbatim
-     quote that was itself a numbered list got wrapped in ONE
-     `==...==` span around the whole list, which silently broke instead
-     of highlighting -- confirmed the root cause is structural, not a
-     rendering bug: `==...==` is inline markup exactly like `**bold**`,
-     and inline markup can never cross a blank line or list-item
-     boundary in any CommonMark-based parser (reproduced the identical
-     failure with plain `**bold**` around the same list, in
-     `oxmarkdown-core`). Fixed at the source, not the renderer:
-     `DEFAULT_GRAPH_SKILL` (`graphLogDefaults.server.ts`) now instructs
-     marking each list item's own text separately when the verbatim
-     words are/contain a list, keeping each item's own `1.`/`-` marker
-     outside the highlight.
+     sync-graph --project <path>` — unchanged by the redesign.
+   - **Verified directly, but NOT YET RE-VERIFIED after this redesign**
+     — the ORIGINAL (pre-redesign) whole-day shape WAS verified directly
+     against the real local dev SurrealDB with a FAKE `LlmProvider`: two
+     days processed with correct cross-day linking; a second run made
+     zero new LLM calls; changing one day's `content_hash` regenerated
+     ONLY that day; a day with nothing worth capturing correctly produced
+     no file. The new `add_node`/validation/caching logic has been
+     self-reviewed carefully but not yet re-run against a scripted fake
+     `LlmProvider` the way every other redesign in this list was before
+     being marked verified — same open item `graph-structure`'s own
+     redesign already has (see item 7's own note).
+   - **A real bug in production output, found and fixed (predates this
+     redesign, still true of the current code)**: a verbatim quote that
+     was itself a numbered list got wrapped in ONE `==...==` span around
+     the whole list, which silently broke instead of highlighting --
+     confirmed the root cause is structural, not a rendering bug:
+     `==...==` is inline markup exactly like `**bold**`, and inline
+     markup can never cross a blank line or list-item boundary in any
+     CommonMark-based parser (reproduced the identical failure with plain
+     `**bold**` around the same list, in `oxmarkdown-core`). Fixed at the
+     source, not the renderer: `DEFAULT_GRAPH_SKILL`
+     (`graphLogDefaults.server.ts`) instructs marking each list item's
+     own text separately when the verbatim words are/contain a list,
+     keeping each item's own `1.`/`-` marker outside the highlight.
 6. **Done — `graph-project-view`, REDESIGNED from its original per-day
    shape** (see the header's "real architecture change" note).
    `graphProjectView.server.ts` (`runGraphProjectView`) now reads

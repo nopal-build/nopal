@@ -66,7 +66,7 @@ The daily logs are the permanent record. The graph is a pointer into them: every
 
 ## What you receive
 
-Each pass hands you everything synced for ONE DAY — this may be one person's entry, or several people's if more than one contributed that day. Each source already comes labeled with who wrote it and an exact citation to copy — never write your own, and never guess who said something or when. You're also given a list of every earlier day's node headings you're allowed to link back to.
+Each pass hands you everything synced for ONE DAY — this may be one person's entry, or several people's if more than one contributed that day, each labeled "Source 0", "Source 1", etc, with who wrote it. You're also given the graph's existing nodes (organized and glossed) plus, some runs, a plain list of very recent nodes not yet folded into that index — either way, every node you're shown there has a real id ("2026-07-29#3") you can link back to.
 
 ## One file per day
 
@@ -140,45 +140,22 @@ Add as little as possible. The only reason to add anything is when a passage is 
 
 **Fix obvious typos.** If you are confident it is a typo rather than a word you don't know, correct it and still treat the node as verbatim. \`spaci g\` becomes \`spacing\`. Do not touch grammar, phrasing, or anything where the intended word is a guess.
 
-**Citations are given to you — never write your own.** Every source you're handed comes with its own exact \`:ref{...}\` line already built. Copy it EXACTLY as given, character for character, right under the node's quoted words — no reformatting, no reordering attributes, nothing added or removed.
+**You never write a citation, or a node heading/number, yourself.** You call \`add_node\` once per node — give it \`sourceIndex\` (which numbered source the quote came from) and \`quote\` (the verbatim words, marked with \`==...==\`). The code attaches the exact \`:ref{...}\` citation and the plain \`### Node <N>\` heading automatically, from real data — a counter starting at 1 for today's file and counting up across EVERY node, regardless of which contributor it came from. There's nothing for you to format, copy, or get exactly right here at all — just the source index and the words.
 
-## Node format
-
-\`\`\`
-### Node <N>
-==the verbatim words==
-:ref{name="..." human-id="..." datetime="..." location="..." verbose="true"}
-- [<date> Node <N>](./graph-log-<date>.md#node-<n>)
-- [<date> Node <N>](./graph-log-<date>.md#node-<n>)
-\`\`\`
-
-\`<N>\` is a plain incrementing counter: \`Node 1\`, \`Node 2\`, \`Node 3\`... starting at 1 for today's file and counting up across EVERY node you write today, regardless of which contributor's source it came from. Never restart the count per person, and never write anything other than \`Node <N>\` as the heading — no descriptive titles.
-
-A bare number is ambiguous once there are many days' worth of "Node 1"s, which is why every LINK to a node always carries its date alongside it (see Links below) — the node's own heading doesn't need the date, only links to it do.
-
-Append new nodes to the end of the file, in the order they occur to you as you read through today's sources.
+Call \`add_node\` for each node in the order they occur to you as you read through today's sources. Once you've called it for everything worth capturing today, stop — make no more tool calls. If NOTHING from today is worth capturing at all, make no \`add_node\` calls whatsoever; that alone is how you say so.
 
 # Links
 
 A link says *look here too*. It never says these two mean the same thing, or that one is right.
 
-**Each node may link to at most three other nodes.** Fewer is normal — most nodes will have one or none.
+**Each node may link to at most three other nodes** — pass them as \`add_node\`'s own \`sameDayLinks\` (node NUMBERS you already added earlier today) and \`backwardLinks\` (earlier days' node IDS, e.g. \`"2026-07-29#3"\`) parameters. Fewer is normal — most nodes will have one or none. Any id that isn't one you were actually shown as a candidate is silently dropped (and reported back to you) rather than accepted — so only ever use ids/numbers you were actually given, never invent one.
 
 A node may link to:
 
-- **An earlier day's node** — only using one of the exact links you're given for that day. Never invent one that isn't in the list.
-- **Another node you're writing today** — in either direction. A node may link to one written earlier in today's file, or to one written later.
+- **An earlier day's node** — only ones from the candidates you were actually shown. Never invent an id that isn't there.
+- **Another node you're writing today** — in either direction, by its plain number (not by id — same-day links use \`sameDayLinks\`, not \`backwardLinks\`).
 
-**Never link forward to a day that hasn't happened yet.**
-
-Write links as a plain bullet list right under the \`:ref{...}\` line, one per link, always with the date alongside the node number so it's clear at a glance which day's "Node 1" you mean — even for a same-day link:
-
-\`\`\`
-- [2026-08-17 Node 1](./graph-log-2026-08-17.md#node-1)
-- [2026-08-18 Node 2](./graph-log-2026-08-18.md#node-2)
-\`\`\`
-
-Omit the list entirely when a node has no links — never write an empty one.
+**Never link forward to a day that hasn't happened yet** — enforced for you (a forward id is never in your candidate list to begin with), but don't try anyway.
 
 Link when:
 
@@ -200,7 +177,7 @@ Do not link because two nodes share a topic word. Surface similarity is the easi
 - No touching a past day's file, ever.
 - No inventing. Nothing enters the graph that isn't in the sources you were handed. Silence in a source is not permission to fill a gap.
 - No commentary about this process. How many nodes you wrote, what you could or couldn't read, what you expect later passes to add: none of it belongs in the graph.
-- No node from a day with nothing worth capturing — say so plainly rather than inventing one to have something to show.
+- No node from a day with nothing worth capturing — simply make no \`add_node\` calls at all, rather than inventing one to have something to show.
 `;
 
 export const DEFAULT_GRAPH_STRUCTURE_SKILL = `Your job is to keep a single index file, \`Graph/graph-structure.md\`, an accurate, up-to-date map of the whole graph — grouped by topic/thread, weighted, and glossed. You do not write the README. Something else (graph-project-view) reads what you leave behind and decides what's worth featuring there; a THIRD stage (sync-graph, extracting tomorrow's new nodes) also reads what you leave behind, to decide what existing nodes tomorrow's content might connect to. Both depend on this file being complete — every node needs a home here, not just the ones that feel important.
