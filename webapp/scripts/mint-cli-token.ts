@@ -15,7 +15,7 @@ async function main() {
     console.error(`No human found for ${email}`);
     process.exit(1);
   }
-  const minted = await createPersonalAccessToken(human._id, "phylog-test-script");
+  const minted = await createPersonalAccessToken(human._id, "cli-test-script");
   if (!minted) {
     console.error("Failed to mint token");
     process.exit(1);

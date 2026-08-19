@@ -57,7 +57,7 @@ import {
 } from "./vault.server";
 import { downloadFileBytes } from "./file.server";
 import { getProjectStageSkill, isSkipInstruction, listExtraSkillFiles } from "./projectN02.server";
-import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
+import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import type { LlmProvider, PhotoDescriber } from "./llmProvider";
@@ -186,7 +186,7 @@ export async function runSyncKnowledge(
   if (isSkipInstruction(skill)) {
     return { ok: true, skipped: true, entries: [], unsupported: [] };
   }
-  if (!isPhylogAgentConfigured()) {
+  if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
   }
 
@@ -302,7 +302,15 @@ export async function runSyncKnowledge(
             process: "sync-knowledge",
             type: "llm",
             name: "complete",
-            params: { fileId: source._id, name: source.name },
+            // The truncated fragment itself, never persisted anywhere
+            // else (the knowledge file only gets written on success) --
+            // exactly the case where seeing what the model was in the
+            // middle of writing actually matters.
+            params: {
+              fileId: source._id,
+              name: source.name,
+              text: response.text?.trim() ? response.text.trim().slice(0, 8000) : null,
+            },
             durationMs,
             outcome: "error",
           });
@@ -325,7 +333,10 @@ export async function runSyncKnowledge(
           process: "sync-knowledge",
           type: "llm",
           name: "complete",
-          params: { fileId: source._id, name: source.name },
+          // Redundant with the knowledge file itself on success (`body`
+          // above), but kept for consistency with every other LLM event
+          // in this timeline — same field, same place, every time.
+          params: { fileId: source._id, name: source.name, text: body ? body.slice(0, 8000) : null },
           durationMs,
         });
       } else {

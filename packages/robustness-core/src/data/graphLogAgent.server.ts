@@ -5,8 +5,7 @@
  *   daily-log-sync -> sync-knowledge -> sync-graph -> graph-structure
  *     -> graph-project-view
  *
- * Mirrors `phylogAgent.server.ts`'s own `runPhylogPipeline` shape — one
- * job (`nopal graphlog run` / `POST /api/graphlog/run`) runs all five
+ * One job (`nopal graphlog run` / `POST /api/graphlog/run`) runs all five
  * stages sequentially, sharing one progress log. Each stage is ALSO
  * independently runnable (its own CLI subcommand/API route) for iterating
  * on one project's own skill files without paying for the others every
@@ -15,10 +14,9 @@
  * a real error) if any of them fails.
  *
  * `daily-log-sync` runs first and unconditionally (deterministic, no
- * skill gate, no LLM cost) — same reason PhyLog's own pre-capture STAGING
- * is unconditional ahead of its skill-gated summarization: the later
- * agentic stages need `syncs/Daily Logs` to actually be populated to have
- * anything to work from.
+ * skill gate, no LLM cost) — the later agentic stages need
+ * `syncs/Daily Logs` to actually be populated to have anything to work
+ * from.
  */
 
 import { runDailyLogSync } from "./dailyLogSync.server";

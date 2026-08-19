@@ -105,9 +105,9 @@ type Current =
       folder: VaultFolder;
       ancestry: VaultFolder[];
       readme: FileRef | null;
-      /** Non-null exactly when `readme` is a `project-n01` folder's own
-       * README.md — gives its front-matter-stripped body, same as the
-       * Newspaper page (see the `phylog`/`vault` skills). Rendered via plain
+      /** Non-null exactly when `readme` is a `project-n02` folder's own
+       * README.md — gives its front-matter-stripped body (see the
+       * `graphlog`/`vault` skills). Rendered via plain
        * `OxRenderer`/`ProjectView`, same as any other markdown file — no
        * directive resolution happens here (see `project.server.ts`). */
       projectManifest: ResolvedProject | null;
@@ -199,7 +199,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       isMarkdownFile(file) &&
       file.name.toLowerCase() === "readme.md" &&
       fileProjectFolder &&
-      isProjectN01Anchor(fileProjectFolder)
+      isProjectAnchor(fileProjectFolder)
         ? await resolveProjectManifest(fileProjectFolder.human_id, fileProjectFolder)
         : null;
     // A non-owner viewing a file may still act as a full co-owner of it,
@@ -234,7 +234,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? ((await getFileRefById(readmeListing._id)) ?? null)
       : null;
     const projectManifestForFolder =
-      readme && isProjectN01Anchor(folder)
+      readme && isProjectAnchor(folder)
         ? await resolveProjectManifest(folder.human_id, folder)
         : null;
     // Same owner-tier-role resolution as the file branch above, for a
@@ -335,10 +335,10 @@ function isMarkdownFile(file: Pick<FileRef, "name" | "content_type">): boolean {
   );
 }
 
-/** True for a project, or the `personal` root — see the `vault`/`phylog`
- * skills' "project-n01" sections. */
-function isProjectN01Anchor(folder: VaultFolder): boolean {
-  return folder.folder_type === "project-n01" && folder.is_folder_type_root === true;
+/** True for a project, or the `personal` root — see the `vault`/`graphlog`
+ * skills' "project-n02" sections. */
+function isProjectAnchor(folder: VaultFolder): boolean {
+  return folder.folder_type === "project-n02" && folder.is_folder_type_root === true;
 }
 
 /** Column header row for the GitHub-style listing table. */
@@ -946,12 +946,12 @@ function MoveFolderModal({
 }
 
 // ─── Skill file editor ───────────────────────────────────────────────────
-// A project's own `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`
-// (see the `phylog`/`vault` skills) are themselves OxMarkdown documents,
-// so they get the real `OxEditor` (editable) instead of the plain static
-// `OxRenderer` used elsewhere. `key={fileId}` at the call site forces a
-// clean remount on navigation between skill files, so this component's
-// own local state never leaks from one file to the next.
+// A project's own `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/
+// `PROJECT_VIEW.md` (see the `graphlog`/`vault` skills) are themselves
+// OxMarkdown documents, so they get the real `OxEditor` (editable) instead
+// of the plain static `OxRenderer` used elsewhere. `key={fileId}` at the
+// call site forces a clean remount on navigation between skill files, so
+// this component's own local state never leaks from one file to the next.
 function SkillFileEditor({
   fileId,
   initialContent,
@@ -1947,15 +1947,15 @@ export default function VaultV2Page() {
   const currentFolderType =
     current.kind === "folder" ? (current.folder.folder_type ?? null) : null;
   // Rename/Move/Share/Publish/Delete act on the folder OBJECT itself, not
-  // its content — a `project-n01` folder (a project, or Personal) is
+  // its content — a `project-n02` folder (a project, or Personal) is
   // `writable: "system"` at the CONTENT level (see `vaultFolderTypes.ts`),
   // but its own owner can still manage the folder itself exactly as
   // before, so this anchor case only needs the root-level policy. Mirrors
   // the same carve-out `api.vault.folders.$folderId.tsx` makes server-side.
-  const isProjectN01AnchorCurrent =
+  const isProjectAnchorCurrent =
     current.kind === "folder" &&
     current.folder.is_folder_type_root &&
-    currentFolderType === "project-n01";
+    currentFolderType === "project-n02";
   // The project ANCHOR's own object-level lifecycle (rename/delete/publish
   // the WHOLE project) stays creator-only — same precedent project status
   // already set ("a personal organizational tool", unlike the
@@ -1964,7 +1964,7 @@ export default function VaultV2Page() {
   // at all, and doesn't affect Share (below) — sharing a project is
   // explicitly a collaborator-facing action `setProjectSharing` already
   // allows any owner-tier role to perform, anchor or not.
-  const canManageAnchorLifecycle = !isProjectN01AnchorCurrent || isOwnedByViewer;
+  const canManageAnchorLifecycle = !isProjectAnchorCurrent || isOwnedByViewer;
   // Sharing Roles only apply at the PROJECT level (a role is a project-
   // wide grant stored in that project's own README.md — see
   // `projectSharing.server.ts`), never to an arbitrary nested subfolder,
@@ -2000,7 +2000,7 @@ export default function VaultV2Page() {
     isEffectiveOwner &&
     current.kind === "folder" &&
     canWriteToRoot(current.folder.vault_root_key, user.role) &&
-    (isProjectN01AnchorCurrent || canWriteToFolderType(currentFolderType, user.role));
+    (isProjectAnchorCurrent || canWriteToFolderType(currentFolderType, user.role));
   // A folder is publicly reachable either because it was Published itself,
   // or because an ancestor was — Publish is resolved dynamically (see
   // resolvePublicRootFolder), not cascaded onto descendants at publish time,
@@ -2591,11 +2591,12 @@ export default function VaultV2Page() {
             (isMarkdownFile(current.file) ? (
               <div className="vault-readme-section">
                 {fileFolderType === "skills" ? (
-                  // A project's own skills/PRE_CAPTURE.md, CAPTURE.md,
-                  // POST_CAPTURE.md (see the phylog/vault skills) are
-                  // themselves OxMarkdown documents — give them the real,
-                  // editable OxEditor rather than the plain read-only
-                  // OxRenderer used elsewhere.
+                  // A project's own skills/KNOWLEDGE.md, GRAPH.md,
+                  // GRAPH_STRUCTURE.md, PROJECT_VIEW.md (see the
+                  // graphlog/vault skills) are themselves OxMarkdown
+                  // documents — give them the real, editable OxEditor
+                  // rather than the plain read-only OxRenderer used
+                  // elsewhere.
                   <SkillFileEditor
                     key={current.file._id}
                     fileId={current.file._id}
@@ -2610,8 +2611,8 @@ export default function VaultV2Page() {
                   // `OxRenderer`, never `OxEditor`.
                   <OxRenderer markdown={current.file.content ?? ""} />
                 ) : current.projectManifest ? (
-                  // Legacy project-n01 anchor README files only (see
-                  // `isProjectN01Anchor` above) — `ProjectView` gives the
+                  // Project anchor README files only (see
+                  // `isProjectAnchor` above) — `ProjectView` gives the
                   // front-matter-stripped body to `OxRenderer`, plus any
                   // `::gallery{folder="..."}` folders it references.
                   <ProjectView

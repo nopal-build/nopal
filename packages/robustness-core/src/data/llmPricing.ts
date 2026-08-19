@@ -1,6 +1,6 @@
 /**
  * Static Anthropic model pricing — used ONLY to estimate a $ figure on top
- * of PhyLog's tokens-only usage tracking (`phylogMetrics.server.ts`),
+ * of GraphLog's tokens-only usage tracking (`graphLogMetrics.server.ts`),
  * never to bill or gate anything. A pure estimate, not reconciled against
  * real Anthropic billing.
  *

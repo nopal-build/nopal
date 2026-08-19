@@ -1,8 +1,8 @@
 /**
  * `LlmProvider` (`llmProvider.ts`) implemented against Anthropic's Messages
- * API — PhyLog's first LLM backend, per the `vault` skill's PhyLog Agent
- * section. Translates the generic message/tool shape both directions;
- * `phylogAgent.server.ts` never touches the Anthropic SDK directly.
+ * API — shared by every GraphLog stage (see the `graphlog` skill).
+ * Translates the generic message/tool shape both directions; no caller
+ * ever touches the Anthropic SDK directly.
  *
  * PROMPT CACHING: on by default, no config flag -- see "Prompt caching"
  * above `toAnthropicSystem`/`withLastMessageCacheBreakpoint` for exactly
@@ -16,7 +16,7 @@
  * cached bytes and expires on its own (5 minutes idle by default,
  * refreshed on every hit); the only way to force a miss is to change the
  * content, which happens naturally whenever a skill file is edited.
- * `llmPricing.ts`'s `estimateCostUsd` and `phylogMetrics.server.ts`'s
+ * `llmPricing.ts`'s `estimateCostUsd` and `graphLogMetrics.server.ts`'s
  * rollup both account for cache read/write tokens separately from plain
  * input tokens so /fruits/maker's cost estimate stays accurate.
  */
@@ -36,19 +36,21 @@ import type {
 } from "./llmProvider";
 
 const DEFAULT_MODEL = "claude-sonnet-5";
-// capture's update_readme tool asks the model to re-emit the ENTIRE
-// README body every call -- on a project with real accumulated history
-// that can be long, and 4096 was observed truncating mid-generation
-// (stop_reason "max_tokens"), which capture.server.ts's runAgentLoop now
-// detects and refuses to apply -- but a bigger budget avoids hitting it
-// at all for most projects. See the phylog skill's capture section.
+// A tool-calling turn that re-emits a substantial chunk of content (a
+// README section, a cluster) in one call can truncate mid-generation
+// (stop_reason "max_tokens") at a smaller budget -- every caller's own
+// agent loop detects this and refuses to apply a truncated result, but a
+// generous default avoids hitting it at all for most calls. A caller
+// whose own output genuinely scales differently (e.g. `graph-structure`'s
+// original whole-graph-rebuild shape, since redesigned -- see the
+// `graphlog` skill) can still override via `maxTokens`.
 const DEFAULT_MAX_TOKENS = 8192;
 /** Vision calls want a paragraph, not a whole README — kept separate from
  * `DEFAULT_MAX_TOKENS` so tightening one doesn't silently affect the
  * other. */
 const PHOTO_DESCRIPTION_MAX_TOKENS = 512;
 
-const PHOTO_DESCRIPTION_SYSTEM_PROMPT = `You are PhyLog, describing a photo that was attached to a project's daily-log Card. Write a short, factual paragraph (2-4 sentences) capturing what the photo actually shows — objects, people, setting, visible state of progress — grounded ONLY in what's visible plus the text context you're given. Never speculate beyond what's visible. No preamble, no "this photo shows" framing — just the description itself.`;
+const PHOTO_DESCRIPTION_SYSTEM_PROMPT = `You are describing a photo that was attached to a project's daily-log Card. Write a short, factual paragraph (2-4 sentences) capturing what the photo actually shows — objects, people, setting, visible state of progress — grounded ONLY in what's visible plus the text context you're given. Never speculate beyond what's visible. No preamble, no "this photo shows" framing — just the description itself.`;
 
 const ANTHROPIC_IMAGE_MEDIA_TYPES = new Set([
   "image/jpeg",
@@ -185,7 +187,7 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new Error(
-        "ANTHROPIC_API_KEY is not set — required to use PhyLog's Anthropic provider.",
+        "ANTHROPIC_API_KEY is not set — required to use GraphLog's Anthropic provider.",
       );
     }
     this.client = new Anthropic({ apiKey });
@@ -286,6 +288,6 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
  * API routes and the CLI, same "absent env var = feature off" convention
  * `SORTER_ENABLED` already uses, so a fresh deploy never spends money on
  * an LLM call until this is explicitly configured. */
-export function isPhylogAgentConfigured(): boolean {
+export function isGraphLogAgentConfigured(): boolean {
   return !!process.env.ANTHROPIC_API_KEY;
 }

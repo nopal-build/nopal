@@ -1,23 +1,18 @@
 /**
  * `nopal graphlog reset` and its three narrower siblings — GraphLog's own
- * "start over" operations (see the `graphlog` skill). Mirrors PhyLog's
- * `nopal phylog reset`/`reset-pre-capture` shape closely (destructive,
- * explicit, never run implicitly by anything else — a human can inspect
- * the emptied-out state before re-running the pipeline), but split into
- * THREE independent depths instead of two, since GraphLog has three
- * separate kinds of generated content worth being able to wipe on their
- * own:
+ * "start over" operations (see the `graphlog` skill): destructive,
+ * explicit, never run implicitly by anything else, so a human can
+ * inspect the emptied-out state before re-running the pipeline. Split
+ * into THREE independent depths, since GraphLog has three separate
+ * kinds of generated content worth being able to wipe on their own:
  *
  *   - `resetProjectView` — deletes every direct child of the project
  *     folder EXCEPT `skills`/`syncs`/`graph` (and clears `README.md`'s
- *     BODY, front matter preserved — same reasoning as
- *     `projectN01.server.ts`'s `resetProjectN01ContentInternal`/
- *     `migrateToN02.server.ts`'s own README handling: Sharing Roles and
- *     lifecycle `status` live ONLY in that front matter). In practice
- *     this project folder shape means there's rarely anything else TO
- *     delete here yet (GraphLog doesn't file loose content at the
- *     project root the way PhyLog does) — this exists mainly to clear a
- *     stale README body and catch anything unexpected left at the root.
+ *     BODY, front matter preserved, since Sharing Roles and lifecycle
+ *     `status` live ONLY in that front matter). In practice this
+ *     project folder shape means there's rarely anything else TO delete
+ *     here yet — this exists mainly to clear a stale README body and
+ *     catch anything unexpected left at the root.
  *   - `resetGraph` — deletes the `Graph` space folder outright (every
  *     `graph-log-*.md` file AND `graph-structure.md`, so both
  *     `graph-structure`'s own `asOfGraphHash` and `graph-project-view`'s

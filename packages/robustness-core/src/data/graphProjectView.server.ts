@@ -6,7 +6,7 @@
  *     -> graph-project-view (this file)
  *
  * Entirely skill-driven, same "skip means total no-op" convention as
- * every other GraphLog/PhyLog stage: a project's `skills/PROJECT_VIEW.md`
+ * every other GraphLog stage: a project's `skills/PROJECT_VIEW.md`
  * (seeded with real starter instructions, NOT "skip" — see
  * `graphLogDefaults.server.ts`) decides whether/how this runs at all.
  *
@@ -15,9 +15,8 @@
  * to keep `README.md` an accurate, organized synthesis — never inventing
  * progress, dates, or facts that aren't grounded in a thread
  * `graph-structure.md` actually gives it. A bounded tool-calling loop
- * (`update_section`/`remove_section`, mirroring PhyLog's own
- * `capture.server.ts` shape closely but simplified — see this file's own
- * "Deliberately deferred" note) lets the model touch only the sections
+ * (`update_section`/`remove_section` — see this file's own "Deliberately
+ * deferred" note) lets the model touch only the sections
  * that actually need to change, rather than rewriting the whole README
  * every time.
  *
@@ -90,7 +89,7 @@ import {
   listExtraSkillFiles,
 } from "./projectN02.server";
 import { parseGraphStructureFrontmatter, markGraphStructureApplied } from "./graphStructure.server";
-import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
+import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolCall, ToolDefinition } from "./llmProvider";
@@ -345,6 +344,7 @@ async function runReadmeAgentLoop(
   system: string,
   userPrompt: string,
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>,
+  perf: GraphLogPerfRecorder,
 ): Promise<{
   usage: LlmUsage;
   model: string | null;
@@ -360,10 +360,33 @@ async function runReadmeAgentLoop(
   let hitMaxTurns = false;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const turnStart = Date.now();
     const response = await provider.complete({ system, messages, tools: TOOLS });
     usage.inputTokens += response.usage.inputTokens;
     usage.outputTokens += response.usage.outputTokens;
     model = response.model;
+
+    // One perf event PER TURN -- see `syncGraph.server.ts`'s own
+    // identically-shaped addition for the full reasoning (a real,
+    // individually-timed API call, nested under this run's own
+    // aggregate "readme" event, carrying whatever plain text the model
+    // wrote this turn -- otherwise thrown away the moment it's folded
+    // into `messages` below). Especially useful here: this is exactly
+    // what a truncated turn was in the middle of writing when it got
+    // cut off.
+    await perf.event({
+      process: "graph-project-view",
+      type: "llm",
+      name: "turn",
+      params: {
+        turn: turn + 1,
+        stopReason: response.stopReason,
+        toolCalls: response.toolCalls.map((c) => c.name),
+        text: response.text?.trim() ? response.text.trim().slice(0, 8000) : null,
+      },
+      durationMs: Date.now() - turnStart,
+      outcome: response.stopReason === "max_tokens" ? "error" : "ok",
+    });
 
     if (response.stopReason === "max_tokens") {
       // See this file's own "Deliberately deferred" note — no retry
@@ -457,7 +480,7 @@ export async function runGraphProjectView(
   if (isSkipInstruction(skill)) {
     return { ok: true, skipped: true, changed: false, summary: [] };
   }
-  if (!isPhylogAgentConfigured()) {
+  if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
   }
 
@@ -548,7 +571,7 @@ export async function runGraphProjectView(
   const callStart = Date.now();
   try {
     const llm = opts.provider ?? new AnthropicProvider();
-    const { usage, model, truncated, hitMaxTurns } = await runReadmeAgentLoop(llm, system, userPrompt, executors);
+    const { usage, model, truncated, hitMaxTurns } = await runReadmeAgentLoop(llm, system, userPrompt, executors, perf);
 
     const durationMs = Date.now() - callStart;
     await recordGraphLogUsage({

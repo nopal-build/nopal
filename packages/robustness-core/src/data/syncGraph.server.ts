@@ -124,7 +124,7 @@ import {
 } from "./projectN02.server";
 import { parseSyncedCardFileName } from "./dailyLogSync.server";
 import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
-import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
+import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
@@ -438,6 +438,8 @@ async function runSyncGraphDayLoop(
   userPrompt: string,
   callCounter: { count: number },
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>,
+  perf: GraphLogPerfRecorder,
+  date: string,
 ): Promise<{ usage: LlmUsage; model: string | null; truncated: boolean; hitMaxTurns: boolean }> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
@@ -452,11 +454,34 @@ async function runSyncGraphDayLoop(
     // completion in the run doesn't yet know if there'll be a second one
     // worth reading the cache back for; every one after does.
     const cacheSystemPrompt = callCounter.count > 0;
+    const turnStart = Date.now();
     const response = await provider.complete({ system, messages, tools: TOOLS, cacheSystemPrompt });
     callCounter.count++;
     usage.inputTokens += response.usage.inputTokens;
     usage.outputTokens += response.usage.outputTokens;
     model = response.model;
+
+    // One perf event PER TURN (a real, individually-timed API call),
+    // nested (by actual start time) under this day's own aggregate event
+    // recorded by the caller -- includes whatever plain text the model
+    // wrote alongside/instead of a tool call this turn, thrown away
+    // everywhere else in this loop (only ever fed back into `messages`,
+    // never persisted) but genuinely useful here: it's exactly what a
+    // truncated turn was in the middle of writing when it got cut off.
+    await perf.event({
+      process: "sync-graph",
+      type: "llm",
+      name: "turn",
+      params: {
+        date,
+        turn: turn + 1,
+        stopReason: response.stopReason,
+        toolCalls: response.toolCalls.map((c) => c.name),
+        text: response.text?.trim() ? response.text.trim().slice(0, 8000) : null,
+      },
+      durationMs: Date.now() - turnStart,
+      outcome: response.stopReason === "max_tokens" ? "error" : "ok",
+    });
 
     if (response.stopReason === "max_tokens") {
       truncated = true;
@@ -569,7 +594,7 @@ export async function runSyncGraph(
   if (isSkipInstruction(skill)) {
     return { ok: true, skipped: true, days: [] };
   }
-  if (!isPhylogAgentConfigured()) {
+  if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
   }
 
@@ -744,6 +769,8 @@ export async function runSyncGraph(
         userPrompt,
         callCounter,
         executors,
+        perf,
+        date,
       );
 
       if (truncated) {

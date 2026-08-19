@@ -33,9 +33,8 @@ import { createHash } from "node:crypto";
  * inside a project's `syncs` folder — a plain, ordinary folder (no
  * dedicated `SyncFolderTypeKey` of its own), same "reserved NAME by
  * convention" idea `_knowledge` uses one level deeper (see the `graphlog`
- * skill). Not the same folder as the vault-wide `daily-logs` ROOT, or
- * `project-n01`'s own `daily-logs` SPACE TYPE (PhyLog's pre-capture
- * staging area) — three different things that happen to share a name. */
+ * skill). Not the same folder as the vault-wide `daily-logs` ROOT — two
+ * different things that happen to share a name. */
 export const DAILY_LOGS_SYNC_FOLDER_NAME = "Daily Logs";
 
 function contentHash(content: string): string {
@@ -144,11 +143,11 @@ export type DailyLogSyncResult = {
  * `::file{...}` attachment referenced in that Card gets copied alongside it
  * (so sync-knowledge's later walk of the `syncs/` tree sees them too — see
  * the `graphlog` skill). Idempotent: an unchanged Card is skipped entirely
- * (via a stored `content_hash`, the same field `fileSnapshot`/pre-capture
- * already rely on elsewhere), and an already-copied attachment is
+ * (via a stored `content_hash`, the same field `fileSnapshot`
+ * (`sorter.server.ts`) already relies on elsewhere), and an already-copied attachment is
  * recognized by its deterministic destination name, never copied twice.
  *
- * Cross-human by design, same as PhyLog's pre-capture/capture —
+ * Cross-human by design —
  * `listCardEntriesForProject` already sweeps every contributor's Cards for
  * this project, not just whoever triggers the run.
  */

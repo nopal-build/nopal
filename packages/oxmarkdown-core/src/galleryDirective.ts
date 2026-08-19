@@ -16,9 +16,8 @@
  * photos as a grid." Use the container form when photos are already
  * inline in the document being written by hand; use the leaf form to
  * reference an existing vault folder by name without re-listing every
- * photo — the shape PhyLog's capture stage uses (see the `phylog` skill),
- * since it only ever knows file/folder NAMES, never stable URLs it could
- * embed inline.
+ * photo — useful for anything that only ever knows file/folder NAMES,
+ * never stable URLs it could embed inline.
  */
 
 export interface ResolvedGalleryImage {

@@ -2,69 +2,61 @@
  * Vault Folder Types — special, codified sub-folder kinds a human can pick
  * when creating a new folder, layered ON TOP of the Vault Root Folders
  * (`vaultRoots.ts`). Where a root is a fixed, system-provisioned top-level
- * container (`projects`, `personal`, `daily-logs`), a folder TYPE is an
- * opt-in tag a human attaches when creating a folder *inside* one of those
- * — it's what used to be the standalone `skills`/`syncs` roots, now
- * generalized so every project (and the `personal` space) can have its own.
+ * container (`projects`, `personal`), a folder TYPE is an opt-in tag a
+ * human attaches when creating a folder *inside* one of those — it's what
+ * used to be the standalone `skills`/`syncs` roots, now generalized so
+ * every project (and the `personal` space) can have its own.
  *
- * Three tiers, each created via the same "New folder → pick a type" flow
+ * **PhyLog/`project-n01` has been fully retired** (see the `graphlog`
+ * skill) — every project (and `personal`) is `project-n02` now, both for
+ * `createVaultFolder`'s own default and for every lazy-retrofit path. Its
+ * own space types (`newspapers`, the project-scoped `daily-logs` staging
+ * folder) are gone with it; nothing else ever depended on them.
+ *
+ * Two tiers, each created via the same "New folder → pick a type" flow
  * (container types are the one exception — see below):
  *
- * 0. Container types (`ContainerFolderTypeKey`) — `project-n01` and its
- *    successor `project-n02` (see the `graphlog` skill). This is the type
- *    every `projects/<name>` folder AND the `personal` root itself now
- *    carry (see the `vault` skill's "project-n01 spaces" section). Unlike
- *    the other two tiers, a human never picks this from the "New folder"
- *    dialog — it's stamped automatically the moment a project (or
- *    `personal`) is created (`createVaultFolder`/`ensureVaultRootFolders`,
- *    `vault.server.ts`), and lazily backfilled onto any project that
- *    predates this type. `README.md` is that space's index; a human may
- *    only directly write into its `skills`/`syncs` child folders —
- *    everything else in the tree is managed entirely by the pipeline
- *    (`project-n01`: PhyLog's pre-capture/capture/post-capture, see the
- *    `phylog` skill; `project-n02`: GraphLog's sync-knowledge/sync-graph/
- *    graph-project-view, see the `graphlog` skill). Hence
+ * 0. Container types (`ContainerFolderTypeKey`) — just `project-n02`
+ *    today (see the `graphlog` skill). This is the type every
+ *    `projects/<name>` folder AND the `personal` root itself carries (see
+ *    the `vault` skill's "project-n02 spaces" section). Unlike the other
+ *    tier, a human never picks this from the "New folder" dialog — it's
+ *    stamped automatically the moment a project (or `personal`) is created
+ *    (`createVaultFolder`/`ensureVaultRootFolders`, `vault.server.ts`), and
+ *    lazily backfilled onto any project that predates this type.
+ *    `README.md` is that space's index; a human may only directly write
+ *    into its `skills`/`syncs` child folders — everything else in the
+ *    tree (including the `Graph` space) is managed entirely by GraphLog's
+ *    own sync-knowledge/sync-graph/graph-project-view stages. Hence
  *    `writable: "system"` (see below) — no human role can write CONTENT
- *    directly into either container; the pipeline's own server functions
- *    bypass this check entirely (they call the data layer directly, never
+ *    directly into the container; GraphLog's own server functions bypass
+ *    this check entirely (they call the data layer directly, never
  *    through the `api.vault.*` write routes this gates). Folder-OBJECT-
  *    level operations on the anchor itself — rename, delete, share, trash
  *    — are a separate, still-owner-writable concern; see
- *    `vault.server.ts`'s `canWriteToFolderId` doc. `createVaultFolder`
- *    still tags every brand new project `project-n01` today — the cutover
- *    to `project-n02` by default is a deliberate later migration step, not
- *    a side effect of this type existing (see the `graphlog` skill).
+ *    `vault.server.ts`'s `canWriteToFolderId` doc.
  *
- * 1. Space types (`SpaceFolderTypeKey`) — `skills`, `syncs`, `daily-logs`,
- *    and the not-yet-buildable `newspapers`. Creatable directly inside a
- *    `project-n01` folder (a project, or `personal`). SINGLETON per parent
- *    — at most one of each per `project-n01` (enforced server-side,
- *    `validateFolderTypeForParent` in `vault.server.ts`).
+ * 1. Space types (`SpaceFolderTypeKey`) — `skills`, `syncs`, and `graph`.
+ *    Creatable directly inside a `project-n02` folder (a project, or
+ *    `personal`). SINGLETON per parent — at most one of each
+ *    (enforced server-side, `validateFolderTypeForParent` in
+ *    `vault.server.ts`).
  *      - `skills` codifies the identity of that project/space — instructions
  *        steering how it should be built, organized, and maintained (an
  *        eventual sorting agent's guide, and the project's own equivalent of
  *        this very repo's `.agents/skills/<name>/SKILL.md`). Every
- *        `project-n01` gets one auto-seeded at creation time with default
- *        `PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md` files (see
- *        `projectN01.server.ts`) — the ONE place a human directly steers
- *        the otherwise fully PhyLog-managed tree.
+ *        `project-n02` gets one auto-seeded at creation time with default
+ *        `KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`PROJECT_VIEW.md`
+ *        files (see `projectN02.server.ts`) — the ONE place a human
+ *        directly steers the otherwise fully GraphLog-managed tree.
  *      - `syncs` is a data-collection container — see tier 2.
- *      - `daily-logs` is pre-capture's own OUTPUT space (NOT to be confused
- *        with the vault-wide `daily-logs` ROOT — this is a per-project
- *        folder TYPE, a completely separate concept that happens to share
- *        the name): a staging area, one subfolder per (day, contributor),
- *        holding a copy of that day's Card plus generated summaries, which
- *        `nopal phylog capture` then reads to decide how to organize the
- *        project and update its README (see the `phylog` skill's "Stage 1
- *        — pre-capture" / "Stage 2 — capture" sections). `writable:
- *        "system"` — pre-capture populates it directly via the data layer,
- *        never through the `api.vault.*` routes this gates. NOT created at
- *        project creation time (unlike `skills`) — lazily created the
- *        first time pre-capture actually has something to write.
- *      - `newspapers` is RESERVED for individual/daily newspapers PhyLog's
- *        post-capture stage will eventually generate — not implemented
- *        yet (`comingSoon: true`), and `writable: "system"` since, once
- *        built, it'll be PhyLog-managed, not human-editable.
+ *      - `graph` is GraphLog's own OUTPUT space — one `graph-log-YYYY-MM-DD.md`
+ *        file per day `sync-graph` finds new content for, plus
+ *        `graph-structure.md`. `writable: "system"` — GraphLog populates it
+ *        directly via the data layer, never through the `api.vault.*`
+ *        routes this gates. NOT created at project creation time (unlike
+ *        `skills`) — lazily created the first time `sync-graph` actually
+ *        has something to write.
  *
  * 2. Sync types (`SyncFolderTypeKey`) — creatable directly inside a `syncs`
  *    folder, one per data source (NOT singleton — a syncs folder can hold
@@ -86,9 +78,9 @@
 
 import type { Role } from "./humans.server";
 
-export type ContainerFolderTypeKey = "project-n01" | "project-n02";
+export type ContainerFolderTypeKey = "project-n02";
 
-export type SpaceFolderTypeKey = "skills" | "syncs" | "newspapers" | "daily-logs" | "graph";
+export type SpaceFolderTypeKey = "skills" | "syncs" | "graph";
 
 export type SyncFolderTypeKey =
   | "sync-one-way"
@@ -112,17 +104,17 @@ export type VaultFolderTypeDef = {
    *   - `"owner"`: the folder's own owner may always write.
    *   - `"admin"`: requires the ACTING human to hold the platform `Admin`/
    *     `Super` role, even inside their own vault. No folder type uses this
-   *     today — `skills` used to, but that's superseded by PhyLog's
+   *     today — `skills` used to, but that's superseded by this app's own
    *     project-level Sharing Roles (a SEPARATE, project-Role-aware gate on
    *     top of this one — see the `vault` skill's "Sharing Roles" section);
    *     kept as a mechanism for a future folder type that might still want
    *     a platform-role gate.
-   *   - `"system"`: NO human role may write here, full stop — only PhyLog's
-   *     own server-side code, which calls the data layer directly and
-   *     never goes through the `api.vault.*` write routes this gates
-   *     (`canWriteToFolderType`). Used by `project-n01` (everything outside
-   *     its `skills`/`syncs` children is PhyLog-managed) and `newspapers`
-   *     (reserved, not yet built). */
+   *   - `"system"`: NO human role may write here, full stop — only
+   *     GraphLog's own server-side code, which calls the data layer
+   *     directly and never goes through the `api.vault.*` write routes
+   *     this gates (`canWriteToFolderType`). Used by `project-n02`
+   *     (everything outside its `skills`/`syncs` children is
+   *     GraphLog-managed) and `graph`. */
   writable: "owner" | "admin" | "system";
   /** Whether a folder of this type may be shared with other humans —
    * independent of whether its containing root permits sharing at all
@@ -143,8 +135,8 @@ export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> 
     label: "Skills",
     description:
       "Instructions that codify this project's (or your Personal space's) identity — guidance for how it should be built, organized, and maintained.",
-    // No longer platform-Admin/Super-gated (superseded by PhyLog's Sharing
-    // Roles): a project's own creator can always write here, and an
+    // No longer platform-Admin/Super-gated (superseded by this app's own
+    // Sharing Roles): a project's own creator can always write here, and an
     // owner-tier collaborator (Crafter) is separately allowed to EDIT
     // existing skills content — see the project-role gate in
     // `api.vault.$fileId.tsx` and the `vault`/`oxmarkdown` skills.
@@ -159,26 +151,6 @@ export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> 
     writable: "owner",
     shareable: false,
     publishable: true,
-  },
-  newspapers: {
-    label: "Newspapers",
-    description:
-      "Reserved for individual/daily newspapers PhyLog's post-capture stage will eventually generate here. Not available yet.",
-    writable: "system",
-    shareable: false,
-    publishable: false,
-    comingSoon: true,
-  },
-  "daily-logs": {
-    label: "Daily Logs",
-    description:
-      "Pre-processed Cards and their attachments, staged by PhyLog's pre-capture stage and grouped by day and contributor. System-managed — capture reads its organizing decisions from here (and syncs/), not directly editable.",
-    // PhyLog-managed, same as the project-n01 anchor itself — pre-capture
-    // writes here directly via the data layer, never through the
-    // `api.vault.*` routes this gates.
-    writable: "system",
-    shareable: false,
-    publishable: false,
   },
   // `graph` — a `project-n02` space type (see the `graphlog` skill),
   // holding one `graph-log-YYYY-MM-DD.md` file per day GraphLog's
@@ -197,25 +169,10 @@ export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> 
 };
 
 export const CONTAINER_FOLDER_TYPES: Record<ContainerFolderTypeKey, VaultFolderTypeDef> = {
-  "project-n01": {
-    label: "Project",
-    description:
-      "A PhyLog-managed space — a project folder, or your Personal space. README.md is its index; only its skills/syncs folders are directly human-editable, everything else is managed by the PhyLog pipeline.",
-    writable: "system",
-    shareable: true,
-    publishable: true,
-  },
-  // `project-n02` — the GraphLog-managed successor to `project-n01` (see
-  // the `graphlog` skill). Same shape/policy as `project-n01` (README.md
-  // is the index, `skills`/`syncs` are the only human-writable children,
-  // everything else is system-managed) — GraphLog's `sync-knowledge`/
-  // `sync-graph`/`graph-project-view` stages replace PhyLog's pre-capture/
-  // capture/post-capture as the thing managing everything outside those
-  // two folders, including the new `Graph` space type below. Deliberately
-  // NOT yet wired into `createVaultFolder`'s "every new project is a
-  // container" default — that cutover is its own migration step (see the
-  // `graphlog` skill's phased plan), not a side effect of adding this
-  // type definition.
+  // `project-n02` — GraphLog-managed (see the `graphlog` skill). The
+  // successor to `project-n01`/PhyLog, which has been fully retired —
+  // every project (and `personal`) is `project-n02` now, both for
+  // `createVaultFolder`'s own default and for every retrofit path.
   "project-n02": {
     label: "Project",
     description:
@@ -318,8 +275,8 @@ export function isSyncFamilyFolderType(
  * (`vaultRoots.ts`), never a replacement for it. `null`/absent means an
  * ordinary, untyped folder — no additional restriction. An unrecognized
  * type string fails closed (Admin/Super only), same philosophy as
- * `canWriteToRoot`. `"system"` (`project-n01`, `newspapers`) fails closed
- * for EVERY human role, Admin/Super included — only PhyLog's own server
+ * `canWriteToRoot`. `"system"` (`project-n02`, `graph`) fails closed
+ * for EVERY human role, Admin/Super included — only GraphLog's own server
  * code (which never calls this) can touch that content. */
 export function canWriteToFolderType(
   folderType: string | null | undefined,

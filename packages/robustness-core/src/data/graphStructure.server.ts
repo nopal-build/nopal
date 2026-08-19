@@ -134,7 +134,7 @@ import {
   type BacklinkInfo,
   type GraphLogNode,
 } from "./graphNodeIndex.server";
-import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
+import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
@@ -437,6 +437,9 @@ async function runStructureAgentLoop(
   userPrompt: string,
   callCounter: { count: number },
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>,
+  perf: GraphLogPerfRecorder,
+  batchIndex: number,
+  batchCount: number,
 ): Promise<{ usage: LlmUsage; model: string | null; truncated: boolean; hitMaxTurns: boolean }> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
@@ -450,11 +453,34 @@ async function runStructureAgentLoop(
     // second real completion onward, same convention `sync-graph` uses
     // for its own (larger) cached block.
     const cacheSystemPrompt = callCounter.count > 0;
+    const turnStart = Date.now();
     const response = await provider.complete({ system, messages, tools: TOOLS, cacheSystemPrompt });
     callCounter.count++;
     usage.inputTokens += response.usage.inputTokens;
     usage.outputTokens += response.usage.outputTokens;
     model = response.model;
+
+    // One perf event PER TURN -- see `syncGraph.server.ts`'s own
+    // identically-shaped addition for the full reasoning (a real,
+    // individually-timed API call, nested under this batch's own
+    // aggregate event, carrying whatever plain text the model wrote
+    // this turn -- otherwise thrown away the moment it's folded into
+    // `messages` below).
+    await perf.event({
+      process: "graph-structure",
+      type: "llm",
+      name: "turn",
+      params: {
+        batchIndex,
+        batchCount,
+        turn: turn + 1,
+        stopReason: response.stopReason,
+        toolCalls: response.toolCalls.map((c) => c.name),
+        text: response.text?.trim() ? response.text.trim().slice(0, 8000) : null,
+      },
+      durationMs: Date.now() - turnStart,
+      outcome: response.stopReason === "max_tokens" ? "error" : "ok",
+    });
 
     if (response.stopReason === "max_tokens") {
       // Same "leave it, retry later" convention every other GraphLog
@@ -540,7 +566,7 @@ export async function runGraphStructure(
   if (isSkipInstruction(skill)) {
     return { ok: true, skipped: true, changed: false };
   }
-  if (!isPhylogAgentConfigured()) {
+  if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
   }
 
@@ -665,6 +691,9 @@ export async function runGraphStructure(
         userPrompt,
         callCounter,
         executors,
+        perf,
+        batchIndex,
+        batches.length,
       );
 
       const durationMs = Date.now() - callStart;

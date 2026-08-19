@@ -11,14 +11,13 @@
  * `graph-structure`/`graph-project-view` stages get built and iterated on
  * against real content.
  *
- * Also mirrors `phylogDefaults.server.ts`'s admin-editable-override layer
- * (a single DB row, `graphlog_default_skills`, one OPTIONAL field per
- * stage) — added once `/fruits/maker/graphlog/defaults` existed to review
- * these from, same as PhyLog's own defaults got theirs after, not before,
- * a real Maker page existed. See that module's own doc for the full
- * reasoning (deliberately NOT retroactive — only affects a brand new
- * project's seed content going forward, never an existing project's own
- * already-seeded `skills/*.md` file).
+ * Also holds an admin-editable-override layer (a single DB row,
+ * `graphlog_default_skills`, one OPTIONAL field per stage) — added once
+ * `/fruits/maker/graphlog/defaults` existed to review these from, not
+ * before. See that module's own doc for the full reasoning (deliberately
+ * NOT retroactive — only affects a brand new project's seed content going
+ * forward, never an existing project's own already-seeded `skills/*.md`
+ * file).
  */
 
 import { RecordId } from "surrealdb";
@@ -394,9 +393,8 @@ Read \`VOICE.md\` and follow it. It governs how sentences are written, never how
 If it isn't available: write from inside the work rather than above it, keep the honest record of what failed and what got tried first, and use no em dashes.
 `;
 
-// ─── Overrides ───────────────────────────────────────────────
-// Mirrors `phylogDefaults.server.ts`'s override layer exactly — see this
-// file's own module doc above for the full reasoning.
+// ─── Overrides ───────────────────────────────────────────────────────
+// See this file's own module doc above for the full reasoning.
 
 export type GraphLogDefaultStage = "knowledge" | "graph" | "graphStructure" | "projectView";
 

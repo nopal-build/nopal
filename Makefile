@@ -9,11 +9,10 @@ PROXY_PORT ?= 8081
 
 # ── Full-stack dev lifecycle ───────────────────────────────────────────────────
 
-## Run unit tests and deploy the webapp, PhyLog worker, and db to Fly.io.
+## Run unit tests and deploy the webapp, GraphLog worker, and db to Fly.io.
 ## webapp/worker both build from the REPO ROOT (they're pnpm workspace
-## members depending on packages/robustness-core + packages/oxmarkdown-core
-## — see the `phylog` skill's "Scaling & Process Isolation" section), so
-## `fly deploy` runs from here with explicit --config/--dockerfile instead
+## members depending on packages/robustness-core + packages/oxmarkdown-core),
+## so `fly deploy` runs from here with explicit --config/--dockerfile instead
 ## of `cd`-ing into each app's own directory.
 deploy:
 	pnpm --filter remix run test --run
@@ -28,7 +27,7 @@ dev:
 	@echo ""
 	@echo "  ✓ SurrealDB  →  http://localhost:8080"
 	@echo "  ✓ Webapp     →  http://localhost:3000"
-	@echo "  ✓ PhyLog worker running (see 'docker compose logs -f worker')"
+	@echo "  ✓ GraphLog worker running (see 'docker compose logs -f worker')"
 	@echo "  ✓ Logs       →  http://localhost:9999"
 	@echo ""
 

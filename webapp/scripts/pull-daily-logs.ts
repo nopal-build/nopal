@@ -1,7 +1,7 @@
 // webapp/scripts/pull-daily-logs.ts
 //
 // Pulls YOUR OWN daily-logs history down from a real deployment (production
-// by default) and seeds it into local dev, so PhyLog can be built/tested
+// by default) and seeds it into local dev, so GraphLog can be built/tested
 // against real content instead of fixtures.
 //
 // Usage (from webapp/):
@@ -32,7 +32,7 @@
 // Also pulls down every PROJECT actually referenced by a Card among the
 // pulled days (recursively — the whole folder, including a `skills/`
 // subfolder if one exists) — enough for a Card to show its real project
-// name instead of "Unknown project", and for `nopal phylog run` to have a
+// name instead of "Unknown project", and for `nopal graphlog run` to have a
 // real README.md (and SKILL.md) to work with locally. Deliberately NOT
 // your entire `projects/` tree — only the ones your pulled Cards actually
 // point at.
@@ -273,10 +273,10 @@ async function localizeAttachment(
  * files, at any depth) into a local one — used for pulling a specific
  * project a Card referenced, including its `skills/` subfolder if it has
  * one. Preserves a sub-folder's own `folder_type` when it's a TYPE ANCHOR
- * (`is_folder_type_root`, e.g. a project's "Skills" folder) so
- * `phylogAgent.server.ts`'s own skills lookup still recognizes it locally
- * — an ordinary folder is created untyped and just inherits from its new
- * local parent, same as it would remotely.
+ * (`is_folder_type_root`, e.g. a project's "Skills" folder) so GraphLog's
+ * own skills lookup still recognizes it locally — an ordinary folder is
+ * created untyped and just inherits from its new local parent, same as it
+ * would remotely.
  *
  * Every file/folder keeps its remote id locally (see this file's own
  * header comment) — "already pulled" is therefore just "a local record
@@ -516,14 +516,13 @@ async function main() {
             name: remoteProject.name,
             parent_folder_id: localProjectsRoot._id,
             // Mirror the REMOTE project's own current container type
-            // (project-n01 or project-n02) instead of letting
-            // `createVaultFolder` default a brand new project to n01 --
-            // a real bug this fixes: pulling an already-migrated remote
-            // project used to always recreate it locally as project-n01,
-            // auto-seeding PhyLog's stage skills that had no business
-            // being there. Omit entirely for an untyped legacy project
-            // (falls back to createVaultFolder's own n01 default, same
-            // self-healing backfill every other untyped project gets).
+            // (`project-n02` today) rather than always omitting it --
+            // `createVaultFolder` already defaults a brand new project to
+            // `project-n02` on its own, but passing it through explicitly
+            // keeps this correct if that default ever changes. Omit
+            // entirely for an untyped legacy project (falls back to
+            // `createVaultFolder`'s own default, same self-healing backfill
+            // every other untyped project gets).
             folder_type: remoteProject.is_folder_type_root ? remoteProject.folder_type ?? undefined : undefined,
           }))!;
         if (!existingLocal) projectsCreated++;

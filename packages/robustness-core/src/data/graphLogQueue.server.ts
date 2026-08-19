@@ -1,15 +1,9 @@
 /**
- * GraphLog's job queue — mirrors `phylogQueue.server.ts`'s shape closely
- * (BullMQ over the same Redis, an enqueue-then-poll API route, a real
- * worker process consuming it), but on its OWN queue name (`"graphlog"`)
- * rather than sharing PhyLog's — kept fully independent so retiring
- * PhyLog later (see the `graphlog` skill) never touches this file, same
- * reasoning `graphLogMetrics.server.ts` already gives.
- *
- * See `phylogQueue.server.ts`'s own module doc for the full "why a queue
- * at all" reasoning (a GraphLog run can take minutes; running it inline
- * in an HTTP handler risks degrading the whole web server) — identical
- * here, not repeated.
+ * GraphLog's job queue — BullMQ over Redis, an enqueue-then-poll API
+ * route, a real worker process consuming it, on its own queue name
+ * (`"graphlog"`). A GraphLog run can take minutes; running it inline in
+ * an HTTP handler risks degrading the whole web server, hence a real
+ * queue rather than an in-request call.
  */
 
 import { Queue } from "bullmq";
@@ -43,7 +37,6 @@ export type GraphLogJobName =
   | "sync-graph"
   | "graph-structure"
   | "graph-project-view"
-  | "migrate-to-n02"
   | "reset"
   | "reset-project-view"
   | "reset-graph"
@@ -102,11 +95,10 @@ export async function getGraphLogJobOwner(jobId: string): Promise<GraphLogJobDat
 }
 
 // --- Per-project run lock -------------------------------------------------
-// Same reasoning as `phylogQueue.server.ts`'s own `acquireProjectPhylogLock`
-// — only matters once more than one worker process is deployed. A
-// DIFFERENT key prefix (`graphlog:lock:...`) than PhyLog's own
-// (`phylog:lock:...`) so the two pipelines' locks can never collide even
-// though they may run against the very same project folder.
+// A Redis lock, held for the duration of a job's actual pipeline work —
+// only matters once more than one worker process is deployed, to keep two
+// DIFFERENT processes from ever running the same project's pipeline
+// concurrently. Key prefix: `graphlog:lock:...`.
 
 const PROJECT_LOCK_TTL_MS = 10 * 60 * 1000;
 const PROJECT_LOCK_POLL_MS = 3000;

@@ -191,9 +191,22 @@ function TypeBadge({ type }: { type: GraphLogPerfEventType }) {
   return <Badge variant={TYPE_BADGE_VARIANT[type]}>{TYPE_LABEL[type]}</Badge>;
 }
 
+/** Splits out `params.text` (the model's own plain narration for that
+ * call, when present -- see `graphLogPerf.server.ts`'s callers) from
+ * everything else, since it's often long enough to need its own block
+ * rather than being squeezed into the compact inline params string. */
+function splitParams(params: Record<string, unknown> | null): {
+  text: string | null;
+  rest: Record<string, unknown> | null;
+} {
+  if (!params) return { text: null, rest: null };
+  const { text, ...rest } = params;
+  return { text: typeof text === "string" && text ? text : null, rest };
+}
+
 function formatParams(params: Record<string, unknown> | null): string | null {
   if (!params) return null;
-  const entries = Object.entries(params);
+  const entries = Object.entries(params).filter(([, v]) => v !== null && v !== undefined);
   if (entries.length === 0) return null;
   return entries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ");
 }
@@ -215,48 +228,70 @@ function EventRow({
   maxDurationMs: number;
 }) {
   const pct = maxDurationMs > 0 ? Math.max(2, Math.round((event.duration_ms / maxDurationMs) * 100)) : 0;
-  const paramsText = formatParams(event.params);
+  const { text, rest } = splitParams(event.params);
+  const paramsText = formatParams(rest);
   return (
-    <div
-      className="flex items-center justify-between gap-4 py-2"
-      style={{ borderBottom: "1px solid var(--midground)" }}
-    >
-      <div className="flex items-center gap-2 flex-wrap" style={{ minWidth: 0 }}>
-        <span className="text-xs font-mono subtle-text" style={{ minWidth: "62px" }}>
-          {formatOffset(event.started_at, runStartedAt)}
-        </span>
-        <Badge variant="neutral">{event.process}</Badge>
-        <TypeBadge type={event.type} />
-        <span className="text-sm font-mono">{event.name}</span>
-        {event.outcome === "error" && <Badge variant="danger">error</Badge>}
-        {paramsText && (
-          <span className="text-xs font-mono subtle-text" title={paramsText}>
-            {paramsText}
+    <div className="flex flex-col gap-1 py-2" style={{ borderBottom: "1px solid var(--midground)" }}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2 flex-wrap" style={{ minWidth: 0 }}>
+          <span className="text-xs font-mono subtle-text" style={{ minWidth: "62px" }}>
+            {formatOffset(event.started_at, runStartedAt)}
           </span>
-        )}
-      </div>
-      <div className="flex items-center gap-2 shrink-0" style={{ flex: "0 0 33%", maxWidth: "33%" }}>
-        <div
-          style={{
-            flex: 1,
-            height: "8px",
-            background: "var(--midground)",
-            borderRadius: "4px",
-            overflow: "hidden",
-          }}
-        >
+          <Badge variant="neutral">{event.process}</Badge>
+          <TypeBadge type={event.type} />
+          <span className="text-sm font-mono">{event.name}</span>
+          {event.outcome === "error" && <Badge variant="danger">error</Badge>}
+          {paramsText && (
+            <span className="text-xs font-mono subtle-text" title={paramsText}>
+              {paramsText}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0" style={{ flex: "0 0 33%", maxWidth: "33%" }}>
           <div
             style={{
-              height: "100%",
-              width: `${pct}%`,
-              background: event.outcome === "error" ? "var(--red)" : TYPE_BAR_COLOR[event.type],
+              flex: 1,
+              height: "8px",
+              background: "var(--midground)",
+              borderRadius: "4px",
+              overflow: "hidden",
             }}
-          />
+          >
+            <div
+              style={{
+                height: "100%",
+                width: `${pct}%`,
+                background: event.outcome === "error" ? "var(--red)" : TYPE_BAR_COLOR[event.type],
+              }}
+            />
+          </div>
+          <span className="text-xs font-mono subtle-text shrink-0" style={{ minWidth: "48px", textAlign: "right" }}>
+            {formatDuration(event.duration_ms)}
+          </span>
         </div>
-        <span className="text-xs font-mono subtle-text shrink-0" style={{ minWidth: "48px", textAlign: "right" }}>
-          {formatDuration(event.duration_ms)}
-        </span>
       </div>
+      {text && (
+        <details style={{ marginLeft: "70px" }}>
+          <summary className="text-xs font-mono subtle-text" style={{ cursor: "pointer" }}>
+            {text.length.toLocaleString()} character(s) of model text — click to expand
+          </summary>
+          <pre
+            className="text-xs"
+            style={{
+              margin: "6px 0 0 0",
+              padding: "10px",
+              maxHeight: "320px",
+              overflowY: "auto",
+              whiteSpace: "pre-wrap",
+              fontFamily: "monospace",
+              background: "var(--midground)",
+              borderRadius: "6px",
+            }}
+          >
+            {text}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }

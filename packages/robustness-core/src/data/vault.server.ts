@@ -40,16 +40,15 @@ import {
 } from "./vaultFolderTypes";
 import { isVaultRootFolder } from "./vault.types";
 import type { Role } from "./humans.server";
-// File Referencing & Renaming (`fileReferences.server.ts`) and `project-n01`
-// seeding (`projectN01.server.ts`) both statically import several read
+// File Referencing & Renaming (`fileReferences.server.ts`) and `project-n02`
+// seeding (`projectN02.server.ts`) both statically import several read
 // helpers back from THIS file — a real mutual cycle, but a safe one: every
 // name involved on both sides is a hoisted `function` declaration, and
 // nothing in either module calls one of these functions at top-level
 // (module-evaluation) time, only later from inside other async functions.
 // A DYNAMIC `import()` here bought nothing beyond exactly the same safety,
 // while adding a real bug of its own — concurrent first-ever dynamic
-// imports of the same not-yet-cached module (e.g. the three parallel
-// `ensureSkillFile` calls in `ensureProjectN01`) could race and hand one
+// imports of the same not-yet-cached module could race and hand one
 // caller back a not-fully-populated module namespace.
 import {
   syncFileReferences,
@@ -58,7 +57,7 @@ import {
   collectFolderAndDescendantTargets,
   propagateTargetChange,
 } from "./fileReferences.server";
-import { ensureProjectN01 } from "./projectN01.server";
+import { ensureProjectN02 } from "./projectN02.server";
 
 // ─── FileRef CRUD ─────────────────────────────────────────────────────────────
 
@@ -298,18 +297,14 @@ export async function createVaultFolder(data: {
   }
 
   // A direct child of the `projects` root IS a project — defaults to
-  // `project-n01` (forced here, not just in the "New folder" API route, so
-  // it's true regardless of caller) UNLESS the caller explicitly asked for
-  // a different container type (`project-n02`) — e.g.
-  // `scripts/pull-daily-logs.ts` mirroring a REMOTE project's own real
-  // current type, which must never be silently overridden back to n01
-  // (a REAL bug this fixes: pulling an already-migrated remote project
-  // used to always recreate it locally as project-n01, auto-seeding
-  // PhyLog's stage skills alongside whatever GraphLog state got layered
-  // on top afterward).
+  // `project-n02` (forced here, not just in the "New folder" API route, so
+  // it's true regardless of caller) unless the caller explicitly passed a
+  // different `folder_type` — e.g. `scripts/pull-daily-logs.ts` mirroring a
+  // REMOTE project's own real current type. (PhyLog/`project-n01` has been
+  // fully retired — every project is `project-n02` now.)
   const isNewProject = !!parent && !parent.parent_folder_id && parent.vault_root_key === "projects";
   if (isNewProject && !data.folder_type) {
-    folderType = "project-n01";
+    folderType = "project-n02";
     isFolderTypeRoot = true;
   }
 
@@ -335,14 +330,13 @@ export async function createVaultFolder(data: {
   const record = Array.isArray(result) ? result[0] : result;
   const folder = record ? formatRecord(record as unknown as VaultFolder) : undefined;
 
-  // Seed the new project's default skills/PRE_CAPTURE.md, CAPTURE.md,
-  // POST_CAPTURE.md (`projectN01.server` itself calls back into this
-  // function to create that Skills folder — see the import comment above).
-  // Gated on the folder's ACTUAL resulting type, not just `isNewProject`
-  // — a caller that explicitly created this as `project-n02` (see above)
-  // must never get PhyLog's skills seeded onto it.
-  if (folder && folder.folder_type === "project-n01" && folder.is_folder_type_root) {
-    await ensureProjectN01(folder);
+  // Seed the new project's default skills/KNOWLEDGE.md, GRAPH.md,
+  // GRAPH_STRUCTURE.md, PROJECT_VIEW.md (`projectN02.server` itself calls
+  // back into this function to create that Skills folder — see the import
+  // comment above). Gated on the folder's ACTUAL resulting type, not just
+  // `isNewProject`.
+  if (folder && folder.folder_type === "project-n02" && folder.is_folder_type_root) {
+    await ensureProjectN02(folder);
   }
 
   return folder;
@@ -372,17 +366,10 @@ export async function validateFolderTypeForParent(
   if (isSpaceFolderTypeKey(folderType)) {
     const def = SPACE_FOLDER_TYPES[folderType];
 
-    // Every project and `personal` is itself tagged `project-n01` OR its
-    // successor `project-n02` (see `ensureProjectN01`/`ensureProjectN02`,
-    // the `graphlog` skill) — a space type may only be created directly
-    // inside one of those, never nested any deeper. Both containers accept
-    // the same space types (`skills`/`syncs` are reused as-is by `project-
-    // n02`; `graph` is new and only ever gets created by GraphLog itself,
-    // never through this human-facing "New folder" path, but there's no
-    // harm in the picker technically allowing it).
-    const isProjectContainer =
-      (parent.folder_type === "project-n01" || parent.folder_type === "project-n02") &&
-      parent.is_folder_type_root;
+    // Every project and `personal` is itself tagged `project-n02` (see
+    // `ensureProjectN02`, the `graphlog` skill) — a space type may only be
+    // created directly inside one, never nested any deeper.
+    const isProjectContainer = parent.folder_type === "project-n02" && parent.is_folder_type_root;
     if (!isProjectContainer) {
       return `${def.label} folders can only be created directly inside a project or your Personal space`;
     }
@@ -1002,14 +989,14 @@ export async function ensureVaultRootFolders(
     roots.push(created);
   }
 
-  // The `personal` root is itself a `project-n01` container (see the
+  // The `personal` root is itself a `project-n02` container (see the
   // vault skill) — stamp + seed it here, self-healing for any vault that
   // predates this type, same convention as the `vault_root_key` backfill
   // above (see the top-of-file import comment for why a static import
-  // of `projectN01.server`'s mutual dependency on this file is safe).
+  // of `projectN02.server`'s mutual dependency on this file is safe).
   const personalIndex = roots.findIndex((r) => r.vault_root_key === "personal");
   if (personalIndex !== -1) {
-    roots[personalIndex] = await ensureProjectN01(roots[personalIndex]);
+    roots[personalIndex] = await ensureProjectN02(roots[personalIndex]);
   }
 
   return roots;
@@ -1120,7 +1107,7 @@ export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFold
 
   const { folders: personalChildren } = await listFolderChildren(humanId, personal._id);
   // Oldest-first + a deterministic `id` on create — the exact same
-  // check-then-create race `ensureProjectN01`'s Skills-folder bug had (see
+  // check-then-create race `ensureProjectN02`'s Skills-folder bug had (see
   // the `graphlog` skill), confirmed to have produced real duplicate
   // "Daily Logs" folders here too (this function's own destination-folder
   // create below had the identical gap).
@@ -1205,11 +1192,11 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
   if (!projectsRoot) return [];
   const { folders } = await listFolderChildren(humanId, projectsRoot._id);
 
-  // Self-healing retrofit for any project created before `project-n01`
+  // Self-healing retrofit for any project created before `project-n02`
   // existed — same lazy-backfill convention as the root keys above.
   return Promise.all(
     folders.map((f) =>
-      f.folder_type === "project-n01" && f.is_folder_type_root ? f : ensureProjectN01(f),
+      f.folder_type === "project-n02" && f.is_folder_type_root ? f : ensureProjectN02(f),
     ),
   );
 }
@@ -1218,7 +1205,7 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
  * Every project folder `humanId` can target for a daily-log Card — their
  * OWN projects, plus any project someone else has shared a Sharing Role
  * with them on (see `projectSharing.server.ts`). Cards are the one place
- * PhyLog lets ANY role (including Observer) "contribute" to a project it
+ * this app lets ANY role (including Observer) "contribute" to a project it
  * doesn't own — see the vault skill's Daily Log/Cards section.
  *
  * `getTopLevelSharedFolders` already returns exactly the top of each

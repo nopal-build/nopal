@@ -1,20 +1,16 @@
 /**
- * GraphLog usage tracking — mirrors `phylogMetrics.server.ts`'s shape
- * closely (same two-table split: a short-lived raw event log, a durable
- * daily rollup), but on GraphLog's own tables (`graphlog_usage_events`/
- * `graphlog_usage_daily`) — kept fully independent of PhyLog's own tables
- * so retiring PhyLog later (see the `graphlog` skill) never touches this
- * file. `classifyLlmError`/its error-kind union are duplicated here rather
- * than imported from `phylogMetrics.server.ts` for the same reason
- * `graphLogDefaults.server.ts` duplicates PhyLog's `SKIP_MARKER` — small,
- * self-contained, not worth a cross-pipeline dependency.
+ * GraphLog usage tracking — a two-table split (a short-lived raw event
+ * log, a durable daily rollup) on GraphLog's own tables
+ * (`graphlog_usage_events`/`graphlog_usage_daily`). `classifyLlmError`/
+ * its error-kind union, and `graphLogDefaults.server.ts`'s own
+ * `SKIP_MARKER`, are small, self-contained, deliberate duplications
+ * rather than shared cross-file dependencies.
  *
- * Also mirrors PhyLog's aggregation layer: `getGraphLogUsageSummary`
- * (read by `/fruits/maker`'s "GraphLog Usage" section and
- * `/fruits/maker/graphlog`) and `pruneOldGraphLogUsageEvents` (same
- * `CRON_SECRET` cleanup pattern PhyLog's own events table uses) — added
- * once the Maker GraphLog page this file's own header used to say was a
- * precondition actually existed.
+ * `getGraphLogUsageSummary` (read by `/fruits/maker`'s "GraphLog Usage"
+ * section and `/fruits/maker/graphlog`) and `pruneOldGraphLogUsageEvents`
+ * (a `CRON_SECRET`-gated cleanup route) were added once the Maker
+ * GraphLog page this file's own header used to say was a precondition
+ * actually existed.
  */
 
 import { RecordId } from "surrealdb";
@@ -32,9 +28,8 @@ export type GraphLogEventKind =
 export type GraphLogOutcome = "success" | "skipped" | "error";
 export type GraphLogErrorKind = "rate_limited" | "oversized_image" | "incomplete" | "other";
 
-/** Best-effort classification of a thrown LLM-call error — see
- * `phylogMetrics.server.ts`'s identical `classifyLlmError` for the full
- * rationale (never store the raw message). */
+/** Best-effort classification of a thrown LLM-call error — never store
+ * the raw message (could contain sensitive prompt/response content). */
 export function classifyGraphLogError(err: unknown): GraphLogErrorKind {
   const status = (err as { status?: number } | null)?.status;
   if (status === 429) return "rate_limited";
@@ -241,8 +236,7 @@ function emptyTotals(): UsageTotals {
 
 /** Reads entirely from the durable daily rollup — works the same whether
  * the underlying raw events for that range still exist or were already
- * pruned. Mirrors `phylogMetrics.server.ts`'s `getPhylogUsageSummary`
- * exactly, just against GraphLog's own tables/stage set. */
+ * pruned. */
 export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsageSummary> {
   await ensureTables();
   const since = startOfRange(days);

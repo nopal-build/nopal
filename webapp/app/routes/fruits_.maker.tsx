@@ -13,7 +13,6 @@ import { AppLayout } from "../components/AppLayout";
 import { Badge } from "../components/Badge";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { getMakerStats, type MakerRangeDays } from "robustness-core/data/makerStats.server";
-import { getPhylogUsageSummary } from "robustness-core/data/phylogMetrics.server";
 import { getGraphLogUsageSummary } from "robustness-core/data/graphLogMetrics.server";
 import stamp22cLight from "../images/stamps/22c-light.svg";
 import stamp22cDark from "../images/stamps/22c-dark.svg";
@@ -30,13 +29,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // for now this is a simple 7 vs 30 day toggle.
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
 
-  const [stats, phylogUsage, graphLogUsage] = await Promise.all([
+  const [stats, graphLogUsage] = await Promise.all([
     getMakerStats(days),
-    getPhylogUsageSummary(days),
     getGraphLogUsageSummary(days),
   ]);
 
-  return { user, days, stats, phylogUsage, graphLogUsage };
+  return { user, days, stats, graphLogUsage };
 }
 
 export function ErrorBoundary() {
@@ -177,7 +175,7 @@ function StampsPromoCard() {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 export default function FruitsMaker() {
-  const { days, stats, phylogUsage, graphLogUsage } = useLoaderData<typeof loader>();
+  const { days, stats, graphLogUsage } = useLoaderData<typeof loader>();
 
   return (
     <AppLayout>
@@ -253,71 +251,6 @@ export default function FruitsMaker() {
           </div>
         </section>
 
-        {/* ── PhyLog Usage ──────────────────────────────────── */}
-        <section className="mb-12">
-          <hr
-            style={{
-              borderColor: "currentColor",
-              opacity: 0.12,
-              margin: "0 0 24px",
-            }}
-          />
-          <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
-            <h2
-              className="font-bold text-lg font-mono purple-text"
-              style={{ margin: 0 }}
-            >
-              PhyLog Usage
-            </h2>
-            <Link to="/fruits/maker/phylog" prefetch="intent" className="link text-sm font-mono">
-              Full breakdown →
-            </Link>
-          </div>
-
-          {phylogUsage.pricingStale && (
-            <div className="mb-3">
-              <Badge variant="warning">
-                Pricing table is {phylogUsage.pricingAgeDays} days old — verify against
-                platform.claude.com/docs/en/about-claude/pricing
-              </Badge>
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-4">
-            <StatCard
-              label="Pipeline Calls"
-              value={phylogUsage.callCount}
-              hint={`Last ${days} days`}
-            />
-            <StatCard
-              label="Est. Cost"
-              value={`$${phylogUsage.estimatedCostUsd.toFixed(2)}`}
-              hint="baseline gauge, not billing"
-            />
-            <StatCard
-              label="Input Tokens"
-              value={phylogUsage.inputTokens.toLocaleString()}
-              hint={`Last ${days} days`}
-            />
-            <StatCard
-              label="Output Tokens"
-              value={phylogUsage.outputTokens.toLocaleString()}
-              hint={`Last ${days} days`}
-            />
-            <StatCard
-              label="Avg Duration"
-              value={`${(phylogUsage.avgDurationMs / 1000).toFixed(1)}s`}
-              hint={`worst: ${(phylogUsage.maxDurationMs / 1000).toFixed(1)}s`}
-            />
-            <StatCard
-              label="Errors"
-              value={phylogUsage.errorCount}
-              hint={`of ${phylogUsage.callCount} calls`}
-            />
-          </div>
-        </section>
-
-        {/* ── Stamps ────────────────────────────────────── */}
         {/* ── GraphLog Usage ────────────────────── */}
         <section className="mb-12">
           <hr

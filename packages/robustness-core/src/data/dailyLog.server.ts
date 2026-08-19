@@ -343,9 +343,8 @@ export async function getDailyLogCards(
 /**
  * Every (humanId, date) pair that already has a Card for `projectFolderId`
  * — across EVERY human who's ever written one for this project, not just
- * a single acting human. PhyLog's pre-capture and capture stages
- * (`preCapture.server.ts`/`capture.server.ts`) walk this so "run PhyLog
- * for this project" always sweeps every collaborator's Cards, not just
+ * a single acting human. `dailyLogSync.server.ts` walks this so
+ * "sync this project" always sweeps every collaborator's Cards, not just
  * whoever happens to be running the CLI/API call — a Card is ALREADY
  * cross-human safe by design (see the `vault` skill's Cards section: any
  * Sharing Role, including Observer, may write one for a project they can

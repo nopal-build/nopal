@@ -11,10 +11,11 @@ import {
 import { getSharingRoles } from "robustness-core/data/sharingRoles.server";
 
 /**
- * GET/PUT /api/vault/projects/:folderId/sharing — PhyLog's Sharing Roles.
- * See `projectSharing.server.ts` for the underlying model: the project's
- * README.md front matter is the source of truth; `vault_folders.shared_with`
- * is a derived cache kept in sync by `setProjectSharing`.
+ * GET/PUT /api/vault/projects/:folderId/sharing — this app's own project
+ * Sharing Roles. See `projectSharing.server.ts` for the underlying model:
+ * the project's README.md front matter is the source of truth;
+ * `vault_folders.shared_with` is a derived cache kept in sync by
+ * `setProjectSharing`.
  */
 
 async function loadContext(folderId: string, request: Request) {

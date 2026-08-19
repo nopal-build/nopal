@@ -479,8 +479,8 @@ Interacting mode first, without needing that decision resolved.
      marker unless rewritten. `project.server.ts`'s `resolveProjectManifest`
      was trimmed to match (`ResolvedProject` is now just `{ manifest, body
      }` — no more `files`/`folders`/`csvFields` directive resolution).
-     A project's own `skills/PRE_CAPTURE.md`/`CAPTURE.md`/`POST_CAPTURE.md`
-     files (see the `vault`/`phylog` skills) render via a real `<OxEditor>`
+     A project's own `skills/*.md` files (see the `vault`/`graphlog`
+     skills) render via a real `<OxEditor>`
      (`SkillFileEditor` in `fruits_.vault.tsx`, mode `"editing"`/
      `"interacting"` per the existing write-permission check), since they
      never contained the legacy directive registry's directives at all.
@@ -772,7 +772,7 @@ Interacting mode first, without needing that decision resolved.
     the LEAF-directive sibling of 14 above, same name, distinguished by
     mdast node TYPE (`leafDirective` vs `containerDirective`), same
     deliberate STATIC/Interacting-mode-only scope.** Added after
-    discovering PhyLog's capture stage (see the `phylog` skill) had been
+    discovering PhyLog's own capture stage (since retired) had been
     instructing its AI to write exactly this syntax the whole time, under
     the mistaken assumption it was an MdxEditor-only directive being
     retired along with everything else — it wasn't; OxMarkdown just didn't

@@ -18,13 +18,6 @@ app.use((req, _res, next) => {
 
 const httpServer = createServer(app);
 
-// NOTE: `/api/phylog/*` used to run its multi-minute pipeline inline in
-// the request, which needed a generous `httpServer.setTimeout(...)` bump
-// here to survive. That's no longer true — every `/api/phylog/*` route
-// now just enqueues a job (or polls one) and returns almost immediately
-// (see `phylogQueue.server.ts`/`worker.ts`), so Node's own defaults are
-// fine again and this override has been removed.
-
 const viteDevServer =
   process.env.NODE_ENV === "production"
     ? null
@@ -72,30 +65,6 @@ const authLimiter = rateLimit({
   message: { error: "Too many attempts. Please wait a minute and try again." },
 });
 app.use(["/api/passkeys", "/api/cli-auth/exchange"], authLimiter);
-
-// PhyLog agent runs: each call is a real, billed Anthropic API request.
-// Scoped to just the ENQUEUE routes, not the whole `/api/phylog` prefix —
-// `/api/phylog/jobs/:jobId` (polled every ~1.2s by the CLI while a job
-// runs, see `phylogQueue.server.ts`/`crates/cli/src/phylog.rs`) costs
-// nothing and isn't billed, so it shouldn't share this budget. A single
-// multi-minute run could otherwise exhaust an hourly quota sized for ~20
-// real invocations purely from its own polling.
-const aiLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  limit: 20,
-  ...rateLimitHeaders,
-  message: { error: "PhyLog run limit reached for this hour. Please try again later." },
-});
-app.use(
-  [
-    "/api/phylog/run",
-    "/api/phylog/pre-capture",
-    "/api/phylog/capture",
-    "/api/phylog/post-capture",
-    "/api/phylog/reset",
-  ],
-  aiLimiter,
-);
 
 // Uploads: each call costs S3 storage/transfer.
 const uploadLimiter = rateLimit({
@@ -187,32 +156,6 @@ httpServer.listen(3000, () => {
       runTrashCleanup();
       setInterval(runTrashCleanup, 24 * 60 * 60 * 1000);
     }, 37_000);
-
-    // ── PhyLog usage-events cleanup ─────────────────────────────────────
-    // Prunes raw phylogMetrics.server.ts usage events past their retention
-    // window — the durable daily rollup those events already incremented
-    // is untouched, so this only trims short-lived detail, never the usage
-    // trends /fruits/maker/phylog reads. Same CRON_SECRET, staggered a
-    // little from the other daily jobs.
-    const runPhylogUsageCleanup = async () => {
-      try {
-        const res = await fetch(
-          "http://localhost:3000/api/phylog/usage-cleanup",
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${cronSecret}` },
-          },
-        );
-        const data = await res.json();
-        console.log("[cron] phylog/usage-cleanup:", data);
-      } catch (err) {
-        console.error("[cron] phylog/usage-cleanup failed:", err);
-      }
-    };
-    setTimeout(() => {
-      runPhylogUsageCleanup();
-      setInterval(runPhylogUsageCleanup, 24 * 60 * 60 * 1000);
-    }, 44_000);
 
     // ── Daily-log sort ────────────────────────────────────────────────────
     // Sorts every human's closed, not-yet-sorted daily logs (mentions →

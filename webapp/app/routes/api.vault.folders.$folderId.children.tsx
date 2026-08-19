@@ -28,7 +28,7 @@ import {
  * CLI/GUI app (`crates/core/src/vault.rs`'s `Client::children`) has no
  * such separate concept — for a vault PATH to resolve the same way
  * regardless of whether you own or were merely shared a project (e.g.
- * `nopal phylog capture --project "projects/nopal o."` working the same
+ * `nopal graphlog run --project "projects/nopal o."` working the same
  * for an Owner and a shared-in Crafter), it always passes this flag.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {

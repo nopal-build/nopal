@@ -33,14 +33,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const isRoot = isVaultRootFolder(folder);
 
-  // A `project-n01` folder (a project, or `personal`) is `writable:
-  // "system"` at the CONTENT level — only PhyLog may write files/folders
+  // A `project-n02` folder (a project, or `personal`) is `writable:
+  // "system"` at the CONTENT level — only GraphLog may write files/folders
   // INSIDE it (see `vaultFolderTypes.ts`). That restriction is NOT about
   // operating on the anchor folder itself, though: its own owner can still
   // rename/delete/move/share/publish their own project exactly as before—
   // so THIS folder's own object-level mutations only need the ROOT policy,
   // not the (necessarily stricter) folder-type content policy.
-  const isProjectN01Anchor = folder.is_folder_type_root && folder.folder_type === "project-n01";
+  const isProjectAnchor = folder.is_folder_type_root && folder.folder_type === "project-n02";
 
   // The project ANCHOR's own object-level lifecycle (rename/delete/publish
   // the WHOLE project) stays creator-only — same precedent
@@ -49,14 +49,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // Roles govern). Every ORDINARY folder inside a shared project extends
   // to an owner-tier collaborator (Owner/Crafter) exactly like real
   // ownership — see `canActAsProjectOwner`.
-  const ownershipOk = isProjectN01Anchor
+  const ownershipOk = isProjectAnchor
     ? folder.human_id === user._id
     : await canActAsProjectOwner(user._id, folder.human_id, folder._id);
   if (!ownershipOk) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const permitted = isProjectN01Anchor
+  const permitted = isProjectAnchor
     ? canWriteToRoot(folder.vault_root_key, user.role)
     : await canWriteToFolderId(folderId, user.role);
   if (!permitted) {

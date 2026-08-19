@@ -9,7 +9,6 @@ use std::time::Duration;
 mod auth;
 mod graphlog;
 mod image;
-mod phylog;
 mod record;
 mod release_log;
 mod skills;
@@ -87,12 +86,6 @@ enum Command {
     ReleaseLog {
         #[command(subcommand)]
         command: ReleaseLogCommand,
-    },
-    /// PhyLog's pre-capture -> capture -> post-capture pipeline for one
-    /// project (see the `phylog` skill). Always applies for real.
-    Phylog {
-        #[command(subcommand)]
-        command: PhylogCommand,
     },
     /// GraphLog's pipeline for one `project-n02` project (see the
     /// `graphlog` skill): daily-log-sync -> sync-knowledge -> sync-graph
@@ -420,25 +413,6 @@ enum GraphlogCommand {
         #[arg(long)]
         project: String,
     },
-    /// Converts an existing project-n01 space into project-n02.
-    /// DESTRUCTIVE (deletes everything except skills/ and syncs/, clears
-    /// README.md's body) — requires --yes. See the `graphlog` skill's
-    /// "Planned: migration" section.
-    MigrateToN02 {
-        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
-        /// Required unless --full is given.
-        #[arg(long)]
-        project: Option<String>,
-        /// Discover and convert EVERY project-n01 space you own (your own
-        /// `personal` root plus every owned project) in one command,
-        /// instead of one path at a time. Mutually exclusive with
-        /// --project.
-        #[arg(long)]
-        full: bool,
-        /// Required to actually run — this is destructive.
-        #[arg(long)]
-        yes: bool,
-    },
     /// Deterministic Card→project copy into `syncs/Daily Logs/` — no LLM
     /// call, always applies for real (see the `graphlog` skill).
     DailyLogSync {
@@ -522,112 +496,6 @@ enum GraphlogCommand {
         #[arg(long)]
         project: String,
         /// Required to actually run — this is destructive.
-        #[arg(long)]
-        yes: bool,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum PhylogCommand {
-    /// Runs all three stages, in order: pre-capture -> capture ->
-    /// post-capture. Always applies for real (no preview mode) — use
-    /// `phylog reset` + `--full` if you want to start over and inspect
-    /// the result before rebuilding.
-    Run {
-        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
-        #[arg(long)]
-        project: String,
-        /// Reset this project's PhyLog-managed content and reprocess
-        /// EVERY day from scratch (capture's full-rebuild mode).
-        #[arg(long)]
-        full: bool,
-        /// Only relevant with --full: earliest day to include (inclusive),
-        /// YYYY-MM-DD. Omit to start from this project's very first Card.
-        #[arg(long)]
-        since: Option<String>,
-        /// Only relevant with --full: latest day to include (inclusive),
-        /// YYYY-MM-DD. Defaults to today.
-        #[arg(long)]
-        until: Option<String>,
-    },
-    /// Stage 1: stages each Card's text/attachments into this project's
-    /// own daily-logs/ folder (always, regardless of skill), and
-    /// generates `*-summary.md` sidecars for daily-logs attachments and
-    /// syncs/ files per skills/PRE_CAPTURE.md's own instructions
-    /// (summaries are skipped by default; staging never is).
-    PreCapture {
-        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
-        #[arg(long)]
-        project: String,
-        /// Process just this day's Card attachments (plus, always, a
-        /// syncs sweep). Omit (with --file also omitted) to process every
-        /// day this project has a Card for.
-        #[arg(long)]
-        date: Option<String>,
-        /// Process just this one file (a vault path), ignoring --date.
-        #[arg(long)]
-        file: Option<String>,
-    },
-    /// Stage 2: files Card attachments into the project and organizes/
-    /// updates the README, per skills/CAPTURE.md's own instructions.
-    /// Always applies for real.
-    Capture {
-        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
-        #[arg(long)]
-        project: String,
-        /// Full rebuild: reset this project's managed content first, then
-        /// reprocess EVERY day from scratch. Default is incremental (only
-        /// days not yet applied).
-        #[arg(long)]
-        full: bool,
-        /// Only relevant with --full: earliest day to include (inclusive),
-        /// YYYY-MM-DD.
-        #[arg(long)]
-        since: Option<String>,
-        /// Only relevant with --full: latest day to include (inclusive),
-        /// YYYY-MM-DD. Defaults to today.
-        #[arg(long)]
-        until: Option<String>,
-    },
-    /// Stage 3: runs post-capture, per skills/POST_CAPTURE.md's own
-    /// instructions. Currently mostly a placeholder — see the `phylog`
-    /// skill.
-    PostCapture {
-        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
-        #[arg(long)]
-        project: String,
-    },
-    /// A DEDICATED, whole-README structure pass -- distinct from
-    /// `capture`'s own one-day-at-a-time loop. Given the entire current
-    /// README at once, explicitly asked to evaluate and fix the
-    /// project's overall structure. `capture` also runs this
-    /// automatically, mid-cycle, whenever a daily log explicitly asks
-    /// for a reorganization -- this is for triggering it directly.
-    Reorganize {
-        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
-        #[arg(long)]
-        project: String,
-    },
-    /// Deletes everything in this project EXCEPT its skills/, syncs/, and
-    /// daily-logs/ folders — the "start over" operation, always explicit
-    /// and never run implicitly. Follow with `capture --full` to rebuild
-    /// straight from what's already staged in daily-logs/.
-    Reset {
-        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
-        #[arg(long)]
-        project: String,
-        /// Required to actually delete anything — this is destructive.
-        #[arg(long)]
-        yes: bool,
-    },
-    /// The DEEPER reset: everything `reset` wipes, PLUS daily-logs/
-    /// itself (pre-capture's own staged output). Follow with `pre-capture`
-    /// (to restage daily-logs/) then `capture --full` (to rebuild).
-    ResetPreCapture {
-        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
-        #[arg(long)]
-        project: String,
-        /// Required to actually delete anything — this is destructive.
         #[arg(long)]
         yes: bool,
     },
@@ -864,14 +732,6 @@ fn main() {
         Command::Graphlog { command } => {
             let result = match command {
                 GraphlogCommand::Run { project } => graphlog::run(&project),
-                GraphlogCommand::MigrateToN02 { project, full, yes } => match (project, full) {
-                    (Some(_), true) => Err("Pass either --project or --full, not both.".into()),
-                    (Some(project), false) => graphlog::migrate_to_n02(&project, yes),
-                    (None, true) => graphlog::migrate_to_n02_full(yes),
-                    (None, false) => Err(
-                        "Pass --project <path>, or --full to convert everything you own.".into(),
-                    ),
-                },
                 GraphlogCommand::DailyLogSync { project, date } => {
                     graphlog::daily_log_sync(&project, date.as_deref())
                 }
@@ -909,37 +769,6 @@ fn main() {
         Command::ReleaseLog { command } => {
             let result = match command {
                 ReleaseLogCommand::Revert { entry_id } => release_log::revert(&entry_id),
-            };
-            if let Err(e) = result {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        Command::Phylog { command } => {
-            let result = match command {
-                PhylogCommand::Run {
-                    project,
-                    full,
-                    since,
-                    until,
-                } => phylog::run(&project, full, since.as_deref(), until.as_deref()),
-                PhylogCommand::PreCapture {
-                    project,
-                    date,
-                    file,
-                } => phylog::pre_capture(&project, date.as_deref(), file.as_deref()),
-                PhylogCommand::Capture {
-                    project,
-                    full,
-                    since,
-                    until,
-                } => phylog::capture(&project, full, since.as_deref(), until.as_deref()),
-                PhylogCommand::PostCapture { project } => phylog::post_capture(&project),
-                PhylogCommand::Reorganize { project } => phylog::reorganize(&project),
-                PhylogCommand::Reset { project, yes } => phylog::reset(&project, yes),
-                PhylogCommand::ResetPreCapture { project, yes } => {
-                    phylog::reset_pre_capture(&project, yes)
-                }
             };
             if let Err(e) = result {
                 eprintln!("{e}");

@@ -25,8 +25,7 @@ services:
       retries: 15
       start_period: 5s
 
-  # webapp/worker are both pnpm workspace members now (see the `phylog`
-  # skill's "Scaling & Process Isolation" section) — each bind-mounts the
+  # webapp/worker are both pnpm workspace members — each bind-mounts the
   # WHOLE repo root (not just its own directory), because pnpm needs to
   # see every workspace package to link `robustness-core`/`oxmarkdown-core`
   # correctly. Each gets its OWN complete set of node_modules volumes
@@ -75,12 +74,11 @@ services:
       redis:
         condition: service_healthy
 
-  # PhyLog's queue worker (see the `phylog` skill's "Scaling & Process
-  # Isolation" section and `packages/worker/worker.ts`) — its own
+  # GraphLog's queue worker (`packages/worker/worker.ts`) — its own
   # workspace package with its own, much smaller dependency graph (no
-  # React/MDXEditor/PDFKit/etc); NOT sharing webapp's node_modules.
-  # Restarts on crash so a bad job doesn't leave PhyLog permanently
-  # un-worked for the rest of a dev session.
+  # React/etc); NOT sharing webapp's node_modules. Restarts on crash so
+  # a bad job doesn't leave GraphLog permanently un-worked for the rest
+  # of a dev session.
   worker:
     image: node:22.23.2-slim
     working_dir: /app

@@ -192,10 +192,9 @@ export async function getPresignedViewUrl(
  * Reads an object's raw bytes directly through the S3 SDK, in-process —
  * unlike every other read path here (`getPresignedViewUrl`/
  * `getPresignedDownloadUrl`), which hand the browser a presigned URL to
- * fetch itself. Used by PhyLog's pre-capture stage
- * (`preCapture.server.ts`) to feed an image's actual bytes to a
- * vision-capable LLM call happening server-side, where a redirect makes
- * no sense.
+ * fetch itself. Used by `syncKnowledge.server.ts` to feed an image's
+ * actual bytes to a vision-capable LLM call happening server-side, where
+ * a redirect makes no sense.
  */
 export async function downloadFileBytes(s3Key: string): Promise<Buffer> {
   const client = createS3Client();

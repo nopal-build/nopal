@@ -1,11 +1,11 @@
 /**
- * `project-n02` — GraphLog's successor to `project-n01` (see the
- * `graphlog` skill for the full pipeline design, and `vaultFolderTypes.ts`'s
- * "Container types" doc). Mirrors `projectN01.server.ts`'s own shape
- * closely on purpose — same container/space-type architecture, same
- * seed-at-creation-and-lazily-backfill convention — just seeding GraphLog's
- * three skill files instead of PhyLog's, and a `Graph` space folder instead
- * of a `daily-logs` one.
+ * `project-n02` — GraphLog's own container type (see the `graphlog` skill
+ * for the full pipeline design, and `vaultFolderTypes.ts`'s "Container
+ * types" doc). PhyLog/`project-n01` (this type's predecessor) has been
+ * fully retired — `createVaultFolder` now tags every brand new project
+ * (and `personal`) `project-n02` directly, and every retrofit path
+ * (`ensureVaultRootFolders`/`getProjectFolders` in `vault.server.ts`)
+ * converges on it too.
  *
  * This file owns:
  *
@@ -15,14 +15,9 @@
  *     and the seeding logic itself (`ensureProjectN02`).
  *   - The `Graph` space's own find/ensure helpers (`ensureProjectGraphFolder`)
  *     — `sync-graph`'s output location, lazily created the first time
- *     there's an actual `graph-log-*.md` file to write, same convention
- *     `project-n01`'s own `daily-logs` folder uses.
- *
- * Deliberately NOT wired into `createVaultFolder`'s "every new project"
- * default yet, and deliberately does NOT retag an existing `project-n01`
- * folder — that's the explicit migration step (`nopal project
- * migrate-to-n02`, not yet built — see the `graphlog` skill's phased plan),
- * never an automatic side effect of calling anything in this file.
+ *     there's an actual `graph-log-*.md` file to write (same "create on
+ *     first real write" convention `skills` doesn't need, since that one's
+ *     seeded up front instead).
  */
 
 import {
@@ -57,13 +52,10 @@ async function ensureSkillFile(
 }
 
 /**
- * The actual retag+seed mechanics, with NO opinion on whether `folder` was
- * previously a `project-n01` anchor — split out from `ensureProjectN02` so
- * `migrateToN02.server.ts` can call this directly (explicitly bypassing
- * `ensureProjectN02`'s own n01-refusal guard, since performing exactly
- * that retag IS what migration means) without duplicating the seeding
- * logic a second time. Idempotent either way — safe to call on a folder
- * that's already fully project-n02-shaped.
+ * The actual retag+seed mechanics, split out from `ensureProjectN02` as
+ * its own function for callers that want the mechanics directly.
+ * Idempotent — safe to call on a folder that's already fully
+ * project-n02-shaped.
  */
 export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFolder> {
   let current = folder;
@@ -77,12 +69,9 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
   }
 
   const { folders } = await listFolderChildren(current.human_id, current._id);
-  // Same deterministic-pick + deterministic-id fix as
-  // `projectN01.server.ts`'s `ensureProjectN01` — see its own comment for
-  // the real, confirmed duplicate-"Skills"-folder bug this closes. The id
-  // formula is IDENTICAL to `ensureProjectN01`'s (same `humanId`/`"Skills"`/
-  // folder id) on purpose: whichever of n01/n02 seeding ever runs against
-  // this project, both converge on the exact same Skills folder row.
+  // Deterministic-pick + deterministic-id, to close a real, confirmed
+  // check-then-create race that once produced duplicate "Skills" folders
+  // on several real projects (see the `graphlog` skill's own writeup).
   let skillsFolder: VaultFolder | undefined = folders
     .filter((f) => f.is_folder_type_root && f.folder_type === "skills")
     .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
@@ -99,8 +88,7 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
     // Seeds with the CURRENT effective defaults (an admin's override, if
     // set, else the hardcoded built-in) -- not a stale hardcoded string,
     // so a change made on /fruits/maker/graphlog/defaults applies to
-    // every project created from that point on, same as PhyLog's own
-    // `ensureProjectN01` already does.
+    // every project created from that point on.
     const effective = await getAllEffectiveGraphLogDefaultSkills();
     await Promise.all([
       ensureSkillFile(current.human_id, skillsFolder._id, "KNOWLEDGE.md", effective.knowledge.content),
@@ -125,43 +113,25 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
 
 /**
  * Idempotently ensures `folder` (a project, or the `personal` root) is
- * tagged `project-n02` and has a `skills` folder seeded with the three
+ * tagged `project-n02` and has a `skills` folder seeded with the four
  * default GraphLog skill files — safe to call on every access (a no-op
- * once everything already exists). Refuses to touch a folder that's
- * already a `project-n01` anchor — retagging that is the explicit
- * migration step (see `migrateToN02.server.ts`), never an implicit side
- * effect of this function. Returns the up-to-date folder record.
+ * once everything already exists). Returns the up-to-date folder record.
  */
 export async function ensureProjectN02(folder: VaultFolder): Promise<VaultFolder> {
-  if (folder.folder_type === "project-n01" && folder.is_folder_type_root) {
-    throw new Error(
-      "This is a project-n01 space — migrate it to project-n02 explicitly before calling ensureProjectN02",
-    );
-  }
   return applyProjectN02Shape(folder);
 }
 
 /**
  * Resolves `folderId`, verifies it's actually a `project-n02` folder (a
  * project, or `personal`), and retrofits it (stamping the type + seeding
- * default skills) if it predates this type — but only ever for a folder
- * that ISN'T already a `project-n01` anchor (see `ensureProjectN02`'s own
- * doc). This is the chokepoint every GraphLog CLI/API entry point should
- * run a `--project` path through, mirroring `projectN01.server.ts`'s
- * `resolveProjectN01`.
+ * default skills) if it predates this type. This is the chokepoint every
+ * GraphLog CLI/API entry point should run a `--project` path through.
  */
 export async function resolveProjectN02(
   folderId: string,
 ): Promise<{ ok: true; folder: VaultFolder } | { ok: false; error: string }> {
   const folder = await getFolderById(folderId);
   if (!folder) return { ok: false, error: "Folder not found" };
-
-  if (folder.folder_type === "project-n01" && folder.is_folder_type_root) {
-    return {
-      ok: false,
-      error: "This is a project-n01 space — migrate it to project-n02 first",
-    };
-  }
 
   const isPersonalRoot = !folder.parent_folder_id && folder.vault_root_key === "personal";
   let isProjectFolder = false;
@@ -201,9 +171,8 @@ export async function findProjectGraphFolder(projectFolder: VaultFolder): Promis
 
 /** Idempotently ensures the project's `Graph` space folder exists — unlike
  * `skills`, NOT auto-seeded at project creation; `sync-graph` calls this
- * lazily, the first time it actually has a `graph-log-*.md` file to write
- * (same convention `project-n01`'s own `ensureProjectDailyLogsFolder`
- * uses). */
+ * lazily, the first time it actually has a `graph-log-*.md` file to
+ * write. */
 export async function ensureProjectGraphFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
   const existing = await findProjectGraphFolder(projectFolder);
   if (existing) return existing;
@@ -223,10 +192,9 @@ export async function ensureProjectGraphFolder(projectFolder: VaultFolder): Prom
   return created;
 }
 
-// ─── Skill files (read by every GraphLog stage) ─────────────────────
-// Deliberately DUPLICATED from `projectN01.server.ts` (same names, same
-// logic) rather than imported — kept fully independent so retiring PhyLog
-// later (see the `graphlog` skill) never has to touch GraphLog code. Same
+// ─── Skill files (read by every GraphLog stage) ───────────────────────
+// Kept independent (not shared with any other pipeline) — small, self-
+// contained duplication over a cross-module dependency. Same
 // reasoning `graphLogDefaults.server.ts` already gives for duplicating
 // `SKIP_MARKER`.
 
