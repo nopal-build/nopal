@@ -136,6 +136,7 @@ import {
 } from "./graphNodeIndex.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
+import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
 
 const GRAPH_STRUCTURE_FILE_NAME = "graph-structure.md";
@@ -513,6 +514,8 @@ export type GraphStructureResult =
 export interface RunGraphStructureOptions {
   provider?: LlmProvider;
   log?: (line: string) => void;
+  /** Timeline recorder for this run — see `graphLogPerf.server.ts`. */
+  perf?: GraphLogPerfRecorder;
 }
 
 /**
@@ -531,6 +534,7 @@ export async function runGraphStructure(
   opts: RunGraphStructureOptions = {},
 ): Promise<GraphStructureResult> {
   const log = opts.log ?? (() => {});
+  const perf = opts.perf ?? noopGraphLogRunRecorder;
 
   const skill = await getProjectStageSkill(projectFolder, "GRAPH_STRUCTURE.md");
   if (isSkipInstruction(skill)) {
@@ -663,6 +667,7 @@ export async function runGraphStructure(
         executors,
       );
 
+      const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
@@ -670,9 +675,17 @@ export async function runGraphStructure(
         kind: "graph-structure",
         model: model ?? undefined,
         usage,
-        durationMs: Date.now() - callStart,
+        durationMs,
         outcome: truncated ? "error" : "success",
         errorKind: truncated ? "incomplete" : undefined,
+      });
+      await perf.event({
+        process: "graph-structure",
+        type: "llm",
+        name: "batch",
+        params: { batchIndex, batchCount: batches.length, nodeCount: batchNodes.length },
+        durationMs,
+        outcome: truncated ? "error" : "ok",
       });
 
       if (truncated) {
@@ -720,14 +733,23 @@ export async function runGraphStructure(
     return { ok: true, skipped: false, changed: true };
   } catch (err) {
     log(`graph-structure: couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
+    const durationMs = Date.now() - runCallStart;
     await recordGraphLogUsage({
       humanId: actingHumanId,
       projectFolderId: projectFolder._id,
       stage: "graph-structure",
       kind: "graph-structure",
-      durationMs: Date.now() - runCallStart,
+      durationMs,
       outcome: "error",
       errorKind: classifyGraphLogError(err),
+    });
+    await perf.event({
+      process: "graph-structure",
+      type: "llm",
+      name: "batch",
+      params: null,
+      durationMs,
+      outcome: "error",
     });
     return { ok: true, skipped: false, changed: anyCommitted() };
   }

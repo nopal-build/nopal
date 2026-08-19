@@ -712,13 +712,45 @@ SAME key formula in both files: whichever of n01/n02 seeding ever runs
 against a given project, both converge on the identical Skills folder
 row, never two.
 
-**Known, NOT yet checked**: the same unprotected check-then-create shape
-likely also exists in `ensureProjectGraphFolder`'s `Graph` folder
-creation and `dailyLogSync.server.ts`'s sync-folder creation — not
-confirmed broken (no evidence found), not fixed preemptively here since
-that would be guessing rather than confirming a real problem. Worth an
-explicit audit pass if either ever shows the same duplicate-folder
-symptom.
+### A THIRD, SEPARATE real bug: the same check-then-create race in `dailyLogSync.server.ts`/`resolveDailyLogsFolder`/`ensureProjectGraphFolder`, producing a duplicate "Daily Logs" folder in production
+
+**The audit this doc's own "Known, NOT yet checked" note called for,
+triggered by a real production report**: cards silently failing to load
+after deploying and running the migration, with two "Daily Log" folders
+visible — the exact "a file created via one duplicate becomes
+permanently invisible to a request that resolves to a different one"
+symptom `scripts/migrate-merge-duplicate-vault-folders.ts`'s own header
+already describes for the ORIGINAL version of this race
+(`getOrCreateVaultFolder`/`ensureVaultRootFolders`, fixed earlier). This
+time it was GraphLog-era code added later that never got the same
+protection: `dailyLogSync.server.ts`'s `ensureProjectSyncsFolder`/
+`ensureDailyLogsSyncFolder` (a project's own `syncs/Daily Logs`),
+`vault.server.ts`'s `resolveDailyLogsFolder` (personal's own
+`syncs/Syncs`-then-`Daily Logs` destination — the one that actually holds
+a human's real Daily Log Cards, which is why this manifested as cards
+not loading rather than just a cosmetic duplicate), and
+`projectN02.server.ts`'s `ensureProjectGraphFolder` (the `Graph` space) —
+all three did a plain "list children, `.find()` by name, create if
+missing" check with no atomicity, same shape `ensureProjectN01`'s Skills-
+folder bug already had. A migration/`graphlog run` invoked more than
+once (or two overlapping requests hitting either path around the same
+moment) could race both calls past the "missing" check and each create
+its own folder.
+
+**Fixed the same way as the Skills-folder bug**: every create call above
+now passes a deterministic `id: systemVaultFolderKey(humanId, name,
+parentFolderId)`, so a concurrent create converges on one row instead of
+two; every lookup that picks among possible existing matches now sorts
+oldest-first first, same belt-and-suspenders convention
+`getOrCreateVaultFolder` already established. Not itself a data
+migration — existing duplicate rows already in a production database
+need `scripts/migrate-merge-duplicate-vault-folders.ts` (generic,
+idempotent, walks every human's folder tree merging same-named siblings
+under the same parent, oldest survives) run against that database:
+`--dry-run` first to see what it would merge, then for real. This
+script already existed for the original root-cause race and needed no
+changes to also repair this one — it operates on whatever duplicate rows
+it finds, regardless of which code path created them.
 
 **Not yet done**: running the (now-safe) migration across every REAL
 existing project + every human's `personal` space, repairing
@@ -766,6 +798,71 @@ tables/stage set.
   ~$0.33 estimated) — `getGraphLogUsageSummary(30)` correctly aggregated
   them end to end (byStage/byProject/byHuman/byDate all populated
   correctly) on the first real call, not just against synthetic data.
+
+## Performance tracing (per-run timelines)
+
+Separate from `graphLogMetrics.server.ts`'s own token/cost usage
+tracking: `graphLogPerf.server.ts` records a per-run TIMELINE of real,
+code-measured event durations — API calls, LLM calls, plain function
+calls — never a number the model itself reports (deliberately: this
+exists to see how long CODE takes, not to have the AI estimate its own
+timing). Two tables, `graphlog_runs` (one row per run: started/finished/
+ok/error) and `graphlog_run_events` (one row per timed event within a
+run: `process`/`type`/`name`/`params`/`duration_ms`/`started_at`/
+`outcome`, ordered by actual start time). A "run" reuses the owning
+BullMQ job's own id directly as its record id (`worker.ts`'s
+`processGraphLogJob` calls `startGraphLogRun`/`finishGraphLogRun` around
+every GraphLog job, of every job name) — one real queued job always means
+exactly one timeline, no separate id scheme to keep in sync.
+
+- **`GraphLogPerfRecorder`** (`event`/`time`) is the interface every
+  stage function's own `opts.perf` is typed as — a real recorder when
+  invoked from the worker, or `noopGraphLogRunRecorder` when a stage is
+  exercised directly with no run/job context (a script, a test). `time()`
+  wraps an async call, measuring it wall-clock and recording the event
+  automatically (including on a thrown error, before rethrowing).
+- **`process` values today**: `"daily-log-sync"`, `"sync-knowledge"`,
+  `"sync-graph"`, `"graph-structure"`, `"graph-project-view"`, plus the
+  deterministic jobs' own names (`"migrate-to-n02"`, `"reset"`,
+  `"reset-project-view"`, `"reset-graph"`, `"reset-knowledge"`).
+  `runGraphLogPipeline` (the `"run"` job) shares ONE recorder across all
+  five stages, tagging each stage's own events correctly — a full `nopal
+  graphlog run` produces one run whose timeline spans all five stages,
+  not five separate untagged runs.
+- **`type` values**: `"llm"` (a real Anthropic call — `sync-knowledge`'s
+  `describePhoto`/`complete`, `sync-graph`'s per-day tool loop,
+  `graph-structure`'s per-batch tool loop, `graph-project-view`'s readme
+  tool loop), `"api"` (an external call that isn't an LLM — today just
+  `sync-knowledge`'s `downloadFileBytes` S3 read), `"fn"` (a plain
+  function call — today each stage's own top-level wrapper, recorded by
+  `runGraphLogPipeline`/`worker.ts` around the whole stage call so a
+  skipped/fast stage still shows up as one bar), `"other"` (reserved,
+  unused today).
+- **Granularity is per-day/per-batch, not per-turn** — `sync-graph`
+  records one `llm` event per DAY (wrapping that day's whole bounded tool
+  loop, however many turns it took), `graph-structure` records one per
+  BATCH of new nodes, `graph-project-view` records one for the whole
+  readme tool loop — piggybacking on the exact spot each stage already
+  computes a `durationMs` for `recordGraphLogUsage`, rather than
+  instrumenting every individual turn/tool-call inside those loops.
+- **`/fruits/maker/graphlog/defaults`'s "Recent Runs" section** lists the
+  most recent runs (`listRecentGraphLogRuns`); each links to
+  **`/fruits/maker/graphlog/runs/$runId`** (`getGraphLogRun`), a full
+  timeline view — one row per event, ordered by actual start time (NOT
+  insertion order — a wrapper `fn` span is only written once it finishes,
+  which is AFTER everything nested inside it), with a right-aligned
+  duration bar (max 33% of the row's own width; the single longest event
+  in the run is the only one that ever fills that full 33%).
+- **Not yet wired to a cron route** — `pruneOldGraphLogRuns` (30-day
+  default retention) exists but has no `POST /api/graphlog/*-cleanup`
+  route calling it yet, same gap `pruneOldGraphLogUsageEvents` itself had
+  before its own Maker page existed.
+- **Verified directly**: a synthetic run (mixed `llm`/`api`/`fn` events,
+  one deliberately marked `outcome: "error"`) was seeded against the real
+  local dev SurrealDB and screenshotted on both new pages in light AND
+  dark mode — badges/bars reuse the SAME already-vetted hues `Badge`'s
+  own `accent`/`success`/`warning`/`neutral` variants use as backgrounds
+  (no bespoke contrast check needed), confirmed legible in both schemes.
 
 ## Local dev gotcha: the worker doesn't hot-reload
 
@@ -893,6 +990,28 @@ skill was born from:
      node's worth of text, so the original truncation mode is no longer
      reachable in ordinary use. `MAX_TURNS = 30` per day (generous for a
      realistic day's node count).
+   - **A REAL, CONFIRMED FOLLOW-ON BUG, found against a real production
+     run of this exact redesign (`nopal o.`, a busy day, not
+     theoretical)**: "one tool call per node" was only ever a PROMPT-level
+     assumption, never an enforced one -- Anthropic is free to return
+     several `tool_use` blocks in a single response, and on a busy day
+     the model batched multiple `add_node` calls into one turn, growing
+     that turn's own output past the shared 8192-token ceiling anyway --
+     the exact truncation class the redesign above was meant to
+     eliminate, just recreated one level up (per-turn instead of
+     per-day; confirmed live: "2026-08-14's output was cut off by the
+     model's own output limit" on an otherwise-healthy multi-day catch-up
+     run). Fixed the same way every other "never trust the model with
+     something code can just enforce" bug in this file already was:
+     `runSyncGraphDayLoop` now only EXECUTES the first `add_node` call in
+     a given turn; any extra call in that same turn is rejected (told to
+     retry on a later turn) rather than applied, so a turn's own
+     necessary output is now actually BOUNDED to one node, not just asked
+     to be. The system prompt and the tool's own description were also
+     reworded to ask for this directly -- belt and suspenders, since a
+     clearer prompt still reduces how often the reject-and-retry path
+     even needs to fire. Code-fixed, ready for the next deploy; not yet
+     re-run against the specific day that triggered this.
    - **Citations are now ATTACHED BY CODE, not copied by the model at
      all** — a step further than the original "pre-computed, hand it
      verbatim text to copy" design (which still left room for a long

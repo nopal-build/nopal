@@ -36,6 +36,24 @@
  * is now just one node's worth of text, not a whole day's, so the
  * original truncation mode is no longer reachable in ordinary use.
  *
+ * A REAL, CONFIRMED FOLLOW-ON BUG, found against a real production run of
+ * the redesign above (not theoretical): "one tool call per node" was only
+ * ever a PROMPT-level assumption, not an enforced one -- Anthropic is free
+ * to return several `tool_use` blocks in a single response, and on a busy
+ * day the model batched multiple `add_node` calls into one turn, growing
+ * that turn's own output past the shared 8192-token ceiling anyway -- the
+ * exact same truncation class the redesign above was meant to eliminate,
+ * just recreated one level up (per-turn instead of per-day). Fixed the
+ * same way every other "never trust the model with something code can
+ * just enforce" bug in this file already was: `runSyncGraphDayLoop` now
+ * only EXECUTES the first `add_node` call in a given turn; any extra call
+ * in that same turn is rejected (told to retry on a later turn) rather
+ * than applied, so a turn's own necessary output is now actually bounded
+ * to one node, not just asked to be. The system prompt and the tool's own
+ * description were also reworded to ask for this directly -- belt and
+ * suspenders, since a clearer prompt still reduces how often the reject-
+ * and-retry path even needs to fire.
+ *
  * Each node gets a plain, predictable `### Node <N>` heading (an
  * incrementing counter per day's file, never an LLM-generated title —
  * see `GRAPH.md`) and a verbose `:ref{...}` citation
@@ -108,6 +126,7 @@ import { parseSyncedCardFileName } from "./dailyLogSync.server";
 import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
+import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
 
 const GRAPH_LOG_PREFIX = "graph-log-";
@@ -257,7 +276,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: "add_node",
     description:
-      'Add one citable node to today\'s graph-log file. `sourceIndex` must be one of today\'s numbered sources (shown as "Source 0:", "Source 1:", etc) -- its citation is attached automatically from real data, never write a :ref{...} yourself. `blocks` is the verbatim words, broken into one or more paragraph/list blocks in order -- code applies ==...== highlighting itself (per-item for a list, so a marker never ends up inside the highlight, and per-paragraph, so a highlight never spans a blank line and breaks) -- never include == yourself. `sameDayLinks`/`backwardLinks` are optional -- at most 3 links total are kept (any more, or any id you weren\'t actually given as a candidate, are dropped and reported back to you), so only send the ones that matter most.',
+      'Add one citable node to today\'s graph-log file. Call this AT MOST ONCE per turn, then stop and wait for the result before calling it again for the next node -- if you call it more than once in the same turn, only the first call is processed and the rest are rejected (you will need to call them again on a later turn). `sourceIndex` must be one of today\'s numbered sources (shown as "Source 0:", "Source 1:", etc) -- its citation is attached automatically from real data, never write a :ref{...} yourself. `blocks` is the verbatim words, broken into one or more paragraph/list blocks in order -- code applies ==...== highlighting itself (per-item for a list, so a marker never ends up inside the highlight, and per-paragraph, so a highlight never spans a blank line and breaks) -- never include == yourself. `sameDayLinks`/`backwardLinks` are optional -- at most 3 links total are kept (any more, or any id you weren\'t actually given as a candidate, are dropped and reported back to you), so only send the ones that matter most.',
     inputSchema: {
       type: "object",
       properties: {
@@ -406,8 +425,11 @@ function createSyncGraphExecutors(input: {
 
 /** Generous relative to a single day's realistic node count — a very
  * prolific day might have 10-20 nodes; 30 turns leaves real headroom
- * without being unbounded. Each turn's own output is small (one node),
- * so a higher ceiling here costs more calls, not more truncation risk. */
+ * without being unbounded. Each turn's own output is small (one node) —
+ * see `runSyncGraphDayLoop`'s own "at most one add_node executed per
+ * turn" enforcement below for why that's now actually GUARANTEED, not
+ * just assumed — so a higher ceiling here costs more calls, not more
+ * truncation risk. */
 const MAX_TURNS = 30;
 
 async function runSyncGraphDayLoop(
@@ -443,9 +465,34 @@ async function runSyncGraphDayLoop(
 
     messages.push({ role: "assistant", content: response.text ?? "", toolCalls: response.toolCalls });
     if (response.toolCalls.length === 0) break;
+    // A REAL, CONFIRMED BUG (found against a real production run, not
+    // theoretical): this loop's own module doc has always claimed "each
+    // turn's own output is small (one node)", but nothing here actually
+    // enforced that -- Anthropic is free to return MULTIPLE `tool_use`
+    // blocks in a single response, and on a busy day the model batched
+    // several `add_node` calls into one turn, which grew that turn's own
+    // generated output past the shared 8192-token ceiling -- the exact
+    // truncation class this stage's whole redesign was meant to make
+    // unreachable, just recreated one level up (per-turn instead of
+    // per-day). The system prompt/tool description now also ASK for one
+    // call per turn, but a prompt alone is never trusted here (same
+    // reasoning every other "never trust the model with something code
+    // can just enforce" fix in this file already follows) -- only the
+    // FIRST tool call in a turn is actually executed; every extra call in
+    // that SAME turn is rejected without being applied, so the model
+    // simply re-issues it on a later turn instead of it silently
+    // succeeding twice or being dropped.
+    let executedThisTurn = false;
     for (const call of response.toolCalls) {
-      const executor = executors[call.name];
-      const resultText = executor ? await executor(call.input) : `Unknown tool: ${call.name}`;
+      let resultText: string;
+      if (executedThisTurn) {
+        resultText =
+          "Not processed -- only the FIRST add_node call in a turn is executed, to keep each turn's own output small. Call add_node again on your next turn for this node.";
+      } else {
+        const executor = executors[call.name];
+        resultText = executor ? await executor(call.input) : `Unknown tool: ${call.name}`;
+        executedThisTurn = true;
+      }
       messages.push({ role: "tool_result", toolCallId: call.id, content: resultText });
     }
     if (response.stopReason !== "tool_use") break;
@@ -459,7 +506,7 @@ function buildSystemPrompt(skillContent: string, graphStructureBody: string | nu
   const structureSection = graphStructureBody
     ? `The graph's existing nodes, organized and glossed (from graph-structure.md, current as of its own last run — every "<date> Node <N>" you see here is a valid backwardLinks id, as "date#N"):\n\n${graphStructureBody}`
     : "No graph-structure.md exists yet for this project — see the plain candidate list you're given per day instead.";
-  return `You are GraphLog's sync-graph step, extracting citable nodes from one day's synced content at a time, per a project owner's own instructions. Call add_node once per node worth capturing today, citing it by its sourceIndex — never write a :ref{...} yourself, it's attached automatically from real data. Only use sameDayLinks/backwardLinks ids you were actually shown as candidates; an invented one is silently dropped and reported back to you. Stop calling add_node once you've captured everything worth capturing today — if nothing from today is worth capturing at all, make no tool calls.\n\n${skillContent}\n\n---\n\n${structureSection}`;
+  return `You are GraphLog's sync-graph step, extracting citable nodes from one day's synced content at a time, per a project owner's own instructions. Call add_node once per node worth capturing today, citing it by its sourceIndex — never write a :ref{...} yourself, it's attached automatically from real data. Call add_node ONE TIME PER TURN, then stop and wait for its result before calling it again for the next node — never call add_node more than once in the same response, even on a busy day with many nodes to add; only your first call each turn is actually processed, any extra calls in the same turn are rejected and must be retried on a later turn. Only use sameDayLinks/backwardLinks ids you were actually shown as candidates; an invented one is silently dropped and reported back to you. Stop calling add_node once you've captured everything worth capturing today — if nothing from today is worth capturing at all, make no tool calls.\n\n${skillContent}\n\n---\n\n${structureSection}`;
 }
 
 function buildUserPrompt(input: { date: string; sourceBlocks: string[]; liveCandidates: string[] }): string {
@@ -500,6 +547,8 @@ export type SyncGraphResult =
 export interface RunSyncGraphOptions {
   provider?: LlmProvider;
   log?: (line: string) => void;
+  /** Timeline recorder for this run — see `graphLogPerf.server.ts`. */
+  perf?: GraphLogPerfRecorder;
 }
 
 /**
@@ -514,6 +563,7 @@ export async function runSyncGraph(
   opts: RunSyncGraphOptions = {},
 ): Promise<SyncGraphResult> {
   const log = opts.log ?? (() => {});
+  const perf = opts.perf ?? noopGraphLogRunRecorder;
 
   const skill = await getProjectStageSkill(projectFolder, "GRAPH.md");
   if (isSkipInstruction(skill)) {
@@ -698,6 +748,7 @@ export async function runSyncGraph(
 
       if (truncated) {
         log(`sync-graph: ${date}'s output was cut off by the model's own output limit — skipped, will retry next run.`);
+        const durationMs = Date.now() - callStart;
         await recordGraphLogUsage({
           humanId: actingHumanId,
           projectFolderId: projectFolder._id,
@@ -705,14 +756,23 @@ export async function runSyncGraph(
           kind: "graph-extract",
           model: model ?? undefined,
           usage,
-          durationMs: Date.now() - callStart,
+          durationMs,
           outcome: "error",
           errorKind: "incomplete",
+        });
+        await perf.event({
+          process: "sync-graph",
+          type: "llm",
+          name: "day",
+          params: { date },
+          durationMs,
+          outcome: "error",
         });
         continue;
       }
       if (hitMaxTurns) {
         log(`sync-graph: ${date} hit its turn limit before finishing — skipped, will retry next run.`);
+        const durationMs = Date.now() - callStart;
         await recordGraphLogUsage({
           humanId: actingHumanId,
           projectFolderId: projectFolder._id,
@@ -720,13 +780,22 @@ export async function runSyncGraph(
           kind: "graph-extract",
           model: model ?? undefined,
           usage,
-          durationMs: Date.now() - callStart,
+          durationMs,
           outcome: "error",
           errorKind: "incomplete",
+        });
+        await perf.event({
+          process: "sync-graph",
+          type: "llm",
+          name: "day",
+          params: { date },
+          durationMs,
+          outcome: "error",
         });
         continue;
       }
 
+      const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
@@ -734,8 +803,15 @@ export async function runSyncGraph(
         kind: "graph-extract",
         model: model ?? undefined,
         usage,
-        durationMs: Date.now() - callStart,
+        durationMs,
         outcome: "success",
+      });
+      await perf.event({
+        process: "sync-graph",
+        type: "llm",
+        name: "day",
+        params: { date },
+        durationMs,
       });
 
       const nodeBlocks = getNodeBlocks();
@@ -762,14 +838,23 @@ export async function runSyncGraph(
       days.push({ date, changed: true, empty: false });
     } catch (err) {
       log(`sync-graph: ${date} couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
+      const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
         stage: "sync-graph",
         kind: "graph-extract",
-        durationMs: Date.now() - callStart,
+        durationMs,
         outcome: "error",
         errorKind: classifyGraphLogError(err),
+      });
+      await perf.event({
+        process: "sync-graph",
+        type: "llm",
+        name: "day",
+        params: { date },
+        durationMs,
+        outcome: "error",
       });
     }
   }

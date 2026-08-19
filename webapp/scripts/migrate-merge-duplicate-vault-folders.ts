@@ -129,12 +129,15 @@ async function mergeDuplicateSiblings(humanId: string, parentFolderId: string | 
 }
 
 async function main() {
-  const db = await getDb();
-  if (!db) {
-    console.error("Could not connect to SurrealDB — aborting.");
-    process.exit(1);
-  }
-  await db.close();
+  // Just proves connectivity — `getDb()` caches a SINGLE connection for the
+  // whole process (see `db.server.ts`'s own doc) and every query below
+  // reuses this exact same connection, so it must NOT be closed here. An
+  // earlier version of this script called `db.close()` right after this
+  // check, which killed the one cached connection every other query in
+  // this script goes on to (silently) reuse — `generic.server.ts`'s
+  // `query()` swallows the resulting error rather than throwing, so this
+  // failed silently as "Checking 0 human(s)" instead of a visible crash.
+  await getDb();
 
   if (DRY_RUN) console.log("DRY RUN — no changes will be written.\n");
 

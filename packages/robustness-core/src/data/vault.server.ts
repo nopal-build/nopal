@@ -1119,15 +1119,21 @@ export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFold
   if (!personal) throw new Error(`No personal root found for human ${humanId}`);
 
   const { folders: personalChildren } = await listFolderChildren(humanId, personal._id);
-  let syncsFolder = personalChildren.find(
-    (f) => f.is_folder_type_root && f.folder_type === "syncs",
-  );
+  // Oldest-first + a deterministic `id` on create — the exact same
+  // check-then-create race `ensureProjectN01`'s Skills-folder bug had (see
+  // the `graphlog` skill), confirmed to have produced real duplicate
+  // "Daily Logs" folders here too (this function's own destination-folder
+  // create below had the identical gap).
+  let syncsFolder: VaultFolder | undefined = personalChildren
+    .filter((f) => f.is_folder_type_root && f.folder_type === "syncs")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
   if (!syncsFolder) {
     syncsFolder = await createVaultFolder({
       human_id: humanId,
       name: "Syncs",
       parent_folder_id: personal._id,
       folder_type: "syncs",
+      id: systemVaultFolderKey(humanId, "Syncs", personal._id),
     });
   }
   if (!syncsFolder) throw new Error("Failed to create personal's syncs folder");
@@ -1142,7 +1148,14 @@ export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFold
   const legacyRoot = legacyResult?.[0]?.[0] ? formatRecord(legacyResult[0][0]) : null;
 
   const { folders: syncsChildren } = await listFolderChildren(humanId, syncsFolder._id);
-  const existingDestination = syncsChildren.find((f) => f.name === PERSONAL_DAILY_LOGS_FOLDER_NAME);
+  // Oldest-first for the same reason as `syncsFolder` above — if a past
+  // race already left more than one "Daily Logs" folder here, always
+  // converge on the same (oldest) one rather than a non-deterministic
+  // pick; run `scripts/migrate-merge-duplicate-vault-folders.ts` to fold
+  // any leftover duplicates' real content back together.
+  const existingDestination = syncsChildren
+    .filter((f) => f.name === PERSONAL_DAILY_LOGS_FOLDER_NAME)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
 
   if (legacyRoot) {
     if (existingDestination) {
@@ -1169,6 +1182,7 @@ export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFold
     human_id: humanId,
     name: PERSONAL_DAILY_LOGS_FOLDER_NAME,
     parent_folder_id: syncsFolder._id,
+    id: systemVaultFolderKey(humanId, PERSONAL_DAILY_LOGS_FOLDER_NAME, syncsFolder._id),
   });
   if (!created) throw new Error("Failed to create personal's syncs/Daily Logs folder");
   return created;

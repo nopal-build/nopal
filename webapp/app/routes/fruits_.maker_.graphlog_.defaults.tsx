@@ -279,6 +279,7 @@ export default function FruitsMakerGraphLogDefaults() {
             data -- it's not reset by redeploying `webapp`/`worker`.
           </p>
         </div>
+
         <div className="flex flex-col gap-4">
           <DefaultSkillEditor
             stage="knowledge"

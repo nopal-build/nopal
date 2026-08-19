@@ -44,6 +44,11 @@ import {
   resetProjectAll,
 } from "robustness-core/data/graphLogReset.server";
 import { getFolderById, type VaultFolder } from "robustness-core/data/vault.server";
+import {
+  startGraphLogRun,
+  finishGraphLogRun,
+  type GraphLogPerfRecorder,
+} from "robustness-core/data/graphLogPerf.server";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 // Sequential per worker process on purpose — PhyLog's own concurrency
@@ -170,11 +175,13 @@ async function runGraphLogJob(
   job: Job<GraphLogJobData, unknown, GraphLogJobName>,
   projectFolder: VaultFolder,
   onProgress: (line: string) => void,
+  perf: GraphLogPerfRecorder,
 ): Promise<unknown> {
   switch (job.name) {
     case "sync-knowledge": {
       const result = await runSyncKnowledge(projectFolder, job.data.actingHumanId, {
         log: onProgress,
+        perf,
       });
       if (!result.ok) throw new Error(result.error);
       return result;
@@ -182,6 +189,7 @@ async function runGraphLogJob(
     case "sync-graph": {
       const result = await runSyncGraph(projectFolder, job.data.actingHumanId, {
         log: onProgress,
+        perf,
       });
       if (!result.ok) throw new Error(result.error);
       return result;
@@ -189,6 +197,7 @@ async function runGraphLogJob(
     case "graph-structure": {
       const result = await runGraphStructure(projectFolder, job.data.actingHumanId, {
         log: onProgress,
+        perf,
       });
       if (!result.ok) throw new Error(result.error);
       return result;
@@ -196,6 +205,7 @@ async function runGraphLogJob(
     case "graph-project-view": {
       const result = await runGraphProjectView(projectFolder, job.data.actingHumanId, {
         log: onProgress,
+        perf,
       });
       if (!result.ok) throw new Error(result.error);
       return result;
@@ -204,28 +214,34 @@ async function runGraphLogJob(
       const result = await runGraphLogPipeline(
         job.data.actingHumanId,
         job.data.projectFolderId,
-        {},
+        { perf },
         onProgress,
       );
       if (!result.ok) throw new Error(result.error);
       return result;
     }
     case "migrate-to-n02": {
-      const result = await migrateProjectToN02(job.data.projectFolderId);
+      const result = await perf.time("migrate-to-n02", "fn", "migrateProjectToN02", null, () =>
+        migrateProjectToN02(job.data.projectFolderId),
+      );
       if (!result.ok) throw new Error(result.error);
       return result;
     }
     case "reset-project-view": {
-      return await resetProjectView(projectFolder);
+      return await perf.time("reset-project-view", "fn", "resetProjectView", null, () =>
+        resetProjectView(projectFolder),
+      );
     }
     case "reset-graph": {
-      return await resetGraph(projectFolder);
+      return await perf.time("reset-graph", "fn", "resetGraph", null, () => resetGraph(projectFolder));
     }
     case "reset-knowledge": {
-      return await resetKnowledge(projectFolder);
+      return await perf.time("reset-knowledge", "fn", "resetKnowledge", null, () =>
+        resetKnowledge(projectFolder),
+      );
     }
     case "reset": {
-      return await resetProjectAll(projectFolder);
+      return await perf.time("reset", "fn", "resetProjectAll", null, () => resetProjectAll(projectFolder));
     }
     default:
       throw new Error(`Unknown GraphLog job name: ${job.name}`);
@@ -237,14 +253,35 @@ async function processGraphLogJob(job: Job<GraphLogJobData, unknown, GraphLogJob
     job.log(line).catch((err) => console.error("Failed to write job log line:", err));
   };
 
-  const projectFolder = await getFolderById(job.data.projectFolderId);
-  if (!projectFolder) throw new Error("Project not found");
+  // The job's own BullMQ id doubles as this run's id (see
+  // `graphLogPerf.server.ts`'s own module doc) -- one real job always
+  // means exactly one timeline, never a separately-generated id to keep
+  // in sync with it.
+  const perf = await startGraphLogRun({
+    runId: job.id!,
+    humanId: job.data.actingHumanId,
+    projectFolderId: job.data.projectFolderId,
+    jobName: job.name,
+  });
 
-  const release = await acquireProjectGraphLogLock(job.data.projectFolderId, onProgress);
   try {
-    return await runGraphLogJob(job, projectFolder, onProgress);
-  } finally {
-    await release();
+    const projectFolder = await getFolderById(job.data.projectFolderId);
+    if (!projectFolder) throw new Error("Project not found");
+
+    const release = await acquireProjectGraphLogLock(job.data.projectFolderId, onProgress);
+    try {
+      const result = await runGraphLogJob(job, projectFolder, onProgress, perf);
+      await finishGraphLogRun(job.id!, { ok: true });
+      return result;
+    } finally {
+      await release();
+    }
+  } catch (err) {
+    await finishGraphLogRun(job.id!, {
+      ok: false,
+      error: err instanceof Error ? err.message : "Unknown error",
+    });
+    throw err;
   }
 }
 

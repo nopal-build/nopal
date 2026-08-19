@@ -188,7 +188,15 @@ export async function resolveProjectN02(
  * folder into existence just to look. */
 export async function findProjectGraphFolder(projectFolder: VaultFolder): Promise<VaultFolder | null> {
   const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
-  return folders.find((f) => f.is_folder_type_root && f.folder_type === "graph") ?? null;
+  // Oldest-first, same defensive convention as `applyProjectN02Shape`'s own
+  // Skills-folder pick — belt-and-suspenders against any duplicate a past
+  // race already left behind (see `ensureProjectGraphFolder`'s own comment
+  // for the actual fix).
+  return (
+    folders
+      .filter((f) => f.is_folder_type_root && f.folder_type === "graph")
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))[0] ?? null
+  );
 }
 
 /** Idempotently ensures the project's `Graph` space folder exists — unlike
@@ -199,11 +207,17 @@ export async function findProjectGraphFolder(projectFolder: VaultFolder): Promis
 export async function ensureProjectGraphFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
   const existing = await findProjectGraphFolder(projectFolder);
   if (existing) return existing;
+  // Same deterministic-id fix as `applyProjectN02Shape`'s own Skills-folder
+  // bug and `dailyLogSync.server.ts`'s syncs/Daily-Logs folders — this
+  // check-then-create had the exact same unprotected race (see the
+  // `graphlog` skill's "Known, NOT yet checked" note, now confirmed and
+  // closed here too).
   const created = await createVaultFolder({
     human_id: projectFolder.human_id,
     name: "Graph",
     parent_folder_id: projectFolder._id,
     folder_type: "graph",
+    id: systemVaultFolderKey(projectFolder.human_id, "Graph", projectFolder._id),
   });
   if (!created) throw new Error("Failed to create the project's Graph folder");
   return created;

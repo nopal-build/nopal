@@ -19,8 +19,11 @@ import {
   getGraphLogUsageSummary,
   type GraphLogStage,
 } from "robustness-core/data/graphLogMetrics.server";
+import { listRecentGraphLogRuns, type GraphLogRun } from "robustness-core/data/graphLogPerf.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+
+const RECENT_RUNS_LIMIT = 20;
 
 type MakerRangeDays = 7 | 30;
 
@@ -40,20 +43,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
   const usage = await getGraphLogUsageSummary(days);
 
-  const [projectFolders, humans] = await Promise.all([
-    Promise.all(usage.byProject.map((p) => getFolderById(p.projectFolderId))),
-    getHumansById(usage.byHuman.map((h) => h.humanId)),
+  const recentRuns = await listRecentGraphLogRuns(RECENT_RUNS_LIMIT);
+
+  const projectFolderIds = new Set([
+    ...usage.byProject.map((p) => p.projectFolderId),
+    ...recentRuns.map((r) => r.project_folder_id),
   ]);
+  const humanIds = new Set([
+    ...usage.byHuman.map((h) => h.humanId),
+    ...recentRuns.map((r) => r.human_id),
+  ]);
+  const [projectFolders, humans] = await Promise.all([
+    Promise.all([...projectFolderIds].map((id) => getFolderById(id))),
+    getHumansById([...humanIds]),
+  ]);
+  const projectFolderIdList = [...projectFolderIds];
   const projectNameById: Record<string, string> = {};
   projectFolders.forEach((folder, i) => {
-    projectNameById[usage.byProject[i].projectFolderId] = folder?.name ?? "(deleted project)";
+    projectNameById[projectFolderIdList[i]] = folder?.name ?? "(deleted project)";
   });
   const humanById: Record<string, { name: string; email: string }> = {};
   humans.forEach((h) => {
     humanById[h._id] = { name: h.name, email: h.email };
   });
 
-  return { user, days, usage, projectNameById, humanById };
+  return { user, days, usage, recentRuns, projectNameById, humanById };
 }
 
 export function ErrorBoundary() {
@@ -178,10 +192,104 @@ function BarRow({
   );
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
+// ─── Recent Runs ────────────────────────────────────────────────────────────
+// A performance timeline lives per run — `graphLogPerf.server.ts` — tracing
+// real, code-measured API/LLM/function-call durations, never a number the
+// model itself reports. This list is the entry point into an individual
+// run's own full timeline (`/fruits/maker/graphlog/runs/$runId`).
+
+/** Pinned to an explicit locale AND `timeZone: "UTC"` — never the viewer's
+ * own — same fix `OxRenderer.tsx`'s `formatRefDatetime` already uses, for
+ * the same SSR/hydration-mismatch reason (see the `graphlog` skill). */
+function formatRunDatetime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: "UTC",
+  });
+}
+
+function formatRunDuration(ms: number | null): string {
+  if (ms === null) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function RunStatusBadge({ run }: { run: GraphLogRun }) {
+  if (run.ok === null) return <Badge variant="warning">Running…</Badge>;
+  if (run.ok) return <Badge variant="success">OK</Badge>;
+  return <Badge variant="danger">Failed</Badge>;
+}
+
+function RecentRunsSection({
+  runs,
+  projectNameById,
+  humanNameById,
+}: {
+  runs: GraphLogRun[];
+  projectNameById: Record<string, string>;
+  humanNameById: Record<string, string>;
+}) {
+  return (
+    <section className="mb-12">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+        <SectionHeader>Recent Runs</SectionHeader>
+        <Link to="/fruits/maker/graphlog/defaults" className="link text-xs font-mono">
+          Default Prompts →
+        </Link>
+      </div>
+      <div className="good-box p-5">
+        {runs.length === 0 ? (
+          <p className="text-sm subtle-text" style={{ margin: 0 }}>
+            No GraphLog runs recorded yet.
+          </p>
+        ) : (
+          runs.map((run) => (
+            <Link
+              key={run._id}
+              to={`/fruits/maker/graphlog/runs/${run._id}`}
+              className="flex items-center justify-between flex-wrap gap-2 py-2"
+              style={{
+                borderBottom: "1px solid var(--midground)",
+                textDecoration: "none",
+                color: "inherit",
+              }}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="neutral">{run.job_name}</Badge>
+                <span className="text-sm font-mono">
+                  {projectNameById[run.project_folder_id] ?? run.project_folder_id}
+                </span>
+                <span className="text-xs font-mono subtle-text">
+                  {humanNameById[run.human_id] ?? run.human_id}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-mono subtle-text">{formatRunDatetime(run.started_at)}</span>
+                <span className="text-xs font-mono subtle-text">{formatRunDuration(run.duration_ms)}</span>
+                <RunStatusBadge run={run} />
+              </div>
+            </Link>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ─── Main ───────────────────────────────────────────────────────────────────
 
 export default function FruitsMakerGraphLog() {
-  const { days, usage, projectNameById, humanById } = useLoaderData<typeof loader>();
+  const { days, usage, recentRuns, projectNameById, humanById } = useLoaderData<typeof loader>();
+  const humanNameById: Record<string, string> = Object.fromEntries(
+    Object.entries(humanById).map(([id, h]) => [id, h.name]),
+  );
 
   const maxDateCalls = Math.max(1, ...usage.byDate.map((d) => d.callCount));
   const maxProjectCalls = Math.max(1, ...usage.byProject.map((p) => p.callCount));
@@ -205,6 +313,13 @@ export default function FruitsMakerGraphLog() {
           <RangeToggle days={days} />
         </div>
 
+        <RecentRunsSection
+          runs={recentRuns}
+          projectNameById={projectNameById}
+          humanNameById={humanNameById}
+        />
+
+        {/* ── Overview ──────────────────────── */}
         {/* ── Overview ────────────────────────────────────── */}
         <section className="mb-12">
           <SectionHeader>Overview</SectionHeader>

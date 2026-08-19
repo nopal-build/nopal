@@ -59,6 +59,7 @@ import { downloadFileBytes } from "./file.server";
 import { getProjectStageSkill, isSkipInstruction, listExtraSkillFiles } from "./projectN02.server";
 import { AnthropicProvider, isPhylogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
+import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import type { LlmProvider, PhotoDescriber } from "./llmProvider";
 
 /** The reserved subfolder name every `syncs/` folder may carry — see this
@@ -163,6 +164,8 @@ export interface RunSyncKnowledgeOptions {
   provider?: LlmProvider;
   photoDescriber?: PhotoDescriber;
   log?: (line: string) => void;
+  /** Timeline recorder for this run — see `graphLogPerf.server.ts`. */
+  perf?: GraphLogPerfRecorder;
 }
 
 /**
@@ -177,6 +180,7 @@ export async function runSyncKnowledge(
   opts: RunSyncKnowledgeOptions = {},
 ): Promise<SyncKnowledgeResult> {
   const log = opts.log ?? (() => {});
+  const perf = opts.perf ?? noopGraphLogRunRecorder;
 
   const skill = await getProjectStageSkill(projectFolder, "KNOWLEDGE.md");
   if (isSkipInstruction(skill)) {
@@ -235,13 +239,16 @@ export async function runSyncKnowledge(
     try {
       if (isImage) {
         photoLlm ??= new AnthropicProvider();
-        const bytes = await downloadFileBytes(source.s3_key!);
+        const bytes = await perf.time("sync-knowledge", "api", "downloadFileBytes", { fileId: source._id }, () =>
+          downloadFileBytes(source.s3_key!),
+        );
         const result = await photoLlm.describePhoto({
           imageBase64: bytes.toString("base64"),
           mediaType: source.content_type,
           context: `Knowledge-extraction instructions for this project:\n\n${skillContent}`,
         });
         body = result.description;
+        const durationMs = Date.now() - callStart;
         await recordGraphLogUsage({
           humanId: actingHumanId,
           projectFolderId: projectFolder._id,
@@ -249,8 +256,15 @@ export async function runSyncKnowledge(
           kind,
           model: result.model,
           usage: result.usage,
-          durationMs: Date.now() - callStart,
+          durationMs,
           outcome: "success",
+        });
+        await perf.event({
+          process: "sync-knowledge",
+          type: "llm",
+          name: "describePhoto",
+          params: { fileId: source._id, name: source.name },
+          durationMs,
         });
       } else if (source.content) {
         textLlm ??= new AnthropicProvider();
@@ -272,6 +286,7 @@ export async function runSyncKnowledge(
           // path — never persist a fragment cut off by the model's own
           // output limit as if it were finished.
           log(`sync-knowledge: "${source.name}"'s output was cut off by the model's own output limit — skipped, will retry next run.`);
+          const durationMs = Date.now() - callStart;
           await recordGraphLogUsage({
             humanId: actingHumanId,
             projectFolderId: projectFolder._id,
@@ -279,14 +294,23 @@ export async function runSyncKnowledge(
             kind,
             model: response.model,
             usage: response.usage,
-            durationMs: Date.now() - callStart,
+            durationMs,
             outcome: "error",
             errorKind: "incomplete",
+          });
+          await perf.event({
+            process: "sync-knowledge",
+            type: "llm",
+            name: "complete",
+            params: { fileId: source._id, name: source.name },
+            durationMs,
+            outcome: "error",
           });
           unsupported.push({ fileId: source._id, name: source.name });
           continue;
         }
         body = response.text?.trim() || null;
+        const durationMs = Date.now() - callStart;
         await recordGraphLogUsage({
           humanId: actingHumanId,
           projectFolderId: projectFolder._id,
@@ -294,8 +318,15 @@ export async function runSyncKnowledge(
           kind,
           model: response.model,
           usage: response.usage,
-          durationMs: Date.now() - callStart,
+          durationMs,
           outcome: "success",
+        });
+        await perf.event({
+          process: "sync-knowledge",
+          type: "llm",
+          name: "complete",
+          params: { fileId: source._id, name: source.name },
+          durationMs,
         });
       } else {
         unsupported.push({ fileId: source._id, name: source.name });
@@ -308,14 +339,23 @@ export async function runSyncKnowledge(
       log(
         `sync-knowledge: "${source.name}" couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`,
       );
+      const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
         stage: "sync-knowledge",
         kind,
-        durationMs: Date.now() - callStart,
+        durationMs,
         outcome: "error",
         errorKind: classifyGraphLogError(err),
+      });
+      await perf.event({
+        process: "sync-knowledge",
+        type: "llm",
+        name: isImage ? "describePhoto" : "complete",
+        params: { fileId: source._id, name: source.name },
+        durationMs,
+        outcome: "error",
       });
       continue;
     }

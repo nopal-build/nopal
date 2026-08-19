@@ -16,6 +16,7 @@
     "./data/graphLogAgent.server": "./src/data/graphLogAgent.server.ts",
     "./data/graphLogDefaults.server": "./src/data/graphLogDefaults.server.ts",
     "./data/graphLogMetrics.server": "./src/data/graphLogMetrics.server.ts",
+    "./data/graphLogPerf.server": "./src/data/graphLogPerf.server.ts",
     "./data/graphLogQueue.server": "./src/data/graphLogQueue.server.ts",
     "./data/graphLogReset.server": "./src/data/graphLogReset.server.ts",
     "./data/graphNodeIndex.server": "./src/data/graphNodeIndex.server.ts",

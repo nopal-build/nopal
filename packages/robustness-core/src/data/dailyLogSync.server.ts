@@ -22,6 +22,7 @@ import {
   listFolderChildren,
   updateFileRef,
   copyFileIntoFolder,
+  systemVaultFolderKey,
   type VaultFolder,
 } from "./vault.server";
 import { getDailyLogCards, listCardEntriesForProject } from "./dailyLog.server";
@@ -43,13 +44,23 @@ function contentHash(content: string): string {
 
 async function ensureProjectSyncsFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
   const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
-  const existing = folders.find((f) => f.is_folder_type_root && f.folder_type === "syncs");
+  // Same deterministic-pick + deterministic-id fix as `ensureProjectN01`'s
+  // own Skills-folder bug (see the `graphlog` skill's write-up) — this
+  // check-then-create had the exact same unprotected race, and it's what
+  // produced real duplicate "Daily Logs" folders in production. Sorting
+  // oldest-first is a defensive belt-and-suspenders measure for any
+  // duplicates a past race already left behind; the deterministic `id`
+  // below is what actually closes the race going forward.
+  const existing = folders
+    .filter((f) => f.is_folder_type_root && f.folder_type === "syncs")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
   if (existing) return existing;
   const created = await createVaultFolder({
     human_id: projectFolder.human_id,
     name: "Syncs",
     parent_folder_id: projectFolder._id,
     folder_type: "syncs",
+    id: systemVaultFolderKey(projectFolder.human_id, "Syncs", projectFolder._id),
   });
   if (!created) throw new Error("Failed to create the project's syncs folder");
   return created;
@@ -63,12 +74,17 @@ async function ensureProjectSyncsFolder(projectFolder: VaultFolder): Promise<Vau
 export async function ensureDailyLogsSyncFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
   const syncsFolder = await ensureProjectSyncsFolder(projectFolder);
   const { folders } = await listFolderChildren(projectFolder.human_id, syncsFolder._id);
-  const existing = folders.find((f) => f.name === DAILY_LOGS_SYNC_FOLDER_NAME);
+  // Same fix as `ensureProjectSyncsFolder` above, for the same reason —
+  // see its own comment.
+  const existing = folders
+    .filter((f) => f.name === DAILY_LOGS_SYNC_FOLDER_NAME)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
   if (existing) return existing;
   const created = await createVaultFolder({
     human_id: projectFolder.human_id,
     name: DAILY_LOGS_SYNC_FOLDER_NAME,
     parent_folder_id: syncsFolder._id,
+    id: systemVaultFolderKey(projectFolder.human_id, DAILY_LOGS_SYNC_FOLDER_NAME, syncsFolder._id),
   });
   if (!created) throw new Error("Failed to create the project's syncs/Daily Logs folder");
   return created;
