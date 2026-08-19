@@ -4,7 +4,10 @@ use std::fs::File;
 use std::io::Write;
 use std::io::{self, Read};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 mod auth;
 mod graphlog;
@@ -802,62 +805,128 @@ fn read_serial_port_interactive(port_name: &str) -> Result<(), Box<dyn std::erro
     let ports = serialport::available_ports()?;
     let port = ports.iter().find(|p| p.port_name.contains(port_name));
 
-    match port {
-        Some(p) => {
-            println!("Connected to {}", p.port_name);
-            let mut port = serialport::new(p.port_name.clone(), 2_000_000)
-                .timeout(Duration::from_millis(10))
-                .open()?;
+    let p = match port {
+        Some(p) => p,
+        None => {
+            eprintln!("Error: Port not found");
+            return Ok(());
+        }
+    };
 
-            let now = jiff::Timestamp::now();
-            // Write output relative to wherever the command is invoked from,
-            // creating the `data` directory if it doesn't already exist.
-            std::fs::create_dir_all("./data")?;
-            let filename = format!(
-                "./data/load_cell_data_{}.csv",
-                now.strftime("%Y-%m-%d_%H:%M").to_string()
-            );
-            let mut file = File::create(&filename)?;
-            // Add header in
-            writeln!(file, "Distance (in),Force (lbs)")?;
+    println!("Connected to {}", p.port_name);
+    let port = serialport::new(p.port_name.clone(), 2_000_000)
+        .timeout(Duration::from_millis(10))
+        .open()?;
 
-            loop {
-                println!("Enter distance (or 'q' to quit): ");
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
+    let now = jiff::Timestamp::now();
+    // Write output relative to wherever the command is invoked from,
+    // creating the `data` directory if it doesn't already exist.
+    std::fs::create_dir_all("./data")?;
+    let filename = format!(
+        "./data/load_cell_data_{}.csv",
+        now.strftime("%Y-%m-%d_%H:%M").to_string()
+    );
+    let file = Arc::new(Mutex::new(File::create(&filename)?));
+    {
+        let mut f = file.lock().unwrap();
+        writeln!(f, "Elapsed (s),Type,Force (lbs),Raw (mV/V),Distance (in)")?;
+        f.flush()?;
+    }
 
-                let input = input.trim();
-                if input.to_lowercase().eq("q") {
-                    break;
+    let start = Instant::now();
+    let running = Arc::new(AtomicBool::new(true));
+    // Force sampled once per second by the background thread. Distance
+    // entries are annotated with the most recent value here instead of
+    // triggering a fresh (blocking) serial read, so recording a distance
+    // never waits on — and never misses — the force at the moment it was
+    // measured. Previously the force was only read *after* the operator
+    // finished typing a distance, so by the time it was captured, plastic
+    // deformation had already let the force relax.
+    let latest_force: Arc<Mutex<Option<(f64, f64, f64)>>> = Arc::new(Mutex::new(None));
+
+    let sampler_handle = {
+        let running = Arc::clone(&running);
+        let latest_force = Arc::clone(&latest_force);
+        let file = Arc::clone(&file);
+        let mut port = port;
+        thread::spawn(move || {
+            while running.load(Ordering::Relaxed) {
+                let iter_start = Instant::now();
+                match read_single_measurement(&mut port) {
+                    Ok((force, raw)) => {
+                        let elapsed = start.elapsed().as_secs_f64();
+                        *latest_force.lock().unwrap() = Some((force, raw, elapsed));
+                        let mut f = file.lock().unwrap();
+                        if writeln!(f, "{:.3},force,{},{},", elapsed, force, raw).is_ok() {
+                            let _ = f.flush();
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: no measurement this second ({e})");
+                    }
                 }
-                let distance = fraction_to_float(input);
-                if let Err(e) = distance {
+                let elapsed_iter = iter_start.elapsed();
+                if elapsed_iter < Duration::from_secs(1) {
+                    thread::sleep(Duration::from_secs(1) - elapsed_iter);
+                }
+            }
+        })
+    };
+
+    println!("Recording force once per second in the background -> {filename}");
+    println!(
+        "Enter a distance measurement whenever you take one, 'n' to bump the \
+         previous distance by 1/8\", or 'q' to quit:"
+    );
+
+    // Track the last recorded distance so 'n' can just bump it by one step,
+    // instead of retyping the fraction (e.g. "1 1/2") each time.
+    const DISTANCE_STEP: f64 = 0.125;
+    let mut last_distance: Option<f64> = None;
+
+    loop {
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        let input = input.trim();
+        if input.eq_ignore_ascii_case("q") {
+            break;
+        }
+        let distance = if input.eq_ignore_ascii_case("n") {
+            last_distance.map_or(0.0, |d| d + DISTANCE_STEP)
+        } else {
+            match fraction_to_float(input) {
+                Ok(d) => d,
+                Err(e) => {
                     println!("Invalid distance: {}", e);
                     continue;
                 }
-                let distance = distance.unwrap();
+            }
+        };
+        last_distance = Some(distance);
 
-                // Read the latest value from the serial port
-                match read_single_measurement(&mut port) {
-                    Ok((force, raw_value)) => {
-                        println!(
-                            "Distance: {}, Force: {}, Raw: {}",
-                            distance, force, raw_value
-                        );
-                        // Write to file: distance,force
-                        writeln!(file, "{},{}", distance, force)?;
-                        file.flush()?;
-                    }
-                    Err(e) => {
-                        println!("Error reading measurement: {}", e);
-                    }
-                }
+        let elapsed = start.elapsed().as_secs_f64();
+        let last = *latest_force.lock().unwrap();
+        let mut f = file.lock().unwrap();
+        match last {
+            Some((force, raw, sample_elapsed)) => {
+                println!(
+                    "Distance: {distance}  (nearest force sample @ {sample_elapsed:.1}s: {force} lbs)"
+                );
+                writeln!(f, "{:.3},distance,{},{},{}", elapsed, force, raw, distance)?;
+            }
+            None => {
+                println!("Distance: {distance} (no force sample yet)");
+                writeln!(f, "{:.3},distance,,,{}", elapsed, distance)?;
             }
         }
-        None => {
-            eprintln!("Error: Port not found");
-        }
+        f.flush()?;
     }
+
+    running.store(false, Ordering::Relaxed);
+    let _ = sampler_handle.join();
+
+    println!("Saved {filename}");
 
     Ok(())
 }
