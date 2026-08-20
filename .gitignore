@@ -28,3 +28,10 @@ webapp/tmp/
 
 # Mac Ignores
 .DS_Store
+
+# GraphLog load-bearing decision records — reasoning is worth keeping
+# locally, but the repo is public and a one-line "brake, not a default"
+# code comment is enough to point at these without publishing the
+# reasoning itself. See docs/adr/0001-nodes-are-permanent-and-verbatim.md
+# and its siblings.
+docs/adr/

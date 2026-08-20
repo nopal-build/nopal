@@ -72,6 +72,7 @@ import {
   getFileRefById,
   getFolderById,
   getOrCreateVaultFolder,
+  resolveDailyLogsFolder,
 } from "robustness-core/data/vault.server";
 import { cacheDailyLog } from "robustness-core/data/dailyLog.server";
 import { uploadPrivateFileToS3 } from "robustness-core/data/file.server";
@@ -190,29 +191,69 @@ async function remoteFile(host: string, token: string, fileId: string): Promise<
   return file;
 }
 
+/**
+ * Resolves the token's OWN daily-log storage folder, mirroring
+ * `resolveDailyLogsFolder` (`vault.server.ts`) over HTTP instead of DB
+ * access — see the `graphlog` skill's "Daily Logs symlink" section. The
+ * vault-wide `daily-logs` ROOT was retired there in favor of
+ * `personal/syncs/Daily Logs`; a not-yet-migrated human may still have the
+ * legacy root, so that's checked FIRST (same order `resolveDailyLogsFolder`
+ * itself uses) before falling back to the new location.
+ */
+async function remoteResolveDailyLogsFolder(
+  host: string,
+  token: string,
+  root: { folders: VaultFolder[] },
+): Promise<VaultFolder> {
+  const legacyRoot = root.folders.find((f) => f.vault_root_key === "daily-logs");
+  if (legacyRoot) return legacyRoot;
+
+  const personal = root.folders.find((f) => f.vault_root_key === "personal");
+  if (!personal) {
+    throw new Error("No daily-logs root or personal root found for this token -- is it valid?");
+  }
+
+  const { folders: personalChildren } = await remoteChildren(host, token, personal._id);
+  const syncsFolder = personalChildren.find(
+    (f) => f.is_folder_type_root && f.folder_type === "syncs",
+  );
+  if (!syncsFolder) {
+    throw new Error("No Syncs folder found under this token's personal space.");
+  }
+
+  const { folders: syncsChildren } = await remoteChildren(host, token, syncsFolder._id);
+  const dailyLogsFolder = syncsChildren.find((f) => f.name === "Daily Logs");
+  if (!dailyLogsFolder) {
+    throw new Error("No Daily Logs folder found under this token's personal/Syncs space.");
+  }
+  return dailyLogsFolder;
+}
+
 // ─── Local write (direct DB, same pattern scripts/seed/index.ts uses) ─────
 
 async function ensureLocalHuman(id: string, email: string, name: string): Promise<void> {
+  // `getDb()` returns a SINGLE connection cached and reused for the whole
+  // process's lifetime (see db.server.ts's own doc comment) — every other
+  // vault.server.ts/generic.server.ts call this script makes later shares
+  // this exact same connection, so it must NEVER be closed here. Closing it
+  // used to leave every later call (e.g. resolveDailyLogsFolder) failing
+  // with a `ConnectionUnavailable` against the now-dead cached connection.
   const db = await getDb();
-  try {
-    const existing = await db.select(new RecordId("humans", id));
-    if (existing) {
-      // `db.upsert` REPLACES the entire record (SurrealDB's own docs: "UPSERT
-      // replaces the entire record if it exists") — doing that here would
-      // silently stomp an already-promoted local role (Super/Admin) back
-      // down to "Human" on every single re-run of this script, which is
-      // exactly the bug this guarded against. `db.merge` only touches the
-      // fields we actually pass, leaving role (and anything else) alone.
-      await db.merge(new RecordId("humans", id), { email, name });
-    } else {
-      await db.upsert(new RecordId("humans", id), {
-        email,
-        name,
-        role: "Human",
-      });
-    }
-  } finally {
-    await db.close();
+  const existing = await db.select(new RecordId("humans", id));
+  if (existing) {
+    // `db.upsert` REPLACES the entire record (SurrealDB's own docs: "UPSERT
+    // replaces the entire record if it exists") — doing that here would
+    // silently stomp an already-promoted local role (Super/Admin) back
+    // down to "Human" on every single re-run of this script, which is
+    // exactly the bug this guarded against. `db.merge` only touches the
+    // fields we actually pass, leaving role (and anything else) alone.
+    await db.merge(new RecordId("humans", id), { email, name });
+  } else {
+    await db.upsert(new RecordId("humans", id), {
+      email,
+      name,
+      role: "Human",
+    });
   }
 }
 
@@ -370,17 +411,17 @@ async function main() {
 
   console.log(`Reading daily-logs from ${host} ...`);
   const root = await remoteChildren(host, token, "root");
-  const dailyLogsRoot = root.folders.find((f) => f.vault_root_key === "daily-logs");
-  if (!dailyLogsRoot) {
-    throw new Error("No daily-logs root found for this token — is it valid?");
-  }
+  const dailyLogsRoot = await remoteResolveDailyLogsFolder(host, token, root);
   const humanId = dailyLogsRoot.human_id;
   console.log(`Found daily-logs for human ${humanId}.`);
 
   await ensureLocalHuman(humanId, email, name);
   console.log(`Upserted local humans:${humanId} (${email}).`);
 
-  const localRoot = await getOrCreateVaultFolder(humanId, "daily-logs", null);
+  // Mirrors the same personal/syncs/Daily Logs resolution remotely just
+  // used, straight from the app's own vault.server.ts, so this can't drift
+  // from how a real login would resolve the same human's local storage.
+  const localRoot = await resolveDailyLogsFolder(humanId);
 
   const { folders: dateFolders } = await remoteChildren(host, token, dailyLogsRoot._id);
   console.log(`Found ${dateFolders.length} day(s) remotely.`);

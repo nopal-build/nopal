@@ -352,6 +352,33 @@ function renderQuoteBlocks(rawBlocks: unknown): string | null {
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
+// brake, not a default — see ADR-002 (docs/adr/0002-three-link-cap-per-node.md,
+// kept out of the public repo). Links create weight, weight creates
+// visibility, visibility creates writing, and writing creates links --
+// this caps that loop so whatever's already been mentioned most can't
+// accumulate faster forever. Reads as an arbitrary tuning constant;
+// raising it looks free right up until the top of every project's index
+// stops changing. If this ever needs to change, that's a conversation,
+// not a one-line tweak -- see the ADR for what "how you'd know it broke"
+// looks like (nothing errors, the graph just slowly starts amplifying
+// whatever got mentioned most).
+export const MAX_LINKS_PER_NODE = 3;
+
+/** Pure cap logic, split out from the \`add_node\` executor purely so
+ * ADR-002's own "no node ends up with four links" test can exercise it
+ * directly. Same-day links are kept first (see the caller's own comment
+ * for why). */
+export function capNodeLinks(
+  sameDay: number[],
+  backward: string[],
+  max: number = MAX_LINKS_PER_NODE,
+): { sameDay: number[]; backward: string[]; droppedCount: number } {
+  const cappedSameDay = sameDay.slice(0, max);
+  const cappedBackward = backward.slice(0, Math.max(0, max - cappedSameDay.length));
+  const droppedCount = sameDay.length + backward.length - cappedSameDay.length - cappedBackward.length;
+  return { sameDay: cappedSameDay, backward: cappedBackward, droppedCount };
+}
+
 function createSyncGraphExecutors(input: {
   date: string;
   sourceCitations: string[];
@@ -384,16 +411,16 @@ function createSyncGraphExecutors(input: {
       const invalidCount =
         rawSameDay.length - validSameDay.length + (rawBackward.length - validBackward.length);
 
-      // A node may link to at most three others (per GRAPH.md's own
-      // instructions) -- enforced here rather than left as a soft
+      // A node may link to at most MAX_LINKS_PER_NODE others (per GRAPH.md's
+      // own instructions) -- enforced here rather than left as a soft
       // instruction, same "never trust the model with a rule code can
       // just apply" reasoning the rest of this pipeline already follows.
       // Same-day links are kept first (they're rarer and more deliberate
       // -- a cross-day link is comparatively easy to over-produce).
-      const MAX_LINKS = 3;
-      const sameDayNumbers = validSameDay.slice(0, MAX_LINKS);
-      const backwardIds = validBackward.slice(0, Math.max(0, MAX_LINKS - sameDayNumbers.length));
-      const overCapCount = validSameDay.length + validBackward.length - sameDayNumbers.length - backwardIds.length;
+      const { sameDay: sameDayNumbers, backward: backwardIds, droppedCount: overCapCount } = capNodeLinks(
+        validSameDay,
+        validBackward,
+      );
       const droppedCount = invalidCount + overCapCount;
 
       const linkLines = [
@@ -416,7 +443,7 @@ function createSyncGraphExecutors(input: {
       );
       nextNumber++;
 
-      return `Added Node ${number}.${droppedCount > 0 ? ` (dropped ${droppedCount} link id(s) -- invalid, or over the 3-link cap)` : ""}`;
+      return `Added Node ${number}.${droppedCount > 0 ? ` (dropped ${droppedCount} link id(s) -- invalid, or over the ${MAX_LINKS_PER_NODE}-link cap)` : ""}`;
     },
   };
 

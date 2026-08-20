@@ -130,6 +130,7 @@ import {
 import {
   aggregateHash,
   computeBacklinkIndex,
+  extractDatesFromText,
   parseGraphLogNodes,
   type BacklinkInfo,
   type GraphLogNode,
@@ -205,8 +206,14 @@ function buildNodeBlock(node: GraphLogNode, backlinks: Map<string, BacklinkInfo>
 const NODE_LINE_RE = /^-\s*(\d{4}-\d{2}-\d{2})\s+Node\s+(\d+)\b/;
 const WEIGHT_LINE_RE = /^Weight:/i;
 const STATUS_SUFFIX_RE = /(·\s*Status:.*)$/i;
+const STATUS_FIELD_RE = /·\s*Status:\s*([^·]*)/i;
+const DUE_FIELD_RE = /·\s*Due:\s*([^·]*)/i;
+const BLOCKING_FIELD_RE = /·\s*Blocking:\s*([^·]*)/i;
 
-function nodeIdsInSection(section: ReadmeSection): string[] {
+/** Exported for `graph-project-view.server.ts`'s own node pre-fetch/
+ * `get_node` (1.1/ADR-006) to reuse the exact same parsing rather than
+ * re-deriving it. */
+export function nodeIdsInSection(section: ReadmeSection): string[] {
   const ids: string[] = [];
   for (const line of section.content.split("\n")) {
     const match = NODE_LINE_RE.exec(line.trim());
@@ -215,12 +222,68 @@ function nodeIdsInSection(section: ReadmeSection): string[] {
   return ids;
 }
 
-function buildMembershipIndex(sections: ReadmeSection[]): Set<string> {
+/** Exported for `graph-project-view.server.ts`'s own `get_node` id
+ * validation — "same as `add_node` already does for link candidates"
+ * (1.1). */
+export function buildMembershipIndex(sections: ReadmeSection[]): Set<string> {
   const set = new Set<string>();
   for (const section of sections) {
     for (const id of nodeIdsInSection(section)) set.add(id);
   }
   return set;
+}
+
+/** A field is "present" only when it has a real, non-placeholder value —
+ * guards against a stray literal \`<date>\`/\`<what it holds up>\` left
+ * over from the node-format template shown in `GRAPH_STRUCTURE.md`. */
+function isRealFieldValue(raw: string | undefined): boolean {
+  if (!raw) return false;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 && !/^<.*>$/.test(trimmed);
+}
+
+export type ClusterStatusCategory = "settled" | "superseded" | "dormant" | "other";
+
+export type ClusterFields = {
+  hasDue: boolean;
+  hasBlocking: boolean;
+  statusCategory: ClusterStatusCategory;
+};
+
+/** Reads the `Due`/`Blocking`/`Status` fields off a cluster's own
+ * "Weight: ... · Status: ... · Due: ... · Blocking: ..." line (see
+ * `GRAPH_STRUCTURE.md`'s own "four fields on a thread") — these are the
+ * model's real judgment calls (never recomputed, unlike Weight itself),
+ * read back deterministically wherever code needs to ACT on them (the
+ * sort order below; `graph-project-view`'s "fell away" detection). A
+ * cluster with no recognizable Weight line has none of these. */
+export function parseClusterFields(section: ReadmeSection): ClusterFields {
+  const line = section.content.split("\n").find((l) => WEIGHT_LINE_RE.test(l.trim())) ?? "";
+  const statusRaw = STATUS_FIELD_RE.exec(line)?.[1];
+  const status = (statusRaw ?? "").trim().toLowerCase();
+  const statusCategory: ClusterStatusCategory = status.startsWith("settled")
+    ? "settled"
+    : status.startsWith("superseded")
+      ? "superseded"
+      : status.startsWith("dormant")
+        ? "dormant"
+        : "other";
+  return {
+    hasDue: isRealFieldValue(DUE_FIELD_RE.exec(line)?.[1]),
+    hasBlocking: isRealFieldValue(BLOCKING_FIELD_RE.exec(line)?.[1]),
+    statusCategory,
+  };
+}
+
+/** A thread that's "fallen away" per `GRAPH_STRUCTURE.md`'s own "Falling
+ * away" section (ADR-009) — dormant, no Due, no Blocking. Its nodes stay
+ * in the graph permanently and it stays in graph-structure.md (so
+ * `sync-graph` can still link back to it — ADR-004), it just stops being
+ * surfaced to the README. Exported for `graph-project-view.server.ts`'s
+ * own coverage report (1.2) to report which threads this run. */
+export function hasFallenAway(section: ReadmeSection): boolean {
+  const fields = parseClusterFields(section);
+  return fields.statusCategory === "dormant" && !fields.hasDue && !fields.hasBlocking;
 }
 
 /** Restates a thread's Weight line from LIVE backlink data — pure
@@ -262,20 +325,87 @@ function totalInboundCount(nodeIds: string[], backlinks: Map<string, BacklinkInf
   return nodeIds.reduce((sum, id) => sum + (backlinks.get(id)?.count ?? 0), 0);
 }
 
-/** Re-sorts named clusters heaviest-first by real inbound-link count —
- * arithmetic, never the model's job to order by feel. The intro
- * (heading `""`, should always be empty per `GRAPH_STRUCTURE.md`'s own
- * "no preamble" instruction) stays first if present; `## Unclustered`
- * (per that same skill's own convention for zero-inbound-link nodes)
- * always stays last. */
-function sortClustersByWeight(sections: ReadmeSection[], backlinks: Map<string, BacklinkInfo>): ReadmeSection[] {
+/** The union of distinct linking authors across every node in a
+ * cluster — brake, not a default, see ADR-003 (docs/adr/0003-rank-by-
+ * distinct-authors.md, kept out of the public repo, and the matching note
+ * on `BacklinkInfo.fromAuthors` in `graphNodeIndex.server.ts`). This is
+ * read BEFORE raw count in `rankCluster` below — never replace that
+ * ordering with a plain count/sum, even though the two usually agree. */
+function distinctAuthorsInSection(nodeIds: string[], backlinks: Map<string, BacklinkInfo>): number {
+  const authors = new Set<string>();
+  for (const id of nodeIds) {
+    const info = backlinks.get(id);
+    if (!info) continue;
+    for (const a of info.fromAuthors) authors.add(a);
+  }
+  return authors.size;
+}
+
+function latestInboundDate(nodeIds: string[], backlinks: Map<string, BacklinkInfo>): string {
+  let latest = "";
+  for (const id of nodeIds) {
+    const info = backlinks.get(id);
+    if (info && info.latestDate > latest) latest = info.latestDate;
+  }
+  return latest;
+}
+
+type ClusterRank = { tier: number; distinctAuthors: number; totalCount: number; latestDate: string };
+
+/**
+ * Places one cluster on the importance-and-urgency grid `GRAPH_STRUCTURE.md`
+ * itself now describes (ADR-008: "the structure file's order serves the
+ * next stages, not a human reader") — NOT the earlier "raw link count
+ * only" sort this replaces. `Blocking`/`Due` are the model's own judgment
+ * calls (never recomputed, see `parseClusterFields`); everything below
+ * them is ordered by real, code-computed weight, distinct authors first
+ * (ADR-003). A thread that's dormant with neither field has fallen away
+ * (ADR-009) and sinks to the very bottom, tier 5, rather than competing
+ * on weight at all — an old, heavy thread nobody's kept alive should NOT
+ * be able to outrank a live one just because it accumulated more links
+ * over more time.
+ */
+function rankCluster(section: ReadmeSection, backlinks: Map<string, BacklinkInfo>): ClusterRank {
+  const fields = parseClusterFields(section);
+  const nodeIds = nodeIdsInSection(section);
+  const tier = fields.hasBlocking && fields.hasDue
+    ? 1
+    : fields.hasBlocking
+      ? 2
+      : fields.hasDue
+        ? 3
+        : fields.statusCategory !== "other"
+          ? 5 // settled / superseded / dormant, carrying neither Due nor Blocking
+          : 4;
+  return {
+    tier,
+    distinctAuthors: distinctAuthorsInSection(nodeIds, backlinks),
+    totalCount: totalInboundCount(nodeIds, backlinks),
+    latestDate: latestInboundDate(nodeIds, backlinks),
+  };
+}
+
+/** Re-sorts named clusters down the importance-and-urgency grid (see
+ * `rankCluster`) — never the model's job to order by feel, and (per
+ * ADR-008) never optimized for a human reading this file directly: this
+ * order is what `sync-graph` sees as its backward-link candidate list and
+ * what `graph-project-view` reads off top-down, so it serves THEM. The
+ * intro (heading `""`, should always be empty per `GRAPH_STRUCTURE.md`'s
+ * own "no preamble" instruction) stays first if present; `## Unclustered`
+ * (per that same skill's own convention for a node with no thread yet)
+ * always stays last, never competing for a "live work" slot. */
+export function sortClustersByWeight(sections: ReadmeSection[], backlinks: Map<string, BacklinkInfo>): ReadmeSection[] {
   const intro = sections.filter((s) => s.heading === "");
   const unclustered = sections.filter((s) => s.heading !== "" && s.heading.toLowerCase() === "unclustered");
   const named = sections.filter((s) => s.heading !== "" && s.heading.toLowerCase() !== "unclustered");
-  const sorted = [...named].sort(
-    (a, b) => totalInboundCount(nodeIdsInSection(b), backlinks) - totalInboundCount(nodeIdsInSection(a), backlinks),
-  );
-  return [...intro, ...sorted, ...unclustered];
+  const ranked = named.map((section) => ({ section, rank: rankCluster(section, backlinks) }));
+  ranked.sort((a, b) => {
+    if (a.rank.tier !== b.rank.tier) return a.rank.tier - b.rank.tier;
+    if (a.rank.distinctAuthors !== b.rank.distinctAuthors) return b.rank.distinctAuthors - a.rank.distinctAuthors;
+    if (a.rank.totalCount !== b.rank.totalCount) return b.rank.totalCount - a.rank.totalCount;
+    return b.rank.latestDate.localeCompare(a.rank.latestDate);
+  });
+  return [...intro, ...ranked.map((r) => r.section), ...unclustered];
 }
 
 // ─── The graph-structure tool-calling loop ─────────────────────────────
@@ -408,7 +538,7 @@ function createStructureExecutors(input: {
   };
 }
 
-/** Generous relative to `graph-project-view`'s own MAX_TURNS=8 -- a
+/** Generous relative to `graph-project-view`'s own MAX_TURNS=20 -- a
  * first-ever build (or a fallback full rebuild against an unparseable
  * previous file, see this file's own module doc) may need one
  * update_cluster call per thread, and a real project can have dozens.
@@ -511,11 +641,50 @@ Do not write any planning, reasoning, or summary text outside of a tool call -- 
 ${skillContent}`;
 }
 
-function buildUserPrompt(input: { existingStructureBody: string | null; newNodeBlocks: string[] }): string {
+/**
+ * Per-existing-thread MECHANICAL facts (`GRAPH_STRUCTURE.md`'s own "What
+ * you receive": "the date of its most recent node, and any dates found
+ * in its nodes' own text") — both plain arithmetic/regex, never the
+ * model's job to recompute, same "never trust the model with something
+ * code can just hand over" reasoning every other precomputed fact in
+ * this pipeline already follows. What these MEAN (a commitment vs. a
+ * passing mention; whether a thread is actually dormant) stays the
+ * model's own judgment via `Status`/`Due`/`Blocking` — this only surfaces
+ * the raw material for that judgment. Skips a cluster with no real nodes
+ * (a stray heading) and the intro/Unclustered pseudo-sections, which have
+ * no meaningful "most recent node" of their own. */
+function buildClusterFactsBlock(sections: ReadmeSection[], allNodesById: Map<string, GraphLogNode>): string | null {
+  const lines: string[] = [];
+  for (const section of sections) {
+    if (section.heading === "" || section.heading.toLowerCase() === "unclustered") continue;
+    const nodeIds = nodeIdsInSection(section);
+    if (nodeIds.length === 0) continue;
+    let mostRecent: string | null = null;
+    const mentionedDates = new Set<string>();
+    for (const id of nodeIds) {
+      const node = allNodesById.get(id);
+      if (!node) continue;
+      if (!mostRecent || node.date > mostRecent) mostRecent = node.date;
+      for (const d of extractDatesFromText(node.quote)) mentionedDates.add(d);
+    }
+    if (!mostRecent && mentionedDates.size === 0) continue;
+    const mentioned = mentionedDates.size > 0 ? [...mentionedDates].sort().join(", ") : "none found";
+    lines.push(`- "${section.heading}" — most recent node: ${mostRecent ?? "unknown"}; dates mentioned in its nodes' own text: ${mentioned}`);
+  }
+  if (lines.length === 0) return null;
+  return `Per-thread mechanical facts (you decide what they mean — a commitment vs. a passing mention, dormant vs. just quiet):\n\n${lines.join("\n")}`;
+}
+
+function buildUserPrompt(input: {
+  existingStructureBody: string | null;
+  clusterFactsBlock: string | null;
+  newNodeBlocks: string[];
+}): string {
   return [
     input.existingStructureBody
       ? `The CURRENT graph-structure.md:\n\n${input.existingStructureBody}`
       : "No graph-structure.md exists yet -- every node below needs a fresh home.",
+    input.clusterFactsBlock,
     input.newNodeBlocks.length > 0
       ? `Node(s) new since the last run, needing a home (full text -- call get_node for anything else you need to re-examine):\n\n${input.newNodeBlocks.join("\n\n---\n\n")}`
       : null,
@@ -680,8 +849,9 @@ export async function runGraphStructure(
       const { sections: currentSections } = getCurrent();
       const existingStructureBody =
         currentSections.length > 0 ? joinReadmeSections(currentSections).trim() : null;
+      const clusterFactsBlock = buildClusterFactsBlock(currentSections, allNodesById);
       const newNodeBlocks = batchNodes.map((n) => buildNodeBlock(n, backlinks));
-      const userPrompt = buildUserPrompt({ existingStructureBody, newNodeBlocks });
+      const userPrompt = buildUserPrompt({ existingStructureBody, clusterFactsBlock, newNodeBlocks });
       const batchLabel = batches.length > 1 ? ` (batch ${batchIndex + 1}/${batches.length})` : "";
 
       const callStart = Date.now();

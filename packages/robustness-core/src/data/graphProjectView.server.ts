@@ -88,13 +88,31 @@ import {
   isSkipInstruction,
   listExtraSkillFiles,
 } from "./projectN02.server";
-import { parseGraphStructureFrontmatter, markGraphStructureApplied } from "./graphStructure.server";
+import {
+  parseGraphStructureFrontmatter,
+  markGraphStructureApplied,
+  hasFallenAway,
+  nodeIdsInSection,
+  buildMembershipIndex,
+} from "./graphStructure.server";
+import { parseGraphLogNodes, formatNodeVerbatim, type GraphLogNode } from "./graphNodeIndex.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolCall, ToolDefinition } from "./llmProvider";
 
 const GRAPH_STRUCTURE_FILE_NAME = "graph-structure.md";
+const GRAPH_LOG_RE = /^graph-log-(\d{4}-\d{2}-\d{2})\.md$/;
+
+/** 1.1's own budget — bounded by NODE COUNT, not thread count (a thread
+ * can hold fifty nodes a year from now even if it holds a dozen today).
+ * Filled top-down, stopping mid-thread if needed — threads earlier in
+ * graph-structure.md's own ordering (see `sortClustersByWeight`'s
+ * importance-and-urgency grid, ADR-008) are exactly the ones this stage
+ * most needs real words for, so they're served first and in full before
+ * anything later gets a look. `get_node` (below) is the ceiling for
+ * everything this floor doesn't reach. */
+const NODE_PREFETCH_BUDGET = 60;
 
 // ─── The "Notes on this view" section — protected, code-owned ─────────────
 
@@ -220,6 +238,16 @@ const TOOLS: ToolDefinition[] = [
       required: ["heading"],
     },
   },
+  {
+    name: "get_node",
+    description:
+      'Fetch one node\'s full verbatim text and exact :ref{...} citation by id (e.g. "2026-07-29#3" -- ids are shown in brackets after every node you\'re already handed, and in every "- <date> Node <N>" line in graph-structure.md). Nodes behind the top threads are already given to you in full; use this for anything else you need to quote or cite before writing about it.',
+    inputSchema: {
+      type: "object",
+      properties: { nodeId: { type: "string" } },
+      required: ["nodeId"],
+    },
+  },
 ];
 
 /** A real bug, found in real production output: the tool description's
@@ -240,13 +268,15 @@ function createReadmeExecutors(input: {
   log: (line: string) => void;
   initialContent: string;
   initialFileId: string | undefined;
+  allNodesById: Map<string, GraphLogNode>;
+  validNodeIds: Set<string>;
 }): {
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>;
   summaries: string[];
   hadRefusal: () => boolean;
   getCurrent: () => { content: string; fileId: string | undefined };
 } {
-  const { projectFolder, log } = input;
+  const { projectFolder, log, allNodesById, validNodeIds } = input;
   let currentContent = input.initialContent;
   let currentFileId = input.initialFileId;
   let hadRefusal = false;
@@ -322,6 +352,16 @@ function createReadmeExecutors(input: {
       summaries.push(`removed "${heading}"`);
       log(`graph-project-view -- removed README section "${heading}".`);
       return `Removed section "${heading}".`;
+    },
+    get_node: async (toolInput) => {
+      const nodeId = String(toolInput.nodeId ?? "").trim();
+      // Validated against graph-structure.md's OWN node list -- same "never
+      // trust an id the model claims to have" reasoning `add_node` already
+      // applies to its own link candidates (see 1.1(b)'s own ask).
+      if (!validNodeIds.has(nodeId)) return `Error: "${nodeId}" is not a node id in graph-structure.md`;
+      const node = allNodesById.get(nodeId);
+      if (!node) return `Error: no node found with id "${nodeId}"`;
+      return formatNodeVerbatim(node);
     },
   };
 
@@ -413,6 +453,30 @@ async function runReadmeAgentLoop(
 
 // ─── Main entry point ───────────────────────────────────────────────────
 
+/**
+ * 1.2's own "what fell out of the README" report — deliberately just a
+ * MEASUREMENT, never a rule: nothing here blocks a run or forces
+ * coverage, it only makes visible what's currently invisible. See this
+ * file's own module doc note on why (four of ten real threads produced
+ * no README representation on the first production run, with no
+ * predictable pattern by rank — the next tuning round should read this
+ * data across a few real runs before anyone writes a coverage RULE).
+ */
+export type CoverageReport = {
+  /** Threads present in graph-structure.md with no trace of their
+   * heading anywhere in the README's final body — a cheap, approximate
+   * heuristic (substring match on the thread's own name), not exact
+   * per-node citation tracking. Good enough to spot a pattern across
+   * runs; not precise enough to gate anything on. */
+  missingThreads: string[];
+  /** Threads that fell away THIS run per ADR-009/`hasFallenAway`
+   * (dormant, no Due, no Blocking) — still fully present in
+   * graph-structure.md and still linkable by sync-graph (ADR-004), just
+   * no longer surfaced to the README. Reported so the drop is visible,
+   * never silent. */
+  fellAway: string[];
+};
+
 export type GraphProjectViewResult =
   | {
       ok: true;
@@ -424,6 +488,10 @@ export type GraphProjectViewResult =
        * `appliedByProjectView`) AND at least one section was edited. */
       changed: boolean;
       summary: string[];
+      /** Null whenever this run didn't get far enough to check (skipped,
+       * no graph yet, truncated, refused, errored, ...) — only a CLEAN
+       * finish computes this. See `CoverageReport`'s own doc. */
+      coverage: CoverageReport | null;
     }
   | { ok: false; error: string };
 
@@ -435,23 +503,60 @@ export interface RunGraphProjectViewOptions {
 }
 
 function buildSystemPrompt(skillContent: string): string {
-  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index). Never invent progress, dates, or facts that aren't grounded in a thread graph-structure.md actually gives you or the README's own existing content. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
+  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index, PLUS the actual verbatim text of the nodes behind its top threads). Never invent progress, dates, or facts that aren't grounded in a real node's own words or the README's own existing content -- graph-structure.md's glosses are a table of contents, never something to write prose from directly. Call get_node for any node you need that wasn't already handed to you in full. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
 
-Do not write any planning, reasoning, or summary text outside of a tool call -- go straight to calling update_section/remove_section with no preamble and no narration in between calls either. Your own output budget per turn is limited, and explanatory text spends it on nothing that ends up in the README.
+Do not write any planning, reasoning, or summary text outside of a tool call -- go straight to calling update_section/remove_section/get_node with no preamble and no narration in between calls either. Your own output budget per turn is limited, and explanatory text spends it on nothing that ends up in the README.
 
 ${skillContent}`;
+}
+
+/**
+ * 1.1's own pre-fetch — the FLOOR nobody can forget (see this file's own
+ * module doc / ADR-006): without this, a run that never happens to call
+ * `get_node` silently falls back to writing from glosses alone, and
+ * nothing errors when that happens. Walks graph-structure.md's OWN
+ * ordering top-down (already importance-sorted, see
+ * `graphStructure.server.ts`'s `sortClustersByWeight`) and fills a fixed
+ * NODE budget, grouped by thread, stopping mid-thread rather than
+ * mid-graph once the budget runs out — bounded by node count, not thread
+ * count, so this stays flat as a thread that holds a dozen nodes today
+ * grows to hold fifty. */
+function buildNodePrefetchBlock(
+  sections: ReadmeSection[],
+  allNodesById: Map<string, GraphLogNode>,
+): string | null {
+  const named = sections.filter((s) => s.heading !== "" && s.heading.toLowerCase() !== "unclustered");
+  const blocks: string[] = [];
+  let remaining = NODE_PREFETCH_BUDGET;
+  for (const section of named) {
+    if (remaining <= 0) break;
+    const nodeIds = nodeIdsInSection(section);
+    if (nodeIds.length === 0) continue;
+    const included = nodeIds.slice(0, remaining);
+    const nodeTexts = included.map((id) => allNodesById.get(id)).filter((n): n is GraphLogNode => !!n);
+    if (nodeTexts.length === 0) continue;
+    remaining -= included.length;
+    const truncatedNote = included.length < nodeIds.length
+      ? `\n\n(truncated -- ${nodeIds.length - included.length} more node(s) in this thread not shown here; call get_node for any of them by id)`
+      : "";
+    blocks.push(`## ${section.heading}\n\n${nodeTexts.map(formatNodeVerbatim).join("\n\n")}${truncatedNote}`);
+  }
+  if (blocks.length === 0) return null;
+  return `The actual node text behind graph-structure.md's own top threads, in its own order (read these to decide what to WRITE, not just what to write ABOUT -- call get_node for anything else you need):\n\n${blocks.join("\n\n---\n\n")}`;
 }
 
 function buildUserPrompt(input: {
   today: string;
   graphStructureBody: string;
+  nodeTextBlock: string | null;
   readmeContent: string;
   unstampedComments: string[];
 }): string {
   const currentBody = splitFrontmatter(input.readmeContent).body.trim();
   return [
     `Today's actual date: ${input.today}`,
-    `graph-structure.md (the whole graph, organized):\n\n${input.graphStructureBody}`,
+    `graph-structure.md (the whole graph, organized -- a table of contents; read the nodes below to write from):\n\n${input.graphStructureBody}`,
+    input.nodeTextBlock,
     currentBody
       ? `README.md's CURRENT body (edit this incrementally via update_section/remove_section):\n\n${currentBody}`
       : "README.md is currently empty — this is the first content it will ever have.",
@@ -461,6 +566,28 @@ function buildUserPrompt(input: {
   ]
     .filter(Boolean)
     .join("\n\n---\n\n");
+}
+
+/**
+ * 1.2's coverage/fell-away pass — pure text comparison, no LLM call, run
+ * unconditionally after every clean finish. `missingThreads` is
+ * deliberately approximate (see `CoverageReport`'s own doc): exact
+ * per-node citation tracking would need every node's raw `:ref{...}`
+ * line re-derived (today's parser discards it once author/humanId are
+ * extracted), which is more machinery than a MEASUREMENT pass warrants
+ * before a coverage RULE is even on the table.
+ */
+function computeCoverageReport(structureBody: string, readmeBody: string): CoverageReport {
+  const sections = splitReadmeSections(structureBody);
+  const lowerReadme = readmeBody.toLowerCase();
+  const missingThreads: string[] = [];
+  const fellAway: string[] = [];
+  for (const section of sections) {
+    if (section.heading === "" || section.heading.toLowerCase() === "unclustered") continue;
+    if (hasFallenAway(section)) fellAway.push(section.heading);
+    if (!lowerReadme.includes(section.heading.toLowerCase())) missingThreads.push(section.heading);
+  }
+  return { missingThreads, fellAway };
 }
 
 /**
@@ -478,7 +605,7 @@ export async function runGraphProjectView(
 
   const skill = await getProjectStageSkill(projectFolder, "PROJECT_VIEW.md");
   if (isSkipInstruction(skill)) {
-    return { ok: true, skipped: true, changed: false, summary: [] };
+    return { ok: true, skipped: true, changed: false, summary: [], coverage: null };
   }
   if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
@@ -487,30 +614,48 @@ export async function runGraphProjectView(
   const graphFolder = await findProjectGraphFolder(projectFolder);
   if (!graphFolder) {
     log("graph-project-view: no Graph/ folder yet — nothing to do.");
-    return { ok: true, skipped: false, changed: false, summary: [] };
+    return { ok: true, skipped: false, changed: false, summary: [], coverage: null };
   }
 
   const { files } = await listFolderChildren(projectFolder.human_id, graphFolder._id);
   const structureListing = files.find((f) => f.name === GRAPH_STRUCTURE_FILE_NAME);
   if (!structureListing) {
     log("graph-project-view: no graph-structure.md yet — nothing to do.");
-    return { ok: true, skipped: false, changed: false, summary: [] };
+    return { ok: true, skipped: false, changed: false, summary: [], coverage: null };
   }
   const structureFile = await getFileRefById(structureListing._id);
   if (!structureFile?.content) {
     log("graph-project-view: graph-structure.md is empty — nothing to do.");
-    return { ok: true, skipped: false, changed: false, summary: [] };
+    return { ok: true, skipped: false, changed: false, summary: [], coverage: null };
   }
 
   const meta = parseGraphStructureFrontmatter(structureFile.content);
   if (!meta.asOfGraphHash) {
     log("graph-project-view: graph-structure.md is malformed (no asOfGraphHash) — skipping.");
-    return { ok: true, skipped: false, changed: false, summary: [] };
+    return { ok: true, skipped: false, changed: false, summary: [], coverage: null };
   }
   if (meta.appliedByProjectView === meta.asOfGraphHash) {
     log("graph-project-view: up to date, nothing changed since last run.");
-    return { ok: true, skipped: false, changed: false, summary: [] };
+    return { ok: true, skipped: false, changed: false, summary: [], coverage: null };
   }
+
+  // 1.1's own floor+ceiling (ADR-006): read every graph-log file's real
+  // node text, not just graph-structure.md's own glosses, so the model
+  // has actual words to write from -- see `buildNodePrefetchBlock`/
+  // `get_node`'s own doc for the full reasoning.
+  const graphLogListings = files
+    .map((f) => ({ listing: f, date: GRAPH_LOG_RE.exec(f.name)?.[1] }))
+    .filter((x): x is { listing: (typeof files)[number]; date: string } => !!x.date);
+  const allNodes: GraphLogNode[] = [];
+  for (const { listing, date } of graphLogListings) {
+    const file = await getFileRefById(listing._id);
+    if (!file?.content) continue;
+    allNodes.push(...parseGraphLogNodes(date, splitFrontmatter(file.content).body));
+  }
+  const allNodesById = new Map(allNodes.map((n) => [n.id, n]));
+  const structureSections = splitReadmeSections(splitFrontmatter(structureFile.content).body);
+  const validNodeIds = buildMembershipIndex(structureSections);
+  const nodeTextBlock = buildNodePrefetchBlock(structureSections, allNodesById);
 
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
   const extraSkillFiles = await listExtraSkillFiles(projectFolder);
@@ -557,6 +702,8 @@ export async function runGraphProjectView(
     log,
     initialContent: contentWithNotes,
     initialFileId: readmeFileId,
+    allNodesById,
+    validNodeIds,
   });
   const { executors, summaries, hadRefusal, getCurrent } = executors_;
 
@@ -564,6 +711,7 @@ export async function runGraphProjectView(
   const userPrompt = buildUserPrompt({
     today,
     graphStructureBody: splitFrontmatter(structureFile.content).body.trim(),
+    nodeTextBlock,
     readmeContent: contentWithNotes,
     unstampedComments: unstamped,
   });
@@ -596,15 +744,15 @@ export async function runGraphProjectView(
 
     if (truncated) {
       log("graph-project-view: update was cut off by the model's own output limit — will retry next run.");
-      return { ok: true, skipped: false, changed: false, summary: [] };
+      return { ok: true, skipped: false, changed: false, summary: [], coverage: null };
     }
     if (hitMaxTurns) {
       log("graph-project-view: hit its turn limit before finishing — will retry next run.");
-      return { ok: true, skipped: false, changed: false, summary: [] };
+      return { ok: true, skipped: false, changed: false, summary: [], coverage: null };
     }
     if (hadRefusal()) {
       log("graph-project-view: had at least one refused edit — will retry next run.");
-      return { ok: true, skipped: false, changed: false, summary: [] };
+      return { ok: true, skipped: false, changed: false, summary: [], coverage: null };
     }
 
     // Clean finish: one final deterministic reconcile pass, always run
@@ -637,7 +785,19 @@ export async function runGraphProjectView(
     await markGraphStructureApplied(structureListing._id, structureFile.content, meta.asOfGraphHash);
     const changed = summaries.length > 0;
     log(changed ? `graph-project-view: ${summaries.join(", ")}.` : "graph-project-view: nothing to change.");
-    return { ok: true, skipped: false, changed, summary: summaries };
+
+    const coverage = computeCoverageReport(
+      splitFrontmatter(structureFile.content).body,
+      splitFrontmatter(reconciledContent).body,
+    );
+    if (coverage.missingThreads.length > 0) {
+      log(`graph-project-view: ${coverage.missingThreads.length} thread(s) have no representation in the README this run: ${coverage.missingThreads.join(", ")}.`);
+    }
+    if (coverage.fellAway.length > 0) {
+      log(`graph-project-view: ${coverage.fellAway.length} thread(s) fell away this run (dormant, no Due, no Blocking): ${coverage.fellAway.join(", ")}.`);
+    }
+
+    return { ok: true, skipped: false, changed, summary: summaries, coverage };
   } catch (err) {
     log(`graph-project-view: couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
     const durationMs = Date.now() - callStart;
@@ -658,6 +818,6 @@ export async function runGraphProjectView(
       durationMs,
       outcome: "error",
     });
-    return { ok: true, skipped: false, changed: false, summary: [] };
+    return { ok: true, skipped: false, changed: false, summary: [], coverage: null };
   }
 }

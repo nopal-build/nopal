@@ -287,23 +287,107 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     `graph-project-view`'s own `appliedByProjectView` marker meaningless
     the next time either stage runs — no separate "full" mode needed,
     same idempotent-by-construction property the old per-day design had.
-  - **Preemptively hardened, not yet proven against a real run**: this
-    stage hasn't actually built a real README from a substantial
-    `graph-structure.md` yet (every real run so far has hit "no
-    graph-structure.md yet" because the upstream stage never finished —
-    see `graph-structure`'s own "real finding" bullet above), but shares
-    the exact same tool-calling-loop shape that JUST proved vulnerable to
-    a real bootstrap truncating on its first turn's own narration text.
-    Applied the same two defensive fixes ahead of time rather than
-    waiting to hit the identical failure for real: the system prompt now
-    explicitly forbids text outside a tool call, and `MAX_TURNS` is
-    raised from 8 to 20 (a first bootstrap needs a minimum of ~5-6
-    `update_section` calls, one per canonical heading, leaving little
-    margin at the old ceiling). No batching equivalent to
+  - **Hardened ahead of `graph-structure`'s own real bootstrap failure**
+    (before this stage had run for real against a substantial
+    `graph-structure.md` itself): shares the exact same tool-calling-loop
+    shape that proved vulnerable to a real bootstrap truncating on its
+    first turn's own narration text. Applied the same two defensive fixes
+    ahead of time rather than waiting to hit the identical failure for
+    real: the system prompt explicitly forbids text outside a tool call,
+    and `MAX_TURNS` is raised from 8 to 20 (a first bootstrap needs a
+    minimum of ~5-6 `update_section` calls, one per canonical heading,
+    leaving little margin at the old ceiling). No batching equivalent to
     `graph-structure`'s own `NEW_NODE_BATCH_SIZE` was added here since
     there's no analogous "list of many things" to chunk — this stage
     always writes to the same fixed six sections, not a growing
     per-cluster set.
+  - **A REAL, CONFIRMED FAILURE from the first production run against a
+    substantial graph, fixed directly (not theoretical)**: this stage DID
+    run end-to-end for real (Nopal O., 88+ nodes) and produced a
+    README — but a 4,473-character one with ZERO `:ref{...}` citations,
+    zero `==` highlight marks, and four quotation marks total. Not a
+    prompt-quality problem: `buildUserPrompt` only ever handed the model
+    four things — today's date, `graph-structure.md`'s body, the README's
+    current body, and unstamped comments — and `graph-structure.md` holds
+    only twelve-word glosses (`2026-08-14 Node 1 (Austin T) — journaling
+    as superpower for organizing thoughts`), never the words themselves.
+    There was structurally NO path from this stage to a single word
+    anyone actually wrote, so "write from the nodes, quote their own
+    words" was a request `PROJECT_VIEW.md` made of a stage that had no
+    way to comply — paraphrase of paraphrase was the only possible
+    output. Fixed with BOTH a floor and a ceiling, deliberately, not just
+    one (a tool alone is one skill edit away from silently reverting to
+    paraphrase with nothing erroring, which is exactly how this failed
+    the first time — see ADR-006, `docs/adr/` kept out of the public
+    repo):
+    - **Pre-fetch (the floor)** — `buildNodePrefetchBlock` walks
+      `graph-structure.md`'s own top threads (already importance-sorted,
+      see the next bullet) top-down and hands the model every member
+      node's full verbatim text plus its exact `:ref{...}` citation
+      (`graphNodeIndex.server.ts`'s new `formatNodeVerbatim`/`refLine` —
+      a node's citation is now kept verbatim on the parsed record, not
+      just re-derived into a name/humanId pair, so nothing downstream
+      ever has to re-serialize one from parts). Bounded by a NODE budget
+      (`NODE_PREFETCH_BUDGET = 60`), not a thread count, filled top-down
+      and stopping MID-THREAD if needed (with an explicit "truncated"
+      note so the model knows it saw only part of one) — flat cost as the
+      graph grows, rather than scaling with however large one thread
+      happens to get.
+    - **`get_node` (the ceiling)** — a new tool, same shape
+      `graph-structure`'s own `get_node` already has: takes a node id,
+      returns its verbatim text and citation, validated against
+      `graph-structure.md`'s own node list (`buildMembershipIndex`,
+      exported from `graphStructure.server.ts` for this) exactly like
+      `add_node` already validates its own link candidates — an id not
+      actually in the graph is rejected, not silently accepted.
+  - **The thread sort was ALSO wrong, found on the same first production
+    run, fixed as its own change (ADR-008)**: `graph-structure.md`'s
+    clusters used to sort by raw inbound link COUNT only — never reading
+    `BacklinkInfo.fromAuthors` (see ADR-003), a thread's `Status`, or
+    anything resembling urgency — which let a single person's own notes
+    outrank the one thread holding a real deadline and a shipping list.
+    `GRAPH_STRUCTURE.md` now gives a thread two new optional fields,
+    `Due: <date>` and `Blocking: <what it holds up>` (the latter must
+    NAME the thing held up, never a rating — see ADR-007, guarding
+    against the same drift-to-a-cheap-default that made `Status` collapse
+    to `active` on 9 of 10 real threads), and `graphStructure.server.ts`'s
+    `sortClustersByWeight`/`rankCluster` now sort down an
+    importance-and-urgency grid: `Blocking`+`Due` first, `Blocking` alone,
+    `Due` alone, then everything else by distinct authors then raw count
+    then latest date, with `settled`/`superseded`/`dormant` threads
+    carrying neither field sinking to the very bottom rather than
+    competing on accumulated weight at all. A thread that's `dormant` with
+    no `Due` and no `Blocking` has "fallen away" (`hasFallenAway`, ADR-009)
+    — still fully present in `graph-structure.md` and still a valid
+    `sync-graph` backward-link candidate (ADR-004), just no longer
+    surfaced to the README. Two new MECHANICAL facts (never the model's
+    job to compute) are now handed to `graph-structure` per existing
+    thread — the date of its most recent node, and any dates found in its
+    nodes' own text (`graphNodeIndex.server.ts`'s new
+    `extractDatesFromText`) — so the model's only real judgment is
+    deciding what those dates MEAN (a commitment vs. a passing mention),
+    never finding them. **Known, deliberately unresolved risk (ADR-008's
+    own "known consequence")**: `sync-graph` receives this SAME ordering
+    as its backward-link candidate list, so the sort now also shapes what
+    tomorrow's nodes link to, which shapes weight, which shapes the sort —
+    a real feedback loop, accepted for now (Austin's call: the sort serves
+    the downstream stages, not human readability); the fix if it proves
+    real is a separately-ordered candidate list for `sync-graph`, not a
+    compromise to this ordering.
+  - **A companion coverage/"fell away" report, deliberately NOT a
+    coverage rule** — after every clean finish, `computeCoverageReport`
+    diffs graph-structure.md's own thread list against the README's final
+    body (an approximate heading-substring check, not exact per-node
+    citation tracking — a measurement, not a gate) and reports which
+    threads have zero representation, alongside which threads fell away
+    this run per `hasFallenAway`. Surfaced on `GraphProjectViewResult`'s
+    own new `coverage` field (`{ missingThreads, fellAway }`, `null`
+    whenever a run didn't reach a clean finish) and logged as job lines —
+    never a rule forcing coverage, since on the first real run four of ten
+    threads (including all fourteen nodes covering shipped work) produced
+    no README representation with no pattern predictable by rank, and the
+    right next step is reading this data across a few real runs before
+    anyone writes a rule from a guess.
 
 ## Reset
 
@@ -1130,6 +1214,22 @@ real across every existing project/`personal` space, and PhyLog/
 `project-n01`'s code has since been fully retired (deleted, not just
 unused) — see the header above and "Migration from `project-n01`" for
 what that involved.
+
+## Load-bearing decisions (ADRs)
+
+A handful of GraphLog's behaviors look like tuning parameters or
+inefficiencies to a future rewrite, but are actually brakes on real
+feedback loops (e.g. the three-link cap, ranking by distinct authors
+before raw count, quiet threads staying in `sync-graph`'s candidate list).
+Removing any of them is silent — nothing errors, the system just slowly
+stops doing the thing it was built to do. The reasoning for each is kept
+in `docs/adr/000N-slug.md`, numbered so code can point at one directly
+(`// brake, not a default — see ADR-002`) without spelling out the
+reasoning inline. **That directory is deliberately git-ignored and kept
+OUT of the public repo** (see `.gitignore`) — the one-line code comment is
+enough to stop a careless change without publishing the reasoning itself;
+ask whoever holds the ADR file directly if you need to read one and don't
+have the directory locally.
 
 ## Related skills
 

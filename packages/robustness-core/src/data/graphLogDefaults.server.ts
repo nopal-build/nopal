@@ -109,6 +109,31 @@ Take the personal, when it bears on the work. Someone writing that they worry th
 
 Be generous. The graph is allowed to be large. A missing node is invisible forever, and everything downstream is built from what you leave.
 
+## Lists
+
+People here write lists constantly, and a list is not a special kind of content. It is ordinary content with the connective words taken out. So the standalone test decides it, item by item, exactly as it decides everything else. (This is about how many NODES a list becomes. How a list is MARKED UP inside one node is a separate thing, covered under "Writing the node" below.)
+
+**Read one item alone, with nothing else in front of you. If it says something, it is a node. If it needs the heading above it or the item before it to mean anything, it belongs with them.**
+
+Work down the list applying that. A list will often split unevenly, and that is correct rather than a sign you have done it wrong.
+
+- \`Added rate limiting\` says something. Node.
+- \`Defining newspaper release. Minimum 3 hour lock out, but could be up to 12hours\` says something. Node.
+- \`PhyLog: (Internal name) is the 3rd party process that merges daily logs and such into the vault\` says something, and it is a definition other entries will lean on for months. Node, and one of the more valuable ones in the file.
+- \`Creating a sync folder\` says nothing on its own. It is a heading with no content behind it yet.
+- \`Prep for Journal Time: How are we going to share or review the footage on our own?\` says nothing without the four steps around it. That whole structure is one node.
+- \`PhyLog: describe in more details how this works later\` says nothing at all. It is a promise to write something.
+
+**When you split a list, carry its heading into each node.** This is the part that matters. An item is usually standalone *because of* the heading over it, and orphaning it is what makes splitting feel destructive. The heading is the writer's own words, so it belongs inside the quoted blocks, not in \`setup\`. Nesting changes nothing here: a parent whose children are meaningless without it is one node, children included, written as a paragraph block plus a list block.
+
+**Two exceptions, both narrow.**
+
+A list of *alternatives* is one node, never several. When someone writes that they need to do one of two things, splitting the fork puts two positions in the record that the person does not hold. The fork is the thought.
+
+A list of stubs with nothing behind them is one node recording that the pieces were named and left undefined, or no node at all. Do not manufacture a node per empty heading.
+
+**When an item is genuinely borderline, split it.** The heading travels with it, so the cost of being wrong is a slightly thin node that still points at its source. The cost of the other error is an idea buried inside a list where nothing can ever link to it, and burial is the failure this whole file is built to prevent.
+
 ## What does not earn a node
 
 **The writer narrating their own writing.** Deciding what to write next, announcing a section, restating a heading as a sentence. This is scaffolding, not thought:
@@ -186,36 +211,70 @@ You are handed the CURRENT \`graph-structure.md\` exactly as it stands (every ex
 - How many DISTINCT people wrote those linking nodes.
 - The date span those links were made across.
 
+You are also given, per thread already in the file: the date of its most recent node, and any dates found in its nodes' own text. Both are mechanical. What they mean is yours to decide, and the \`Status\`, \`Due\` and \`Blocking\` sections below are where you decide it.
+
 You are editing this file, one thread at a time, via \`update_cluster\`/\`remove_cluster\` calls — not rewriting it from scratch every run. Place each new node into whichever existing thread it belongs to, or start a new one if it doesn't fit anywhere yet. Keep a continuing thread's NAME the same across runs where it still fits, so the file downstream (README sections, sync-graph's own linking) doesn't churn just because you reworded a heading — only rename a thread once its old name has clearly stopped fitting what's in it. If you need an OLDER node's exact original wording (deciding whether to merge, split, or rename a thread), call \`get_node\` with its id — every id you're shown (in brackets after a new node, or embedded in any \`- <date> Node <N>\` line in the current file) works.
 
 # Every node gets a home
 
 This is an index, not a highlight reel. A node with zero inbound links still needs to be findable — it might be the FIRST of two mentions, and the second one hasn't happened yet. Group it into whatever thread it's closest to, even a thread of one. Nothing gets left out, and nothing gets left for "later" — there is no later pass that adds missing nodes back in.
 
-# Grouping
+# Grouping is the real work in this pass
 
-Group by what the nodes are actually about, not by date, not by who wrote them. Two people's nodes on the same real thing belong in the same group even when they used different words — that's the connection this file exists to make visible.
+Group by what the nodes are actually about, not by date, not by who wrote them. Two people's nodes on the same real thing belong in the same group even when they used different words — that's the connection this file exists to make visible. **Two people describing the same thing from different sides is the case to watch for**: one writing about what to build and the other about how it should feel are usually one thread, not two, and splitting them by whose vocabulary you recognized is the most common way this file loses the merge it exists to show.
 
 A thread's name is a short, plain label for what it's about — 2-5 words, no punctuation flourish, not a sentence. \`Task friction\`, not \`Thoughts on how tasks might create friction over time\`.
 
-# Weight and status
+**Never group by following the links.** Link topology puts nearly half a real graph into one connected mass that doesn't break apart even when its heaviest nodes are removed, because everything in a project eventually relates to everything else. The links tell you a project is coherent, not what its threads are. Read what the nodes SAY.
 
-Still write a \`Weight: ...\` line in the shape shown below, but you don't need to get the numbers exactly right — they're recomputed automatically from real data after every run, regardless of what you write there. Write a placeholder if it's easier (\`Weight: (recomputed)\`) and spend your real effort on Status instead, which is never recomputed for you:
+**Aim for threads of roughly three to twelve nodes.** A guide, not a rule to break content over.
 
-\`\`\`
-Weight: 7 inbound links, 3 people, 2026-07-29 → 2026-08-15
-\`\`\`
+- **Past about fifteen nodes it is usually a topic, not a thread.** Split it by the QUESTION being argued rather than by subject matter, because subject matter is exactly what fused everything into one mass. "The AI layer" is a topic. "What AI is allowed to generate," "how much it writes versus surfaces," and "how its own scope gets reviewed" are three threads a reader can tell apart.
+- **A thread of one or two is fine** and often correct. A new idea starts as a thread of one.
 
-A thread with no inbound links yet still gets a weight line — just say so plainly (\`Weight: no inbound links yet\`) rather than omitting it.
+# The four fields on a thread
 
-Status is your one real judgment call in this pass. Follow a thread's own nodes forward in time and decide which of these it currently is:
+Every thread carries a single line holding up to four things. One is computed for you. Three are yours, and they are the whole of your judgment in this pass.
 
-- **active** — still being added to, no resolution in sight.
-- **open, unowned/owned, opened <date>** — a concrete piece of work nobody's finished; name who owns it only if a node itself says so, never guess.
-- **settled, <date>** — a later node in the thread closed it out (a decision made, a task done, a question answered). Say what closed it and when.
-- **superseded by <node>** — a later node in the thread replaced an earlier claim rather than just adding to it. Point at the node that did the superseding.
+**\`Weight:\`** is recomputed from real data after every run regardless of what you write, so write \`Weight: (recomputed)\` and spend nothing on it. It measures one thing only: how much has piled up around this thread over time. That is real, and it is blind to anything that arrived recently.
 
-Never mark something settled or superseded on a hunch — only when a later node in the graph actually says so.
+**\`Status:\`**, **\`Due:\`** and **\`Blocking:\`** are never recomputed. Nothing checks them. They decide where this thread ranks for every stage downstream, and they are the reason a deadline set yesterday can outrank a conversation three weeks deep.
+
+Status answers *is it finished*. Due and Blocking answer *does it matter, and is it timed*. Keep them separate: a thread can be wide open and unimportant, and it can be settled and still the most consequential thing on the page.
+
+## Status — is this thread finished?
+
+Status answers one question and nothing else: has this been closed out. It says nothing about whether the thread matters. Follow the thread's own nodes forward in time and pick one:
+
+- **active** — a live line of thinking, still being added to. **\`active\` has to be earned by a node landing recently.** Do not use it as the safe answer: "still being discussed" is true of nearly any thread ever written, and a file where everything says active has said nothing.
+- **open** — a concrete piece of work nobody has finished. A decision someone is waiting on, a bug, feedback nobody has acted on. Name an owner only if a node says so, never guess.
+- **settled, <date>** — a later node closed it out: a decision made, a thing shipped, a question answered. Say what closed it and when. **Shipped work is settled**, even when more shipping is coming.
+- **dormant** — nothing added for weeks, nobody waiting. Not dead, just quiet. The honest home for most old threads, and what stops \`active\` from swallowing the file. You are given the date of each thread's most recent node, so this one is close to arithmetic; use it.
+- **superseded by <node>** — a later node replaced an earlier claim rather than adding to it. Point at the node that did it. Where the thread's own heaviest node is the superseded one, say so on the Weight line, because accumulated weight is exactly what makes a dead claim look authoritative downstream.
+
+Never mark something settled or superseded on a hunch — only when a later node actually says so. Nobody mentioning a thing again makes it dormant, never settled.
+
+**A thread can hold more than one status.** When a thread is mostly settled but carries one live question, give it its dominant status and mark the exception on that node's own line rather than flattening it.
+
+## Due and Blocking — does this thread matter, and is it timed?
+
+Weight measures what has piled up. A thing that arrived yesterday carrying a hard deadline has no pile and matters more than anything on the page. These two fields are how that gets seen, and between them they place a thread on the importance-and-urgency grid the ordering uses.
+
+**\`Due: <date>\`** — a real date this thread is bound to. You are handed any dates code found in the thread's nodes; your job is deciding whether each is a commitment or a passing mention. A deadline someone committed to is a \`Due\`. Someone recalling when a thing shipped is not. Leave the field off when there is no date.
+
+**\`Blocking: <what it is holding up>\`** — present only when this thread is holding something else back, and you must **name the thing**. Not a rating.
+
+> \`Blocking: client onboarding and the Sunny handoff\`
+
+Never write \`Blocking: high\` or \`Blocking: important\`. A label costs nothing to write and means nothing; naming what is stuck is a claim anyone can check against the nodes and correct when it's wrong. If you can't name what it holds up, it isn't blocking, and you leave the field off.
+
+**Most threads have neither field, and that is correct.** These are the exception, not a score every thread carries. A file where half the threads claim to be blocking something has told the reader nothing, exactly like a file where everything says active.
+
+## Falling away
+
+A thread that is dormant, has no \`Due\`, and has no \`Blocking\` stops being surfaced downstream. Its nodes stay in the graph permanently and it stays in this file; it simply stops occupying attention.
+
+This is deliberate and it is how a bullet journal already works: an item nobody kept alive falls away rather than being struck out or deleted. Do not treat it as deletion and do not resist it by inventing a \`Blocking\` line to keep something visible. If a thread genuinely still matters after months of silence, the thing it holds up can be named, and naming it is the whole test.
 
 # Node format
 
@@ -223,14 +282,26 @@ One line per node, under its thread's heading, in this exact shape:
 
 \`\`\`
 ## <Thread name>
-Weight: <N> inbound link(s), <M> people, <earliest> \u2192 <latest> \u00b7 Status: <status>
-- <date> Node <N> (<author>) \u2014 <one-line gloss>
-- <date> Node <N> (<author>) \u2014 <one-line gloss>
+Weight: <recomputed> · Status: <status> · Due: <date> · Blocking: <what it holds up>
+- <date> Node <N> (<author>) — <one-line gloss>
+- <date> Node <N> (<author>) — <one-line gloss>
 \`\`\`
+
+\`Due\` and \`Blocking\` are omitted entirely when they don't apply, which is most threads. \`Weight\` and \`Status\` are always present.
 
 **The gloss is a short, plain phrase pointing at what the node says — never a quote, never a full sentence restating the node, never your own opinion of it. Aim for well under 12 words — a phrase, not a clause.** \`bullet journaling as a model for deliberate task friction\`, not \`Gerald thinks that bullet journaling could work well because it adds deliberate friction to task management which he finds valuable\`. The full words are already in the graph; this file only has to help someone (or the next stage) decide whether to go look. **This file's own length scales with the WHOLE graph's node count, and a graph accumulates for months** — a gloss that runs long by a sentence multiplies into real bloat once there are a hundred nodes, in a way it never would for a single day's output. Keep every gloss short even when a node's own idea took the writer four sentences to work out.
 
-Threads are automatically re-sorted heaviest-first after every run, so you don't need to place a new cluster in any particular position yourself. A thread with no inbound links yet still belongs under a plain \`## Unclustered\` heading if it doesn't yet belong anywhere else — still one line per node, same format; it'll sort to the bottom on its own.
+Threads are re-sorted automatically after every run, so never place a cluster in a particular position yourself. **The order is not for a person reading this file. It is for the stages that read it next**, which take what comes first most seriously, so the fields you write are what decide whether the right thing leads.
+
+The order runs down the importance-and-urgency grid:
+
+1. **\`Blocking\` and \`Due\`** — important and timed. Nothing outranks this.
+2. **\`Blocking\`, no \`Due\`** — important, not yet urgent. The work that gets crowded out by louder things, which is exactly why it sits above them.
+3. **\`Due\`, no \`Blocking\`** — a date with nothing behind it. Real, but it does not outrank work that is holding something up.
+4. **Everything else**, by how many distinct people link in, then by raw link count.
+5. **Settled, superseded and dormant**, below all of it.
+
+\`## Unclustered\` is only for a node that genuinely has no thread yet, and it sorts last. **It is never where live work belongs.** A single node naming a deadline or an unanswered decision gets its own named thread with the fields filled in, not a slot in the leftovers pile.
 
 # What never happens in this pass
 
@@ -240,7 +311,13 @@ Threads are automatically re-sorted heaviest-first after every run, so you don't
 - No dropping a node because it seems minor. Minor now is not minor forever, and this file is the only place that would ever notice it came back.
 `;
 
-export const DEFAULT_PROJECT_VIEW_SKILL = `Your job is to write this project's README from \`Graph/graph-structure.md\` — GraphLog's own clustered, weighted index of the whole graph (see \`GRAPH_STRUCTURE.md\`). You never read graph-log files or daily logs directly, and you never count links or judge weight yourself — that's already been done for you, in the "Weight" line under every thread you're handed. Your job is deciding what's worth featuring in a short, honest README, and writing it in the people's own words.
+export const DEFAULT_PROJECT_VIEW_SKILL = `Your job is to write this project's README from \`Graph/graph-structure.md\` — GraphLog's own clustered, weighted index of the whole graph (see \`GRAPH_STRUCTURE.md\`) — plus the actual node text behind the threads worth featuring.
+
+You never count links or judge weight yourself; that's already done for you in the "Weight" line under every thread. Your job is deciding what's worth featuring in a short, honest README, and writing it from what people actually said rather than from a summary of what they said.
+
+**Two inputs, and they do different jobs.** \`graph-structure.md\` tells you what this project is made of and what carries weight, in twelve-word glosses. It is a table of contents, never source material: a gloss is somebody's paraphrase of a paraphrase and writing prose from it produces a summary of a summary, which is the one thing this whole system exists to prevent. The full text of the top threads' nodes is handed to you alongside it, and \`get_node <id>\` fetches any other node by the id shown in a \`- <date> Node <N>\` line. **Read the index to decide what to write about. Read the nodes to write.**
+
+If you find yourself writing a sentence about a thread whose nodes you have not read, stop and fetch them.
 
 The README is where someone goes to understand the project without reading the graph. It answers two questions at once: what has to get done, and what the group is actually thinking about. Both belong here, and they are different kinds of material.
 
@@ -260,7 +337,11 @@ Weight orders the ideas. It does not order everything.
 
 An idea earns its place by sticking around and pulling other things toward it — that's exactly what a thread's "Weight" line already tells you. A concept people keep picking up over weeks outranks one that arrived this morning. But a deadline landing next month, a decision somebody is waiting on, a bug found yesterday: those are live state, and they matter because of when they are rather than how much has gathered around them. Weight would rank them near zero and be wrong.
 
-So order the thinking sections by weight (read straight off \`graph-structure.md\`) and the action sections by what is actually live. Never let a heavy thread push a hard constraint down the page.
+\`graph-structure.md\` already separates these for you, and its order is built for you rather than for someone reading that file. Threads carrying \`Blocking:\` and \`Due:\` come first, then \`Blocking:\` alone, then \`Due:\` alone, then everything else by weight, then the settled and dormant. So the action sections of this README come from the top of that file and the thinking sections from the middle, in the order they already appear.
+
+\`Blocking:\` names what a thread is holding up. That naming is the most useful sentence in the whole index and it belongs in the README, not just in your ranking. Never let a heavy thread push a hard constraint down the page.
+
+A thread marked \`dormant\` with no \`Due\` and no \`Blocking\` has fallen away. Leave it out. It is not deleted, its nodes are permanent, it has simply stopped earning attention, and pulling it back in undoes the one mechanism keeping this file short.
 
 **A heavy idea marked superseded is the worst thing this file can carry.** \`graph-structure.md\` already tracks this in its Status line — where a thread is marked \`superseded by <node>\`, the weight that gathered around the OLD version never transfers to the new one. Say what it is now, and say that it changed.
 
@@ -271,6 +352,8 @@ Weight is countable and comes from three places, strongest first (all already re
 3. **Chains.** A node that later nodes depend on, or that only makes sense as the start of a run of them, is load-bearing even when its own count is modest.
 
 A thread with no inbound links is a single mention. Keep it if it belongs, but never let it set the shape of the file.
+
+**Check how many people are actually writing before you say anything about agreement.** Every cross-person claim assumes more than one person is logging on this project, and plenty of projects have one. Where only one person has written, distinct-author counts are a constant, convergence cannot appear and divergence cannot be detected. Never write that nobody else has picked something up, or that a view is unchallenged, in a project where nobody else has written at all. That reads as a finding about the idea when it is a fact about the room. Say plainly that one person is logging here, and let the reader draw their own conclusion about what that means.
 
 **Write the count when it supports a claim.** "Both of you have come back to this six times since 7/29" is a finding about where the group's attention actually is, it is checkable, and it is worth far more than asserting that something matters and expecting the reader to take your word. Give the number, name who and across what span (straight from \`graph-structure.md\`'s Weight line), and move on.
 
@@ -286,9 +369,13 @@ That is a ceiling on the file, not on any one section. If it is running long, ta
 
 # Their words carry it. Yours connect it.
 
-Any line doing real work is a person's own sentence, quoted from the node itself (go read the real node in its graph-log file — \`graph-structure.md\` only gives you a gloss and a pointer, never the words to quote). Copy its \`:ref{...}\` directive exactly as it appears in that graph-log file. Never build a citation, never reformat one, never move one to a different quote.
+You are not required to quote every line, and this file is allowed to change flavor over time. What is not optional is that you write from the nodes rather than from the glosses, and that a reader can get back to a source.
 
-Write in your own voice to connect one thought to another, to head a section, or to state a plain fact of record.
+**Quote when the words themselves carry the point.** Someone's own phrasing of what they want, a line that names a tension, a sentence that is better than any paraphrase of it. Where two people arrived at the same thing in different words, quoting both is the only way to show it actually happened rather than asserting that it did.
+
+**Write in your own voice** to connect one thought to another, to head a section, to state a plain fact of record, or to compress a run of routine nodes that nobody needs verbatim.
+
+**Any line doing real work carries its node's \`:ref{...}\` directive**, quoted or not. Copy it exactly as it appears on the node. Never build a citation, never reformat one, never move one to a different quote. A paraphrase with a working citation is auditable; the same paraphrase without one is just a claim.
 
 **Don't gloss a quote.** A good line doesn't need an interpreter. Say what changed because of it, or say nothing.
 

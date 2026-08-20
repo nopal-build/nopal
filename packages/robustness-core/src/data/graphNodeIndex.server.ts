@@ -30,6 +30,13 @@ export type GraphLogNode = {
   quote: string;
   authorName: string | null;
   authorHumanId: string | null;
+  /** The exact, unmodified `:ref{...}` line as it appears in the
+   * graph-log file — kept verbatim (not just the name/humanId parsed out
+   * of it below) so a later stage that needs to COPY a citation (see
+   * `graph-project-view`'s own "the view stage reads node text" fix,
+   * ADR-006) never has to re-serialize one from parts and risk it drifting
+   * from what `sync-graph` actually wrote. */
+  refLine: string;
   /** This node's own OUTBOUND links — other nodes it points AT. */
   links: NodeLink[];
 };
@@ -99,10 +106,26 @@ export function parseGraphLogNodes(date: string, body: string): GraphLogNode[] {
       quote,
       authorName: name,
       authorHumanId: humanId,
+      refLine: block[refIndex].trim(),
       links,
     });
   }
   return nodes;
+}
+
+/**
+ * Formats one node for a stage that needs to WRITE FROM it (not just
+ * count links against it) — verbatim quote plus its exact citation, so
+ * the model can copy a `:ref{...}` directive rather than construct one
+ * (ADR-005). Used by `graph-project-view`'s own node pre-fetch/`get_node`
+ * (ADR-006) — deliberately separate from `graphStructure.server.ts`'s own
+ * `buildNodeBlock`, which also carries inbound/outbound link facts that
+ * matter for CLUSTERING a node but not for writing prose from one.
+ */
+export function formatNodeVerbatim(node: GraphLogNode): string {
+  return [`${node.date} Node ${node.number} (${node.authorName ?? "Unknown"}) [id: ${node.id}]:`, node.quote, node.refLine]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export type BacklinkInfo = {
@@ -110,7 +133,20 @@ export type BacklinkInfo = {
   /** Distinct author NAMES of the nodes linking in — not ids, since two
    * different people are the strongest weight signal `GRAPH_STRUCTURE.md`
    * cares about (see the `graphlog` skill), and names are what a prompt
-   * can use directly without another lookup. */
+   * can use directly without another lookup.
+   *
+   * brake, not a default — see ADR-003 (docs/adr/0003-rank-by-distinct-authors.md,
+   * kept out of the public repo). Every caller that RANKS by weight (see
+   * `graphStructure.server.ts`'s own thread sort) must read the SIZE of
+   * this set before it reads `count` — one person circling their own idea
+   * produces the same `count` as two people converging on it, and
+   * converging-from-different-directions is the only signal here that
+   * justifies a multi-person tool over a private journal. Collapsing this
+   * to a sum (it looks like a harmless, faster optimization: a `Set` costs
+   * more to maintain than a running total, and on any given day the two
+   * numbers usually agree) is silent — nothing errors, convergence just
+   * stops showing up in the ranking and whoever writes the most starts
+   * winning every one of them. */
   fromAuthors: Set<string>;
   earliestDate: string;
   latestDate: string;
@@ -149,6 +185,33 @@ export function computeBacklinkIndex(allNodes: GraphLogNode[]): Map<string, Back
     }
   }
   return index;
+}
+
+const MONTH_NAMES = "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
+const ISO_DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b/g;
+const MONTH_DAY_YEAR_RE = new RegExp(
+  `\\b(${MONTH_NAMES})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`,
+  "gi",
+);
+
+/**
+ * Best-effort scan for date-like mentions in a node's own verbatim text —
+ * feeds `graph-structure`'s own "dates found in a thread's nodes" fact
+ * (see `GRAPH_STRUCTURE.md`'s "Due and Blocking" section: code finds the
+ * dates, the MODEL judges whether each is a real commitment or a passing
+ * mention — never the reverse). Deliberately permissive rather than
+ * precise: an over-detected non-date is harmless noise the model already
+ * has to judge past anyway, but a missed real deadline is invisible
+ * forever, same "be generous" tradeoff `GRAPH.md` already makes for
+ * whether something earns a node at all. Returns ISO `YYYY-MM-DD` where
+ * the source was already that explicit, otherwise the mention as written
+ * (e.g. "August 20") — deduped, not otherwise interpreted.
+ */
+export function extractDatesFromText(text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(ISO_DATE_RE)) found.add(match[1]);
+  for (const match of text.matchAll(MONTH_DAY_YEAR_RE)) found.add(match[0].trim());
+  return [...found];
 }
 
 /** Deterministic hash over a set of parts, order-independent — same
