@@ -13,8 +13,9 @@
  * can be transitioned independently. Uses `currentColor`, so it inherits
  * whatever text color the wrapping element sets — including dark mode,
  * as long as that color already flips (e.g. `purple-text`, or
- * `CircleButton`'s own `.circle-btn` color, both of which already have a
- * `prefers-color-scheme: dark` override in `root.css`).
+ * `CircleButton`'s own base color, both of which already resolve
+ * correctly per color scheme — see `packages/stamps/src/tokens.ts`'s
+ * `semanticColors`).
  */
 export function HamburgerNeqIcon({
   open,

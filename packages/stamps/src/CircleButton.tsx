@@ -1,15 +1,16 @@
-// app/components/CircleButton.tsx
+// packages/stamps/src/CircleButton.tsx
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { circleButton, type CircleButtonVariants } from "./circleButton.css";
 
-type CircleButtonProps = Omit<
-  ButtonHTMLAttributes<HTMLButtonElement>,
-  "children"
-> & {
+type CircleButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
   children: ReactNode;
-  /** Shows the hover/pressed background + purple text \u2014 e.g. while a menu it triggers is open. */
+  /** Shows the hover/pressed background + purple text — e.g. while a menu it triggers is open. */
   active?: boolean;
   /** Diameter in px. Defaults to 36. */
   size?: number;
+  /** Solid-fill green or transparent-red-on-hover tint. Defaults to the
+   * plain transparent style. */
+  variant?: NonNullable<CircleButtonVariants>["variant"];
 };
 
 /**
@@ -29,6 +30,7 @@ export function CircleButton({
   children,
   active = false,
   size = 36,
+  variant = "default",
   className = "",
   style,
   type = "button",
@@ -38,7 +40,7 @@ export function CircleButton({
     <button
       type={type}
       data-active={active ? "true" : undefined}
-      className={`circle-btn ${className}`.trim()}
+      className={`${circleButton({ variant })} ${className}`.trim()}
       style={{ width: size, height: size, ...style }}
       {...rest}
     >

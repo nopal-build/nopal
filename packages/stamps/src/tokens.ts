@@ -101,6 +101,7 @@ export const semanticColors = {
   textPrimary: "var(--color-text-primary)",
   textBrand: "var(--color-text-brand)",
   textSubtle: "var(--color-text-subtle)",
+  textDanger: "var(--color-text-danger)",
   surfacePage: "var(--color-surface-page)",
   surfaceCard: "var(--color-surface-card)",
   surfaceBorder: "var(--color-surface-border)",

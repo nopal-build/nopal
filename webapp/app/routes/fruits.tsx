@@ -6,7 +6,7 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
-import { MoreMenu } from "../components/MoreMenu";
+import { MoreMenu } from "stamps/MoreMenu";
 import { DayContainer, DayTitle } from "../components/DailyLogDay";
 import OxRenderer from "../components/OxRenderer";
 import { getAccessibleProjectFolders } from "robustness-core/data/vault.server";

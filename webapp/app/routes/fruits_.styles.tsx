@@ -9,9 +9,9 @@ import { Chip } from "stamps/Chip";
 import { Input } from "stamps/Input";
 import { Modal } from "stamps/Modal";
 import { CopyField } from "../components/CopyField";
-import { SearchCollection } from "../components/SearchCollection";
-import { MoreMenu, MoreIcon } from "../components/MoreMenu";
-import { CircleButton } from "../components/CircleButton";
+import { SearchCollection } from "stamps/SearchCollection";
+import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
+import { CircleButton } from "stamps/CircleButton";
 import { HamburgerNeqIcon } from "../components/HamburgerNeqIcon";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -234,12 +234,12 @@ export default function FruitsStyles() {
                   [
                     "A round icon-only button (favorite, close, …)",
                     "<CircleButton>",
-                    "components/CircleButton.tsx",
+                    "stamps/CircleButton (packages/stamps)",
                   ],
                   [
                     'A "•••" (or any) action menu on a row/card',
                     "<MoreMenu>",
-                    "components/MoreMenu.tsx",
+                    "stamps/MoreMenu (packages/stamps)",
                   ],
                   [
                     'Search a list, optionally "add new"',

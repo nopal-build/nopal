@@ -1,4 +1,4 @@
-// app/components/MoreMenu.tsx
+// packages/stamps/src/MoreMenu.tsx
 import {
   useEffect,
   useLayoutEffect,
@@ -7,6 +7,9 @@ import {
   type ReactNode,
 } from "react";
 import { CircleButton } from "./CircleButton";
+import { menuItem } from "./menuItem.css";
+import { panel as panelClass, root as rootClass, triggerWrapper } from "./moreMenu.css";
+import { Surface } from "./Surface";
 
 /**
  * The "•••" trigger icon on its own, in case a caller needs the glyph
@@ -88,7 +91,7 @@ const VIEWPORT_MARGIN = 8;
 type MenuPosition = { top: number; left: number };
 
 /**
- * A small `good-box` action menu, opened by a trigger of your choosing.
+ * A small `Surface` action menu, opened by a trigger of your choosing.
  * Closes on Escape, on an outside click, or after an item is clicked. Use
  * this instead of hand-rolling a per-row "..." menu (see `RelationshipCard`
  * in `fruits_.profile.tsx` for the pattern this replaces) — it bundles the
@@ -200,11 +203,8 @@ export function MoreMenu({
   }, [open, align]);
 
   return (
-    <div
-      ref={rootRef}
-      className={`relative inline-block ${className}`.trim()}
-    >
-      <div ref={triggerRef} className="inline-block">
+    <div ref={rootRef} className={`${rootClass} ${className}`.trim()}>
+      <div ref={triggerRef} className={triggerWrapper}>
         {trigger ? (
           trigger({ open, toggle, label })
         ) : (
@@ -221,10 +221,10 @@ export function MoreMenu({
       </div>
 
       {open && (
-        <div
+        <Surface
           ref={panelRef}
           role="menu"
-          className="good-box flex flex-col gap-0.5"
+          className={panelClass}
           style={{
             position: "fixed",
             top: position ? position.top : -9999,
@@ -247,15 +247,12 @@ export function MoreMenu({
                     setOpen(false);
                     item.onClick();
                   }}
-                  className={[
-                    "menu-item text-sm",
-                    item.danger ? "red-text" : "purple-text",
-                  ].join(" ")}
+                  className={menuItem({ danger: item.danger })}
                 >
                   {item.label}
                 </button>
               ))}
-        </div>
+        </Surface>
       )}
     </div>
   );

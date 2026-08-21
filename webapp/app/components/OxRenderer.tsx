@@ -37,7 +37,7 @@ import OxPopover from "../oxmarkdown/OxPopover";
 import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
-import { CircleButton } from "./CircleButton";
+import { CircleButton } from "stamps/CircleButton";
 import "../styles/oxmarkdown.css";
 
 export interface OxRendererProps {
@@ -743,13 +743,14 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
 // interactable, not a caller-registered directive.
 
 /** Just the X mark from the provided artwork — CircleButton itself
- * supplies the circular hover background/border (`.circle-btn-red`,
- * root.css), so only the two crossing strokes are needed here, not the
- * circle that came with them in the original combined default/hover
- * reference image. `stroke="currentColor"` (swapped from the original
- * hardcoded `#A63B31`, which is `--red`'s own hex value) so it inherits
- * whatever color `.circle-btn-red` sets, same adaptation as the "add
- * file" paperclip icon. Paths otherwise UNCHANGED from what was given;
+ * supplies the circular hover background/border (`variant="red"`, see
+ * `packages/stamps/src/circleButton.css.ts`), so only the two crossing
+ * strokes are needed here, not the circle that came with them in the
+ * original combined default/hover reference image. `stroke="currentColor"`
+ * (swapped from the original hardcoded `#A63B31`, which is `--red`'s own
+ * hex value) so it inherits whatever color the `red` variant sets, same
+ * adaptation as the "add file" paperclip icon. Paths otherwise UNCHANGED
+ * from what was given;
  * `viewBox` cropped to "0 0 36 36" (the default X's own coordinates
  * already sit centered within that — confirmed against the reference
  * artwork's hover-state circle, `rx=17.5`/35px, positioned identically
@@ -851,7 +852,7 @@ export function FileDirectiveLayout({
         // instead of trying to resize the button itself.
         <div className="ox-file-remove-slot">
           <CircleButton
-            className="circle-btn-red"
+            variant="red"
             onClick={onRemove}
             aria-label={`Remove ${name}`}
           >
@@ -1039,7 +1040,7 @@ export function CardDirectiveLayout({
         </div>
         {onRemove && (
           <CircleButton
-            className="circle-btn-red"
+            variant="red"
             onClick={onRemove}
             aria-label={`Remove ${projectName} card`}
           >

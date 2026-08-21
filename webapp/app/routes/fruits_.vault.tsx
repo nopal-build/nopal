@@ -57,7 +57,7 @@ import { getProjectRoleForFolderId } from "robustness-core/data/projectSharing.s
 import { getRelatedHumans } from "robustness-core/data/relationships.server";
 import { resolveProjectManifest, type ResolvedProject } from "robustness-core/data/project.server";
 import { AppLayout } from "../components/AppLayout";
-import { MoreMenu, type MoreMenuItem } from "../components/MoreMenu";
+import { MoreMenu, type MoreMenuItem } from "stamps/MoreMenu";
 import OxEditor from "../components/OxEditor";
 import OxRenderer from "../components/OxRenderer";
 import { ProjectView } from "../components/ProjectView";

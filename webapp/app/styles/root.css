@@ -86,6 +86,7 @@ html {
   --color-text-primary: var(--plum-700);
   --color-text-brand: var(--plum-300);
   --color-text-subtle: var(--text-subtle);
+  --color-text-danger: var(--clay-500);
   --color-surface-page: var(--white);
   --color-surface-card: var(--surface-day-100);
   --color-surface-border: var(--surface-day-500);
@@ -105,6 +106,7 @@ html {
     --color-text-primary: var(--white);
     --color-text-brand: var(--moon);
     --color-text-subtle: var(--text-subtle-dark);
+    --color-text-danger: var(--clay-300);
     --color-surface-page: var(--purple);
     --color-surface-card: var(--surface-night-100);
     --color-surface-border: var(--surface-night-500);
@@ -213,86 +215,10 @@ body {
    than a bare `var(--foreground)` — that variable doesn't flip itself, so
    pairing it with dark-mode text (which does flip) would wash out to
    light-on-light. */
-.circle-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: var(--text-subtle);
-  transition: background 150ms, color 150ms;
-  flex-shrink: 0;
-
-  &:hover,
-  &:focus-visible,
-  &[data-active="true"] {
-    background: var(--foreground);
-    color: var(--purple);
-  }
-  &:focus-visible {
-    outline: 2px solid var(--purple-light);
-    outline-offset: 2px;
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    color: var(--text-subtle-dark);
-    &:hover,
-    &:focus-visible,
-    &[data-active="true"] {
-      background: var(--dark-foreground);
-      color: white;
-    }
-  }
-}
-
-/* Solid-fill green variant of `.circle-btn` (pair via CircleButton's
-   `className` prop) — e.g. an "add attachment" affordance that needs to
-   read as actionable at rest, not just on hover. `--green` already reads
-   fine against white in both color schemes, so no dark-mode override is
-   needed here (unlike the transparent default above). Declared after
-   `.circle-btn` so it wins the same-specificity `:hover`/dark-mode ties. */
-.circle-btn-green {
-  background: var(--green);
-  color: white;
-
-  &:hover,
-  &:focus-visible,
-  &[data-active="true"] {
-    background: var(--green);
-    color: white;
-    filter: brightness(1.1);
-  }
-}
-
-/* Transparent-at-rest, red-tinted-on-hover variant of `.circle-btn` (pair
-   via CircleButton's `className` prop) - a "remove this" affordance
-   (the file directive's own X button, editingNodes.tsx). Icon color
-   stays --red in both states (matches the provided artwork - only the
-   background/border appear on hover); a transparent 1px border at rest
-   reserves the same space the hover border needs, so hovering doesn't
-   shift anything by a pixel. --red/--red-light already read fine in both
-   color schemes without a dark-mode pair (same as .badge-danger below,
-   already shipped with no override). Declared after .circle-btn so it
-   wins the same-specificity :hover ties. */
-.circle-btn-red {
-  color: var(--red);
-  border: 1px solid transparent;
-  box-sizing: border-box;
-
-  &:hover,
-  &:focus-visible,
-  &[data-active="true"] {
-    background: var(--red-light);
-    border-color: var(--red);
-    color: var(--red);
-  }
-}
+/* .circle-btn/.circle-btn-green/.circle-btn-red moved to
+   packages/stamps/src/circleButton.css.ts (a vanilla-extract recipe) —
+   see the `CircleButton` component there instead of adding these classes
+   back here. */
 
 /* Badge variants moved to packages/stamps/src/badge.css.ts (a
    vanilla-extract recipe) — see the `Badge` component there instead of

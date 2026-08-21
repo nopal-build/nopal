@@ -69,7 +69,7 @@ import { AppLayout } from "../components/AppLayout";
 import { Input } from "stamps/Input";
 import { Badge } from "stamps/Badge";
 import { Modal } from "stamps/Modal";
-import { MoreMenu } from "../components/MoreMenu";
+import { MoreMenu } from "stamps/MoreMenu";
 import {
   getKnownAccounts,
   rememberAccount,

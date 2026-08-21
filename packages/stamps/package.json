@@ -9,7 +9,10 @@
     "./Chip": "./src/Chip.tsx",
     "./Input": "./src/Input.tsx",
     "./Surface": "./src/Surface.tsx",
-    "./Modal": "./src/Modal.tsx"
+    "./Modal": "./src/Modal.tsx",
+    "./CircleButton": "./src/CircleButton.tsx",
+    "./MoreMenu": "./src/MoreMenu.tsx",
+    "./SearchCollection": "./src/SearchCollection.tsx"
   },
   "peerDependencies": {
     "react": "^18.3.1"
