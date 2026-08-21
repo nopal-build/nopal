@@ -1,0 +1,21 @@
+{
+  "name": "stamps",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./tokens": "./src/tokens.ts",
+    "./Badge": "./src/Badge.tsx",
+    "./Chip": "./src/Chip.tsx"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3"
+  },
+  "dependencies": {
+    "@vanilla-extract/css": "^1.21.2",
+    "@vanilla-extract/recipes": "^0.5.7"
+  }
+}

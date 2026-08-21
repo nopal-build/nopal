@@ -67,7 +67,7 @@ import {
 } from "robustness-core/data/apiTokens.server";
 import { AppLayout } from "../components/AppLayout";
 import { Input } from "../components/Input";
-import { Badge } from "../components/Badge";
+import { Badge } from "stamps/Badge";
 import { Modal } from "../components/Modal";
 import { MoreMenu } from "../components/MoreMenu";
 import {

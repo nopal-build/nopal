@@ -4,8 +4,8 @@ import type { LoaderFunctionArgs } from "react-router";
 import { redirect, data } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
-import { Badge } from "../components/Badge";
-import { Chip } from "../components/Chip";
+import { Badge } from "stamps/Badge";
+import { Chip } from "stamps/Chip";
 import { Input } from "../components/Input";
 import { Modal } from "../components/Modal";
 import { CopyField } from "../components/CopyField";
@@ -219,12 +219,12 @@ export default function FruitsStyles() {
                   [
                     "A status pill (Complete, Overdue…)",
                     '<Badge variant="...">',
-                    "components/Badge.tsx",
+                    "stamps/Badge (packages/stamps)",
                   ],
                   [
                     "A filter / category tag",
                     "<Chip>",
-                    "components/Chip.tsx",
+                    "stamps/Chip (packages/stamps)",
                   ],
                   [
                     "A centered dialog / confirmation",
@@ -798,7 +798,10 @@ export default function FruitsStyles() {
             <p className="text-xs font-mono subtle-text">
               Use <Code>{"<Chip />"}</Code> for category / filter tags and{" "}
               <Code>{"<Badge variant='...' />"}</Code> for semantic status
-              labels. Both live in <Code>components/</Code>.
+              labels. Both live in <Code>packages/stamps</Code> — the shared,
+              vanilla-extract-based design system both <Code>webapp</Code>{" "}
+              and any future app are meant to consume. New shared primitives
+              should land there, not in <Code>app/components/</Code>.
             </p>
 
             <div>

@@ -17,7 +17,7 @@ import {
 } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
-import { Badge } from "../components/Badge";
+import { Badge } from "stamps/Badge";
 import {
   getGraphLogRun,
   type GraphLogPerfEventType,

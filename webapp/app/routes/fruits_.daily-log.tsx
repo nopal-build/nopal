@@ -13,7 +13,7 @@ import {
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
-import { Chip } from "../components/Chip";
+import { Chip } from "stamps/Chip";
 import { DayContainer, DayTitle } from "../components/DailyLogDay";
 import OxEditor from "../components/OxEditor";
 import type { MentionItem, MentionSearch } from "oxmarkdown-core";

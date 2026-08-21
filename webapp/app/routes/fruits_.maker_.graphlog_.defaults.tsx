@@ -17,7 +17,7 @@ import {
 import { useEffect, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
-import { Badge } from "../components/Badge";
+import { Badge } from "stamps/Badge";
 import {
   getAllEffectiveGraphLogDefaultSkills,
   setGraphLogDefaultSkillOverride,

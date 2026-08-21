@@ -10,7 +10,7 @@ import {
 } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
-import { Badge } from "../components/Badge";
+import { Badge } from "stamps/Badge";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { getMakerStats, type MakerRangeDays } from "robustness-core/data/makerStats.server";
 import { getGraphLogUsageSummary } from "robustness-core/data/graphLogMetrics.server";

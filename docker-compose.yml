@@ -46,6 +46,7 @@ services:
       - webapp_robustness_core_node_modules:/app/packages/robustness-core/node_modules
       - webapp_oxmarkdown_core_node_modules:/app/packages/oxmarkdown-core/node_modules
       - webapp_worker_node_modules:/app/packages/worker/node_modules
+      - webapp_stamps_node_modules:/app/packages/stamps/node_modules
       - webapp_pnpm_store:/pnpm-store
     environment:
       NODE_ENV: development
@@ -90,6 +91,7 @@ services:
       - worker_robustness_core_node_modules:/app/packages/robustness-core/node_modules
       - worker_oxmarkdown_core_node_modules:/app/packages/oxmarkdown-core/node_modules
       - worker_webapp_node_modules:/app/webapp/node_modules
+      - worker_stamps_node_modules:/app/packages/stamps/node_modules
       - worker_pnpm_store:/pnpm-store
     environment:
       NODE_ENV: development
@@ -185,12 +187,14 @@ volumes:
   webapp_robustness_core_node_modules:
   webapp_oxmarkdown_core_node_modules:
   webapp_worker_node_modules:
+  webapp_stamps_node_modules:
   webapp_pnpm_store:
   worker_node_modules:
   worker_pkg_node_modules:
   worker_robustness_core_node_modules:
   worker_oxmarkdown_core_node_modules:
   worker_webapp_node_modules:
+  worker_stamps_node_modules:
   worker_pnpm_store:
   minio_data:
   redis_data:
