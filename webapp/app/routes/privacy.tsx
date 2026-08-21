@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import type { MetaFunction } from "react-router";
 import { Layout } from "../components/Layout";
 import { FooterDiscovery } from "../components/Footer";
+import { link } from "stamps/link.css";
 
 export const meta: MetaFunction = () => [
   { title: "Privacy Notice | Nopal Build" },
@@ -42,11 +43,11 @@ export default function Privacy() {
               someone at Nopal (or another Nopal user) invited that specific
               person by email — there's no public sign-up form. A few pages
               are the exception and are covered separately below: the{" "}
-              <a href="/docs/wc-waiver" className="link">
+              <a href="/docs/wc-waiver" className={link}>
                 workers' comp waiver
               </a>{" "}
               form and the{" "}
-              <Link to="/contact" className="link">
+              <Link to="/contact" className={link}>
                 newsletter
               </Link>{" "}
               sign-up, both of which don't require an account.
@@ -112,7 +113,7 @@ export default function Privacy() {
             <SubSection title="Newsletter">
               <p>
                 Only if you check the opt-in box on the{" "}
-                <Link to="/contact" className="link">
+                <Link to="/contact" className={link}>
                   contact page
                 </Link>
                 : your name and email, sent to our email provider (Resend) to
@@ -174,7 +175,7 @@ export default function Privacy() {
               You can ask us what we have on you, ask us to correct it, or
               ask us to delete it, at any time. Because Nopal is small and
               invite-only today, we handle these requests directly — email{" "}
-              <a href="mailto:human@nopal.build" className="link">
+              <a href="mailto:human@nopal.build" className={link}>
                 human@nopal.build
               </a>{" "}
               and we'll sort it out. If you're in the EU/UK, this includes
@@ -195,7 +196,7 @@ export default function Privacy() {
           <Section title="Questions">
             <p>
               Email{" "}
-              <a href="mailto:human@nopal.build" className="link">
+              <a href="mailto:human@nopal.build" className={link}>
                 human@nopal.build
               </a>{" "}
               — a human will answer.

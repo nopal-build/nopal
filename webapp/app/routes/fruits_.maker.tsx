@@ -12,6 +12,9 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
 import { surfaceBase } from "stamps/surface.css";
+import { link } from "stamps/link.css";
+import { textSize } from "stamps/typography.css";
+import { sprinkles } from "stamps/sprinkles.css";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { getMakerStats, type MakerRangeDays } from "robustness-core/data/makerStats.server";
 import { getGraphLogUsageSummary } from "robustness-core/data/graphLogMetrics.server";
@@ -55,7 +58,7 @@ export function ErrorBoundary() {
               The Maker dashboard is only available to Admin and Super
               accounts.
             </p>
-            <Link to="/fruits" className="link text-sm">
+            <Link to="/fruits" className={`${link} ${textSize.sm}`}>
               ← Back to Dashboard
             </Link>
           </div>
@@ -79,7 +82,7 @@ export function ErrorBoundary() {
                 ? error.message
                 : "An unexpected error occurred."}
           </p>
-          <Link to="/fruits" className="link text-sm">
+          <Link to="/fruits" className={`${link} ${textSize.sm}`}>
             ← Back to Dashboard
           </Link>
         </div>
@@ -268,7 +271,11 @@ export default function FruitsMaker() {
             >
               GraphLog Usage
             </h2>
-            <Link to="/fruits/maker/graphlog" prefetch="intent" className="link text-sm font-mono">
+            <Link
+              to="/fruits/maker/graphlog"
+              prefetch="intent"
+              className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
+            >
               Full breakdown →
             </Link>
           </div>

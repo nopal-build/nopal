@@ -12,6 +12,7 @@ import { Link } from "react-router";
 import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
+import { link } from "stamps/link.css";
 
 export default function LoginError() {
   return (
@@ -33,14 +34,14 @@ export default function LoginError() {
             <p>
               There has been a problem logging in as this user. Please
               contact{" "}
-              <a href="mailto:human@nopal.build" className="link">
+              <a href="mailto:human@nopal.build" className={link}>
                 human@nopal.build
               </a>{" "}
               for help.
             </p>
           </div>
           <div className={sprinkles({ mt: 8 })}>
-            <Link to="/login" className="link">
+            <Link to="/login" className={link}>
               ← Back to login
             </Link>
           </div>

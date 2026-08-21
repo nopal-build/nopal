@@ -4,6 +4,7 @@ import type { LinksFunction, MetaFunction } from "react-router";
 import sunnyHomeStyles from "../styles/sunnyHome.css?url";
 import { ZoomImg } from "../components/ZoomImg";
 import { surfaceBase } from "stamps/surface.css";
+import { link } from "stamps/link.css";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: sunnyHomeStyles },
@@ -50,7 +51,7 @@ export default function SunnyHomeNo1() {
           <p className="text-lg mt-2 mb-4">
             This home is nestled at the end of Central Avenue on{" "}
             <a
-              className="link"
+              className={link}
               href="https://www.google.com/maps/place/9+E+Foothill+Dr,+Phoenix,+AZ+85020/@33.5774228,-112.073064,1021m/data=!3m2!1e3!4b1!4m6!3m5!1s0x872b6da221eb8827:0x3ddbadcf057b8e2f!8m2!3d33.5774228!4d-112.073064!16s%2Fg%2F11c2dqy24y?entry=ttu&g_ep=EgoyMDI1MDQyMy4wIKXMDSoASAFQAw%3D%3D"
             >
               Foothill Dr.
@@ -76,7 +77,7 @@ export default function SunnyHomeNo1() {
             Nature dials down the noise, letting the signal of life gain
             richness and clarity. Through{" "}
             <a
-              className="link"
+              className={link}
               target="_blank"
               href="https://www.terrapinbrightgreen.com/reports/14-patterns/"
             >
@@ -173,7 +174,7 @@ export default function SunnyHomeNo1() {
             </div>
             <p className="text-xl mt-2">
               Inquire at{" "}
-              <a className="link" href="mailto:human@nopal.build">
+              <a className={link} href="mailto:human@nopal.build">
                 human@nopal.build
               </a>
             </p>

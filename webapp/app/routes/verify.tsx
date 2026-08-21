@@ -13,6 +13,7 @@ import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { button } from "stamps/button.css";
+import { link } from "stamps/link.css";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { Link } from "react-router";
@@ -91,7 +92,7 @@ export default function Verify() {
               <div className={`${textSize.lg} red-text ${sprinkles({ mt: 2 })}`}>
                 That code has expired, when you are ready{" "}
                 <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
-                  <button className="link" type="submit">
+                  <button className={link} type="submit">
                     click here to request a new code
                   </button>
                 </Form>
@@ -101,7 +102,7 @@ export default function Verify() {
               <div className={`${textSize.lg} red-text ${sprinkles({ mt: 2 })}`}>
                 We lost your session, when you are ready{" "}
                 <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
-                  <button className="link" type="submit">
+                  <button className={link} type="submit">
                     click here to request a new code
                   </button>
                 </Form>
@@ -111,7 +112,7 @@ export default function Verify() {
               <div className={`${textSize.lg} ${sprinkles({ textAlign: "right" })}`}>
                 ...or{" "}
                 <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
-                  <button className="link" type="submit">
+                  <button className={link} type="submit">
                     request new code
                   </button>
                 </Form>
@@ -120,7 +121,7 @@ export default function Verify() {
             )}
           </div>
           <div className={sprinkles({ mt: 8 })}>
-            <Link to="/login" className="link">
+            <Link to="/login" className={link}>
               ← Back to login
             </Link>
           </div>

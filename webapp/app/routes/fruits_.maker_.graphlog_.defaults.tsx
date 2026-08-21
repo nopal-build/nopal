@@ -19,6 +19,9 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
 import { surfaceBase } from "stamps/surface.css";
+import { link } from "stamps/link.css";
+import { textSize } from "stamps/typography.css";
+import { sprinkles } from "stamps/sprinkles.css";
 import {
   getAllEffectiveGraphLogDefaultSkills,
   setGraphLogDefaultSkillOverride,
@@ -84,7 +87,7 @@ export function ErrorBoundary() {
             <p className="text-sm subtle-text">
               GraphLog's default prompts are only available to Admin and Super accounts.
             </p>
-            <Link to="/fruits/maker/graphlog" className="link text-sm">
+            <Link to="/fruits/maker/graphlog" className={`${link} ${textSize.sm}`}>
               ← Back to GraphLog Usage
             </Link>
           </div>
@@ -105,7 +108,7 @@ export function ErrorBoundary() {
                 ? error.message
                 : "An unexpected error occurred."}
           </p>
-          <Link to="/fruits/maker/graphlog" className="link text-sm">
+          <Link to="/fruits/maker/graphlog" className={`${link} ${textSize.sm}`}>
             ← Back to GraphLog Usage
           </Link>
         </div>
@@ -264,7 +267,10 @@ export default function FruitsMakerGraphLogDefaults() {
     <AppLayout>
       <div className="container mx-auto px-4 py-12" style={{ maxWidth: "860px" }}>
         <div className="flex items-center justify-between flex-wrap gap-4 mb-2">
-          <Link to="/fruits/maker/graphlog" className="link text-sm font-mono">
+          <Link
+            to="/fruits/maker/graphlog"
+            className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
+          >
             ← GraphLog Usage
           </Link>
         </div>

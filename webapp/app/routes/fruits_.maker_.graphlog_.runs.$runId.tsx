@@ -19,6 +19,9 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
 import { surfaceBase } from "stamps/surface.css";
+import { link } from "stamps/link.css";
+import { textSize } from "stamps/typography.css";
+import { sprinkles } from "stamps/sprinkles.css";
 import {
   getGraphLogRun,
   type GraphLogPerfEventType,
@@ -70,7 +73,7 @@ export function ErrorBoundary() {
             <p className="text-sm subtle-text">
               GraphLog run timelines are only available to Admin and Super accounts.
             </p>
-            <Link to="/fruits/maker/graphlog" className="link text-sm">
+            <Link to="/fruits/maker/graphlog" className={`${link} ${textSize.sm}`}>
               ← Back to GraphLog
             </Link>
           </div>
@@ -89,7 +92,7 @@ export function ErrorBoundary() {
             <p className="text-sm subtle-text">
               This run may have been pruned, or the link is wrong.
             </p>
-            <Link to="/fruits/maker/graphlog" className="link text-sm">
+            <Link to="/fruits/maker/graphlog" className={`${link} ${textSize.sm}`}>
               ← Back to GraphLog
             </Link>
           </div>
@@ -110,7 +113,7 @@ export function ErrorBoundary() {
                 ? error.message
                 : "An unexpected error occurred."}
           </p>
-          <Link to="/fruits/maker/graphlog" className="link text-sm">
+          <Link to="/fruits/maker/graphlog" className={`${link} ${textSize.sm}`}>
             ← Back to GraphLog
           </Link>
         </div>
@@ -308,7 +311,10 @@ export default function FruitsMakerGraphLogRun() {
     <AppLayout>
       <div className="container mx-auto px-4 py-12" style={{ maxWidth: "960px" }}>
         <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
-          <Link to="/fruits/maker/graphlog" className="link text-sm font-mono">
+          <Link
+            to="/fruits/maker/graphlog"
+            className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
+          >
             ← GraphLog
           </Link>
         </div>

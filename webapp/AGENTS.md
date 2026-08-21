@@ -55,12 +55,15 @@ shared with any future non-webapp surface — see the UI conventions below.
     `.btn-outline`/`.btn-purple`/`.btn-yellow` classes. For a tinted
     variant (e.g. a destructive action), pass `tint: "danger"` instead of
     the old `style={{ "--btn-color": "var(--red)" }}` escape hatch.
-  - Non-migrated legacy classes (`.link`, `.menu-item`, `.collection-well`)
-    are still fine to use as-is for now — they haven't been ported yet
-    (they're custom CSS, not Tailwind, so they're a separate concern from
-    this migration). Don't block a change on migrating something unrelated
-    to what you're already touching; do migrate whatever Tailwind you *do*
-    touch in the same change.
+  - **Links**: use `stamps/link.css`'s `link` class instead of the
+    Tailwind-adjacent legacy `.link` class — applies to `<a>`, `<Link>`,
+    or a plain inline `<button>` (e.g. a "cancel" action styled as a link).
+  - The only non-migrated legacy classes left are `.menu-item` and
+    `.collection-well` — still fine to use as-is for now (they're custom
+    CSS, not Tailwind, so they're a separate concern from this migration).
+    Don't block a change on migrating something unrelated to what you're
+    already touching; do migrate whatever Tailwind you *do* touch in the
+    same change.
 - Don't re-apply styling that a shared component already provides by default
   (e.g. `Input` already has border/radius/padding baked in). Only pass a
   `className` for one-off overrides.

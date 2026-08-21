@@ -17,6 +17,7 @@ import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { button } from "stamps/button.css";
+import { link } from "stamps/link.css";
 import { getUser, updateUserSession } from "../modules/auth/auth.server";
 import { sessionStorage } from "../modules/auth/session.server";
 import {
@@ -315,7 +316,7 @@ function PasskeySetup({
           <div className={sprinkles({ mt: 8, textAlign: "center" })}>
             <Link
               to={`/login?email=${encodeURIComponent(invitedEmail)}`}
-              className="link"
+              className={link}
             >
               Skip for now — I'll use an email code
             </Link>

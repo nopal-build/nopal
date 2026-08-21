@@ -9,6 +9,7 @@ import {
 import type { ActionFunctionArgs, MetaFunction } from "react-router";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
+import { link } from "stamps/link.css";
 import { generateWaiverPdf } from "../util/waiverPdf.server";
 import { uploadPrivateFileToS3, getPresignedViewUrl } from "robustness-core/data/file.server";
 import { createLegalDocument } from "robustness-core/data/legalDocuments.server";
@@ -504,11 +505,11 @@ export default function WcWaiver() {
                 accessible to Nopal staff and to you, if you view it from a
                 Nopal account under this email address — it is never made
                 public. See our{" "}
-                <Link to="/privacy" className="link" target="_blank">
+                <Link to="/privacy" className={link} target="_blank">
                   privacy notice
                 </Link>{" "}
                 for more, or contact{" "}
-                <a href="mailto:human@nopal.build" className="link">
+                <a href="mailto:human@nopal.build" className={link}>
                   human@nopal.build
                 </a>
                 .

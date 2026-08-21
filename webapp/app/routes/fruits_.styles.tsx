@@ -14,6 +14,8 @@ import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
 import { CircleButton } from "stamps/CircleButton";
 import { surfaceBase, surfaceBorderOnly, surfaceHoverable } from "stamps/surface.css";
 import { HamburgerNeqIcon } from "stamps/HamburgerNeqIcon";
+import { link } from "stamps/link.css";
+import { textSize } from "stamps/typography.css";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -1040,8 +1042,8 @@ export default function FruitsStyles() {
           <div className="flex flex-col gap-4">
             <div className={`${surfaceBase} p-5 flex flex-col gap-4`}>
               <Tile>
-                <Label>.link class — green underline on hover</Label>
-                <a href="#links" className="link text-sm">
+                <Label>link class — green underline on hover</Label>
+                <a href="#links" className={`${link} ${textSize.sm}`}>
                   View project details
                 </a>
               </Tile>

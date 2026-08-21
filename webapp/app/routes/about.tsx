@@ -3,6 +3,7 @@ import { Layout } from "../components/Layout";
 import { FooterDiscovery } from "../components/Footer";
 import { LinksFunction } from "react-router";
 import projectStyles from "../styles/project.css?url";
+import { link } from "stamps/link.css";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: projectStyles },
@@ -39,7 +40,7 @@ export default function About() {
               “the middle day” has fascinated me for two decades, now confirmed
               by{" "}
               <a
-                className="link"
+                className={link}
                 href="https://huckberry.com/journal/posts/3-days?srsltid=AfmBOoomKIjGbRnKP6VBR2xkPF2gcDisb5MapqEFNV_3iqnxSsUG6Hbq"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -88,7 +89,7 @@ export default function About() {
             </p>
             <p className="text-xl mt-4 mb-4">
               <a
-                className="link"
+                className={link}
                 href="https://www.goodreads.com/book/show/3828902-thinking-in-systems"
                 target="_blank"
                 rel="noopener noreferrer"

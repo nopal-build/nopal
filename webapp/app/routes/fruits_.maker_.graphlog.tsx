@@ -16,6 +16,9 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
 import { surfaceBase } from "stamps/surface.css";
+import { link } from "stamps/link.css";
+import { textSize } from "stamps/typography.css";
+import { sprinkles } from "stamps/sprinkles.css";
 import {
   getGraphLogUsageSummary,
   type GraphLogStage,
@@ -84,7 +87,7 @@ export function ErrorBoundary() {
             <p className="text-sm subtle-text">
               GraphLog usage stats are only available to Admin and Super accounts.
             </p>
-            <Link to="/fruits/maker" className="link text-sm">
+            <Link to="/fruits/maker" className={`${link} ${textSize.sm}`}>
               ← Back to Maker
             </Link>
           </div>
@@ -105,7 +108,7 @@ export function ErrorBoundary() {
                 ? error.message
                 : "An unexpected error occurred."}
           </p>
-          <Link to="/fruits/maker" className="link text-sm">
+          <Link to="/fruits/maker" className={`${link} ${textSize.sm}`}>
             ← Back to Maker
           </Link>
         </div>
@@ -241,7 +244,10 @@ function RecentRunsSection({
     <section className="mb-12">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
         <SectionHeader>Recent Runs</SectionHeader>
-        <Link to="/fruits/maker/graphlog/defaults" className="link text-xs font-mono">
+        <Link
+          to="/fruits/maker/graphlog/defaults"
+          className={`${link} ${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
+        >
           Default Prompts →
         </Link>
       </div>
@@ -300,10 +306,16 @@ export default function FruitsMakerGraphLog() {
     <AppLayout>
       <div className="container mx-auto px-4 py-12" style={{ maxWidth: "860px" }}>
         <div className="flex items-center justify-between flex-wrap gap-4 mb-2">
-          <Link to="/fruits/maker" className="link text-sm font-mono">
+          <Link
+            to="/fruits/maker"
+            className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
+          >
             ← Maker
           </Link>
-          <Link to="/fruits/maker/graphlog/defaults" className="link text-sm font-mono">
+          <Link
+            to="/fruits/maker/graphlog/defaults"
+            className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
+          >
             Default Prompts →
           </Link>
         </div>

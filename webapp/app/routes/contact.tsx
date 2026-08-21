@@ -1,6 +1,7 @@
 import { Layout } from "../components/Layout";
 import { FooterDiscovery } from "../components/Footer";
 import { surfaceBase, surfaceHoverable } from "stamps/surface.css";
+import { link } from "stamps/link.css";
 import { Form, Link, useActionData, useNavigation } from "react-router";
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -74,7 +75,7 @@ export default function Contact() {
             </ButtonLink>
           </div>
           <div className="mt-4">
-            <a href="mailto:human@nopal.build" className="link">
+            <a href="mailto:human@nopal.build" className={link}>
               Email us at human@nopal.build
             </a>
           </div>
@@ -115,7 +116,7 @@ export default function Contact() {
                     />
                     <span>
                       Yes, email me occasional updates from Nopal. See our{" "}
-                      <Link to="/privacy" className="link" target="_blank">
+                      <Link to="/privacy" className={link} target="_blank">
                         privacy notice
                       </Link>{" "}
                       for how we use it — you can unsubscribe any time from

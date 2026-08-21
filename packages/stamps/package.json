@@ -20,7 +20,8 @@
     "./navLink.css": "./src/navLink.css.ts",
     "./appLayoutShell.css": "./src/appLayoutShell.css.ts",
     "./HamburgerNeqIcon": "./src/HamburgerNeqIcon.tsx",
-    "./button.css": "./src/button.css.ts"
+    "./button.css": "./src/button.css.ts",
+    "./link.css": "./src/link.css.ts"
   },
   "peerDependencies": {
     "react": "^18.3.1"

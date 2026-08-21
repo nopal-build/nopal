@@ -71,6 +71,8 @@ import { Badge } from "stamps/Badge";
 import { Modal } from "stamps/Modal";
 import { MoreMenu } from "stamps/MoreMenu";
 import { surfaceBase } from "stamps/surface.css";
+import { link } from "stamps/link.css";
+import { textSize } from "stamps/typography.css";
 import {
   getKnownAccounts,
   rememberAccount,
@@ -1333,7 +1335,7 @@ function RelationshipCard({
                 <div className="flex items-center justify-end gap-4">
                   <button
                     type="button"
-                    className="link text-sm"
+                    className={`${link} ${textSize.sm}`}
                     disabled={revoking}
                     onClick={() => setConfirmRevokeOpen(false)}
                   >
@@ -1383,7 +1385,7 @@ function RelationshipCard({
               <div className="flex items-center justify-end gap-4">
                 <button
                   type="button"
-                  className="link text-sm"
+                  className={`${link} ${textSize.sm}`}
                   disabled={changingRole}
                   onClick={() => setConfirmRoleOpen(false)}
                 >
@@ -1424,7 +1426,7 @@ function RelationshipCard({
               <div className="flex items-center justify-end gap-4">
                 <button
                   type="button"
-                  className="link text-sm"
+                  className={`${link} ${textSize.sm}`}
                   disabled={forcingLogout}
                   onClick={() => setConfirmForceLogoutOpen(false)}
                 >
@@ -1462,7 +1464,7 @@ function RelationshipCard({
               <div className="flex items-center justify-end gap-4">
                 <button
                   type="button"
-                  className="link text-sm"
+                  className={`${link} ${textSize.sm}`}
                   disabled={suspending}
                   onClick={() => setConfirmSuspendOpen(false)}
                 >
@@ -1993,12 +1995,12 @@ export default function Profile() {
         <div className="flex items-center gap-4 mb-6 md:hidden">
           <button
             type="button"
-            className="link text-sm"
+            className={`${link} ${textSize.sm}`}
             onClick={() => setSwitchModalOpen(true)}
           >
             Switch account
           </button>
-          <Link to="/logout" className="link text-sm">
+          <Link to="/logout" className={`${link} ${textSize.sm}`}>
             Logout
           </Link>
         </div>
@@ -2059,7 +2061,7 @@ export default function Profile() {
                     </button>
                     <button
                       type="button"
-                      className="link text-sm"
+                      className={`${link} ${textSize.sm}`}
                       disabled={switchBusy}
                       aria-label={`Remove ${account.email}`}
                       onClick={() => handleForgetAccount(account.email)}
@@ -2140,7 +2142,7 @@ export default function Profile() {
                         Save
                       </button>
                       <button
-                        className="link"
+                        className={link}
                         type="button"
                         onClick={() => setEditingName(false)}
                       >
@@ -2151,7 +2153,7 @@ export default function Profile() {
                     <div className="flex items-center gap-2">
                       <span>{displayUser.name}</span>
                       <button
-                        className="link text-sm"
+                        className={`${link} ${textSize.sm}`}
                         type="button"
                         onClick={() => setEditingName(true)}
                       >
@@ -2221,7 +2223,7 @@ export default function Profile() {
                             name="mode"
                             value={displayUser.pendingEmailType}
                           />
-                          <button className="link" type="submit">
+                          <button className={link} type="submit">
                             Resend code
                           </button>
                         </Form>
@@ -2231,7 +2233,7 @@ export default function Profile() {
                             name="intent"
                             value="cancel-email-change"
                           />
-                          <button className="link" type="submit">
+                          <button className={link} type="submit">
                             Cancel
                           </button>
                         </Form>
@@ -2242,7 +2244,7 @@ export default function Profile() {
                       <div className="flex items-center gap-2">
                         <span>{displayUser.email}</span>
                         <button
-                          className="link text-sm"
+                          className={`${link} ${textSize.sm}`}
                           type="button"
                           onClick={() => setEditingPrimaryEmail((v) => !v)}
                         >
@@ -2271,7 +2273,7 @@ export default function Profile() {
                             Send code
                           </button>
                           <button
-                            className="link"
+                            className={link}
                             type="button"
                             onClick={() => setEditingPrimaryEmail(false)}
                           >
@@ -2361,7 +2363,7 @@ export default function Profile() {
                           Send code
                         </button>
                         <button
-                          className="link"
+                          className={link}
                           type="button"
                           onClick={() => setAddingAlias(false)}
                         >
@@ -2371,7 +2373,7 @@ export default function Profile() {
                     ) : (
                       <div>
                         <button
-                          className="link text-sm"
+                          className={`${link} ${textSize.sm}`}
                           type="button"
                           onClick={() => setAddingAlias(true)}
                         >
