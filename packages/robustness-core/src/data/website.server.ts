@@ -20,7 +20,19 @@
  * functions.
  */
 
-import { createFileRef, listFolderChildren, type VaultFolder } from "./vault.server";
+import { parse as parseYaml } from "yaml";
+import {
+  createFileRef,
+  getFileRefById,
+  getFolderById,
+  listFolderChildren,
+  type FileRef,
+  type VaultFolder,
+} from "./vault.server";
+import { splitFrontmatter } from "./project.types";
+
+const README_NAME = "README.md";
+const SITE_SETTINGS_NAME = "_site-settings.json";
 
 const DEFAULT_README = `# Welcome
 
@@ -64,14 +76,201 @@ async function ensureTextFile(
 export async function applyWebsiteShape(folder: VaultFolder): Promise<VaultFolder> {
   if (folder.folder_type !== "website" || !folder.is_folder_type_root) return folder;
   await Promise.all([
-    ensureTextFile(folder.human_id, folder._id, "README.md", DEFAULT_README, "text/markdown"),
+    ensureTextFile(folder.human_id, folder._id, README_NAME, DEFAULT_README, "text/markdown"),
     ensureTextFile(
       folder.human_id,
       folder._id,
-      "_site-settings.json",
+      SITE_SETTINGS_NAME,
       DEFAULT_SITE_SETTINGS,
       "application/json",
     ),
   ]);
+  return folder;
+}
+
+// ─── Public rendering (`/v2/*`) — read side only for now ────────────────────
+
+export type WebsitePublishStatus = "draft" | "published";
+
+/** Conservative default — a page with no front matter at all (a brand new
+ * `website` project's seeded README, or any hand-added file) stays hidden
+ * from the public `/v2/*` routes until an editor explicitly opts it in.
+ * Same "fail closed" instinct the rest of Vault's permission model uses. */
+export const DEFAULT_WEBSITE_PUBLISH_STATUS: WebsitePublishStatus = "draft";
+
+export type WebsitePageMeta = {
+  title: string | null;
+  description: string | null;
+  publish: WebsitePublishStatus;
+};
+
+export type ResolvedWebsitePage = {
+  file: FileRef;
+  meta: WebsitePageMeta;
+  /** The file's markdown with front matter stripped — ready for
+   * `OxRenderer`. */
+  body: string;
+};
+
+/** Reads just `title`/`description`/`publish` from a page's front matter —
+ * mirrors `project.types.ts`'s `parseProjectSharing`/`parseProjectStatus`
+ * (never throws, defaults on anything missing/malformed). Deliberately NOT
+ * a full manifest parse — a website page's front matter has no other
+ * reserved keys yet. */
+function parseWebsitePageMeta(markdown: string): WebsitePageMeta {
+  const fallback: WebsitePageMeta = {
+    title: null,
+    description: null,
+    publish: DEFAULT_WEBSITE_PUBLISH_STATUS,
+  };
+  const { frontmatter } = splitFrontmatter(markdown);
+  if (!frontmatter) return fallback;
+  try {
+    const data = parseYaml(frontmatter);
+    if (!data || typeof data !== "object") return fallback;
+    const d = data as Record<string, unknown>;
+    return {
+      title: typeof d.title === "string" ? d.title : null,
+      description: typeof d.description === "string" ? d.description : null,
+      publish: d.publish === "published" ? "published" : DEFAULT_WEBSITE_PUBLISH_STATUS,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function toResolvedPage(file: FileRef): ResolvedWebsitePage {
+  const markdown = file.content ?? "";
+  const { body } = splitFrontmatter(markdown);
+  return { file, meta: parseWebsitePageMeta(markdown), body };
+}
+
+function stripMdExtension(name: string): string {
+  return name.replace(/\.md$/i, "");
+}
+
+/**
+ * Resolves a `/v2/...` path to a page inside `siteFolder` — the vault
+ * folder tree itself IS the URL tree (no stored `slug`). Each path segment
+ * matches a child FOLDER by name; once segments are exhausted, that
+ * folder's own `README.md` is the page (same convention Vault already uses
+ * for a folder's own index doc). The LAST segment may instead match a
+ * plain markdown FILE (by name, minus `.md`) when no folder matches — e.g.
+ * `about` → `about.md`. Returns `null` on no match (a real 404).
+ */
+export async function resolveWebsitePageByPath(
+  siteFolder: VaultFolder,
+  segments: string[],
+): Promise<ResolvedWebsitePage | null> {
+  let currentFolder = siteFolder;
+  const cleanSegments = segments.map((s) => s.trim()).filter(Boolean);
+
+  for (let i = 0; i < cleanSegments.length; i++) {
+    const segment = cleanSegments[i];
+    const isLast = i === cleanSegments.length - 1;
+    const { folders, files } = await listFolderChildren(
+      currentFolder.human_id,
+      currentFolder._id,
+    );
+
+    const matchedFolder = folders.find(
+      (f) => f.name.toLowerCase() === segment.toLowerCase(),
+    );
+    if (matchedFolder) {
+      currentFolder = matchedFolder;
+      continue;
+    }
+
+    if (isLast) {
+      const matchedFile = files.find(
+        (f) =>
+          f.name.toLowerCase().endsWith(".md") &&
+          f.name.toLowerCase() !== README_NAME.toLowerCase() &&
+          stripMdExtension(f.name).toLowerCase() === segment.toLowerCase(),
+      );
+      if (matchedFile) {
+        const full = await getFileRefById(matchedFile._id);
+        return full ? toResolvedPage(full) : null;
+      }
+    }
+    return null;
+  }
+
+  const { files } = await listFolderChildren(currentFolder.human_id, currentFolder._id);
+  const readme = files.find((f) => f.name.toLowerCase() === README_NAME.toLowerCase());
+  if (!readme) return null;
+  const full = await getFileRefById(readme._id);
+  return full ? toResolvedPage(full) : null;
+}
+
+export type WebsiteLinkItem = { label: string; to: string };
+
+export type WebsiteSettings = {
+  nav: WebsiteLinkItem[];
+  footer: {
+    tagline: string;
+    links: WebsiteLinkItem[];
+    social: WebsiteLinkItem[];
+  };
+};
+
+const DEFAULT_WEBSITE_SETTINGS: WebsiteSettings = {
+  nav: [],
+  footer: { tagline: "", links: [], social: [] },
+};
+
+function parseLinkItems(raw: unknown): WebsiteLinkItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: WebsiteLinkItem[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const label = (entry as Record<string, unknown>).label;
+    const to = (entry as Record<string, unknown>).to;
+    if (typeof label === "string" && label && typeof to === "string" && to) {
+      out.push({ label, to });
+    }
+  }
+  return out;
+}
+
+/** Reads `_site-settings.json` (nav + footer config) — falls back to empty
+ * defaults for a missing/malformed file rather than failing the whole page
+ * render, same fail-soft convention `parseWebsitePageMeta` uses. */
+export async function getWebsiteSettings(siteFolder: VaultFolder): Promise<WebsiteSettings> {
+  const { files } = await listFolderChildren(siteFolder.human_id, siteFolder._id);
+  const settingsListing = files.find(
+    (f) => f.name.toLowerCase() === SITE_SETTINGS_NAME.toLowerCase(),
+  );
+  const settingsFile = settingsListing ? await getFileRefById(settingsListing._id) : null;
+  if (!settingsFile?.content) return DEFAULT_WEBSITE_SETTINGS;
+  try {
+    const parsed = JSON.parse(settingsFile.content) as Record<string, unknown>;
+    const footer = (parsed.footer ?? {}) as Record<string, unknown>;
+    return {
+      nav: parseLinkItems(parsed.nav),
+      footer: {
+        tagline: typeof footer.tagline === "string" ? footer.tagline : "",
+        links: parseLinkItems(footer.links),
+        social: parseLinkItems(footer.social),
+      },
+    };
+  } catch {
+    return DEFAULT_WEBSITE_SETTINGS;
+  }
+}
+
+/**
+ * The one `website` project backing the public `/v2/*` routes today —
+ * config-selected via `WEBSITE_PROJECT_FOLDER_ID` (no UI/mapping mechanism
+ * yet, since only one site exists; picking among several is a real later
+ * problem once that's actually needed). Returns `null` when unset, not
+ * found, or not actually a `website` anchor — callers treat that as a
+ * plain 404, never a crash.
+ */
+export async function getPrimaryWebsiteFolder(): Promise<VaultFolder | null> {
+  const folderId = process.env.WEBSITE_PROJECT_FOLDER_ID;
+  if (!folderId) return null;
+  const folder = await getFolderById(folderId);
+  if (!folder || folder.folder_type !== "website" || !folder.is_folder_type_root) return null;
   return folder;
 }
