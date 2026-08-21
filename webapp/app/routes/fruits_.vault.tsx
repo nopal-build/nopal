@@ -761,6 +761,7 @@ function MovePickerNode({
 function NewFolderPanel({
   parentFolder,
   isSpaceTypeEligible,
+  canCreateWebsite,
   existingChildren,
   onCreate,
 }: {
@@ -769,6 +770,15 @@ function NewFolderPanel({
    * of the `projects` root — the only places Space types (Skills/Syncs) may
    * be created (see the vault skill). */
   isSpaceTypeEligible: boolean;
+  /** True only when `parentFolder` is literally the `projects` root AND the
+   * acting human holds the `Super` role — `website` is the one Container
+   * type a human may explicitly choose at creation time instead of the
+   * default "Project" (`project-n02`, applied lazily) — see
+   * `vaultFolderTypes.ts`'s `creatableBy` and the `vault` skill's "website
+   * projects" section. Server-validated independently in
+   * `validateFolderTypeForParent`; this only controls whether the choice is
+   * even offered. */
+  canCreateWebsite: boolean;
   existingChildren: VaultFolder[];
   onCreate: (name: string, folderType: string | null) => void;
 }) {
@@ -797,14 +807,48 @@ function NewFolderPanel({
   const typeOptions = [...spaceTypeOptions, ...syncTypeOptions];
 
   const [name, setName] = useState("");
+  const [containerType, setContainerType] = useState<"project" | "website">(
+    "project",
+  );
   const canSubmit = name.trim().length > 0;
   const submitPlain = () => {
     if (!canSubmit) return;
-    onCreate(name.trim(), null);
+    onCreate(
+      name.trim(),
+      canCreateWebsite && containerType === "website" ? "website" : null,
+    );
   };
 
   return (
     <div style={{ width: "230px" }}>
+      {canCreateWebsite && (
+        <div style={{ display: "flex", gap: "4px", padding: "2px 2px 6px" }}>
+          {(
+            [
+              { key: "project", label: "Project" },
+              { key: "website", label: "Website" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => setContainerType(opt.key)}
+              className="text-xs font-mono px-2 py-1 rounded"
+              style={{
+                flex: 1,
+                border: "1px solid var(--border)",
+                background:
+                  containerType === opt.key
+                    ? "var(--purple-light)"
+                    : "var(--bg-secondary)",
+                color: containerType === opt.key ? "white" : "var(--text)",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div style={{ display: "flex", gap: "6px", padding: "2px 2px 6px" }}>
         <input
           autoFocus
@@ -814,7 +858,11 @@ function NewFolderPanel({
           onKeyDown={(e) => {
             if (e.key === "Enter") submitPlain();
           }}
-          placeholder="Folder name"
+          placeholder={
+            canCreateWebsite && containerType === "website"
+              ? "Site name"
+              : "Folder name"
+          }
           className="text-xs font-mono"
           style={{
             flex: 1,
@@ -2334,6 +2382,10 @@ export default function VaultV2Page() {
                           (current.folder.vault_root_key === "personal" &&
                             isVaultRootFolder(current.folder)) ||
                           current.folder.parent_folder_id === projectsRootId
+                        }
+                        canCreateWebsite={
+                          current.folder._id === projectsRootId &&
+                          user.role === "Super"
                         }
                         existingChildren={
                           foldersByParent[current.folder._id] ?? []
