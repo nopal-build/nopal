@@ -232,6 +232,63 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
   41px grid — no margins standing in for blank lines that should just be
   real rows. (The static `OxRenderer` keeps ordinary margin-based prose
   rhythm; this principle is specific to the live-editable surface.)
+- **Every space in the saved markdown is preserved on screen, exactly,
+  on ALL THREE surfaces (static, Interacting, Editing) — both WITHIN a
+  line (multiple spaces) and BETWEEN blocks (blank-line rhythm).** Two
+  genuinely separate rules, easy to conflate (a real, confirmed mix-up
+  the first time this was investigated — the WITHIN-a-line fix below was
+  shipped first, on its own, and did nothing for the actual reported
+  screenshot, because the real bug was the BETWEEN-blocks one):
+  - **Within a line**: `.ox-content { white-space: break-spaces }` (not
+    the browser default, `normal`, which collapses a run of ASCII spaces
+    to one). Deliberately `break-spaces`, not `pre-wrap`: the one
+    `white-space` value that both preserves a run of spaces faithfully
+    AND still lets that run wrap at the container edge instead of
+    overflowing; `pre` (block code's own browser default, unaffected by
+    this rule) additionally never wraps at all, correct for code but
+    wrong for prose. Safe alongside `OxRenderer.tsx`'s
+    `renderTextWithBreaks` (embedded `\n` → real `<br />`, see item 17 in
+    Build status below): that function's own `.split("\n")` already
+    removes every literal `\n` from the strings it hands to React, so
+    there's never a raw newline character left in a DOM text node for
+    this rule to also start rendering as a second, doubled break.
+    Doesn't touch `.ox-code-block`/`.ox-content
+    code.ox-code-block-editing` — a `<pre>` element's own UA-stylesheet
+    default (`white-space: pre`) is an explicit rule on that element,
+    which wins outright over an INHERITED value from an ancestor
+    regardless of the ancestor's specificity, so those two keep their
+    own (stricter, no-wrap) whitespace handling unchanged.
+  - **Between blocks — the actual root cause of the real bug report**:
+    the static/Interacting renderer was missing block-rhythm margin
+    ENTIRELY at the top level, so two ordinary adjacent blocks (the
+    overwhelmingly common "exactly one blank line apart" case —
+    `.ox-blank-line-spacer` below only ever accounts for EXTRA blank
+    lines beyond that first one) rendered with ZERO gap between them,
+    reading as one continuous run of lines — sharply different from
+    Editing mode's own blank-line handling (a real empty row, always
+    visible), even though both are meant to represent the same one grid
+    unit of separation. Root cause: `.ox-content > *:not(:first-child) {
+    margin-top: var(--ox-grid) }`, the rule this skill had long
+    documented as already existing, had EITHER never actually been added
+    or been lost — and even once (re)added, the very same direct-child
+    selector still matched nothing, because real content sits ONE LEVEL
+    DEEPER than `.ox-content` itself (inside the `.ox-dot-grid` child
+    `<div>` — see "41×41px dot grid background" above); `.ox-content`'s
+    ONE direct child IS `.ox-dot-grid`, so `:not(:first-child)` never
+    matched anything at that level at all. Fixed for real on
+    `.ox-dot-grid > *:not(:first-child)` (plus the equivalent for every
+    OTHER place `renderBlockNodes` renders a run of sibling blocks into a
+    shared parent — `blockquote`, a list item's own body, a toggle's
+    body; `.ox-grid-cell` already had its own correct version of this
+    same rule, written correctly from the start since it has no
+    dot-grid-style wrapper of its own to trip over), confirmed with an
+    actual screenshot, not just CSS reasoning — reasoning about the
+    selector alone is exactly what produced the first, silently-wrong
+    "fix." `.ox-blank-line-spacer` itself is excluded
+    (`margin-top: 0 !important`) from all of these — it already
+    contributes its own full grid unit of height per extra blank line, so
+    it must never ALSO pick up this rule's margin or a 2-blank-line gap
+    would render as 3 grid units instead of 2.
 - **TODO — typewriter font.** Explore a monospace body font for precise
   gutter/column alignment. Needs a real visual pass before committing.
 

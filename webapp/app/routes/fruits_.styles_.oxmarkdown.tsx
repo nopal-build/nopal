@@ -727,6 +727,54 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "A within-line spacing fix that didn't fix the actual reported bug",
+    body: (
+      <>
+        Copying real prose in (some literal double-spaces after periods) triggered a repeat
+        report of "spacing gets collapsed" — read, at first, as multiple ASCII spaces within a
+        line collapsing to one under the browser's default <code>white-space: normal</code>.
+        Shipped <code>.ox-content {'{'} white-space: break-spaces {'}'}</code> for that (a real,
+        legitimate fix, kept), confirmed it does NOT touch either code-block class (a real{" "}
+        <code>&lt;pre&gt;</code> element's own browser default, <code>white-space: pre</code>, is a
+        direct rule on that element that always wins over an inherited value from an ancestor no
+        matter the ancestor's specificity) — then checked the ACTUAL screenshot that prompted the
+        report and found it showed something else entirely: paragraph-to-paragraph spacing, not
+        in-line spacing. See the next entry for the real bug and fix.
+      </>
+    ),
+  },
+  {
+    title: "The actual bug: static rendering had ZERO margin between ordinary blocks",
+    body: (
+      <>
+        The static/Interacting renderer was missing block-rhythm margin entirely at the top
+        level: two ordinary paragraphs one blank line apart (the overwhelmingly common case —{" "}
+        <code>.ox-blank-line-spacer</code> only ever accounts for EXTRA blank lines beyond that
+        first one) rendered back-to-back with no gap at all, reading as one continuous run of
+        lines — sharply different from Editing mode's own blank-line handling (a real empty row,
+        always visible). Root cause, found only after actually diffing a screenshot against the
+        Vault's own editor view side by side, not from reasoning about the CSS alone:{" "}
+        <code>.ox-content &gt; *:not(:first-child)</code> — long documented in this skill as the
+        rule providing this rhythm — matched NOTHING, because real content sits one level deeper
+        than <code>.ox-content</code> itself, inside the <code>.ox-dot-grid</code> child{" "}
+        <code>&lt;div&gt;</code> the dot-grid background lives on; <code>.ox-content</code>'s ONE
+        direct child IS <code>.ox-dot-grid</code>, so the selector had nothing else to match at
+        that level. First attempted fix (re-adding this exact rule verbatim) shipped, was
+        confirmed via a real screenshot to have done NOTHING, and was corrected in the same
+        sitting — a direct demonstration of why this skill's three-surface testing convention
+        insists on checking the actual rendered result, not just the markdown/CSS reasoning.
+        Fixed on <code>.ox-dot-grid &gt; *:not(:first-child)</code> instead, plus the equivalent
+        for every other place a run of sibling blocks renders into a shared parent (a
+        blockquote's body, a list item's own body, a toggle's body —{" "}
+        <code>.ox-grid-cell</code> already had a correct version of this same rule, since it has
+        no dot-grid-style wrapper to trip over). <code>.ox-blank-line-spacer</code> itself is
+        excluded (<code>margin-top: 0 !important</code>) from all of these, since it already
+        contributes its own full grid unit of height per extra blank line — without the
+        exclusion a 2-blank-line gap would render as 3 grid units instead of 2.
+      </>
+    ),
+  },
 ];
 
 // ─── Sample content for the playground ──────────────────────────────────────────────────────────────────
@@ -734,6 +782,8 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
 const DEFAULT_SAMPLE = `# Try editing this
 
 Bold, *italic*, ~~strikethrough~~, inline \`code\`, and a [link](https://example.com).
+
+Spacing   preserved   exactly   as   saved — even   runs   of   2+ — on every surface (see the oxmarkdown skill's Design language section).
 
 :::note{title="Container directive"}
 This paragraph is followed by a blank line inside the directive —

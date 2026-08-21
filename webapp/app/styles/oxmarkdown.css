@@ -155,6 +155,24 @@
   color: var(--ox-color-text);
   overflow-x: hidden;
   overflow-wrap: break-word;
+  /* Preserve every space exactly as saved, including runs of 2+ — the
+     browser default (`normal`) collapses a run of ASCII spaces to one,
+     which is the ONE thing that made Editing mode (a live Lexical
+     `contentEditable`, which browsers keep visually faithful to typed
+     whitespace while focused) look different from this same markdown's
+     OWN static/Interacting-mode render the moment it wasn't being
+     actively typed into — the bug this rule fixes, not a cosmetic
+     preference. `break-spaces` (not `pre-wrap`) is deliberate: it's the
+     one white-space value that BOTH preserves a run of spaces faithfully
+     AND allows the run itself to wrap at the container edge instead of
+     overflowing — see the `oxmarkdown` skill's Design language section.
+     Safe alongside the `\n`-splitting `renderTextWithBreaks` already does
+     for embedded hard breaks (`OxRenderer.tsx`'s `case "text"`): that
+     function's own `.split("\n")` already removes every literal `\n`
+     character from the strings it hands to React, replacing each with a
+     real `<br />`, so there's never a raw `\n` left in a DOM text node
+     for this rule to also start rendering as a second, doubled break. */
+  white-space: break-spaces;
 }
 
 .ox-dot-grid {
@@ -277,6 +295,63 @@
 .ox-content p {
   line-height: var(--ox-grid);
   margin: 0;
+}
+
+/* Ordinary prose rhythm for the static/Interacting renderer: every block
+   sibling gets one grid unit of space above it, on every parent
+   `renderBlockNodes` (OxRenderer.tsx) ever renders a run of sibling
+   blocks into — the top-level document, plus every nested block
+   container (a blockquote's body, a list item's own body, a toggle's
+   body; `.ox-grid-cell` already has its own identical rule below, next
+   to the rest of the grid directive's CSS).
+
+   THIS RULE WAS MISSING ENTIRELY despite being long-documented in this
+   skill's Design language section — with it absent, every pair of
+   ordinary adjacent blocks (the overwhelmingly common "exactly one blank
+   line apart" case, since `.ox-blank-line-spacer` below only ever
+   accounts for EXTRA blank lines beyond that first one) rendered with
+   ZERO gap between them: two consecutive paragraphs read as one
+   continuous run of lines, sharply different from Editing mode's own
+   blank-line handling (a real empty row, always visible) even though
+   both are meant to represent the exact same one grid unit of
+   separation. Reported more than once as "spacing gets collapsed" and
+   mis-diagnosed as an inline (multiple-spaces-within-a-line) issue before
+   this, the actual block-level rhythm bug, was found. Editing mode
+   itself is UNAFFECTED by any of this — it doesn't use margin for this at
+   all, see "Blank lines between blocks are real rows, not CSS margin, in
+   Editing mode" elsewhere in this file's design language notes.
+
+   `.ox-dot-grid`, NOT `.ox-content`, on the first selector below — a real
+   miss the first time this rule was written. Per "41×41px dot grid
+   background" above, `OxRenderer.tsx` always nests actual content one
+   level deeper, inside a `.ox-dot-grid` child `<div>` — `.ox-content`
+   ITSELF only ever has that one wrapper as its sole direct child, so
+   `.ox-content > *:not(:first-child)` matches nothing at all at the top
+   level (that one wrapper both IS the first child and is the ONLY
+   child). This is exactly the kind of thing the three-surface testing
+   convention below is for — confirmed only after actually looking at the
+   rendered result, not just reasoning about the CSS in the abstract. */
+.ox-dot-grid > *:not(:first-child),
+.ox-content blockquote > *:not(:first-child),
+.ox-content li > *:not(:first-child),
+.ox-content .ox-toggle-body > *:not(:first-child) {
+  margin-top: var(--ox-grid);
+}
+
+/* `.ox-blank-line-spacer` (below) already contributes its own full grid
+   unit of height per EXTRA blank line beyond the first — it must never
+   ALSO pick up the rule above's margin-top, or a 2-blank-line gap would
+   render as 3 grid units instead of 2 (the spacer's own height, PLUS a
+   margin-top the rule above would otherwise also give it for being a
+   non-first child, PLUS the real node right after it separately getting
+   its own baseline margin-top too). `!important` because this needs to
+   win over the rule above regardless of which of its several selectors
+   (or `.ox-grid-cell`'s own, separate rule below) matched — a plain class
+   selector alone is LESS specific than any of those `> *:not(:first-
+   child)` combinators, so without it this would silently lose the
+   cascade back to the rule it's meant to override. */
+.ox-content .ox-blank-line-spacer {
+  margin-top: 0 !important;
 }
 
 /* One per blank line BEYOND the single one CommonMark already requires to
