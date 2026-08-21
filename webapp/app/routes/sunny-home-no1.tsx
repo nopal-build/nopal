@@ -3,6 +3,7 @@ import { Footer } from "../components/Footer";
 import type { LinksFunction, MetaFunction } from "react-router";
 import sunnyHomeStyles from "../styles/sunnyHome.css?url";
 import { ZoomImg } from "../components/ZoomImg";
+import { surfaceBase } from "stamps/surface.css";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: sunnyHomeStyles },
@@ -151,7 +152,7 @@ export default function SunnyHomeNo1() {
           </p>
 
           <div
-            className="good-box mt-20 p-4"
+            className={`${surfaceBase} mt-20 p-4`}
             style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
           >
             <h4 className="purple-light-text text-xl italic">
@@ -219,7 +220,7 @@ function DailyExperience({
           {svg}
         </div>
         <div>
-          <div className={"daily-experience-text good-box p-2"}>
+          <div className={`daily-experience-text ${surfaceBase} p-2`}>
             <p className="text-lg">{children}</p>
           </div>
         </div>

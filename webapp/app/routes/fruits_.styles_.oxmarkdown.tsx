@@ -27,6 +27,7 @@ import OxRenderer from "../components/OxRenderer";
 import OxEditor from "../components/OxEditor";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import type { MentionItem, MentionSearch } from "oxmarkdown-core";
+import { surfaceBase } from "stamps/surface.css";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -72,7 +73,7 @@ function StateSwatch({ label, children }: { label: string; children: React.React
   return (
     <div className="flex flex-col gap-2 items-start">
       <Label>{label}</Label>
-      <div className="good-box ox-content ox-tokens p-3" style={{ minWidth: "140px" }}>
+      <div className={`${surfaceBase} ox-content ox-tokens p-3`} style={{ minWidth: "140px" }}>
         {children}
       </div>
     </div>
@@ -973,7 +974,7 @@ export default function OxMarkdownStyles() {
           </div>
 
           <Label>Rendered (OxRenderer)</Label>
-          <div className="good-box p-4">
+          <div className={`${surfaceBase} p-4`}>
             <OxRenderer
               markdown={markdown}
               directives={DEMO_DIRECTIVES}
@@ -995,7 +996,7 @@ export default function OxMarkdownStyles() {
             mode, step 4) — everything else here is read-only prose.
           </p>
           <Label>OxEditor (mode="interacting")</Label>
-          <div className="good-box p-4 mb-3">
+          <div className={`${surfaceBase} p-4 mb-3`}>
             <OxEditor
               mode="interacting"
               markdown={interactiveMarkdown}
@@ -1034,7 +1035,7 @@ export default function OxMarkdownStyles() {
             silently dropped.
           </p>
           <Label>OxEditor (mode="editing")</Label>
-          <div className="good-box p-4 mb-3">
+          <div className={`${surfaceBase} p-4 mb-3`}>
             <OxEditor
               mode="editing"
               markdown={editingMarkdown}
@@ -1065,7 +1066,7 @@ export default function OxMarkdownStyles() {
             something with no real match.
           </p>
           <Label>OxEditor (mode="editing") with mentionSearch</Label>
-          <div className="good-box p-4 mb-3">
+          <div className={`${surfaceBase} p-4 mb-3`}>
             <OxEditor
               mode="editing"
               markdown={mentionMarkdown}

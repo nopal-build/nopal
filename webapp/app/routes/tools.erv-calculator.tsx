@@ -5,6 +5,7 @@ import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { Breadcrumb } from "../components/Breadcrumb";
 import { NumberInput } from "../components/NumberInput";
+import { surfaceBase } from "stamps/surface.css";
 
 export const meta: MetaFunction = () => [
   { title: "Fresh Air Calculator | Nopal Tools" },
@@ -128,7 +129,7 @@ function PartyScenarioNote({
   ];
 
   return (
-    <div className="good-box p-5">
+    <div className={`${surfaceBase} p-5`}>
       <h3 className="text-sm font-bold mb-1">What if the party grows?</h3>
       <p className="text-xs opacity-60 mb-4">
         If your ERV stays at {targetCFM} CFM but attendance doubles or triples,
@@ -244,7 +245,7 @@ export default function ERVCalculator() {
           {/* Main layout */}
           <div className="flex flex-col sm:flex-row gap-6 mb-12">
             {/* ---- Inputs ---- */}
-            <div className="good-box p-5 sm:w-[260px] shrink-0">
+            <div className={`${surfaceBase} p-5 sm:w-[260px] shrink-0`}>
               <h2 className="text-base font-bold mb-4">Occupancy</h2>
 
               <InputGroup
@@ -277,7 +278,7 @@ export default function ERVCalculator() {
             {/* ---- Output ---- */}
             <div className="flex-1 min-w-0 flex flex-col gap-4">
               {/* Primary result */}
-              <div className="good-box p-5">
+              <div className={`${surfaceBase} p-5`}>
                 <p className="text-xs font-semibold opacity-60 uppercase tracking-widest mb-1">
                   Target Ventilation Flow
                 </p>
@@ -301,7 +302,7 @@ export default function ERVCalculator() {
               </div>
 
               {/* Breakdown */}
-              <div className="good-box p-5">
+              <div className={`${surfaceBase} p-5`}>
                 <h3 className="text-sm font-bold mb-3">How It's Calculated</h3>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <tbody>

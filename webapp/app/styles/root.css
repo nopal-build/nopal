@@ -229,9 +229,9 @@ body {
 /* The scrollable list area of a SearchCollection (and the profile page's
    hand-rolled copy of that shell) — a "well" that matches the page
    background (white light / --purple dark) so rows inside can be plain
-   `.good-box` cards: their backgrounds, text colors, and anything
+   `Surface` cards: their backgrounds, text colors, and anything
    scheme-aware inside them (MoreMenu, subtle-text, …) flip normally.
-   Top radius is 1px inside the good-box's 8px so the well doesn't poke
+   Top radius is 1px inside Surface's 8px so the well doesn't poke
    out of the shell's border. */
 .collection-well {
   background: white;
@@ -269,7 +269,7 @@ body {
 }
 
 /* Readonly "copy this command" inputs — a nested "well" look inside a
-   .good-box, distinct from the box's own background. */
+   Surface, distinct from the box's own background. */
 .code-input {
   background: var(--midground);
   border: 1px solid var(--foreground);
@@ -284,7 +284,7 @@ body {
 
 /* Multi-line usage-snippet blocks (see the styles guide) — accent purple in
    light mode; plain white in dark, where --purple-light is too dim against a
-   dark .good-box. */
+   dark Surface. */
 .code-block {
   color: var(--purple-light);
   @media (prefers-color-scheme: dark) {
@@ -292,35 +292,10 @@ body {
   }
 }
 
-.good-box-boarder {
-  border: 1px solid var(--color-surface-border);
-  border-radius: 8px;
-}
-
-/* Good Box */
-.good-box {
-  border: 1px solid var(--color-surface-border);
-  background: var(--color-surface-card);
-  border-radius: 8px;
-  hr {
-    border-color: var(--color-surface-border);
-  }
-}
-
-.good-box-hover:hover {
-  cursor: pointer;
-  border-color: var(--purple-light);
-  box-shadow: 0px 0px 8px rgba(0, 0, 0, 0.05);
-  .good-arrow svg path {
-    stroke: var(--green);
-  }
-  @media (prefers-color-scheme: dark) {
-    border-color: var(--pink);
-    .good-arrow svg path {
-      stroke: var(--green-light);
-    }
-  }
-}
+/* .good-box/.good-box-hover/.good-box-boarder retired — fully migrated
+   to packages/stamps/src/surface.css.ts (`surfaceBase`, `surfaceHoverable`,
+   `surfaceBorderOnly`) and the `Surface` component built on them. Don't
+   add these classes back — reach for `stamps/Surface` instead. */
 
 .good-white-box {
   border: 1px solid var(--foreground);

@@ -877,7 +877,7 @@ export function FileDirectiveLayout({
  * see the oxmarkdown skill's file-directive section. Two independent
  * concerns:
  *
- *   1. A modal overlay (`good-box` panel on a dimmed backdrop, closes on
+ *   1. A modal overlay (a Surface panel on a dimmed backdrop, closes on
  *      Escape or a backdrop click — same conventions as `Modal.tsx`,
  *      though this needs its own shell rather than reusing that
  *      component: `Modal.tsx`'s panel caps out at a fixed 400px width,

@@ -9,6 +9,7 @@ import {
   getAuthEmail,
 } from "../modules/auth/auth.server";
 import { Input } from "stamps/Input";
+import { surfaceBase } from "stamps/surface.css";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { Link } from "react-router";
@@ -44,7 +45,7 @@ export default function Verify() {
             Verify Login Code
           </h1>
           <p className="italic mb-8">Check your email for "the code"</p>
-          <div className="w-auto flex flex-col gap-4 good-box p-4 text-xl">
+          <div className={`w-auto flex flex-col gap-4 ${surfaceBase} p-4 text-xl`}>
             <Form method="POST" className="flex flex-col gap-4">
               <input type="hidden" value={authEmail} name="authEmail" />
               <Input

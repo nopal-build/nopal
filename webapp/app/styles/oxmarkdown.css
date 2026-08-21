@@ -768,8 +768,9 @@
    `FileImageModal`) — clicking a `::file{...}` image thumbnail opens
    this, on a dimmed backdrop, same z-index tier as `Modal.tsx`'s own
    overlay (1000; both are app-level modals, never open at once). Shares
-   `.good-box` for its panel background/border so it flips for dark mode
-   the same way every other panel does, with no override needed here. */
+   `stamps`' `surfaceBase` (packages/stamps/src/surface.css.ts) for its
+   panel background/border so it flips for dark mode the same way every
+   other panel does, with no override needed here. */
 img.ox-file-thumb {
   cursor: zoom-in;
 }
@@ -888,7 +889,7 @@ img.ox-file-thumb {
    landing its edge at `.ox-card-host`'s new, wider border-box edge —
    which sits exactly `8px` past the day frame's visual border (`DayContainer`
    itself adds no padding of its own — `components/DailyLogDay.tsx`).
-   `.good-box` (root.css) supplies the actual fill/border look — nothing
+   `stamps`' `surfaceBase` supplies the actual fill/border look — nothing
    card-specific there. */
 .ox-card-directive {
   margin: 0 calc(-1 * (var(--ox-grid) + 8px)) 16px calc(-1 * (var(--ox-grid) + 8px));

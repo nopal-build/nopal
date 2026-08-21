@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Input } from "stamps/Input";
+import { surfaceBase } from "stamps/surface.css";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { useLoaderData, useActionData, useNavigate, Form } from "react-router";
@@ -107,7 +108,7 @@ export default function Login() {
       <div className="scene1">
         <div className="w-full max-w-96 mx-auto px-4 py-12">
           <h1 className="text-3xl purple-light-text font-bold mb-4">Login</h1>
-          <Form method="POST" className="flex flex-col gap-4 good-box p-4">
+          <Form method="POST" className={`flex flex-col gap-4 ${surfaceBase} p-4`}>
             {redirectTo && (
               <input type="hidden" name="redirectTo" value={redirectTo} />
             )}
@@ -133,7 +134,7 @@ export default function Login() {
             or
           </div>
 
-          <div className="flex flex-col gap-2 good-box p-4">
+          <div className={`flex flex-col gap-2 ${surfaceBase} p-4`}>
             {passkeyError && (
               <div className="red-text text-sm">{passkeyError}</div>
             )}

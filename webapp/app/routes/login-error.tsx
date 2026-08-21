@@ -9,6 +9,7 @@
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { Link } from "react-router";
+import { surfaceBase } from "stamps/surface.css";
 
 export default function LoginError() {
   return (
@@ -18,7 +19,7 @@ export default function LoginError() {
           <h1 className="text-3xl purple-light-text font-bold mb-4">
             Login Problem
           </h1>
-          <div className="good-box p-4 text-lg">
+          <div className={`${surfaceBase} p-4 text-lg`}>
             <p>
               There has been a problem logging in as this user. Please
               contact{" "}

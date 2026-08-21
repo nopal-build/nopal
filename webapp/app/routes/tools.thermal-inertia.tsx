@@ -1,6 +1,7 @@
 import type { MetaFunction } from "react-router";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
+import { surfaceBase } from "stamps/surface.css";
 
 export const meta: MetaFunction = () => [
   { title: "Thermal Inertia | Nopal Tools" },
@@ -383,7 +384,7 @@ export default function ThermalInertia() {
           </p>
 
           {/* ---- Explainer ---- */}
-          <div className="good-box p-4 mb-6">
+          <div className={`${surfaceBase} p-4 mb-6`}>
             <h2 className="text-xl font-bold mb-3">
               What is Thermal Diffusivity?
             </h2>
@@ -405,21 +406,21 @@ export default function ThermalInertia() {
 
             {/* Three pillars */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 text-sm">
-              <div className="good-box p-3">
+              <div className={`${surfaceBase} p-3`}>
                 <p className="font-semibold mb-1">k &mdash; Conductivity</p>
                 <p className="text-xs purple-light-text">
                   How readily heat flows through the material (W/m·K). Higher
                   means heat flows faster.
                 </p>
               </div>
-              <div className="good-box p-3">
+              <div className={`${surfaceBase} p-3`}>
                 <p className="font-semibold mb-1">ρ &mdash; Density</p>
                 <p className="text-xs purple-light-text">
                   Mass per unit volume (kg/m³). More mass means more thermal
                   storage capacity.
                 </p>
               </div>
-              <div className="good-box p-3">
+              <div className={`${surfaceBase} p-3`}>
                 <p className="font-semibold mb-1">
                   c<sub>p</sub> &mdash; Specific Heat
                 </p>
@@ -447,7 +448,7 @@ export default function ThermalInertia() {
           </div>
 
           {/* ---- Bar Chart ---- */}
-          <div className="good-box p-4 mb-6">
+          <div className={`${surfaceBase} p-4 mb-6`}>
             <SectionHeading>
               Thermal Diffusivity by Insulation Type
             </SectionHeading>
@@ -525,7 +526,7 @@ export default function ThermalInertia() {
           </div>
 
           {/* ---- Key Observations ---- */}
-          <div className="good-box p-4 mb-6">
+          <div className={`${surfaceBase} p-4 mb-6`}>
             <SectionHeading>Key Observations</SectionHeading>
             <ul className="mt-3 space-y-4">
               {[

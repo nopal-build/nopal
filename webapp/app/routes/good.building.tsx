@@ -4,6 +4,7 @@ import goodsStyles from "../styles/goods.css?url";
 import { LinksFunction } from "react-router";
 import { FooterDiscovery } from "../components/Footer";
 import { GoodContact, GoodButtonGuiding } from "../components/GoodAssets";
+import { surfaceBase } from "stamps/surface.css";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: projectStyles },
@@ -27,7 +28,7 @@ export default function GoodBuilding() {
           <h2 className="green-text text-3xl mt-12">Nopal's Recipes</h2>
 
           <div className="flex flex-col sm:flex-row gap-4 mt-4">
-            <div className="build-recipe basis-1/2 font-mono p-4 good-box">
+            <div className={`build-recipe basis-1/2 font-mono p-4 ${surfaceBase}`}>
               <h4 className="font-bold">Sunny Home Recipe</h4>
               <dl className="mt-4">
                 <dd>$500k+</dd>
@@ -37,7 +38,7 @@ export default function GoodBuilding() {
               </dl>
             </div>
 
-            <div className="build-recipe basis-1/2 font-mono p-4 good-box">
+            <div className={`build-recipe basis-1/2 font-mono p-4 ${surfaceBase}`}>
               <h4 className="font-bold">Sunny ADU Recipe</h4>
               <dl className="mt-4">
                 <dd>$200k+</dd>
@@ -55,7 +56,7 @@ export default function GoodBuilding() {
           <h2 className="green-text text-3xl mt-12">Custom Recipes</h2>
 
           <div className="flex flex-col sm:flex-row gap-4 mt-4">
-            <div className="build-recipe basis-1/2 font-mono p-4 good-box">
+            <div className={`build-recipe basis-1/2 font-mono p-4 ${surfaceBase}`}>
               <h4 className="font-bold">[Your Home Recipe]</h4>
               <dl className="mt-4">
                 <dd>$500k+</dd>

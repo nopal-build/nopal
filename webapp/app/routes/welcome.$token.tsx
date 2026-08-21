@@ -13,6 +13,7 @@ import {
 import { startRegistration } from "@simplewebauthn/browser";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
+import { surfaceBase } from "stamps/surface.css";
 import { getUser, updateUserSession } from "../modules/auth/auth.server";
 import { sessionStorage } from "../modules/auth/session.server";
 import {
@@ -128,7 +129,7 @@ function ExistingSessionChoice({
           <h1 className="text-3xl purple-light-text font-bold mb-4">
             You're already signed in
           </h1>
-          <div className="flex flex-col gap-4 good-box p-4">
+          <div className={`flex flex-col gap-4 ${surfaceBase} p-4`}>
             <p className="text-sm" style={{ color: "var(--text-subtle)" }}>
               You're signed in as <strong>{existingUser.email}</strong>, but
               this passkey setup link was sent to{" "}
@@ -250,7 +251,7 @@ function PasskeySetup({
           <h1 className="text-3xl purple-light-text font-bold mb-4">
             Welcome, {invitedName}
           </h1>
-          <div className="flex flex-col gap-4 good-box p-4">
+          <div className={`flex flex-col gap-4 ${surfaceBase} p-4`}>
             <p className="text-sm" style={{ color: "var(--text-subtle)" }}>
               Set up a passkey so you can sign in instantly with your
               fingerprint, face, or PIN — no email codes to wait for.

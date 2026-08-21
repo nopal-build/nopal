@@ -9,7 +9,7 @@ import "../styles/dailyLog.css";
 
 /** One bordered, rounded frame per day, holding that day's prose + cards
  * + release log. A near-white/dark-plum background (`.daily-log-day`,
- * deliberately NOT the same warm `farground` tone `good-box`/cards use)
+ * deliberately NOT the same warm `farground` tone Surface/cards use)
  * is what lets a Card visually "sit on top of" the day's own prose area
  * instead of blending into it. Zero padding on BOTH sides — the OxEditor
  * content inside already reserves a full `41px` gutter on EACH side
