@@ -13,7 +13,7 @@ import { SearchCollection } from "stamps/SearchCollection";
 import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
 import { CircleButton } from "stamps/CircleButton";
 import { surfaceBase, surfaceBorderOnly, surfaceHoverable } from "stamps/surface.css";
-import { HamburgerNeqIcon } from "../components/HamburgerNeqIcon";
+import { HamburgerNeqIcon } from "stamps/HamburgerNeqIcon";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
@@ -114,7 +114,7 @@ function Swatch({
 
 // ─── Hamburger → "≠" Icon ────────────────────────────────────────────────────
 
-/** Self-contained demo of `HamburgerNeqIcon` (components/HamburgerNeqIcon.tsx)
+/** Self-contained demo of `HamburgerNeqIcon` (stamps/HamburgerNeqIcon)
  * — owns its own open/closed state so it can be dropped into the style
  * guide without wiring anything up. */
 function HamburgerNeqDemo() {

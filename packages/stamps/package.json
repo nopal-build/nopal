@@ -16,7 +16,10 @@
     "./SearchCollection": "./src/SearchCollection.tsx",
     "./CopyField": "./src/CopyField.tsx",
     "./sprinkles.css": "./src/sprinkles.css.ts",
-    "./typography.css": "./src/typography.css.ts"
+    "./typography.css": "./src/typography.css.ts",
+    "./navLink.css": "./src/navLink.css.ts",
+    "./appLayoutShell.css": "./src/appLayoutShell.css.ts",
+    "./HamburgerNeqIcon": "./src/HamburgerNeqIcon.tsx"
   },
   "peerDependencies": {
     "react": "^18.3.1"

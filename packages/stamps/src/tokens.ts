@@ -112,6 +112,8 @@ export const semanticColors = {
   fieldBg: "var(--color-field-bg)",
   fieldBorder: "var(--color-field-border)",
   fieldText: "var(--color-field-text)",
+
+  navActiveBg: "var(--color-nav-active-bg)",
 } as const;
 
 // Mirrors `webapp/tailwind.config.ts`'s `fontFamily` — kept here too so
@@ -126,3 +128,14 @@ export const fonts = {
 } as const;
 
 export const darkModeMediaQuery = "(prefers-color-scheme: dark)";
+
+// The one responsive breakpoint currently in use anywhere in the design
+// system (AppLayout's desktop-topbar/mobile-nav split). Named, not a
+// magic number, so it isn't silently duplicated/drifted the next time
+// something else needs to switch layouts at the same point. Add more
+// named breakpoints here — lazily, like everything else in this file —
+// only once something else actually needs one.
+export const breakpoints = {
+  navMin: "860px",
+  navMax: "859px",
+} as const;

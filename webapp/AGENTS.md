@@ -40,12 +40,21 @@ shared with any future non-webapp surface — see the UI conventions below.
     Only reach for a new scale value if the existing one (documented in
     `sprinkles.css.ts`) genuinely doesn't cover it — don't invent one-off
     pixel values when a nearby scale step would do.
-  - Typography utility classes (`text-3xl`, `font-bold`, etc.) and
-    non-migrated legacy classes (`.link`, `.btn-*`, `.menu-item`,
+  - **Typography**: use `stamps/typography.css`'s `textSize` (`textSize.sm`,
+    `textSize["3xl"]`, etc. — pairs `font-size`/`line-height` together, so
+    don't set them separately) for font size, and `stamps/sprinkles.css`'s
+    `sprinkles()` for `fontWeight`, `fontFamily` (`mono`/`hand`),
+    `fontStyle`, `textTransform`, `letterSpacing`, and standalone
+    `lineHeight` — not Tailwind's `text-sm`, `font-bold`, `font-mono`,
+    `italic`, `uppercase`, `tracking-wide`, etc. Use `stamps/typography.css`'s
+    `truncate` for Tailwind's `truncate` (don't set `overflow`/
+    `text-overflow`/`white-space` separately).
+  - Non-migrated legacy classes (`.link`, `.btn-*`, `.menu-item`,
     `.collection-well`) are still fine to use as-is for now — they haven't
-    been ported yet. Don't block a change on migrating something unrelated
-    to what you're already touching; do migrate whatever Tailwind you *do*
-    touch in the same change.
+    been ported yet (they're custom CSS, not Tailwind, so they're a separate
+    concern from this migration). Don't block a change on migrating
+    something unrelated to what you're already touching; do migrate
+    whatever Tailwind you *do* touch in the same change.
 - Don't re-apply styling that a shared component already provides by default
   (e.g. `Input` already has border/radius/padding baked in). Only pass a
   `className` for one-off overrides.

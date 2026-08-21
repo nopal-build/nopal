@@ -5,7 +5,23 @@ import { useUser, permissions } from "../hooks/useUser";
 import noLogoColor from "../images/no-logo-color.svg";
 import noLogoWhite from "../images/no-logo-white.svg";
 import { useSchemePref } from "../hooks/useSchemePref";
-import { HamburgerNeqIcon } from "./HamburgerNeqIcon";
+import { HamburgerNeqIcon } from "stamps/HamburgerNeqIcon";
+import { navLink } from "stamps/navLink.css";
+import { textSize } from "stamps/typography.css";
+import { sprinkles } from "stamps/sprinkles.css";
+import { colors, fonts } from "stamps/tokens";
+import {
+  main as mainClass,
+  shell as shellClass,
+  topbar,
+  topbarLogo,
+  topbarLogoImg,
+  topbarNav,
+  topbarProfile,
+  topnav,
+  topnavBar,
+  topnavMenu,
+} from "stamps/appLayoutShell.css";
 
 const BANNER_HEIGHT = 40;
 
@@ -57,17 +73,19 @@ function ImpersonationBanner({ targetName }: { targetName: string }) {
 
   return (
     <div
-      style={{
-        height: BANNER_HEIGHT,
-        background: "var(--yellow)",
-        color: "var(--purple)",
+      className={sprinkles({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: "12px",
-        fontSize: "13px",
-        fontFamily: "monospace",
+        gap: 3,
         flexShrink: 0,
+      })}
+      style={{
+        height: BANNER_HEIGHT,
+        background: colors.yellow,
+        color: colors.purple,
+        fontSize: "13px", // between textSize.xs/sm — not on the scale, kept literal
+        fontFamily: fonts.mono,
       }}
     >
       <span>
@@ -78,14 +96,13 @@ function ImpersonationBanner({ targetName }: { targetName: string }) {
         type="button"
         onClick={handleReturn}
         disabled={returning}
+        className={`${textSize.xs} ${sprinkles({ py: 0.5, px: 2.5 })}`}
         style={{
-          background: "var(--purple)",
-          color: "var(--yellow)",
+          background: colors.purple,
+          color: colors.yellow,
           border: "none",
           borderRadius: "4px",
-          padding: "2px 10px",
-          fontSize: "12px",
-          fontFamily: "monospace",
+          fontFamily: fonts.mono,
           cursor: returning ? "default" : "pointer",
         }}
       >
@@ -94,18 +111,6 @@ function ImpersonationBanner({ targetName }: { targetName: string }) {
     </div>
   );
 }
-
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `text-sm font-mono py-2 rounded block ${
-    isActive ? "font-bold app-nav-active-bg" : "purple-light-text"
-  }`;
-
-const navLinkStyle = ({ isActive }: { isActive: boolean }) =>
-  ({
-    ...(isActive ? { paddingLeft: "8px" } : {}),
-    textDecoration: "none",
-    transition: "background 150ms, color 150ms",
-  }) as React.CSSProperties;
 
 function getCurrentSectionLabel(pathname: string): string {
   if (pathname.startsWith("/fruits/daily-log")) return "Daily Log";
@@ -116,17 +121,7 @@ function getCurrentSectionLabel(pathname: string): string {
   return "Dashboard";
 }
 
-const topbarLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `text-sm font-mono rounded ${
-    isActive ? "font-bold app-nav-active-bg" : "purple-light-text"
-  }`;
-
-const topbarLinkStyle = () =>
-  ({
-    textDecoration: "none",
-    padding: "6px 14px",
-    transition: "background 150ms, color 150ms",
-  }) as React.CSSProperties;
+const navLinkFontClass = `${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`;
 
 export function AppLayout({ children }: { children?: ReactNode }) {
   const schemePref = useSchemePref();
@@ -140,124 +135,48 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const closeMenu = useCallback(() => setMenuOpen(false), []);
 
   return (
-    <div className="flex flex-col" style={{ height: "100vh" }}>
+    <div
+      className={sprinkles({ display: "flex", flexDirection: "column" })}
+      style={{ height: "100vh" }}
+    >
       {user && <ImpersonationBanner targetName={user.name || user.email} />}
-      <div
-        className="app-layout"
-        style={{ height: "auto", flex: 1, minHeight: 0 }}
-      >
-      {/* ===== TOP NAV BAR (desktop ≥860px) ===== */}
-      <header className="app-topbar">
-        <Link to="/" prefetch="intent" className="app-topbar-logo">
-          <img src={isDark ? noLogoWhite : noLogoColor} alt="no." />
-        </Link>
-
-        <nav className="app-topbar-nav">
-          <NavLink
-            to="/fruits"
-            prefetch="intent"
-            end
-            className={topbarLinkClass}
-            style={topbarLinkStyle}
-          >
-            Dashboard
-          </NavLink>
-          <NavLink
-            to="/fruits/daily-log"
-            prefetch="intent"
-            className={topbarLinkClass}
-            style={topbarLinkStyle}
-          >
-            Daily Log
-          </NavLink>
-          <NavLink
-            to="/fruits/vault"
-            prefetch="intent"
-            className={topbarLinkClass}
-            style={topbarLinkStyle}
-          >
-            Vault
-          </NavLink>
-          {isAdmin && (
-            <NavLink
-              to="/fruits/maker"
-              prefetch="intent"
-              className={topbarLinkClass}
-              style={topbarLinkStyle}
-            >
-              Maker
-            </NavLink>
-          )}
-        </nav>
-
-        <div className="app-topbar-profile">
-          <NavLink
-            to="/fruits/profile"
-            prefetch="intent"
-            className={topbarLinkClass}
-            style={topbarLinkStyle}
-          >
-            Profile
-          </NavLink>
-        </div>
-      </header>
-
-      {/* ===== TOP NAV (mobile <860px) ===== */}
-      <div className="app-topnav">
-        <div className="app-topnav-bar">
-          <Link to="/fruits" prefetch="intent">
+      <div className={shellClass} style={{ height: "auto", flex: 1, minHeight: 0 }}>
+        {/* ===== TOP NAV BAR (desktop ≥860px) ===== */}
+        <header className={topbar}>
+          <Link to="/" prefetch="intent" className={topbarLogo}>
             <img
               src={isDark ? noLogoWhite : noLogoColor}
               alt="no."
-              style={{ height: "20px", display: "block" }}
+              className={topbarLogoImg}
             />
           </Link>
-          <button
-            onClick={() => setMenuOpen((o) => !o)}
-            aria-label={menuOpen ? "Close menu" : "Open menu"}
-            className="purple-text"
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <span className="text-sm font-mono">{currentSectionLabel}</span>
-            <HamburgerNeqIcon open={menuOpen} />
-          </button>
-        </div>
 
-        {menuOpen && (
-          <div className="app-topnav-menu">
+          <nav className={topbarNav}>
             <NavLink
               to="/fruits"
               prefetch="intent"
               end
-              className={navLinkClass}
-              style={navLinkStyle}
-              onClick={closeMenu}
+              className={({ isActive }) =>
+                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+              }
             >
               Dashboard
             </NavLink>
             <NavLink
               to="/fruits/daily-log"
               prefetch="intent"
-              className={navLinkClass}
-              style={navLinkStyle}
-              onClick={closeMenu}
+              className={({ isActive }) =>
+                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+              }
             >
               Daily Log
             </NavLink>
             <NavLink
               to="/fruits/vault"
               prefetch="intent"
-              className={navLinkClass}
-              style={navLinkStyle}
-              onClick={closeMenu}
+              className={({ isActive }) =>
+                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+              }
             >
               Vault
             </NavLink>
@@ -265,28 +184,115 @@ export function AppLayout({ children }: { children?: ReactNode }) {
               <NavLink
                 to="/fruits/maker"
                 prefetch="intent"
-                className={navLinkClass}
-                style={navLinkStyle}
-                onClick={closeMenu}
+                className={({ isActive }) =>
+                  `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+                }
               >
                 Maker
               </NavLink>
             )}
+          </nav>
+
+          <div className={topbarProfile}>
             <NavLink
               to="/fruits/profile"
               prefetch="intent"
-              className={navLinkClass}
-              style={navLinkStyle}
-              onClick={closeMenu}
+              className={({ isActive }) =>
+                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+              }
             >
               Profile
             </NavLink>
           </div>
-        )}
-      </div>
+        </header>
 
-      {/* ===== MAIN ===== */}
-      <main className="app-main">{children}</main>
+        {/* ===== TOP NAV (mobile <860px) ===== */}
+        <div className={topnav}>
+          <div className={topnavBar}>
+            <Link to="/fruits" prefetch="intent">
+              <img
+                src={isDark ? noLogoWhite : noLogoColor}
+                alt="no."
+                style={{ height: "20px", display: "block" }}
+              />
+            </Link>
+            <button
+              onClick={() => setMenuOpen((o) => !o)}
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              className={`purple-text ${sprinkles({
+                p: 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+              })}`}
+              style={{ background: "none", border: "none", cursor: "pointer" }}
+            >
+              <span className={navLinkFontClass}>{currentSectionLabel}</span>
+              <HamburgerNeqIcon open={menuOpen} />
+            </button>
+          </div>
+
+          {menuOpen && (
+            <div className={topnavMenu}>
+              <NavLink
+                to="/fruits"
+                prefetch="intent"
+                end
+                className={({ isActive }) =>
+                  `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                }
+                onClick={closeMenu}
+              >
+                Dashboard
+              </NavLink>
+              <NavLink
+                to="/fruits/daily-log"
+                prefetch="intent"
+                className={({ isActive }) =>
+                  `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                }
+                onClick={closeMenu}
+              >
+                Daily Log
+              </NavLink>
+              <NavLink
+                to="/fruits/vault"
+                prefetch="intent"
+                className={({ isActive }) =>
+                  `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                }
+                onClick={closeMenu}
+              >
+                Vault
+              </NavLink>
+              {isAdmin && (
+                <NavLink
+                  to="/fruits/maker"
+                  prefetch="intent"
+                  className={({ isActive }) =>
+                    `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                  }
+                  onClick={closeMenu}
+                >
+                  Maker
+                </NavLink>
+              )}
+              <NavLink
+                to="/fruits/profile"
+                prefetch="intent"
+                className={({ isActive }) =>
+                  `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                }
+                onClick={closeMenu}
+              >
+                Profile
+              </NavLink>
+            </div>
+          )}
+        </div>
+
+        {/* ===== MAIN ===== */}
+        <main className={mainClass}>{children}</main>
       </div>
     </div>
   );

@@ -100,6 +100,13 @@ html {
   --color-field-bg: var(--white);
   --color-field-border: var(--surface-night-500);
   --color-field-text: var(--surface-night-100);
+
+  /* The active nav-link highlight. Text color is intentionally NOT part
+     of this token — it stays literal `--purple` in both schemes (see
+     `navLink.css.ts`), since the highlight itself is already dark (day)
+     or solid white (night), so dark purple text stays readable against
+     it either way. */
+  --color-nav-active-bg: var(--surface-day-500);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -114,6 +121,7 @@ html {
     --color-surface-border: var(--surface-night-500);
     --color-field-bg: var(--surface-day-100);
     --color-field-border: var(--surface-day-500);
+    --color-nav-active-bg: var(--white);
   }
 }
 
@@ -1080,107 +1088,11 @@ body {
 }
 
 /* === App Layout === */
-.app-layout {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-}
-
-.app-nav-active-bg {
-  color: var(--purple);
-  background: var(--foreground);
-  @media (prefers-color-scheme: dark) {
-    background: var(--white);
-  }
-}
-
-.app-topbar {
-  display: none;
-}
-
-.app-topnav {
-  display: none;
-}
-
-.app-main {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow-x: auto;
-  overflow-y: scroll;
-}
-
-@media (min-width: 860px) {
-  .app-topbar {
-    display: flex;
-    align-items: center;
-    gap: 32px;
-    padding: 10px 24px;
-    border-bottom: 1px solid var(--foreground);
-    background: var(--farground);
-    flex-shrink: 0;
-    @media (prefers-color-scheme: dark) {
-      background: var(--dark-farground);
-      border-color: var(--dark-foreground);
-    }
-  }
-
-  .app-topbar-logo {
-    display: flex;
-    align-items: center;
-    flex-shrink: 0;
-  }
-
-  .app-topbar-logo img {
-    height: 22px;
-    width: auto;
-    display: block;
-  }
-
-  .app-topbar-nav {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin: 0 auto;
-  }
-
-  .app-topbar-profile {
-    flex-shrink: 0;
-  }
-}
-
-@media (max-width: 859px) {
-  .app-topnav {
-    display: block;
-    background: var(--farground);
-    border-bottom: 1px solid var(--foreground);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    @media (prefers-color-scheme: dark) {
-      background: var(--dark-farground);
-      border-color: var(--dark-foreground);
-    }
-  }
-
-  .app-topnav-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-  }
-
-  .app-topnav-menu {
-    border-top: 1px solid var(--foreground);
-    padding: 8px 16px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    @media (prefers-color-scheme: dark) {
-      border-color: var(--dark-foreground);
-    }
-  }
-}
+/* .app-layout, .app-nav-active-bg, .app-topbar (+ its descendant
+   classes), .app-topnav (+ its descendant classes), and .app-main are all
+   retired — fully migrated to packages/stamps/src/appLayoutShell.css.ts
+   and navLink.css.ts. See AppLayout.tsx (webapp/app/components) instead
+   of adding these classes back here. */
 
 /* Background Classes */
 .midground-bg {

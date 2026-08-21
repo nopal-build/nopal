@@ -1,4 +1,4 @@
-// app/components/HamburgerNeqIcon.tsx
+// packages/stamps/src/HamburgerNeqIcon.tsx
 
 /**
  * Three horizontal lines that morph into a "≠"-style mark: the top and
@@ -12,10 +12,9 @@
  * Drawn from three `div` lines (not an SVG) so each line's `transform`
  * can be transitioned independently. Uses `currentColor`, so it inherits
  * whatever text color the wrapping element sets — including dark mode,
- * as long as that color already flips (e.g. `purple-text`, or
- * `CircleButton`'s own base color, both of which already resolve
- * correctly per color scheme — see `packages/stamps/src/tokens.ts`'s
- * `semanticColors`).
+ * as long as that color already flips (e.g. `semanticColors.textPrimary`,
+ * or `CircleButton`'s own base color, both of which already resolve
+ * correctly per color scheme — see `tokens.ts`'s `semanticColors`).
  */
 export function HamburgerNeqIcon({
   open,
