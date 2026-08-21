@@ -38,6 +38,7 @@ import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import { CircleButton } from "stamps/CircleButton";
+import { surfaceBase } from "stamps/surface.css";
 import "../styles/oxmarkdown.css";
 
 export interface OxRendererProps {
@@ -938,7 +939,7 @@ function FileImageModal({
   return (
     <div className="ox-file-modal-backdrop" onClick={onClose}>
       <div
-        className="ox-file-modal good-box"
+        className={`ox-file-modal ${surfaceBase}`}
         role="dialog"
         aria-modal="true"
         aria-label={name}
@@ -1028,7 +1029,7 @@ export function CardDirectiveLayout({
 }) {
   return (
     <div
-      className={`ox-card-directive good-box${pending ? " ox-card-directive--pending" : ""}`}
+      className={`ox-card-directive ${surfaceBase}${pending ? " ox-card-directive--pending" : ""}`}
       contentEditable={false}
     >
       <div className="ox-card-header">

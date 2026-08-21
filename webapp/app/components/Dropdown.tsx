@@ -1,3 +1,5 @@
+import { surfaceBase } from "stamps/surface.css";
+
 export function Dropdown({
   label,
   children,
@@ -29,7 +31,7 @@ export function TextDropdown({
         <span>{label}</span>
         <span className="arrow"></span>
       </button>
-      <ul className="good-box dropdown-content">{children}</ul>
+      <ul className={`${surfaceBase} dropdown-content`}>{children}</ul>
     </div>
   );
 }

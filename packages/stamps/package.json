@@ -9,6 +9,7 @@
     "./Chip": "./src/Chip.tsx",
     "./Input": "./src/Input.tsx",
     "./Surface": "./src/Surface.tsx",
+    "./surface.css": "./src/surface.css.ts",
     "./Modal": "./src/Modal.tsx",
     "./CircleButton": "./src/CircleButton.tsx",
     "./MoreMenu": "./src/MoreMenu.tsx",

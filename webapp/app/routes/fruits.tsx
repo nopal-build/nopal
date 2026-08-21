@@ -7,6 +7,7 @@ import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
 import { MoreMenu } from "stamps/MoreMenu";
+import { surfaceBase } from "stamps/surface.css";
 import { DayContainer, DayTitle } from "../components/DailyLogDay";
 import OxRenderer from "../components/OxRenderer";
 import { getAccessibleProjectFolders } from "robustness-core/data/vault.server";
@@ -295,7 +296,7 @@ function ProjectRow({ project }: { project: ProjectRowData }) {
     <Link
       to={`/fruits/newspaper/${project._id}`}
       prefetch="intent"
-      className="good-box p-4 flex items-center justify-between gap-3 hover:opacity-80 transition-opacity"
+      className={`${surfaceBase} p-4 flex items-center justify-between gap-3 hover:opacity-80 transition-opacity`}
       style={{ textDecoration: "none", color: "inherit" }}
     >
       <span className="font-bold text-sm">{project.name}</span>

@@ -11,6 +11,7 @@ import {
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
+import { surfaceBase } from "stamps/surface.css";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { getMakerStats, type MakerRangeDays } from "robustness-core/data/makerStats.server";
 import { getGraphLogUsageSummary } from "robustness-core/data/graphLogMetrics.server";
@@ -47,7 +48,7 @@ export function ErrorBoundary() {
           className="container mx-auto px-4 py-12"
           style={{ maxWidth: "480px" }}
         >
-          <div className="good-box p-6 flex flex-col gap-3">
+          <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
             <Badge variant="danger">403</Badge>
             <h1 className="font-bold text-xl">Access Denied</h1>
             <p className="text-sm subtle-text">
@@ -69,7 +70,7 @@ export function ErrorBoundary() {
         className="container mx-auto px-4 py-12"
         style={{ maxWidth: "480px" }}
       >
-        <div className="good-box p-6 flex flex-col gap-3">
+        <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
           <h1 className="font-bold text-xl">Something went wrong</h1>
           <p className="text-sm subtle-text">
             {isRouteErrorResponse(error)
@@ -99,7 +100,7 @@ function StatCard({
   hint?: string;
 }) {
   return (
-    <div className="good-box p-5 flex flex-col gap-1" style={{ minWidth: "180px" }}>
+    <div className={`${surfaceBase} p-5 flex flex-col gap-1`} style={{ minWidth: "180px" }}>
       <div className="text-xs font-mono subtle-text uppercase tracking-wide">
         {label}
       </div>
@@ -213,7 +214,7 @@ export default function FruitsMaker() {
             />
           </div>
 
-          <div className="good-box p-5">
+          <div className={`${surfaceBase} p-5`}>
             <div className="flex items-center justify-between mb-4">
               <div className="text-xs font-mono subtle-text uppercase tracking-wide">
                 Humans active in range

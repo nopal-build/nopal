@@ -70,6 +70,7 @@ import { Input } from "stamps/Input";
 import { Badge } from "stamps/Badge";
 import { Modal } from "stamps/Modal";
 import { MoreMenu } from "stamps/MoreMenu";
+import { surfaceBase } from "stamps/surface.css";
 import {
   getKnownAccounts,
   rememberAccount,
@@ -954,7 +955,7 @@ function formatSignedAt(iso: string): string {
 
 function WaiverCard({ doc }: { doc: LegalDocumentRecord }) {
   return (
-    <div className="good-box p-3 flex items-center justify-between gap-4">
+    <div className={`${surfaceBase} p-3 flex items-center justify-between gap-4`}>
       <div className="text-sm min-w-0">
         <div className="font-bold truncate">Signed workers' comp waiver</div>
         <div className="truncate" style={{ color: "var(--text-subtle)" }}>
@@ -1187,7 +1188,7 @@ function RelationshipCard({
   }
 
   return (
-    <div className="good-box p-3 flex items-center justify-between gap-4">
+    <div className={`${surfaceBase} p-3 flex items-center justify-between gap-4`}>
       <div
         className="text-sm min-w-0"
         style={revoked ? { opacity: 0.5, filter: "grayscale(0.6)" } : undefined}
@@ -1532,7 +1533,7 @@ function RelationshipCard({
 
 function PasskeyCard({ passkey }: { passkey: Passkey }) {
   return (
-    <div className="good-box p-3 flex items-center justify-between gap-4">
+    <div className={`${surfaceBase} p-3 flex items-center justify-between gap-4`}>
       <div className="text-sm min-w-0">
         <div className="font-bold truncate">{passkey.name}</div>
         <div className="truncate" style={{ color: "var(--text-subtle)" }}>
@@ -1580,7 +1581,7 @@ function ApiTokenCard({ token }: { token: ApiToken }) {
     !neverExpires && new Date(token.expiresAt as string).getTime() < Date.now();
 
   return (
-    <div className="good-box p-3 flex items-center justify-between gap-4">
+    <div className={`${surfaceBase} p-3 flex items-center justify-between gap-4`}>
       <div className="text-sm min-w-0">
         <div className="font-bold truncate">{token.name}</div>
         <div className="truncate" style={{ color: "var(--text-subtle)" }}>
@@ -2027,7 +2028,7 @@ export default function Profile() {
                 {knownOtherAccounts.map((account) => (
                   <div
                     key={account.email}
-                    className="good-box p-2 flex items-center justify-between gap-2"
+                    className={`${surfaceBase} p-2 flex items-center justify-between gap-2`}
                   >
                     <button
                       type="button"
@@ -2104,7 +2105,7 @@ export default function Profile() {
 
         {inviteExpired && (
           <div
-            className="good-box p-3 text-sm mb-6"
+            className={`${surfaceBase} p-3 text-sm mb-6`}
             style={{ color: "var(--text-subtle)" }}
           >
             That passkey setup link had already expired or been used, so no
@@ -2118,7 +2119,7 @@ export default function Profile() {
             <section id="basic" className="flex flex-col gap-4">
               <h2 className="font-bold text-lg">Basic</h2>
 
-              <div className="good-box p-4 flex flex-col gap-4">
+              <div className={`${surfaceBase} p-4 flex flex-col gap-4`}>
                 {/* ── Name ─────────────────────────────────────────────── */}
                 <div className="flex flex-col gap-2">
                   <label className="purple-text font-bold text-sm">Name</label>
@@ -2294,7 +2295,7 @@ export default function Profile() {
                         {(displayUser.aliasEmails ?? []).map((aliasEmail) => (
                           <div
                             key={aliasEmail}
-                            className="good-box p-2 flex items-center justify-between gap-2 text-sm"
+                            className={`${surfaceBase} p-2 flex items-center justify-between gap-2 text-sm`}
                           >
                             <span>{aliasEmail}</span>
                             <Form
@@ -2399,7 +2400,7 @@ export default function Profile() {
                   input right below it, separated by a divider. The whole
                   thing is one <Form> so the "Add" card in the results area
                   can submit it directly. */}
-              <div className="good-box flex flex-col">
+              <div className={`${surfaceBase} flex flex-col`}>
                 <Form
                   method="post"
                   key={
@@ -2418,7 +2419,7 @@ export default function Profile() {
                     {showAddCard ? (
                       needsInviteDetails ? (
                         <div
-                          className="good-box p-3 flex flex-col gap-3"
+                          className={`${surfaceBase} p-3 flex flex-col gap-3`}
                           style={{ borderStyle: "dashed" }}
                         >
                           <div className="text-sm font-bold">
@@ -2446,7 +2447,7 @@ export default function Profile() {
                       ) : (
                         <button
                           type="submit"
-                          className="good-box p-3 text-sm text-left"
+                          className={`${surfaceBase} p-3 text-sm text-left`}
                           style={{ borderStyle: "dashed", cursor: "pointer" }}
                         >
                           <span className="font-bold">
@@ -2458,7 +2459,7 @@ export default function Profile() {
                       filteredRevokedRelatedHumans.length === 0 ? (
                       normalizedEmailQuery ? (
                         <div
-                          className="good-box p-3 text-sm"
+                          className={`${surfaceBase} p-3 text-sm`}
                           style={{ opacity: 0.5, filter: "grayscale(0.6)" }}
                         >
                           <div className="font-bold">No results</div>
@@ -2467,7 +2468,7 @@ export default function Profile() {
                           </div>
                         </div>
                       ) : (
-                        <div className="good-box p-3 text-sm">
+                        <div className={`${surfaceBase} p-3 text-sm`}>
                           No relationships yet.
                         </div>
                       )
@@ -2583,7 +2584,7 @@ export default function Profile() {
 
               {passkeys.length === 0 ? (
                 <div
-                  className="good-box p-3 text-sm mb-4"
+                  className={`${surfaceBase} p-3 text-sm mb-4`}
                   style={{ color: "var(--text-subtle)" }}
                 >
                   No passkeys yet.
@@ -2627,7 +2628,7 @@ export default function Profile() {
                 their own after 30 days.
               </p>
 
-              <div className="good-box p-3 text-sm mb-4">
+              <div className={`${surfaceBase} p-3 text-sm mb-4`}>
                 <div className="mb-2">
                   Don't have the CLI yet?{" "}
                   <a
@@ -2662,7 +2663,7 @@ export default function Profile() {
 
               {cliSessionTokens.length === 0 ? (
                 <div
-                  className="good-box p-3 text-sm mb-4"
+                  className={`${surfaceBase} p-3 text-sm mb-4`}
                   style={{ color: "var(--text-subtle)" }}
                 >
                   No CLI sessions yet.
@@ -2692,7 +2693,7 @@ export default function Profile() {
               </p>
 
               {apiTokenGenerateResult && "token" in apiTokenGenerateResult && (
-                <div className="good-box p-3 text-sm mb-4">
+                <div className={`${surfaceBase} p-3 text-sm mb-4`}>
                   <div className="mb-2 red-text font-bold">
                     Copy this now — it won't be shown again.
                   </div>

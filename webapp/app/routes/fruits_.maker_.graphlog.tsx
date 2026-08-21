@@ -15,6 +15,7 @@ import {
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
+import { surfaceBase } from "stamps/surface.css";
 import {
   getGraphLogUsageSummary,
   type GraphLogStage,
@@ -77,7 +78,7 @@ export function ErrorBoundary() {
     return (
       <AppLayout>
         <div className="container mx-auto px-4 py-12" style={{ maxWidth: "480px" }}>
-          <div className="good-box p-6 flex flex-col gap-3">
+          <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
             <Badge variant="danger">403</Badge>
             <h1 className="font-bold text-xl">Access Denied</h1>
             <p className="text-sm subtle-text">
@@ -95,7 +96,7 @@ export function ErrorBoundary() {
   return (
     <AppLayout>
       <div className="container mx-auto px-4 py-12" style={{ maxWidth: "480px" }}>
-        <div className="good-box p-6 flex flex-col gap-3">
+        <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
           <h1 className="font-bold text-xl">Something went wrong</h1>
           <p className="text-sm subtle-text">
             {isRouteErrorResponse(error)
@@ -117,7 +118,7 @@ export function ErrorBoundary() {
 
 function StatCard({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
   return (
-    <div className="good-box p-5 flex flex-col gap-1" style={{ minWidth: "180px" }}>
+    <div className={`${surfaceBase} p-5 flex flex-col gap-1`} style={{ minWidth: "180px" }}>
       <div className="text-xs font-mono subtle-text uppercase tracking-wide">{label}</div>
       <div className="font-bold text-2xl purple-text">{value}</div>
       {hint && <div className="text-xs font-mono subtle-text">{hint}</div>}
@@ -244,7 +245,7 @@ function RecentRunsSection({
           Default Prompts →
         </Link>
       </div>
-      <div className="good-box p-5">
+      <div className={`${surfaceBase} p-5`}>
         {runs.length === 0 ? (
           <p className="text-sm subtle-text" style={{ margin: 0 }}>
             No GraphLog runs recorded yet.
@@ -374,7 +375,7 @@ export default function FruitsMakerGraphLog() {
         {/* ── By stage ───────────────────────────────────────────────────── */}
         <section className="mb-12">
           <SectionHeader>By Stage</SectionHeader>
-          <div className="good-box p-5">
+          <div className={`${surfaceBase} p-5`}>
             {(Object.keys(STAGE_LABELS) as GraphLogStage[]).map((stage) => {
               const s = usage.byStage[stage];
               return (
@@ -400,7 +401,7 @@ export default function FruitsMakerGraphLog() {
         {/* ── Trend ──────────────────────────────────────────────────────── */}
         <section className="mb-12">
           <SectionHeader>Calls Per Day</SectionHeader>
-          <div className="good-box p-5">
+          <div className={`${surfaceBase} p-5`}>
             {usage.byDate.length === 0 ? (
               <p className="text-sm subtle-text">No GraphLog activity in this range.</p>
             ) : (
@@ -420,7 +421,7 @@ export default function FruitsMakerGraphLog() {
         {/* ── By project ─────────────────────────────────────────────────── */}
         <section className="mb-12">
           <SectionHeader>By Project</SectionHeader>
-          <div className="good-box p-5">
+          <div className={`${surfaceBase} p-5`}>
             {usage.byProject.length === 0 ? (
               <p className="text-sm subtle-text">No GraphLog activity in this range.</p>
             ) : (
@@ -440,7 +441,7 @@ export default function FruitsMakerGraphLog() {
         {/* ── By human ────────────────────────────────────────────────────── */}
         <section>
           <SectionHeader>By Human</SectionHeader>
-          <div className="good-box p-5">
+          <div className={`${surfaceBase} p-5`}>
             {usage.byHuman.length === 0 ? (
               <p className="text-sm subtle-text">No GraphLog activity in this range.</p>
             ) : (

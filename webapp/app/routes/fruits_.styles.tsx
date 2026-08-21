@@ -12,6 +12,7 @@ import { CopyField } from "stamps/CopyField";
 import { SearchCollection } from "stamps/SearchCollection";
 import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
 import { CircleButton } from "stamps/CircleButton";
+import { surfaceBase, surfaceBorderOnly, surfaceHoverable } from "stamps/surface.css";
 import { HamburgerNeqIcon } from "../components/HamburgerNeqIcon";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -161,7 +162,7 @@ export default function FruitsStyles() {
 
         {/* ── Quick Nav ──────────────────────────────────────────────────── */}
         <div
-          className="good-box p-4 mb-12 flex flex-wrap gap-x-5 gap-y-2"
+          className={`${surfaceBase} p-4 mb-12 flex flex-wrap gap-x-5 gap-y-2`}
           style={{ fontSize: "0.8rem" }}
         >
           {[
@@ -204,7 +205,7 @@ export default function FruitsStyles() {
               <Code>AGENTS.md</Code>).
             </p>
 
-            <div className="good-box p-4">
+            <div className={`${surfaceBase} p-4`}>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 &quot;I need to build…&quot; → use this
               </div>
@@ -244,7 +245,7 @@ export default function FruitsStyles() {
                   [
                     'Search a list, optionally "add new"',
                     "<SearchCollection>",
-                    "components/SearchCollection.tsx",
+                    "stamps/SearchCollection (packages/stamps)",
                   ],
                   [
                     "A \u201ccopy this value\u201d row",
@@ -276,7 +277,7 @@ export default function FruitsStyles() {
               </div>
             </div>
 
-            <div className="good-box p-4">
+            <div className={`${surfaceBase} p-4`}>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 When to extract a *new* component
               </div>
@@ -320,7 +321,7 @@ export default function FruitsStyles() {
               </div>
             </div>
 
-            <div className="good-box p-4">
+            <div className={`${surfaceBase} p-4`}>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 Full component inventory — <Code>app/components/</Code>
               </div>
@@ -387,7 +388,7 @@ export default function FruitsStyles() {
                       ],
                       [
                         "MoreMenu",
-                        "good-box action menu, open/outside-click/Escape handled for you. Defaults to a CircleButton + ••• trigger, but accepts a custom trigger render prop.",
+                        "Surface action menu, open/outside-click/Escape handled for you. Defaults to a CircleButton + ••• trigger, but accepts a custom trigger render prop.",
                       ],
                     ],
                   },
@@ -453,6 +454,9 @@ export default function FruitsStyles() {
                 <Code>style={"{{ color: 'var(--name)' }}"}</Code>.
               </p>
               <div className="flex flex-wrap gap-4 good-white-box p-4">
+                {/* good-white-box stays a plain global class — always-white
+                    regardless of scheme (needed for accurate color-swatch
+                    perception), unlike Surface which flips for dark mode. */}
                 <Swatch varName="--white" hex="#ffffff" />
                 <Swatch varName="--purple" hex="#3f2b46" />
                 <Swatch varName="--purple-light" hex="#7f5b8b" />
@@ -499,7 +503,7 @@ export default function FruitsStyles() {
               </div>
             </div>
 
-            <div className="good-box p-4">
+            <div className={`${surfaceBase} p-4`}>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 Utility text color classes (prefer this over using color
                 variables when applicable)
@@ -520,7 +524,7 @@ export default function FruitsStyles() {
         {/* ── 2. Typography ──────────────────────────────────────────────── */}
         <Section id="typography" title="02 · Typography">
           <div className="flex flex-col gap-6">
-            <div className="good-box p-5 flex flex-col gap-4">
+            <div className={`${surfaceBase} p-5 flex flex-col gap-4`}>
               <Tile>
                 <Label>text-2xl + font-bold — page titles</Label>
                 <h1 className="font-bold text-2xl">Page Title</h1>
@@ -607,7 +611,7 @@ export default function FruitsStyles() {
               </Tile>
             </Row>
 
-            <div className="good-box p-4">
+            <div className={`${surfaceBase} p-4`}>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 Sizes via padding (no separate size classes — add padding
                 manually)
@@ -638,7 +642,7 @@ export default function FruitsStyles() {
               </Row>
             </div>
 
-            <div className="good-box p-4">
+            <div className={`${surfaceBase} p-4`}>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 Disabled state — add <Code>opacity-50 cursor-not-allowed</Code>
               </div>
@@ -658,7 +662,7 @@ export default function FruitsStyles() {
               </Row>
             </div>
 
-            <div className="good-box p-4">
+            <div className={`${surfaceBase} p-4`}>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 Destructive / danger — use <Code>--red</Code> via custom CSS var
                 override
@@ -685,8 +689,8 @@ export default function FruitsStyles() {
           <div className="flex flex-col gap-6">
             <Row>
               <div style={{ flex: "1 1 260px" }}>
-                <Label>.good-box — standard card / container</Label>
-                <div className="good-box p-5 flex flex-col gap-2">
+                <Label>Surface — standard card / container</Label>
+                <div className={`${surfaceBase} p-5 flex flex-col gap-2`}>
                   <div className="font-bold text-sm">Card Title</div>
                   <p className="text-sm subtle-text">
                     Use for any grouped content block. Background is{" "}
@@ -697,8 +701,8 @@ export default function FruitsStyles() {
               </div>
 
               <div style={{ flex: "1 1 260px" }}>
-                <Label>.good-box + .good-box-hover — interactive card</Label>
-                <div className="good-box good-box-hover p-5 flex flex-col gap-2">
+                <Label>Surface with `hoverable` — interactive card</Label>
+                <div className={`${surfaceBase} ${surfaceHoverable} p-5 flex flex-col gap-2`}>
                   <div className="font-bold text-sm">Clickable Card</div>
                   <p className="text-sm subtle-text">
                     Hover to see border highlight and shadow. Wrap with a{" "}
@@ -708,8 +712,8 @@ export default function FruitsStyles() {
               </div>
 
               <div style={{ flex: "1 1 260px" }}>
-                <Label>.good-box-boarder — border only, no background</Label>
-                <div className="good-box-boarder p-5 flex flex-col gap-2">
+                <Label>surfaceBorderOnly — border only, no background</Label>
+                <div className={`${surfaceBorderOnly} p-5 flex flex-col gap-2`}>
                   <div className="font-bold text-sm">Border Box</div>
                   <p className="text-sm subtle-text">
                     Transparent background. Good for nested sections.
@@ -720,14 +724,14 @@ export default function FruitsStyles() {
 
             <div>
               <Label>
-                Dividers inside .good-box — use{" "}
+                Dividers inside a Surface — use{" "}
                 <Code>
                   {
                     "<hr style={{ borderColor: 'currentColor', opacity: 0.12 }} />"
                   }
                 </Code>
               </Label>
-              <div className="good-box p-5 flex flex-col gap-3">
+              <div className={`${surfaceBase} p-5 flex flex-col gap-3`}>
                 <div className="font-bold text-sm">Section A</div>
                 <hr
                   style={{
@@ -753,7 +757,7 @@ export default function FruitsStyles() {
                 Typical project card anatomy — header, badge, body, footer
               </Label>
               <div
-                className="good-box flex flex-col gap-3 p-5"
+                className={`${surfaceBase} flex flex-col gap-3 p-5`}
                 style={{ maxWidth: "420px" }}
               >
                 <div className="flex items-start justify-between gap-4">
@@ -852,7 +856,7 @@ export default function FruitsStyles() {
               </Row>
             </div>
 
-            <div className="good-box p-4">
+            <div className={`${surfaceBase} p-4`}>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 Label + value pattern — used in detail views
               </div>
@@ -909,7 +913,7 @@ export default function FruitsStyles() {
             </p>
 
             <div
-              className="good-box p-5 flex flex-col gap-5"
+              className={`${surfaceBase} p-5 flex flex-col gap-5`}
               style={{ maxWidth: "480px" }}
             >
               <div>
@@ -1034,7 +1038,7 @@ export default function FruitsStyles() {
         {/* ── 7. Links ───────────────────────────────────────────────────── */}
         <Section id="links" title="07 · Links">
           <div className="flex flex-col gap-4">
-            <div className="good-box p-5 flex flex-col gap-4">
+            <div className={`${surfaceBase} p-5 flex flex-col gap-4`}>
               <Tile>
                 <Label>.link class — green underline on hover</Label>
                 <a href="#links" className="link text-sm">
@@ -1100,7 +1104,7 @@ export default function FruitsStyles() {
               the Fruits app:
             </p>
 
-            <div className="good-box p-5">
+            <div className={`${surfaceBase} p-5`}>
               <div className="flex flex-col gap-3">
                 {[
                   ["gap-2 / p-2", "8px", "Icon spacing, tight rows"],
@@ -1134,7 +1138,7 @@ export default function FruitsStyles() {
               </div>
             </div>
 
-            <div className="good-box p-5">
+            <div className={`${surfaceBase} p-5`}>
               <div className="text-xs font-mono mb-3 font-bold purple-text">
                 Max widths
               </div>
@@ -1190,13 +1194,13 @@ export default function FruitsStyles() {
                 focus/click, so copying by hand still works if{" "}
                 <Code>navigator.clipboard</Code> is unavailable.
               </p>
-              <div className="good-box p-4" style={{ maxWidth: "480px" }}>
+              <div className={`${surfaceBase} p-4`} style={{ maxWidth: "480px" }}>
                 <CopyField
                   value="nopal login --device=cli"
                   ariaLabel="example CLI command"
                 />
               </div>
-              <div className="good-box p-3 mt-3 text-xs font-mono code-block">
+              <div className={`${surfaceBase} p-3 mt-3 text-xs font-mono code-block`}>
                 {'<CopyField value={COMMAND} ariaLabel="..." />'}
               </div>
             </div>
@@ -1214,7 +1218,7 @@ export default function FruitsStyles() {
               <p className="text-xs subtle-text mb-3">
                 Pulled out of <Code>fruits_.profile.tsx</Code> per the
                 pattern in <Code>#component-guide</Code> above.{" "}
-                A <Code>good-box</Code> shell for "search/filter a list, and
+                A <Code>Surface</Code> shell for "search/filter a list, and
                 optionally add a new entry" UI: fixed-height scrollable list
                 on top, divider, search field below. It owns layout only —
                 filtering and submission stay with the caller. Try typing a
@@ -1225,11 +1229,11 @@ export default function FruitsStyles() {
                   items={filteredDemoFruits}
                   getKey={(fruit) => fruit}
                   renderItem={(fruit) => (
-                    <div className="good-box p-3 text-sm">{fruit}</div>
+                    <div className={`${surfaceBase} p-3 text-sm`}>{fruit}</div>
                   )}
                   emptyState={
                     <div
-                      className="good-box p-3 text-sm"
+                      className={`${surfaceBase} p-3 text-sm`}
                       style={{ opacity: 0.6 }}
                     >
                       No fruits match "{fruitQuery}".
@@ -1268,11 +1272,11 @@ export default function FruitsStyles() {
                 <span className="font-bold">Note:</span> the scrollable list
                 area is a <Code>.collection-well</Code> — it matches the
                 page background (white / <Code>--purple</Code>), so rows
-                inside should just be <Code>.good-box</Code> cards (as
+                inside should just be plain <Code>Surface</Code> cards (as
                 above, and <Code>RelationshipCard</Code> in{" "}
                 <Code>fruits_.profile.tsx</Code>). Don't force{" "}
                 <Code>var(--white)</Code> backgrounds with explicit text
-                colors — plain good-box rows flip for dark mode on their
+                colors — plain Surface rows flip for dark mode on their
                 own, and so does everything inside them (
                 <Code>MoreMenu</Code>, <Code>Badge</Code>,{" "}
                 <Code>subtle-text</Code>, …).
@@ -1401,7 +1405,7 @@ export default function FruitsStyles() {
               </p>
 
               <Label>Default trigger (CircleButton + MoreIcon)</Label>
-              <div className="good-box p-4 mb-4" style={{ maxWidth: "480px" }}>
+              <div className={`${surfaceBase} p-4 mb-4`} style={{ maxWidth: "480px" }}>
                 <MoreMenu
                   label="More actions"
                   items={[
@@ -1415,7 +1419,7 @@ export default function FruitsStyles() {
 
               <Label>In context — as a row's trailing action</Label>
               <div
-                className="good-box p-3 flex items-center justify-between gap-4 mb-4"
+                className={`${surfaceBase} p-3 flex items-center justify-between gap-4 mb-4`}
                 style={{ maxWidth: "480px" }}
               >
                 <div className="text-sm min-w-0">
@@ -1438,7 +1442,7 @@ export default function FruitsStyles() {
                 Custom trigger — same menu, a <Code>btn-outline</Code> button
                 instead
               </Label>
-              <div className="good-box p-4 mb-4" style={{ maxWidth: "480px" }}>
+              <div className={`${surfaceBase} p-4 mb-4`} style={{ maxWidth: "480px" }}>
                 <MoreMenu
                   label="Manage project"
                   items={[
@@ -1463,7 +1467,7 @@ export default function FruitsStyles() {
               </div>
 
               <div
-                className="good-box p-3 text-xs font-mono code-block"
+                className={`${surfaceBase} p-3 text-xs font-mono code-block`}
                 style={{ lineHeight: 1.7 }}
               >
                 <div>{'<MoreMenu'}</div>
@@ -1509,7 +1513,7 @@ export default function FruitsStyles() {
             </Row>
 
             <div
-              className="good-box p-3 text-xs font-mono code-block"
+              className={`${surfaceBase} p-3 text-xs font-mono code-block`}
               style={{ lineHeight: 1.7 }}
             >
               <div>{"const [open, setOpen] = useState(false);"}</div>

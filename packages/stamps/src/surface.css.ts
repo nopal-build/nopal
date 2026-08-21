@@ -29,6 +29,13 @@ globalStyle(`${surfaceBase} hr`, {
   borderColor: semanticColors.surfaceBorder,
 });
 
+// Port of `.good-box-boarder` — border only, no background. Good for
+// nested sections inside another Surface.
+export const surfaceBorderOnly = style({
+  border: `1px solid ${semanticColors.surfaceBorder}`,
+  borderRadius: 8,
+});
+
 // Port of `.good-box-hover:hover` minus the `.good-arrow svg path` bit,
 // which is specific to marketing's `GoodAssets` links, not a generic
 // surface concern.

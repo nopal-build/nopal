@@ -18,6 +18,7 @@ import {
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
+import { surfaceBase } from "stamps/surface.css";
 import {
   getGraphLogRun,
   type GraphLogPerfEventType,
@@ -63,7 +64,7 @@ export function ErrorBoundary() {
     return (
       <AppLayout>
         <div className="container mx-auto px-4 py-12" style={{ maxWidth: "480px" }}>
-          <div className="good-box p-6 flex flex-col gap-3">
+          <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
             <Badge variant="danger">403</Badge>
             <h1 className="font-bold text-xl">Access Denied</h1>
             <p className="text-sm subtle-text">
@@ -82,7 +83,7 @@ export function ErrorBoundary() {
     return (
       <AppLayout>
         <div className="container mx-auto px-4 py-12" style={{ maxWidth: "480px" }}>
-          <div className="good-box p-6 flex flex-col gap-3">
+          <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
             <Badge variant="warning">404</Badge>
             <h1 className="font-bold text-xl">Run Not Found</h1>
             <p className="text-sm subtle-text">
@@ -100,7 +101,7 @@ export function ErrorBoundary() {
   return (
     <AppLayout>
       <div className="container mx-auto px-4 py-12" style={{ maxWidth: "480px" }}>
-        <div className="good-box p-6 flex flex-col gap-3">
+        <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
           <h1 className="font-bold text-xl">Something went wrong</h1>
           <p className="text-sm subtle-text">
             {isRouteErrorResponse(error)
@@ -312,7 +313,7 @@ export default function FruitsMakerGraphLogRun() {
           </Link>
         </div>
 
-        <div className="good-box p-5 mb-8">
+        <div className={`${surfaceBase} p-5 mb-8`}>
           <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="accent">{run.job_name}</Badge>
@@ -341,7 +342,7 @@ export default function FruitsMakerGraphLogRun() {
             in order · bar length relative to this run's longest event ({formatDuration(maxDurationMs)})
           </span>
         </div>
-        <div className="good-box p-5">
+        <div className={`${surfaceBase} p-5`}>
           {events.length === 0 ? (
             <p className="text-sm subtle-text" style={{ margin: 0 }}>
               {run.ok === null

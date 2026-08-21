@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
+import { surfaceBase } from "stamps/surface.css";
 import {
   getAllEffectiveGraphLogDefaultSkills,
   setGraphLogDefaultSkillOverride,
@@ -77,7 +78,7 @@ export function ErrorBoundary() {
     return (
       <AppLayout>
         <div className="container mx-auto px-4 py-12" style={{ maxWidth: "480px" }}>
-          <div className="good-box p-6 flex flex-col gap-3">
+          <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
             <Badge variant="danger">403</Badge>
             <h1 className="font-bold text-xl">Access Denied</h1>
             <p className="text-sm subtle-text">
@@ -95,7 +96,7 @@ export function ErrorBoundary() {
   return (
     <AppLayout>
       <div className="container mx-auto px-4 py-12" style={{ maxWidth: "480px" }}>
-        <div className="good-box p-6 flex flex-col gap-3">
+        <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
           <h1 className="font-bold text-xl">Something went wrong</h1>
           <p className="text-sm subtle-text">
             {isRouteErrorResponse(error)
@@ -171,7 +172,7 @@ function DefaultSkillEditor({
   const busy = fetcher.state !== "idle";
 
   return (
-    <div className="good-box p-5 flex flex-col gap-3">
+    <div className={`${surfaceBase} p-5 flex flex-col gap-3`}>
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <span className="font-bold text-sm">{meta.title}</span>

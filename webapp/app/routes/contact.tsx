@@ -1,5 +1,6 @@
 import { Layout } from "../components/Layout";
 import { FooterDiscovery } from "../components/Footer";
+import { surfaceBase, surfaceHoverable } from "stamps/surface.css";
 import { Form, Link, useActionData, useNavigation } from "react-router";
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
@@ -175,7 +176,7 @@ function ButtonLink({
 }) {
   return (
     <a
-      className="text-nowrap good-box good-box-hover justify-between inline-flex items-center gap-4 p-2"
+      className={`text-nowrap ${surfaceBase} ${surfaceHoverable} justify-between inline-flex items-center gap-4 p-2`}
       target="_blank"
       href={href}
     >

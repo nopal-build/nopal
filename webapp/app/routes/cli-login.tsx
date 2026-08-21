@@ -14,6 +14,7 @@ import { getUser } from "../modules/auth/auth.server";
 import { createApiTokenWithExchangeCode } from "robustness-core/data/apiTokens.server";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
+import { surfaceBase } from "stamps/surface.css";
 
 function parsePort(value: string | null): string | null {
   return value && /^\d{1,5}$/.test(value) ? value : null;
@@ -123,7 +124,7 @@ export default function CliLogin() {
           <h1 className="text-3xl purple-light-text font-bold mb-4">
             Authorize CLI access
           </h1>
-          <div className="good-box p-4">
+          <div className={`${surfaceBase} p-4`}>
             <p className="mb-4">
               A command-line tool on <strong>{hostname}</strong> wants access to
               your Nopal account (<strong>{email}</strong>).
