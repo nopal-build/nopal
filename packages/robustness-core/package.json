@@ -48,6 +48,7 @@
     "./data/vault.types": "./src/data/vault.types.ts",
     "./data/vaultFolderTypes": "./src/data/vaultFolderTypes.ts",
     "./data/vaultRoots": "./src/data/vaultRoots.ts",
+    "./data/website.server": "./src/data/website.server.ts",
     "./util/nopalDirectives": "./src/util/nopalDirectives.ts",
     "./util/projectCsv": "./src/util/projectCsv.ts"
   },

@@ -31,6 +31,7 @@ import {
 import { merge } from "./generic.server";
 import { getAllEffectiveGraphLogDefaultSkills } from "./graphLogDefaults.server";
 import { systemVaultFolderKey } from "./vault.server";
+import { CONTAINER_FOLDER_TYPES, isContainerFolderTypeKey } from "./vaultFolderTypes";
 
 // ─── Seeding ────────────────────────────────────────────────────────────
 
@@ -145,6 +146,22 @@ export async function resolveProjectN02(
     return {
       ok: false,
       error: "This isn't a project — pass a path like 'projects/sunny' or 'personal'",
+    };
+  }
+
+  // A folder can carry a DIFFERENT recognized container type (today, only
+  // `website` — see `vaultFolderTypes.ts`) — fail closed rather than
+  // silently retagging it into a GraphLog-managed project-n02 shape, which
+  // would clobber it (no Skills folder needed/wanted there, and GraphLog
+  // has no business writing into a website project's content).
+  if (
+    isContainerFolderTypeKey(folder.folder_type) &&
+    folder.is_folder_type_root &&
+    folder.folder_type !== "project-n02"
+  ) {
+    return {
+      ok: false,
+      error: `This is a ${CONTAINER_FOLDER_TYPES[folder.folder_type].label} project, not a GraphLog project`,
     };
   }
 

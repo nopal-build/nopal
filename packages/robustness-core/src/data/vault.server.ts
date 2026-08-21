@@ -28,7 +28,10 @@ import {
   type VaultRootKey,
 } from "./vaultRoots";
 import {
+  canCreateFolderType,
   canWriteToFolderType,
+  CONTAINER_FOLDER_TYPES,
+  isContainerFolderTypeKey,
   isFolderTypePublishable,
   isFolderTypeShareable,
   isSpaceFolderTypeKey,
@@ -40,12 +43,13 @@ import {
 } from "./vaultFolderTypes";
 import { isVaultRootFolder } from "./vault.types";
 import type { Role } from "./humans.server";
-// File Referencing & Renaming (`fileReferences.server.ts`) and `project-n02`
-// seeding (`projectN02.server.ts`) both statically import several read
-// helpers back from THIS file — a real mutual cycle, but a safe one: every
-// name involved on both sides is a hoisted `function` declaration, and
-// nothing in either module calls one of these functions at top-level
-// (module-evaluation) time, only later from inside other async functions.
+// File Referencing & Renaming (`fileReferences.server.ts`), `project-n02`
+// seeding (`projectN02.server.ts`), and `website` seeding
+// (`website.server.ts`) all statically import several read helpers back
+// from THIS file — a real mutual cycle, but a safe one: every name involved
+// on both sides is a hoisted `function` declaration, and nothing in either
+// module calls one of these functions at top-level (module-evaluation)
+// time, only later from inside other async functions.
 // A DYNAMIC `import()` here bought nothing beyond exactly the same safety,
 // while adding a real bug of its own — concurrent first-ever dynamic
 // imports of the same not-yet-cached module could race and hand one
@@ -58,6 +62,7 @@ import {
   propagateTargetChange,
 } from "./fileReferences.server";
 import { ensureProjectN02 } from "./projectN02.server";
+import { applyWebsiteShape } from "./website.server";
 
 // ─── FileRef CRUD ─────────────────────────────────────────────────────────────
 
@@ -338,6 +343,11 @@ export async function createVaultFolder(data: {
   if (folder && folder.folder_type === "project-n02" && folder.is_folder_type_root) {
     await ensureProjectN02(folder);
   }
+  // Same idea, for a `website` project's own scaffolding (README.md +
+  // _site-settings.json) — see `website.server.ts`.
+  if (folder && folder.folder_type === "website" && folder.is_folder_type_root) {
+    await applyWebsiteShape(folder);
+  }
 
   return folder;
 }
@@ -358,11 +368,30 @@ export async function createVaultFolder(data: {
  *  - Sync types (`sync-one-way`, …): only directly inside a folder whose
  *    OWN `folder_type` is exactly `"syncs"` (not nested any deeper), and
  *    NOT singleton — a `syncs` folder can hold many connectors.
+ *  - Container types (`website` — `project-n02` is never passed here, it's
+ *    always stamped automatically): only directly inside the `projects`
+ *    root itself, not singleton (any number of `website` projects may
+ *    exist side by side), and additionally gated by `creatableBy`
+ *    (`canCreateFolderType`) — the one case where CREATING a folder of a
+ *    given type needs more than context/singleton checks.
  */
 export async function validateFolderTypeForParent(
   parent: VaultFolder,
   folderType: VaultFolderTypeKey,
+  actingRole: Role,
 ): Promise<string | null> {
+  if (isContainerFolderTypeKey(folderType)) {
+    const def = CONTAINER_FOLDER_TYPES[folderType];
+    if (!canCreateFolderType(folderType, actingRole)) {
+      return `Only a ${def.creatableBy} may create a ${def.label} folder`;
+    }
+    const isProjectsRoot = !parent.parent_folder_id && parent.vault_root_key === "projects";
+    if (!isProjectsRoot) {
+      return `${def.label} folders can only be created directly inside Projects`;
+    }
+    return null;
+  }
+
   if (isSpaceFolderTypeKey(folderType)) {
     const def = SPACE_FOLDER_TYPES[folderType];
 
@@ -1193,10 +1222,16 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
   const { folders } = await listFolderChildren(humanId, projectsRoot._id);
 
   // Self-healing retrofit for any project created before `project-n02`
-  // existed — same lazy-backfill convention as the root keys above.
+  // existed — same lazy-backfill convention as the root keys above. Only
+  // an UNTYPED folder gets force-converted: a folder already carrying a
+  // different recognized container type (e.g. `website`) is left alone,
+  // or this would silently clobber it back into a GraphLog-managed
+  // project-n02 shape the next time this ran (e.g. every dashboard load).
   return Promise.all(
     folders.map((f) =>
-      f.folder_type === "project-n02" && f.is_folder_type_root ? f : ensureProjectN02(f),
+      isContainerFolderTypeKey(f.folder_type) && f.is_folder_type_root
+        ? f
+        : ensureProjectN02(f),
     ),
   );
 }

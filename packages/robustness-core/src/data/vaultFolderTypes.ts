@@ -16,12 +16,13 @@
  * Two tiers, each created via the same "New folder → pick a type" flow
  * (container types are the one exception — see below):
  *
- * 0. Container types (`ContainerFolderTypeKey`) — just `project-n02`
- *    today (see the `graphlog` skill). This is the type every
- *    `projects/<name>` folder AND the `personal` root itself carries (see
- *    the `vault` skill's "project-n02 spaces" section). Unlike the other
- *    tier, a human never picks this from the "New folder" dialog — it's
- *    stamped automatically the moment a project (or `personal`) is created
+ * 0. Container types (`ContainerFolderTypeKey`) — `project-n02` (see the
+ *    `graphlog` skill) and `website` (see the `vault` skill's "website
+ *    projects" section). This is the type every `projects/<name>` folder
+ *    AND the `personal` root itself carries (see the `vault` skill's
+ *    "project-n02 spaces" section). `project-n02` is never picked from
+ *    the "New folder" dialog — it's stamped automatically the moment an
+ *    ordinary project (or `personal`) is created
  *    (`createVaultFolder`/`ensureVaultRootFolders`, `vault.server.ts`), and
  *    lazily backfilled onto any project that predates this type.
  *    `README.md` is that space's index; a human may only directly write
@@ -35,6 +36,17 @@
  *    level operations on the anchor itself — rename, delete, share, trash
  *    — are a separate, still-owner-writable concern; see
  *    `vault.server.ts`'s `canWriteToFolderId` doc.
+ *
+ *    `website` is the one exception to "never picked from the New folder
+ *    dialog" — a human explicitly chooses it (over the default "Project")
+ *    when creating a folder directly inside `projects`, but only a Super
+ *    is offered the choice at all (`creatableBy`, below). Once created it
+ *    behaves like any other project: `writable: "owner"` (ordinary
+ *    Sharing-Roles-gated content, no GraphLog involvement, no `skills`/
+ *    `syncs` restriction), so its owner can share it with anyone —
+ *    Admin, Super, or a plain Human — exactly like sharing any other
+ *    project. `README.md` doubles as both the project's Sharing Roles doc
+ *    (same as always) AND the site's homepage.
  *
  * 1. Space types (`SpaceFolderTypeKey`) — `skills`, `syncs`, and `graph`.
  *    Creatable directly inside a `project-n02` folder (a project, or
@@ -78,7 +90,7 @@
 
 import type { Role } from "./humans.server";
 
-export type ContainerFolderTypeKey = "project-n02";
+export type ContainerFolderTypeKey = "project-n02" | "website";
 
 export type SpaceFolderTypeKey = "skills" | "syncs" | "graph";
 
@@ -128,6 +140,14 @@ export type VaultFolderTypeDef = {
    * folder" type picker rather than hidden, so the architecture already has
    * a slot for it. */
   comingSoon?: boolean;
+  /** Restricts who may CREATE a NEW folder of this type at all — separate
+   * from `writable` (which gates writing CONTENT once a folder already
+   * exists). Omit for "anyone who could otherwise create a folder here" —
+   * the normal case. Only `website` uses this today (`"Super"`): creating
+   * one is rare/deliberate, but once created it's an ordinary
+   * Sharing-Roles-gated project like any other, unrestricted by platform
+   * role — see `canCreateFolderType` below. */
+  creatableBy?: Role;
 };
 
 export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> = {
@@ -180,6 +200,24 @@ export const CONTAINER_FOLDER_TYPES: Record<ContainerFolderTypeKey, VaultFolderT
     writable: "system",
     shareable: true,
     publishable: true,
+  },
+  // `website` — a folder of pages backing a public site (see the `vault`
+  // skill's "website projects" section; rendered at `/v2/*` for the first
+  // one, Nopal's own marketing site). Deliberately NOT GraphLog-managed —
+  // ordinary owner/Sharing-Roles-writable content, so its own `README.md`
+  // (the site's homepage) and every other file in the tree are directly
+  // human-editable, same as a plain vault folder. `creatableBy: "Super"`
+  // restricts who may spin up a NEW one; sharing it afterward is completely
+  // unrestricted by platform role (Admin, Super, or a plain Human may all
+  // be granted a Sharing Role on it, exactly like any other project).
+  website: {
+    label: "Website",
+    description:
+      "A folder of pages for a public site. README.md is its homepage; any other markdown file or sub-folder becomes another page.",
+    writable: "owner",
+    shareable: true,
+    publishable: false,
+    creatableBy: "Super",
   },
 };
 
@@ -268,6 +306,23 @@ export function isSyncFamilyFolderType(
   value: string | null | undefined,
 ): boolean {
   return value === "syncs" || isSyncFolderTypeKey(value);
+}
+
+/** Whether `role` may CREATE a brand new folder of type `folderType` at
+ * all — separate from `canWriteToFolderType` (content, once it exists).
+ * Types with no `creatableBy` (everything except `website` today) are
+ * unrestricted here — still subject to the normal context/singleton
+ * checks in `validateFolderTypeForParent`. An unrecognized type fails
+ * closed, same philosophy as the other predicates in this file. */
+export function canCreateFolderType(
+  folderType: string | null | undefined,
+  role: Role,
+): boolean {
+  if (!folderType) return true;
+  if (!isVaultFolderTypeKey(folderType)) return false;
+  const def = VAULT_FOLDER_TYPES[folderType];
+  if (!def.creatableBy) return true;
+  return role === def.creatableBy;
 }
 
 /** Whether `role` may write (create/edit/delete folders or files) into a

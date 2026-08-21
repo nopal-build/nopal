@@ -93,7 +93,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json({ error: "Unknown folder type" }, { status: 400 });
     }
     folderType = body.folder_type;
-    const validationError = await validateFolderTypeForParent(parent, folderType);
+    const validationError = await validateFolderTypeForParent(parent, folderType, user.role);
     if (validationError) {
       return Response.json({ error: validationError }, { status: 409 });
     }
