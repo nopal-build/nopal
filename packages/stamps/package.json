@@ -19,7 +19,8 @@
     "./typography.css": "./src/typography.css.ts",
     "./navLink.css": "./src/navLink.css.ts",
     "./appLayoutShell.css": "./src/appLayoutShell.css.ts",
-    "./HamburgerNeqIcon": "./src/HamburgerNeqIcon.tsx"
+    "./HamburgerNeqIcon": "./src/HamburgerNeqIcon.tsx",
+    "./button.css": "./src/button.css.ts"
   },
   "peerDependencies": {
     "react": "^18.3.1"

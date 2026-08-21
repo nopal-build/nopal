@@ -3,6 +3,7 @@ import { Input } from "stamps/Input";
 import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
+import { button } from "stamps/button.css";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { useLoaderData, useActionData, useNavigate, Form } from "react-router";
@@ -141,7 +142,7 @@ export default function Login() {
             />
             {actionData?.error && <div className="red-text">{authError}</div>}
             <div className={sprinkles({ textAlign: "right" })}>
-              <button className="btn-secondary" type="submit">
+              <button className={button({ variant: "secondary" })} type="submit">
                 Send Code
               </button>
             </div>
@@ -166,7 +167,7 @@ export default function Login() {
               <div className={`red-text ${textSize.sm}`}>{passkeyError}</div>
             )}
             <button
-              className="btn-secondary"
+              className={button({ variant: "secondary" })}
               type="button"
               disabled={passkeyBusy}
               onClick={handlePasskeyLogin}

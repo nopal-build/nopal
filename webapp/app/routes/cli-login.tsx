@@ -15,6 +15,9 @@ import { createApiTokenWithExchangeCode } from "robustness-core/data/apiTokens.s
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { surfaceBase } from "stamps/surface.css";
+import { sprinkles } from "stamps/sprinkles.css";
+import { textSize } from "stamps/typography.css";
+import { button } from "stamps/button.css";
 
 function parsePort(value: string | null): string | null {
   return value && /^\d{1,5}$/.test(value) ? value : null;
@@ -91,8 +94,18 @@ export default function CliLogin() {
     return (
       <Layout>
         <div className="scene1">
-          <div className="w-full max-w-xl mx-auto px-4 py-12">
-            <h1 className="text-3xl purple-light-text font-bold mb-4">CLI Login</h1>
+          <div
+            className={sprinkles({ px: 4, py: 12 })}
+            style={{ width: "100%", maxWidth: "36rem", margin: "0 auto" }}
+          >
+            <h1
+              className={`${textSize["3xl"]} purple-light-text ${sprinkles({
+                fontWeight: "bold",
+                mb: 4,
+              })}`}
+            >
+              CLI Login
+            </h1>
             <div className="red-text">{loaderData.error}</div>
           </div>
         </div>
@@ -107,8 +120,18 @@ export default function CliLogin() {
     return (
       <Layout>
         <div className="scene1">
-          <div className="w-full max-w-xl mx-auto px-4 py-12">
-            <h1 className="text-3xl purple-light-text font-bold mb-4">CLI Login</h1>
+          <div
+            className={sprinkles({ px: 4, py: 12 })}
+            style={{ width: "100%", maxWidth: "36rem", margin: "0 auto" }}
+          >
+            <h1
+              className={`${textSize["3xl"]} purple-light-text ${sprinkles({
+                fontWeight: "bold",
+                mb: 4,
+              })}`}
+            >
+              CLI Login
+            </h1>
             <p>Denied. You can close this tab and return to your terminal.</p>
           </div>
         </div>
@@ -120,25 +143,40 @@ export default function CliLogin() {
   return (
     <Layout>
       <div className="scene1">
-        <div className="w-full max-w-xl mx-auto px-4 py-12">
-          <h1 className="text-3xl purple-light-text font-bold mb-4">
+        <div
+          className={sprinkles({ px: 4, py: 12 })}
+          style={{ width: "100%", maxWidth: "36rem", margin: "0 auto" }}
+        >
+          <h1
+            className={`${textSize["3xl"]} purple-light-text ${sprinkles({
+              fontWeight: "bold",
+              mb: 4,
+            })}`}
+          >
             Authorize CLI access
           </h1>
-          <div className={`${surfaceBase} p-4`}>
-            <p className="mb-4">
+          <div className={`${surfaceBase} ${sprinkles({ p: 4 })}`}>
+            <p className={sprinkles({ mb: 4 })}>
               A command-line tool on <strong>{hostname}</strong> wants access to
               your Nopal account (<strong>{email}</strong>).
             </p>
             {actionData && "error" in actionData && (
-              <div className="red-text mb-4">{actionData.error}</div>
+              <div className={`red-text ${sprinkles({ mb: 4 })}`}>{actionData.error}</div>
             )}
-            <Form method="POST" className="flex items-center gap-2 justify-end">
+            <Form
+              method="POST"
+              className={sprinkles({
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                justifyContent: "flex-end",
+              })}
+            >
               <input type="hidden" name="port" value={port} />
               <input type="hidden" name="state" value={state} />
               <input type="hidden" name="hostname" value={hostname} />
               <button
-                className="btn-secondary"
-                style={{ "--btn-color": "var(--red)" } as React.CSSProperties}
+                className={button({ variant: "secondary", tint: "danger" })}
                 type="submit"
                 name="intent"
                 value="deny"
@@ -146,8 +184,7 @@ export default function CliLogin() {
                 Deny
               </button>
               <button
-                className="btn-secondary"
-                style={{ "--btn-color": "var(--green)" } as React.CSSProperties}
+                className={button({ variant: "secondary" })}
                 type="submit"
                 name="intent"
                 value="approve"
