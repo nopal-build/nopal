@@ -1,7 +1,9 @@
 # webapp Agent Notes
 
 Stack: React Router 7 (SSR, file-based-ish routes via `app/routes.ts`), React 18,
-Tailwind CSS, TypeScript, SurrealDB. Tests run with `vitest`.
+TypeScript, SurrealDB. Tests run with `vitest`. Styling is mid-migration from
+Tailwind CSS onto `packages/stamps`, a vanilla-extract-based design system
+shared with any future non-webapp surface — see the UI conventions below.
 
 ## UI conventions
 
@@ -13,11 +15,37 @@ Tailwind CSS, TypeScript, SurrealDB. Tests run with `vitest`.
   a full component inventory, and rules for when to extract a new component
   vs. keep markup inline. Don't skip this step even for "small" UI changes;
   it's faster than re-deriving a pattern that already exists.
-- Always use the shared components in `app/components` (e.g. `Input`, `Badge`,
-  `Chip`, `Modal`, `SearchCollection`, `CopyField`) instead of raw `<input>`,
-  `<textarea>`, hand-rolled dialogs, or copy-to-clipboard rows. If a raw
-  element or duplicated pattern is used instead of an existing component,
-  that's a bug — replace it.
+- Always use the shared components from `packages/stamps` (e.g. `Input`,
+  `Badge`, `Chip`, `Modal`, `Surface`, `CircleButton`, `MoreMenu`,
+  `SearchCollection`, `CopyField` — imported as `stamps/Input`, `stamps/Badge`,
+  etc.) instead of raw `<input>`, `<textarea>`, hand-rolled dialogs, or
+  copy-to-clipboard rows. If a raw element or duplicated pattern is used
+  instead of an existing component, that's a bug — replace it. New *shared*
+  (cross-surface-ready) primitives belong in `packages/stamps`, not
+  `app/components` — see `#component-guide` in `fruits_.styles.tsx` for the
+  full inventory of what's already there and where it lives. `app/components`
+  is for webapp/marketing-specific components (`Layout`, `AppLayout`,
+  `GoodAssets`, etc.) that aren't meant to be shared.
+- This app is migrating off Tailwind onto `packages/stamps` (a
+  vanilla-extract-based design system) — don't add new Tailwind utility
+  classes. Concretely:
+  - **Colors**: use `stamps/tokens`'s `semanticColors` (preferred —
+    `textPrimary`, `textSubtle`, `surfaceCard`, etc., already flip correctly
+    for dark mode) or `colors`/`palette` for a literal/nature-named hue, not
+    a raw `var(--x)` string or a Tailwind color class.
+  - **Spacing & layout**: use `stamps/sprinkles.css`'s `sprinkles()` instead
+    of Tailwind's spacing/layout utility classes (`p-4`, `gap-2`, `flex`,
+    `items-center`, `mb-6`, `text-right`, …) — e.g.
+    `sprinkles({ p: 4, gap: 2, display: "flex", alignItems: "center" })`.
+    Only reach for a new scale value if the existing one (documented in
+    `sprinkles.css.ts`) genuinely doesn't cover it — don't invent one-off
+    pixel values when a nearby scale step would do.
+  - Typography utility classes (`text-3xl`, `font-bold`, etc.) and
+    non-migrated legacy classes (`.link`, `.btn-*`, `.menu-item`,
+    `.collection-well`) are still fine to use as-is for now — they haven't
+    been ported yet. Don't block a change on migrating something unrelated
+    to what you're already touching; do migrate whatever Tailwind you *do*
+    touch in the same change.
 - Don't re-apply styling that a shared component already provides by default
   (e.g. `Input` already has border/radius/padding baked in). Only pass a
   `className` for one-off overrides.
@@ -25,10 +53,11 @@ Tailwind CSS, TypeScript, SurrealDB. Tests run with `vitest`.
   version): used once → keep it inline. Repeated 2+ times in one route file →
   extract a local, unexported component in that same file. Needed on a
   second route, or wraps a native form element → promote it to
-  `app/components/` and document it in `fruits_.styles.tsx` in the same
-  change. Prefer generic, slot-based props (e.g. `SearchCollection`'s
-  `resultsSlot`) over baking one route's business logic into the shared
-  component.
+  `packages/stamps` (or `app/components/` if it's genuinely
+  webapp/marketing-specific, not meant to be shared) and document it in
+  `fruits_.styles.tsx` in the same change. Prefer generic, slot-based props
+  (e.g. `SearchCollection`'s `resultsSlot`) over baking one route's business
+  logic into the shared component.
 - If you add a new visual pattern, component, or prop (e.g. `Input`'s
   `hideLabel`), add a corresponding live example to `fruits_.styles.tsx` in
   the same change so it stays the single source of truth — an undocumented

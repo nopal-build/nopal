@@ -14,7 +14,8 @@
     "./CircleButton": "./src/CircleButton.tsx",
     "./MoreMenu": "./src/MoreMenu.tsx",
     "./SearchCollection": "./src/SearchCollection.tsx",
-    "./CopyField": "./src/CopyField.tsx"
+    "./CopyField": "./src/CopyField.tsx",
+    "./sprinkles.css": "./src/sprinkles.css.ts"
   },
   "peerDependencies": {
     "react": "^18.3.1"
@@ -24,6 +25,7 @@
   },
   "dependencies": {
     "@vanilla-extract/css": "^1.21.2",
-    "@vanilla-extract/recipes": "^0.5.7"
+    "@vanilla-extract/recipes": "^0.5.7",
+    "@vanilla-extract/sprinkles": "^1.7.1"
   }
 }

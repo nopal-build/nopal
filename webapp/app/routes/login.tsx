@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Input } from "stamps/Input";
 import { surfaceBase } from "stamps/surface.css";
+import { sprinkles } from "stamps/sprinkles.css";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { useLoaderData, useActionData, useNavigate, Form } from "react-router";
@@ -106,9 +107,24 @@ export default function Login() {
   return (
     <Layout>
       <div className="scene1">
-        <div className="w-full max-w-96 mx-auto px-4 py-12">
-          <h1 className="text-3xl purple-light-text font-bold mb-4">Login</h1>
-          <Form method="POST" className={`flex flex-col gap-4 ${surfaceBase} p-4`}>
+        <div
+          className={sprinkles({ px: 4, py: 12 })}
+          style={{ width: "100%", maxWidth: "24rem", margin: "0 auto" }}
+        >
+          <h1
+            className={`text-3xl purple-light-text font-bold ${sprinkles({ mb: 4 })}`}
+          >
+            Login
+          </h1>
+          <Form
+            method="POST"
+            className={`${surfaceBase} ${sprinkles({
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              p: 4,
+            })}`}
+          >
             {redirectTo && (
               <input type="hidden" name="redirectTo" value={redirectTo} />
             )}
@@ -120,7 +136,7 @@ export default function Login() {
               placeholder="you@nature.yeah"
             />
             {actionData?.error && <div className="red-text">{authError}</div>}
-            <div className="text-right">
+            <div className={sprinkles({ textAlign: "right" })}>
               <button className="btn-secondary" type="submit">
                 Send Code
               </button>
@@ -128,13 +144,20 @@ export default function Login() {
           </Form>
 
           <div
-            className="text-center my-4"
+            className={sprinkles({ textAlign: "center", my: 4 })}
             style={{ color: "var(--text-subtle)" }}
           >
             or
           </div>
 
-          <div className={`flex flex-col gap-2 ${surfaceBase} p-4`}>
+          <div
+            className={`${surfaceBase} ${sprinkles({
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              p: 4,
+            })}`}
+          >
             {passkeyError && (
               <div className="red-text text-sm">{passkeyError}</div>
             )}
