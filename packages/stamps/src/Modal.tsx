@@ -1,19 +1,22 @@
-import { useEffect } from "react";
+// packages/stamps/src/Modal.tsx
+import { useEffect, type ReactNode } from "react";
+import { Surface } from "./Surface";
+import { backdrop, closeButton, header, panel, title } from "./modal.css";
 
 /**
  * A minimal, dependency-free modal: a full-screen backdrop plus a centered
- * `good-box` panel. Closes on Escape or backdrop click.
+ * `Surface` panel. Closes on Escape or backdrop click.
  */
 export function Modal({
   open,
   onClose,
-  title,
+  title: titleText,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title?: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -27,24 +30,22 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.5)", zIndex: 1000 }}
-      onClick={onClose}
-    >
-      <div
-        className="good-box p-4 w-full"
-        style={{ maxWidth: "400px" }}
+    <div className={backdrop} onClick={onClose}>
+      <Surface
+        className={panel}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-label={titleText}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-2 mb-3">
-          {title && <h2 className="font-bold text-lg">{title}</h2>}
+        <div className={header}>
+          {titleText && <h2 className={title}>{titleText}</h2>}
+          {/* `.link` is still a plain global CSS class (root.css) — not
+              yet ported to `stamps`, but still valid, so referencing it
+              here alongside the new vanilla-extract classes is fine. */}
           <button
             type="button"
-            className="link text-sm"
+            className={`link ${closeButton}`}
             onClick={onClose}
             aria-label="Close"
           >
@@ -52,7 +53,7 @@ export function Modal({
           </button>
         </div>
         {children}
-      </div>
+      </Surface>
     </div>
   );
 }

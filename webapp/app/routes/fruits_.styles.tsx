@@ -7,7 +7,7 @@ import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
 import { Input } from "stamps/Input";
-import { Modal } from "../components/Modal";
+import { Modal } from "stamps/Modal";
 import { CopyField } from "../components/CopyField";
 import { SearchCollection } from "../components/SearchCollection";
 import { MoreMenu, MoreIcon } from "../components/MoreMenu";
@@ -229,7 +229,7 @@ export default function FruitsStyles() {
                   [
                     "A centered dialog / confirmation",
                     "<Modal>",
-                    "components/Modal.tsx",
+                    "stamps/Modal (packages/stamps)",
                   ],
                   [
                     "A round icon-only button (favorite, close, …)",

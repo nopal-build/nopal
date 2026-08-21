@@ -68,7 +68,7 @@ import {
 import { AppLayout } from "../components/AppLayout";
 import { Input } from "stamps/Input";
 import { Badge } from "stamps/Badge";
-import { Modal } from "../components/Modal";
+import { Modal } from "stamps/Modal";
 import { MoreMenu } from "../components/MoreMenu";
 import {
   getKnownAccounts,

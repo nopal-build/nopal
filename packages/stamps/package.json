@@ -7,7 +7,9 @@
     "./tokens": "./src/tokens.ts",
     "./Badge": "./src/Badge.tsx",
     "./Chip": "./src/Chip.tsx",
-    "./Input": "./src/Input.tsx"
+    "./Input": "./src/Input.tsx",
+    "./Surface": "./src/Surface.tsx",
+    "./Modal": "./src/Modal.tsx"
   },
   "peerDependencies": {
     "react": "^18.3.1"
