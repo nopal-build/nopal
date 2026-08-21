@@ -8,7 +8,7 @@ import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
 import { Input } from "stamps/Input";
 import { Modal } from "stamps/Modal";
-import { CopyField } from "../components/CopyField";
+import { CopyField } from "stamps/CopyField";
 import { SearchCollection } from "stamps/SearchCollection";
 import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
 import { CircleButton } from "stamps/CircleButton";
@@ -249,7 +249,7 @@ export default function FruitsStyles() {
                   [
                     "A \u201ccopy this value\u201d row",
                     "<CopyField>",
-                    "components/CopyField.tsx",
+                    "stamps/CopyField (packages/stamps)",
                   ],
                   [
                     "The page shell (nav, footer, container)",

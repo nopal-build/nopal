@@ -104,6 +104,7 @@ export const semanticColors = {
   textDanger: "var(--color-text-danger)",
   surfacePage: "var(--color-surface-page)",
   surfaceCard: "var(--color-surface-card)",
+  surfaceInset: "var(--color-surface-inset)",
   surfaceBorder: "var(--color-surface-border)",
 
   // Form fields deliberately don't follow the day/night surface swap —

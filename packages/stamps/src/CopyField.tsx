@@ -1,5 +1,6 @@
-// app/components/CopyField.tsx
+// packages/stamps/src/CopyField.tsx
 import { useState } from "react";
+import { copyButton, field, row } from "./copyField.css";
 
 type CopyFieldProps = {
   /** The full text copied to the clipboard and shown (read-only) in the field. */
@@ -40,22 +41,19 @@ export function CopyField({
   }
 
   return (
-    <div className={`flex items-center gap-2 ${className}`.trim()}>
+    <div className={`${row} ${className}`.trim()}>
       <input
         readOnly
         value={value}
         onFocus={(e) => e.currentTarget.select()}
         onClick={(e) => e.currentTarget.select()}
         aria-label={ariaLabel}
-        className="font-mono flex-1 min-w-0 code-input"
-        style={{ fontSize: "0.75rem", padding: "6px 8px" }}
+        className={field}
       />
-      <button
-        type="button"
-        onClick={handleCopy}
-        className="btn-secondary shrink-0"
-        style={{ padding: "6px 12px", fontSize: "0.75rem" }}
-      >
+      {/* `.btn-secondary` is still a plain global CSS class (root.css) —
+          not yet ported to `stamps`, but still valid, so referencing it
+          here alongside the new vanilla-extract classes is fine. */}
+      <button type="button" onClick={handleCopy} className={`btn-secondary ${copyButton}`}>
         {copied ? copiedLabel : copyLabel}
       </button>
     </div>
