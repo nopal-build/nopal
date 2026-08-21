@@ -44,12 +44,16 @@ import {
 import { isVaultRootFolder } from "./vault.types";
 import type { Role } from "./humans.server";
 // File Referencing & Renaming (`fileReferences.server.ts`), `project-n02`
-// seeding (`projectN02.server.ts`), and `website` seeding
+// seeding (`projectN02.server.ts`), and `website` seeding/publish/settings
 // (`website.server.ts`) all statically import several read helpers back
 // from THIS file — a real mutual cycle, but a safe one: every name involved
-// on both sides is a hoisted `function` declaration, and nothing in either
-// module calls one of these functions at top-level (module-evaluation)
-// time, only later from inside other async functions.
+// is a hoisted `function` declaration, and nothing in any of these modules
+// calls one of these functions at top-level (module-evaluation) time, only
+// later from inside other async functions. `website.server.ts` ALSO
+// imports `canActAsProjectOwner` from `projectSharing.server.ts`, which
+// itself imports back from this file — a third node on the same cycle,
+// same safety argument applies (`canActAsProjectOwner`/`isProjectFolder`/
+// `findOwningProjectFolder` are all hoisted `function` declarations too).
 // A DYNAMIC `import()` here bought nothing beyond exactly the same safety,
 // while adding a real bug of its own — concurrent first-ever dynamic
 // imports of the same not-yet-cached module could race and hand one

@@ -56,6 +56,19 @@ import {
 import { getProjectRoleForFolderId } from "robustness-core/data/projectSharing.server";
 import { getRelatedHumans } from "robustness-core/data/relationships.server";
 import { resolveProjectManifest, type ResolvedProject } from "robustness-core/data/project.server";
+import {
+  findWebsiteAnchor,
+  parseWebsitePageMeta,
+  type WebsiteLinkItem,
+  type WebsitePageMeta,
+  type WebsitePublishStatus,
+  type WebsiteSettings,
+} from "robustness-core/data/website.server";
+// Pure, server-free helpers (no `.server` suffix) — safe to import into
+// client-rendered code, unlike everything from `website.server`/
+// `vault.server` above (loader-only, stripped from the client bundle).
+import { splitFrontmatter, withReadmeBody } from "robustness-core/data/project.types";
+import { Badge } from "stamps/Badge";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "stamps/MoreMenu";
 import OxEditor from "../components/OxEditor";
@@ -111,12 +124,23 @@ type Current =
        * `OxRenderer`/`ProjectView`, same as any other markdown file — no
        * directive resolution happens here (see `project.server.ts`). */
       projectManifest: ResolvedProject | null;
+      /** Non-null when this folder is part of a `website` project (see the
+       * `vault` skill's "website projects" section) — either it IS the
+       * anchor itself, or a sub-folder inside one. Drives the "Site
+       * settings" button (anchor only) and the publish toggle on `readme`
+       * below. */
+      websiteAnchor: VaultFolder | null;
+      /** This folder's own `readme`'s `title`/`description`/`publish` —
+       * only meaningful alongside a non-null `websiteAnchor`. */
+      websitePageMeta: WebsitePageMeta | null;
     }
   | {
       kind: "file";
       file: FileRef;
       ancestry: VaultFolder[];
       projectManifest: ResolvedProject | null;
+      websiteAnchor: VaultFolder | null;
+      websitePageMeta: WebsitePageMeta | null;
     };
 
 type HumanEntry = { _id: string; name: string; email: string };
@@ -212,7 +236,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const role = await getProjectRoleForFolderId(file.folder_id, user._id);
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
     }
-    current = { kind: "file", file, ancestry, projectManifest: projectManifestForFile };
+    const websiteAnchorForFile = findWebsiteAnchor(ancestry);
+    const websitePageMetaForFile =
+      websiteAnchorForFile && isMarkdownFile(file)
+        ? parseWebsitePageMeta(file.content ?? "")
+        : null;
+    current = {
+      kind: "file",
+      file,
+      ancestry,
+      projectManifest: projectManifestForFile,
+      websiteAnchor: websiteAnchorForFile,
+      websitePageMeta: websitePageMetaForFile,
+    };
   } else if (folderParam) {
     const folder = await getFolderById(folderParam);
     if (!folder || !canViewFolder(user._id, folder)) {
@@ -245,7 +281,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const role = await getProjectRoleForFolderId(folder._id, user._id);
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
     }
-    current = { kind: "folder", folder, ancestry, readme, projectManifest: projectManifestForFolder };
+    const websiteAnchorForFolder = findWebsiteAnchor(ancestry);
+    const websitePageMetaForFolder =
+      websiteAnchorForFolder && readme ? parseWebsitePageMeta(readme.content ?? "") : null;
+    current = {
+      kind: "folder",
+      folder,
+      ancestry,
+      readme,
+      projectManifest: projectManifestForFolder,
+      websiteAnchor: websiteAnchorForFolder,
+      websitePageMeta: websitePageMetaForFolder,
+    };
   }
 
   return {
@@ -993,6 +1040,292 @@ function MoveFolderModal({
   );
 }
 
+// ─── Website publish toggle ─────────────────────────────────────────────
+// The `publish` front-matter flag on a page inside a `website` project
+// (see the `vault` skill's "website projects" section) — a small Badge
+// (Draft/Published) that's also a button when `editable`, PUTting to the
+// dedicated `/api/vault/website-pages/:fileId/publish` endpoint (a targeted
+// front-matter rewrite, same idea as Project Status's own dedicated
+// endpoint — see `withWebsitePublish`).
+function WebsitePublishToggle({
+  fileId,
+  publish,
+  editable,
+  onToggled,
+}: {
+  fileId: string;
+  publish: WebsitePublishStatus;
+  editable: boolean;
+  onToggled: (next: WebsitePublishStatus) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const isPublished = publish === "published";
+
+  if (!editable) {
+    return <Badge variant={isPublished ? "success" : "neutral"}>{isPublished ? "Published" : "Draft"}</Badge>;
+  }
+
+  const handleClick = async () => {
+    setSaving(true);
+    const next: WebsitePublishStatus = isPublished ? "draft" : "published";
+    try {
+      const res = await fetch(`/api/vault/website-pages/${fileId}/publish`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ publish: next }),
+      });
+      if (res.ok) onToggled(next);
+      else {
+        const data = await res.json().catch(() => null);
+        window.alert(data?.error ?? `Request failed (${res.status})`);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={saving}
+      style={{ border: "none", background: "none", padding: 0, cursor: saving ? "default" : "pointer" }}
+      title={isPublished ? "Published — click to unpublish" : "Draft — click to publish"}
+    >
+      <Badge variant={isPublished ? "success" : "neutral"}>
+        {saving ? "…" : isPublished ? "Published" : "Draft"}
+      </Badge>
+    </button>
+  );
+}
+
+// ─── Site settings (nav + footer) modal ────────────────────────────────
+
+function LinkListEditor({
+  label,
+  items,
+  onChange,
+}: {
+  label: string;
+  items: WebsiteLinkItem[];
+  onChange: (next: WebsiteLinkItem[]) => void;
+}) {
+  const update = (index: number, patch: Partial<WebsiteLinkItem>) => {
+    onChange(items.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  };
+  const remove = (index: number) => {
+    onChange(items.filter((_, i) => i !== index));
+  };
+  const add = () => {
+    onChange([...items, { label: "", to: "" }]);
+  };
+
+  return (
+    <div style={{ marginBottom: "12px" }}>
+      <div className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginBottom: "4px" }}>
+        {label}
+      </div>
+      {items.map((item, i) => (
+        <div key={i} style={{ display: "flex", gap: "4px", marginBottom: "4px" }}>
+          <input
+            type="text"
+            value={item.label}
+            onChange={(e) => update(i, { label: e.target.value })}
+            placeholder="Label"
+            className="text-xs font-mono"
+            style={{ flex: 1, minWidth: 0, padding: "4px 6px", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)" }}
+          />
+          <input
+            type="text"
+            value={item.to}
+            onChange={(e) => update(i, { to: e.target.value })}
+            placeholder="/v2/page or https://..."
+            className="text-xs font-mono"
+            style={{ flex: 2, minWidth: 0, padding: "4px 6px", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)" }}
+          />
+          <button
+            type="button"
+            onClick={() => remove(i)}
+            className="btn-outline text-xs font-mono px-2 rounded"
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={add} className="btn-outline text-xs font-mono px-2 py-1 rounded">
+        + Add link
+      </button>
+    </div>
+  );
+}
+
+function SiteSettingsModal({
+  folderId,
+  onClose,
+  apiJson,
+}: {
+  folderId: string;
+  onClose: () => void;
+  apiJson: (url: string, options?: RequestInit) => Promise<any>;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<WebsiteSettings>({
+    nav: [],
+    footer: { tagline: "", links: [], social: [] },
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await apiJson(`/api/vault/website/${folderId}/settings`);
+      if (cancelled || !data) return;
+      setSettings(data.settings);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [folderId, apiJson]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const data = await apiJson(`/api/vault/website/${folderId}/settings`, {
+      method: "PUT",
+      body: JSON.stringify({ settings }),
+    });
+    setSaving(false);
+    if (data) onClose();
+  };
+
+  return (
+    <div className="vault-modal-backdrop" onClick={onClose}>
+      <div className="vault-modal" onClick={(e) => e.stopPropagation()}>
+        <h3 className="vault-modal-title">Site settings</h3>
+        <p className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginTop: "-8px", marginBottom: "16px" }}>
+          Configures the main nav and footer for this site's public pages.
+        </p>
+
+        {loading ? (
+          <p className="text-xs font-mono" style={{ padding: "12px" }}>
+            Loading…
+          </p>
+        ) : (
+          <>
+            <LinkListEditor
+              label="Main navigation"
+              items={settings.nav}
+              onChange={(nav) => setSettings((prev) => ({ ...prev, nav }))}
+            />
+            <div style={{ marginBottom: "12px" }}>
+              <div className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginBottom: "4px" }}>
+                Footer tagline
+              </div>
+              <input
+                type="text"
+                value={settings.footer.tagline}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    footer: { ...prev.footer, tagline: e.target.value },
+                  }))
+                }
+                placeholder="A short line under the footer"
+                className="text-xs font-mono"
+                style={{ width: "100%", padding: "4px 6px", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)" }}
+              />
+            </div>
+            <LinkListEditor
+              label="Footer links"
+              items={settings.footer.links}
+              onChange={(links) =>
+                setSettings((prev) => ({ ...prev, footer: { ...prev.footer, links } }))
+              }
+            />
+            <LinkListEditor
+              label="Footer social links"
+              items={settings.footer.social}
+              onChange={(social) =>
+                setSettings((prev) => ({ ...prev, footer: { ...prev.footer, social } }))
+              }
+            />
+          </>
+        )}
+
+        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+          <button onClick={onClose} className="btn-outline text-xs font-mono px-3 py-1.5 rounded">
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || loading}
+            className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Website page editor ────────────────────────────────────────────────
+// A markdown file inside a `website` project (see the `vault` skill's
+// "website projects" section) gets a real, editable `OxEditor` bound to
+// just its BODY (front matter stripped via `splitFrontmatter`/rejoined via
+// `withReadmeBody` on save) — both pure, server-free helpers from
+// `project.types.ts`, safe to run client-side. Mirrors `SkillFileEditor`'s
+// debounced-save shape; `key` at the call site includes `updated_at` (not
+// just the file id) so a publish-toggle's own write (a DIFFERENT mutation
+// path on the same file) always forces a clean remount with fresh front
+// matter, rather than risking a stale save clobbering it back.
+function WebsitePageEditor({
+  fileId,
+  initialContent,
+  editable,
+  onSave,
+}: {
+  fileId: string;
+  initialContent: string;
+  editable: boolean;
+  onSave: (fileId: string, content: string) => void;
+}) {
+  const initialBody = useMemo(() => splitFrontmatter(initialContent).body, [initialContent]);
+  const [body, setBody] = useState(initialBody);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedBodyRef = useRef(initialBody);
+
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    },
+    [],
+  );
+
+  const handleChange = useCallback(
+    (nextBody: string) => {
+      setBody(nextBody);
+      if (!editable) return;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        if (nextBody === lastSavedBodyRef.current) return;
+        lastSavedBodyRef.current = nextBody;
+        onSave(fileId, withReadmeBody(initialContent, nextBody));
+      }, 2000);
+    },
+    [editable, fileId, initialContent, onSave],
+  );
+
+  return (
+    <OxEditor
+      mode={editable ? "editing" : "interacting"}
+      markdown={body}
+      onChange={handleChange}
+      placeholder="Write this page..."
+    />
+  );
+}
+
 // ─── Skill file editor ───────────────────────────────────────────────────
 // A project's own `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/
 // `PROJECT_VIEW.md` (see the `graphlog`/`vault` skills) are themselves
@@ -1440,6 +1773,7 @@ export default function VaultV2Page() {
   const [replacing, setReplacing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [siteSettingsOpen, setSiteSettingsOpen] = useState(false);
 
   // ─── Upload queue (ported from vault v1) ──────────────────────────────
   // Multi-file, max 2 concurrent, XHR byte-progress for small files, and
@@ -1938,6 +2272,34 @@ export default function VaultV2Page() {
     [apiJson],
   );
 
+  // A website page's own BODY save (see `WebsitePageEditor` above) — same
+  // debounced, no-revalidate shape as `handleSaveSkillFile`; `content` here
+  // already has front matter rejoined back in (`withReadmeBody`), so this
+  // is just an ordinary content PATCH.
+  const handleSaveWebsitePage = useCallback(
+    (fileId: string, content: string) => {
+      markOwnMutation(fileId);
+      void apiJson(`/api/vault/${fileId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content }),
+      });
+    },
+    [apiJson],
+  );
+
+  // A website page's `publish` toggle (see `WebsitePublishToggle`) DOES
+  // revalidate — unlike a content save, this changes the front matter
+  // `WebsitePageEditor` itself needs fresh (see its own `key` comment at
+  // the call site) to avoid clobbering it on the next body edit.
+  const handleWebsitePublishToggled = useCallback(
+    (fileId: string, folderId: string | null) => {
+      markOwnMutation(fileId);
+      invalidateAndRevalidate([folderId]);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   // ─── Derived view data ──────────────────────────────────────────────────────
 
   const pendingForCurrentFolder =
@@ -2398,6 +2760,16 @@ export default function VaultV2Page() {
                     )}
                   </MoreMenu>
                 )}
+                {canWriteCurrent &&
+                  current.websiteAnchor &&
+                  current.websiteAnchor._id === current.folder._id && (
+                    <button
+                      className="vault-toolbar-btn"
+                      onClick={() => setSiteSettingsOpen(true)}
+                    >
+                      ⚙ Site settings
+                    </button>
+                  )}
                 {folderEffectivelyPublic && (
                   <CopyLinkButton path={`/public/folder/${current.folder._id}`} />
                 )}
@@ -2625,6 +2997,16 @@ export default function VaultV2Page() {
 
               {current.readme && (
                 <div className="vault-readme-section">
+                  {current.websiteAnchor && current.websitePageMeta && (
+                    <div style={{ marginBottom: "12px" }}>
+                      <WebsitePublishToggle
+                        fileId={current.readme._id}
+                        publish={current.websitePageMeta.publish}
+                        editable={false}
+                        onToggled={() => {}}
+                      />
+                    </div>
+                  )}
                   {current.projectManifest ? (
                     <ProjectView
                       body={current.projectManifest.body}
@@ -2638,11 +3020,34 @@ export default function VaultV2Page() {
             </>
           )}
 
-          {/* ── File view ─ render by content type ────────────────── */}
+          {/* ── File view ─ render by content type ──────────────────── */}
           {current.kind === "file" &&
             (isMarkdownFile(current.file) ? (
               <div className="vault-readme-section">
-                {fileFolderType === "skills" ? (
+                {current.websiteAnchor && current.websitePageMeta ? (
+                  // A page inside a `website` project (see the `vault`
+                  // skill) — real editable OxEditor bound to just the
+                  // body, plus a Draft/Published toggle above it.
+                  <>
+                    <div style={{ marginBottom: "12px" }}>
+                      <WebsitePublishToggle
+                        fileId={current.file._id}
+                        publish={current.websitePageMeta.publish}
+                        editable={canWriteCurrentFile}
+                        onToggled={() =>
+                          handleWebsitePublishToggled(current.file._id, current.file.folder_id)
+                        }
+                      />
+                    </div>
+                    <WebsitePageEditor
+                      key={`${current.file._id}-${current.file.updated_at}`}
+                      fileId={current.file._id}
+                      initialContent={current.file.content ?? ""}
+                      editable={canWriteCurrentFile}
+                      onSave={handleSaveWebsitePage}
+                    />
+                  </>
+                ) : fileFolderType === "skills" ? (
                   // A project's own skills/KNOWLEDGE.md, GRAPH.md,
                   // GRAPH_STRUCTURE.md, PROJECT_VIEW.md (see the
                   // graphlog/vault skills) are themselves OxMarkdown
@@ -2732,6 +3137,15 @@ export default function VaultV2Page() {
           foldersByParent={foldersByParent}
           onMove={handleMoveFolder}
           onClose={() => setMoveOpen(false)}
+        />
+      )}
+
+      {/* Site settings modal (website projects only) */}
+      {siteSettingsOpen && current.kind === "folder" && current.websiteAnchor && (
+        <SiteSettingsModal
+          folderId={current.websiteAnchor._id}
+          onClose={() => setSiteSettingsOpen(false)}
+          apiJson={apiJson}
         />
       )}
     </AppLayout>

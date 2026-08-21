@@ -20,16 +20,18 @@
  * functions.
  */
 
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   createFileRef,
   getFileRefById,
   getFolderById,
   listFolderChildren,
+  updateFileRef,
   type FileRef,
   type VaultFolder,
 } from "./vault.server";
 import { splitFrontmatter } from "./project.types";
+import { canActAsProjectOwner } from "./projectSharing.server";
 
 const README_NAME = "README.md";
 const SITE_SETTINGS_NAME = "_site-settings.json";
@@ -112,12 +114,25 @@ export type ResolvedWebsitePage = {
   body: string;
 };
 
+/** Every ancestor folder from the root container down to (and including)
+ * the folder/file being viewed — same shape `fruits_.vault.tsx`'s own
+ * `ancestry` array already uses. Finds the `website` anchor among them, if
+ * any: the loader's way of knowing "is this file/folder part of a website
+ * project at all" without re-walking the tree itself. */
+export function findWebsiteAnchor(ancestry: VaultFolder[]): VaultFolder | null {
+  return (
+    ancestry.find((f) => f.folder_type === "website" && f.is_folder_type_root) ?? null
+  );
+}
+
 /** Reads just `title`/`description`/`publish` from a page's front matter —
  * mirrors `project.types.ts`'s `parseProjectSharing`/`parseProjectStatus`
  * (never throws, defaults on anything missing/malformed). Deliberately NOT
  * a full manifest parse — a website page's front matter has no other
- * reserved keys yet. */
-function parseWebsitePageMeta(markdown: string): WebsitePageMeta {
+ * reserved keys yet. Exported for `fruits_.vault.tsx`'s loader, which needs
+ * a page's `publish` state to render the toggle without a second content
+ * fetch. */
+export function parseWebsitePageMeta(markdown: string): WebsitePageMeta {
   const fallback: WebsitePageMeta = {
     title: null,
     description: null,
@@ -137,6 +152,59 @@ function parseWebsitePageMeta(markdown: string): WebsitePageMeta {
   } catch {
     return fallback;
   }
+}
+
+/**
+ * Rewrites ONLY the `publish` key of a page's front matter, preserving
+ * every other field (`title`/`description`/...) and the body untouched —
+ * mirrors `project.types.ts`'s `withProjectStatus` exactly, including
+ * dropping the key entirely when set back to the default ("draft"), so a
+ * once-published-then-unpublished page front-matter-round-trips to
+ * looking exactly like a page that was never published at all.
+ */
+export function withWebsitePublish(markdown: string, publish: WebsitePublishStatus): string {
+  const { frontmatter, body } = splitFrontmatter(markdown);
+  let data: Record<string, unknown> = {};
+  if (frontmatter) {
+    try {
+      const parsed = parseYaml(frontmatter);
+      if (parsed && typeof parsed === "object") data = { ...(parsed as Record<string, unknown>) };
+    } catch {
+      data = {};
+    }
+  }
+  if (publish !== DEFAULT_WEBSITE_PUBLISH_STATUS) data.publish = publish;
+  else delete data.publish;
+
+  if (Object.keys(data).length === 0) return body;
+  const yamlText = stringifyYaml(data).trimEnd();
+  return `---\n${yamlText}\n---\n${body}`;
+}
+
+export type SetWebsitePagePublishResult =
+  | { ok: true; publish: WebsitePublishStatus }
+  | { ok: false; error: string };
+
+/**
+ * Sets a website page's `publish` front matter — gated by the SAME
+ * ordinary Sharing-Roles check every other website write goes through
+ * (`canActAsProjectOwner`), not a platform Admin/Super role (see
+ * `vaultFolderTypes.ts`'s `website.writable: "owner"`).
+ */
+export async function setWebsitePagePublish(
+  actingHumanId: string,
+  file: FileRef,
+  publish: WebsitePublishStatus,
+): Promise<SetWebsitePagePublishResult> {
+  if (!(await canActAsProjectOwner(actingHumanId, file.human_id, file.folder_id))) {
+    return {
+      ok: false,
+      error: "You don't have permission to change this page's publish status",
+    };
+  }
+  const updatedContent = withWebsitePublish(file.content ?? "", publish);
+  await updateFileRef(file._id, { content: updatedContent });
+  return { ok: true, publish };
 }
 
 function toResolvedPage(file: FileRef): ResolvedWebsitePage {
@@ -257,6 +325,45 @@ export async function getWebsiteSettings(siteFolder: VaultFolder): Promise<Websi
   } catch {
     return DEFAULT_WEBSITE_SETTINGS;
   }
+}
+
+export type SetWebsiteSettingsResult =
+  | { ok: true; settings: WebsiteSettings }
+  | { ok: false; error: string };
+
+/** Overwrites `_site-settings.json` wholesale (creating it if somehow
+ * missing) — same permission gate as `setWebsitePagePublish`. The nav/
+ * footer editor always sends the FULL settings object (it's small), so
+ * there's no partial-merge case to handle here, unlike a page's front
+ * matter. */
+export async function setWebsiteSettings(
+  actingHumanId: string,
+  siteFolder: VaultFolder,
+  settings: WebsiteSettings,
+): Promise<SetWebsiteSettingsResult> {
+  if (!(await canActAsProjectOwner(actingHumanId, siteFolder.human_id, siteFolder._id))) {
+    return {
+      ok: false,
+      error: "You don't have permission to change this site's settings",
+    };
+  }
+  const content = `${JSON.stringify(settings, null, 2)}\n`;
+  const { files } = await listFolderChildren(siteFolder.human_id, siteFolder._id);
+  const existing = files.find(
+    (f) => f.name.toLowerCase() === SITE_SETTINGS_NAME.toLowerCase(),
+  );
+  if (existing) {
+    await updateFileRef(existing._id, { content });
+  } else {
+    await createFileRef({
+      human_id: siteFolder.human_id,
+      name: SITE_SETTINGS_NAME,
+      content,
+      content_type: "application/json",
+      folder_id: siteFolder._id,
+    });
+  }
+  return { ok: true, settings };
 }
 
 /**

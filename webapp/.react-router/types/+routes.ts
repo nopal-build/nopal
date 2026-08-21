@@ -264,7 +264,17 @@ type Pages = {
   "/api/vault": {
     params: {};
   };
+  "/api/vault/website-pages/:fileId/publish": {
+    params: {
+      "fileId": string;
+    };
+  };
   "/api/vault/projects/:folderId/sharing": {
+    params: {
+      "folderId": string;
+    };
+  };
+  "/api/vault/website/:folderId/settings": {
     params: {
       "folderId": string;
     };
@@ -428,7 +438,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/passkeys/invite-register-options" | "/fruits/maker/graphlog/runs/:runId" | "/api/passkeys/invite-register-verify" | "/fruits/maker/graphlog/defaults" | "/api/graphlog/graph-project-view" | "/api/graphlog/reset-project-view" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/graphlog/graph-structure" | "/api/graphlog/reset-knowledge" | "/api/passkeys/register-verify" | "/api/graphlog/daily-log-sync" | "/api/graphlog/sync-knowledge" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/api/graphlog/jobs/:jobId" | "/api/graphlog/reset-graph" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/api/graphlog/sync-graph" | "/fruits/maker/graphlog" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/graphlog/reset" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/graphlog/run" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7" | "/v2" | "/v2/*";
+    page: "/" | "/api/passkeys/invite-register-options" | "/fruits/maker/graphlog/runs/:runId" | "/api/passkeys/invite-register-verify" | "/fruits/maker/graphlog/defaults" | "/api/graphlog/graph-project-view" | "/api/graphlog/reset-project-view" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/graphlog/graph-structure" | "/api/graphlog/reset-knowledge" | "/api/passkeys/register-verify" | "/api/graphlog/daily-log-sync" | "/api/graphlog/sync-knowledge" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/api/graphlog/jobs/:jobId" | "/api/graphlog/reset-graph" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/api/graphlog/sync-graph" | "/fruits/maker/graphlog" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/graphlog/reset" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/graphlog/run" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/website-pages/:fileId/publish" | "/api/vault/projects/:folderId/sharing" | "/api/vault/website/:folderId/settings" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7" | "/v2" | "/v2/*";
   };
   "routes/api.passkeys.invite-register-options.tsx": {
     id: "routes/api.passkeys.invite-register-options";
@@ -724,11 +734,19 @@ type RouteFiles = {
   };
   "routes/api.vault.tsx": {
     id: "routes/api.vault";
-    page: "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload";
+    page: "/api/vault" | "/api/vault/website-pages/:fileId/publish" | "/api/vault/projects/:folderId/sharing" | "/api/vault/website/:folderId/settings" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload";
+  };
+  "routes/api.vault.website-pages.$fileId.publish.tsx": {
+    id: "routes/api.vault.website-pages.$fileId.publish";
+    page: "/api/vault/website-pages/:fileId/publish";
   };
   "routes/api.vault.projects.$folderId.sharing.tsx": {
     id: "routes/api.vault.projects.$folderId.sharing";
     page: "/api/vault/projects/:folderId/sharing";
+  };
+  "routes/api.vault.website.$folderId.settings.tsx": {
+    id: "routes/api.vault.website.$folderId.settings";
+    page: "/api/vault/website/:folderId/settings";
   };
   "routes/api.vault.projects.$folderId.status.tsx": {
     id: "routes/api.vault.projects.$folderId.status";
@@ -996,7 +1014,9 @@ type RouteModules = {
   "routes/api.upload.presign": typeof import("./app/routes/api.upload.presign.tsx");
   "routes/magic-link": typeof import("./app/routes/magic-link.tsx");
   "routes/api.vault": typeof import("./app/routes/api.vault.tsx");
+  "routes/api.vault.website-pages.$fileId.publish": typeof import("./app/routes/api.vault.website-pages.$fileId.publish.tsx");
   "routes/api.vault.projects.$folderId.sharing": typeof import("./app/routes/api.vault.projects.$folderId.sharing.tsx");
+  "routes/api.vault.website.$folderId.settings": typeof import("./app/routes/api.vault.website.$folderId.settings.tsx");
   "routes/api.vault.projects.$folderId.status": typeof import("./app/routes/api.vault.projects.$folderId.status.tsx");
   "routes/api.vault.public-download.$fileId": typeof import("./app/routes/api.vault.public-download.$fileId.tsx");
   "routes/api.vault.public-view.$fileId": typeof import("./app/routes/api.vault.public-view.$fileId.tsx");
