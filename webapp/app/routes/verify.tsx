@@ -8,7 +8,7 @@ import {
   getAuthError,
   getAuthEmail,
 } from "../modules/auth/auth.server";
-import { Input } from "../components/Input";
+import { Input } from "stamps/Input";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { Link } from "react-router";

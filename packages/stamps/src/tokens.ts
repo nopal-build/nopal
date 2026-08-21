@@ -104,6 +104,12 @@ export const semanticColors = {
   surfacePage: "var(--color-surface-page)",
   surfaceCard: "var(--color-surface-card)",
   surfaceBorder: "var(--color-surface-border)",
+
+  // Form fields deliberately don't follow the day/night surface swap —
+  // see the comment above `--color-field-bg` in root.css.
+  fieldBg: "var(--color-field-bg)",
+  fieldBorder: "var(--color-field-border)",
+  fieldText: "var(--color-field-text)",
 } as const;
 
 // Mirrors `webapp/tailwind.config.ts`'s `fontFamily` — kept here too so

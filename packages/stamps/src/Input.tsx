@@ -1,4 +1,6 @@
-import { FocusEventHandler } from "react";
+// packages/stamps/src/Input.tsx
+import type { FocusEventHandler } from "react";
+import { field, label as labelRecipe, wrapper } from "./input.css";
 
 type InputProps = {
   type?: "text" | "textarea" | "dropdown" | "date" | "number";
@@ -6,9 +8,7 @@ type InputProps = {
   name: string;
   value?: string;
   defaultValue?: string;
-  onChange?: (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-  ) => void;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
   required?: boolean;
   onFocus?: FocusEventHandler<HTMLInputElement | HTMLTextAreaElement>;
   onBlur?: FocusEventHandler<HTMLInputElement | HTMLTextAreaElement>;
@@ -26,10 +26,10 @@ type InputProps = {
   hideLabel?: boolean;
 };
 
-const DEFAULT_INPUT_CLASSNAME = "border border-gray-300 rounded px-2 py-1";
-
 export function Input(props: InputProps) {
   const { type = "text", name, defaultValue, value, placeholder } = props;
+
+  const isCompact = type === "date" || type === "number";
 
   const commonProps = {
     defaultValue,
@@ -40,43 +40,25 @@ export function Input(props: InputProps) {
     onBlur: props.onBlur,
     autoComplete: "off",
     required: props.required,
-    className: [DEFAULT_INPUT_CLASSNAME, props.className]
-      .filter(Boolean)
-      .join(" "),
     placeholder,
     autoFocus: props.autoFocus,
   };
 
   return (
-    <div className="flex flex-col input-component">
-      <label
-        className={`purple-text font-bold${props.hideLabel ? " sr-only" : ""}`}
-        htmlFor={name}
-      >
+    <div className={wrapper}>
+      <label className={labelRecipe({ hidden: props.hideLabel })} htmlFor={name}>
         {props.label}
       </label>
       {type == "textarea" ? (
         <textarea
-          style={{
-            minHeight: "130px",
-          }}
+          className={`${field({ multiline: true })} ${props.className ?? ""}`.trim()}
           {...commonProps}
         />
       ) : (
         <input
-          style={
-            // Native `date`/`number` control chrome (the calendar icon,
-            // segmented date parts, and up/down spin buttons) needs more
-            // vertical room than plain text to render without clipping or
-            // overflowing the rounded border — the default 16px vertical
-            // padding from `.input-component` leaves almost none at a
-            // 40px cap. Trim padding and give those two types a couple
-            // extra px of height instead, so the value stays centered and
-            // the native chrome has space to render fully inside the box.
-            type === "date" || type === "number"
-              ? { maxHeight: "42px", padding: "8px" }
-              : { maxHeight: "40px" }
-          }
+          className={`${field({ density: isCompact ? "compact" : "normal" })} ${
+            props.className ?? ""
+          }`.trim()}
           type={type || "text"}
           min={props.min}
           max={props.max}

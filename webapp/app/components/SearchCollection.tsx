@@ -1,5 +1,5 @@
 // app/components/SearchCollection.tsx
-import { Input } from "./Input";
+import { Input } from "stamps/Input";
 
 type SearchCollectionProps<T> = {
   /** Full item list — used for the default `renderItem` path. Pass `[]` and

@@ -89,6 +89,15 @@ html {
   --color-surface-page: var(--white);
   --color-surface-card: var(--surface-day-100);
   --color-surface-border: var(--surface-day-500);
+
+  /* Form fields deliberately don't follow the day/night surface swap
+     above — inputs keep an "ink on paper" look (dark text/border on a
+     pale background) in BOTH schemes rather than inverting to a dark
+     field on a dark page, which is why `field-text` doesn't change
+     between the two blocks below. */
+  --color-field-bg: var(--white);
+  --color-field-border: var(--surface-night-500);
+  --color-field-text: var(--surface-night-100);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -99,6 +108,8 @@ html {
     --color-surface-page: var(--purple);
     --color-surface-card: var(--surface-night-100);
     --color-surface-border: var(--surface-night-500);
+    --color-field-bg: var(--surface-day-100);
+    --color-field-border: var(--surface-day-500);
   }
 }
 
@@ -1283,26 +1294,5 @@ body {
   }
 }
 
-.input-component {
-  input,
-  textarea {
-    color: var(--dark-farground);
-    background: var(--white);
-    border-color: var(--dark-foreground);
-    padding: 16px 8px;
-    border-radius: 8px;
-    outline: none;
-    @media (prefers-color-scheme: dark) {
-      background: var(--farground);
-      border-color: var(--foreground);
-    }
-    &:focus {
-      border-color: var(--pink);
-    }
-  }
-  label {
-    /*font-weight: bold;*/
-    /*font-size: 16px;*/
-    /*margin-bottom: 2px;*/
-  }
-}
+/* .input-component moved to packages/stamps/src/input.css.ts (a
+   vanilla-extract recipe) — see the `Input` component there. */

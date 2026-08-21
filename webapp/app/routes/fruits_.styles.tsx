@@ -6,7 +6,7 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
-import { Input } from "../components/Input";
+import { Input } from "stamps/Input";
 import { Modal } from "../components/Modal";
 import { CopyField } from "../components/CopyField";
 import { SearchCollection } from "../components/SearchCollection";
@@ -210,7 +210,7 @@ export default function FruitsStyles() {
               </div>
               <div className="flex flex-col gap-2">
                 {[
-                  ["A text / textarea field", "<Input>", "components/Input.tsx"],
+                  ["A text / textarea field", "<Input>", "stamps/Input (packages/stamps)"],
                   [
                     "A numeric field with +/− steppers",
                     "<NumberInput>",

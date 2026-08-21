@@ -6,7 +6,8 @@
   "exports": {
     "./tokens": "./src/tokens.ts",
     "./Badge": "./src/Badge.tsx",
-    "./Chip": "./src/Chip.tsx"
+    "./Chip": "./src/Chip.tsx",
+    "./Input": "./src/Input.tsx"
   },
   "peerDependencies": {
     "react": "^18.3.1"
