@@ -1,6 +1,5 @@
 import { query } from "robustness-core/data/generic.server";
 import {
-  registerDb,
   getAllPublishedPagesByDbRef,
   getPageByDbRefAndSlug,
 } from "./core.server";
@@ -15,10 +14,6 @@ const db = {
   dbName: "gbs_applied_science",
   getPublicUrl: (slug: string) => `/science/${slug}`,
 };
-
-export function registerAppliedScienceDb() {
-  registerDb(db);
-}
 
 const assemblyDbFieldName = "Assembly Database";
 

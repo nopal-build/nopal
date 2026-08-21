@@ -1,6 +1,5 @@
 import { query } from "robustness-core/data/generic.server";
 import {
-  registerDb,
   getAllPublishedPagesByDbRef,
   getPageByDbRefAndSlug,
 } from "./core.server";
@@ -14,9 +13,6 @@ const db = {
   dbName: "gbs_assemblies",
   getPublicUrl: (slug: string) => `/assemblies/${slug}`,
 };
-export function registerAssembliesDb() {
-  registerDb(db);
-}
 
 export async function getAllAssemblies(): Promise<{
   data: MaterialRecord[];

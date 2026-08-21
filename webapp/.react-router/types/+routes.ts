@@ -391,18 +391,6 @@ type Pages = {
   "/login": {
     params: {};
   };
-  "/mrgnt": {
-    params: {};
-  };
-  "/mrgnt/discord": {
-    params: {};
-  };
-  "/mrgnt/humans": {
-    params: {};
-  };
-  "/mrgnt/gbs": {
-    params: {};
-  };
   "/path": {
     params: {};
   };
@@ -432,7 +420,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/passkeys/invite-register-options" | "/fruits/maker/graphlog/runs/:runId" | "/api/passkeys/invite-register-verify" | "/fruits/maker/graphlog/defaults" | "/api/graphlog/graph-project-view" | "/api/graphlog/reset-project-view" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/graphlog/graph-structure" | "/api/graphlog/reset-knowledge" | "/api/passkeys/register-verify" | "/api/graphlog/daily-log-sync" | "/api/graphlog/sync-knowledge" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/api/graphlog/jobs/:jobId" | "/api/graphlog/reset-graph" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/api/graphlog/sync-graph" | "/fruits/maker/graphlog" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/graphlog/reset" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/graphlog/run" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
+    page: "/" | "/api/passkeys/invite-register-options" | "/fruits/maker/graphlog/runs/:runId" | "/api/passkeys/invite-register-verify" | "/fruits/maker/graphlog/defaults" | "/api/graphlog/graph-project-view" | "/api/graphlog/reset-project-view" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/graphlog/graph-structure" | "/api/graphlog/reset-knowledge" | "/api/passkeys/register-verify" | "/api/graphlog/daily-log-sync" | "/api/graphlog/sync-knowledge" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/api/graphlog/jobs/:jobId" | "/api/graphlog/reset-graph" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/api/graphlog/sync-graph" | "/fruits/maker/graphlog" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/graphlog/reset" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/graphlog/run" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/projects/:folderId/sharing" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
   };
   "routes/api.passkeys.invite-register-options.tsx": {
     id: "routes/api.passkeys.invite-register-options";
@@ -874,26 +862,6 @@ type RouteFiles = {
     id: "routes/login";
     page: "/login";
   };
-  "routes/mrgnt.tsx": {
-    id: "routes/mrgnt";
-    page: "/mrgnt" | "/mrgnt/discord" | "/mrgnt/humans" | "/mrgnt/gbs";
-  };
-  "routes/mrgnt.discord.tsx": {
-    id: "routes/mrgnt.discord";
-    page: "/mrgnt/discord";
-  };
-  "routes/mrgnt._index.tsx": {
-    id: "routes/mrgnt._index";
-    page: "/mrgnt";
-  };
-  "routes/mrgnt.humans.tsx": {
-    id: "routes/mrgnt.humans";
-    page: "/mrgnt/humans";
-  };
-  "routes/mrgnt.gbs.tsx": {
-    id: "routes/mrgnt.gbs";
-    page: "/mrgnt/gbs";
-  };
   "routes/path.tsx": {
     id: "routes/path";
     page: "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7";
@@ -1044,11 +1012,6 @@ type RouteModules = {
   "routes/verify": typeof import("./app/routes/verify.tsx");
   "routes/about": typeof import("./app/routes/about.tsx");
   "routes/login": typeof import("./app/routes/login.tsx");
-  "routes/mrgnt": typeof import("./app/routes/mrgnt.tsx");
-  "routes/mrgnt.discord": typeof import("./app/routes/mrgnt.discord.tsx");
-  "routes/mrgnt._index": typeof import("./app/routes/mrgnt._index.tsx");
-  "routes/mrgnt.humans": typeof import("./app/routes/mrgnt.humans.tsx");
-  "routes/mrgnt.gbs": typeof import("./app/routes/mrgnt.gbs.tsx");
   "routes/path": typeof import("./app/routes/path.tsx");
   "routes/path._index": typeof import("./app/routes/path._index.tsx");
   "routes/path.faq-1": typeof import("./app/routes/path.faq-1.tsx");

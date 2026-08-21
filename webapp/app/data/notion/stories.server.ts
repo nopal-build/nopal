@@ -1,5 +1,4 @@
 import {
-  registerDb,
   getAllPublishedPagesByDbRef,
   getPageByDbRefAndSlug,
 } from "./core.server";
@@ -11,9 +10,6 @@ const db = {
   dbName: "gbs_stories",
   getPublicUrl: (slug: string) => `/stories/${slug}`,
 };
-export function registerStoriesDb() {
-  registerDb(db);
-}
 
 export async function getAllStories(): Promise<{
   data: StoryRecord[];

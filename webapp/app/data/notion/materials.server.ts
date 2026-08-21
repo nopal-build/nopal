@@ -1,5 +1,4 @@
 import {
-  registerDb,
   getAllPublishedPagesByDbRef,
   getPageByDbRefAndSlug,
 } from "./core.server";
@@ -12,9 +11,6 @@ const db = {
   dbName: "gbs_materials",
   getPublicUrl: (slug: string) => `/materials/${slug}`,
 };
-export function registerMaterialsDb() {
-  registerDb(db);
-}
 
 export async function getAllMaterials(): Promise<{
   data: MaterialRecord[];
