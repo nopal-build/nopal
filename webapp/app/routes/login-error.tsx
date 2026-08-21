@@ -10,16 +10,26 @@ import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { Link } from "react-router";
 import { surfaceBase } from "stamps/surface.css";
+import { sprinkles } from "stamps/sprinkles.css";
+import { textSize } from "stamps/typography.css";
 
 export default function LoginError() {
   return (
     <Layout>
       <div className="scene1">
-        <div className="w-full max-w-96 mx-auto px-4 py-12">
-          <h1 className="text-3xl purple-light-text font-bold mb-4">
+        <div
+          className={sprinkles({ px: 4, py: 12 })}
+          style={{ width: "100%", maxWidth: "24rem", margin: "0 auto" }}
+        >
+          <h1
+            className={`${textSize["3xl"]} purple-light-text ${sprinkles({
+              fontWeight: "bold",
+              mb: 4,
+            })}`}
+          >
             Login Problem
           </h1>
-          <div className={`${surfaceBase} p-4 text-lg`}>
+          <div className={`${surfaceBase} ${textSize.lg} ${sprinkles({ p: 4 })}`}>
             <p>
               There has been a problem logging in as this user. Please
               contact{" "}
@@ -29,7 +39,7 @@ export default function LoginError() {
               for help.
             </p>
           </div>
-          <div className="mt-8">
+          <div className={sprinkles({ mt: 8 })}>
             <Link to="/login" className="link">
               ← Back to login
             </Link>

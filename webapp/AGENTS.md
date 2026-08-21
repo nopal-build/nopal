@@ -49,12 +49,18 @@ shared with any future non-webapp surface — see the UI conventions below.
     `italic`, `uppercase`, `tracking-wide`, etc. Use `stamps/typography.css`'s
     `truncate` for Tailwind's `truncate` (don't set `overflow`/
     `text-overflow`/`white-space` separately).
-  - Non-migrated legacy classes (`.link`, `.btn-*`, `.menu-item`,
-    `.collection-well`) are still fine to use as-is for now — they haven't
-    been ported yet (they're custom CSS, not Tailwind, so they're a separate
-    concern from this migration). Don't block a change on migrating
-    something unrelated to what you're already touching; do migrate
-    whatever Tailwind you *do* touch in the same change.
+  - **Buttons**: use `stamps/button.css`'s `button` recipe (`button({
+    variant: "primary" | "secondary" | "outline" | "purple" | "yellow" })`)
+    instead of Tailwind/legacy `.btn`/`.btn-primary`/`.btn-secondary`/
+    `.btn-outline`/`.btn-purple`/`.btn-yellow` classes. For a tinted
+    variant (e.g. a destructive action), pass `tint: "danger"` instead of
+    the old `style={{ "--btn-color": "var(--red)" }}` escape hatch.
+  - Non-migrated legacy classes (`.link`, `.menu-item`, `.collection-well`)
+    are still fine to use as-is for now — they haven't been ported yet
+    (they're custom CSS, not Tailwind, so they're a separate concern from
+    this migration). Don't block a change on migrating something unrelated
+    to what you're already touching; do migrate whatever Tailwind you *do*
+    touch in the same change.
 - Don't re-apply styling that a shared component already provides by default
   (e.g. `Input` already has border/radius/padding baked in). Only pass a
   `className` for one-off overrides.

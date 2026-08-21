@@ -10,6 +10,9 @@ import {
 } from "../modules/auth/auth.server";
 import { Input } from "stamps/Input";
 import { surfaceBase } from "stamps/surface.css";
+import { sprinkles } from "stamps/sprinkles.css";
+import { textSize } from "stamps/typography.css";
+import { button } from "stamps/button.css";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { Link } from "react-router";
@@ -40,13 +43,34 @@ export default function Verify() {
   return (
     <Layout>
       <div className="scene1">
-        <div className="w-full max-w-96 mx-auto px-4 py-12">
-          <h1 className="text-3xl purple-light-text font-bold mb-2">
+        <div
+          className={sprinkles({ px: 4, py: 12 })}
+          style={{ width: "100%", maxWidth: "24rem", margin: "0 auto" }}
+        >
+          <h1
+            className={`${textSize["3xl"]} purple-light-text ${sprinkles({
+              fontWeight: "bold",
+              mb: 2,
+            })}`}
+          >
             Verify Login Code
           </h1>
-          <p className="italic mb-8">Check your email for "the code"</p>
-          <div className={`w-auto flex flex-col gap-4 ${surfaceBase} p-4 text-xl`}>
-            <Form method="POST" className="flex flex-col gap-4">
+          <p className={sprinkles({ fontStyle: "italic", mb: 8 })}>
+            Check your email for "the code"
+          </p>
+          <div
+            className={`${surfaceBase} ${textSize.xl} ${sprinkles({
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              p: 4,
+            })}`}
+            style={{ width: "auto" }}
+          >
+            <Form
+              method="POST"
+              className={sprinkles({ display: "flex", flexDirection: "column", gap: 4 })}
+            >
               <input type="hidden" value={authEmail} name="authEmail" />
               <Input
                 label="Code"
@@ -57,16 +81,16 @@ export default function Verify() {
               {authError && !shouldRequestCode && (
                 <div className="red-text">{authError}</div>
               )}
-              <div className="text-right">
-                <button className="btn-secondary" type="submit">
+              <div className={sprinkles({ textAlign: "right" })}>
+                <button className={button({ variant: "secondary" })} type="submit">
                   Continue
                 </button>
               </div>
             </Form>
             {authError?.includes("expired") ? (
-              <div className="text-lg red-text mt-2">
+              <div className={`${textSize.lg} red-text ${sprinkles({ mt: 2 })}`}>
                 That code has expired, when you are ready{" "}
-                <Form method="POST" className="inline-flex">
+                <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
                   <button className="link" type="submit">
                     click here to request a new code
                   </button>
@@ -74,9 +98,9 @@ export default function Verify() {
                 .
               </div>
             ) : authError?.includes("verification") ? (
-              <div className="text-lg red-text mt-2">
+              <div className={`${textSize.lg} red-text ${sprinkles({ mt: 2 })}`}>
                 We lost your session, when you are ready{" "}
-                <Form method="POST" className="inline-flex">
+                <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
                   <button className="link" type="submit">
                     click here to request a new code
                   </button>
@@ -84,9 +108,9 @@ export default function Verify() {
                 .
               </div>
             ) : (
-              <div className="text-lg text-right">
+              <div className={`${textSize.lg} ${sprinkles({ textAlign: "right" })}`}>
                 ...or{" "}
-                <Form method="POST" className="inline-flex">
+                <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
                   <button className="link" type="submit">
                     request new code
                   </button>
@@ -95,7 +119,7 @@ export default function Verify() {
               </div>
             )}
           </div>
-          <div className="mt-8">
+          <div className={sprinkles({ mt: 8 })}>
             <Link to="/login" className="link">
               ← Back to login
             </Link>
