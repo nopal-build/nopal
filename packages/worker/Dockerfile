@@ -33,6 +33,7 @@ RUN corepack enable pnpm
 COPY --link pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY --link packages/oxmarkdown-core/package.json packages/oxmarkdown-core/
 COPY --link packages/robustness-core/package.json packages/robustness-core/
+COPY --link packages/stamps/package.json packages/stamps/
 COPY --link packages/worker/package.json packages/worker/
 COPY --link webapp/package.json webapp/
 RUN pnpm install --frozen-lockfile
