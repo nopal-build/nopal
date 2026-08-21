@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Input } from "stamps/Input";
 import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
+import { textSize } from "stamps/typography.css";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { useLoaderData, useActionData, useNavigate, Form } from "react-router";
@@ -112,7 +113,10 @@ export default function Login() {
           style={{ width: "100%", maxWidth: "24rem", margin: "0 auto" }}
         >
           <h1
-            className={`text-3xl purple-light-text font-bold ${sprinkles({ mb: 4 })}`}
+            className={`${textSize["3xl"]} purple-light-text ${sprinkles({
+              fontWeight: "bold",
+              mb: 4,
+            })}`}
           >
             Login
           </h1>
@@ -159,7 +163,7 @@ export default function Login() {
             })}`}
           >
             {passkeyError && (
-              <div className="red-text text-sm">{passkeyError}</div>
+              <div className={`red-text ${textSize.sm}`}>{passkeyError}</div>
             )}
             <button
               className="btn-secondary"

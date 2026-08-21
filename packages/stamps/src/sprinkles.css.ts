@@ -14,6 +14,7 @@
 // a new color rung gets added to `tokens.ts`: only when something
 // actually needs it.
 import { defineProperties, createSprinkles } from "@vanilla-extract/sprinkles";
+import { fonts } from "./tokens";
 
 const space = {
   0: "0",
@@ -96,5 +97,29 @@ const layoutProperties = defineProperties({
   },
 });
 
-export const sprinkles = createSprinkles(spaceProperties, layoutProperties);
+// Typography properties that are each an independent, freely-combinable
+// single CSS property — bundled into the SAME sprinkles config as spacing/
+// layout for the same reason as above (one `sprinkles()` call to import,
+// not several). Font SIZE deliberately isn't here — Tailwind's `text-sm`
+// actually sets font-size AND line-height together as a linked pair, which
+// doesn't fit sprinkles' one-property-per-key model. See `textSize` in
+// `typography.css.ts` instead.
+const typographyProperties = defineProperties({
+  properties: {
+    fontWeight: { normal: 400, medium: 500, semibold: 600, bold: 700 },
+    fontFamily: { mono: fonts.mono, hand: fonts.hand },
+    fontStyle: ["normal", "italic"],
+    textTransform: ["none", "uppercase", "capitalize"],
+    letterSpacing: {
+      normal: "normal",
+      wide: "0.025em",
+      wider: "0.05em",
+      widest: "0.1em",
+    },
+    lineHeight: { none: "1", tight: "1.25", snug: "1.375", relaxed: "1.625" },
+    whiteSpace: ["normal", "nowrap"],
+  },
+});
+
+export const sprinkles = createSprinkles(spaceProperties, layoutProperties, typographyProperties);
 export type Sprinkles = Parameters<typeof sprinkles>[0];

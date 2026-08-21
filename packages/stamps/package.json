@@ -15,7 +15,8 @@
     "./MoreMenu": "./src/MoreMenu.tsx",
     "./SearchCollection": "./src/SearchCollection.tsx",
     "./CopyField": "./src/CopyField.tsx",
-    "./sprinkles.css": "./src/sprinkles.css.ts"
+    "./sprinkles.css": "./src/sprinkles.css.ts",
+    "./typography.css": "./src/typography.css.ts"
   },
   "peerDependencies": {
     "react": "^18.3.1"
