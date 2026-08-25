@@ -5,9 +5,13 @@ use std::io::Write;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use nopal_core::sync_api::{self as core_sync_api, SyncApiColumn, SyncApiSchema};
+use nopal_core::vault::{Client as VaultClient, Folder as VaultFolder};
 
 mod auth;
 mod graphlog;
@@ -17,6 +21,7 @@ mod release_log;
 mod skills;
 mod sort;
 mod sync;
+mod sync_api;
 mod update;
 mod vault;
 mod video;
@@ -27,7 +32,24 @@ const DEFAULT_HOST: &str = "https://nopal.build";
 #[derive(Debug, Subcommand)]
 enum Command {
     Test {},
-    RecordLoadCell {},
+    RecordLoadCell {
+        /// Which project's Syncs folder to record into, e.g.
+        /// `projects/sunny` — defaults to your Personal space.
+        #[arg(long)]
+        project: Option<String>,
+        /// Name of the sync-api analysis inside Syncs (created on first
+        /// use). Defaults to "load-cell".
+        #[arg(long, default_value = "load-cell")]
+        analysis: String,
+        /// Exact run name (e.g. "test-1"). Omit to auto-number against
+        /// --run-prefix.
+        #[arg(long)]
+        run_name: Option<String>,
+        /// Prefix to auto-number the run name against when --run-name is
+        /// omitted (e.g. "test" -> "test-1", "test-2", ...).
+        #[arg(long, default_value = "test")]
+        run_prefix: String,
+    },
     /// Log in via your browser and store a session token for the CLI.
     Login {
         /// Nopal host to authenticate against.
@@ -76,6 +98,15 @@ enum Command {
     Sync {
         #[command(subcommand)]
         command: SyncCommand,
+    },
+    /// Typed CSV data-collection analyses (create an analysis + schema,
+    /// then create runs and append rows to them) — see the vault skill's
+    /// "Sync types" section. Mostly useful for manual setup/testing; a
+    /// real data source (e.g. `record-load-cell`) calls the same
+    /// `nopal_core::sync_api` module directly.
+    SyncApi {
+        #[command(subcommand)]
+        command: SyncApiCommand,
     },
     /// Trigger the daily-log Sorter (mentions → project backlinks,
     /// completed Card tasks, Card file attachments → Release Log entries).
@@ -394,6 +425,68 @@ enum SyncCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum SyncApiCommand {
+    /// Create (or update the schema of) a sync-api analysis inside a
+    /// project's (or Personal's) Syncs folder.
+    CreateAnalysis {
+        /// Analysis name (its folder name inside Syncs).
+        name: String,
+        /// Which project's Syncs folder — defaults to Personal.
+        #[arg(long)]
+        project: Option<String>,
+        /// Comma-separated `name:type` column list, e.g.
+        /// `elapsed:number,kind:string,force_lbs:number`. Valid types:
+        /// string, number, boolean, timestamp.
+        #[arg(long)]
+        schema: String,
+    },
+    /// Create a new run (`<name>.md` + `<name>.csv`) inside an analysis.
+    CreateRun {
+        /// Analysis name.
+        analysis: String,
+        /// Which project's Syncs folder — defaults to Personal.
+        #[arg(long)]
+        project: Option<String>,
+        /// Exact run name. Omit to auto-number against --prefix instead.
+        #[arg(long)]
+        name: Option<String>,
+        /// Prefix to auto-number the run name against when --name is
+        /// omitted (e.g. "test" -> "test-1", "test-2", ...).
+        #[arg(long, default_value = "test")]
+        prefix: String,
+        /// Run title (defaults to the run name).
+        #[arg(long)]
+        title: Option<String>,
+        /// Initial body text for the run's markdown file.
+        #[arg(long)]
+        body: Option<String>,
+    },
+    /// Append one row to an existing run's CSV.
+    AppendRow {
+        /// Analysis name.
+        analysis: String,
+        /// Run name (see 'nopal sync-api ls-runs').
+        run: String,
+        /// Which project's Syncs folder — defaults to Personal.
+        #[arg(long)]
+        project: Option<String>,
+        /// Comma-separated `key=value` pairs, e.g.
+        /// `elapsed=1.5,kind=force,force_lbs=12.3`. Values are
+        /// best-effort coerced to number/boolean, else kept as strings.
+        #[arg(long)]
+        row: String,
+    },
+    /// List the runs in an analysis.
+    LsRuns {
+        /// Analysis name.
+        analysis: String,
+        /// Which project's Syncs folder — defaults to Personal.
+        #[arg(long)]
+        project: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum SortCommand {
     /// Sort one day (yours) — defaults to yesterday (UTC) if --date is omitted.
     Run {
@@ -561,9 +654,16 @@ fn main() {
         Command::Test {} => {
             println!("Testing");
         }
-        Command::RecordLoadCell {} => {
+        Command::RecordLoadCell {
+            project,
+            analysis,
+            run_name,
+            run_prefix,
+        } => {
             println!("Recording load cell info");
-            if let Err(e) = read_serial_port_interactive("DK0HR7JK") {
+            if let Err(e) =
+                read_serial_port_interactive("DK0HR7JK", project, &analysis, run_name, &run_prefix)
+            {
                 eprintln!("Error: {}", e);
             }
         }
@@ -732,6 +832,36 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Command::SyncApi { command } => {
+            let result = match command {
+                SyncApiCommand::CreateAnalysis {
+                    name,
+                    project,
+                    schema,
+                } => sync_api::create_analysis(&name, project, &schema),
+                SyncApiCommand::CreateRun {
+                    analysis,
+                    project,
+                    name,
+                    prefix,
+                    title,
+                    body,
+                } => sync_api::create_run(&analysis, project, name, Some(prefix), title, body),
+                SyncApiCommand::AppendRow {
+                    analysis,
+                    run,
+                    project,
+                    row,
+                } => sync_api::append_row(&analysis, &run, project, &row),
+                SyncApiCommand::LsRuns { analysis, project } => {
+                    sync_api::ls_runs(&analysis, project)
+                }
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
         Command::Graphlog { command } => {
             let result = match command {
                 GraphlogCommand::Run { project } => graphlog::run(&project),
@@ -800,7 +930,13 @@ fn main() {
 const COMPRESSION_10000_LBS: f64 = -1.9870;
 const TENSION_10000_LBS: f64 = 1.9857;
 
-fn read_serial_port_interactive(port_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn read_serial_port_interactive(
+    port_name: &str,
+    project: Option<String>,
+    analysis: &str,
+    run_name: Option<String>,
+    run_prefix: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Find and open the serial port
     let ports = serialport::available_ports()?;
     let port = ports.iter().find(|p| p.port_name.contains(port_name));
@@ -833,6 +969,24 @@ fn read_serial_port_interactive(port_name: &str) -> Result<(), Box<dyn std::erro
         f.flush()?;
     }
 
+    // Local file above is the durable source of truth (never lost to a
+    // flaky test-bench network) — this is a best-effort MIRROR into a
+    // sync-api vault run, live as each row is captured. A failure here
+    // never aborts the recording session.
+    let vault_row_tx: Option<mpsc::Sender<serde_json::Value>> =
+        match setup_load_cell_run(project, analysis, run_name, run_prefix) {
+            Ok((client, folder, run)) => {
+                println!("Vault run: {analysis}/{run}.csv (syncing live)");
+                Some(spawn_vault_pusher(client, folder, run))
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: couldn't set up vault sync ({e}) \u{2014} recording locally only."
+                );
+                None
+            }
+        };
+
     let start = Instant::now();
     let running = Arc::new(AtomicBool::new(true));
     // Force sampled once per second by the background thread. Distance
@@ -848,6 +1002,7 @@ fn read_serial_port_interactive(port_name: &str) -> Result<(), Box<dyn std::erro
         let running = Arc::clone(&running);
         let latest_force = Arc::clone(&latest_force);
         let file = Arc::clone(&file);
+        let vault_row_tx = vault_row_tx.clone();
         let mut port = port;
         thread::spawn(move || {
             while running.load(Ordering::Relaxed) {
@@ -859,6 +1014,15 @@ fn read_serial_port_interactive(port_name: &str) -> Result<(), Box<dyn std::erro
                         let mut f = file.lock().unwrap();
                         if writeln!(f, "{:.3},force,{},{},", elapsed, force, raw).is_ok() {
                             let _ = f.flush();
+                        }
+                        if let Some(tx) = &vault_row_tx {
+                            let _ = tx.send(load_cell_row(
+                                elapsed,
+                                "force",
+                                Some(force),
+                                Some(raw),
+                                None,
+                            ));
                         }
                     }
                     Err(e) => {
@@ -914,10 +1078,28 @@ fn read_serial_port_interactive(port_name: &str) -> Result<(), Box<dyn std::erro
                     "Distance: {distance}  (nearest force sample @ {sample_elapsed:.1}s: {force} lbs)"
                 );
                 writeln!(f, "{:.3},distance,{},{},{}", elapsed, force, raw, distance)?;
+                if let Some(tx) = &vault_row_tx {
+                    let _ = tx.send(load_cell_row(
+                        elapsed,
+                        "distance",
+                        Some(force),
+                        Some(raw),
+                        Some(distance),
+                    ));
+                }
             }
             None => {
                 println!("Distance: {distance} (no force sample yet)");
                 writeln!(f, "{:.3},distance,,,{}", elapsed, distance)?;
+                if let Some(tx) = &vault_row_tx {
+                    let _ = tx.send(load_cell_row(
+                        elapsed,
+                        "distance",
+                        None,
+                        None,
+                        Some(distance),
+                    ));
+                }
             }
         }
         f.flush()?;
@@ -926,9 +1108,114 @@ fn read_serial_port_interactive(port_name: &str) -> Result<(), Box<dyn std::erro
     running.store(false, Ordering::Relaxed);
     let _ = sampler_handle.join();
 
+    // Drop the main thread's own sender (the sampler thread's clone was
+    // already dropped by the join above) so the pusher's channel closes,
+    // its `recv()` loop ends, and any final buffered rows get flushed
+    // before we report done.
+    drop(vault_row_tx);
+
     println!("Saved {filename}");
 
     Ok(())
+}
+
+/// Vault columns for a `load-cell` sync-api analysis — mirrors the local
+/// CSV's own header (`Elapsed (s),Type,Force (lbs),Raw (mV/V),Distance
+/// (in)`) with plain identifier names.
+fn load_cell_schema() -> SyncApiSchema {
+    SyncApiSchema {
+        columns: vec![
+            SyncApiColumn {
+                name: "elapsed_s".into(),
+                column_type: "number".into(),
+            },
+            SyncApiColumn {
+                name: "kind".into(),
+                column_type: "string".into(),
+            },
+            SyncApiColumn {
+                name: "force_lbs".into(),
+                column_type: "number".into(),
+            },
+            SyncApiColumn {
+                name: "raw_mv_v".into(),
+                column_type: "number".into(),
+            },
+            SyncApiColumn {
+                name: "distance_in".into(),
+                column_type: "number".into(),
+            },
+        ],
+    }
+}
+
+fn load_cell_row(
+    elapsed: f64,
+    kind: &str,
+    force: Option<f64>,
+    raw: Option<f64>,
+    distance: Option<f64>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "elapsed_s": elapsed,
+        "kind": kind,
+        "force_lbs": force,
+        "raw_mv_v": raw,
+        "distance_in": distance,
+    })
+}
+
+/// Ensures the `analysis` exists (creating it with the load-cell schema on
+/// first use) inside `project`'s (or Personal's) Syncs folder, then
+/// creates a new run for this recording session. Returns the client (reused
+/// by the pusher thread), the analysis folder, and the created run's name.
+fn setup_load_cell_run(
+    project: Option<String>,
+    analysis: &str,
+    run_name: Option<String>,
+    run_prefix: &str,
+) -> nopal_core::Result<(VaultClient, VaultFolder, String)> {
+    let client = VaultClient::new()?;
+    let folder =
+        core_sync_api::ensure_analysis(&client, project.as_deref(), analysis, &load_cell_schema())?;
+    let run = core_sync_api::create_run(
+        &client,
+        &folder,
+        run_name.as_deref(),
+        Some(run_prefix),
+        None,
+        None,
+    )?;
+    Ok((client, folder, run.name))
+}
+
+/// Spawns the background thread that turns buffered rows into batched
+/// `append_rows` calls — network latency here never blocks the sampler or
+/// the operator typing distances. Ends (and flushes anything already
+/// queued) once every `Sender` clone has been dropped.
+fn spawn_vault_pusher(
+    client: VaultClient,
+    folder: VaultFolder,
+    run_name: String,
+) -> mpsc::Sender<serde_json::Value> {
+    let (tx, rx) = mpsc::channel::<serde_json::Value>();
+    thread::spawn(move || loop {
+        let first = match rx.recv() {
+            Ok(row) => row,
+            Err(_) => break,
+        };
+        let mut batch = vec![first];
+        while let Ok(row) = rx.try_recv() {
+            batch.push(row);
+        }
+        let count = batch.len();
+        if let Err(e) = core_sync_api::append_rows(&client, &folder, &run_name, &batch) {
+            eprintln!(
+                    "Warning: failed to sync {count} row(s) to the vault ({e}) \u{2014} still saved locally."
+                );
+        }
+    });
+    tx
 }
 
 fn read_single_measurement(

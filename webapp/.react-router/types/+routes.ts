@@ -284,9 +284,25 @@ type Pages = {
       "folderId": string;
     };
   };
+  "/api/vault/sync-api/:folderId/schema": {
+    params: {
+      "folderId": string;
+    };
+  };
   "/api/vault/public-download/:fileId": {
     params: {
       "fileId": string;
+    };
+  };
+  "/api/vault/sync-api/:folderId/runs": {
+    params: {
+      "folderId": string;
+    };
+  };
+  "/api/vault/sync-api/:folderId/runs/:runName/rows": {
+    params: {
+      "folderId": string;
+      "runName": string;
     };
   };
   "/api/vault/public-view/:fileId": {
@@ -312,6 +328,9 @@ type Pages = {
     params: {
       "fileId": string;
     };
+  };
+  "/api/vault/sync-api/ensure": {
+    params: {};
   };
   "/api/vault/multipart-init": {
     params: {};
@@ -438,7 +457,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/api/passkeys/invite-register-options" | "/fruits/maker/graphlog/runs/:runId" | "/api/passkeys/invite-register-verify" | "/fruits/maker/graphlog/defaults" | "/api/graphlog/graph-project-view" | "/api/graphlog/reset-project-view" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/graphlog/graph-structure" | "/api/graphlog/reset-knowledge" | "/api/passkeys/register-verify" | "/api/graphlog/daily-log-sync" | "/api/graphlog/sync-knowledge" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/api/graphlog/jobs/:jobId" | "/api/graphlog/reset-graph" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/api/graphlog/sync-graph" | "/fruits/maker/graphlog" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/graphlog/reset" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/graphlog/run" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/website-pages/:fileId/publish" | "/api/vault/projects/:folderId/sharing" | "/api/vault/website/:folderId/settings" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7" | "/v2" | "/v2/*";
+    page: "/" | "/api/passkeys/invite-register-options" | "/fruits/maker/graphlog/runs/:runId" | "/api/passkeys/invite-register-verify" | "/fruits/maker/graphlog/defaults" | "/api/graphlog/graph-project-view" | "/api/graphlog/reset-project-view" | "/api/legal-documents/view/:docId" | "/api/release-log/:entryId/revert" | "/api/admin/impersonation-status" | "/api/passkeys/register-options" | "/api/admin/stop-impersonating" | "/api/graphlog/graph-structure" | "/api/graphlog/reset-knowledge" | "/api/passkeys/register-verify" | "/api/graphlog/daily-log-sync" | "/api/graphlog/sync-knowledge" | "/fruits/newspaper/:folderId" | "/api/passkeys/login-options" | "/fruits/styles/oxmarkdown" | "/api/passkeys/login-verify" | "/api/graphlog/jobs/:jobId" | "/api/graphlog/reset-graph" | "/tools/frames-volume-calc" | "/tools/grade-differential" | "/api/graphlog/sync-graph" | "/fruits/maker/graphlog" | "/public/folder/:folderId" | "/tools/building-envelope" | "/api/daily-log/sort-all" | "/api/admin/impersonate" | "/api/cli-auth/exchange" | "/grandpas-cabin-recipe" | "/tools/thermal-inertia" | "/api/daily-log/upload" | "/tools/erv-calculator" | "/api/mentions/search" | "/api/mentions/select" | "/public/file/:fileId" | "/api/daily-log/sort" | "/api/graphlog/reset" | "/api/humans/related" | "/tools/space-layout" | "/fruits/daily-log" | "/good/architecture" | "/api/graphlog/run" | "/api/sync-targets" | "/api/sync-targets/:targetId" | "/tools/do-not-use" | "/api/sync-tokens" | "/fruits/profile" | "/good/consulting" | "/assemblies/:id" | "/docs/wc-waiver" | "/fruits/styles" | "/good/sunny-no1" | "/sunny-home-no1" | "/welcome/:token" | "/fruits/maker" | "/fruits/vault" | "/good/building" | "/materials/:id" | "/card/:fileId" | "/roots" | "/tools" | "/good/guides" | "/login-error" | "/science/:id" | "/stories/:id" | "/tools/loads" | "/api/events" | "/api/upload" | "/api/upload/presign" | "/magic-link" | "/api/vault" | "/api/vault/website-pages/:fileId/publish" | "/api/vault/projects/:folderId/sharing" | "/api/vault/website/:folderId/settings" | "/api/vault/projects/:folderId/status" | "/api/vault/sync-api/:folderId/schema" | "/api/vault/public-download/:fileId" | "/api/vault/sync-api/:folderId/runs" | "/api/vault/sync-api/:folderId/runs/:runName/rows" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/sync-api/ensure" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload" | "/cli-login" | "/tools/mtf" | "/scc-demo" | "/contact" | "/explore" | "/privacy" | "/fruits" | "/good/s" | "/health" | "/health/:key?" | "/logout" | "/verify" | "/about" | "/login" | "/path" | "/path/faq-1" | "/path/faq-2" | "/path/faq-3" | "/path/faq-4" | "/path/faq-5" | "/path/faq-6" | "/path/faq-7" | "/v2" | "/v2/*";
   };
   "routes/api.passkeys.invite-register-options.tsx": {
     id: "routes/api.passkeys.invite-register-options";
@@ -734,7 +753,7 @@ type RouteFiles = {
   };
   "routes/api.vault.tsx": {
     id: "routes/api.vault";
-    page: "/api/vault" | "/api/vault/website-pages/:fileId/publish" | "/api/vault/projects/:folderId/sharing" | "/api/vault/website/:folderId/settings" | "/api/vault/projects/:folderId/status" | "/api/vault/public-download/:fileId" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload";
+    page: "/api/vault" | "/api/vault/website-pages/:fileId/publish" | "/api/vault/projects/:folderId/sharing" | "/api/vault/website/:folderId/settings" | "/api/vault/projects/:folderId/status" | "/api/vault/sync-api/:folderId/schema" | "/api/vault/public-download/:fileId" | "/api/vault/sync-api/:folderId/runs" | "/api/vault/sync-api/:folderId/runs/:runName/rows" | "/api/vault/public-view/:fileId" | "/api/vault/multipart-complete" | "/api/vault/download/:fileId" | "/api/vault/archive-cleanup" | "/api/vault/multipart-abort" | "/api/vault/replace/:fileId" | "/api/vault/sync-api/ensure" | "/api/vault/multipart-init" | "/api/vault/multipart-part" | "/api/vault/sync-manifest" | "/api/vault/trash-cleanup" | "/api/vault/view/:fileId" | "/api/vault/all-files" | "/api/vault/:fileId" | "/api/vault/folders" | "/api/vault/folders/:folderId" | "/api/vault/folders/:folderId/children" | "/api/vault/presign" | "/api/vault/upload";
   };
   "routes/api.vault.website-pages.$fileId.publish.tsx": {
     id: "routes/api.vault.website-pages.$fileId.publish";
@@ -752,9 +771,21 @@ type RouteFiles = {
     id: "routes/api.vault.projects.$folderId.status";
     page: "/api/vault/projects/:folderId/status";
   };
+  "routes/api.vault.sync-api.$folderId.schema.tsx": {
+    id: "routes/api.vault.sync-api.$folderId.schema";
+    page: "/api/vault/sync-api/:folderId/schema";
+  };
   "routes/api.vault.public-download.$fileId.tsx": {
     id: "routes/api.vault.public-download.$fileId";
     page: "/api/vault/public-download/:fileId";
+  };
+  "routes/api.vault.sync-api.$folderId.runs.tsx": {
+    id: "routes/api.vault.sync-api.$folderId.runs";
+    page: "/api/vault/sync-api/:folderId/runs" | "/api/vault/sync-api/:folderId/runs/:runName/rows";
+  };
+  "routes/api.vault.sync-api.$folderId.runs.$runName.rows.tsx": {
+    id: "routes/api.vault.sync-api.$folderId.runs.$runName.rows";
+    page: "/api/vault/sync-api/:folderId/runs/:runName/rows";
   };
   "routes/api.vault.public-view.$fileId.tsx": {
     id: "routes/api.vault.public-view.$fileId";
@@ -779,6 +810,10 @@ type RouteFiles = {
   "routes/api.vault.replace.$fileId.tsx": {
     id: "routes/api.vault.replace.$fileId";
     page: "/api/vault/replace/:fileId";
+  };
+  "routes/api.vault.sync-api.ensure.tsx": {
+    id: "routes/api.vault.sync-api.ensure";
+    page: "/api/vault/sync-api/ensure";
   };
   "routes/api.vault.multipart-init.tsx": {
     id: "routes/api.vault.multipart-init";
@@ -1018,13 +1053,17 @@ type RouteModules = {
   "routes/api.vault.projects.$folderId.sharing": typeof import("./app/routes/api.vault.projects.$folderId.sharing.tsx");
   "routes/api.vault.website.$folderId.settings": typeof import("./app/routes/api.vault.website.$folderId.settings.tsx");
   "routes/api.vault.projects.$folderId.status": typeof import("./app/routes/api.vault.projects.$folderId.status.tsx");
+  "routes/api.vault.sync-api.$folderId.schema": typeof import("./app/routes/api.vault.sync-api.$folderId.schema.tsx");
   "routes/api.vault.public-download.$fileId": typeof import("./app/routes/api.vault.public-download.$fileId.tsx");
+  "routes/api.vault.sync-api.$folderId.runs": typeof import("./app/routes/api.vault.sync-api.$folderId.runs.tsx");
+  "routes/api.vault.sync-api.$folderId.runs.$runName.rows": typeof import("./app/routes/api.vault.sync-api.$folderId.runs.$runName.rows.tsx");
   "routes/api.vault.public-view.$fileId": typeof import("./app/routes/api.vault.public-view.$fileId.tsx");
   "routes/api.vault.multipart-complete": typeof import("./app/routes/api.vault.multipart-complete.tsx");
   "routes/api.vault.download.$fileId": typeof import("./app/routes/api.vault.download.$fileId.tsx");
   "routes/api.vault.archive-cleanup": typeof import("./app/routes/api.vault.archive-cleanup.tsx");
   "routes/api.vault.multipart-abort": typeof import("./app/routes/api.vault.multipart-abort.tsx");
   "routes/api.vault.replace.$fileId": typeof import("./app/routes/api.vault.replace.$fileId.tsx");
+  "routes/api.vault.sync-api.ensure": typeof import("./app/routes/api.vault.sync-api.ensure.tsx");
   "routes/api.vault.multipart-init": typeof import("./app/routes/api.vault.multipart-init.tsx");
   "routes/api.vault.multipart-part": typeof import("./app/routes/api.vault.multipart-part.tsx");
   "routes/api.vault.sync-manifest": typeof import("./app/routes/api.vault.sync-manifest.tsx");

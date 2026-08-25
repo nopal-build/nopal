@@ -801,9 +801,13 @@ function MovePickerNode({
 /**
  * Panel content for the "New folder" `MoreMenu` popover (see `VaultV2Page`'s
  * toolbar) — NOT a modal. Plain-folder creation is a name + Create (or hit
- * Enter); a Vault Folder Type (Skills/Syncs, or a sync connector when the
- * current folder IS a Syncs folder — see the vault skill) is a single
- * button that kicks off creation immediately, no typing required.
+ * Enter). A singleton Space type (Skills/Syncs — see the vault skill) is a
+ * single button that kicks off creation immediately, no typing required,
+ * since its name is always the type's own label. A Sync type — only
+ * offered when the current folder IS a Syncs folder — is NOT singleton
+ * (any number of data sources may live side by side, each with its own
+ * meaningful name), so picking one just SELECTS that type; the typed name
+ * + Create/Enter creates it.
  */
 function NewFolderPanel({
   parentFolder,
@@ -843,23 +847,27 @@ function NewFolderPanel({
         (key) => !existingSpaceTypes.has(key),
       )
     : [];
+  // Sync types are NOT singleton (a Syncs folder can hold any number of
+  // data sources, each with its own meaningful name — e.g. an analysis
+  // named "load-cell") so, unlike Space types below, picking one doesn't
+  // create immediately: it just selects which type the typed NAME should
+  // be created as.
   const syncTypeOptions = isSyncsContainer
     ? (Object.keys(SYNC_FOLDER_TYPES) as SyncFolderTypeKey[])
     : [];
-
-  const typeDefs: Record<string, { label: string; description: string; comingSoon?: boolean }> = {
-    ...SPACE_FOLDER_TYPES,
-    ...SYNC_FOLDER_TYPES,
-  };
-  const typeOptions = [...spaceTypeOptions, ...syncTypeOptions];
 
   const [name, setName] = useState("");
   const [containerType, setContainerType] = useState<"project" | "website">(
     "project",
   );
+  const [syncType, setSyncType] = useState<SyncFolderTypeKey | null>(null);
   const canSubmit = name.trim().length > 0;
   const submitPlain = () => {
     if (!canSubmit) return;
+    if (syncType) {
+      onCreate(name.trim(), syncType);
+      return;
+    }
     onCreate(
       name.trim(),
       canCreateWebsite && containerType === "website" ? "website" : null,
@@ -896,6 +904,44 @@ function NewFolderPanel({
           ))}
         </div>
       )}
+      {syncTypeOptions.length > 0 && (
+        <div style={{ padding: "2px 2px 6px" }}>
+          <div
+            className="text-xs font-mono"
+            style={{ opacity: 0.6, padding: "0 2px 4px" }}
+          >
+            Type
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+            {syncTypeOptions.map((key) => {
+              const def = SYNC_FOLDER_TYPES[key];
+              const selected = syncType === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={def.comingSoon}
+                  title={def.description}
+                  onClick={() => setSyncType(selected ? null : key)}
+                  className="text-xs font-mono px-2 py-1 rounded"
+                  style={{
+                    border: "1px solid var(--border)",
+                    background: selected
+                      ? "var(--purple-light)"
+                      : "var(--bg-secondary)",
+                    color: selected ? "white" : "var(--text)",
+                    opacity: def.comingSoon ? 0.5 : 1,
+                    cursor: def.comingSoon ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {def.label}
+                  {def.comingSoon ? " (soon)" : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", gap: "6px", padding: "2px 2px 6px" }}>
         <input
           autoFocus
@@ -906,9 +952,11 @@ function NewFolderPanel({
             if (e.key === "Enter") submitPlain();
           }}
           placeholder={
-            canCreateWebsite && containerType === "website"
-              ? "Site name"
-              : "Folder name"
+            syncType
+              ? "e.g. load-cell"
+              : canCreateWebsite && containerType === "website"
+                ? "Site name"
+                : "Folder name"
           }
           className="text-xs font-mono"
           style={{
@@ -932,13 +980,13 @@ function NewFolderPanel({
         </button>
       </div>
 
-      {typeOptions.length > 0 && (
+      {spaceTypeOptions.length > 0 && (
         <>
           <div
             style={{ borderTop: "1px solid var(--border)", margin: "2px 0 4px" }}
           />
-          {typeOptions.map((key) => {
-            const def = typeDefs[key];
+          {spaceTypeOptions.map((key) => {
+            const def = SPACE_FOLDER_TYPES[key];
             return (
               <button
                 key={key}

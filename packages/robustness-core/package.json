@@ -41,6 +41,7 @@
     "./data/releaseLog.server": "./src/data/releaseLog.server.ts",
     "./data/sharingRoles.server": "./src/data/sharingRoles.server.ts",
     "./data/sorter.server": "./src/data/sorter.server.ts",
+    "./data/syncApi.server": "./src/data/syncApi.server.ts",
     "./data/syncGraph.server": "./src/data/syncGraph.server.ts",
     "./data/syncKnowledge.server": "./src/data/syncKnowledge.server.ts",
     "./data/syncTargets.server": "./src/data/syncTargets.server.ts",

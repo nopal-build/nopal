@@ -77,12 +77,20 @@
  *      - `sync-one-way` / `sync-two-way`: the CLI's folder sync (`nopal sync
  *        add [--two-way]`) — a local directory mirrors in (one-way) or both
  *        ways (two-way).
- *      - `sync-api` / `sync-email` / `sync-custom`: not implemented yet —
- *        placeholders for hooking into an external API, forwarding email/
- *        text, or a one-off hand-built collector. Listed now so the
- *        architecture (and the "New folder" type picker) has somewhere for
- *        them to slot in later without another root/schema change.
- *        `comingSoon: true` keeps them visible-but-disabled in the UI.
+ *      - `sync-api`: a typed CSV data-collection ANALYSIS — the caller
+ *        (CLI command, test-bench hardware, an embedded device) defines a
+ *        column schema once (`_schema.json`, set via `PUT
+ *        /api/vault/sync-api/:folderId/schema`), then creates any number of
+ *        RUNS against it (`<name>.md` + `<name>.csv`, see
+ *        `syncApi.server.ts`), appending rows to a run's CSV over whatever
+ *        timeframe fits that data source. CLI/API-only for now — not yet
+ *        exposed as a schema-authoring UI in the "New folder" picker.
+ *      - `sync-email` / `sync-custom`: not implemented yet — placeholders
+ *        for forwarding email/text, or a one-off hand-built collector.
+ *        Listed now so the architecture (and the "New folder" type picker)
+ *        has somewhere for them to slot in later without another
+ *        root/schema change. `comingSoon: true` keeps them
+ *        visible-but-disabled in the UI.
  *
  * This file has NO server-only imports — safe on both client and server,
  * same convention as `vaultRoots.ts`.
@@ -240,11 +248,11 @@ export const SYNC_FOLDER_TYPES: Record<SyncFolderTypeKey, VaultFolderTypeDef> = 
   },
   "sync-api": {
     label: "API Integration",
-    description: "Hook into an external system's API to pull data in on a schedule.",
+    description:
+      "A typed CSV data-collection analysis: define a column schema once, then create any number of runs and append rows to them over time (CLI/API only for now).",
     writable: "owner",
     shareable: false,
     publishable: true,
-    comingSoon: true,
   },
   "sync-email": {
     label: "Email & Text",

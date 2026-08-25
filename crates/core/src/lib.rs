@@ -10,6 +10,7 @@
 pub mod auth;
 pub mod record;
 pub mod sync;
+pub mod sync_api;
 pub mod vault;
 pub mod video;
 
