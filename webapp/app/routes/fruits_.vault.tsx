@@ -354,6 +354,41 @@ function formatSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Triggers a real browser "Save As" download from whatever
+ * `/api/vault/download/:fileId` (or the folder-level `download-manifest`)
+ * handed back — an S3-backed file's presigned `url` (browser navigates
+ * straight to it), or a content-only file's inline `content` (Blob-download
+ * client-side, same pattern as `exportObj.ts`/`exportSvg.ts`'s
+ * `triggerObjDownload`/`triggerSvgDownload` — there's no S3 object to point
+ * a URL at, so the bytes have to be assembled here instead).
+ */
+function triggerFileDownload(entry: {
+  name: string;
+  url?: string;
+  content?: string;
+  contentType?: string;
+}): void {
+  const a = document.createElement("a");
+  a.download = entry.name;
+  let objectUrl: string | null = null;
+  if (entry.url) {
+    a.href = entry.url;
+  } else if (entry.content !== undefined) {
+    const blob = new Blob([entry.content], {
+      type: entry.contentType || "text/plain",
+    });
+    objectUrl = URL.createObjectURL(blob);
+    a.href = objectUrl;
+  } else {
+    return;
+  }
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+}
+
 function formatDate(iso: string): string {
   // Parse the calendar date directly from the ISO string so that server (UTC)
   // and browser (local timezone) always produce the same string and React
@@ -2277,14 +2312,46 @@ export default function VaultV2Page() {
       window.alert(data?.error ?? `Request failed (${res.status})`);
       return;
     }
-    if (data?.url) {
-      const a = document.createElement("a");
-      a.href = data.url;
-      a.download = file.name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+    triggerFileDownload({ name: file.name, ...data });
+  };
+
+  // "Download all" — DIRECT child files only (see the download-manifest
+  // route's own doc for why a nested sub-folder's files aren't included).
+  // Not a zip: each file lands as its own separate download, staggered a
+  // few hundred ms apart so the browser doesn't block/flag a burst of
+  // simultaneous downloads as spammy.
+  const [downloadAllProgress, setDownloadAllProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+
+  const handleDownloadAll = async () => {
+    if (current.kind !== "folder") return;
+    const res = await fetch(
+      `/api/vault/folders/${current.folder._id}/download-manifest`,
+    );
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      window.alert(data?.error ?? `Request failed (${res.status})`);
+      return;
     }
+    const files: Array<{
+      name: string;
+      url?: string;
+      content?: string;
+      contentType?: string;
+    }> = data?.files ?? [];
+    if (!files.length) return;
+
+    setDownloadAllProgress({ done: 0, total: files.length });
+    for (let i = 0; i < files.length; i++) {
+      triggerFileDownload(files[i]);
+      setDownloadAllProgress({ done: i + 1, total: files.length });
+      if (i < files.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    }
+    setDownloadAllProgress(null);
   };
 
   const handleReplace = async (uploaded: File) => {
@@ -2485,9 +2552,9 @@ export default function VaultV2Page() {
     !current.folder.is_folder_type_root &&
     !isFolderShared(current.folder);
 
-  const fileHasS3 =
+  const fileDownloadable =
     current.kind === "file" &&
-    Boolean(current.file.s3_key || current.file.s3_url);
+    Boolean(current.file.s3_key || current.file.s3_url || current.file.content != null);
   // Past daily-log files are read-only — no Replace/Delete (server enforces too).
   const fileLocked = current.kind === "file" && isFileRefLocked(current.file);
 
@@ -2768,6 +2835,18 @@ export default function VaultV2Page() {
                     ↑ Upload files
                   </button>
                 )}
+                {(folderChildren?.files.length ?? 0) > 0 && (
+                  <button
+                    className="vault-toolbar-btn"
+                    disabled={!!downloadAllProgress}
+                    onClick={handleDownloadAll}
+                    title="Downloads each file in this folder individually (not a zip) — sub-folders aren't included"
+                  >
+                    {downloadAllProgress
+                      ? `↓ Downloading ${downloadAllProgress.done}/${downloadAllProgress.total}…`
+                      : "↓ Download all"}
+                  </button>
+                )}
                 {canWriteCurrent && (
                   <MoreMenu
                     label="New folder"
@@ -2842,7 +2921,7 @@ export default function VaultV2Page() {
 
             {current.kind === "file" && (
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {fileHasS3 && (
+                {fileDownloadable && (
                   <button
                     className="vault-toolbar-btn"
                     onClick={() => handleDownload(current.file)}
@@ -3151,7 +3230,7 @@ export default function VaultV2Page() {
                     .filter(Boolean)
                     .join(" · ")}
                 </span>
-                {fileHasS3 && (
+                {fileDownloadable && (
                   <button
                     className="vault-toolbar-btn"
                     onClick={() => handleDownload(current.file)}

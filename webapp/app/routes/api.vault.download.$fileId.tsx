@@ -6,9 +6,15 @@ import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
 /**
  * GET /api/vault/download/:fileId
  *
- * Returns a short-lived presigned S3 download URL for the requested file.
- * The URL embeds `Content-Disposition: attachment` so the browser triggers
- * a save dialog rather than opening the file inline.
+ * Returns whatever a client needs to trigger a real "Save As" download —
+ * two possible shapes depending on where the file's bytes live:
+ *   - S3-backed: `{ url }`, a short-lived presigned S3 URL (embeds
+ *     `Content-Disposition: attachment` so the browser saves rather than
+ *     opens it inline) — the client just navigates to it.
+ *   - Content-only (markdown, a sync-api run's `.csv`/`.md`, `_schema.json`,
+ *     ...): `{ content, contentType, filename }` — there's no S3 object to
+ *     presign a URL for, so the client Blob-downloads the inline text
+ *     itself (see `triggerFileDownload` in `fruits_.vault.tsx`).
  *
  * Only the file owner may download via this endpoint.
  */
@@ -38,18 +44,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (!file.s3_key) {
-    return Response.json({ error: "No downloadable file attached" }, { status: 400 });
+  if (file.s3_key) {
+    try {
+      const url = await getPresignedDownloadUrl(file.s3_key, file.name);
+      return Response.json({ url });
+    } catch (err) {
+      console.error("Presign download error:", err);
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to generate download URL" },
+        { status: 500 },
+      );
+    }
   }
 
-  try {
-    const url = await getPresignedDownloadUrl(file.s3_key, file.name);
-    return Response.json({ url });
-  } catch (err) {
-    console.error("Presign download error:", err);
-    return Response.json(
-      { error: err instanceof Error ? err.message : "Failed to generate download URL" },
-      { status: 500 },
-    );
+  if (file.content != null) {
+    return Response.json({
+      content: file.content,
+      contentType: file.content_type,
+      filename: file.name,
+    });
   }
+
+  return Response.json({ error: "No downloadable content" }, { status: 400 });
 }
