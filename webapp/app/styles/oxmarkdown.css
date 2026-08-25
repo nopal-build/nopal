@@ -252,9 +252,20 @@
 
 /* ── Headings ───────────────────────────────────────────────────────────── */
 
+/* `margin: 0` is load-bearing, not cosmetic, same reasoning as `.ox-content
+   p`/`:is(ul, ol)`/`table`/`.ox-code-block` below — REAL BUG fixed here,
+   found via a repro: this rule never zeroed margin, so h1-h6 fell back to
+   the browser's own UA-stylesheet heading margin (~23px top/bottom for h1),
+   visibly breaking Editing mode's "blank lines are real rows, not CSS
+   margin" rule (see "Design language" in the `oxmarkdown` skill) whenever a
+   heading wasn't the very first element in the document (a heading in that
+   position only ever LOOKED fine because its own margin-top collapses
+   invisibly against the container, masking the bug for the single most
+   common case someone would eyeball first). */
 .ox-content :is(h1, h2, h3, h4, h5, h6) {
   line-height: var(--ox-grid);
   padding: 0;
+  margin: 0;
   font-weight: 700;
 }
 .ox-content h1 {
@@ -282,9 +293,13 @@
 
 /* ── Blockquote ─────────────────────────────────────────────────────────── */
 
+/* `margin: 0` — same missing-reset bug as headings above (the browser's
+   default blockquote margin is `1em 40px`, doubly wrong here since the
+   left inset is already handled by `padding-left` above). */
 .ox-content blockquote {
   border-left: 3px solid var(--ox-color-accent);
   padding-left: 16px;
+  margin: 0;
   color: var(--ox-color-subtle);
   font-style: italic;
   line-height: var(--ox-grid);

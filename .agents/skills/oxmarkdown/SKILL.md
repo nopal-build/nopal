@@ -291,6 +291,22 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
     would render as 3 grid units instead of 2.
 - **TODO — typewriter font.** Explore a monospace body font for precise
   gutter/column alignment. Needs a real visual pass before committing.
+- **Every block element in `.ox-content` must explicitly zero its own
+  `margin`** (`p`, `:is(ul, ol)`, `table`, `.ox-code-block` all already did)
+  — REAL BUG found and fixed: `:is(h1, h2, h3, h4, h5, h6)` and
+  `blockquote` never got this, so they silently fell back to the browser's
+  own UA-stylesheet margin (~23px top/bottom for h1; `1em 40px` for
+  blockquote). Confirmed with a real repro (pasting `"# title\nplain
+  text\n# another title\nplain text"`, see `normalizePastedLines` below):
+  the FIRST heading in a document looked fine (its margin-top collapses
+  invisibly against the container, masking the bug), but every subsequent
+  heading showed a large, unwanted gap on both sides in Editing mode —
+  directly violating "blank lines are real rows, not CSS margin" above.
+  Verified fixed by direct screenshot (`scripts/visual-check.ts`), both
+  color schemes, after confirming via a headless Lexical import test that
+  the underlying document model was already correct (exactly 4 sibling
+  nodes, no extra empty paragraphs) — i.e. this was purely a missing CSS
+  reset, not a paste/import bug.
 
 ## Key resolved decisions
 
@@ -368,8 +384,49 @@ aren't re-litigated from scratch:
   checkbox.
 - **Paste is always "paste without formatting."** `MarkdownPastePlugin.tsx`
   prefers `text/plain`; falls back to stripping `text/html` tags to text
-  (converting block boundaries to newlines first). The only saved format is
-  markdown, so paste should never let external styling leak in.
+  (converting block boundaries to newlines first, and normalizing `&nbsp;`/
+  U+00A0 to a plain space). The only saved format is markdown, so paste
+  should never let external styling leak in.
+  **`normalizePastedLines` inserts a blank line ONLY between two adjacent
+  PLAIN lines** (neither is already a real CommonMark block-starter: a
+  heading, list item, blockquote, thematic break, or code fence) — real
+  block-starters already end/begin a block on a single `\n` per spec (an
+  ATX heading or list item CAN interrupt a paragraph with zero blank
+  lines), so `"# title\nplain text\n# another title\nplain text"` parses
+  as 4 separate blocks completely unmodified; forcing an unneeded blank
+  line there would just add a pointless visible empty row in Editing mode
+  (blank lines are real rows there, not CSS margin — see "Design
+  language" above). The one case real CommonMark syntax genuinely can't
+  tell apart on its own: two plain lines with no special syntax on either
+  side, which is the literal spec-defined difference between "two
+  paragraphs" and "one paragraph, soft-wrapped across two lines" — left
+  over from a checklist/list pasted from an external source (Apple Notes,
+  Google Docs, Figma text layers, ...) with no markdown syntax of its own,
+  those lines would otherwise silently fuse into one block/item (confirmed
+  by a real repro: converting the first of two such fused lines to a
+  heading pulled the second line into the same heading). REVISED TWICE—
+  first from a version that tried to guess "real paragraph break vs. soft
+  wrap" by counting the source's own HTML block tags (wrong: a source can
+  join two conceptually separate lines with a tag-less break while using
+  real block tags everywhere else in the very same paste), then from a
+  version that unconditionally doubled EVERY newline (wrong: forced
+  pointless blank-row gaps even where CommonMark's own heading/list/
+  blockquote interrupt rules already worked correctly, confirmed by a
+  second repro pasting `"# title\nplain text\n..."`). Skipped entirely
+  Skipped entirely
+  when the text contains a code fence or looks like a markdown table,
+  since those depend on their own internal lines staying adjacent. Only
+  affects PASTE, not typed content or whole-document loads — the existing
+  bare-`\n`-as-real-line-break rule (item 17 below) is unchanged for those
+  paths. **The block-starter check allows up to 3 leading spaces before
+  the marker** (`BLOCK_STARTER_LINE_RE`), matching CommonMark's own
+  leniency (a heading/list/blockquote indented 1-3 spaces is still a real
+  block-starter; only 4+ triggers an indented code block) — confirmed as a
+  real gap by a third repro: an indented `"  # heading"` line (e.g. a
+  source that indents continuation lines) looked "plain" to a
+  column-0-only check and got an unwanted blank line forced in front of
+  it, reproducing the exact same symptom as the original bug this whole
+  mechanism exists to fix.
 - **Popover positioning is one shared component**, `oxmarkdown/OxPopover.tsx`,
   on `@floating-ui/react` (already transitive via `@lexical/react`).
   Handles `flip`/`shift`/`size`/`offset`/`autoUpdate`; below `640px`
