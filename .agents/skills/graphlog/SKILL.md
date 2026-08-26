@@ -470,6 +470,10 @@ agentic-shaped stage uses, even though these three are actually
 deterministic — kept consistent with the rest of the CLI/API surface
 rather than special-cased as synchronous like `daily-log-sync`.
 
+The combined `reset` and the full `run` are both also reachable from
+`/fruits/vault`'s "More Actions" dropdown (Admin/Super only) — see item 11
+under "Build status" below.
+
 ## `project-n02` spaces
 
 The ONLY `ContainerFolderTypeKey` in `vaultFolderTypes.ts` (PhyLog's
@@ -1341,6 +1345,22 @@ skill was born from:
     also clears `graph-structure.md` (it lives in the same `Graph`
     folder), taking both its own `asOfGraphHash` and `graph-project-view`'s
     `appliedByProjectView` marker with it.
+11. **Done — Run/Reset GraphLog from the Vault UI itself**, not just the
+    CLI. `/fruits/vault`'s "More Actions" dropdown, on any `project-n02`
+    folder (project OR `personal`), gains "Run GraphLog"/"Reset GraphLog"
+    entries — but ONLY for `permissions.isAdmin(user)` (Admin or Super),
+    and deliberately independent of that folder's own ownership/Sharing
+    Role gate, since a staff member using this may not own or be shared on
+    the project at all. To make that work, the three routes it calls
+    (`api.graphlog.run.tsx`, `api.graphlog.reset.tsx`,
+    `api.graphlog.jobs.$jobId.tsx`) were widened from owner-only to
+    `role?.isOwner || isStaff`, matching the existing staff-override
+    pattern in `api.legal-documents.view.$docId.tsx`. The UI enqueues,
+    then polls `GET /api/graphlog/jobs/:jobId` every 3s (same
+    enqueue-then-poll shape the CLI uses), and reports success/failure via
+    a plain `window.alert` — intentionally minimal, no progress detail
+    beyond that. "Reset" additionally requires a confirm dialog, since it's
+    destructive.
 
 **All done against the original phased plan** — the migration ran for
 real across every existing project/`personal` space, and PhyLog/

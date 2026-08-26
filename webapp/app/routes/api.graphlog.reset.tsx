@@ -34,7 +34,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const folder = await getFolderById(projectFolderId);
   if (!folder) return Response.json({ error: "Project not found" }, { status: 404 });
   const role = await getProjectRole(folder, user._id);
-  if (!role?.isOwner) {
+  // An Admin/Super may trigger this against ANY project or personal space,
+  // not just ones they own or hold an owner-tier Sharing Role on -- the
+  // Vault's own "More Actions" → Reset GraphLog entry is gated the same way
+  // client-side (see `fruits_.vault.tsx`). Same "staff override" pattern
+  // `api.legal-documents.view.$docId.tsx` already uses.
+  const isStaff = user.role === "Admin" || user.role === "Super";
+  if (!role?.isOwner && !isStaff) {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
 

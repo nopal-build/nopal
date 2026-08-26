@@ -13,8 +13,11 @@ import { getGraphLogJobOwner, getGraphLogJobStatus } from "robustness-core/data/
  * `graphLogQueue.server.ts`).
  *
  * Same access bar as enqueuing: the acting human must hold an owner-tier
- * Sharing Role on the job's own project (or be its owner) — a job id
- * alone shouldn't leak another human's GraphLog activity.
+ * Sharing Role on the job's own project (or be its owner), OR be
+ * Admin/Super (the Vault's own "More Actions" → Run/Reset GraphLog is
+ * available to staff on any project, so polling the resulting job has to
+ * allow the same) — a job id alone shouldn't leak another human's
+ * GraphLog activity to anyone else.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -29,7 +32,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const folder = await getFolderById(jobData.projectFolderId);
   if (!folder) return Response.json({ error: "Job not found" }, { status: 404 });
   const role = await getProjectRole(folder, user._id);
-  if (!role?.isOwner) {
+  const isStaff = user.role === "Admin" || user.role === "Super";
+  if (!role?.isOwner && !isStaff) {
     return Response.json({ error: "Job not found" }, { status: 404 });
   }
 

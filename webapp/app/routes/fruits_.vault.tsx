@@ -75,6 +75,7 @@ import OxEditor from "../components/OxEditor";
 import OxRenderer from "../components/OxRenderer";
 import { ProjectView } from "../components/ProjectView";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
+import { permissions } from "../hooks/useUser";
 import "../styles/vault.css";
 
 // ─── Upload constants (ported from vault v1 — the flow that “worked well”) ───
@@ -1975,6 +1976,7 @@ export default function VaultV2Page() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replacing, setReplacing] = useState(false);
+  const [graphLogBusy, setGraphLogBusy] = useState<"run" | "reset" | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [siteSettingsOpen, setSiteSettingsOpen] = useState(false);
@@ -2424,6 +2426,82 @@ export default function VaultV2Page() {
     if (data) invalidateAndRevalidate([folder.parent_folder_id]);
   };
 
+  // ─── Admin/Super GraphLog controls ("More Actions" → Run/Reset GraphLog) ──
+  // A first, minimal UI trigger for a pipeline that, until now, only ever
+  // ran from the CLI or the daily-log pipeline itself — see the `graphlog`
+  // skill. Deliberately staff-only for now (`permissions.isAdmin`), on any
+  // project-n02 container (a project OR a personal space) regardless of
+  // who owns it — the two API routes this calls (`api.graphlog.run.tsx`/
+  // `api.graphlog.reset.tsx`) were widened to accept the SAME staff
+  // override, and `api.graphlog.jobs.$jobId.tsx` (polled below) too.
+
+  /** Polls until the job leaves "waiting"/"active"/"delayed" -- same
+   * enqueue-then-poll shape the CLI already uses against this same route,
+   * just from the browser instead of a terminal loop. */
+  const pollGraphLogJob = async (jobId: string): Promise<{ ok: boolean; message: string }> => {
+    for (;;) {
+      const res = await fetch(`/api/graphlog/jobs/${jobId}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        return { ok: false, message: data?.error ?? `Failed to check job status (${res.status})` };
+      }
+      if (data.state === "completed") return { ok: true, message: "Finished successfully." };
+      if (data.state === "failed") return { ok: false, message: data.error ?? "Job failed." };
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  };
+
+  const handleRunGraphLog = async () => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    setGraphLogBusy("run");
+    try {
+      const data = await apiJson("/api/graphlog/run", {
+        method: "POST",
+        body: JSON.stringify({ projectFolderId: folder._id }),
+      });
+      if (!data?.jobId) return;
+      const outcome = await pollGraphLogJob(data.jobId);
+      window.alert(
+        outcome.ok
+          ? `GraphLog run finished for "${folder.name}".`
+          : `GraphLog run failed for "${folder.name}": ${outcome.message}`,
+      );
+      if (outcome.ok) invalidateAndRevalidate([folder._id]);
+    } finally {
+      setGraphLogBusy(null);
+    }
+  };
+
+  const handleResetGraphLog = async () => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    if (
+      !window.confirm(
+        `Reset GraphLog for "${folder.name}"? This deletes its Graph history, knowledge sidecars, and README content (front matter preserved). This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setGraphLogBusy("reset");
+    try {
+      const data = await apiJson("/api/graphlog/reset", {
+        method: "POST",
+        body: JSON.stringify({ projectFolderId: folder._id }),
+      });
+      if (!data?.jobId) return;
+      const outcome = await pollGraphLogJob(data.jobId);
+      window.alert(
+        outcome.ok
+          ? `GraphLog reset finished for "${folder.name}".`
+          : `GraphLog reset failed for "${folder.name}": ${outcome.message}`,
+      );
+      if (outcome.ok) invalidateAndRevalidate([folder._id]);
+    } finally {
+      setGraphLogBusy(null);
+    }
+  };
+
 
 
   const handleDownload = async (file: FileRef) => {
@@ -2759,6 +2837,26 @@ export default function VaultV2Page() {
         danger: true,
       });
     }
+  }
+  // Admin/Super GraphLog controls — independent of the ownership/share-based
+  // gate above, since a staff member managing this from the Vault UI may not
+  // own or be shared on the target project at all.
+  if (
+    current.kind === "folder" &&
+    currentFolderType === "project-n02" &&
+    permissions.isAdmin(user)
+  ) {
+    moreActions.push({
+      label: graphLogBusy === "run" ? "Running GraphLog…" : "Run GraphLog",
+      onClick: handleRunGraphLog,
+      disabled: graphLogBusy !== null,
+    });
+    moreActions.push({
+      label: graphLogBusy === "reset" ? "Resetting GraphLog…" : "Reset GraphLog",
+      onClick: handleResetGraphLog,
+      disabled: graphLogBusy !== null,
+      danger: true,
+    });
   }
 
   const moreActionsTrigger = ({
