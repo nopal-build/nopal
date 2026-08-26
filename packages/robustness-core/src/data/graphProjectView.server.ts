@@ -95,7 +95,7 @@ import {
   nodeIdsInSection,
   buildMembershipIndex,
 } from "./graphStructure.server";
-import { parseGraphLogNodes, formatNodeVerbatim, type GraphLogNode } from "./graphNodeIndex.server";
+import { parseGraphLogNodes, formatNodeVerbatim, extractFileDirectives, type GraphLogNode } from "./graphNodeIndex.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -475,6 +475,16 @@ export type CoverageReport = {
    * no longer surfaced to the README. Reported so the drop is visible,
    * never silent. */
   fellAway: string[];
+  /** A node carrying a real \`::file{...}\` (an attached photo/PDF/etc,
+   * see `syncGraph.server.ts`'s own "A REAL, CONFIRMED GAP" note) whose
+   * thread did NOT fall away this run, but whose exact file directive is
+   * nowhere in the finished README — unlike `missingThreads`, this is a
+   * hard requirement (`PROJECT_VIEW.md`'s own "A file is never
+   * optional"), not a soft measurement: a file is either carried along
+   * with its node's words or it isn't, and this catches the model
+   * dropping one. Each entry is `"<node id> (<thread>)"`. Empty when
+   * every non-fallen-away file-bearing node's file made it in. */
+  missingFiles: string[];
 };
 
 export type GraphProjectViewResult =
@@ -503,7 +513,7 @@ export interface RunGraphProjectViewOptions {
 }
 
 function buildSystemPrompt(skillContent: string): string {
-  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index, PLUS the actual verbatim text of the nodes behind its top threads). Never invent progress, dates, or facts that aren't grounded in a real node's own words or the README's own existing content -- graph-structure.md's glosses are a table of contents, never something to write prose from directly. Call get_node for any node you need that wasn't already handed to you in full. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
+  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index, PLUS the actual verbatim text of the nodes behind its top threads). Never invent progress, dates, or facts that aren't grounded in a real node's own words or the README's own existing content -- graph-structure.md's glosses are a table of contents, never something to write prose from directly. Call get_node for any node you need that wasn't already handed to you in full. A node's own text may carry a ::file{...} directive (an attached photo/PDF/etc) -- when you feature that node's words anywhere, copy its ::file{...} into the same section, exactly as it appears; a file is never optional and never gets its own separate section. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
 
 Do not write any planning, reasoning, or summary text outside of a tool call -- go straight to calling update_section/remove_section/get_node with no preamble and no narration in between calls either. Your own output budget per turn is limited, and explanatory text spends it on nothing that ends up in the README.
 
@@ -577,17 +587,34 @@ function buildUserPrompt(input: {
  * extracted), which is more machinery than a MEASUREMENT pass warrants
  * before a coverage RULE is even on the table.
  */
-function computeCoverageReport(structureBody: string, readmeBody: string): CoverageReport {
+function computeCoverageReport(
+  structureBody: string,
+  readmeBody: string,
+  allNodesById: Map<string, GraphLogNode>,
+): CoverageReport {
   const sections = splitReadmeSections(structureBody);
   const lowerReadme = readmeBody.toLowerCase();
   const missingThreads: string[] = [];
   const fellAway: string[] = [];
+  const missingFiles: string[] = [];
   for (const section of sections) {
     if (section.heading === "" || section.heading.toLowerCase() === "unclustered") continue;
-    if (hasFallenAway(section)) fellAway.push(section.heading);
+    const threadFellAway = hasFallenAway(section);
+    if (threadFellAway) fellAway.push(section.heading);
     if (!lowerReadme.includes(section.heading.toLowerCase())) missingThreads.push(section.heading);
+
+    // A fallen-away thread is INTENTIONALLY left out of the README
+    // (ADR-009) -- its files fall away with it, not a miss to report.
+    if (threadFellAway) continue;
+    for (const nodeId of nodeIdsInSection(section)) {
+      const node = allNodesById.get(nodeId);
+      if (!node) continue;
+      for (const fileDirective of extractFileDirectives(node.quote)) {
+        if (!readmeBody.includes(fileDirective)) missingFiles.push(`${nodeId} (${section.heading})`);
+      }
+    }
   }
-  return { missingThreads, fellAway };
+  return { missingThreads, fellAway, missingFiles };
 }
 
 /**
@@ -789,12 +816,16 @@ export async function runGraphProjectView(
     const coverage = computeCoverageReport(
       splitFrontmatter(structureFile.content).body,
       splitFrontmatter(reconciledContent).body,
+      allNodesById,
     );
     if (coverage.missingThreads.length > 0) {
       log(`graph-project-view: ${coverage.missingThreads.length} thread(s) have no representation in the README this run: ${coverage.missingThreads.join(", ")}.`);
     }
     if (coverage.fellAway.length > 0) {
       log(`graph-project-view: ${coverage.fellAway.length} thread(s) fell away this run (dormant, no Due, no Blocking): ${coverage.fellAway.join(", ")}.`);
+    }
+    if (coverage.missingFiles.length > 0) {
+      log(`graph-project-view: ${coverage.missingFiles.length} attached file(s) were dropped this run (PROJECT_VIEW.md says never): ${coverage.missingFiles.join(", ")}.`);
     }
 
     return { ok: true, skipped: false, changed, summary: summaries, coverage };

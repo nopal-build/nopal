@@ -128,6 +128,19 @@ export function formatNodeVerbatim(node: GraphLogNode): string {
     .join("\n");
 }
 
+const FILE_DIRECTIVE_RE = /::file\{[^}]*\}/g;
+
+/** Every \`::file{...}\` directive verbatim (as it literally appears) in a
+ * node's own quote — usually zero or one, never invented, since
+ * `sync-graph`'s own \`add_node\` executor is the only writer (see that
+ * file's own "A REAL, CONFIRMED GAP" module-doc note). Used by
+ * `graph-project-view`'s own coverage pass to confirm a node's attached
+ * file actually made it into the finished README — files are a hard
+ * requirement there, not just a measurement. */
+export function extractFileDirectives(quote: string): string[] {
+  return [...quote.matchAll(FILE_DIRECTIVE_RE)].map((m) => m[0]);
+}
+
 export type BacklinkInfo = {
   count: number;
   /** Distinct author NAMES of the nodes linking in — not ids, since two

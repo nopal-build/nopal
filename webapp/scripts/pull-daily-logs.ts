@@ -78,8 +78,27 @@ import { cacheDailyLog } from "robustness-core/data/dailyLog.server";
 import { uploadPrivateFileToS3 } from "robustness-core/data/file.server";
 import { merge } from "robustness-core/data/generic.server";
 import { getDb } from "robustness-core/data/db.server";
+import { ensureProjectN02 } from "robustness-core/data/projectN02.server";
+import { parseSyncedCardFileName, parseSyncedAttachmentFileName } from "robustness-core/data/dailyLogSync.server";
 import { RecordId } from "surrealdb";
 import type { VaultFolder } from "robustness-core/data/vault.types";
+
+/** A REAL, CONFIRMED GAP, FOUND AND FIXED: this script mirrors a
+ * project's ALREADY-SYNCED `syncs/Daily Logs/*` tree byte-for-byte via
+ * `pullFolderTree` below, but never set `date` on any of it -- and for
+ * every contributor OTHER than whoever ran this script, that pulled
+ * mirror is the ONLY local copy that will ever exist (their own RAW
+ * daily-log Cards were never pulled, so a local `runDailyLogSync` re-run
+ * can never regenerate -- or fix -- their days). `sync-graph`'s own
+ * `collectDatedCandidates` requires a real `date` (`!!f.date`), so every
+ * one of those days was silently invisible to the whole graph, no matter
+ * what either skill said. Fixed here since `date` is fully recoverable
+ * from the filename shape itself (`dailyLogSync.server.ts`'s own
+ * `parseSyncedCardFileName`/`parseSyncedAttachmentFileName`), with no
+ * need to ask production for it. */
+function dateFromSyncedName(name: string): string | null {
+  return parseSyncedCardFileName(name)?.date ?? parseSyncedAttachmentFileName(name)?.date ?? null;
+}
 
 type Args = {
   host: string;
@@ -354,6 +373,13 @@ async function pullFolderTree(
           counts.attachmentsCopied++;
         }
       }
+      // Backfill `date` on an already-pulled Daily Logs sync file that
+      // predates this fix -- see this file's own "A REAL, CONFIRMED GAP"
+      // module note above.
+      const recoveredDate = dateFromSyncedName(existingFile.name);
+      if (recoveredDate && existingFile.date !== recoveredDate) {
+        await merge("file_refs", existingFile._id, { date: recoveredDate });
+      }
       continue;
     }
 
@@ -384,6 +410,9 @@ async function pullFolderTree(
       s3_key: s3Key,
       size: listing.size,
       folder_id: localParentId,
+      // See this file's own "A REAL, CONFIRMED GAP" module note above --
+      // recoverable directly from the filename, no need to ask production.
+      date: dateFromSyncedName(listing.name) ?? undefined,
     });
     counts.filesCreated++;
   }
@@ -549,6 +578,23 @@ async function main() {
           continue;
         }
         const existingLocal = await getFolderById(remoteProject._id);
+        // A REAL, CONFIRMED BUG, found and fixed here: tagging the local
+        // project `project-n02` immediately at creation used to fire
+        // `createVaultFolder`'s own `ensureProjectN02` side effect (auto-
+        // provisioning a Skills folder, seeded with the DEFAULT skill
+        // text) BEFORE `pullFolderTree` below ever got a chance to bring
+        // in the REAL remote Skills folder (its own original id, its own
+        // real content) -- leaving every freshly-pulled project-n02
+        // project with TWO "Skills" folders, neither one deduped by the
+        // deterministic-id fix (`projectN02.server.ts`'s own
+        // `applyProjectN02Shape`), since that fix only prevents the SAME
+        // code path racing against itself, not two genuinely different
+        // creation paths (auto-provision vs. a real pull) each producing
+        // one. Fixed by creating the local project UNTYPED here, pulling
+        // the real tree first, and only THEN applying the remote's own
+        // type below -- by the time `ensureProjectN02` runs, the real
+        // Skills folder (if any) already exists, so it's a safe no-op
+        // seed rather than a duplicate.
         const localProject =
           existingLocal ??
           (await createVaultFolder({
@@ -556,19 +602,22 @@ async function main() {
             human_id: humanId,
             name: remoteProject.name,
             parent_folder_id: localProjectsRoot._id,
-            // Mirror the REMOTE project's own current container type
-            // (`project-n02` today) rather than always omitting it --
-            // `createVaultFolder` already defaults a brand new project to
-            // `project-n02` on its own, but passing it through explicitly
-            // keeps this correct if that default ever changes. Omit
-            // entirely for an untyped legacy project (falls back to
-            // `createVaultFolder`'s own default, same self-healing backfill
-            // every other untyped project gets).
-            folder_type: remoteProject.is_folder_type_root ? remoteProject.folder_type ?? undefined : undefined,
           }))!;
         if (!existingLocal) projectsCreated++;
         console.log(`  → ${remoteProject.name}`);
         await pullFolderTree(host, token, humanId, remoteProject._id, localProject._id, projectCounts);
+
+        if (!existingLocal && remoteProject.is_folder_type_root && remoteProject.folder_type) {
+          await merge("vault_folders", localProject._id, {
+            folder_type: remoteProject.folder_type,
+            is_folder_type_root: true,
+            updated_at: new Date().toISOString(),
+          });
+          if (remoteProject.folder_type === "project-n02") {
+            const retagged = await getFolderById(localProject._id);
+            if (retagged) await ensureProjectN02(retagged);
+          }
+        }
       }
     }
 

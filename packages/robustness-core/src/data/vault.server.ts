@@ -181,6 +181,13 @@ export async function updateFileRef(
     is_public: boolean;
     /** ISO timestamp to archive the file; null to unarchive. */
     archived_at: string | null;
+    /** Same field `createFileRef` already accepts at creation (e.g.
+     * `dailyLogSync.server.ts`'s own `date: entryDate` stamp) -- also
+     * settable here so a file COPIED in after the fact (an attachment,
+     * copied via `copyFileIntoFolder` with no `date` of its own) can be
+     * stamped afterward, letting `sync-graph`'s existing `!!f.date`
+     * candidate filter pick it up for free. */
+    date: string | null;
   }>,
 ): Promise<FileRef | undefined> {
   const result = await merge("file_refs", id, {

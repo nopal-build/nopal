@@ -381,13 +381,36 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     citation tracking — a measurement, not a gate) and reports which
     threads have zero representation, alongside which threads fell away
     this run per `hasFallenAway`. Surfaced on `GraphProjectViewResult`'s
-    own new `coverage` field (`{ missingThreads, fellAway }`, `null`
-    whenever a run didn't reach a clean finish) and logged as job lines —
-    never a rule forcing coverage, since on the first real run four of ten
-    threads (including all fourteen nodes covering shipped work) produced
-    no README representation with no pattern predictable by rank, and the
-    right next step is reading this data across a few real runs before
-    anyone writes a rule from a guess.
+    own new `coverage` field (`{ missingThreads, fellAway, missingFiles }`,
+    `null` whenever a run didn't reach a clean finish) and logged as job
+    lines — `missingThreads`/`fellAway` are never a rule forcing coverage,
+    since on the first real run four of ten threads (including all
+    fourteen nodes covering shipped work) produced no README
+    representation with no pattern predictable by rank, and the right next
+    step is reading this data across a few real runs before anyone writes
+    a rule from a guess.
+  - **`missingFiles` is checked more strictly than the other two, ON
+    PURPOSE** — unlike thread coverage, `PROJECT_VIEW.md`'s own "A file is
+    never optional" is a hard rule, not a judgment call: for every node in
+    a NON-fallen-away thread, `extractFileDirectives` (`graphNodeIndex.server.ts`)
+    pulls any real `::file{...}` off that node's own text (see
+    `sync-graph`'s own "Files" note — the directive is code-attached, so
+    this is checking for something that's ALWAYS really there when a node
+    cites a file source) and confirms the exact same directive text
+    survived into the finished README. Still report-only, not a forced
+    retry: unlike a truncated/refused turn (a mechanical failure), a
+    dropped file is the model making a legitimate-looking editorial
+    choice that happens to violate an instruction — forcing an automatic
+    retry risks looping forever if it keeps making the same choice, so
+    this is visibility, not enforcement, same as the other two fields.
+  - **A REAL, CONFIRMED GAP, FOUND AND FIXED: files had NO path into the
+    graph at all before this**, regardless of what either skill said —
+    see "Done — `daily-log-sync`" and "Done — `sync-graph`" above (Build
+    status items 3 and 5) for the full fix (a missing `date` stamp on a
+    copied attachment, closed at the source) and `oxmarkdown-core`'s new
+    `fileDirective.ts` (`buildFileDirectiveMarkdown`, the first
+    SERVER-side writer of `::file{...}` — until now it was only ever
+    authored by a human through the upload UI).
 
 ## Reset
 
@@ -833,6 +856,25 @@ skill was born from:
    own carefully-scoped, separately-tested follow-up — see "The 'Daily
    Logs' symlink" above for the full design and what's still open
    (sidebar navigation polish, per-request caching).
+   - **A REAL, CONFIRMED GAP, FOUND AND FIXED: a copied attachment never
+     carried a `date`.** Only the Card's own text file got `date:
+     entryDate` stamped at creation; a copied `::file{...}` attachment
+     was left with none. Since `sync-graph`'s `collectDatedCandidates`
+     only ever collects files with a real `date` (`!!f.date`), every
+     attachment — a photo, a PDF, anything — was SILENTLY EXCLUDED from
+     ever becoming a graph candidate, no matter what either skill said.
+     `sync-knowledge` still described it into a `_knowledge/*.knowledge.md`
+     sidecar (it walks every real file, not just dated ones), but nothing
+     downstream ever read that description back in — the description
+     dead-ended, and the file had NO path into the graph, and therefore
+     none into the README, structurally, regardless of prompt wording.
+     Fixed by stamping `date` on a copied attachment too
+     (`updateFileRef`'s own allowed-fields list widened to include `date`
+     for exactly this), so it flows through the SAME per-day pipeline a
+     Card's text already does. See `sync-graph`'s own "Files" note below
+     for the rest of the fix (a file-backed source, a node's own
+     `::file{...}`, and `graph-project-view`'s "files are never optional"
+     coverage check).
 4. **Done — `sync-knowledge`.** `syncKnowledge.server.ts`
    (`runSyncKnowledge`) walks a project's `syncs/` tree recursively
    (skipping `_knowledge/` folders themselves), and for every file without
@@ -997,6 +1039,21 @@ skill was born from:
      (`graphLogDefaults.server.ts`) instructs marking each list item's
      own text separately when the verbatim words are/contain a list,
      keeping each item's own `1.`/`-` marker outside the highlight.
+   - **Files.** An attached photo/PDF now becomes a real, numbered source
+     alongside a day's Card text — see "Done — `daily-log-sync`" above for
+     the `date`-stamping half of this fix. A file-backed source is only
+     ever offered once it has a real knowledge-derived description to
+     ground a node in (never fabricated from an unseen photo); its
+     `sourceIndex` behaves exactly like a text source's. When `add_node`
+     cites one, its real `::file{...}` mount (`buildFileDirectiveMarkdown`,
+     `oxmarkdown-core`'s new `fileDirective.ts`) is appended to the node's
+     own text BY CODE, never typed out by the model — same reasoning
+     `:ref{...}` already follows. From there the file needs no separate
+     field or plumbing at all: it's just part of `GraphLogNode.quote`, so
+     `graph-structure`'s pre-fetch and `graph-project-view`'s own node text
+     see it automatically. `DEFAULT_GRAPH_SKILL`'s own new "Files" section
+     covers the model-facing side (read a file's description, apply the
+     same standalone test, never write `::file{...}` yourself).
 6. **Done — `graph-project-view`, REDESIGNED from its original per-day
    shape** (see the header's "real architecture change" note).
    `graphProjectView.server.ts` (`runGraphProjectView`) now reads

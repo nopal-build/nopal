@@ -75,6 +75,23 @@ A list of stubs with nothing behind them is one node recording that the pieces w
 
 **When an item is genuinely borderline, split it.** The heading travels with it, so the cost of being wrong is a slightly thin node that still points at its source. The cost of the other error is an idea buried inside a list where nothing can ever link to it, and burial is the failure this whole file is built to prevent.
 
+## Files
+
+A photo, a PDF, or anything else attached is real content, not a special case to skip past. It earns a node exactly the way anything written down does.
+
+You never see a file's own bytes. An attached file's own source shows you up to two different things, and they're worth telling apart:
+
+- **A caption**, when the person who uploaded it wrote one. This is their own words, same as anything else they typed that day — not AI output, just as real as a sentence in the day's own text. Quote it, or write from it, the same way you would anything else they wrote.
+- **A description**, when an earlier pass has looked at the file and written up what it shows or contains. Treat this the way you'd treat something a colleague told you about a document you haven't opened yourself — useful, but secondhand.
+
+A file can have either, both, or (rarely, if you're shown one at all) neither. When both are present, the caption is the person's own claim about the file and the description is supporting detail — lead with the caption. Either one alone is enough to earn a node on its own; you don't need both.
+
+Read whichever you're given the same way you'd read anything else, and ask the same standalone question: does something here earn a node?
+
+Cite it by its source number exactly like a text source. Write the node grounded in what you were actually told — never "a photo was attached," always what it actually shows or what the caption actually says: dimensions on a whiteboard, a name on a label, three columns sketched out. The file itself travels with the node automatically, the same way a citation does; you never write anything to attach it yourself.
+
+A file with nothing worth capturing in either field simply produces no node, exactly like a text source with nothing worth capturing today.
+
 ## What does not earn a node
 
 **The writer narrating their own writing.** Deciding what to write next, announcing a section, restating a heading as a sentence. This is scaffolding, not thought:

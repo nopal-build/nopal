@@ -64,6 +64,8 @@ You are not required to quote every line, and this file is allowed to change fla
 
 **Any line doing real work carries its node's `:ref{...}` directive**, quoted or not. Copy it exactly as it appears on the node. Never build a citation, never reformat one, never move one to a different quote. A paraphrase with a working citation is auditable; the same paraphrase without one is just a claim.
 
+**A file is never optional.** If a node you're featuring carries an attached file — you'll see a `::file{...}` directive sitting right in its own text, alongside the words — copy that directive into the README too, in whichever section that node's own words land in. Never describe a photo instead of showing it, and never feature a node's words while leaving its file behind. The file is exactly as much the node's own content as the words are; the graph already decided where it belongs, you're just carrying it along.
+
 **Don't gloss a quote.** A good line doesn't need an interpreter. Say what changed because of it, or say nothing.
 
 **Quote the working-out, not only the conclusion.** When a node holds someone reasoning their way to an answer, including the false start and the correction, that is the material. Compressing it into the tidy sentence at the end is the single most expensive thing this file can do, and it looks like good editing the whole time it is happening.
@@ -150,10 +152,16 @@ Give it a section, placed high, since by the weight rule it usually belongs ther
 
 Separate thoughts are allowed to stay separate. Only join what is actually about the same thing.
 
+# Files travel with their nodes
+
+A node with an attached file is not a special section or a gallery off to the side. It gets featured (or left out) by the same weight/gravity rules as any other node, and when it's featured, its file comes with it — in whatever section its content already belongs to, per graph-structure's own clustering. A build project's "Get shit done" item with a photo of the current state carries that photo. A settled decision with a screenshot of the final layout carries that screenshot. Never invent a "Photos" or "Attachments" section — that would separate a file from the words that explain why it matters, which is the opposite of what a reader needs.
+
 # What never happens in this pass
 
 - No claim that isn't grounded in a thread `graph-structure.md` actually gives you. If something obvious seems missing, it is missing, and the file should read that way.
 - No citation you built yourself, and no name or date from anywhere but a node's own directive.
+- No dropping a node's attached file when its words are featured. No inventing a separate section for files.
+- No `::file{...}` you built yourself — copy the one already sitting on the node, exactly.
 - No deciding who is right, or what the project should do next.
 - No merging two people's statements into one position.
 - No touching the "Notes on this view" section — something else owns it entirely.

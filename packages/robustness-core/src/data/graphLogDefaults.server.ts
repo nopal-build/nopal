@@ -134,6 +134,23 @@ A list of stubs with nothing behind them is one node recording that the pieces w
 
 **When an item is genuinely borderline, split it.** The heading travels with it, so the cost of being wrong is a slightly thin node that still points at its source. The cost of the other error is an idea buried inside a list where nothing can ever link to it, and burial is the failure this whole file is built to prevent.
 
+## Files
+
+A photo, a PDF, or anything else attached is real content, not a special case to skip past. It earns a node exactly the way anything written down does.
+
+You never see a file's own bytes. An attached file's own source shows you up to two different things, and they're worth telling apart:
+
+- **A caption**, when the person who uploaded it wrote one. This is their own words, same as anything else they typed that day — not AI output, just as real as a sentence in the day's own text. Quote it, or write from it, the same way you would anything else they wrote.
+- **A description**, when an earlier pass has looked at the file and written up what it shows or contains. Treat this the way you'd treat something a colleague told you about a document you haven't opened yourself — useful, but secondhand.
+
+A file can have either, both, or (rarely, if you're shown one at all) neither. When both are present, the caption is the person's own claim about the file and the description is supporting detail — lead with the caption. Either one alone is enough to earn a node on its own; you don't need both.
+
+Read whichever you're given the same way you'd read anything else, and ask the same standalone question: does something here earn a node?
+
+Cite it by its source number exactly like a text source. Write the node grounded in what you were actually told — never "a photo was attached," always what it actually shows or what the caption actually says: dimensions on a whiteboard, a name on a label, three columns sketched out. The file itself travels with the node automatically, the same way a citation does; you never write anything to attach it yourself.
+
+A file with nothing worth capturing in either field simply produces no node, exactly like a text source with nothing worth capturing today.
+
 ## What does not earn a node
 
 **The writer narrating their own writing.** Deciding what to write next, announcing a section, restating a heading as a sentence. This is scaffolding, not thought:
@@ -218,6 +235,8 @@ You are editing this file, one thread at a time, via \`update_cluster\`/\`remove
 # Every node gets a home
 
 This is an index, not a highlight reel. A node with zero inbound links still needs to be findable — it might be the FIRST of two mentions, and the second one hasn't happened yet. Group it into whatever thread it's closest to, even a thread of one. Nothing gets left out, and nothing gets left for "later" — there is no later pass that adds missing nodes back in.
+
+A node that carries an attached file (you'll see a \`::file{...}\` inside its own text) is grouped exactly like any other node — by what it's about, never pulled into its own category just because it has a file.
 
 # Grouping is the real work in this pass
 
@@ -377,6 +396,8 @@ You are not required to quote every line, and this file is allowed to change fla
 
 **Any line doing real work carries its node's \`:ref{...}\` directive**, quoted or not. Copy it exactly as it appears on the node. Never build a citation, never reformat one, never move one to a different quote. A paraphrase with a working citation is auditable; the same paraphrase without one is just a claim.
 
+**A file is never optional.** If a node you're featuring carries an attached file — you'll see a \`::file{...}\` directive sitting right in its own text, alongside the words — copy that directive into the README too, in whichever section that node's own words land in. Never describe a photo instead of showing it, and never feature a node's words while leaving its file behind. The file is exactly as much the node's own content as the words are; the graph already decided where it belongs, you're just carrying it along.
+
 **Don't gloss a quote.** A good line doesn't need an interpreter. Say what changed because of it, or say nothing.
 
 **Quote the working-out, not only the conclusion.** When a node holds someone reasoning their way to an answer, including the false start and the correction, that is the material. Compressing it into the tidy sentence at the end is the single most expensive thing this file can do, and it looks like good editing the whole time it is happening.
@@ -463,10 +484,16 @@ Give it a section, placed high, since by the weight rule it usually belongs ther
 
 Separate thoughts are allowed to stay separate. Only join what is actually about the same thing.
 
+# Files travel with their nodes
+
+A node with an attached file is not a special section or a gallery off to the side. It gets featured (or left out) by the same weight/gravity rules as any other node, and when it's featured, its file comes with it — in whatever section its content already belongs to, per graph-structure's own clustering. A build project's "Get shit done" item with a photo of the current state carries that photo. A settled decision with a screenshot of the final layout carries that screenshot. Never invent a "Photos" or "Attachments" section — that would separate a file from the words that explain why it matters, which is the opposite of what a reader needs.
+
 # What never happens in this pass
 
 - No claim that isn't grounded in a thread \`graph-structure.md\` actually gives you. If something obvious seems missing, it is missing, and the file should read that way.
 - No citation you built yourself, and no name or date from anywhere but a node's own directive.
+- No dropping a node's attached file when its words are featured. No inventing a separate section for files.
+- No \`::file{...}\` you built yourself — copy the one already sitting on the node, exactly.
 - No deciding who is right, or what the project should do next.
 - No merging two people's statements into one position.
 - No touching the "Notes on this view" section — something else owns it entirely.

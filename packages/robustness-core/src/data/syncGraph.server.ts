@@ -101,11 +101,42 @@
  * `update_cluster` does for an existing thread — a day's raw source
  * content doesn't have the kind of stable identity a graph NODE or a
  * README SECTION already has to diff against).
+ *
+ * A REAL, CONFIRMED GAP, FOUND AND FIXED: an attached FILE (a photo, a
+ * PDF, ...) had NO path into the graph at all, regardless of what either
+ * skill said. `dailyLogSync.server.ts` copies a Card's `::file{...}`
+ * attachments into the vault, but never stamped `date` on the COPY the
+ * way it does for the Card's own text file -- so `collectDatedCandidates`
+ * (below, `!!f.date`) silently excluded every attachment from ever
+ * becoming a candidate here. `sync-knowledge` still described it into a
+ * `_knowledge/*.knowledge.md` sidecar, but nothing ever read that sidecar
+ * back in, so the description dead-ended. Fixed at the source:
+ * `dailyLogSync.server.ts` now stamps `date` on a copied attachment too,
+ * so it flows through the exact same per-day candidate pipeline a Card's
+ * text already does. A file-backed candidate is only offered as a source
+ * once it has a real knowledge-derived DESCRIPTION or a real human-
+ * written CAPTION to ground a node in (never fabricated from an unseen
+ * photo) -- a caption is deliberately just as sufficient on its own as a
+ * description, since it's the uploader's own words, zero AI involved, and
+ * shouldn't need `sync-knowledge` switched on (a real cost, off by
+ * default) just to be reachable. The caption itself lives on the CARD's
+ * own `::file{...}` attributes, never on the copied attachment file, so
+ * it's recovered per day by re-scanning each of that day's Card
+ * candidates and matching by the attachment's own synced name
+ * (`captionByAttachmentName` below). When `add_node` cites a file-backed
+ * source, its real `::file{...}` mount (INCLUDING that caption, if any)
+ * is appended to the node's own text BY CODE (`buildFileDirectiveMarkdown`,
+ * `oxmarkdown-core`), never typed out by the model -- same reasoning
+ * `:ref{...}` already follows. From there the file travels for free: it's
+ * just part of the node's permanent text, so `graph-structure`'s
+ * pre-fetch and `graph-project-view`'s own node text (see that file's own
+ * "Files must appear" note) see it automatically, with no separate
+ * plumbing needed downstream.
  */
 
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { buildRefDirectiveMarkdown } from "oxmarkdown-core";
+import { buildRefDirectiveMarkdown, buildFileDirectiveMarkdown, type FileDirectiveAttrs } from "oxmarkdown-core";
 import { splitFrontmatter } from "./project.types";
 import {
   createFileRef,
@@ -122,7 +153,8 @@ import {
   isSkipInstruction,
   listExtraSkillFiles,
 } from "./projectN02.server";
-import { parseSyncedCardFileName } from "./dailyLogSync.server";
+import { parseSyncedCardFileName, parseSyncedAttachmentFileName, syncedAttachmentFileName } from "./dailyLogSync.server";
+import { extractFileAttachments } from "./sorter.server";
 import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
@@ -212,6 +244,25 @@ async function collectDatedCandidates(humanId: string, folderId: string): Promis
   return out;
 }
 
+/** A candidate's contributor + (for an attachment) its human-friendly
+ * original name -- tries the Card-text shape first
+ * (`date-humanId.md`), then the attachment shape (`date-humanId-
+ * originalName`); the two are mutually exclusive by construction (see
+ * `parseSyncedAttachmentFileName`'s own doc). Neither matching means an
+ * unrecognized file shape (a future non-daily-log sync source) -- no
+ * attribution available, not an error. */
+type CandidateAttribution = { humanId?: string; originalName?: string; isAttachment: boolean };
+
+function resolveCandidateAttribution(name: string): CandidateAttribution {
+  const asCard = parseSyncedCardFileName(name);
+  if (asCard) return { humanId: asCard.humanId, isAttachment: false };
+  const asAttachment = parseSyncedAttachmentFileName(name);
+  if (asAttachment) {
+    return { humanId: asAttachment.humanId, originalName: asAttachment.originalName, isAttachment: true };
+  }
+  return { isAttachment: false };
+}
+
 /** Finds a candidate's own sibling knowledge sidecar (`_knowledge/<name>.knowledge.md`
  * next to it), if `sync-knowledge` has already produced one — see that
  * stage's own module doc for the naming convention. */
@@ -276,7 +327,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: "add_node",
     description:
-      'Add one citable node to today\'s graph-log file. Call this AT MOST ONCE per turn, then stop and wait for the result before calling it again for the next node -- if you call it more than once in the same turn, only the first call is processed and the rest are rejected (you will need to call them again on a later turn). `sourceIndex` must be one of today\'s numbered sources (shown as "Source 0:", "Source 1:", etc) -- its citation is attached automatically from real data, never write a :ref{...} yourself. `blocks` is the verbatim words, broken into one or more paragraph/list blocks in order -- code applies ==...== highlighting itself (per-item for a list, so a marker never ends up inside the highlight, and per-paragraph, so a highlight never spans a blank line and breaks) -- never include == yourself. `sameDayLinks`/`backwardLinks` are optional -- at most 3 links total are kept (any more, or any id you weren\'t actually given as a candidate, are dropped and reported back to you), so only send the ones that matter most.',
+      'Add one citable node to today\'s graph-log file. Call this AT MOST ONCE per turn, then stop and wait for the result before calling it again for the next node -- if you call it more than once in the same turn, only the first call is processed and the rest are rejected (you will need to call them again on a later turn). `sourceIndex` must be one of today\'s numbered sources (shown as "Source 0:", "Source 1:", etc) -- its citation is attached automatically from real data, never write a :ref{...} yourself. A source marked as an ATTACHED FILE (a photo, a PDF, ...) is real content just like any text source -- it may show you a Caption (the uploader\'s own words, zero AI) and/or a Description (an earlier pass\'s writeup of what the file shows); either alone is enough to cite, and a caption is the more authoritative of the two when both are present. The actual file is attached to the node automatically, you never write a ::file{...} yourself either. `blocks` is the verbatim words (or, for a file source, your own words grounded in whatever Caption/Description text you were actually given), broken into one or more paragraph/list blocks in order -- code applies ==...== highlighting itself (per-item for a list, so a marker never ends up inside the highlight, and per-paragraph, so a highlight never spans a blank line and breaks) -- never include == yourself. `sameDayLinks`/`backwardLinks` are optional -- at most 3 links total are kept (any more, or any id you weren\'t actually given as a candidate, are dropped and reported back to you), so only send the ones that matter most.',
     inputSchema: {
       type: "object",
       properties: {
@@ -382,6 +433,7 @@ export function capNodeLinks(
 function createSyncGraphExecutors(input: {
   date: string;
   sourceCitations: string[];
+  sourceFiles: (FileDirectiveAttrs | null)[];
   knownBackwardIds: Map<string, string>;
 }): {
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>;
@@ -399,7 +451,17 @@ function createSyncGraphExecutors(input: {
       const quoteBody = renderQuoteBlocks(toolInput.blocks);
       if (!quoteBody) return "Error: blocks must include at least one non-empty paragraph or list block";
       const setup = typeof toolInput.setup === "string" ? toolInput.setup.trim() : "";
-      const quote = [setup || null, quoteBody].filter(Boolean).join("\n\n");
+      // If this node cites an ATTACHED FILE (a photo, a PDF, ...), the
+      // real \`::file{...}\` mount is appended here, by CODE, never typed
+      // out by the model -- same "never trust the model with markup it can
+      // get wrong" reasoning \`:ref{...}\`'s own citation already follows.
+      // This is also the whole fix for "files never showed up in the
+      // README": from here on, a node about a photo carries that photo
+      // inline in its own permanent text, so every later stage (graph-
+      // structure's pre-fetch, graph-project-view) sees it automatically.
+      const fileInfo = input.sourceFiles[sourceIndex];
+      const fileDirective = fileInfo ? buildFileDirectiveMarkdown(fileInfo) : null;
+      const quote = [setup || null, quoteBody, fileDirective].filter(Boolean).join("\n\n");
 
       const number = nextNumber;
       const rawSameDay = Array.isArray(toolInput.sameDayLinks) ? toolInput.sameDayLinks : [];
@@ -647,14 +709,14 @@ export async function runSyncGraph(
   const dates = [...byDate.keys()].sort();
 
   // Resolve every possible contributor's display name up front, one
-  // batched lookup — `parseSyncedCardFileName` returns `null` for
+  // batched lookup — `resolveCandidateAttribution` returns nothing for
   // anything not shaped like a daily-log-sync copy (a future non-daily-
   // log sync source's own file), which just means no attribution name is
   // available for it below.
   const contributorIds = new Set<string>();
   for (const c of candidates) {
-    const parsed = parseSyncedCardFileName(c.name);
-    if (parsed) contributorIds.add(parsed.humanId);
+    const attribution = resolveCandidateAttribution(c.name);
+    if (attribution.humanId) contributorIds.add(attribution.humanId);
   }
   const humans = await getHumansById([...contributorIds]);
   const humanNameById = new Map(humans.map((h) => [h._id, h.name]));
@@ -713,43 +775,96 @@ export async function runSyncGraph(
   for (const date of dates) {
     const dayCandidates = byDate.get(date)!;
 
+    // A human can write a real caption on a `::file{...}` attachment
+    // right in the Card itself (see `oxmarkdown/fileDirective.ts`'s own
+    // caption editor) -- their OWN words about the file, zero AI
+    // involved, and available even when sync-knowledge is "skip". It
+    // lives on the CARD's markdown, never on the copied attachment file
+    // itself, so it's recovered here by re-reading each of today's Card
+    // candidates and matching by the attachment's own synced name.
+    const captionByAttachmentName = new Map<string, string>();
+    for (const candidate of dayCandidates) {
+      const asCard = parseSyncedCardFileName(candidate.name);
+      if (!asCard) continue;
+      const cardFile = await getFileRefById(candidate.fileId);
+      if (!cardFile?.content) continue;
+      for (const attachment of extractFileAttachments(cardFile.content)) {
+        if (!attachment.caption) continue;
+        captionByAttachmentName.set(
+          syncedAttachmentFileName(asCard.date, asCard.humanId, attachment.name),
+          attachment.caption,
+        );
+      }
+    }
+
     const hashParts: string[] = [];
     const sourceBlocks: string[] = [];
     const sourceCitations: string[] = [];
+    // Parallel to `sourceCitations` -- non-null exactly when that source
+    // IS an attached file (a photo, a PDF, ...), never a Card's own text.
+    // `add_node`'s executor uses this to attach the real `::file{...}`
+    // automatically, by code, whenever a node cites that source -- see
+    // this file's own module doc "Files" note (a real, confirmed gap: an
+    // attachment previously had NO path into the graph at all, since it
+    // never carried a `date` and was never offered as a source here).
+    const sourceFiles: (FileDirectiveAttrs | null)[] = [];
     for (const candidate of dayCandidates) {
       const source = await getFileRefById(candidate.fileId);
       if (!source) continue;
-      hashParts.push(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
 
       const sidecar = await findKnowledgeSidecar(projectFolder.human_id, candidate);
       let knowledgeContent: string | null = null;
       if (sidecar) {
-        hashParts.push(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
         const sidecarFile = await getFileRefById(sidecar.fileId);
         knowledgeContent = sidecarFile?.content ?? null;
       }
 
-      const parsed = parseSyncedCardFileName(candidate.name);
-      const contributorHumanId = parsed?.humanId;
-      const contributorName = contributorHumanId
-        ? humanNameById.get(contributorHumanId) ?? "Unknown"
+      const attribution = resolveCandidateAttribution(candidate.name);
+      const caption = attribution.isAttachment ? captionByAttachmentName.get(candidate.name) ?? null : null;
+
+      // An attached file with NEITHER a real caption NOR a knowledge-
+      // derived description is nothing to ground a node in -- skip it as
+      // a candidate entirely (never counted in the idempotency hash
+      // either, so it starts contributing the FIRST run something real
+      // exists for it). A caption alone is enough, deliberately: it's the
+      // uploader's OWN words, zero AI required, and shouldn't need
+      // sync-knowledge switched on just to be reachable -- see the
+      // `graphlog` skill's own "Files" note on why AI description and a
+      // human's own caption are treated as two independent, either-is-
+      // enough sources of grounding. The Card's own text content is
+      // never skipped this way.
+      if (attribution.isAttachment && !knowledgeContent && !caption) continue;
+
+      hashParts.push(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
+      if (sidecar) hashParts.push(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
+      if (caption) hashParts.push(`caption:${candidate.fileId}:${caption}`);
+
+      const contributorName = attribution.humanId
+        ? humanNameById.get(attribution.humanId) ?? "Unknown"
         : "Unknown";
+      const displayName = attribution.originalName ?? source.name;
 
       const sourceIndex = sourceBlocks.length;
       sourceCitations.push(
         buildRefDirectiveMarkdown({
           name: contributorName,
-          humanId: contributorHumanId,
+          humanId: attribution.humanId,
           datetime: `${date}T12:00:00Z`,
           location: `/fruits/vault?file=${source._id}`,
           verbose: true,
         }),
       );
+      sourceFiles.push(
+        attribution.isAttachment ? { fileId: source._id, name: displayName, caption: caption ?? undefined } : null,
+      );
       sourceBlocks.push(
         [
-          `Source ${sourceIndex}: "${source.name}" (by ${contributorName})`,
-          `Content:\n${source.content ?? "(no readable text content)"}`,
-          knowledgeContent ? `Extracted knowledge about this source:\n${knowledgeContent}` : null,
+          `Source ${sourceIndex}: "${displayName}" (by ${contributorName})${attribution.isAttachment ? " -- an ATTACHED FILE (photo/PDF/etc); its own bytes aren't shown to you, only what's below" : ""}`,
+          caption ? `Caption written by the person who uploaded it: "${caption}"` : null,
+          attribution.isAttachment
+            ? knowledgeContent ? `AI-generated description:\n${knowledgeContent}` : (caption ? null : "(no description available)")
+            : `Content:\n${source.content ?? "(no readable text content)"}`,
+          !attribution.isAttachment && knowledgeContent ? `Extracted knowledge about this source:\n${knowledgeContent}` : null,
         ]
           .filter(Boolean)
           .join("\n\n"),
@@ -785,7 +900,12 @@ export async function runSyncGraph(
       .map(([, label]) => label);
 
     const userPrompt = buildUserPrompt({ date, sourceBlocks, liveCandidates });
-    const { executors, getNodeBlocks } = createSyncGraphExecutors({ date, sourceCitations, knownBackwardIds });
+    const { executors, getNodeBlocks } = createSyncGraphExecutors({
+      date,
+      sourceCitations,
+      sourceFiles,
+      knownBackwardIds,
+    });
 
     const callStart = Date.now();
     try {

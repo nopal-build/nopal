@@ -123,8 +123,30 @@ export function parseSyncedCardFileName(name: string): { date: string; humanId: 
  * same-named attachments never collide, and a re-run can check "does this
  * exact name already exist" instead of re-deriving provenance some other
  * way. */
-function syncedAttachmentFileName(date: string, humanId: string, originalName: string): string {
+/** Exported so `sync-graph` (`syncGraph.server.ts`) can compute an
+ * attachment's own synced name directly from a Card's `::file{...}`
+ * attributes (date/humanId it already knows, `attachment.name` from
+ * `extractFileAttachments`) -- the deterministic link back to the
+ * uploader's own caption, which lives on the CARD, never on the copied
+ * file itself. */
+export function syncedAttachmentFileName(date: string, humanId: string, originalName: string): string {
   return `${date}-${humanId}-${originalName}`;
+}
+
+/** The reverse of `syncedAttachmentFileName` — recovers `{date, humanId,
+ * originalName}` from a synced attachment's own filename, for
+ * `sync-graph` to resolve contributor attribution the same way it already
+ * does for a Card's own text file. Mutually exclusive with
+ * `parseSyncedCardFileName` by construction: a Card's own copy always
+ * ends in EXACTLY `.md` with nothing after `humanId`, while an attachment
+ * always has a THIRD, non-empty segment after it (the original name) —
+ * try the Card parser first, and only fall back to this one. */
+export function parseSyncedAttachmentFileName(
+  name: string,
+): { date: string; humanId: string; originalName: string } | null {
+  const match = /^(\d{4}-\d{2}-\d{2})-([^-]+)-(.+)$/.exec(name);
+  if (!match) return null;
+  return { date: match[1], humanId: match[2], originalName: match[3] };
 }
 
 export type DailyLogSyncResult = {
@@ -164,11 +186,19 @@ export async function runDailyLogSync(
     dailyLogsFolder._id,
   );
   const existingFileByName = new Map(existingFiles.map((f) => [f.name, f]));
-  // Attachment existence only ever needs a plain name check (never a hash
-  // comparison — see `syncedAttachmentFileName`'s own doc), tracked
-  // separately so a just-copied attachment can be recorded without needing
-  // a full `FileRefListing`-shaped object to put in `existingFileByName`.
-  const attachmentNamesHandled = new Set(existingFiles.map((f) => f.name));
+  // Attachment existence check, keyed by name -- ALSO used to backfill a
+  // missing/wrong `date` on an attachment that already exists locally
+  // (pulled in by `pull-daily-logs.ts` before its own matching fix, or
+  // copied by an older version of this file, before `date` was stamped
+  // at all). A REAL, CONFIRMED GAP, FOUND AND FIXED: the original
+  // Set-based "already handled" check meant a name match alone was
+  // treated as fully synced FOREVER -- an attachment stuck without a
+  // `date` from before this fix shipped could never be repaired by simply
+  // re-running daily-log-sync, since nothing ever looked past its name to
+  // check whether its `date` was actually right.
+  const attachmentFileByName = new Map<string, { _id: string; date?: string }>(
+    existingFiles.map((f) => [f.name, { _id: f._id, date: f.date }]),
+  );
 
   const range = date ? { since: date, until: date } : { since, until };
   const entries = await listCardEntriesForProject(projectFolderId, range);
@@ -185,6 +215,14 @@ export async function runDailyLogSync(
     const existingFile = existingFileByName.get(targetName);
 
     if (existingFile && existingFile.content_hash === hash) {
+      // Content matches, but a pulled/pre-fix copy may still be missing
+      // its `date` -- same backfill reasoning as the attachment loop
+      // below. Checked even on the "nothing to sync" path, since content
+      // matching is exactly the case that would otherwise never touch
+      // this file again.
+      if (existingFile.date !== entryDate) {
+        await updateFileRef(existingFile._id, { date: entryDate });
+      }
       result.unchanged.push({ date: entryDate, humanId });
     } else if (existingFile) {
       await updateFileRef(existingFile._id, { content: card.content, content_hash: hash });
@@ -209,18 +247,35 @@ export async function runDailyLogSync(
 
     for (const attachment of extractFileAttachments(card.content)) {
       const attachmentName = syncedAttachmentFileName(entryDate, humanId, attachment.name);
-      if (attachmentNamesHandled.has(attachmentName)) continue; // already synced in a previous run
+      const existingAttachment = attachmentFileByName.get(attachmentName);
+      if (existingAttachment) {
+        // Already copied -- but see this function's own doc above: back
+        // fill `date` if it's missing/wrong rather than trusting a name
+        // match alone to mean "fully synced".
+        if (existingAttachment.date !== entryDate) {
+          await updateFileRef(existingAttachment._id, { date: entryDate });
+        }
+        continue;
+      }
 
       const copied = await copyFileIntoFolder(attachment.fileId, dailyLogsFolder._id);
       if (!copied) continue; // source file vanished mid-flight
 
       // `copyFileIntoFolder` auto-dedupes against the SOURCE's own filename
       // (see its own doc) — rename to our deterministic name right after,
-      // so a re-run's existence check above stays reliable.
-      if (copied.name !== attachmentName) {
-        await updateFileRef(copied._id, { name: attachmentName });
+      // so a re-run's existence check above stays reliable. ALSO stamp
+      // `date` here, same as the Card's own text file gets at creation --
+      // without it, `sync-graph`'s `collectDatedCandidates` (`!!f.date`)
+      // never sees this attachment at all, and a real, confirmed gap this
+      // closes: an attached photo/PDF had no path into the graph, and
+      // therefore no path into the README, no matter what either skill
+      // said. `copyFileIntoFolder` never sets `date` on its own (a plain
+      // copy, not daily-log-sync-aware), so this is the ONLY place it's
+      // ever stamped for an attachment.
+      if (copied.name !== attachmentName || copied.date !== entryDate) {
+        await updateFileRef(copied._id, { name: attachmentName, date: entryDate });
       }
-      attachmentNamesHandled.add(attachmentName);
+      attachmentFileByName.set(attachmentName, { _id: copied._id, date: entryDate });
       result.attachmentsCopied.push({
         date: entryDate,
         humanId,

@@ -16,6 +16,8 @@ You are editing this file, one thread at a time, via `update_cluster`/`remove_cl
 
 This is an index, not a highlight reel. A node with zero inbound links still needs to be findable — it might be the FIRST of two mentions, and the second one hasn't happened yet. Group it into whatever thread it's closest to, even a thread of one. Nothing gets left out, and nothing gets left for "later" — there is no later pass that adds missing nodes back in.
 
+A node that carries an attached file (you'll see a `::file{...}` inside its own text) is grouped exactly like any other node — by what it's about, never pulled into its own category just because it has a file.
+
 # Grouping is the real work in this pass
 
 Group by what the nodes are actually about, not by date, not by who wrote them. Two people's nodes on the same real thing belong in the same group even when they used different words — that's the connection this file exists to make visible. **Two people describing the same thing from different sides is the case to watch for**: one writing about what to build and the other about how it should feel are usually one thread, not two, and splitting them by whose vocabulary you recognized is the most common way this file loses the merge it exists to show.
