@@ -128,17 +128,22 @@ export function formatNodeVerbatim(node: GraphLogNode): string {
     .join("\n");
 }
 
-const FILE_DIRECTIVE_RE = /::file\{[^}]*\}/g;
+const GALLERY_IMAGE_RE = /!\[[^\]]*\]\(\/api\/vault\/view\/[^)\s]+\)/g;
 
-/** Every \`::file{...}\` directive verbatim (as it literally appears) in a
- * node's own quote — usually zero or one, never invented, since
+/** Every attached-image markdown line verbatim (as it literally appears)
+ * in a node's own quote — usually zero or one, never invented, since
  * `sync-graph`'s own \`add_node\` executor is the only writer (see that
- * file's own "A REAL, CONFIRMED GAP" module-doc note). Used by
- * `graph-project-view`'s own coverage pass to confirm a node's attached
- * file actually made it into the finished README — files are a hard
- * requirement there, not just a measurement. */
-export function extractFileDirectives(quote: string): string[] {
-  return [...quote.matchAll(FILE_DIRECTIVE_RE)].map((m) => m[0]);
+ * file's own "A REAL, CONFIRMED GAP" module-doc note). A node's own
+ * attached file is an ORDINARY \`![alt](/api/vault/view/<fileId>)\`
+ * markdown image — no custom directive at all — so it degrades
+ * gracefully anywhere and a writer can freely group several of these
+ * under a shared \`:::gallery{}...:::\` wrapper without touching the
+ * image line itself (see `graph-project-view`'s own "Files travel with
+ * their nodes" note). Used by `graph-project-view`'s own coverage pass to
+ * confirm a node's attached image actually made it into the finished
+ * README — files are a hard requirement there, not just a measurement. */
+export function extractGalleryImageLines(quote: string): string[] {
+  return [...quote.matchAll(GALLERY_IMAGE_RE)].map((m) => m[0]);
 }
 
 export type BacklinkInfo = {

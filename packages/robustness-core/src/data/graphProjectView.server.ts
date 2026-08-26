@@ -95,7 +95,7 @@ import {
   nodeIdsInSection,
   buildMembershipIndex,
 } from "./graphStructure.server";
-import { parseGraphLogNodes, formatNodeVerbatim, extractFileDirectives, type GraphLogNode } from "./graphNodeIndex.server";
+import { parseGraphLogNodes, formatNodeVerbatim, extractGalleryImageLines, type GraphLogNode } from "./graphNodeIndex.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -475,14 +475,17 @@ export type CoverageReport = {
    * no longer surfaced to the README. Reported so the drop is visible,
    * never silent. */
   fellAway: string[];
-  /** A node carrying a real \`::file{...}\` (an attached photo/PDF/etc,
-   * see `syncGraph.server.ts`'s own "A REAL, CONFIRMED GAP" note) whose
-   * thread did NOT fall away this run, but whose exact file directive is
-   * nowhere in the finished README — unlike `missingThreads`, this is a
-   * hard requirement (`PROJECT_VIEW.md`'s own "A file is never
-   * optional"), not a soft measurement: a file is either carried along
-   * with its node's words or it isn't, and this catches the model
-   * dropping one. Each entry is `"<node id> (<thread>)"`. Empty when
+  /** A node carrying a real attached-image markdown line (an
+   * `![alt](/api/vault/view/<fileId>)`, see `syncGraph.server.ts`'s own
+   * "A REAL, CONFIRMED GAP" note) whose thread did NOT fall away this
+   * run, but whose exact image line is nowhere in the finished README --
+   * unlike `missingThreads`, this is a hard requirement (`PROJECT_VIEW.md`'s
+   * own "A file is never optional"), not a soft measurement: a file is
+   * either carried along with its node's words or it isn't, and this
+   * catches the model dropping one. Grouping several such images under a
+   * shared `:::gallery{}...:::` wrapper is fine and expected -- only the
+   * individual image LINE has to survive unchanged, not any particular
+   * wrapper around it. Each entry is `"<node id> (<thread>)"`. Empty when
    * every non-fallen-away file-bearing node's file made it in. */
   missingFiles: string[];
 };
@@ -513,7 +516,7 @@ export interface RunGraphProjectViewOptions {
 }
 
 function buildSystemPrompt(skillContent: string): string {
-  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index, PLUS the actual verbatim text of the nodes behind its top threads). Never invent progress, dates, or facts that aren't grounded in a real node's own words or the README's own existing content -- graph-structure.md's glosses are a table of contents, never something to write prose from directly. Call get_node for any node you need that wasn't already handed to you in full. A node's own text may carry a ::file{...} directive (an attached photo/PDF/etc) -- when you feature that node's words anywhere, copy its ::file{...} into the same section, exactly as it appears; a file is never optional and never gets its own separate section. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
+  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index, PLUS the actual verbatim text of the nodes behind its top threads). Never invent progress, dates, or facts that aren't grounded in a real node's own words or the README's own existing content -- graph-structure.md's glosses are a table of contents, never something to write prose from directly. Call get_node for any node you need that wasn't already handed to you in full. A node's own text may carry an attached image (an ordinary ![alt](/api/vault/view/...) markdown image) -- when you feature that node's words anywhere, that exact image line must appear in the same section too, wrapped in a :::gallery{}...::: block (group several images from the same thread into ONE gallery rather than several); a file is never optional and never gets its own separate section. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
 
 Do not write any planning, reasoning, or summary text outside of a tool call -- go straight to calling update_section/remove_section/get_node with no preamble and no narration in between calls either. Your own output budget per turn is limited, and explanatory text spends it on nothing that ends up in the README.
 
@@ -609,8 +612,8 @@ function computeCoverageReport(
     for (const nodeId of nodeIdsInSection(section)) {
       const node = allNodesById.get(nodeId);
       if (!node) continue;
-      for (const fileDirective of extractFileDirectives(node.quote)) {
-        if (!readmeBody.includes(fileDirective)) missingFiles.push(`${nodeId} (${section.heading})`);
+      for (const imageLine of extractGalleryImageLines(node.quote)) {
+        if (!readmeBody.includes(imageLine)) missingFiles.push(`${nodeId} (${section.heading})`);
       }
     }
   }

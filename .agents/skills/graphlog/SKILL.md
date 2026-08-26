@@ -392,25 +392,37 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   - **`missingFiles` is checked more strictly than the other two, ON
     PURPOSE** — unlike thread coverage, `PROJECT_VIEW.md`'s own "A file is
     never optional" is a hard rule, not a judgment call: for every node in
-    a NON-fallen-away thread, `extractFileDirectives` (`graphNodeIndex.server.ts`)
-    pulls any real `::file{...}` off that node's own text (see
-    `sync-graph`'s own "Files" note — the directive is code-attached, so
-    this is checking for something that's ALWAYS really there when a node
-    cites a file source) and confirms the exact same directive text
-    survived into the finished README. Still report-only, not a forced
-    retry: unlike a truncated/refused turn (a mechanical failure), a
-    dropped file is the model making a legitimate-looking editorial
-    choice that happens to violate an instruction — forcing an automatic
-    retry risks looping forever if it keeps making the same choice, so
-    this is visibility, not enforcement, same as the other two fields.
+    a NON-fallen-away thread, `extractGalleryImageLines` (`graphNodeIndex.server.ts`)
+    pulls any real attached-image markdown line (an ordinary
+    `![alt](/api/vault/view/<fileId>)`, never a custom directive) off that
+    node's own text (see `sync-graph`'s own "Files" note — the image line
+    is code-attached, so this is checking for something that's ALWAYS
+    really there when a node cites a file source) and confirms that exact
+    same image line survived into the finished README, however it got
+    wrapped along the way (a `:::gallery{}...:::` grouping several images
+    together is fine — only the individual line itself has to survive
+    unchanged). Still report-only, not a forced retry: unlike a
+    truncated/refused turn (a mechanical failure), a dropped file is the
+    model making a legitimate-looking editorial choice that happens to
+    violate an instruction — forcing an automatic retry risks looping
+    forever if it keeps making the same choice, so this is visibility, not
+    enforcement, same as the other two fields.
   - **A REAL, CONFIRMED GAP, FOUND AND FIXED: files had NO path into the
     graph at all before this**, regardless of what either skill said —
     see "Done — `daily-log-sync`" and "Done — `sync-graph`" above (Build
     status items 3 and 5) for the full fix (a missing `date` stamp on a
-    copied attachment, closed at the source) and `oxmarkdown-core`'s new
-    `fileDirective.ts` (`buildFileDirectiveMarkdown`, the first
-    SERVER-side writer of `::file{...}` — until now it was only ever
-    authored by a human through the upload UI).
+    copied attachment, closed at the source). GraphLog's own OUTPUT
+    deliberately does NOT use the `::file{...}` directive at all — an
+    attached image is appended to its node's text as an ORDINARY
+    `![alt](/api/vault/view/<fileId>)` markdown image instead (a real,
+    considered choice, not an oversight: it degrades gracefully anywhere,
+    and several images can be grouped under one shared
+    `:::gallery{}...:::` wrapper without ever having to rebuild the image
+    line itself — something a one-file-per-mount `::file{...}` directive
+    can't do). `::file{...}` remains exactly what it always was: the
+    HUMAN-facing upload directive a person writes when attaching a photo
+    to a Card in the first place; GraphLog only ever READS that one (for
+    its `caption`), never writes one of its own.
 
 ## Reset
 
@@ -872,8 +884,8 @@ skill was born from:
      (`updateFileRef`'s own allowed-fields list widened to include `date`
      for exactly this), so it flows through the SAME per-day pipeline a
      Card's text already does. See `sync-graph`'s own "Files" note below
-     for the rest of the fix (a file-backed source, a node's own
-     `::file{...}`, and `graph-project-view`'s "files are never optional"
+     for the rest of the fix (a file-backed source, a node's own attached
+     image, and `graph-project-view`'s "files are never optional"
      coverage check).
 4. **Done — `sync-knowledge`.** `syncKnowledge.server.ts`
    (`runSyncKnowledge`) walks a project's `syncs/` tree recursively
@@ -1041,19 +1053,41 @@ skill was born from:
      keeping each item's own `1.`/`-` marker outside the highlight.
    - **Files.** An attached photo/PDF now becomes a real, numbered source
      alongside a day's Card text — see "Done — `daily-log-sync`" above for
-     the `date`-stamping half of this fix. A file-backed source is only
-     ever offered once it has a real knowledge-derived description to
-     ground a node in (never fabricated from an unseen photo); its
-     `sourceIndex` behaves exactly like a text source's. When `add_node`
-     cites one, its real `::file{...}` mount (`buildFileDirectiveMarkdown`,
-     `oxmarkdown-core`'s new `fileDirective.ts`) is appended to the node's
-     own text BY CODE, never typed out by the model — same reasoning
-     `:ref{...}` already follows. From there the file needs no separate
-     field or plumbing at all: it's just part of `GraphLogNode.quote`, so
-     `graph-structure`'s pre-fetch and `graph-project-view`'s own node text
-     see it automatically. `DEFAULT_GRAPH_SKILL`'s own new "Files" section
-     covers the model-facing side (read a file's description, apply the
-     same standalone test, never write `::file{...}` yourself).
+     the `date`-stamping half of this fix. A file-backed source is offered
+     once it has EITHER a real knowledge-derived DESCRIPTION or a real
+     human-written CAPTION to ground a node in (never fabricated from an
+     unseen photo) — a caption is deliberately just as sufficient on its
+     own, since it's the uploader's own words, zero AI involved, and
+     shouldn't need `sync-knowledge` switched on (a real cost, off by
+     default) just to be reachable. The caption lives on the Card's own
+     `::file{...}` attributes (the HUMAN-facing upload directive, never
+     touched otherwise) and is recovered per day by re-scanning that day's
+     Cards and matching by the attachment's own synced name. Its
+     `sourceIndex` behaves exactly like a text source's.
+     - **Deliberately NOT rendered as `::file{...}`.** When `add_node`
+       cites a file-backed source, an ORDINARY
+       `![alt](/api/vault/view/<fileId>)` markdown image (the caption, if
+       any, becomes the alt text) is appended to the node's own text BY
+       CODE, never typed out by the model — same reasoning `:ref{...}`
+       already follows, just never using the `::file{...}` directive
+       itself. A bare image degrades gracefully anywhere (no directive
+       support needed at all), and — the real reason for this choice —
+       several of these can be freely grouped under one shared
+       `:::gallery{}...:::` container by a later stage without ever
+       having to rebuild the image line itself, which a one-file-per-mount
+       `::file{...}` directive can't do. From there the file needs no
+       separate field or plumbing at all: it's just part of
+       `GraphLogNode.quote`, so `graph-structure`'s pre-fetch and
+       `graph-project-view`'s own node text see it automatically.
+       `DEFAULT_GRAPH_SKILL`'s own new "Files" section covers the
+       model-facing side (read a caption and/or a description, apply the
+       same standalone test, never write any image markup yourself).
+       `PROJECT_VIEW.md`'s own "Files travel with their nodes" section
+       tells graph-project-view to wrap a featured image (or several
+       related ones) in a `:::gallery{}...:::` block, grouping multiple
+       images from the same thread/moment into ONE gallery rather than
+       scattering single-image ones — the grouping is the writer's choice,
+       the image line inside it is not.
 6. **Done — `graph-project-view`, REDESIGNED from its original per-day
    shape** (see the header's "real architecture change" note).
    `graphProjectView.server.ts` (`runGraphProjectView`) now reads
