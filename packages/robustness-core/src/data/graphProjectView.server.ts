@@ -95,7 +95,7 @@ import {
   nodeIdsInSection,
   buildMembershipIndex,
 } from "./graphStructure.server";
-import { parseGraphLogNodes, formatNodeVerbatim, extractGalleryImageLines, type GraphLogNode } from "./graphNodeIndex.server";
+import { parseGraphLogNodes, formatNodeVerbatim, extractAttachedFileLines, type GraphLogNode } from "./graphNodeIndex.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -475,8 +475,9 @@ export type CoverageReport = {
    * no longer surfaced to the README. Reported so the drop is visible,
    * never silent. */
   fellAway: string[];
-  /** A node carrying a real attached-image markdown line (an
-   * `![alt](/api/vault/view/<fileId>)`, see `syncGraph.server.ts`'s own
+  /** A node carrying a real attached-file markdown line (an image, a
+   * video link, or a plain file link, all pointing at
+   * `/api/vault/view/<fileId>` -- see `syncGraph.server.ts`'s own
    * "A REAL, CONFIRMED GAP" note) whose thread did NOT fall away this
    * run, but whose exact image line is nowhere in the finished README --
    * unlike `missingThreads`, this is a hard requirement (`PROJECT_VIEW.md`'s
@@ -516,7 +517,7 @@ export interface RunGraphProjectViewOptions {
 }
 
 function buildSystemPrompt(skillContent: string): string {
-  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index, PLUS the actual verbatim text of the nodes behind its top threads). Never invent progress, dates, or facts that aren't grounded in a real node's own words or the README's own existing content -- graph-structure.md's glosses are a table of contents, never something to write prose from directly. Call get_node for any node you need that wasn't already handed to you in full. A node's own text may carry an attached image (an ordinary ![alt](/api/vault/view/...) markdown image) -- when you feature that node's words anywhere, that exact image line must appear in the same section too, wrapped in a :::gallery{}...::: block (group several images from the same thread into ONE gallery rather than several); a file is never optional and never gets its own separate section. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
+  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index, PLUS the actual verbatim text of the nodes behind its top threads). Never invent progress, dates, or facts that aren't grounded in a real node's own words or the README's own existing content -- graph-structure.md's glosses are a table of contents, never something to write prose from directly. Call get_node for any node you need that wasn't already handed to you in full. A node's own text may carry an attached file: a PHOTO or VIDEO (an ordinary markdown image or a link marked ?type=video) belongs in a :::gallery{}...::: block wherever that node's words are featured -- group several photos/videos from the same thread into ONE gallery rather than several. Anything else (a PDF, a doc, ...) is a plain [name](url) link, never put inside a gallery. Either way, that exact image/link line must appear in the same section as the words it came with -- a file is never optional and never gets its own separate section. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
 
 Do not write any planning, reasoning, or summary text outside of a tool call -- go straight to calling update_section/remove_section/get_node with no preamble and no narration in between calls either. Your own output budget per turn is limited, and explanatory text spends it on nothing that ends up in the README.
 
@@ -612,8 +613,8 @@ function computeCoverageReport(
     for (const nodeId of nodeIdsInSection(section)) {
       const node = allNodesById.get(nodeId);
       if (!node) continue;
-      for (const imageLine of extractGalleryImageLines(node.quote)) {
-        if (!readmeBody.includes(imageLine)) missingFiles.push(`${nodeId} (${section.heading})`);
+      for (const fileLine of extractAttachedFileLines(node.quote)) {
+        if (!readmeBody.includes(fileLine)) missingFiles.push(`${nodeId} (${section.heading})`);
       }
     }
   }

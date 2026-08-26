@@ -128,22 +128,27 @@ export function formatNodeVerbatim(node: GraphLogNode): string {
     .join("\n");
 }
 
-const GALLERY_IMAGE_RE = /!\[[^\]]*\]\(\/api\/vault\/view\/[^)\s]+\)/g;
+// Matches all three shapes `syncGraph.server.ts`'s own
+// `buildAttachedMediaMarkdown` can produce: an image (`![alt](url)`), a
+// video link (`[alt](url?type=video)`), or a plain file link
+// (`[alt](url)`) — the leading `!` is optional, everything else is the
+// same `[...](/api/vault/view/...)` shape either way.
+const ATTACHED_FILE_RE = /!?\[[^\]]*\]\(\/api\/vault\/view\/[^)\s]+\)/g;
 
-/** Every attached-image markdown line verbatim (as it literally appears)
+/** Every attached-file markdown line verbatim (as it literally appears)
  * in a node's own quote — usually zero or one, never invented, since
  * `sync-graph`'s own \`add_node\` executor is the only writer (see that
  * file's own "A REAL, CONFIRMED GAP" module-doc note). A node's own
- * attached file is an ORDINARY \`![alt](/api/vault/view/<fileId>)\`
- * markdown image — no custom directive at all — so it degrades
- * gracefully anywhere and a writer can freely group several of these
- * under a shared \`:::gallery{}...:::\` wrapper without touching the
- * image line itself (see `graph-project-view`'s own "Files travel with
- * their nodes" note). Used by `graph-project-view`'s own coverage pass to
- * confirm a node's attached image actually made it into the finished
- * README — files are a hard requirement there, not just a measurement. */
-export function extractGalleryImageLines(quote: string): string[] {
-  return [...quote.matchAll(GALLERY_IMAGE_RE)].map((m) => m[0]);
+ * attached file is ORDINARY markdown — no custom directive at all — so
+ * it degrades gracefully anywhere, and a writer can freely group several
+ * photos/videos under a shared \`:::gallery{}...:::\` wrapper without
+ * touching the image/link line itself (see `graph-project-view`'s own
+ * "Files travel with their nodes" note). Used by `graph-project-view`'s
+ * own coverage pass to confirm a node's attached file actually made it
+ * into the finished README — files are a hard requirement there, not
+ * just a measurement. */
+export function extractAttachedFileLines(quote: string): string[] {
+  return [...quote.matchAll(ATTACHED_FILE_RE)].map((m) => m[0]);
 }
 
 export type BacklinkInfo = {

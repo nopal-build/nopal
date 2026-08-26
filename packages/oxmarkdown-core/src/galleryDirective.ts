@@ -23,6 +23,11 @@
 export interface ResolvedGalleryImage {
   url: string;
   name: string;
+  /** Defaults to `"image"` when omitted, for any existing caller that
+   * never had a reason to distinguish (every real image really is one) --
+   * added once the gallery grid gained real video playback, so a caller
+   * resolving a folder that also contains videos can say so. */
+  kind?: "image" | "video";
 }
 
 /** A plain lookup function, same spirit as `CardResolver` — the renderer

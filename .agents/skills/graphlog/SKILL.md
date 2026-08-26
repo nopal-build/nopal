@@ -1065,29 +1065,49 @@ skill was born from:
      Cards and matching by the attachment's own synced name. Its
      `sourceIndex` behaves exactly like a text source's.
      - **Deliberately NOT rendered as `::file{...}`.** When `add_node`
-       cites a file-backed source, an ORDINARY
-       `![alt](/api/vault/view/<fileId>)` markdown image (the caption, if
-       any, becomes the alt text) is appended to the node's own text BY
-       CODE, never typed out by the model — same reasoning `:ref{...}`
-       already follows, just never using the `::file{...}` directive
-       itself. A bare image degrades gracefully anywhere (no directive
-       support needed at all), and — the real reason for this choice —
-       several of these can be freely grouped under one shared
-       `:::gallery{}...:::` container by a later stage without ever
-       having to rebuild the image line itself, which a one-file-per-mount
-       `::file{...}` directive can't do. From there the file needs no
-       separate field or plumbing at all: it's just part of
-       `GraphLogNode.quote`, so `graph-structure`'s pre-fetch and
-       `graph-project-view`'s own node text see it automatically.
-       `DEFAULT_GRAPH_SKILL`'s own new "Files" section covers the
-       model-facing side (read a caption and/or a description, apply the
-       same standalone test, never write any image markup yourself).
-       `PROJECT_VIEW.md`'s own "Files travel with their nodes" section
-       tells graph-project-view to wrap a featured image (or several
-       related ones) in a `:::gallery{}...:::` block, grouping multiple
-       images from the same thread/moment into ONE gallery rather than
-       scattering single-image ones — the grouping is the writer's choice,
-       the image line inside it is not.
+       cites a file-backed source, ORDINARY markdown (never a custom
+       directive) is appended to the node's own text BY CODE
+       (`buildAttachedMediaMarkdown`, `syncGraph.server.ts`), never typed
+       out by the model — same reasoning `:ref{...}` already follows.
+       Shape depends on the file's REAL content type, decided by code,
+       never guessed by the model:
+       - **Image** — `![alt](/api/vault/view/<fileId>)` (the caption, if
+         any, becomes the alt text).
+       - **Video** — `[alt](/api/vault/view/<fileId>?type=video)`, an
+         ORDINARY LINK carrying a `?type=video` marker — a real, working,
+         clickable link even somewhere that's never heard of this
+         convention (unlike an `<img>` pointed at a video file, which
+         would just be broken). `OxRenderer.tsx`'s own gallery collector
+         (`collectGalleryMedia`, the `oxmarkdown` skill's own domain) looks
+         for that SAME marker to upgrade the link into a real
+         `<video controls>` player wherever it ends up inside a
+         `:::gallery{}...:::` block — a real, new capability added
+         alongside this (the gallery, and `project.server.ts`'s own LEAF
+         `::gallery{folder="..."}` folder resolution, both used to only
+         ever recognize images; video is now equally first-class in both).
+       - **Anything else** (a PDF, a doc, ...) — a plain
+         `[name](/api/vault/view/<fileId>)` link, no marker — never
+         gallery-eligible, a reader just clicks through.
+
+       A bare image/link degrades gracefully anywhere (no directive
+       support needed at all), and — the real reason for this choice over
+       a one-file-per-mount `::file{...}` directive — several photos/videos
+       can be freely grouped under one shared `:::gallery{}...:::`
+       container by a later stage without ever having to rebuild the
+       image/link line itself. From there the file needs no separate field
+       or plumbing at all: it's just part of `GraphLogNode.quote`, so
+       `graph-structure`'s pre-fetch and `graph-project-view`'s own node
+       text see it automatically. `DEFAULT_GRAPH_SKILL`'s own "Files"
+       section covers the model-facing side (read a caption and/or a
+       description, apply the same standalone test, never write any
+       markup yourself — the model never needs to know or care which of
+       the three shapes above its own citation becomes). `PROJECT_VIEW.md`'s
+       own "Files travel with their nodes" section tells graph-project-view
+       the gallery is for photos/videos ONLY (grouping several from the
+       same thread/moment into ONE gallery rather than scattering
+       single-item ones), and everything else stays a plain link, never
+       wrapped in a gallery — the grouping is the writer's choice, the
+       image/link line inside it is not.
 6. **Done — `graph-project-view`, REDESIGNED from its original per-day
    shape** (see the header's "real architecture change" note).
    `graphProjectView.server.ts` (`runGraphProjectView`) now reads

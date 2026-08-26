@@ -126,17 +126,24 @@
  * (`captionByAttachmentName` below).
  *
  * NOT rendered as a `::file{...}` directive, deliberately -- an attached
- * image is appended to its node's own text as an ORDINARY
- * `![alt](/api/vault/view/<fileId>)` markdown image (`buildGalleryImageMarkdown`
- * below), BY CODE, never typed out by the model, same reasoning `:ref{...}`
- * already follows. A bare image degrades gracefully anywhere (no directive
- * support needed at all) and, unlike a one-file-at-a-time `::file{...}`
- * mount, several of these can be freely grouped under one shared
+ * file is appended to its node's own text as ORDINARY markdown
+ * (`buildAttachedMediaMarkdown` below), BY CODE, never typed out by the
+ * model, same reasoning `:ref{...}` already follows, shaped by the file's
+ * REAL content type: an image is `![alt](url)`; a video is `[alt](url)`
+ * with the url carrying `?type=video` (a real, clickable link even
+ * somewhere that's never heard of this convention, unlike an `<img>`
+ * pointed at a video file, which would just be broken -- and the same
+ * marker `OxRenderer.tsx`'s own gallery collector looks for to upgrade it
+ * into a real `<video controls>` player); anything else (a PDF, a doc,
+ * ...) is a plain `[name](url)` link, never gallery-eligible at all.
+ * Ordinary markdown degrades gracefully anywhere (no directive support
+ * needed) and, unlike a one-file-at-a-time `::file{...}` mount, several
+ * photos/videos can be freely grouped under one shared
  * `:::gallery{}...:::` container by whichever LATER stage is actually
  * laying out a page (see `graph-project-view`'s own "Files travel with
- * their nodes" note) -- the image line itself never has to be rebuilt to
- * make that grouping happen. From there the file travels for free: it's
- * just part of the node's permanent text, so `graph-structure`'s
+ * their nodes" note) -- the image/link line itself never has to be
+ * rebuilt to make that grouping happen. From there the file travels for
+ * free: it's just part of the node's permanent text, so `graph-structure`'s
  * pre-fetch and `graph-project-view`'s own node text see it automatically,
  * with no separate plumbing needed downstream.
  */
@@ -334,7 +341,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: "add_node",
     description:
-      'Add one citable node to today\'s graph-log file. Call this AT MOST ONCE per turn, then stop and wait for the result before calling it again for the next node -- if you call it more than once in the same turn, only the first call is processed and the rest are rejected (you will need to call them again on a later turn). `sourceIndex` must be one of today\'s numbered sources (shown as "Source 0:", "Source 1:", etc) -- its citation is attached automatically from real data, never write a :ref{...} yourself. A source marked as an ATTACHED FILE (a photo, a PDF, ...) is real content just like any text source -- it may show you a Caption (the uploader\'s own words, zero AI) and/or a Description (an earlier pass\'s writeup of what the file shows); either alone is enough to cite, and a caption is the more authoritative of the two when both are present. The actual image is attached to the node automatically as a plain photo, you never write any markup to attach it yourself. `blocks` is the verbatim words (or, for a file source, your own words grounded in whatever Caption/Description text you were actually given), broken into one or more paragraph/list blocks in order -- code applies ==...== highlighting itself (per-item for a list, so a marker never ends up inside the highlight, and per-paragraph, so a highlight never spans a blank line and breaks) -- never include == yourself. `sameDayLinks`/`backwardLinks` are optional -- at most 3 links total are kept (any more, or any id you weren\'t actually given as a candidate, are dropped and reported back to you), so only send the ones that matter most.',
+      'Add one citable node to today\'s graph-log file. Call this AT MOST ONCE per turn, then stop and wait for the result before calling it again for the next node -- if you call it more than once in the same turn, only the first call is processed and the rest are rejected (you will need to call them again on a later turn). `sourceIndex` must be one of today\'s numbered sources (shown as "Source 0:", "Source 1:", etc) -- its citation is attached automatically from real data, never write a :ref{...} yourself. A source marked as an ATTACHED FILE (a photo, a video, a PDF, ...) is real content just like any text source -- it may show you a Caption (the uploader\'s own words, zero AI) and/or a Description (an earlier pass\'s writeup of what the file shows); either alone is enough to cite, and a caption is the more authoritative of the two when both are present. The actual file is attached to the node automatically (a photo or video embeds inline, anything else becomes a link), you never write any markup to attach it yourself. `blocks` is the verbatim words (or, for a file source, your own words grounded in whatever Caption/Description text you were actually given), broken into one or more paragraph/list blocks in order -- code applies ==...== highlighting itself (per-item for a list, so a marker never ends up inside the highlight, and per-paragraph, so a highlight never spans a blank line and breaks) -- never include == yourself. `sameDayLinks`/`backwardLinks` are optional -- at most 3 links total are kept (any more, or any id you weren\'t actually given as a candidate, are dropped and reported back to you), so only send the ones that matter most.',
     inputSchema: {
       type: "object",
       properties: {
@@ -410,7 +417,7 @@ function renderQuoteBlocks(rawBlocks: unknown): string | null {
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
-type SourceFileInfo = { fileId: string; name: string; caption?: string };
+type SourceFileInfo = { fileId: string; name: string; caption?: string; contentType: string };
 
 /** Escapes characters that would otherwise break markdown image/link
  * syntax if they showed up in a filename or a human-written caption --
@@ -423,15 +430,34 @@ function escapeMarkdownImageAlt(value: string): string {
 }
 
 /** An attached file's own markdown, appended to its node's text when
- * `add_node` cites a file-backed source -- an ORDINARY image, not a
- * custom directive (see this file's own module doc for why). The
- * caption (a human's own words, when present) becomes the alt text,
- * which is also what a `:::gallery{}...:::` grid shows as a caption
- * underneath the photo -- falls back to the file's own name when there
- * is none. */
-function buildGalleryImageMarkdown(info: SourceFileInfo): string {
+ * `add_node` cites a file-backed source -- shape depends on the file's
+ * real content type, decided here by CODE, never left for the model to
+ * guess at:
+ *
+ * - An IMAGE is an ORDINARY \`![alt](url)\` markdown image.
+ * - A VIDEO is an ORDINARY \`[alt](url)\` markdown LINK, its URL carrying
+ *   \`?type=video\` -- a real, working, clickable link even in a renderer
+ *   that's never heard of this convention (unlike an image tag pointed at
+ *   a video file, which would just be broken), and the SAME marker
+ *   `OxRenderer.tsx`'s own gallery collector looks for to upgrade it into
+ *   a real `<video controls>` player when it appears inside a
+ *   `:::gallery{}...:::` block.
+ * - ANYTHING ELSE (a PDF, a doc, ...) is a plain \`[name](url)\` link, no
+ *   marker -- never embedded as media, never gallery-eligible; a reader
+ *   just clicks through to it. GRAPH_STRUCTURE.md/PROJECT_VIEW.md both
+ *   say the same thing from the model's side: a gallery holds photos and
+ *   videos only, everything else is an ordinary link.
+ *
+ * The caption (a human's own words, when present) becomes the alt/link
+ * text either way, which is also what a `:::gallery{}...:::` grid shows
+ * as a caption underneath a photo or video -- falls back to the file's
+ * own name when there is none. */
+function buildAttachedMediaMarkdown(info: SourceFileInfo): string {
   const alt = escapeMarkdownImageAlt(info.caption || info.name);
-  return `![${alt}](/api/vault/view/${info.fileId})`;
+  const url = `/api/vault/view/${info.fileId}`;
+  if (info.contentType.startsWith("image/")) return `![${alt}](${url})`;
+  if (info.contentType.startsWith("video/")) return `[${alt}](${url}?type=video)`;
+  return `[${alt}](${url})`;
 }
 
 // brake, not a default — see ADR-002 (docs/adr/0002-three-link-cap-per-node.md,
@@ -482,18 +508,19 @@ function createSyncGraphExecutors(input: {
       const quoteBody = renderQuoteBlocks(toolInput.blocks);
       if (!quoteBody) return "Error: blocks must include at least one non-empty paragraph or list block";
       const setup = typeof toolInput.setup === "string" ? toolInput.setup.trim() : "";
-      // If this node cites an ATTACHED FILE (a photo, a PDF, ...), a real
-      // \`![alt](/api/vault/view/<fileId>)\` markdown image is appended
-      // here, by CODE, never typed out by the model -- same "never trust
-      // the model with markup it can get wrong" reasoning \`:ref{...}\`'s
-      // own citation already follows. This is also the whole fix for
-      // "files never showed up in the README": from here on, a node
-      // about a photo carries that photo inline in its own permanent
-      // text, so every later stage (graph-structure's pre-fetch,
-      // graph-project-view) sees it automatically.
+      // If this node cites an ATTACHED FILE (a photo, a video, a PDF,
+      // ...), its markdown is appended here BY CODE (image/video/plain
+      // link, shaped by the file's real content type), never typed out
+      // by the model -- same "never trust the model with markup it can
+      // get wrong" reasoning \`:ref{...}\`'s own citation already
+      // follows. This is also the whole fix for "files never showed up
+      // in the README": from here on, a node about a photo carries that
+      // photo inline in its own permanent text, so every later stage
+      // (graph-structure's pre-fetch, graph-project-view) sees it
+      // automatically.
       const fileInfo = input.sourceFiles[sourceIndex];
-      const galleryImage = fileInfo ? buildGalleryImageMarkdown(fileInfo) : null;
-      const quote = [setup || null, quoteBody, galleryImage].filter(Boolean).join("\n\n");
+      const attachedMedia = fileInfo ? buildAttachedMediaMarkdown(fileInfo) : null;
+      const quote = [setup || null, quoteBody, attachedMedia].filter(Boolean).join("\n\n");
 
       const number = nextNumber;
       const rawSameDay = Array.isArray(toolInput.sameDayLinks) ? toolInput.sameDayLinks : [];
@@ -887,7 +914,9 @@ export async function runSyncGraph(
         }),
       );
       sourceFiles.push(
-        attribution.isAttachment ? { fileId: source._id, name: displayName, caption: caption ?? undefined } : null,
+        attribution.isAttachment
+          ? { fileId: source._id, name: displayName, caption: caption ?? undefined, contentType: source.content_type }
+          : null,
       );
       sourceBlocks.push(
         [

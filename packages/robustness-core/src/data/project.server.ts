@@ -74,8 +74,12 @@ export async function resolveProjectManifest(
     if (!subfolder) continue;
     const subChildren = await listFolderChildren(humanId, subfolder._id);
     galleryFolders[folderName] = subChildren.files
-      .filter((f) => f.content_type.startsWith("image/"))
-      .map((f) => ({ url: fileUrl(f._id), name: f.name }));
+      .filter((f) => f.content_type.startsWith("image/") || f.content_type.startsWith("video/"))
+      .map((f) => ({
+        url: fileUrl(f._id),
+        name: f.name,
+        kind: f.content_type.startsWith("video/") ? ("video" as const) : ("image" as const),
+      }));
   }
 
   return { manifest: resolvedManifest, body, galleryFolders };

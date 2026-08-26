@@ -1,12 +1,17 @@
 // Regression tests for the "files never reached the README" fix: an
-// attached photo/PDF now flows daily-log-sync -> sync-graph -> a node's
-// own text -> graph-structure -> graph-project-view, automatically, with
-// no separate plumbing at any later stage. An attached image is an
-// ORDINARY `![alt](/api/vault/view/<fileId>)` markdown image, never a
-// custom `::file{...}` directive -- see `syncGraph.server.ts`'s own
-// module doc for why (degrades gracefully anywhere, and several can be
-// freely grouped under one shared `:::gallery{}...:::` wrapper without
-// ever touching the image line itself).
+// attached photo/video/PDF now flows daily-log-sync -> sync-graph -> a
+// node's own text -> graph-structure -> graph-project-view,
+// automatically, with no separate plumbing at any later stage. Shape
+// depends on the file's real content type (see `syncGraph.server.ts`'s
+// `buildAttachedMediaMarkdown`):
+//   - image  -> ordinary `![alt](url)`
+//   - video  -> ordinary `[alt](url?type=video)` (a real, clickable link
+//     even where the `?type=video` convention isn't understood; the SAME
+//     marker `OxRenderer.tsx`'s own gallery collector looks for to
+//     upgrade it into a real `<video controls>` player)
+//   - anything else -> a plain `[name](url)` link, never gallery-eligible
+// None of these are a custom `::file{...}` directive -- see that file's
+// own module doc for why.
 
 import { describe, it, expect } from "vitest";
 import {
@@ -16,7 +21,7 @@ import {
 } from "robustness-core/data/dailyLogSync.server";
 import { capNodeLinks } from "robustness-core/data/syncGraph.server";
 import { extractFileAttachments } from "robustness-core/data/sorter.server";
-import { extractGalleryImageLines, type GraphLogNode } from "robustness-core/data/graphNodeIndex.server";
+import { extractAttachedFileLines, type GraphLogNode } from "robustness-core/data/graphNodeIndex.server";
 
 // capNodeLinks is imported only to confirm the module still loads cleanly
 // alongside the new file-handling code in the same file (a cheap smoke
@@ -50,26 +55,39 @@ describe("attachment filename parsing", () => {
   });
 });
 
-describe("an attached image is a plain markdown image, never a custom directive", () => {
-  it("extractGalleryImageLines finds an image embedded in a node's own quote", () => {
+describe("extractAttachedFileLines finds all three attached-file shapes", () => {
+  it("finds an image embedded in a node's own quote", () => {
     const quote = "==The whiteboard shows three columns: build, ship, learn.==\n\n![whiteboard.jpg](/api/vault/view/abc123)";
-    expect(extractGalleryImageLines(quote)).toEqual(["![whiteboard.jpg](/api/vault/view/abc123)"]);
+    expect(extractAttachedFileLines(quote)).toEqual(["![whiteboard.jpg](/api/vault/view/abc123)"]);
+  });
+
+  it("finds a video link marked with ?type=video", () => {
+    const quote = "==Shading update on the south wall.==\n\n[Shading update on south wall](/api/vault/view/def456?type=video)";
+    expect(extractAttachedFileLines(quote)).toEqual([
+      "[Shading update on south wall](/api/vault/view/def456?type=video)",
+    ]);
+  });
+
+  it("finds a plain (non-media) file link", () => {
+    const quote = "==The permit PDF is attached.==\n\n[permit.pdf](/api/vault/view/ghi789)";
+    expect(extractAttachedFileLines(quote)).toEqual(["[permit.pdf](/api/vault/view/ghi789)"]);
   });
 
   it("returns nothing for a node with no attached file", () => {
-    expect(extractGalleryImageLines("==Just words, no file here.==")).toEqual([]);
+    expect(extractAttachedFileLines("==Just words, no file here.==")).toEqual([]);
   });
 
-  it("does not match an ordinary external image, only /api/vault/view/ ones", () => {
-    expect(extractGalleryImageLines("![a photo](https://example.com/photo.jpg)")).toEqual([]);
+  it("does not match an ordinary external link/image, only /api/vault/view/ ones", () => {
+    expect(extractAttachedFileLines("![a photo](https://example.com/photo.jpg)")).toEqual([]);
+    expect(extractAttachedFileLines("[a link](https://example.com)")).toEqual([]);
   });
 
-  it("finds every image when several are grouped together", () => {
+  it("finds every attachment when several are grouped together", () => {
     const quote = [
       "![south wall](/api/vault/view/abc123)",
-      "![west wall](/api/vault/view/def456)",
+      "[shading update](/api/vault/view/def456?type=video)",
     ].join("\n");
-    expect(extractGalleryImageLines(quote)).toHaveLength(2);
+    expect(extractAttachedFileLines(quote)).toHaveLength(2);
   });
 });
 
@@ -84,9 +102,9 @@ describe("a human-written caption is real content, independent of AI", () => {
     // Mirrors exactly what `syncGraph.server.ts`'s own
     // `captionByAttachmentName` map does: recover the caption from the
     // Card's `::file{...}` (the human-facing UPLOAD directive, unrelated
-    // to how GraphLog itself renders an attached image downstream), key
-    // it by the attachment's SYNCED name, then look it up again by that
-    // same synced name (`candidate.name`).
+    // to how GraphLog itself renders an attached file downstream), key it
+    // by the attachment's SYNCED name, then look it up again by that same
+    // synced name (`candidate.name`).
     const cardContent = '::file{fileId="abc123" name="IMG_1614.jpeg" caption="South wall, before starting the electrical."}';
     const [attachment] = extractFileAttachments(cardContent);
     const captionByAttachmentName = new Map<string, string>();
@@ -107,10 +125,7 @@ describe("a human-written caption is real content, independent of AI", () => {
 });
 
 describe("a node's file is part of its permanent text (no separate field needed)", () => {
-  it("a node's own quote carries the image line end to end", () => {
-    // Simulates what `add_node`'s executor produces once a file-backed
-    // source is cited: quote body + image line, joined the same way
-    // `renderQuoteBlocks`/`add_node` already join setup + quote.
+  it("a node's own quote carries an image line end to end", () => {
     const imageLine = "![South wall, before starting the electrical.](/api/vault/view/abc123)";
     const quote = ["==The whiteboard shows three columns.==", imageLine].join("\n\n");
     const node: GraphLogNode = {
@@ -124,9 +139,15 @@ describe("a node's file is part of its permanent text (no separate field needed)
       links: [],
     };
     // Whatever later reads `node.quote` (graph-structure's pre-fetch,
-    // graph-project-view's node text) sees the image automatically --
-    // no new field on GraphLogNode was needed for this to work.
-    expect(extractGalleryImageLines(node.quote)).toHaveLength(1);
+    // graph-project-view's node text) sees the file automatically -- no
+    // new field on GraphLogNode was needed for this to work.
+    expect(extractAttachedFileLines(node.quote)).toHaveLength(1);
     expect(node.quote).toContain(imageLine);
+  });
+
+  it("a node's own quote carries a video link end to end", () => {
+    const videoLine = "[Shading update on south wall](/api/vault/view/def456?type=video)";
+    const quote = ["==The shade sail now covers the whole south wall.==", videoLine].join("\n\n");
+    expect(extractAttachedFileLines(quote)).toEqual([videoLine]);
   });
 });

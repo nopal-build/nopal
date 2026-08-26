@@ -64,7 +64,12 @@ You are not required to quote every line, and this file is allowed to change fla
 
 **Any line doing real work carries its node's `:ref{...}` directive**, quoted or not. Copy it exactly as it appears on the node. Never build a citation, never reformat one, never move one to a different quote. A paraphrase with a working citation is auditable; the same paraphrase without one is just a claim.
 
-**A file is never optional.** If a node you're featuring carries an attached photo — you'll see an ordinary `![alt](url)` image sitting right in its own text, alongside the words — that image must appear in the README too, in whichever section that node's own words land in, wrapped in a `:::gallery{}...:::` block. Never describe a photo instead of showing it, and never feature a node's words while leaving its photo behind. The photo is exactly as much the node's own content as the words are; the graph already decided where it belongs, you're just carrying it along.
+**A file is never optional.** If a node you're featuring carries an attached file, that file must appear in the README too, in whichever section that node's own words land in. What it looks like depends on what it is:
+
+- **A photo or video** — you'll see an ordinary `![alt](url)` image or a `[alt](url)` link marked for video sitting right in the node's own text. Wrap it in a `:::gallery{}...:::` block. Never describe a photo instead of showing it, and never feature a node's words while leaving its photo or video behind.
+- **Anything else** (a PDF, a doc, ...) — you'll see a plain `[name](url)` link. Leave it as a plain link, inline with the words that explain why it matters. Never put it in a gallery, and never invent a description of what it contains beyond what the node's own words already say.
+
+Either way, the file is exactly as much the node's own content as the words are; the graph already decided where it belongs, you're just carrying it along.
 
 **Don't gloss a quote.** A good line doesn't need an interpreter. Say what changed because of it, or say nothing.
 
@@ -154,16 +159,19 @@ Separate thoughts are allowed to stay separate. Only join what is actually about
 
 # Files travel with their nodes
 
-A node with an attached photo is not a special section or a gallery off to the side. It gets featured (or left out) by the same weight/gravity rules as any other node, and when it's featured, its photo comes with it — in whatever section its content already belongs to, per graph-structure's own clustering. A build project's "Get shit done" item with a photo of the current state carries that photo. A settled decision with a screenshot of the final layout carries that screenshot. Never invent a "Photos" or "Attachments" section — that would separate an image from the words that explain why it matters, which is the opposite of what a reader needs.
+A node with an attached file is not a special section or a gallery off to the side. It gets featured (or left out) by the same weight/gravity rules as any other node, and when it's featured, its file comes with it — in whatever section its content already belongs to, per graph-structure's own clustering. A build project's "Get shit done" item with a photo of the current state carries that photo. A settled decision with a screenshot of the final layout carries that screenshot. A permit PDF sits right next to the sentence about the permit. Never invent a "Photos" or "Attachments" section — that would separate a file from the words that explain why it matters, which is the opposite of what a reader needs.
 
-**Group images that belong together.** A node's own attached photo arrives as a single, ordinary `![alt](url)` markdown image — never rebuild that line, but wrap it in a `:::gallery{}...:::` block rather than leaving it bare in the middle of prose, even when it's the only photo in that block. When several photos belong to the same moment — the same day, the same thread, several angles of the same thing — wrap them together in ONE gallery instead of scattering separate single-photo galleries down the section. The grouping is yours to decide; the image line inside it is not — copy each one exactly as it appears on its own node.
+**The gallery is for photos and videos only.** Anything else — a PDF, a spreadsheet, any other kind of file — is a plain link, never wrapped in `:::gallery{}...:::`. A gallery block that ends up holding something that isn't a photo or video is a mistake, not a style choice.
+
+**Group photos and videos that belong together.** A node's own attached photo or video arrives as a single, ordinary markdown line (an image, or a link marked for video) — never rebuild that line, but wrap it in a `:::gallery{}...:::` block rather than leaving it bare in the middle of prose, even when it's the only one in that block. When several belong to the same moment — the same day, the same thread, several angles of the same thing — wrap them together in ONE gallery instead of scattering separate single-item galleries down the section. Mixing photos and videos in the same gallery is fine. The grouping is yours to decide; the image/link line inside it is not — copy each one exactly as it appears on its own node.
 
 # What never happens in this pass
 
 - No claim that isn't grounded in a thread `graph-structure.md` actually gives you. If something obvious seems missing, it is missing, and the file should read that way.
 - No citation you built yourself, and no name or date from anywhere but a node's own directive.
 - No dropping a node's attached file when its words are featured. No inventing a separate section for files.
-- No rebuilding an attached image's own markdown line yourself — copy it exactly as it appears on the node. Grouping several into one `:::gallery{}...:::` is the only thing you're free to change.
+- No rebuilding an attached file's own markdown line yourself — copy it exactly as it appears on the node. Grouping several photos/videos into one `:::gallery{}...:::` is the only thing you're free to change.
+- No putting anything that isn't a photo or video inside a `:::gallery{}...:::` block.
 - No deciding who is right, or what the project should do next.
 - No merging two people's statements into one position.
 - No touching the "Notes on this view" section — something else owns it entirely.

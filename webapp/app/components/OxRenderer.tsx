@@ -486,28 +486,69 @@ interface GalleryImage {
   url: string;
   alt: string | null;
   title: string | null;
+  kind: "image" | "video";
 }
 
-/** Recursively collects every `image` mdast node found within a
- * `:::gallery{...}` container's children — no new syntax needed, a
- * gallery is just a directive-wrapped SEQUENCE of ordinary `![alt](url)`
- * markdown images, usually one per line/paragraph. This is what makes it
- * degrade gracefully: a renderer that doesn't understand the `gallery`
- * directive at all (Obsidian, GitHub, a bare text editor) still shows every
- * photo, just stacked instead of tiled. */
+// A video URL carries this marker as its own query parameter so a plain
+// image/link URL never has to be sniffed or looked up to tell them apart
+// -- the WRITER (e.g. `sync-graph`'s own attachment handling) already
+// knows the real content type, so it's encoded once, at write time,
+// rather than guessed at render time. `/api/vault/view/:fileId` itself
+// ignores unknown query params, so this never affects what actually gets
+// served.
+const VIDEO_MARKER = "type=video";
+
+function stripVideoMarker(url: string): string {
+  return url
+    .replace(/[?&]type=video&/, (m) => (m.startsWith("?") ? "?" : "&"))
+    .replace(/[?&]type=video$/, "");
+}
+
+/** Extracts the plain text of a link's own children ("Watch the video" in
+ * `[Watch the video](url)`) -- a link's own "alt text" equivalent, since
+ * an mdast `link` node (unlike `image`) has no `alt` attribute of its
+ * own, only child inline content. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function collectGalleryImages(nodes: readonly unknown[]): GalleryImage[] {
-  const images: GalleryImage[] = [];
+function linkText(node: any): string | null {
+  const parts: string[] = [];
+  const visit = (n: any) => {
+    if (!n) return;
+    if (n.type === "text" && typeof n.value === "string") parts.push(n.value);
+    if (Array.isArray(n.children)) n.children.forEach(visit);
+  };
+  visit(node);
+  const text = parts.join("").trim();
+  return text.length > 0 ? text : null;
+}
+
+/** Recursively collects every photo/video found within a `:::gallery{...}`
+ * container's children -- no new custom directive needed for either kind.
+ * A PHOTO is an ordinary `image` mdast node (`![alt](url)`); a VIDEO is an
+ * ordinary `link` mdast node (`[alt](url)`) whose URL carries
+ * `VIDEO_MARKER` -- a real, playable link even in a renderer that's never
+ * heard of this convention, which is what makes it degrade gracefully
+ * (unlike an `<img>` pointed at a video file, which would just be a
+ * broken image). Anything else inside the container (a plain link to a
+ * non-media file, ordinary prose) is deliberately left uncollected -- the
+ * gallery only ever holds photos and videos; everything else belongs
+ * outside it, as a normal part of the surrounding text. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function collectGalleryMedia(nodes: readonly unknown[]): GalleryImage[] {
+  const media: GalleryImage[] = [];
   const visit = (node: any) => {
     if (!node || typeof node !== "object") return;
     if (node.type === "image") {
-      images.push({ url: node.url, alt: node.alt ?? null, title: node.title ?? null });
+      media.push({ url: node.url, alt: node.alt ?? null, title: node.title ?? null, kind: "image" });
+      return;
+    }
+    if (node.type === "link" && typeof node.url === "string" && node.url.includes(VIDEO_MARKER)) {
+      media.push({ url: stripVideoMarker(node.url), alt: linkText(node), title: node.title ?? null, kind: "video" });
       return;
     }
     if (Array.isArray(node.children)) node.children.forEach(visit);
   };
   (nodes as RootContent[]).forEach(visit);
-  return images;
+  return media;
 }
 
 // 3 is the most columns the gallery layout supports at all right now —
@@ -545,7 +586,11 @@ function renderGalleryGrid(
     >
       {images.map((img, i) => (
         <figure key={i} className="ox-gallery-item">
-          <img src={img.url} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
+          {img.kind === "video" ? (
+            <video src={img.url} title={img.title ?? undefined} controls preload="metadata" />
+          ) : (
+            <img src={img.url} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
+          )}
           {img.alt && <figcaption>{img.alt}</figcaption>}
         </figure>
       ))}
@@ -662,14 +707,18 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
   // placeholder instead; nothing is lost, the real mdast node round-trips
   // losslessly through export either way.
   if (node.type === "containerDirective" && node.name === "gallery") {
-    const images = collectGalleryImages(node.children);
-    // No images found at all (e.g. a caller left it empty, or every child
-    // is some other kind of content) — degrade to plain content instead of
-    // an empty box, same as any other unregistered container directive.
-    if (images.length === 0) {
+    const media = collectGalleryMedia(node.children);
+    // No photos/videos found at all (e.g. a caller left it empty, or
+    // every child is some other kind of content — a plain link to a
+    // non-media file, ordinary prose) — degrade to plain content instead
+    // of an empty box, same as any other unregistered container
+    // directive. A gallery only ever holds photos/videos; anything else
+    // belongs outside it as normal text, so it's rendered here rather
+    // than silently dropped.
+    if (media.length === 0) {
       return <Fragment key={key}>{renderBlockNodes(node.children, ctx)}</Fragment>;
     }
-    return renderGalleryGrid(images, directiveAttrs(node)["max-columns"], key, null);
+    return renderGalleryGrid(media, directiveAttrs(node)["max-columns"], key, null);
   }
 
   // `::gallery{folder="..."}` — the LEAF-directive sibling of the
@@ -691,7 +740,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     const images = ctx.resolveGalleryFolder?.(attrs.folder ?? "");
     if (!images || images.length === 0) return null;
     return renderGalleryGrid(
-      images.map((img) => ({ url: img.url, alt: img.name, title: null })),
+      images.map((img) => ({ url: img.url, alt: img.name, title: null, kind: img.kind ?? "image" })),
       undefined,
       key,
       attrs.title ?? null,
