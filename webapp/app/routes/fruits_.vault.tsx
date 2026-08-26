@@ -417,6 +417,127 @@ function isMarkdownFile(file: Pick<FileRef, "name" | "content_type">): boolean {
   );
 }
 
+function isCsvFile(file: Pick<FileRef, "name" | "content_type">): boolean {
+  return (
+    file.content_type === "text/csv" || file.name.toLowerCase().endsWith(".csv")
+  );
+}
+
+/**
+ * Minimal RFC 4180 CSV parser (quoted fields, doubled-quote escaping,
+ * \r\n or \n line endings) — the decode side of `syncApi.server.ts`'s own
+ * `csvField`/`rowToCsvLine` encoder, so a sync-api analysis run's CSV
+ * (the main reason this view exists — see the vault skill's "Sync types"
+ * section) round-trips exactly.
+ */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += c;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      row.push(field);
+      field = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  // Drop a trailing wholly-empty row (a normal trailing "\n" produces one).
+  if (rows.length > 0 && rows[rows.length - 1].every((cell) => cell === "")) {
+    rows.pop();
+  }
+  return rows;
+}
+
+const CSV_TABLE_MAX_ROWS = 500;
+
+/**
+ * Renders an analysis CSV's content as a real table — header row, then
+ * data rows, capped at `CSV_TABLE_MAX_ROWS` (a sync-api run fed by a
+ * continuously-monitoring sensor over days can grow to thousands of rows;
+ * download the file for the rest). CONTENT-ONLY files only (every
+ * sync-api-created CSV is one, per `createSyncApiRun`/`appendSyncApiRows`)
+ * — a manually-uploaded, S3-backed `.csv` still falls back to the generic
+ * icon+Download view rather than risking a browser-side S3 CORS fetch.
+ */
+function CsvTableView({ content }: { content: string }) {
+  const rows = useMemo(() => parseCsv(content), [content]);
+  if (rows.length === 0) {
+    return <div className="vault-v2-file-fallback">Empty CSV.</div>;
+  }
+
+  const [header, ...body] = rows;
+  const truncated = body.length > CSV_TABLE_MAX_ROWS;
+  const visibleBody = truncated ? body.slice(0, CSV_TABLE_MAX_ROWS) : body;
+
+  return (
+    <div>
+      <div className="vault-csv-table-wrap">
+        <table className="vault-csv-table">
+          <thead>
+            <tr>
+              {header.map((cell, i) => (
+                <th key={i}>{cell}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visibleBody.length === 0 ? (
+              <tr>
+                <td colSpan={header.length} className="subtle-text">
+                  No rows yet.
+                </td>
+              </tr>
+            ) : (
+              visibleBody.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci}>{cell}</td>
+                  ))}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-xs font-mono subtle-text" style={{ padding: "8px 2px" }}>
+        {body.length} row{body.length === 1 ? "" : "s"} · {header.length} column
+        {header.length === 1 ? "" : "s"}
+        {truncated &&
+          ` — showing first ${CSV_TABLE_MAX_ROWS}, download the file to see the rest`}
+      </div>
+    </div>
+  );
+}
+
 /** True for a project, or the `personal` root — see the `vault`/`graphlog`
  * skills' "project-n02" sections. */
 function isProjectAnchor(folder: VaultFolder): boolean {
@@ -3207,6 +3328,8 @@ export default function VaultV2Page() {
                   <OxRenderer markdown={current.file.content ?? ""} />
                 )}
               </div>
+            ) : isCsvFile(current.file) && current.file.content != null ? (
+              <CsvTableView content={current.file.content} />
             ) : current.file.content_type.startsWith("image/") ? (
               <img
                 className="vault-v2-media"
