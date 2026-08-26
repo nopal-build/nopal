@@ -27,6 +27,7 @@ import { runGraphProjectView, type GraphProjectViewResult } from "./graphProject
 import { getFolderById, type VaultFolder } from "./vault.server";
 import type { LlmProvider } from "./llmProvider";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
+import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
 
 export type GraphLogPipelineResult =
   | {
@@ -62,6 +63,13 @@ export async function runGraphLogPipeline(
   const projectFolder: VaultFolder | undefined = await getFolderById(projectFolderId);
   if (!projectFolder) return { ok: false, error: "Project not found" };
 
+  // A Stop request (see `graphLogQueue.server.ts`'s own "Cooperative
+  // cancellation" section) is checked between each of the five stages
+  // below, plus once more per turn/file/day INSIDE the three agentic
+  // stages themselves -- this top-level check alone would otherwise leave
+  // Stop unable to interrupt anything until a whole stage finishes.
+  await throwIfGraphLogCancelled(projectFolderId);
+
   log("run: starting daily-log-sync...");
   const dailyLogSync = await perf.time("daily-log-sync", "fn", "runDailyLogSync", null, () =>
     runDailyLogSync(projectFolderId, {}),
@@ -70,6 +78,7 @@ export async function runGraphLogPipeline(
     `run: daily-log-sync done (${dailyLogSync.synced.length} synced, ${dailyLogSync.attachmentsCopied.length} attachment(s) copied).`,
   );
 
+  await throwIfGraphLogCancelled(projectFolderId);
   log("run: starting sync-knowledge...");
   const syncKnowledge = await perf.time("sync-knowledge", "fn", "runSyncKnowledge", null, () =>
     runSyncKnowledge(projectFolder, actingHumanId, {
@@ -81,6 +90,7 @@ export async function runGraphLogPipeline(
   if (!syncKnowledge.ok) return { ok: false, error: syncKnowledge.error };
   log(syncKnowledge.skipped ? "run: sync-knowledge skipped." : "run: sync-knowledge done.");
 
+  await throwIfGraphLogCancelled(projectFolderId);
   log("run: starting sync-graph...");
   const syncGraph = await perf.time("sync-graph", "fn", "runSyncGraph", null, () =>
     runSyncGraph(projectFolder, actingHumanId, {
@@ -92,6 +102,7 @@ export async function runGraphLogPipeline(
   if (!syncGraph.ok) return { ok: false, error: syncGraph.error };
   log(syncGraph.skipped ? "run: sync-graph skipped." : "run: sync-graph done.");
 
+  await throwIfGraphLogCancelled(projectFolderId);
   log("run: starting graph-structure...");
   const graphStructure = await perf.time("graph-structure", "fn", "runGraphStructure", null, () =>
     runGraphStructure(projectFolder, actingHumanId, {
@@ -103,6 +114,7 @@ export async function runGraphLogPipeline(
   if (!graphStructure.ok) return { ok: false, error: graphStructure.error };
   log(graphStructure.skipped ? "run: graph-structure skipped." : "run: graph-structure done.");
 
+  await throwIfGraphLogCancelled(projectFolderId);
   log("run: starting graph-project-view...");
   const graphProjectView = await perf.time("graph-project-view", "fn", "runGraphProjectView", null, () =>
     runGraphProjectView(projectFolder, actingHumanId, {

@@ -60,6 +60,7 @@ import { getProjectStageSkill, isSkipInstruction, listExtraSkillFiles } from "./
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
+import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
 import type { LlmProvider, PhotoDescriber } from "./llmProvider";
 
 /** The reserved subfolder name every `syncs/` folder may carry — see this
@@ -214,6 +215,11 @@ export async function runSyncKnowledge(
   const unsupported: { fileId: string; name: string }[] = [];
 
   for (const candidate of candidates) {
+    // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
+    // cancellation" section) — once per file, so a Stop request never
+    // waits longer than the current file's own extraction call.
+    await throwIfGraphLogCancelled(projectFolder._id);
+
     const source = await getFileRefById(candidate.fileId);
     if (!source || !source.folder_id) {
       log(`sync-knowledge: candidate "${candidate.name}" (${candidate.fileId}) no longer resolves — skipped.`);

@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getProjectRole } from "robustness-core/data/projectSharing.server";
-import { enqueueGraphLogJob } from "robustness-core/data/graphLogQueue.server";
+import { enqueueGraphLogJob, getGraphLogProjectStatus } from "robustness-core/data/graphLogQueue.server";
 
 /**
  * POST /api/graphlog/reset
@@ -42,6 +42,17 @@ export async function action({ request }: ActionFunctionArgs) {
   const isStaff = user.role === "Admin" || user.role === "Super";
   if (!role?.isOwner && !isStaff) {
     return Response.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  // Same running-job backstop as `api.graphlog.run.tsx` -- see its own
+  // comment. Resetting mid-run would delete state a still-active pipeline
+  // is reading from/writing to.
+  const status = await getGraphLogProjectStatus(projectFolderId);
+  if (status.running) {
+    return Response.json(
+      { error: "GraphLog is already running for this project. Stop it first, or wait for it to finish." },
+      { status: 409 },
+    );
   }
 
   try {

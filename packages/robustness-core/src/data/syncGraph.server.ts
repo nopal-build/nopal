@@ -173,6 +173,7 @@ import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
+import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
 
 const GRAPH_LOG_PREFIX = "graph-log-";
@@ -588,6 +589,7 @@ async function runSyncGraphDayLoop(
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>,
   perf: GraphLogPerfRecorder,
   date: string,
+  projectFolderId: string,
 ): Promise<{ usage: LlmUsage; model: string | null; truncated: boolean; hitMaxTurns: boolean }> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
@@ -596,6 +598,10 @@ async function runSyncGraphDayLoop(
   let hitMaxTurns = false;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
+    // cancellation" section) — once per turn, so a Stop request never
+    // waits longer than the current tool call.
+    await throwIfGraphLogCancelled(projectFolderId);
     // The system prompt (skill instructions + graph-structure.md) is
     // byte-identical across every day AND every turn of this whole run —
     // see this file's own "Prompt caching" module doc. The FIRST ever
@@ -832,6 +838,11 @@ export async function runSyncGraph(
   const days: SyncGraphDayResult[] = [];
 
   for (const date of dates) {
+    // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
+    // cancellation" section) — once per day, so a Stop request never
+    // waits longer than the current day's own extraction turns.
+    await throwIfGraphLogCancelled(projectFolder._id);
+
     const dayCandidates = byDate.get(date)!;
 
     // A human can write a real caption on a `::file{...}` attachment
@@ -979,6 +990,7 @@ export async function runSyncGraph(
         executors,
         perf,
         date,
+        projectFolder._id,
       );
 
       if (truncated) {

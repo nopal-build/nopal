@@ -99,6 +99,7 @@ import { parseGraphLogNodes, formatNodeVerbatim, extractAttachedFileLines, type 
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
+import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolCall, ToolDefinition } from "./llmProvider";
 
 const GRAPH_STRUCTURE_FILE_NAME = "graph-structure.md";
@@ -385,6 +386,7 @@ async function runReadmeAgentLoop(
   userPrompt: string,
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>,
   perf: GraphLogPerfRecorder,
+  projectFolderId: string,
 ): Promise<{
   usage: LlmUsage;
   model: string | null;
@@ -400,6 +402,11 @@ async function runReadmeAgentLoop(
   let hitMaxTurns = false;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
+    // cancellation" section) — once per turn, so a Stop request never
+    // waits longer than the current tool call.
+    await throwIfGraphLogCancelled(projectFolderId);
+
     const turnStart = Date.now();
     const response = await provider.complete({ system, messages, tools: TOOLS });
     usage.inputTokens += response.usage.inputTokens;
@@ -750,7 +757,14 @@ export async function runGraphProjectView(
   const callStart = Date.now();
   try {
     const llm = opts.provider ?? new AnthropicProvider();
-    const { usage, model, truncated, hitMaxTurns } = await runReadmeAgentLoop(llm, system, userPrompt, executors, perf);
+    const { usage, model, truncated, hitMaxTurns } = await runReadmeAgentLoop(
+      llm,
+      system,
+      userPrompt,
+      executors,
+      perf,
+      projectFolder._id,
+    );
 
     const durationMs = Date.now() - callStart;
     await recordGraphLogUsage({

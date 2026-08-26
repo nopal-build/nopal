@@ -542,6 +542,130 @@ pub fn reset_knowledge(
     Ok(())
 }
 
+// ─── Schedule (Admin/Super only) ──────────────────────────
+// `nopal graphlog schedule enable/disable/status` — enrolls/removes a
+// project from GraphLog's nightly automatic run, or reads back its own
+// current schedule/run status. Thin clients over `api.graphlog.schedule`
+// (enable/disable) and the same `api.graphlog.status` the Vault UI's own
+// permanent status line polls (status) — see the `graphlog` skill. The
+// server rejects these for anyone who isn't Admin/Super, same as the
+// Vault UI's own "More Actions" gate.
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ScheduleResponse {
+    scheduled: bool,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct GraphLogStatusResponse {
+    running: bool,
+    #[serde(default)]
+    current_job_id: Option<String>,
+    #[serde(default)]
+    current_job_name: Option<String>,
+    #[serde(default)]
+    current_started_at: Option<String>,
+    #[serde(default)]
+    last_completed_job_name: Option<String>,
+    #[serde(default)]
+    last_completed_at: Option<String>,
+    #[serde(default)]
+    last_completed_ok: Option<bool>,
+    #[serde(default)]
+    last_completed_error: Option<String>,
+    #[serde(default)]
+    scheduled: bool,
+}
+
+/// `nopal graphlog schedule enable --project <path>`
+pub fn schedule_enable(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    let body = json!({ "projectFolderId": folder._id, "scheduled": true });
+    let resp: ScheduleResponse = client.post_json("/api/graphlog/schedule", &body)?;
+    println!(
+        "GraphLog's nightly automatic run is now {} for {project_path}/.",
+        if resp.scheduled {
+            "ENABLED"
+        } else {
+            "disabled"
+        }
+    );
+    Ok(())
+}
+
+/// `nopal graphlog schedule disable --project <path>`
+pub fn schedule_disable(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    let body = json!({ "projectFolderId": folder._id, "scheduled": false });
+    let resp: ScheduleResponse = client.post_json("/api/graphlog/schedule", &body)?;
+    println!(
+        "GraphLog's nightly automatic run is now {} for {project_path}/.",
+        if resp.scheduled {
+            "enabled"
+        } else {
+            "DISABLED"
+        }
+    );
+    Ok(())
+}
+
+/// `nopal graphlog schedule status --project <path>`
+pub fn schedule_status(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    let resp: GraphLogStatusResponse = client.get_json(&format!(
+        "/api/graphlog/status?projectFolderId={}",
+        folder._id
+    ))?;
+
+    println!("=== GraphLog status: {project_path}/ ===");
+    println!(
+        "Nightly schedule: {}",
+        if resp.scheduled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+
+    if resp.running {
+        println!(
+            "Currently running: {} (job {}, started {}).",
+            resp.current_job_name.as_deref().unwrap_or("?"),
+            resp.current_job_id.as_deref().unwrap_or("?"),
+            resp.current_started_at
+                .as_deref()
+                .unwrap_or("an unknown time ago"),
+        );
+    } else {
+        println!("Currently running: no.");
+    }
+
+    match (resp.last_completed_at, resp.last_completed_ok) {
+        (Some(at), Some(true)) => println!(
+            "Last run: {at} ({}) — succeeded.",
+            resp.last_completed_job_name.as_deref().unwrap_or("run")
+        ),
+        (Some(at), Some(false)) => println!(
+            "Last run: {at} ({}) — failed: {}.",
+            resp.last_completed_job_name.as_deref().unwrap_or("run"),
+            resp.last_completed_error
+                .as_deref()
+                .unwrap_or("unknown error"),
+        ),
+        _ => println!("Last run: never."),
+    }
+
+    Ok(())
+}
+
 /// `nopal graphlog reset --project <path> --yes`
 ///
 /// Runs all three resets above, in order: reset-project-view ->

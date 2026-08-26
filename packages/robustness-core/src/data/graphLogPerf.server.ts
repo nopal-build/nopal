@@ -252,6 +252,45 @@ export async function finishGraphLogRun(
   }
 }
 
+/**
+ * The project's own most recent run that hasn't finished yet (`ok` still
+ * `null`) — the DB-side half of "is GraphLog currently running for this
+ * project" (`getGraphLogProjectStatus`, `graphLogQueue.server.ts`, cross-
+ * checks this against the run's actual BullMQ job state, since a crashed
+ * worker can leave a row stuck at `ok: null` forever). `null` if every run
+ * this project has ever had is finished, or it's never had one.
+ */
+export async function getLatestUnfinishedGraphLogRun(projectFolderId: string): Promise<GraphLogRun | null> {
+  await ensureTables();
+  const result = await query<[GraphLogRun[]]>(
+    `SELECT * FROM graphlog_runs
+     WHERE project_folder_id = $projectFolderId
+       AND (ok = NONE OR ok = null)
+     ORDER BY started_at DESC
+     LIMIT 1`,
+    { projectFolderId },
+  );
+  return result?.[0]?.[0] ? formatRecord(result[0][0]) : null;
+}
+
+/** The project's own most recent FINISHED run (`ok` is `true` or `false`)
+ * — what the Vault's permanent "last run" status line reads (see
+ * `getGraphLogProjectStatus`). `null` if this project has never finished
+ * a run (including "never run at all"). */
+export async function getLatestCompletedGraphLogRun(projectFolderId: string): Promise<GraphLogRun | null> {
+  await ensureTables();
+  const result = await query<[GraphLogRun[]]>(
+    `SELECT * FROM graphlog_runs
+     WHERE project_folder_id = $projectFolderId
+       AND ok != NONE
+       AND ok != null
+     ORDER BY started_at DESC
+     LIMIT 1`,
+    { projectFolderId },
+  );
+  return result?.[0]?.[0] ? formatRecord(result[0][0]) : null;
+}
+
 /** Most recent runs, newest first — powers the "Recent Runs" list on
  * `/fruits/maker/graphlog/defaults`. */
 export async function listRecentGraphLogRuns(limit = 20): Promise<GraphLogRun[]> {

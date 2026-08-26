@@ -595,6 +595,36 @@ enum GraphlogCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Enrolls/removes a project from GraphLog's nightly automatic run
+    /// (midnight, server-side), or shows its current schedule/run status.
+    /// Admin/Super only. See the `graphlog` skill.
+    Schedule {
+        #[command(subcommand)]
+        command: GraphlogScheduleCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GraphlogScheduleCommand {
+    /// Enrolls this project in GraphLog's nightly automatic run.
+    Enable {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Removes this project from GraphLog's nightly automatic run.
+    Disable {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Is this project scheduled, is a job currently running, and when did
+    /// the last one finish (if ever)?
+    Status {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -884,6 +914,17 @@ fn main() {
                 GraphlogCommand::ResetKnowledge { project, yes } => {
                     graphlog::reset_knowledge(&project, yes)
                 }
+                GraphlogCommand::Schedule { command } => match command {
+                    GraphlogScheduleCommand::Enable { project } => {
+                        graphlog::schedule_enable(&project)
+                    }
+                    GraphlogScheduleCommand::Disable { project } => {
+                        graphlog::schedule_disable(&project)
+                    }
+                    GraphlogScheduleCommand::Status { project } => {
+                        graphlog::schedule_status(&project)
+                    }
+                },
             };
             if let Err(e) = result {
                 eprintln!("{e}");

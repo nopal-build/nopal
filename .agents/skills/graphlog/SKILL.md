@@ -1404,6 +1404,58 @@ skill was born from:
       exact same `"run"` job does a full first pass; an existing project's
       same job only picks up what changed since the last one. Scheduling
       required zero changes to the pipeline itself.
+13. **Done — live run status, Stop, and CLI parity for Schedule**
+    (`graphLogQueue.server.ts`'s "Cooperative cancellation"/"Live project
+    status" sections, `graphLogPerf.server.ts`'s
+    `getLatestUnfinishedGraphLogRun`/`getLatestCompletedGraphLogRun`).
+    - **`GET /api/graphlog/status?projectFolderId=...`** (Admin/Super
+      only) is now the one true "what's going on with GraphLog for this
+      project" read — is a job running/queued right now, when did the
+      last one finish and did it succeed, and is the project enrolled in
+      the nightly schedule. Backed by `getGraphLogProjectStatus`, which
+      reads the already-existing `graphlog_runs` table (see
+      `graphLogPerf.server.ts`) rather than adding a new one, and
+      cross-checks its "still running" row against that run's REAL BullMQ
+      job state — if the worker crashed mid-run and never got to record
+      its own outcome, this self-heals (marks it failed right there)
+      instead of leaving a project stuck reporting "running" forever with
+      no way to Stop a job that no longer exists. The Vault UI polls this
+      every 5s for a permanent status line (next to `ProjectRoleBanner`)
+      AND to gate Run/Reset vs. Stop in "More Actions"; `nopal graphlog
+      schedule status --project <path>` reads the exact same endpoint.
+    - **`POST /api/graphlog/cancel`** (Admin/Super only,
+      `cancelGraphLogJob`) — "Stop GraphLog" in the Vault UI. A queued-
+      but-not-yet-started job is removed from the BullMQ queue outright.
+      An already-active job instead gets a plain Redis cooperative-
+      cancellation flag (`graphlog:cancel:<projectFolderId>`, TTL'd as a
+      safety net) — there's no way to preemptively kill a job mid-`await`
+      in BullMQ/Node, so every pipeline stage checks
+      `throwIfGraphLogCancelled` at its own safe checkpoints (between each
+      of the five `run` stages in `graphLogAgent.server.ts`; once per
+      turn inside `graph-structure`'s and `graph-project-view`'s own
+      agentic loops and `sync-graph`'s per-day loop; once per file inside
+      `sync-knowledge`'s loop) and throws `GraphLogCancelledError`, which
+      the worker's existing catch block records exactly like any other
+      failure (`finishGraphLogRun({ ok: false, error: ... })`). This means
+      Stop can take as long as the current turn/file/day/stage takes to
+      finish — never instant — same "finish cleanly, don't kill mid-write"
+      philosophy `worker.ts`'s own graceful SIGTERM shutdown already uses.
+      `worker.ts` clears the flag unconditionally in `processGraphLogJob`'s
+      own outer `finally` so a stale flag can never wedge that project's
+      NEXT run.
+    - **`api.graphlog.run.tsx`/`.reset.tsx`/`.scheduled-run.tsx` all now
+      refuse to enqueue a SECOND job for a project that's already
+      running** (a 409 from the first two; a silent skip — counted in the
+      response as `skippedAlreadyRunning` — from the cron), reading the
+      same `getGraphLogProjectStatus`. The Vault UI's own client-side gate
+      (swapping Run/Reset for Stop while `running`) is a courtesy, never
+      the enforcement point.
+    - **`nopal graphlog schedule enable/disable/status --project <path>`**
+      — CLI parity for the Vault UI's Enable/Disable GraphLog Schedule
+      toggle and the new status line, thin clients over
+      `api.graphlog.schedule`/`api.graphlog.status`. No CLI equivalent for
+      Stop was added (not asked for; `api.graphlog.cancel` exists and a
+      thin client would be trivial to add the same way if that changes).
 
 **All done against the original phased plan** — the migration ran for
 real across every existing project/`personal` space, and PhyLog/

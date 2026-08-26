@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getProjectRole } from "robustness-core/data/projectSharing.server";
-import { enqueueGraphLogJob } from "robustness-core/data/graphLogQueue.server";
+import { enqueueGraphLogJob, getGraphLogProjectStatus } from "robustness-core/data/graphLogQueue.server";
 
 /**
  * POST /api/graphlog/run
@@ -37,6 +37,19 @@ export async function action({ request }: ActionFunctionArgs) {
   const isStaff = user.role === "Admin" || user.role === "Super";
   if (!role?.isOwner && !isStaff) {
     return Response.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  // A project already has a job running/queued -- refuse another one
+  // rather than letting two pipelines race each other. The Vault UI
+  // already disables Run/Reset while `graphlog/status` reports
+  // `running: true`; this is the server-side backstop for anything that
+  // calls this route directly (the CLI, a stale tab).
+  const status = await getGraphLogProjectStatus(projectFolderId);
+  if (status.running) {
+    return Response.json(
+      { error: "GraphLog is already running for this project. Stop it first, or wait for it to finish." },
+      { status: 409 },
+    );
   }
 
   try {

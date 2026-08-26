@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getGraphLogScheduledFolders } from "robustness-core/data/graphLogSchedule.server";
-import { enqueueGraphLogJob } from "robustness-core/data/graphLogQueue.server";
+import { enqueueGraphLogJob, getGraphLogProjectStatus } from "robustness-core/data/graphLogQueue.server";
 
 /**
  * POST /api/graphlog/scheduled-run
@@ -49,10 +49,19 @@ export async function action({ request }: ActionFunctionArgs) {
   const folders = await getGraphLogScheduledFolders();
 
   let enqueued = 0;
+  let skippedAlreadyRunning = 0;
   const errors: string[] = [];
 
   for (const folder of folders) {
     try {
+      // A human may have kicked off a manual Run/Reset (or a previous
+      // night's scheduled run may have overrun into this one) -- skip
+      // rather than piling a second job in behind it.
+      const status = await getGraphLogProjectStatus(folder._id);
+      if (status.running) {
+        skippedAlreadyRunning++;
+        continue;
+      }
       await enqueueGraphLogJob("run", {
         actingHumanId: folder.human_id,
         projectFolderId: folder._id,
@@ -66,8 +75,8 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   console.log(
-    `graphlog/scheduled-run: enqueued ${enqueued}/${folders.length} project(s)${errors.length ? `, ${errors.length} errors` : ""}`,
+    `graphlog/scheduled-run: enqueued ${enqueued}/${folders.length} project(s)${skippedAlreadyRunning ? `, ${skippedAlreadyRunning} already running` : ""}${errors.length ? `, ${errors.length} errors` : ""}`,
   );
 
-  return Response.json({ enqueued, total: folders.length, errors });
+  return Response.json({ enqueued, total: folders.length, skippedAlreadyRunning, errors });
 }

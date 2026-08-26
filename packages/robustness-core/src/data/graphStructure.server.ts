@@ -138,6 +138,7 @@ import {
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
+import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
 
 const GRAPH_STRUCTURE_FILE_NAME = "graph-structure.md";
@@ -570,6 +571,7 @@ async function runStructureAgentLoop(
   perf: GraphLogPerfRecorder,
   batchIndex: number,
   batchCount: number,
+  projectFolderId: string,
 ): Promise<{ usage: LlmUsage; model: string | null; truncated: boolean; hitMaxTurns: boolean }> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
@@ -578,6 +580,10 @@ async function runStructureAgentLoop(
   let hitMaxTurns = false;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
+    // cancellation" section) — once per turn, so a Stop request never
+    // waits longer than the current tool call.
+    await throwIfGraphLogCancelled(projectFolderId);
     // The system prompt (skill instructions -- stable across every turn
     // AND every batch of this whole run) is worth caching from the
     // second real completion onward, same convention `sync-graph` uses
@@ -864,6 +870,7 @@ export async function runGraphStructure(
         perf,
         batchIndex,
         batches.length,
+        projectFolder._id,
       );
 
       const durationMs = Date.now() - callStart;

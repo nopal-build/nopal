@@ -146,6 +146,22 @@ type Current =
 
 type HumanEntry = { _id: string; name: string; email: string };
 
+/** `GET /api/graphlog/status`'s own response shape — see that route and
+ * `getGraphLogProjectStatus` (`graphLogQueue.server.ts`) for what backs
+ * each field. Polled by the Vault's permanent GraphLog status line
+ * (Admin/Super only, see "Admin/Super GraphLog controls" below). */
+type GraphLogProjectStatus = {
+  running: boolean;
+  currentJobId: string | null;
+  currentJobName: string | null;
+  currentStartedAt: string | null;
+  lastCompletedJobName: string | null;
+  lastCompletedAt: string | null;
+  lastCompletedOk: boolean | null;
+  lastCompletedError: string | null;
+  scheduled: boolean;
+};
+
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -400,6 +416,19 @@ function formatDate(iso: string): string {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+/** A real timestamp (not just a calendar date -- see `formatDate` above
+ * for that case), in the viewer's own local time. Used only by the
+ * GraphLog status line, where "when did this actually happen" (down to
+ * the minute) matters more than avoiding timezone drift on a pure date. */
+function formatTimestamp(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 
@@ -1976,8 +2005,9 @@ export default function VaultV2Page() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replacing, setReplacing] = useState(false);
-  const [graphLogBusy, setGraphLogBusy] = useState<"run" | "reset" | null>(null);
+  const [graphLogBusy, setGraphLogBusy] = useState<"run" | "reset" | "cancel" | null>(null);
   const [graphLogScheduleBusy, setGraphLogScheduleBusy] = useState(false);
+  const [graphLogStatus, setGraphLogStatus] = useState<GraphLogProjectStatus | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [siteSettingsOpen, setSiteSettingsOpen] = useState(false);
@@ -2427,35 +2457,18 @@ export default function VaultV2Page() {
     if (data) invalidateAndRevalidate([folder.parent_folder_id]);
   };
 
-  // ─── Admin/Super GraphLog controls ("More Actions" → Run/Reset/Schedule) ─
+  // ─── Admin/Super GraphLog controls ("More Actions" → Run/Reset/Stop/Schedule) ─
   // A first, minimal UI trigger for a pipeline that, until now, only ever
   // ran from the CLI or the daily-log pipeline itself — see the `graphlog`
   // skill. Deliberately staff-only for now (`permissions.isAdmin`), on any
   // project-n02 container (a project OR a personal space) regardless of
-  // who owns it — the two API routes Run/Reset call (`api.graphlog.run.tsx`/
-  // `api.graphlog.reset.tsx`) were widened to accept the SAME staff
-  // override, and `api.graphlog.jobs.$jobId.tsx` (polled below) too.
-  // "Enable/Disable GraphLog Schedule" is a separate, simpler flag flip
-  // (`api.graphlog.schedule.tsx`) that enrolls this project in a nightly
-  // automatic run (`server.js` + `api.graphlog.scheduled-run.tsx`) — that
-  // route is Admin/Super ONLY, with no owner fallback (see its own doc
-  // comment for why).
-
-  /** Polls until the job leaves "waiting"/"active"/"delayed" -- same
-   * enqueue-then-poll shape the CLI already uses against this same route,
-   * just from the browser instead of a terminal loop. */
-  const pollGraphLogJob = async (jobId: string): Promise<{ ok: boolean; message: string }> => {
-    for (;;) {
-      const res = await fetch(`/api/graphlog/jobs/${jobId}`);
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok) {
-        return { ok: false, message: data?.error ?? `Failed to check job status (${res.status})` };
-      }
-      if (data.state === "completed") return { ok: true, message: "Finished successfully." };
-      if (data.state === "failed") return { ok: false, message: data.error ?? "Job failed." };
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    }
-  };
+  // who owns it — every API route these call (`api.graphlog.run.tsx`,
+  // `.reset.tsx`, `.cancel.tsx`, `.status.tsx`, `.schedule.tsx`) enforces
+  // the same staff check server-side too, never trusting this client gate
+  // alone. Rather than an alert on completion, `graphLogStatus` (polled
+  // above) is the live, permanent source of truth: while it reports
+  // `running`, Run/Reset are replaced by Stop below; once it flips back,
+  // the status line itself shows the outcome (succeeded/failed/error).
 
   const handleRunGraphLog = async () => {
     if (current.kind !== "folder") return;
@@ -2466,14 +2479,7 @@ export default function VaultV2Page() {
         method: "POST",
         body: JSON.stringify({ projectFolderId: folder._id }),
       });
-      if (!data?.jobId) return;
-      const outcome = await pollGraphLogJob(data.jobId);
-      window.alert(
-        outcome.ok
-          ? `GraphLog run finished for "${folder.name}".`
-          : `GraphLog run failed for "${folder.name}": ${outcome.message}`,
-      );
-      if (outcome.ok) invalidateAndRevalidate([folder._id]);
+      if (data?.jobId) await refreshGraphLogStatus(folder._id);
     } finally {
       setGraphLogBusy(null);
     }
@@ -2495,18 +2501,94 @@ export default function VaultV2Page() {
         method: "POST",
         body: JSON.stringify({ projectFolderId: folder._id }),
       });
-      if (!data?.jobId) return;
-      const outcome = await pollGraphLogJob(data.jobId);
-      window.alert(
-        outcome.ok
-          ? `GraphLog reset finished for "${folder.name}".`
-          : `GraphLog reset failed for "${folder.name}": ${outcome.message}`,
-      );
-      if (outcome.ok) invalidateAndRevalidate([folder._id]);
+      if (data?.jobId) await refreshGraphLogStatus(folder._id);
     } finally {
       setGraphLogBusy(null);
     }
   };
+
+  /** Stops whatever's currently running/queued (`api.graphlog.cancel.tsx`)
+   * -- a queued job is removed outright; an already-active one gets a
+   * cooperative flag and stops at its own next safe checkpoint, so this
+   * can take a little while to actually clear `graphLogStatus.running`
+   * (the next poll tick, at most 5s after it actually finishes). */
+  const handleStopGraphLog = async () => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    if (
+      !window.confirm(
+        `Stop the GraphLog job currently running for "${folder.name}"? It stops at its next safe checkpoint (between pipeline stages, or after the current file/day/turn) -- not instantly.`,
+      )
+    ) {
+      return;
+    }
+    setGraphLogBusy("cancel");
+    try {
+      const data = await apiJson("/api/graphlog/cancel", {
+        method: "POST",
+        body: JSON.stringify({ projectFolderId: folder._id }),
+      });
+      if (data) await refreshGraphLogStatus(folder._id);
+    } finally {
+      setGraphLogBusy(null);
+    }
+  };
+
+  /** The single source of truth `moreActions` below reads to decide
+   * whether to show Run/Reset (idle) or Stop (running), and what the
+   * permanent status line renders — see `GET /api/graphlog/status`. */
+  const refreshGraphLogStatus = async (folderId: string) => {
+    try {
+      const res = await fetch(`/api/graphlog/status?projectFolderId=${folderId}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as GraphLogProjectStatus;
+      setGraphLogStatus(data);
+    } catch {
+      // Best-effort -- the next poll tick (or the next manual action) will
+      // catch up; this is a status DISPLAY, never the source of truth the
+      // server itself enforces (see the 409 guard on run/reset).
+    }
+  };
+
+  /** Polls this project's own GraphLog status every 5s while it's the
+   * current folder and the viewer is Admin/Super — what keeps the
+   * permanent status line (and the Run/Reset/Stop gating in `moreActions`)
+   * live without anyone needing to manually refresh the page. */
+  useEffect(() => {
+    const eligible =
+      current.kind === "folder" &&
+      (current.folder.folder_type ?? null) === "project-n02" &&
+      permissions.isAdmin(user);
+    if (!eligible) {
+      setGraphLogStatus(null);
+      return;
+    }
+    const folderId = current.kind === "folder" ? current.folder._id : null;
+    if (!folderId) return;
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/graphlog/status?projectFolderId=${folderId}`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as GraphLogProjectStatus;
+        if (!cancelled) setGraphLogStatus(data);
+      } catch {
+        // Best-effort, see `refreshGraphLogStatus` above.
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [
+    current.kind,
+    current.kind === "folder" ? current.folder._id : null,
+    current.kind === "folder" ? current.folder.folder_type : null,
+    user.role,
+  ]);
 
   /** Enables/disables GraphLog's daily automatic run for this project/
    * personal space — unlike Run/Reset above, purely a flag flip
@@ -2528,8 +2610,6 @@ export default function VaultV2Page() {
       setGraphLogScheduleBusy(false);
     }
   };
-
-
 
   const handleDownload = async (file: FileRef) => {
     const res = await fetch(`/api/vault/download/${file._id}`);
@@ -2874,22 +2954,36 @@ export default function VaultV2Page() {
     permissions.isAdmin(user)
   ) {
     const graphLogScheduled = current.folder.graphlog_scheduled === true;
+    const graphLogRunning = graphLogStatus?.running === true;
     moreActions.push({
       label: graphLogScheduled ? "Disable GraphLog Schedule" : "Enable GraphLog Schedule",
       onClick: handleToggleGraphLogSchedule,
       disabled: graphLogScheduleBusy,
     });
-    moreActions.push({
-      label: graphLogBusy === "run" ? "Running GraphLog…" : "Run GraphLog",
-      onClick: handleRunGraphLog,
-      disabled: graphLogBusy !== null,
-    });
-    moreActions.push({
-      label: graphLogBusy === "reset" ? "Resetting GraphLog…" : "Reset GraphLog",
-      onClick: handleResetGraphLog,
-      disabled: graphLogBusy !== null,
-      danger: true,
-    });
+    if (graphLogRunning) {
+      // A running project can't be Run again or Reset out from under
+      // itself (the server enforces this too -- see the 409 guard on both
+      // routes -- this is purely so the buttons stop suggesting an action
+      // that would just be rejected). Stop is the only action offered.
+      moreActions.push({
+        label: graphLogBusy === "cancel" ? "Stopping GraphLog…" : "Stop GraphLog",
+        onClick: handleStopGraphLog,
+        disabled: graphLogBusy !== null,
+        danger: true,
+      });
+    } else {
+      moreActions.push({
+        label: graphLogBusy === "run" ? "Running GraphLog…" : "Run GraphLog",
+        onClick: handleRunGraphLog,
+        disabled: graphLogBusy !== null,
+      });
+      moreActions.push({
+        label: graphLogBusy === "reset" ? "Resetting GraphLog…" : "Reset GraphLog",
+        onClick: handleResetGraphLog,
+        disabled: graphLogBusy !== null,
+        danger: true,
+      });
+    }
   }
 
   const moreActionsTrigger = ({
@@ -3208,6 +3302,41 @@ export default function VaultV2Page() {
               folderId={current.folder._id}
               relatedHumans={relatedHumans}
             />
+          )}
+
+          {/* Permanent GraphLog status line -- Admin/Super only (see
+              "Admin/Super GraphLog controls" above), so operators always
+              know whether a project has ever run, and whether one is
+              running right now, without opening More Actions to find out. */}
+          {current.kind === "folder" && currentFolderType === "project-n02" && permissions.isAdmin(user) && (
+            <div className="vault-project-role-banner text-xs font-mono">
+              {graphLogStatus === null ? (
+                <span>GraphLog: checking status…</span>
+              ) : graphLogStatus.running ? (
+                <span>
+                  GraphLog: <strong>running</strong> ({graphLogStatus.currentJobName ?? "run"}
+                  {graphLogStatus.currentStartedAt
+                    ? `, started ${formatTimestamp(graphLogStatus.currentStartedAt)}`
+                    : ""}
+                  )
+                </span>
+              ) : graphLogStatus.lastCompletedAt ? (
+                <span>
+                  GraphLog: last ran {formatTimestamp(graphLogStatus.lastCompletedAt)} (
+                  {graphLogStatus.lastCompletedJobName ?? "run"}) —{" "}
+                  {graphLogStatus.lastCompletedOk ? (
+                    <strong>succeeded</strong>
+                  ) : (
+                    <strong title={graphLogStatus.lastCompletedError ?? undefined}>failed</strong>
+                  )}
+                </span>
+              ) : (
+                <span>GraphLog: never run.</span>
+              )}
+              {graphLogStatus?.scheduled && (
+                <span className="vault-project-role-banner-shared">Nightly schedule enabled</span>
+              )}
+            </div>
           )}
 
           {/* ── Root view ─ the three root containers, no actions ─────────────── */}

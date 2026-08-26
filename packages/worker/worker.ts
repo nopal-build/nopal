@@ -14,6 +14,7 @@ import { Worker, type Job } from "bullmq";
 import {
   GRAPHLOG_QUEUE_NAME,
   acquireProjectGraphLogLock,
+  clearGraphLogCancellation,
   type GraphLogJobData,
   type GraphLogJobName,
 } from "robustness-core/data/graphLogQueue.server";
@@ -160,6 +161,13 @@ async function processGraphLogJob(job: Job<GraphLogJobData, unknown, GraphLogJob
       error: err instanceof Error ? err.message : "Unknown error",
     });
     throw err;
+  } finally {
+    // Unconditional — success, failure, or a Stop-triggered
+    // `GraphLogCancelledError` all end up here, and a stale cancellation
+    // flag left behind by ANY of those paths would silently cancel this
+    // project's very next run too (see `graphLogQueue.server.ts`'s own
+    // "Cooperative cancellation" section).
+    await clearGraphLogCancellation(job.data.projectFolderId);
   }
 }
 
