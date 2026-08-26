@@ -155,6 +155,17 @@ export type VaultFolder = {
    * trash-cleanup cron (`api.vault.trash-cleanup.tsx`) measures a
    * "trashed" project's age against. */
   project_status_at?: string | null;
+  /**
+   * Whether this `project-n02` root folder (a project OR a `personal`
+   * space) is enrolled in GraphLog's automatic daily run — see
+   * `graphLogSchedule.server.ts`. Only meaningful on such a root folder;
+   * null/absent (and on every non-`project-n02` folder) means "not
+   * scheduled". Toggled only by an Admin/Super, from the Vault UI's "More
+   * Actions" menu — never cascaded to descendants.
+   */
+  graphlog_scheduled?: boolean | null;
+  /** ISO timestamp of the last `setGraphLogScheduled` call. */
+  graphlog_scheduled_at?: string | null;
   created_at: string;
   updated_at: string;
 };

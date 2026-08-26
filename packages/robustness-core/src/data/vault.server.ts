@@ -541,6 +541,10 @@ export async function updateVaultFolder(
      * intended writer of these two. */
     project_status: string | null;
     project_status_at: string | null;
+    /** See `graphLogSchedule.server.ts`'s `setGraphLogScheduled` — the only
+     * intended writer of these two. */
+    graphlog_scheduled: boolean | null;
+    graphlog_scheduled_at: string | null;
   }>,
 ): Promise<VaultFolder | undefined> {
   const result = await merge("vault_folders", id, {

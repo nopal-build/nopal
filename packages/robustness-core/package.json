@@ -19,6 +19,7 @@
     "./data/graphLogPerf.server": "./src/data/graphLogPerf.server.ts",
     "./data/graphLogQueue.server": "./src/data/graphLogQueue.server.ts",
     "./data/graphLogReset.server": "./src/data/graphLogReset.server.ts",
+    "./data/graphLogSchedule.server": "./src/data/graphLogSchedule.server.ts",
     "./data/graphNodeIndex.server": "./src/data/graphNodeIndex.server.ts",
     "./data/graphProjectView.server": "./src/data/graphProjectView.server.ts",
     "./data/graphStructure.server": "./src/data/graphStructure.server.ts",

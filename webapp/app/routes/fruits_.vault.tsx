@@ -1977,6 +1977,7 @@ export default function VaultV2Page() {
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replacing, setReplacing] = useState(false);
   const [graphLogBusy, setGraphLogBusy] = useState<"run" | "reset" | null>(null);
+  const [graphLogScheduleBusy, setGraphLogScheduleBusy] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [siteSettingsOpen, setSiteSettingsOpen] = useState(false);
@@ -2426,14 +2427,19 @@ export default function VaultV2Page() {
     if (data) invalidateAndRevalidate([folder.parent_folder_id]);
   };
 
-  // ─── Admin/Super GraphLog controls ("More Actions" → Run/Reset GraphLog) ──
+  // ─── Admin/Super GraphLog controls ("More Actions" → Run/Reset/Schedule) ─
   // A first, minimal UI trigger for a pipeline that, until now, only ever
   // ran from the CLI or the daily-log pipeline itself — see the `graphlog`
   // skill. Deliberately staff-only for now (`permissions.isAdmin`), on any
   // project-n02 container (a project OR a personal space) regardless of
-  // who owns it — the two API routes this calls (`api.graphlog.run.tsx`/
+  // who owns it — the two API routes Run/Reset call (`api.graphlog.run.tsx`/
   // `api.graphlog.reset.tsx`) were widened to accept the SAME staff
   // override, and `api.graphlog.jobs.$jobId.tsx` (polled below) too.
+  // "Enable/Disable GraphLog Schedule" is a separate, simpler flag flip
+  // (`api.graphlog.schedule.tsx`) that enrolls this project in a nightly
+  // automatic run (`server.js` + `api.graphlog.scheduled-run.tsx`) — that
+  // route is Admin/Super ONLY, with no owner fallback (see its own doc
+  // comment for why).
 
   /** Polls until the job leaves "waiting"/"active"/"delayed" -- same
    * enqueue-then-poll shape the CLI already uses against this same route,
@@ -2499,6 +2505,27 @@ export default function VaultV2Page() {
       if (outcome.ok) invalidateAndRevalidate([folder._id]);
     } finally {
       setGraphLogBusy(null);
+    }
+  };
+
+  /** Enables/disables GraphLog's daily automatic run for this project/
+   * personal space — unlike Run/Reset above, purely a flag flip
+   * (`api.graphlog.schedule.tsx`), no job/poll involved. The actual
+   * midnight trigger lives in `server.js` + `api.graphlog.scheduled-run.tsx`. */
+  const handleToggleGraphLogSchedule = async () => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    const nextScheduled = folder.graphlog_scheduled !== true;
+    setGraphLogScheduleBusy(true);
+    try {
+      const data = await apiJson("/api/graphlog/schedule", {
+        method: "POST",
+        body: JSON.stringify({ projectFolderId: folder._id, scheduled: nextScheduled }),
+      });
+      if (!data) return;
+      invalidateAndRevalidate([folder._id]);
+    } finally {
+      setGraphLogScheduleBusy(false);
     }
   };
 
@@ -2846,6 +2873,12 @@ export default function VaultV2Page() {
     currentFolderType === "project-n02" &&
     permissions.isAdmin(user)
   ) {
+    const graphLogScheduled = current.folder.graphlog_scheduled === true;
+    moreActions.push({
+      label: graphLogScheduled ? "Disable GraphLog Schedule" : "Enable GraphLog Schedule",
+      onClick: handleToggleGraphLogSchedule,
+      disabled: graphLogScheduleBusy,
+    });
     moreActions.push({
       label: graphLogBusy === "run" ? "Running GraphLog…" : "Run GraphLog",
       onClick: handleRunGraphLog,

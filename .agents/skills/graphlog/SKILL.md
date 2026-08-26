@@ -472,7 +472,11 @@ rather than special-cased as synchronous like `daily-log-sync`.
 
 The combined `reset` and the full `run` are both also reachable from
 `/fruits/vault`'s "More Actions" dropdown (Admin/Super only) — see item 11
-under "Build status" below.
+under "Build status" below. The same dropdown also has an Admin/Super-only
+"Enable/Disable GraphLog Schedule" toggle that enrolls a project in an
+automatic nightly `run` — no scheduled equivalent for `reset`, since that's
+destructive and deliberately stays an explicit, one-off action. See item 12
+under "Build status".
 
 ## `project-n02` spaces
 
@@ -1361,6 +1365,45 @@ skill was born from:
     a plain `window.alert` — intentionally minimal, no progress detail
     beyond that. "Reset" additionally requires a confirm dialog, since it's
     destructive.
+12. **Done — a nightly automatic run, opt-in per project**
+    (`graphLogSchedule.server.ts`). The same Vault "More Actions" dropdown
+    (Admin/Super only, same `permissions.isAdmin` gate as item 11) gains an
+    "Enable GraphLog Schedule"/"Disable GraphLog Schedule" toggle on any
+    `project-n02` folder. Architecture mirrors `projectStatus.server.ts`
+    exactly: a denormalized `graphlog_scheduled`/`graphlog_scheduled_at`
+    pair on `vault_folders` (`vault.types.ts`), written only by
+    `setGraphLogScheduled`, read back by `getGraphLogScheduledFolders`
+    (`SELECT * FROM vault_folders WHERE folder_type = 'project-n02' AND
+    is_folder_type_root = true AND graphlog_scheduled = true`).
+    - **Unlike Run/Reset, this toggle is Admin/Super ONLY — no owner
+      fallback**, in both the UI gate and its API route
+      (`api.graphlog.schedule.tsx`). Enrolling something in an unattended
+      nightly run is a different, more consequential call than triggering
+      one run by hand, so it doesn't get the same "or you own it"
+      carve-out Run/Reset have.
+    - **The actual midnight trigger lives in `server.js`**, alongside the
+      existing archive-cleanup/trash-cleanup/daily-log-sort crons but
+      anchored differently: those three just repeat every 24h from server
+      start (staggered by a fixed offset), which is "once a day" but NOT
+      necessarily midnight. GraphLog's is deliberately anchored to actual
+      local midnight (`msUntilNextMidnight()`), since "run overnight" was
+      the whole point. Same `CRON_SECRET` bearer-token protection as the
+      other three, hitting a new `POST /api/graphlog/scheduled-run`
+      (`api.graphlog.scheduled-run.tsx`), which fans out one normal `"run"`
+      job (`enqueueGraphLogJob`, same queue Run/Reset use) per scheduled
+      project, `actingHumanId` set to the project's own `human_id` since
+      no human is actually present to attribute the run to.
+    - **No separate "fresh vs incremental" mode was needed.**
+      `runGraphLogPipeline` already ties `daily-log-sync` →
+      `sync-knowledge` → `sync-graph` → `graph-structure` →
+      `graph-project-view` together, and every one of those five stages
+      already decides for itself whether it has new work from what's
+      already on disk (each logs `"...skipped"` when it finds nothing new
+      — see `runGraphLogPipeline`'s own log lines). A brand new project, or
+      one that was just reset, simply has nothing on disk yet, so the
+      exact same `"run"` job does a full first pass; an existing project's
+      same job only picks up what changed since the last one. Scheduling
+      required zero changes to the pipeline itself.
 
 **All done against the original phased plan** — the migration ran for
 real across every existing project/`personal` space, and PhyLog/

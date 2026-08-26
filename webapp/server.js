@@ -103,6 +103,20 @@ const build = viteDevServer
 
 app.all("*", createRequestHandler({ build }));
 
+/**
+ * Milliseconds from right now until the next local midnight (00:00:00.000
+ * of tomorrow if it's already past midnight today, effectively "tonight
+ * at midnight" whenever this is called during the day). Used to anchor
+ * GraphLog's scheduled-run cron to an actual wall-clock midnight, unlike
+ * the other crons below which just repeat every 24h from server start.
+ */
+function msUntilNextMidnight() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(24, 0, 0, 0);
+  return next.getTime() - now.getTime();
+}
+
 httpServer.listen(3000, () => {
   console.log("App listening on http://localhost:3000");
 
@@ -190,5 +204,32 @@ httpServer.listen(3000, () => {
         setInterval(runDailyLogSort, 24 * 60 * 60 * 1000);
       }, 45_000);
     }
+
+    // ── GraphLog scheduled run ─────────────────────────────────────────────
+    // Runs GraphLog's full pipeline for every project/personal space an
+    // Admin/Super has enrolled ("More Actions" → Enable GraphLog Schedule
+    // in the Vault — see `graphLogSchedule.server.ts`). Same CRON_SECRET,
+    // but anchored to actual local midnight rather than "once every 24h
+    // from server start" like the crons above — the whole point of this
+    // one is running overnight.
+    const runGraphLogSchedule = async () => {
+      try {
+        const res = await fetch(
+          "http://localhost:3000/api/graphlog/scheduled-run",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${cronSecret}` },
+          },
+        );
+        const data = await res.json();
+        console.log("[cron] graphlog/scheduled-run:", data);
+      } catch (err) {
+        console.error("[cron] graphlog/scheduled-run failed:", err);
+      }
+    };
+    setTimeout(() => {
+      runGraphLogSchedule();
+      setInterval(runGraphLogSchedule, 24 * 60 * 60 * 1000);
+    }, msUntilNextMidnight());
   }
 });
