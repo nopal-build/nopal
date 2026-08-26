@@ -816,21 +816,43 @@ exactly one timeline, no separate id scheme to keep in sync.
   noted when this skill's own "Recent Runs" section was first built,
   unrelated to this addition).
 
-## Local dev gotcha: the worker doesn't hot-reload
+## Local dev gotcha: the worker not hot-reloading (FIXED)
 
 `packages/worker`'s `vite-node worker.ts` is a plain, long-running
 process, its own standalone package (not part of `webapp`) so its deploy
-doesn't drag along dependencies it doesn't need — unlike the webapp's own
-Vite dev server, it does NOT watch for file changes. After editing
-`worker.ts` OR ANY `robustness-core` file a GraphLog job transitively
-imports, the running `nopal-worker-1` container is still
-serving the OLD code until restarted: `docker restart nopal-worker-1`
-(confirmed directly — a job enqueued right after a code change failed
-with `Unknown GraphLog job name: ...` until the container was restarted).
-`make reset` also fixes this (a full `docker compose down -v` + fresh
-`up`), but wipes every named volume — including the local SurrealDB/MinIO
-data — so it's a much bigger hammer than needed just to pick up a code
-change.
+doesn't drag along dependencies it doesn't need. This used to mean it did
+NOT watch for file changes at all, unlike the webapp's own Vite dev
+server — editing `worker.ts` OR ANY `robustness-core`/`oxmarkdown-core`
+file a GraphLog job transitively imports left the running
+`nopal-worker-1` container silently serving the OLD code until someone
+remembered to `docker restart nopal-worker-1` by hand (confirmed directly
+multiple times over the course of this skill's own build — a job enqueued
+right after a code change either ran the stale logic or failed outright
+with `Unknown GraphLog job name: ...`).
+
+**Fixed**: `docker-compose.yml`'s `worker` service now runs
+`pnpm --filter worker run dev` (`vite-node --watch worker.ts`) instead of
+`run start` (a plain, one-shot `vite-node` — unchanged, still what
+production's own Dockerfile CMD uses; watch mode is dev-only, on purpose,
+since there's no live-editing to react to in an immutable deployed
+container). `--watch` is `vite-node`'s own built-in flag, and it follows
+pnpm's real workspace symlinks back to each package's actual source —
+the SAME reason the webapp's own dev server already hot-reloads changes
+to `robustness-core`/`oxmarkdown-core` — so editing any file the worker's
+module graph touches now respawns the whole process automatically, no
+manual restart needed.
+
+**Applying this to an already-running local stack requires recreating the
+container**, not just editing the compose file — `docker compose up -d
+worker` (or a full `docker compose up -d`) picks up the new `command:`.
+A plain `docker restart nopal-worker-1` reuses whatever command the
+container was already created with, so it does NOT pick this up on its
+own. Recreating the container interrupts any GraphLog job currently
+running, same as any other worker restart already could — do it between
+runs, not mid-run. `make reset` (a full `docker compose down -v` + fresh
+`up`) also picks it up, but wipes every named volume — including local
+SurrealDB/MinIO data — so it's a much bigger hammer than needed just for
+this.
 
 ## Build status
 

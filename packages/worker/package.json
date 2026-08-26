@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start": "vite-node worker.ts"
+    "start": "vite-node worker.ts",
+    "dev": "vite-node --watch worker.ts"
   },
   "dependencies": {
     "bullmq": "^5.60.0",

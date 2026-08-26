@@ -80,6 +80,18 @@ services:
   # React/etc); NOT sharing webapp's node_modules. Restarts on crash so
   # a bad job doesn't leave GraphLog permanently un-worked for the rest
   # of a dev session.
+  #
+  # Runs `pnpm run dev` (`vite-node --watch`), not `run start` (a plain,
+  # one-shot `vite-node`, still what production's own Dockerfile CMD
+  # uses) -- a REAL, CONFIRMED gap this closes: editing ANY
+  # `robustness-core`/`oxmarkdown-core` file a GraphLog job transitively
+  # imports used to leave this container silently serving the OLD code
+  # until someone remembered to `docker restart nopal-worker-1` by hand
+  # (see the `graphlog` skill's own "Local dev gotcha" note, now
+  # resolved). `--watch` follows pnpm's real symlinks back to each
+  # workspace package's own source (standard Vite monorepo behavior, the
+  # SAME reason the webapp's own dev server already hot-reloads those
+  # same files) and respawns the whole process on any change.
   worker:
     image: node:22.23.2-slim
     working_dir: /app
@@ -106,7 +118,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
-    command: sh -c "corepack enable pnpm && pnpm install --store-dir /pnpm-store && pnpm --filter worker run start"
+    command: sh -c "corepack enable pnpm && pnpm install --store-dir /pnpm-store && pnpm --filter worker run dev"
     depends_on:
       db:
         condition: service_healthy
