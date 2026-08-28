@@ -1,4 +1,4 @@
-import { Link, NavLink } from "@remix-run/react";
+import { Link, NavLink } from "react-router";
 import nopalLogo from "../images/nopal-v2.svg";
 import nopalDarkLogo from "../images/nopal-dark-v2.svg";
 import sun from "../images/sun.svg";

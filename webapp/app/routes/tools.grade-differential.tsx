@@ -4,8 +4,9 @@ import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { Breadcrumb } from "../components/Breadcrumb";
 import { NumberInput } from "../components/NumberInput";
-import type { MetaFunction } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { surfaceBase } from "stamps/surface.css";
+import type { MetaFunction } from "react-router";
+import { Link } from "react-router";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -320,7 +321,7 @@ export default function GradeDifferential() {
             {/* ── Left sidebar ─────────────────────────────────────────────── */}
             <div className="w-full xl:w-64 flex-shrink-0 space-y-4">
               {/* Grid settings */}
-              <section className="good-box p-4 good-box">
+              <section className={`${surfaceBase} p-4`}>
                 <h3 className="font-semibold text-base mb-3">Grid Settings</h3>
                 <div className="space-y-3">
                   <div>
@@ -379,7 +380,7 @@ export default function GradeDifferential() {
               </section>
 
               {/* Layers */}
-              <section className="good-box p-4">
+              <section className={`${surfaceBase} p-4`}>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-semibold text-base">Layers</h3>
                   <button
@@ -470,7 +471,7 @@ export default function GradeDifferential() {
 
               {/* Volume calculator */}
               {layers.length >= 2 && (
-                <section className="good-box p-4">
+                <section className={`${surfaceBase} p-4`}>
                   <h3 className="font-semibold text-base mb-1">
                     Volume Differential
                   </h3>
@@ -542,7 +543,7 @@ export default function GradeDifferential() {
                         cf={volResult.fillCF}
                         className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
                       />
-                      <div className="flex justify-between items-center px-2 py-2 good-box">
+                      <div className={`flex justify-between items-center px-2 py-2 ${surfaceBase}`}>
                         <span className="font-semibold">Net</span>
                         <span
                           className={
@@ -633,7 +634,7 @@ export default function GradeDifferential() {
               </div>
 
               {/* Grid SVG */}
-              <div className="overflow-auto good-box">
+              <div className={`overflow-auto ${surfaceBase}`}>
                 <svg
                   width={svgW}
                   height={svgH}

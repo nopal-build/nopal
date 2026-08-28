@@ -8,7 +8,7 @@ services:
       - surreal_data:/data
     environment:
       SURREAL_LOG: info
-    command: start --bind 0.0.0.0:8080 --user ${DB_USER:-root} --pass ${DB_PASS:-root} surrealkv://data/srdb.db
+    command: start --bind 0.0.0.0:8080 --user ${SURREAL_USER:-root} --pass ${SURREAL_PASS:-root} surrealkv://data/srdb.db
     healthcheck:
       test:
         [
@@ -25,24 +25,188 @@ services:
       retries: 15
       start_period: 5s
 
+  # webapp/worker are both pnpm workspace members — each bind-mounts the
+  # WHOLE repo root (not just its own directory), because pnpm needs to
+  # see every workspace package to link `robustness-core`/`oxmarkdown-core`
+  # correctly. Each gets its OWN complete set of node_modules volumes
+  # (not shared between the two services) so two containers running
+  # `pnpm install` at the same time never race on the same files — a
+  # little redundant disk use locally, in exchange for zero cross-container
+  # install coordination.
   webapp:
-    image: node:20-slim
+    image: node:22.23.2-slim
     working_dir: /app
     ports:
       - "3000:3000"
+
     volumes:
-      - ./webapp:/app
+      - .:/app
       - webapp_node_modules:/app/node_modules
+      - webapp_pkg_node_modules:/app/webapp/node_modules
+      - webapp_robustness_core_node_modules:/app/packages/robustness-core/node_modules
+      - webapp_oxmarkdown_core_node_modules:/app/packages/oxmarkdown-core/node_modules
+      - webapp_worker_node_modules:/app/packages/worker/node_modules
+      - webapp_stamps_node_modules:/app/packages/stamps/node_modules
+      - webapp_pnpm_store:/pnpm-store
     environment:
       NODE_ENV: development
+      CI: "true"
       DATABASE_URL: http://db:8080/rpc
       DATABASE_USERNAME: ${APP_USER:-root}
       DATABASE_PASSWORD: ${APP_PASS:-root}
-    command: sh -c "npm install && npm run dev"
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      S3_ENDPOINT: http://minio:9000
+      # S3_ENDPOINT: http://localhost:9000  # only valid when running webapp outside Docker
+      S3_PUBLIC_HOSTNAME: localhost:9000
+      S3_FORCE_PATH_STYLE: "true"
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
+      REDIS_URL: redis://redis:6379
+    command: sh -c "corepack enable pnpm && pnpm install --store-dir /pnpm-store && pnpm --filter remix run dev"
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # GraphLog's queue worker (`packages/worker/worker.ts`) — its own
+  # workspace package with its own, much smaller dependency graph (no
+  # React/etc); NOT sharing webapp's node_modules. Restarts on crash so
+  # a bad job doesn't leave GraphLog permanently un-worked for the rest
+  # of a dev session.
+  #
+  # Runs `pnpm run dev` (`vite-node --watch`), not `run start` (a plain,
+  # one-shot `vite-node`, still what production's own Dockerfile CMD
+  # uses) -- a REAL, CONFIRMED gap this closes: editing ANY
+  # `robustness-core`/`oxmarkdown-core` file a GraphLog job transitively
+  # imports used to leave this container silently serving the OLD code
+  # until someone remembered to `docker restart nopal-worker-1` by hand
+  # (see the `graphlog` skill's own "Local dev gotcha" note, now
+  # resolved). `--watch` follows pnpm's real symlinks back to each
+  # workspace package's own source (standard Vite monorepo behavior, the
+  # SAME reason the webapp's own dev server already hot-reloads those
+  # same files) and respawns the whole process on any change.
+  worker:
+    image: node:22.23.2-slim
+    working_dir: /app
+    restart: unless-stopped
+    volumes:
+      - .:/app
+      - worker_node_modules:/app/node_modules
+      - worker_pkg_node_modules:/app/packages/worker/node_modules
+      - worker_robustness_core_node_modules:/app/packages/robustness-core/node_modules
+      - worker_oxmarkdown_core_node_modules:/app/packages/oxmarkdown-core/node_modules
+      - worker_webapp_node_modules:/app/webapp/node_modules
+      - worker_stamps_node_modules:/app/packages/stamps/node_modules
+      - worker_pnpm_store:/pnpm-store
+    environment:
+      NODE_ENV: development
+      CI: "true"
+      DATABASE_URL: http://db:8080/rpc
+      DATABASE_USERNAME: ${APP_USER:-root}
+      DATABASE_PASSWORD: ${APP_PASS:-root}
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_HOSTNAME: localhost:9000
+      S3_FORCE_PATH_STYLE: "true"
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
+      REDIS_URL: redis://redis:6379
+    command: sh -c "corepack enable pnpm && pnpm install --store-dir /pnpm-store && pnpm --filter worker run dev"
+    depends_on:
+      db:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # Gives the bundled `mc` binary a pre-configured alias so the
+      # healthcheck subprocess can run `mc ready local` without needing
+      # a separate `mc alias set` step.
+      MC_HOST_local: http://${MINIO_ROOT_USER:-minioadmin}:${MINIO_ROOT_PASSWORD:-minioadmin}@localhost:9000
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} &&
+      mc mb --ignore-existing local/${BUCKET_NAME:-local-bucket} &&
+      mc anonymous set public local/${BUCKET_NAME:-local-bucket}
+      "
+
+  dozzle:
+    image: amir20/dozzle:latest
+    ports:
+      - "9999:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      DOZZLE_NO_ANALYTICS: true
 
 volumes:
   surreal_data:
   webapp_node_modules:
+  webapp_pkg_node_modules:
+  webapp_robustness_core_node_modules:
+  webapp_oxmarkdown_core_node_modules:
+  webapp_worker_node_modules:
+  webapp_stamps_node_modules:
+  webapp_pnpm_store:
+  worker_node_modules:
+  worker_pkg_node_modules:
+  worker_robustness_core_node_modules:
+  worker_oxmarkdown_core_node_modules:
+  worker_webapp_node_modules:
+  worker_stamps_node_modules:
+  worker_pnpm_store:
+  minio_data:
+  redis_data:

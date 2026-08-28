@@ -1,19 +1,15 @@
 import {
-  registerDb,
   getAllPublishedPagesByDbRef,
   getPageByDbRefAndSlug,
 } from "./core.server";
 import type { StoryRecord } from "./types";
-import { formatRecord } from "../generic.server";
+import { formatRecord } from "robustness-core/data/generic.server";
 
 const db = {
   id: "27af2211e45f80a993d4dde9a4067ea3",
   dbName: "gbs_stories",
   getPublicUrl: (slug: string) => `/stories/${slug}`,
 };
-export function registerStoriesDb() {
-  registerDb(db);
-}
 
 export async function getAllStories(): Promise<{
   data: StoryRecord[];

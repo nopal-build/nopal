@@ -1,5 +1,6 @@
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { SyntheticEvent } from "react";
+import { surfaceBase, surfaceHoverable } from "stamps/surface.css";
 
 type Props = {
   onClick?: (e: SyntheticEvent<HTMLAnchorElement>) => void;
@@ -27,7 +28,7 @@ export function GoodBuildingLink({ onClick }: Props) {
       to="/good/building"
       prefetch="render"
       onClick={onClick}
-      className="good-box good-box-hover"
+      className={`${surfaceBase} ${surfaceHoverable}`}
     >
       <svg
         width="66"
@@ -71,7 +72,7 @@ export function GoodGuidingLink({ onClick }: Props) {
       to="/good/guides"
       prefetch="render"
       onClick={onClick}
-      className="good-box good-box-hover"
+      className={`${surfaceBase} ${surfaceHoverable}`}
     >
       <svg
         width="64"
@@ -155,7 +156,7 @@ export function GoodArchitectureLink({ onClick }: Props) {
       to="/good/architecture"
       prefetch="render"
       onClick={onClick}
-      className="good-box good-box-hover"
+      className={`${surfaceBase} ${surfaceHoverable}`}
     >
       <svg
         width="74"
@@ -247,7 +248,7 @@ function GoodButton({
 }) {
   return (
     <Link
-      className="text-nowrap good-box good-box-hover justify-between inline-flex items-center p-2"
+      className={`text-nowrap ${surfaceBase} ${surfaceHoverable} justify-between inline-flex items-center p-2`}
       to={to}
     >
       <span className="inline-flex items-center gap-2">{children}</span>{" "}

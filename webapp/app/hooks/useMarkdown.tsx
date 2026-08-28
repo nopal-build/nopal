@@ -1,6 +1,21 @@
 import showdown from "showdown";
 import { useMemo } from "react";
 
+/**
+ * Merges runs of standalone-image paragraphs into a single <p> so the
+ * CSS grid rules in project.css can apply:
+ *   1 img  → full width   (p:has(> img:only-child))
+ *   2 imgs → side by side (flex, equal columns)
+ *   3+     → grid         (flex-wrap with square crop)
+ */
+function groupConsecutiveImages(html: string): string {
+  return html.replace(/(<p>(?:\s*<img[^>]+>\s*)<\/p>\s*)+/g, (block) => {
+    const imgs = block.match(/<img[^>]+>/g) ?? [];
+    if (imgs.length < 2) return block;
+    return `<p>${imgs.join("\n")}</p>\n`;
+  });
+}
+
 showdown.extension("nopal", () => {
   return [
     {
@@ -26,7 +41,7 @@ export function useMarkdown(body: string) {
       extensions: ["nopal"],
       strikethrough: true,
     });
-    return converter.makeHtml(body);
+    return groupConsecutiveImages(converter.makeHtml(body));
   }, [body]);
   return (
     <div

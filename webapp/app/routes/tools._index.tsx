@@ -1,7 +1,7 @@
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
-import type { MetaFunction } from "@remix-run/node";
+import type { MetaFunction } from "react-router";
 
 export const meta: MetaFunction = () => [
   { title: "Construction Tools | Nopal" },
@@ -16,6 +16,12 @@ interface Tool {
   description: string;
   href: string;
   inDevelopment?: boolean;
+}
+
+interface Doc {
+  name: string;
+  description: string;
+  href: string;
 }
 
 const TOOLS: Tool[] = [
@@ -52,6 +58,28 @@ const TOOLS: Tool[] = [
     href: "/tools/grade-differential",
     inDevelopment: true,
   },
+  {
+    name: "Medium Timber Framing",
+    description: "Size and generate takeoffs for MTF",
+    href: "/tools/mtf",
+    inDevelopment: true,
+  },
+  {
+    name: "Thermal Inertia",
+    description:
+      "Compare thermal diffusivity of common insulation and structural materials. Understand how thermal inertia affects real-world comfort beyond R-values alone.",
+    href: "/tools/thermal-inertia",
+    inDevelopment: true,
+  },
+];
+
+const DOCS: Doc[] = [
+  {
+    name: "AZ Independent Contractor Workers' Comp Acknowledgment",
+    description:
+      "Arizona Independent Contractor Workers' Compensation Acknowledgment and Responsibility form.",
+    href: "/docs/wc-waiver",
+  },
 ];
 
 export default function ToolsIndex() {
@@ -81,6 +109,27 @@ export default function ToolsIndex() {
                   )}
                 </h2>
                 <p className="mt-2 opacity-80">{tool.description}</p>
+              </Link>
+            ))}
+          </div>
+
+          <h2 className="text-3xl font-bold mt-16">Documents</h2>
+          <p className="purple-light-text text-xl mt-2">
+            Forms and legal documents
+          </p>
+
+          <div className="mt-8 space-y-4">
+            {DOCS.map((doc) => (
+              <Link
+                key={doc.href}
+                to={doc.href}
+                prefetch="intent"
+                className="block border border-gray-300 dark:border-[var(--dark-midground)] rounded-lg p-6 hover:border-[var(--green)] dark:hover:border-[var(--green)] transition-colors"
+              >
+                <h2 className="text-2xl font-semibold green-text">
+                  {doc.name}
+                </h2>
+                <p className="mt-2 opacity-80">{doc.description}</p>
               </Link>
             ))}
           </div>

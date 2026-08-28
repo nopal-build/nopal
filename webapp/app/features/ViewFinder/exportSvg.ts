@@ -17,7 +17,7 @@ export function buildSvg(
   edges: Float32Array,
   svgW: number,
   svgH: number,
-  camera: CameraState
+  camera: CameraState,
 ): string {
   const aspect = svgW / svgH;
 
@@ -69,20 +69,25 @@ export function buildSvg(
     const vLen = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
     const facing = (nx * vx + ny * vy + nz * vz) / vLen;
 
-    // smoothstep(0.15, 0.55, facing) — matches shader
-    const t = Math.max(0, Math.min(1, (facing - 0.15) / 0.4));
+    // Edge normals are outward-pointing, so facing > 0 = near side, facing < 0 = far side.
+    // Skip clearly far-side edges (matches the discard threshold in fs_wire).
+    if (facing < -0.5) continue;
+
+    // smoothstep(-0.2, 0.4, facing) — matches updated shader
+    const t = Math.max(0, Math.min(1, (facing + 0.2) / 0.6));
     const strokeW = (0.8 + t * 1.2).toFixed(2);
 
     const line = `<line x1="${sax.toFixed(1)}" y1="${say.toFixed(
-      1
+      1,
     )}" x2="${sbx.toFixed(1)}" y2="${sby.toFixed(
-      1
+      1,
     )}" stroke-width="${strokeW}"/>`;
 
-    if (facing > 0.15) {
-      backLines.push(line);
-    } else {
+    // facing > 0: near-side edge → draw solid on top; ≤ 0: far/silhouette → dashed behind
+    if (facing > 0) {
       frontLines.push(line);
+    } else {
+      backLines.push(line);
     }
   }
 
@@ -96,13 +101,13 @@ export function buildSvg(
       mvp,
       scaleTarget[0] - worldLen / 2,
       scaleTarget[1],
-      scaleTarget[2]
+      scaleTarget[2],
     );
     const p2 = projectPoint(
       mvp,
       scaleTarget[0] + worldLen / 2,
       scaleTarget[1],
-      scaleTarget[2]
+      scaleTarget[2],
     );
     if (p1.clipW <= 0 || p2.clipW <= 0) return 0;
     const sx1 = (p1.clipX / p1.clipW) * 0.5 * svgW + svgW * 0.5;
@@ -150,7 +155,7 @@ export function buildSvg(
       ? [
           `  <g stroke="#444444" stroke-width="1.5" fill="none" stroke-linecap="round">`,
           `    <line x1="${sbBarX1.toFixed(1)}" y1="${sbBarY.toFixed(
-            1
+            1,
           )}" x2="${sbBarX2.toFixed(1)}" y2="${sbBarY.toFixed(1)}"/>`,
           `    <line x1="${sbBarX1.toFixed(1)}" y1="${(
             sbBarY - sbTickH
@@ -164,7 +169,7 @@ export function buildSvg(
           ).toFixed(1)}"/>`,
           `  </g>`,
           `  <text x="${sbMidX.toFixed(1)}" y="${sbLabelY.toFixed(
-            1
+            1,
           )}" text-anchor="middle" font-family="monospace" font-size="11" fill="#444444">${scaleLabel}</text>`,
         ]
       : [];

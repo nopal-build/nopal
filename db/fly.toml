@@ -8,6 +8,9 @@ primary_region = 'dfw'
 
 [build]
 
+[deploy]
+release_command = "/bin/sh /migrate.sh"
+
 [http_service]
 internal_port = 8080
 force_https = true

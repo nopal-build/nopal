@@ -1,9 +1,14 @@
 
 [workspace]
-members = ["cli", "api"]
+members = ["cli", "api", "core", "app"]
 resolver = "2"
 
 [workspace.dependencies]
 # reframed = { path = "crates/reframed" }
 
 [workspace.lints.clippy]
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

@@ -1,11 +1,10 @@
-import { query } from "../generic.server";
+import { query } from "robustness-core/data/generic.server";
 import {
-  registerDb,
   getAllPublishedPagesByDbRef,
   getPageByDbRefAndSlug,
 } from "./core.server";
 import type { MaterialRecord } from "./types";
-import { formatRecord } from "../generic.server";
+import { formatRecord } from "robustness-core/data/generic.server";
 import { getGBSScore } from "../../util/getGBSScore";
 import { RecordId } from "surrealdb";
 
@@ -14,9 +13,6 @@ const db = {
   dbName: "gbs_assemblies",
   getPublicUrl: (slug: string) => `/assemblies/${slug}`,
 };
-export function registerAssembliesDb() {
-  registerDb(db);
-}
 
 export async function getAllAssemblies(): Promise<{
   data: MaterialRecord[];

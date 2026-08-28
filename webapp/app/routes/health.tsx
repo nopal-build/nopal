@@ -6,9 +6,9 @@ import {
   useNavigate,
   useLocation,
   useLoaderData,
-} from "@remix-run/react";
+} from "react-router";
 import { GbScore } from "../components/GbScore";
-import { LinksFunction } from "@remix-run/node";
+import { LinksFunction } from "react-router";
 import healthStyles from "../styles/health.css?url";
 import {
   HealthFactor,
@@ -19,7 +19,7 @@ import {
 } from "../components/FiveFactors";
 import { getSampleSciences } from "../data/notion/science.server";
 import { getAllStories } from "../data/notion/stories.server";
-import type { Collection } from "../data/generic.server";
+import type { Collection } from "robustness-core/data/generic.server";
 import type {
   StoryRecord,
   ScienceRecord,

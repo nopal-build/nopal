@@ -1,4 +1,4 @@
-.PHONY: dev seed down reset clean
+.PHONY: dev seed migrate down reset clean
 
 # docker-compose.yml lives in the project root — delegate everything up.
 # You can also run these targets from the project root directly.
@@ -8,6 +8,9 @@ dev:
 
 seed:
 	$(MAKE) -C .. seed
+
+migrate:
+	$(MAKE) -C .. migrate
 
 down:
 	$(MAKE) -C .. down

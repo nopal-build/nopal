@@ -8,7 +8,7 @@ import {
   CactiFive,
 } from "../svg/path/cacti";
 import { Annotation } from "../components/Annotation";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 
 export default function PathPage() {
   return (

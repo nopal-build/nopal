@@ -1,18 +1,47 @@
 import { Layout } from "../components/Layout";
 import { FooterDiscovery } from "../components/Footer";
-import { Form, useActionData } from "@remix-run/react";
+import { surfaceBase, surfaceHoverable } from "stamps/surface.css";
+import { link } from "stamps/link.css";
+import { Form, Link, useActionData, useNavigation } from "react-router";
 import { useEffect, useState } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { subscribeToNewsletter } from "../util/email.server";
 import { useUserPrefs } from "../hooks/useUserPrefs";
 
-export async function action({ request }: ActionFunctionArgs) {
-  const formData = await request.formData();
-  const email = formData.get("email") as string;
-  const firstName = formData.get("firstName") as string;
-  const lastName = formData.get("lastName") as string;
+type ActionResult =
+  | { success: true }
+  | { success: false; error: string };
 
-  subscribeToNewsletter({ email, firstName, lastName });
+export async function action({
+  request,
+}: ActionFunctionArgs): Promise<ActionResult> {
+  const formData = await request.formData();
+  const email = ((formData.get("email") as string) ?? "").trim();
+  const firstName = ((formData.get("firstName") as string) ?? "").trim();
+  const lastName = ((formData.get("lastName") as string) ?? "").trim();
+  const consent = formData.get("newsletter_consent") === "on";
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { success: false, error: "Enter a valid email address." };
+  }
+  // Only subscribe on an explicit opt-in — we never sign anyone up for
+  // marketing email without them having checked this box themselves.
+  if (!consent) {
+    return {
+      success: false,
+      error: "Please check the box to confirm you'd like to receive emails.",
+    };
+  }
+
+  try {
+    await subscribeToNewsletter({ email, firstName, lastName });
+  } catch (err) {
+    console.error("[contact] newsletter subscribe failed:", err);
+    return {
+      success: false,
+      error: "Something went wrong subscribing you. Please try again.",
+    };
+  }
 
   return { success: true };
 }
@@ -21,6 +50,8 @@ export default function Contact() {
   const [userPrefs, setUserPrefs] = useUserPrefs();
   const [success, setSuccess] = useState(false);
   const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const isSubmitting = navigation.state === "submitting";
 
   useEffect(() => {
     if (actionData?.success) {
@@ -44,7 +75,7 @@ export default function Contact() {
             </ButtonLink>
           </div>
           <div className="mt-4">
-            <a href="mailto:human@nopal.build" className="link">
+            <a href="mailto:human@nopal.build" className={link}>
               Email us at human@nopal.build
             </a>
           </div>
@@ -70,18 +101,54 @@ export default function Contact() {
                   type="email"
                   name="email"
                   placeholder="Email"
+                  required
                   className="border border-gray-300 rounded px-2 py-1"
                 />
               </div>
-              <div className="mt-4 flex">
-                <button type="submit" className="btn-secondary">
-                  Subscribe
-                </button>
+              {!(success || userPrefs.newsletter) && (
+                <div className="mt-4">
+                  <label className="flex items-start gap-2 text-sm subtle-text cursor-pointer">
+                    <input
+                      type="checkbox"
+                      name="newsletter_consent"
+                      required
+                      className="mt-1 shrink-0"
+                    />
+                    <span>
+                      Yes, email me occasional updates from Nopal. See our{" "}
+                      <Link to="/privacy" className={link} target="_blank">
+                        privacy notice
+                      </Link>{" "}
+                      for how we use it — you can unsubscribe any time from
+                      the link in any email we send.
+                    </span>
+                  </label>
+                </div>
+              )}
+              <div className="mt-4 flex items-center">
+                {!(success || userPrefs.newsletter) && (
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="btn-secondary"
+                    style={
+                      isSubmitting ? { opacity: 0.6, cursor: "not-allowed" } : {}
+                    }
+                  >
+                    {isSubmitting ? "Subscribing…" : "Subscribe"}
+                  </button>
+                )}
                 {success || userPrefs.newsletter ? (
-                  <p className="ml-4 self-center green-light-text italic">
+                  <p className="self-center green-light-text italic">
                     You subscribed to the newsletter {"👍"}
                   </p>
-                ) : null}
+                ) : (
+                  actionData?.success === false && (
+                    <p className="ml-4 self-center text-sm" style={{ color: "var(--red)" }}>
+                      {actionData.error}
+                    </p>
+                  )
+                )}
               </div>
             </Form>
           </div>
@@ -110,7 +177,7 @@ function ButtonLink({
 }) {
   return (
     <a
-      className="text-nowrap good-box good-box-hover justify-between inline-flex items-center gap-4 p-2"
+      className={`text-nowrap ${surfaceBase} ${surfaceHoverable} justify-between inline-flex items-center gap-4 p-2`}
       target="_blank"
       href={href}
     >

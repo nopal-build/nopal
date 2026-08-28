@@ -1,0 +1,37 @@
+{
+  "name": "stamps",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./tokens": "./src/tokens.ts",
+    "./Badge": "./src/Badge.tsx",
+    "./Chip": "./src/Chip.tsx",
+    "./Input": "./src/Input.tsx",
+    "./Surface": "./src/Surface.tsx",
+    "./surface.css": "./src/surface.css.ts",
+    "./Modal": "./src/Modal.tsx",
+    "./CircleButton": "./src/CircleButton.tsx",
+    "./MoreMenu": "./src/MoreMenu.tsx",
+    "./SearchCollection": "./src/SearchCollection.tsx",
+    "./CopyField": "./src/CopyField.tsx",
+    "./sprinkles.css": "./src/sprinkles.css.ts",
+    "./typography.css": "./src/typography.css.ts",
+    "./navLink.css": "./src/navLink.css.ts",
+    "./appLayoutShell.css": "./src/appLayoutShell.css.ts",
+    "./HamburgerNeqIcon": "./src/HamburgerNeqIcon.tsx",
+    "./button.css": "./src/button.css.ts",
+    "./link.css": "./src/link.css.ts"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3"
+  },
+  "dependencies": {
+    "@vanilla-extract/css": "^1.21.2",
+    "@vanilla-extract/recipes": "^0.5.7",
+    "@vanilla-extract/sprinkles": "^1.7.1"
+  }
+}

@@ -49,8 +49,9 @@ export function NotionPageDetails({
       ) => {
         if (detail.type == "numbered_list_item") {
           const lastIdx = acc.length - 1;
-          if (Array.isArray(acc[lastIdx])) {
-            acc[lastIdx].push(detail);
+          const last = acc[lastIdx];
+          if (Array.isArray(last)) {
+            last.push(detail);
             return acc;
           } else {
             return [...acc, [detail]];
@@ -177,11 +178,23 @@ function Video({ detail }: { detail: VideoBlockObjectResponse }) {
   const getUrl = () => {
     const url = video?.external?.url;
 
-    // This corrects this format to change it into the embed format to prevent cross origin
+    // Route every YouTube embed through youtube-nocookie.com ("privacy-
+    // enhanced mode"), which doesn't set YouTube's tracking/ads cookies
+    // until the viewer presses play — so this page doesn't need a
+    // cookie-consent banner just for an embedded video.
     // Input: https://youtu.be/Nk-I--FN2BU?si=CPMkK7KVMKtmfwUG
-    // Output: https://www.youtube.com/embed/Nk-I--FN2BU?si=dm8N4Mm-tbDKEZHY
+    // Output: https://www.youtube-nocookie.com/embed/Nk-I--FN2BU?si=dm8N4Mm-tbDKEZHY
     if (url.startsWith("https://youtu.be/")) {
-      return url.replace("https://youtu.be/", "https://www.youtube.com/embed/");
+      return url.replace(
+        "https://youtu.be/",
+        "https://www.youtube-nocookie.com/embed/",
+      );
+    }
+    if (url.includes("youtube.com/embed/")) {
+      return url.replace(
+        /https:\/\/(www\.)?youtube\.com\/embed\//,
+        "https://www.youtube-nocookie.com/embed/",
+      );
     }
 
     return url;

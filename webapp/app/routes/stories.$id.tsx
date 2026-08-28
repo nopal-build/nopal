@@ -1,10 +1,10 @@
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { getStoryBySlug } from "../data/notion/stories.server";
-import { LinksFunction } from "@remix-run/node";
+import { LinksFunction } from "react-router";
 import { Breadcrumb } from "../components/Breadcrumb";
 import healthStyles from "../styles/health.css?url";
 import { NotionPageDetails } from "../components/NotionPageDetails";

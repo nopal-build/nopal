@@ -1,4 +1,4 @@
-import { useRouteLoaderData } from "@remix-run/react";
+import { useRouteLoaderData } from "react-router";
 import { useEffect, useState } from "react";
 import { type RootLoaderData } from "../root";
 

@@ -17,4 +17,4 @@ USE NS nopal; DEFINE DATABASE IF NOT EXISTS dev;
 
 INFO FOR ROOT;
 USE NS nopal; INFO FOR NS;
-USE NS nopal DB dev; INFO FOR DB;
+USE NS nopal DB opuntia; INFO FOR DB;

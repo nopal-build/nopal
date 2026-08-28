@@ -1,13 +1,12 @@
-import { query } from "../generic.server";
+import { query } from "robustness-core/data/generic.server";
 import {
-  registerDb,
   getAllPublishedPagesByDbRef,
   getPageByDbRefAndSlug,
 } from "./core.server";
 import type { NopalPage } from "./core.server";
 import { getAssembliesByPageIds } from "./assemblies.server";
 import type { ScienceRecord } from "./types";
-import { formatRecord } from "../generic.server";
+import { formatRecord } from "robustness-core/data/generic.server";
 import { RecordId } from "surrealdb";
 
 const db = {
@@ -15,10 +14,6 @@ const db = {
   dbName: "gbs_applied_science",
   getPublicUrl: (slug: string) => `/science/${slug}`,
 };
-
-export function registerAppliedScienceDb() {
-  registerDb(db);
-}
 
 const assemblyDbFieldName = "Assembly Database";
 

@@ -1,9 +1,10 @@
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { GoodContact, GoodButtonArchitecture } from "../components/GoodAssets";
 import { Layout } from "../components/Layout";
 import goodsStyles from "../styles/goods.css?url";
-import { LinksFunction } from "@remix-run/node";
+import { LinksFunction } from "react-router";
 import { FooterDiscovery } from "../components/Footer";
+import { surfaceBase } from "stamps/surface.css";
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: goodsStyles },
 ];
@@ -49,7 +50,7 @@ export default function GoodGuides() {
           </p>
 
           <div
-            className="good-box p-4 font-mono mt-20 mx-auto text-xl relative service-box"
+            className={`${surfaceBase} p-4 font-mono mt-20 mx-auto text-xl relative service-box`}
             style={{ maxWidth: "440px" }}
           >
             <h3 className="font-bold text-3xl">At Your Service</h3>
@@ -97,7 +98,7 @@ export default function GoodGuides() {
           <div className="purple-light-text">Side-effects of Ingredients</div>
 
           <div className="flex gap-4 mt-4 best-ingredients">
-            <div className="good-box ingredient-box p-4 font-mono">
+            <div className={`${surfaceBase} ingredient-box p-4 font-mono`}>
               <h4 className="text-xl font-bold">Bad Ingredients</h4>
               <div className="flex gap-4 mt-2">
                 <Star />
@@ -110,7 +111,7 @@ export default function GoodGuides() {
                 <li>High Carbon Emissions</li>
               </ul>
             </div>
-            <div className="good-box ingredient-box p-4 font-mono">
+            <div className={`${surfaceBase} ingredient-box p-4 font-mono`}>
               <h4 className="text-xl font-bold">Good Materials</h4>
               <div className="flex gap-4 mt-2">
                 <Star />

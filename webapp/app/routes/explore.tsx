@@ -1,9 +1,9 @@
-import { LinksFunction } from "@remix-run/node";
+import { LinksFunction } from "react-router";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 
 import exploreStyles from "../styles/explore.css?url";
-import { NavLink } from "@remix-run/react";
+import { NavLink } from "react-router";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: exploreStyles },

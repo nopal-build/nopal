@@ -1,7 +1,8 @@
 import { useState, useCallback, useMemo } from "react";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
-import type { MetaFunction } from "@remix-run/node";
+import type { MetaFunction } from "react-router";
+import { surfaceBase, surfaceBorderOnly } from "stamps/surface.css";
 
 export const meta: MetaFunction = () => [
   { title: "Building Envelope | Nopal" },
@@ -457,7 +458,7 @@ function QuadrantChart({
         </div>
 
         {/* Outer border */}
-        <div className="absolute inset-0 rounded pointer-events-none good-box-boarder" />
+        <div className={`absolute inset-0 rounded pointer-events-none ${surfaceBorderOnly}`} />
 
         {/* Home marker */}
         <div
@@ -555,7 +556,7 @@ export default function BuildingEnvelope() {
             </div>
             {/* ---- LEFT SIDEBAR: Options ---- */}
             <div>
-              <div className="good-box sm:w-[280px] shrink-0 p-4">
+              <div className={`${surfaceBase} sm:w-[280px] shrink-0 p-4`}>
                 {/* Air Tightness */}
                 <SectionHeading>Air Tightness</SectionHeading>
                 <SectionDescription>

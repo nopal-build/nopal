@@ -6,7 +6,8 @@ import {
   GoodButtonGuiding,
 } from "../components/GoodAssets";
 import { RandomFiveFactors } from "../components/FiveFactors";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
+import { link } from "stamps/link.css";
 
 export default function Index() {
   return (
@@ -42,7 +43,7 @@ export default function Index() {
                   physical comfort.
                 </p>
                 <p>Which factors are important to you?</p>
-                <Link className="link" to="/health" prefetch="intent">
+                <Link className={link} to="/health" prefetch="intent">
                   Learn more
                 </Link>
               </div>

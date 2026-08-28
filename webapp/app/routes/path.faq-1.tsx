@@ -3,7 +3,7 @@ import { CostChart } from "../svg/path/CostChart";
 import { BackArrow } from "../svg/arrows/BackArrow";
 import { CactiOne, CactiTwo, CactiThree, CactiFour } from "../svg/path/cacti";
 import { Annotation } from "../components/Annotation";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 
 export default function PathFAQPage() {
   return (

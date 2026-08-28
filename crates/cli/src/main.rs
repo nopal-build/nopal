@@ -1,20 +1,678 @@
 use clap::{Parser, Subcommand}; // Args, ValueEnum
 use jiff;
-use serialport::SerialPortType;
 use std::fs::File;
 use std::io::Write;
 use std::io::{self, Read};
-use std::time::Duration;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use nopal_core::sync_api::{self as core_sync_api, SyncApiColumn, SyncApiSchema};
+use nopal_core::vault::{Client as VaultClient, Folder as VaultFolder};
+
+mod auth;
+mod graphlog;
+mod image;
+mod record;
+mod release_log;
+mod skills;
+mod sort;
+mod sync;
+mod sync_api;
+mod update;
+mod vault;
+mod video;
+mod watch;
+
+const DEFAULT_HOST: &str = "https://nopal.build";
 
 #[derive(Debug, Subcommand)]
 enum Command {
     Test {},
-    RecordLoadCell {},
+    RecordLoadCell {
+        /// Which project's Syncs folder to record into, e.g.
+        /// `projects/sunny` — defaults to your Personal space.
+        #[arg(long)]
+        project: Option<String>,
+        /// Name of the sync-api analysis inside Syncs (created on first
+        /// use). Defaults to "load-cell".
+        #[arg(long, default_value = "load-cell")]
+        analysis: String,
+        /// Exact run name (e.g. "test-1"). Omit to auto-number against
+        /// --run-prefix.
+        #[arg(long)]
+        run_name: Option<String>,
+        /// Prefix to auto-number the run name against when --run-name is
+        /// omitted (e.g. "test" -> "test-1", "test-2", ...).
+        #[arg(long, default_value = "test")]
+        run_prefix: String,
+    },
+    /// Log in via your browser and store a session token for the CLI.
+    Login {
+        /// Nopal host to authenticate against.
+        #[arg(long, default_value = DEFAULT_HOST)]
+        host: String,
+        /// Print the login URL instead of opening a browser automatically.
+        #[arg(long)]
+        no_browser: bool,
+    },
+    /// Remove the locally stored CLI session.
+    Logout {},
+    /// Show who the CLI is currently logged in as.
+    Whoami {
+        /// Also print the raw bearer token this session is using — a real
+        /// secret, handle it like a password. Useful for feeding a script
+        /// (e.g. `webapp/scripts/pull-daily-logs.ts`) that calls the HTTP
+        /// API directly.
+        #[arg(long)]
+        token: bool,
+    },
+    /// Utilities for working with video files (compression, etc). Uploading
+    /// lives under its own separate command.
+    Video {
+        #[command(subcommand)]
+        command: VideoCommand,
+    },
+    /// Utilities for working with image files (OCR text extraction, etc).
+    Image {
+        #[command(subcommand)]
+        command: ImageCommand,
+    },
+    /// Record your screen — captures and compresses in a single ffmpeg
+    /// pass (see `nopal_core::record`'s doc comment), so there's no
+    /// separate `nopal video prep` step needed afterward.
+    Record {
+        #[command(subcommand)]
+        command: RecordCommand,
+    },
+    /// Browse and upload to your Nopal Vault.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
+    /// Mirror local directories into a project's (or your Personal space's)
+    /// Syncs folder (push-only by default; --two-way for both directions).
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommand,
+    },
+    /// Typed CSV data-collection analyses (create an analysis + schema,
+    /// then create runs and append rows to them) — see the vault skill's
+    /// "Sync types" section. Mostly useful for manual setup/testing; a
+    /// real data source (e.g. `record-load-cell`) calls the same
+    /// `nopal_core::sync_api` module directly.
+    SyncApi {
+        #[command(subcommand)]
+        command: SyncApiCommand,
+    },
+    /// Trigger the daily-log Sorter (mentions → project backlinks,
+    /// completed Card tasks, Card file attachments → Release Log entries).
+    /// Runs automatically once a day; this is for triggering it on demand.
+    Sort {
+        #[command(subcommand)]
+        command: SortCommand,
+    },
+    /// Manage structured Release Log entries (see the `vault` skill's
+    /// Release Log section) — today, just reverting one.
+    ReleaseLog {
+        #[command(subcommand)]
+        command: ReleaseLogCommand,
+    },
+    /// GraphLog's pipeline for one `project-n02` project (see the
+    /// `graphlog` skill): daily-log-sync -> sync-knowledge -> sync-graph
+    /// -> graph-structure -> graph-project-view.
+    Graphlog {
+        #[command(subcommand)]
+        command: GraphlogCommand,
+    },
+    /// Reference docs for how to write things in Nopal (OxMarkdown syntax,
+    /// the Vault, etc). Lists available skills by default.
+    Skills {
+        #[command(subcommand)]
+        command: Option<SkillsCommand>,
+    },
+    /// Check for and install a newer version of the nopal CLI.
+    #[command(alias = "upgrade")]
+    Update {
+        /// Only check whether a newer version is available; don't install it.
+        #[arg(long)]
+        check: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum VideoCommand {
+    /// Compress a video (e.g. a screen recording) into a smaller,
+    /// web-friendly H.264 mp4 — a local-only step, run before uploading.
+    Prep {
+        /// Path to the source video.
+        input: PathBuf,
+        /// Output path. Defaults to `<input>.web.mp4` alongside the source.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// H.264 quality (lower = better quality, larger file). Typical range 18-28.
+        #[arg(long, default_value_t = 23)]
+        crf: u8,
+        /// Cap the output height, preserving aspect ratio; never upscales.
+        #[arg(long, default_value_t = 1080)]
+        max_height: u32,
+        /// ffmpeg encoding speed/efficiency tradeoff (e.g. fast, medium, slow).
+        #[arg(long, default_value = "medium")]
+        preset: String,
+        /// Overwrite the output file if it already exists.
+        #[arg(long)]
+        overwrite: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RecordCommand {
+    /// List capturable screens (feed the index into `start --screen`).
+    ListScreens {},
+    /// Start recording; press Enter in this terminal to stop.
+    Start {
+        /// Output path (e.g. `recording.mp4`).
+        output: PathBuf,
+        /// Which screen to capture — see `nopal record list-screens` for
+        /// the index (NOT a plain 0-based count — avfoundation shares one
+        /// index space across cameras and screens). Defaults to the first
+        /// screen `list-screens` finds.
+        #[arg(long)]
+        screen: Option<u32>,
+        /// Capture frame rate. Screen content rarely benefits from > 30.
+        #[arg(long, default_value_t = 30)]
+        fps: u32,
+        /// H.264 quality (lower = better quality, larger file). Typical range 18-28.
+        #[arg(long, default_value_t = 23)]
+        crf: u8,
+        /// Cap the output height, preserving aspect ratio; never upscales.
+        #[arg(long, default_value_t = 1080)]
+        max_height: u32,
+        /// ffmpeg encoding speed/efficiency tradeoff — defaults to a
+        /// real-time-safe preset ("medium"/"slow" can drop frames live).
+        #[arg(long, default_value = "veryfast")]
+        preset: String,
+        /// Overwrite the output file if it already exists.
+        #[arg(long)]
+        overwrite: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ImageCommand {
+    /// Extract text from an image via OCR. Runs entirely locally via
+    /// Tesseract — no network access or API key required.
+    Ocr {
+        /// Path to the source image.
+        input: PathBuf,
+        /// Write extracted text to this file instead of printing to stdout.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Tesseract language code(s), e.g. `eng`, `eng+fra`.
+        #[arg(long, default_value = "eng")]
+        lang: String,
+        /// Tesseract page segmentation mode. Defaults to 1 (automatic
+        /// layout with orientation/script detection), which corrects
+        /// sideways or upside-down photos automatically. See `tesseract
+        /// --help-psm` for other modes.
+        #[arg(long, default_value_t = 1)]
+        psm: u8,
+        /// Write output as Markdown-safe text (escapes stray #/-/>/etc. so
+        /// it renders as plain paragraphs). Without --output, defaults to
+        /// writing `<input-stem>.md` alongside the source instead of
+        /// printing to stdout.
+        #[arg(long)]
+        markdown: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum VaultCommand {
+    /// List a vault folder (the root folders when no path is given).
+    Ls {
+        /// Vault path, e.g. `projects/sunny` (omit for the vault root).
+        #[arg(default_value = "")]
+        path: String,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a tree of folders (and files) under a vault path.
+    Tree {
+        /// Vault path (omit for the vault root).
+        #[arg(default_value = "")]
+        path: String,
+        /// Maximum depth to descend.
+        #[arg(long, default_value_t = 2)]
+        depth: u32,
+        /// Only show folders, not files.
+        #[arg(long)]
+        folders_only: bool,
+    },
+    /// Print a markdown/text card's content to stdout.
+    Cat {
+        /// Vault path to a file, e.g. `projects/sunny/readme.md`.
+        path: String,
+    },
+    /// Download a vault file.
+    Download {
+        /// Vault path to a file.
+        path: String,
+        /// Where to write the file (defaults to the file's name in the
+        /// current directory).
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Show metadata for a vault folder or file.
+    Info {
+        /// Vault path to a folder or file.
+        path: String,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open a vault folder or file in your browser.
+    Open {
+        /// Vault path (omit for the vault root).
+        #[arg(default_value = "")]
+        path: String,
+    },
+    /// Upload local files into a vault folder. Large files upload in
+    /// chunks automatically.
+    Upload {
+        /// Local file(s) to upload.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Destination vault folder, e.g. `personal` or `projects/sunny`.
+        #[arg(long)]
+        to: String,
+    },
+    /// Create a vault folder (creates missing intermediate folders too).
+    Mkdir {
+        /// Vault path to create, e.g. `projects/greenhouse/photos`.
+        path: String,
+    },
+    /// Move a folder into another folder (works across vault roots).
+    Mv {
+        /// Vault path of the folder to move.
+        src: String,
+        /// Vault path of the destination folder.
+        dest: String,
+    },
+    /// Rename a folder.
+    Rename {
+        /// Vault path of the folder to rename.
+        path: String,
+        /// The new folder name (not a path).
+        new_name: String,
+    },
+    /// Replace a vault file's contents in place (same file, new bytes).
+    Replace {
+        /// Local file with the new contents.
+        local: PathBuf,
+        /// Vault path of the file to replace.
+        path: String,
+    },
+    /// Show or change a project's collaborators and their Sharing Roles
+    /// (e.g. Owner, Crafter, Observer — see `sharing_roles`). Only works on
+    /// a project folder (one directly under `projects/`).
+    Share {
+        /// Vault path of the project folder (no flags → show current sharing).
+        path: String,
+        /// Stop sharing — clears the whole collaborator list.
+        #[arg(long, conflicts_with = "with")]
+        private: bool,
+        /// Share with a person and assign their role, as EMAIL:ROLE
+        /// (repeatable). Replaces the current collaborator list rather
+        /// than adding to it.
+        #[arg(long = "with", value_name = "EMAIL:ROLE")]
+        with: Vec<String>,
+    },
+    /// Publish a folder to a public URL — no login required to view it.
+    Publish {
+        /// Vault path of the folder to publish.
+        path: String,
+        /// Copy the public link to the clipboard.
+        #[arg(long)]
+        copy: bool,
+    },
+    /// Unpublish a folder (see 'nopal vault publish').
+    Unpublish {
+        /// Vault path of the folder to unpublish.
+        path: String,
+    },
+    /// Print the public link for a folder or file, if it's reachable
+    /// (published directly, or inside a published folder).
+    Link {
+        /// Vault path of the folder or file.
+        path: String,
+        /// Copy the link to the clipboard.
+        #[arg(long)]
+        copy: bool,
+    },
+    /// Delete a vault file or folder.
+    Rm {
+        /// Vault path of the file or folder to delete.
+        path: String,
+        /// Skip the confirmation prompt.
+        #[arg(long, short = 'f')]
+        force: bool,
+        /// Required to delete a folder that isn't empty.
+        #[arg(long, short = 'r')]
+        recursive: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SyncCommand {
+    /// Register a local directory as a sync target and push it.
+    Add {
+        /// The local directory to sync.
+        dir: PathBuf,
+        /// Name for the target (defaults to the directory name). Also the
+        /// connector folder's name inside the space's Syncs folder.
+        #[arg(long)]
+        name: Option<String>,
+        /// Optimize videos with `nopal video prep` before uploading — the
+        /// smaller .web.mp4 is synced instead of the raw recording.
+        #[arg(long)]
+        preprocess: bool,
+        /// Two-way sync: also pull vault changes down and propagate
+        /// deletions (local deletes archive the vault copy; vault deletes
+        /// remove unchanged local files). Default is push-only — the local
+        /// directory is never modified.
+        #[arg(long)]
+        two_way: bool,
+        /// Which project's Syncs folder to add this to (its Syncs folder is
+        /// created on first use if it doesn't exist yet). Defaults to your
+        /// Personal space when omitted.
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// List sync targets (all devices).
+    Ls {},
+    /// Unregister a sync target.
+    Rm {
+        /// The target's name (see 'nopal sync ls').
+        name: String,
+        /// Keep the synced folder in the vault (only stop syncing).
+        #[arg(long)]
+        keep_remote: bool,
+        /// Skip the confirmation prompt.
+        #[arg(long, short = 'f')]
+        force: bool,
+    },
+    /// Push local changes to the vault — one target by name, or every
+    /// target registered on this device.
+    Run {
+        /// Target name (omit to run all of this device's targets).
+        name: Option<String>,
+        /// Keep running: watch the target directories and sync on change
+        /// (plus a periodic remote poll for two-way targets). Foreground —
+        /// Ctrl-C stops it. For a managed background worker that survives
+        /// reboots, use 'nopal sync watch enable'.
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Manage the background sync worker (macOS launchd).
+    Watch {
+        #[command(subcommand)]
+        command: WatchCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SyncApiCommand {
+    /// Create (or update the schema of) a sync-api analysis inside a
+    /// project's (or Personal's) Syncs folder.
+    CreateAnalysis {
+        /// Analysis name (its folder name inside Syncs).
+        name: String,
+        /// Which project's Syncs folder — defaults to Personal.
+        #[arg(long)]
+        project: Option<String>,
+        /// Comma-separated `name:type` column list, e.g.
+        /// `elapsed:number,kind:string,force_lbs:number`. Valid types:
+        /// string, number, boolean, timestamp.
+        #[arg(long)]
+        schema: String,
+    },
+    /// Create a new run (`<name>.md` + `<name>.csv`) inside an analysis.
+    CreateRun {
+        /// Analysis name.
+        analysis: String,
+        /// Which project's Syncs folder — defaults to Personal.
+        #[arg(long)]
+        project: Option<String>,
+        /// Exact run name. Omit to auto-number against --prefix instead.
+        #[arg(long)]
+        name: Option<String>,
+        /// Prefix to auto-number the run name against when --name is
+        /// omitted (e.g. "test" -> "test-1", "test-2", ...).
+        #[arg(long, default_value = "test")]
+        prefix: String,
+        /// Run title (defaults to the run name).
+        #[arg(long)]
+        title: Option<String>,
+        /// Initial body text for the run's markdown file.
+        #[arg(long)]
+        body: Option<String>,
+    },
+    /// Append one row to an existing run's CSV.
+    AppendRow {
+        /// Analysis name.
+        analysis: String,
+        /// Run name (see 'nopal sync-api ls-runs').
+        run: String,
+        /// Which project's Syncs folder — defaults to Personal.
+        #[arg(long)]
+        project: Option<String>,
+        /// Comma-separated `key=value` pairs, e.g.
+        /// `elapsed=1.5,kind=force,force_lbs=12.3`. Values are
+        /// best-effort coerced to number/boolean, else kept as strings.
+        #[arg(long)]
+        row: String,
+    },
+    /// List the runs in an analysis.
+    LsRuns {
+        /// Analysis name.
+        analysis: String,
+        /// Which project's Syncs folder — defaults to Personal.
+        #[arg(long)]
+        project: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SortCommand {
+    /// Sort one day (yours) — defaults to yesterday (UTC) if --date is omitted.
+    Run {
+        /// YYYY-MM-DD. Defaults to yesterday (UTC).
+        #[arg(long)]
+        date: Option<String>,
+        /// Re-run even if this day was already sorted.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GraphlogCommand {
+    /// Runs the full pipeline, in order: daily-log-sync -> sync-knowledge
+    /// -> sync-graph -> graph-structure -> graph-project-view. See the
+    /// `graphlog` skill.
+    Run {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Deterministic Card→project copy into `syncs/Daily Logs/` — no LLM
+    /// call, always applies for real (see the `graphlog` skill).
+    DailyLogSync {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Only sync this one day, YYYY-MM-DD. Omit to sweep every day this
+        /// project has ever had a Card for.
+        #[arg(long)]
+        date: Option<String>,
+    },
+    /// Extracts concrete metadata (names, dates, decisions) from every file
+    /// under `syncs/`, per `skills/KNOWLEDGE.md`'s own instructions, into
+    /// `_knowledge/<name>.knowledge.md` sidecars. Agentic (real LLM calls).
+    SyncKnowledge {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Extracts citable nodes from each day's synced content, per
+    /// `skills/GRAPH.md`'s own instructions, into
+    /// `Graph/graph-log-YYYY-MM-DD.md`. Agentic (real LLM calls).
+    SyncGraph {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Organizes the whole graph into one weighted, clustered index, per
+    /// `skills/GRAPH_STRUCTURE.md`'s own instructions, into
+    /// `Graph/graph-structure.md`. Agentic (real LLM calls).
+    GraphStructure {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Reconciles README.md against `Graph/graph-structure.md`, per
+    /// `skills/PROJECT_VIEW.md`'s own instructions, whenever the graph has
+    /// changed since the last run. Agentic (real LLM calls).
+    GraphProjectView {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Runs all three resets below, in order: reset-project-view ->
+    /// reset-graph -> reset-knowledge. DESTRUCTIVE — requires --yes. See
+    /// the `graphlog` skill.
+    Reset {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Deletes everything in the project folder except skills/, syncs/,
+    /// and Graph/ (clears README.md's body, front matter preserved).
+    /// DESTRUCTIVE — requires --yes. See the `graphlog` skill.
+    ResetProjectView {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Deletes the project's Graph folder outright — every
+    /// graph-log-*.md file. DESTRUCTIVE — requires --yes. See the
+    /// `graphlog` skill.
+    ResetGraph {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Deletes every _knowledge/ sidecar folder nested anywhere under
+    /// syncs/. DESTRUCTIVE — requires --yes. See the `graphlog` skill.
+    ResetKnowledge {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Enrolls/removes a project from GraphLog's nightly automatic run
+    /// (midnight, server-side), or shows its current schedule/run status.
+    /// Admin/Super only. See the `graphlog` skill.
+    Schedule {
+        #[command(subcommand)]
+        command: GraphlogScheduleCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GraphlogScheduleCommand {
+    /// Enrolls this project in GraphLog's nightly automatic run.
+    Enable {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Removes this project from GraphLog's nightly automatic run.
+    Disable {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+    /// Is this project scheduled, is a job currently running, and when did
+    /// the last one finish (if ever)?
+    Status {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ReleaseLogCommand {
+    /// Reverts one entry — only entries that changed a project file (a
+    /// Card file attachment being filed into the project) can be
+    /// reverted; a plain @mention backlink or completed-task entry has
+    /// nothing to undo and the server will reject it.
+    Revert {
+        /// The entry's own id (see the invisible `<!-- release-log-entry:... -->`
+        /// marker on each bullet in a project's/day's release-log.md).
+        entry_id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillsCommand {
+    /// List available skill references. (default)
+    List {},
+    /// Print a skill's full reference doc.
+    #[command(alias = "cat")]
+    Show {
+        /// Skill name, e.g. `oxmarkdown`.
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum WatchCommand {
+    /// Install + start the worker: runs at login, restarts on crash, and
+    /// authenticates with a sync-scoped (never-expiring, revocable) token.
+    Enable {},
+    /// Stop the worker, remove it from login items, revoke its token.
+    Disable {},
+    /// Is the worker installed/running? When did it last sync?
+    Status {},
+    /// Show the tail of the worker's log file.
+    Logs {
+        /// Number of lines to show.
+        #[arg(long, default_value_t = 40)]
+        lines: usize,
+    },
 }
 
 #[derive(Debug, Parser)]
 #[command(name = "nopal")]
-#[command(about = "Nopal CLI", long_about = None)]
+#[command(version)]
+#[command(about = concat!("Nopal CLI v", env!("CARGO_PKG_VERSION")), long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -26,10 +684,284 @@ fn main() {
         Command::Test {} => {
             println!("Testing");
         }
-        Command::RecordLoadCell {} => {
+        Command::RecordLoadCell {
+            project,
+            analysis,
+            run_name,
+            run_prefix,
+        } => {
             println!("Recording load cell info");
-            if let Err(e) = read_serial_port_interactive("DK0HR7JK") {
+            if let Err(e) =
+                read_serial_port_interactive("DK0HR7JK", project, &analysis, run_name, &run_prefix)
+            {
                 eprintln!("Error: {}", e);
+            }
+        }
+        Command::Login { host, no_browser } => {
+            if let Err(e) = auth::login(&host, no_browser) {
+                eprintln!("Login failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Logout {} => {
+            if let Err(e) = auth::logout() {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Whoami { token } => {
+            if let Err(e) = auth::whoami(token) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Video { command } => match command {
+            VideoCommand::Prep {
+                input,
+                output,
+                crf,
+                max_height,
+                preset,
+                overwrite,
+            } => {
+                let opts = video::PrepOptions {
+                    output,
+                    crf,
+                    max_height,
+                    preset,
+                    overwrite,
+                };
+                if let Err(e) = video::prep(&input, opts) {
+                    eprintln!("video prep failed: {e}");
+                    std::process::exit(1);
+                }
+            }
+        },
+        Command::Image { command } => match command {
+            ImageCommand::Ocr {
+                input,
+                output,
+                lang,
+                psm,
+                markdown,
+            } => {
+                let opts = image::OcrOptions {
+                    output,
+                    lang,
+                    psm,
+                    markdown,
+                };
+                if let Err(e) = image::ocr(&input, opts) {
+                    eprintln!("image ocr failed: {e}");
+                    std::process::exit(1);
+                }
+            }
+        },
+        Command::Record { command } => {
+            let result = match command {
+                RecordCommand::ListScreens {} => record::list_screens(),
+                RecordCommand::Start {
+                    output,
+                    screen,
+                    fps,
+                    crf,
+                    max_height,
+                    preset,
+                    overwrite,
+                } => (|| {
+                    let screen = match screen {
+                        Some(s) => s,
+                        None => {
+                            let first = nopal_core::record::list_screens()?
+                                .into_iter()
+                                .next()
+                                .ok_or("No capturable screens found")?;
+                            println!("No --screen given — using {}: {}", first.index, first.name);
+                            first.index
+                        }
+                    };
+                    record::start(output, screen, fps, crf, preset, max_height, overwrite)
+                })(),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Vault { command } => {
+            let result = match command {
+                VaultCommand::Ls { path, json } => vault::ls(&path, json),
+                VaultCommand::Tree {
+                    path,
+                    depth,
+                    folders_only,
+                } => vault::tree(&path, depth, folders_only),
+                VaultCommand::Cat { path } => vault::cat(&path),
+                VaultCommand::Download { path, output } => vault::download(&path, output),
+                VaultCommand::Info { path, json } => vault::info(&path, json),
+                VaultCommand::Open { path } => vault::open(&path),
+                VaultCommand::Upload { files, to } => vault::upload(&files, &to),
+                VaultCommand::Mkdir { path } => vault::mkdir(&path),
+                VaultCommand::Mv { src, dest } => vault::mv(&src, &dest),
+                VaultCommand::Rename { path, new_name } => vault::rename(&path, &new_name),
+                VaultCommand::Replace { local, path } => vault::replace(&local, &path),
+                VaultCommand::Share {
+                    path,
+                    private,
+                    with,
+                } => vault::share(&path, private, &with),
+                VaultCommand::Publish { path, copy } => vault::publish(&path, copy),
+                VaultCommand::Unpublish { path } => vault::unpublish(&path),
+                VaultCommand::Link { path, copy } => vault::link(&path, copy),
+                VaultCommand::Rm {
+                    path,
+                    force,
+                    recursive,
+                } => vault::rm(&path, force, recursive),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Sync { command } => {
+            let result = match command {
+                SyncCommand::Add {
+                    dir,
+                    name,
+                    preprocess,
+                    two_way,
+                    project,
+                } => sync::add(&dir, name, preprocess, two_way, project),
+                SyncCommand::Ls {} => sync::ls(),
+                SyncCommand::Rm {
+                    name,
+                    keep_remote,
+                    force,
+                } => sync::rm(&name, keep_remote, force),
+                SyncCommand::Run { name, watch } => {
+                    if watch {
+                        if name.is_some() {
+                            Err("--watch runs every target on this device; drop the name".into())
+                        } else {
+                            watch::run_watch()
+                        }
+                    } else {
+                        sync::run(name)
+                    }
+                }
+                SyncCommand::Watch { command } => match command {
+                    WatchCommand::Enable {} => watch::enable(),
+                    WatchCommand::Disable {} => watch::disable(),
+                    WatchCommand::Status {} => watch::status(),
+                    WatchCommand::Logs { lines } => watch::logs(lines),
+                },
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::SyncApi { command } => {
+            let result = match command {
+                SyncApiCommand::CreateAnalysis {
+                    name,
+                    project,
+                    schema,
+                } => sync_api::create_analysis(&name, project, &schema),
+                SyncApiCommand::CreateRun {
+                    analysis,
+                    project,
+                    name,
+                    prefix,
+                    title,
+                    body,
+                } => sync_api::create_run(&analysis, project, name, Some(prefix), title, body),
+                SyncApiCommand::AppendRow {
+                    analysis,
+                    run,
+                    project,
+                    row,
+                } => sync_api::append_row(&analysis, &run, project, &row),
+                SyncApiCommand::LsRuns { analysis, project } => {
+                    sync_api::ls_runs(&analysis, project)
+                }
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Graphlog { command } => {
+            let result = match command {
+                GraphlogCommand::Run { project } => graphlog::run(&project),
+                GraphlogCommand::DailyLogSync { project, date } => {
+                    graphlog::daily_log_sync(&project, date.as_deref())
+                }
+                GraphlogCommand::SyncKnowledge { project } => graphlog::sync_knowledge(&project),
+                GraphlogCommand::SyncGraph { project } => graphlog::sync_graph(&project),
+                GraphlogCommand::GraphStructure { project } => graphlog::graph_structure(&project),
+                GraphlogCommand::GraphProjectView { project } => {
+                    graphlog::graph_project_view(&project)
+                }
+                GraphlogCommand::Reset { project, yes } => graphlog::reset(&project, yes),
+                GraphlogCommand::ResetProjectView { project, yes } => {
+                    graphlog::reset_project_view(&project, yes)
+                }
+                GraphlogCommand::ResetGraph { project, yes } => {
+                    graphlog::reset_graph(&project, yes)
+                }
+                GraphlogCommand::ResetKnowledge { project, yes } => {
+                    graphlog::reset_knowledge(&project, yes)
+                }
+                GraphlogCommand::Schedule { command } => match command {
+                    GraphlogScheduleCommand::Enable { project } => {
+                        graphlog::schedule_enable(&project)
+                    }
+                    GraphlogScheduleCommand::Disable { project } => {
+                        graphlog::schedule_disable(&project)
+                    }
+                    GraphlogScheduleCommand::Status { project } => {
+                        graphlog::schedule_status(&project)
+                    }
+                },
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Sort { command } => {
+            let result = match command {
+                SortCommand::Run { date, force } => sort::run(date, force),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::ReleaseLog { command } => {
+            let result = match command {
+                ReleaseLogCommand::Revert { entry_id } => release_log::revert(&entry_id),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Skills { command } => match command.unwrap_or(SkillsCommand::List {}) {
+            SkillsCommand::List {} => skills::list(),
+            SkillsCommand::Show { name } => {
+                if let Err(e) = skills::show(&name) {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+        },
+        Command::Update { check } => {
+            if let Err(e) = update::update(check) {
+                eprintln!("update failed: {e}");
+                std::process::exit(1);
             }
         }
     }
@@ -39,72 +971,304 @@ fn main() {
 const COMPRESSION_10000_LBS: f64 = -1.9870;
 const TENSION_10000_LBS: f64 = 1.9857;
 
-fn read_serial_port_interactive(port_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn read_serial_port_interactive(
+    port_name: &str,
+    project: Option<String>,
+    analysis: &str,
+    run_name: Option<String>,
+    run_prefix: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Find and open the serial port
     let ports = serialport::available_ports()?;
     let port = ports.iter().find(|p| p.port_name.contains(port_name));
 
-    match port {
-        Some(p) => {
-            println!("Connected to {}", p.port_name);
-            let mut port = serialport::new(p.port_name.clone(), 2_000_000)
-                .timeout(Duration::from_millis(10))
-                .open()?;
+    let p = match port {
+        Some(p) => p,
+        None => {
+            eprintln!("Error: Port not found");
+            return Ok(());
+        }
+    };
 
-            let now = jiff::Timestamp::now();
-            let filename = format!(
-                "./data/load_cell_data_{}.csv",
-                now.strftime("%Y-%m-%d_%H:%M").to_string()
-            );
-            let mut file = File::create(&filename)?;
-            // Add header in
-            writeln!(file, "Distance (in),Force (lbs)")?;
+    println!("Connected to {}", p.port_name);
+    let port = serialport::new(p.port_name.clone(), 2_000_000)
+        .timeout(Duration::from_millis(10))
+        .open()?;
 
-            loop {
-                println!("Enter distance (or 'q' to quit): ");
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
+    let now = jiff::Timestamp::now();
+    // Write output relative to wherever the command is invoked from,
+    // creating the `data` directory if it doesn't already exist.
+    std::fs::create_dir_all("./data")?;
+    let filename = format!(
+        "./data/load_cell_data_{}.csv",
+        now.strftime("%Y-%m-%d_%H:%M").to_string()
+    );
+    let file = Arc::new(Mutex::new(File::create(&filename)?));
+    {
+        let mut f = file.lock().unwrap();
+        writeln!(f, "Elapsed (s),Type,Force (lbs),Raw (mV/V),Distance (in)")?;
+        f.flush()?;
+    }
 
-                let input = input.trim();
-                if input.to_lowercase().eq("q") {
-                    break;
+    // Local file above is the durable source of truth (never lost to a
+    // flaky test-bench network) — this is a best-effort MIRROR into a
+    // sync-api vault run, live as each row is captured. A failure here
+    // never aborts the recording session.
+    let vault_row_tx: Option<mpsc::Sender<serde_json::Value>> =
+        match setup_load_cell_run(project, analysis, run_name, run_prefix) {
+            Ok((client, folder, run)) => {
+                println!("Vault run: {analysis}/{run}.csv (syncing live)");
+                Some(spawn_vault_pusher(client, folder, run))
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: couldn't set up vault sync ({e}) \u{2014} recording locally only."
+                );
+                None
+            }
+        };
+
+    let start = Instant::now();
+    let running = Arc::new(AtomicBool::new(true));
+    // Force sampled once per second by the background thread. Distance
+    // entries are annotated with the most recent value here instead of
+    // triggering a fresh (blocking) serial read, so recording a distance
+    // never waits on — and never misses — the force at the moment it was
+    // measured. Previously the force was only read *after* the operator
+    // finished typing a distance, so by the time it was captured, plastic
+    // deformation had already let the force relax.
+    let latest_force: Arc<Mutex<Option<(f64, f64, f64)>>> = Arc::new(Mutex::new(None));
+
+    let sampler_handle = {
+        let running = Arc::clone(&running);
+        let latest_force = Arc::clone(&latest_force);
+        let file = Arc::clone(&file);
+        let vault_row_tx = vault_row_tx.clone();
+        let mut port = port;
+        thread::spawn(move || {
+            while running.load(Ordering::Relaxed) {
+                let iter_start = Instant::now();
+                match read_single_measurement(&mut port) {
+                    Ok((force, raw)) => {
+                        let elapsed = start.elapsed().as_secs_f64();
+                        *latest_force.lock().unwrap() = Some((force, raw, elapsed));
+                        let mut f = file.lock().unwrap();
+                        if writeln!(f, "{:.3},force,{},{},", elapsed, force, raw).is_ok() {
+                            let _ = f.flush();
+                        }
+                        if let Some(tx) = &vault_row_tx {
+                            let _ = tx.send(load_cell_row(
+                                elapsed,
+                                "force",
+                                Some(force),
+                                Some(raw),
+                                None,
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: no measurement this second ({e})");
+                    }
                 }
-                let distance = fraction_to_float(input);
-                if let Err(e) = distance {
+                let elapsed_iter = iter_start.elapsed();
+                if elapsed_iter < Duration::from_secs(1) {
+                    thread::sleep(Duration::from_secs(1) - elapsed_iter);
+                }
+            }
+        })
+    };
+
+    println!("Recording force once per second in the background -> {filename}");
+    println!(
+        "Enter a distance measurement whenever you take one, 'n' to bump the \
+         previous distance by 1/8\", or 'q' to quit:"
+    );
+
+    // Track the last recorded distance so 'n' can just bump it by one step,
+    // instead of retyping the fraction (e.g. "1 1/2") each time.
+    const DISTANCE_STEP: f64 = 0.125;
+    let mut last_distance: Option<f64> = None;
+
+    loop {
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        let input = input.trim();
+        if input.eq_ignore_ascii_case("q") {
+            break;
+        }
+        let distance = if input.eq_ignore_ascii_case("n") {
+            last_distance.map_or(0.0, |d| d + DISTANCE_STEP)
+        } else {
+            match fraction_to_float(input) {
+                Ok(d) => d,
+                Err(e) => {
                     println!("Invalid distance: {}", e);
                     continue;
                 }
-                let distance = distance.unwrap();
+            }
+        };
+        last_distance = Some(distance);
 
-                // Read the latest value from the serial port
-                match read_single_measurement(&mut port) {
-                    Ok((force, raw_value)) => {
-                        println!(
-                            "Distance: {}, Force: {}, Raw: {}",
-                            distance, force, raw_value
-                        );
-                        // Write to file: distance,force
-                        writeln!(file, "{},{}", distance, force)?;
-                        file.flush()?;
-                    }
-                    Err(e) => {
-                        println!("Error reading measurement: {}", e);
-                    }
+        let elapsed = start.elapsed().as_secs_f64();
+        let last = *latest_force.lock().unwrap();
+        let mut f = file.lock().unwrap();
+        match last {
+            Some((force, raw, sample_elapsed)) => {
+                println!(
+                    "Distance: {distance}  (nearest force sample @ {sample_elapsed:.1}s: {force} lbs)"
+                );
+                writeln!(f, "{:.3},distance,{},{},{}", elapsed, force, raw, distance)?;
+                if let Some(tx) = &vault_row_tx {
+                    let _ = tx.send(load_cell_row(
+                        elapsed,
+                        "distance",
+                        Some(force),
+                        Some(raw),
+                        Some(distance),
+                    ));
+                }
+            }
+            None => {
+                println!("Distance: {distance} (no force sample yet)");
+                writeln!(f, "{:.3},distance,,,{}", elapsed, distance)?;
+                if let Some(tx) = &vault_row_tx {
+                    let _ = tx.send(load_cell_row(
+                        elapsed,
+                        "distance",
+                        None,
+                        None,
+                        Some(distance),
+                    ));
                 }
             }
         }
-        None => {
-            eprintln!("Error: Port not found");
-        }
+        f.flush()?;
     }
 
+    running.store(false, Ordering::Relaxed);
+    let _ = sampler_handle.join();
+
+    // Drop the main thread's own sender (the sampler thread's clone was
+    // already dropped by the join above) so the pusher's channel closes,
+    // its `recv()` loop ends, and any final buffered rows get flushed
+    // before we report done.
+    drop(vault_row_tx);
+
+    println!("Saved {filename}");
+
     Ok(())
+}
+
+/// Vault columns for a `load-cell` sync-api analysis — mirrors the local
+/// CSV's own header (`Elapsed (s),Type,Force (lbs),Raw (mV/V),Distance
+/// (in)`) with plain identifier names.
+fn load_cell_schema() -> SyncApiSchema {
+    SyncApiSchema {
+        columns: vec![
+            SyncApiColumn {
+                name: "elapsed_s".into(),
+                column_type: "number".into(),
+            },
+            SyncApiColumn {
+                name: "kind".into(),
+                column_type: "string".into(),
+            },
+            SyncApiColumn {
+                name: "force_lbs".into(),
+                column_type: "number".into(),
+            },
+            SyncApiColumn {
+                name: "raw_mv_v".into(),
+                column_type: "number".into(),
+            },
+            SyncApiColumn {
+                name: "distance_in".into(),
+                column_type: "number".into(),
+            },
+        ],
+    }
+}
+
+fn load_cell_row(
+    elapsed: f64,
+    kind: &str,
+    force: Option<f64>,
+    raw: Option<f64>,
+    distance: Option<f64>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "elapsed_s": elapsed,
+        "kind": kind,
+        "force_lbs": force,
+        "raw_mv_v": raw,
+        "distance_in": distance,
+    })
+}
+
+/// Ensures the `analysis` exists (creating it with the load-cell schema on
+/// first use) inside `project`'s (or Personal's) Syncs folder, then
+/// creates a new run for this recording session. Returns the client (reused
+/// by the pusher thread), the analysis folder, and the created run's name.
+fn setup_load_cell_run(
+    project: Option<String>,
+    analysis: &str,
+    run_name: Option<String>,
+    run_prefix: &str,
+) -> nopal_core::Result<(VaultClient, VaultFolder, String)> {
+    let client = VaultClient::new()?;
+    let folder =
+        core_sync_api::ensure_analysis(&client, project.as_deref(), analysis, &load_cell_schema())?;
+    let run = core_sync_api::create_run(
+        &client,
+        &folder,
+        run_name.as_deref(),
+        Some(run_prefix),
+        None,
+        None,
+    )?;
+    Ok((client, folder, run.name))
+}
+
+/// Spawns the background thread that turns buffered rows into batched
+/// `append_rows` calls — network latency here never blocks the sampler or
+/// the operator typing distances. Ends (and flushes anything already
+/// queued) once every `Sender` clone has been dropped.
+fn spawn_vault_pusher(
+    client: VaultClient,
+    folder: VaultFolder,
+    run_name: String,
+) -> mpsc::Sender<serde_json::Value> {
+    let (tx, rx) = mpsc::channel::<serde_json::Value>();
+    thread::spawn(move || loop {
+        let first = match rx.recv() {
+            Ok(row) => row,
+            Err(_) => break,
+        };
+        let mut batch = vec![first];
+        while let Ok(row) = rx.try_recv() {
+            batch.push(row);
+        }
+        let count = batch.len();
+        if let Err(e) = core_sync_api::append_rows(&client, &folder, &run_name, &batch) {
+            eprintln!(
+                    "Warning: failed to sync {count} row(s) to the vault ({e}) \u{2014} still saved locally."
+                );
+        }
+    });
+    tx
 }
 
 fn read_single_measurement(
     port: &mut Box<dyn serialport::SerialPort>,
 ) -> Result<(f64, f64), Box<dyn std::error::Error>> {
     let mut serial_buf: Vec<u8> = vec![0; 1000];
+
+    // The load cell streams readings continuously, so by the time the user
+    // enters a distance, stale readings (taken before they moved anything)
+    // have already piled up in the OS input buffer. Discard them so the
+    // reading we return below reflects fresh data only.
+    let _ = port.clear(serialport::ClearBuffer::Input);
 
     // Try to get a valid measurement for up to 1 second
     let start = std::time::Instant::now();

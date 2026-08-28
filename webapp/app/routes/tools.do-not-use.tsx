@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { Breadcrumb } from "../components/Breadcrumb";
-import type { MetaFunction } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import type { MetaFunction } from "react-router";
+import { Link } from "react-router";
 
 export const meta: MetaFunction = () => [
   { title: "Do Not Use | Nopal Tools" },

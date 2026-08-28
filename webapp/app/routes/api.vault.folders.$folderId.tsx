@@ -1,0 +1,238 @@
+import type { ActionFunctionArgs } from "react-router";
+import { getUserFromRequest } from "../modules/auth/auth.server";
+import {
+  canWriteToFolderId,
+  getFolderById,
+  updateVaultFolder,
+  deleteVaultFolderCascade,
+  getDescendantFolders,
+  getFileRefsByFolderIds,
+  isFolderIdPublishable,
+  isFolderShared,
+  moveVaultFolder,
+} from "robustness-core/data/vault.server";
+import { canWriteToRoot } from "robustness-core/data/vaultRoots";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
+import { isFileRefLocked, isVaultRootFolder } from "robustness-core/data/vault.types";
+
+export async function action({ request, params }: ActionFunctionArgs) {
+  const user = await getUserFromRequest(request);
+  if (!user) {
+    return Response.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const { folderId } = params;
+  if (!folderId) {
+    return Response.json({ error: "folderId required" }, { status: 400 });
+  }
+
+  const folder = await getFolderById(folderId);
+  if (!folder) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const isRoot = isVaultRootFolder(folder);
+
+  // A `project-n02` folder (a project, or `personal`) is `writable:
+  // "system"` at the CONTENT level — only GraphLog may write files/folders
+  // INSIDE it (see `vaultFolderTypes.ts`). That restriction is NOT about
+  // operating on the anchor folder itself, though: its own owner can still
+  // rename/delete/move/share/publish their own project exactly as before—
+  // so THIS folder's own object-level mutations only need the ROOT policy,
+  // not the (necessarily stricter) folder-type content policy.
+  const isProjectAnchor = folder.is_folder_type_root && folder.folder_type === "project-n02";
+
+  // The project ANCHOR's own object-level lifecycle (rename/delete/publish
+  // the WHOLE project) stays creator-only — same precedent
+  // `projectStatus.server.ts` already set for project status ("a personal
+  // organizational tool", unlike the collaborator-facing actions Sharing
+  // Roles govern). Every ORDINARY folder inside a shared project extends
+  // to an owner-tier collaborator (Owner/Crafter) exactly like real
+  // ownership — see `canActAsProjectOwner`.
+  const ownershipOk = isProjectAnchor
+    ? folder.human_id === user._id
+    : await canActAsProjectOwner(user._id, folder.human_id, folder._id);
+  if (!ownershipOk) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const permitted = isProjectAnchor
+    ? canWriteToRoot(folder.vault_root_key, user.role)
+    : await canWriteToFolderId(folderId, user.role);
+  if (!permitted) {
+    return Response.json(
+      { error: "You don't have permission to modify this folder" },
+      { status: 403 },
+    );
+  }
+
+  if (request.method === "DELETE") {
+    if (isRoot) {
+      return Response.json(
+        { error: "Vault root folders cannot be deleted" },
+        { status: 403 },
+      );
+    }
+
+    // The daily-log lock (past logs are read-only) applies to cascade deletes
+    // too — otherwise deleting a date folder would sidestep the single-file
+    // DELETE guard in api.vault.$fileId.
+    const descendants = await getDescendantFolders(folderId);
+    const files = await getFileRefsByFolderIds([
+      folderId,
+      ...descendants.map((d) => d._id),
+    ]);
+    if (files.some(isFileRefLocked)) {
+      return Response.json(
+        {
+          error:
+            "This folder contains locked daily-log files and cannot be deleted.",
+        },
+        { status: 403 },
+      );
+    }
+
+    await deleteVaultFolderCascade(folderId);
+    return Response.json({ success: true });
+  }
+
+  if (request.method === "PATCH") {
+    const body = (await request.json()) as {
+      name?: string;
+      /** No longer accepted here — sharing is now project-Role-based (see
+       * `projectSharing.server.ts`), managed exclusively via
+       * `PUT /api/vault/projects/:folderId/sharing`. Still typed so a
+       * lingering caller gets a clear error instead of a silently ignored
+       * field. */
+      shared_with?: unknown;
+      /** Move the folder under this parent. Never null — the vault root only
+       * holds the locked root containers. */
+      parent_folder_id?: string;
+      /** Publish/unpublish — this folder and everything inside it become
+       * reachable at a public, unauthenticated URL. */
+      is_public?: boolean;
+    };
+
+    if (body.shared_with !== undefined) {
+      return Response.json(
+        {
+          error:
+            "Sharing is managed via PUT /api/vault/projects/:folderId/sharing now — see the vault skill's Sharing Roles section.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (isRoot && body.name !== undefined) {
+      return Response.json(
+        { error: "Vault root folders cannot be renamed" },
+        { status: 403 },
+      );
+    }
+
+    // ── Move ── handled on its own; not combinable with rename/share.
+    if (body.parent_folder_id !== undefined) {
+      if (isRoot) {
+        return Response.json(
+          { error: "Vault root folders cannot be moved" },
+          { status: 403 },
+        );
+      }
+      // A folder-type anchor (a project's own "Skills"/"Syncs" folder, or a
+      // sync connector inside one) is pinned in place — see the vault skill
+      // for why (keeps the create-time singleton/context rules honest over
+      // time without needing to re-validate them on every move).
+      if (folder.is_folder_type_root) {
+        return Response.json(
+          { error: "This folder's type is pinned — it cannot be moved" },
+          { status: 403 },
+        );
+      }
+      if (isFolderShared(folder)) {
+        return Response.json(
+          { error: "Shared folders cannot be moved — unshare it first" },
+          { status: 403 },
+        );
+      }
+
+      const newParent = await getFolderById(body.parent_folder_id);
+      if (
+        !newParent ||
+        !(await canActAsProjectOwner(user._id, newParent.human_id, newParent._id))
+      ) {
+        return Response.json(
+          { error: "Destination folder not found" },
+          { status: 404 },
+        );
+      }
+      // Also check the DESTINATION's own write permission — moving INTO a
+      // restricted root or folder type (e.g. `skills`) needs the same role
+      // as creating directly inside it would.
+      if (!(await canWriteToFolderId(newParent._id, user.role))) {
+        return Response.json(
+          { error: "You don't have permission to move folders here" },
+          { status: 403 },
+        );
+      }
+      if (newParent._id === folder._id) {
+        return Response.json(
+          { error: "Cannot move a folder into itself" },
+          { status: 400 },
+        );
+      }
+      if (newParent._id === folder.parent_folder_id) {
+        // No-op move — already there.
+        return Response.json({ folder });
+      }
+
+      const descendants = await getDescendantFolders(folder._id);
+      if (descendants.some((d) => d._id === newParent._id)) {
+        return Response.json(
+          { error: "Cannot move a folder into one of its own sub-folders" },
+          { status: 400 },
+        );
+      }
+      if (descendants.some(isFolderShared)) {
+        return Response.json(
+          {
+            error:
+              "This folder contains shared folders and cannot be moved — unshare them first",
+          },
+          { status: 403 },
+        );
+      }
+
+      const moved = await moveVaultFolder(folder, newParent, descendants);
+      return Response.json({ folder: moved });
+    }
+
+    // ── Publish ── handled on its own; not combinable with rename/share/move.
+    if (body.is_public !== undefined) {
+      if (isRoot) {
+        return Response.json(
+          { error: "Vault root folders cannot be published" },
+          { status: 403 },
+        );
+      }
+      if (!(await isFolderIdPublishable(folder._id))) {
+        return Response.json(
+          { error: "Folders in this part of the vault cannot be published" },
+          { status: 403 },
+        );
+      }
+      const updated = await updateVaultFolder(folderId, {
+        is_public: body.is_public,
+      });
+      return Response.json({ folder: updated });
+    }
+
+    // Name-only (or other non-sharing) update — no cascade needed.
+    const updates: Parameters<typeof updateVaultFolder>[1] = {};
+    if (body.name !== undefined) updates.name = body.name;
+    const updated = await updateVaultFolder(folderId, updates);
+
+    return Response.json({ folder: updated });
+  }
+
+  return Response.json({ error: "Method not allowed" }, { status: 405 });
+}

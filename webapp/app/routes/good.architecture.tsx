@@ -1,10 +1,11 @@
 import { Layout } from "../components/Layout";
 import goodsStyles from "../styles/goods.css?url";
-import { LinksFunction } from "@remix-run/node";
+import { LinksFunction } from "react-router";
 import { FooterDiscovery } from "../components/Footer";
 import { Carousel } from "../components/Carousel";
 import { GoodContact, GoodButtonBuilding } from "../components/GoodAssets";
 import { useArchCarouselHeight } from "../hooks/useArchCarouselHeight.client";
+import { surfaceBase } from "stamps/surface.css";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: goodsStyles },
@@ -100,14 +101,14 @@ export default function GoodArchitecture() {
         <div className="simple-container mt-12 p-4">
           <h2 className="green-text text-3xl">Goodies</h2>
           <div className="flex sm:flex-row flex-col gap-4 mt-4">
-            <div className="good-box p-4 font-mono basis-1/2">
+            <div className={`${surfaceBase} p-4 font-mono basis-1/2`}>
               <h3 className="font-bold text-3xl">Restorations</h3>
               <div className="purple-light-text">For Remodels & Retrofits</div>
               <hr className="my-4" />
               <div className="font-bold text-3xl">$36k+</div>
               <div className="purple-light-text">Starting</div>
             </div>
-            <div className="good-box p-4 font-mono basis-1/2">
+            <div className={`${surfaceBase} p-4 font-mono basis-1/2`}>
               <h3 className="font-bold text-3xl">Creations</h3>
               <div className="purple-light-text">Custom Designs</div>
               <hr className="my-4" />

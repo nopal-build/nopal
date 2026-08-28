@@ -1,5 +1,5 @@
-import { LinksFunction } from "@remix-run/node";
-import { Outlet, useLocation } from "@remix-run/react";
+import { LinksFunction } from "react-router";
+import { Outlet, useLocation } from "react-router";
 import { Layout } from "../components/Layout";
 import { Footer } from "../components/Footer";
 import { CactiSix } from "../svg/path/cacti";

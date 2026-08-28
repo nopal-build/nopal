@@ -1,10 +1,9 @@
 import {
-  registerDb,
   getAllPublishedPagesByDbRef,
   getPageByDbRefAndSlug,
 } from "./core.server";
 import type { MaterialRecord } from "./types";
-import { formatRecord } from "../generic.server";
+import { formatRecord } from "robustness-core/data/generic.server";
 import { getGBSScore } from "../../util/getGBSScore";
 
 const db = {
@@ -12,9 +11,6 @@ const db = {
   dbName: "gbs_materials",
   getPublicUrl: (slug: string) => `/materials/${slug}`,
 };
-export function registerMaterialsDb() {
-  registerDb(db);
-}
 
 export async function getAllMaterials(): Promise<{
   data: MaterialRecord[];

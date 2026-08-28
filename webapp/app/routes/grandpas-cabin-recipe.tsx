@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Layout } from "../components/Layout";
 import { FooterDiscovery } from "../components/Footer";
 import { useMarkdown } from "../hooks/useMarkdown";
-import { LinksFunction } from "@remix-run/node";
+import { LinksFunction } from "react-router";
 import markdownStyles from "../styles/markdown.css?url";
 import { TextDropdown } from "../components/Dropdown";
 

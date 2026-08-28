@@ -1,0 +1,1579 @@
+/**
+ * OxMarkdown — `.ox-content` + `.ox-tokens`
+ *
+ * Modeled off the MdxEditor design language (`mdxeditor.css` /
+ * `.nopal-content`) — same dot-grid rhythm, same gutter-marker idea — but
+ * organized as its own themable system rather than a literal port:
+ *
+ *   - Every rule reads from an `--ox-*` custom property, never a raw
+ *     value and never nopal's `--purple`/`--moon`/etc. tokens directly.
+ *     Those old tokens only ever appear on the RIGHT-hand side, as this
+ *     file's own defaults — so the default theme happens to be nopal's
+ *     existing palette, but nothing here is hard-coded to it.
+ *   - The tokens themselves live in `.ox-tokens`, separate from
+ *     `.ox-content`'s visual styles — apply BOTH classes together
+ *     (`className="ox-content ox-tokens"`) anywhere real content renders.
+ *     They're split because custom properties inherit through the real DOM
+ *     tree, not the React tree: a portaled element (the directive attribute
+ *     popover, rendered straight into `document.body` — see
+ *     `components/OxRenderer.tsx`) sits entirely outside `.ox-content`'s
+ *     subtree, so it needs its own `.ox-tokens` to see these variables at
+ *     all. `.ox-popover` already carries it for exactly this reason.
+ *   - One dark-mode block redefines the same custom properties; no
+ *     per-component `@media` duplication.
+ *   - The whole vertical rhythm derives from one variable, `--ox-grid`
+ *     (41px) — see the "typewriter font" TODO in the oxmarkdown skill for
+ *     why this matters (a fixed character width might want a different
+ *     grid size someday).
+ *
+ * Runtime overrides: `oxmarkdown/theme.ts`'s `themeToStyle()` produces
+ * inline versions of these same custom properties, so a caller can
+ * override individual tokens (a font, an accent color) without touching
+ * this file at all. See that module for the full token list.
+ */
+
+/* Design tokens only — split out from `.ox-content` so anything that needs
+   them but can't rely on DOM-tree inheritance can pull them in too.
+   Custom properties inherit through the REAL DOM tree, not the React tree;
+   a portaled popover (see OxRenderer.tsx) ends up as a child of
+   `document.body`, outside `.ox-content`'s subtree entirely, and silently
+   loses every one of these otherwise. Apply `.ox-tokens` anywhere that can
+   happen — it defines variables only, no visual styles of its own, so it's
+   safe to stack onto something that already has its own look. */
+.ox-tokens {
+  --ox-font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  --ox-font-weight: 267;
+  --ox-letter-spacing: 0.5px;
+  --ox-grid: 41px;
+
+  --ox-color-text: var(--purple, #3f2b46);
+  --ox-color-heading: black;
+  --ox-color-accent: var(--purple-light, #7f5b8b);
+  /* Links specifically (`<a>`, the "add file" trigger, a Card's "open
+     project" link) — a SEPARATE token from `--ox-color-accent` on
+     purpose, even though they're the same color in light mode today, so
+     an actionable link can be retuned independently from purely
+     decorative accents (headings, blockquote border, checkbox border,
+     bullets, ...) without touching both. See this file's dark-mode block
+     below for why this split actually matters. */
+  --ox-color-link: var(--purple-light, #7f5b8b);
+  --ox-color-subtle: var(--text-subtle, #817186);
+  --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 60%, transparent);
+  --ox-color-code-bg: var(--midground, #ece7f3);
+  --ox-color-mark-bg: var(--yellow-light, #fcf0c4);
+  --ox-color-border: var(--midground, #ece7f3);
+  --ox-color-selected-bg: color-mix(in srgb, var(--ox-color-accent) 8%, transparent);
+  --ox-color-selected-border: var(--ox-color-accent);
+  --ox-color-unknown: var(--red, #a63b31);
+}
+
+@media (prefers-color-scheme: dark) {
+  .ox-tokens {
+    --ox-color-text: var(--dark-text, #e8ddd4);
+    /* Every heading (h1-h4) converges on `--moon` in dark mode — h1 reads
+       this token directly; h2/h3/h4 read `--ox-color-accent` (below),
+       which is ALSO `--moon`, so the whole heading hierarchy agrees
+       without needing a third token. REAL BUG fixed here, found by
+       checking actual computed colors (not just eyeballing): this used
+       to read `var(--dark-text, #e8ddd4)` (h1 only, before headings
+       converged) and, separately, `--ox-color-accent` used to read
+       `var(--purple-light, #a78bfa)` — trying to sneak in a dark-mode-
+       only lighter purple via the custom-property FALLBACK syntax. That
+       fallback only ever applies when `--purple-light` is UNDEFINED,
+       which it never is (nopal defines it once, unconditionally, in
+       `:root` — confirmed directly in `root.css`); so headings/
+       checkboxes/bullets/table-headers silently rendered the EXACT SAME
+       purple in both color schemes. Fixed by swapping to an actually-
+       different real token instead of trying to override `--purple-light`
+       itself — matches nopal's OWN established convention for this exact
+       problem (see `.purple-light-text`/`.purple-light-stroke`/
+       `.purple-light-fill` in root.css, all of which swap to `--moon` in
+       dark mode rather than attempting to redefine `--purple-light`). */
+    --ox-color-heading: var(--moon, #c4c6fc);
+    --ox-color-accent: var(--moon, #c4c6fc);
+    /* Links read `white` in dark mode — a THIRD distinct value from the
+       heading/accent `--moon` above, so a link never blends into
+       surrounding heading text. Still its own separate token from
+       `--ox-color-accent` (see this variable's light-mode comment) even
+       though light mode's value happens to equal `--ox-color-accent`
+       today — swap independently to taste. */
+    --ox-color-link: white;
+    --ox-color-subtle: var(--text-subtle-dark, #c8b8ce);
+    --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 60%, transparent);
+    /* NOT `--dark-midground` (#6d6e99) — found by checking actual computed
+       colors, not just eyeballing a screenshot: nopal's real `--purple-light`
+       (#7f5b8b, this file's own `--ox-color-accent`) and `--dark-midground`
+       are two similarly-toned mid purples. That's an unrelated, harmless
+       coincidence almost everywhere `--ox-color-code-bg` is used (plain
+       `--ox-color-text` on it reads fine) — except `.ox-popover-title`,
+       which deliberately renders IN `--ox-color-accent` ON this background,
+       where the near-identical tone collapses to low contrast. Genuinely
+       darker fixes it for that one case without touching anything else
+       that depends on `--ox-color-code-bg`. */
+    --ox-color-code-bg: var(--dark-farground, #221a28);
+    /* Full-strength `--yellow-light` reads as a jarring, near-white slab against
+       the dark palette (and the marked text's own color is already a
+       light tone, so full-opacity yellow washes it out) -- mixed down
+       against the dark background keeps the same "highlighter" hue as
+       light mode while staying a background, not a spotlight. */
+    --ox-color-mark-bg: color-mix(in srgb, var(--yellow-light, #fcf0c4) 35%, var(--dark-farground, #221a28));
+    --ox-color-border: var(--dark-midground, #6d6e99);
+    --ox-color-unknown: var(--red-light, #f6c8c3);
+  }
+}
+
+@media (min-resolution: 2x) {
+  .ox-tokens {
+    --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 40%, transparent);
+  }
+}
+
+/* `.ox-content` now carries only visual base styles — always pair it with
+   `.ox-tokens` in markup (`className="ox-content ox-tokens"`), the same way
+   `.ox-popover` does. */
+.ox-content {
+  /* Left AND right padding are deliberately `--ox-grid`, not an arbitrary
+     number: the gutter markers/bullets/ordered-list numbers below all sit
+     at negative left offsets (they hang in the margin next to their
+     content), and a `::file{...}` directive's remove button
+     (`.ox-file-remove-slot`) hangs in the margin on the RIGHT the exact
+     same way — `overflow-x: hidden` clips relative to THIS element's own
+     box no matter how much space a caller's wrapper provides around it, so
+     this element has to reserve its own room on BOTH sides, not rely on
+     one. One grid cell is enough for the widest thing on either side (the
+     h1 marker, at -38px, on the left; the remove button, exactly
+     `--ox-grid`, on the right). A caller that doesn't need either
+     reserved band at all (a `::file{...}` caption, which has no markers
+     of its own and no remove button poking out of IT specifically) opts
+     out of both via `.ox-no-gutter`, below. */
+  padding: 0 var(--ox-grid) 0 var(--ox-grid);
+  font-family: var(--ox-font-family);
+  font-size: 1.2rem;
+  font-weight: var(--ox-font-weight);
+  line-height: 1.2;
+  letter-spacing: var(--ox-letter-spacing);
+  color: var(--ox-color-text);
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  /* Preserve every space exactly as saved, including runs of 2+ — the
+     browser default (`normal`) collapses a run of ASCII spaces to one,
+     which is the ONE thing that made Editing mode (a live Lexical
+     `contentEditable`, which browsers keep visually faithful to typed
+     whitespace while focused) look different from this same markdown's
+     OWN static/Interacting-mode render the moment it wasn't being
+     actively typed into — the bug this rule fixes, not a cosmetic
+     preference. `break-spaces` (not `pre-wrap`) is deliberate: it's the
+     one white-space value that BOTH preserves a run of spaces faithfully
+     AND allows the run itself to wrap at the container edge instead of
+     overflowing — see the `oxmarkdown` skill's Design language section.
+     Safe alongside the `\n`-splitting `renderTextWithBreaks` already does
+     for embedded hard breaks (`OxRenderer.tsx`'s `case "text"`): that
+     function's own `.split("\n")` already removes every literal `\n`
+     character from the strings it hands to React, replacing each with a
+     real `<br />`, so there's never a raw `\n` left in a DOM text node
+     for this rule to also start rendering as a second, doubled break. */
+  white-space: break-spaces;
+}
+
+.ox-dot-grid {
+  background-image: radial-gradient(var(--ox-color-grid-dot) 1px, transparent 0);
+  background-size: var(--ox-grid) var(--ox-grid);
+  background-position: -20px -20px;
+  padding-bottom: 1px;
+}
+
+
+/* General modifier — disables the left AND right gutters (both are now
+   `--ox-grid` — see `.ox-content` above) and any marker glyph that hangs
+   in either (#/##/###/>, bullet/ordered-list markers, the checklist dash
+   on the left; a `::file{...}` remove button on the right) — for a
+   caller that wants its text flush with the OTHER paddings instead of
+   indented a full grid cell on either side. Apply via the `className`
+   prop `OxEditor`/`OxRenderer` already support (`className="...
+   ox-no-gutter"`) — no separate boolean prop needed. First use: a
+   `::file{...}` directive's caption (`editingNodes.tsx`) — the
+   thumbnail already provides the visual separation a left gutter would
+   otherwise add, and a caption has no remove button of its OWN poking
+   out of it (that belongs to the OUTER `.ox-file-directive` row, not
+   this nested editor), so neither reserved band does anything useful
+   there; without this, the caption's text sat one grid cell narrower on
+   both sides than it needed to. `content: none`, not `display: none`,
+   fully suppresses a `::before`/`::after` pseudo — no box generated at
+   all, not just a hidden one. */
+.ox-content.ox-no-gutter {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.ox-content.ox-no-gutter :is(h1, h2, h3, blockquote)::before,
+.ox-content.ox-no-gutter ul > li:not(.ox-task-item)::before,
+.ox-content.ox-no-gutter ol > li::before,
+.ox-content.ox-no-gutter .ox-task-item-editing--checked::before,
+.ox-content.ox-no-gutter .ox-task-item-editing--unchecked::before {
+  content: none;
+}
+
+/* ── Gutter markers (# / ## / ### / >) ──────────────────────────── */
+
+.ox-content :is(h1, h2, h3, blockquote) {
+  position: relative;
+}
+.ox-content :is(h1, h2, h3, blockquote)::before {
+  position: absolute;
+  top: 4px;
+  left: -38px;
+  width: 32px;
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-weight: 400;
+  color: var(--ox-color-accent);
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+  line-height: inherit;
+}
+.ox-content h1::before {
+  content: "#";
+  font-size: 24px;
+}
+.ox-content h2::before {
+  content: "##";
+  font-size: 17px;
+}
+.ox-content h3::before {
+  content: "###";
+  font-size: 11px;
+}
+.ox-content blockquote::before {
+  content: '"';
+  font-size: 15px;
+  padding-right: 3px;
+  line-height: 10px;
+}
+
+/* ── Headings ───────────────────────────────────────────────────────────── */
+
+/* `margin: 0` is load-bearing, not cosmetic, same reasoning as `.ox-content
+   p`/`:is(ul, ol)`/`table`/`.ox-code-block` below — REAL BUG fixed here,
+   found via a repro: this rule never zeroed margin, so h1-h6 fell back to
+   the browser's own UA-stylesheet heading margin (~23px top/bottom for h1),
+   visibly breaking Editing mode's "blank lines are real rows, not CSS
+   margin" rule (see "Design language" in the `oxmarkdown` skill) whenever a
+   heading wasn't the very first element in the document (a heading in that
+   position only ever LOOKED fine because its own margin-top collapses
+   invisibly against the container, masking the bug for the single most
+   common case someone would eyeball first). */
+.ox-content :is(h1, h2, h3, h4, h5, h6) {
+  line-height: var(--ox-grid);
+  padding: 0;
+  margin: 0;
+  font-weight: 700;
+}
+.ox-content h1 {
+  font-size: 34px;
+  color: var(--ox-color-heading);
+  letter-spacing: 1px;
+}
+.ox-content h2 {
+  font-size: 28px;
+  color: var(--ox-color-accent);
+}
+.ox-content h3 {
+  font-size: 22px;
+  color: var(--ox-color-accent);
+}
+/* h4 never had an explicit color rule before — it silently fell through
+   to `.ox-content`'s own base `--ox-color-text`, which meant it read as
+   plain body text, not a heading, and didn't converge on `--moon` with
+   the rest of the heading hierarchy in dark mode. `--ox-color-accent`
+   (not `--ox-color-heading`) to match h2/h3's lighter-weight treatment
+   in light mode — h4 is a minor heading, not h1's bold treatment. */
+.ox-content h4 {
+  color: var(--ox-color-accent);
+}
+
+/* ── Blockquote ─────────────────────────────────────────────────────────── */
+
+/* `margin: 0` — same missing-reset bug as headings above (the browser's
+   default blockquote margin is `1em 40px`, doubly wrong here since the
+   left inset is already handled by `padding-left` above). */
+.ox-content blockquote {
+  border-left: 3px solid var(--ox-color-accent);
+  padding-left: 16px;
+  margin: 0;
+  color: var(--ox-color-subtle);
+  font-style: italic;
+  line-height: var(--ox-grid);
+}
+
+/* ── Paragraphs / lists ─────────────────────────────────────────────────── */
+
+.ox-content p {
+  line-height: var(--ox-grid);
+  margin: 0;
+}
+
+/* Ordinary prose rhythm for the static/Interacting renderer: every block
+   sibling gets one grid unit of space above it, on every parent
+   `renderBlockNodes` (OxRenderer.tsx) ever renders a run of sibling
+   blocks into — the top-level document, plus every nested block
+   container (a blockquote's body, a list item's own body, a toggle's
+   body; `.ox-grid-cell` already has its own identical rule below, next
+   to the rest of the grid directive's CSS).
+
+   THIS RULE WAS MISSING ENTIRELY despite being long-documented in this
+   skill's Design language section — with it absent, every pair of
+   ordinary adjacent blocks (the overwhelmingly common "exactly one blank
+   line apart" case, since `.ox-blank-line-spacer` below only ever
+   accounts for EXTRA blank lines beyond that first one) rendered with
+   ZERO gap between them: two consecutive paragraphs read as one
+   continuous run of lines, sharply different from Editing mode's own
+   blank-line handling (a real empty row, always visible) even though
+   both are meant to represent the exact same one grid unit of
+   separation. Reported more than once as "spacing gets collapsed" and
+   mis-diagnosed as an inline (multiple-spaces-within-a-line) issue before
+   this, the actual block-level rhythm bug, was found. Editing mode
+   itself is UNAFFECTED by any of this — it doesn't use margin for this at
+   all, see "Blank lines between blocks are real rows, not CSS margin, in
+   Editing mode" elsewhere in this file's design language notes.
+
+   `.ox-dot-grid`, NOT `.ox-content`, on the first selector below — a real
+   miss the first time this rule was written. Per "41×41px dot grid
+   background" above, `OxRenderer.tsx` always nests actual content one
+   level deeper, inside a `.ox-dot-grid` child `<div>` — `.ox-content`
+   ITSELF only ever has that one wrapper as its sole direct child, so
+   `.ox-content > *:not(:first-child)` matches nothing at all at the top
+   level (that one wrapper both IS the first child and is the ONLY
+   child). This is exactly the kind of thing the three-surface testing
+   convention below is for — confirmed only after actually looking at the
+   rendered result, not just reasoning about the CSS in the abstract. */
+.ox-dot-grid > *:not(:first-child),
+.ox-content blockquote > *:not(:first-child),
+.ox-content li > *:not(:first-child),
+.ox-content .ox-toggle-body > *:not(:first-child) {
+  margin-top: var(--ox-grid);
+}
+
+/* `.ox-blank-line-spacer` (below) already contributes its own full grid
+   unit of height per EXTRA blank line beyond the first — it must never
+   ALSO pick up the rule above's margin-top, or a 2-blank-line gap would
+   render as 3 grid units instead of 2 (the spacer's own height, PLUS a
+   margin-top the rule above would otherwise also give it for being a
+   non-first child, PLUS the real node right after it separately getting
+   its own baseline margin-top too). `!important` because this needs to
+   win over the rule above regardless of which of its several selectors
+   (or `.ox-grid-cell`'s own, separate rule below) matched — a plain class
+   selector alone is LESS specific than any of those `> *:not(:first-
+   child)` combinators, so without it this would silently lose the
+   cascade back to the rule it's meant to override. */
+.ox-content .ox-blank-line-spacer {
+  margin-top: 0 !important;
+}
+
+/* One per blank line BEYOND the single one CommonMark already requires to
+   separate two blocks — see `renderBlockNodes` in `OxRenderer.tsx`. Exactly
+   one grid row tall so extra intentional spacing still lines up with the
+   dot grid, the same rhythm rule every other element here follows. */
+.ox-blank-line-spacer {
+  height: var(--ox-grid);
+}
+
+.ox-content :is(ul, ol) {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  line-height: var(--ox-grid);
+}
+.ox-content ul > li:not(.ox-task-item) {
+  position: relative;
+}
+.ox-content ul > li:not(.ox-task-item)::before {
+  content: "—";
+  position: absolute;
+  left: -18px;
+  font-size: 14px;
+  color: var(--ox-color-accent);
+  pointer-events: none;
+  user-select: none;
+  line-height: inherit;
+}
+.ox-content ul ul > li:not(.ox-task-item)::before {
+  content: "–";
+}
+/* A nested list (`@lexical/list`'s own structure, not ours) wraps the
+   nested `<ul>` inside a PARENT `<li>` (e.g. `<li><ul><li>...`), and that
+   wrapper carries no text and no `.ox-task-item` class of its own, so it
+   satisfies `:not(.ox-task-item)` above and picked up a bullet marker
+   that had nothing to do with its own (nonexistent) content: a stray dash
+   rendering directly in front of whatever the nested list's first item
+   actually is, checkbox or not (found from a real screenshot, not
+   assumed — a nested checkbox item showed both a dash AND its own glyph,
+   which is the exact case a real markdown export never produces: nesting
+   never adds an extra bullet level of its own). `:only-child` on the
+   nested list itself is the correct check, not `:first-child` — a real
+   parent item with BOTH its own text and a nested sublist ("parent" text
+   followed by an indented "child" item) must keep its own marker; only a
+   li whose SOLE content is the nested list (no text at all) is this
+   wrapper case. */
+.ox-content ul > li:has(> ul:only-child)::before,
+.ox-content ul > li:has(> ol:only-child)::before {
+  content: none;
+}
+.ox-content ol {
+  counter-reset: ox-ol;
+}
+.ox-content ol > li {
+  position: relative;
+  counter-increment: ox-ol;
+}
+.ox-content ol > li::before {
+  content: counter(ox-ol) ".";
+  position: absolute;
+  top: 2px;
+  left: -1.8em;
+  width: 1.5em;
+  text-align: right;
+  font-size: 0.78rem;
+  font-family: ui-monospace, "SF Mono", monospace;
+  color: var(--ox-color-accent);
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+  line-height: inherit;
+}
+
+/* ── Task lists ─────────────────────────────────────────────────────────── */
+/* .ox-task-list — the <ul> wrapping a checklist
+   .ox-task-item — each <li>
+   .ox-task-checkbox — the styled checkbox
+   .ox-task-text — the label */
+
+.ox-content .ox-task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 3px;
+  line-height: var(--ox-grid);
+  padding: 0;
+}
+.ox-content .ox-task-item::before {
+  content: none;
+}
+.ox-task-checkbox {
+  flex-shrink: 0;
+  width: var(--ox-grid);
+  height: var(--ox-grid);
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: default;
+  position: relative;
+  box-sizing: border-box;
+  appearance: none;
+  display: inline-block;
+}
+.ox-task-checkbox::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 23px;
+  height: 23px;
+  border-radius: 5px;
+  border: 2.5px solid var(--ox-color-accent);
+  background: transparent;
+  box-sizing: border-box;
+}
+.ox-task-checkbox.checked::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 23px;
+  height: 23px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-size: calc(100% - 3px);
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.ox-task-text--checked {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* ── Code ───────────────────────────────────────────────────────────────── */
+
+/* `line-height: 1` is load-bearing, not cosmetic: this inline element's
+   own vertical `padding` (2px top/bottom) otherwise inflates whichever
+   LINE it sits on past the grid — confirmed by direct measurement (a
+   wrapped paragraph/heading containing this element rendered 2px taller
+   per affected line than a plain-text one, breaking the 41px rhythm only
+   on multi-line content containing inline code, single-line content
+   masked the bug since there's nothing to accumulate against). Collapsing
+   its own line-height to 1 keeps its padded box from ever exceeding the
+   41px strut the surrounding text already establishes. */
+.ox-content code {
+  background: var(--ox-color-code-bg);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.875em;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  line-height: 1;
+}
+
+/* `==highlighted==` (GraphLog's `GRAPH.md` skill wraps every verbatim
+   quote in this) -- horizontal-only padding, unlike `.ox-content code`
+   above, so there's no vertical inflation to guard against: nothing here
+   adds height to the line it sits on. */
+.ox-content mark {
+  background: var(--ox-color-mark-bg);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+.ox-code-block {
+  background: var(--ox-color-code-bg);
+  border-radius: 8px;
+  padding: 0 16px;
+  overflow-x: auto;
+  margin: 0;
+  line-height: calc(var(--ox-grid) - 2px);
+}
+.ox-code-block code {
+  background: none;
+  padding: 0;
+  font-size: 0.875em;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+  color: var(--ox-color-text);
+  border-radius: 0;
+  /* Undoes `.ox-content code`'s own `line-height: 1` (meant for INLINE
+     code's padded box specifically — see that rule's comment) for this
+     nested block-code case: same specificity, later in the cascade, so
+     this wins outright — without it, the block's own multi-line rhythm
+     (`.ox-code-block`'s `line-height: calc(var(--ox-grid) - 2px)`) would
+     get silently overridden on the nested element that actually renders
+     the text, collapsing every code-block line to single spacing. */
+  line-height: inherit;
+}
+
+/* ── Links / images / thematic break ───────────────────────────────────── */
+
+.ox-content a {
+  color: var(--ox-color-link);
+  text-decoration: underline;
+}
+.ox-content img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+.ox-content hr {
+  border: none;
+  border-top: 1px solid var(--ox-color-border);
+  margin: calc(var(--ox-grid) / 2 - 0.5px) 0;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+
+.ox-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0;
+  border: 1px solid var(--ox-color-border);
+  border-radius: 8px;
+}
+.ox-content th {
+  text-align: left;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--ox-color-border);
+  color: var(--ox-color-accent);
+  font-weight: 700;
+  line-height: calc(var(--ox-grid) - 2px);
+}
+.ox-content td {
+  padding: 0 10px;
+  border-bottom: 1px solid var(--ox-color-border);
+  line-height: calc(var(--ox-grid) - 1px);
+}
+
+/* ── Directives: unknown-name fallback ─────────────────────────────────── */
+/* Shown when a directive's name has no matching registry entry — visible
+   on purpose, so typos (human or AI-authored) are easy to spot. */
+
+.ox-directive-unknown {
+  display: inline-block;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.85em;
+  color: var(--ox-color-unknown);
+  border: 1px dashed color-mix(in srgb, var(--ox-color-unknown) 45%, transparent);
+  background: color-mix(in srgb, var(--ox-color-unknown) 8%, transparent);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+.ox-directive-unknown--block {
+  display: block;
+  padding: 8px 12px;
+  line-height: 1.4;
+}
+
+/* ── Ref directive (`:ref{...}`) ─────────────────────────── */
+/* See `oxmarkdown-core/src/refDirective.ts` + `components/OxRenderer.tsx`'s
+   `RefDirectiveStatic`/`RefDirectiveMarker`. `.ox-ref` is shared by both
+   the verbose (plain text) and non-verbose (`*` marker) renderings; the
+   marker additionally gets `.ox-ref-marker` for its own clickable-glyph
+   styling. */
+
+/* Same class of bug as `.ox-content code`'s own `line-height: 1` note
+   above, different cause: at `0.85em`, this element's font naturally
+   needs slightly more than the inherited `--ox-grid` (41px) line-height
+   to fit its own glyphs without clipping, so the browser silently grows
+   the LINE it sits on by 1px to compensate -- confirmed by direct
+   measurement (a paragraph containing either the verbose text or the
+   `*` marker rendered 42px tall instead of 41px, even completely alone
+   on its own line with no other content to interact with, and 83px
+   instead of 82px across two wrapped lines). Collapsing this element's
+   own line-height to 1 removes that slop entirely, letting the
+   paragraph's own `--ox-grid` line-height be the only thing that
+   determines the line's actual height — confirmed fixed by the same
+   direct measurement. */
+.ox-ref {
+  font-size: 0.85em;
+  color: var(--ox-color-subtle);
+  line-height: 1;
+}
+.ox-ref a {
+  color: var(--ox-color-link);
+}
+.ox-ref-marker {
+  display: inline-block;
+  cursor: pointer;
+  padding: 0 3px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+.ox-ref-marker:hover,
+.ox-ref-marker:focus-visible {
+  background: var(--ox-color-selected-bg);
+  outline: none;
+}
+.ox-ref-popover-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.ox-ref-popover-row:last-child {
+  margin-bottom: 0;
+}
+.ox-ref-popover-row > span:first-child {
+  opacity: 0.6;
+  font-size: 0.85em;
+}
+
+/* ── Directive-authoring utilities ────────────────── */
+/* ── Directive-authoring utilities ────────────────────────────── */
+/* A directive's registry renderer (see `oxmarkdown/directiveRegistry.ts`)
+   often needs a small "title" line above its content (a gallery caption, a
+   callout heading). Anything NOT grid-aligned breaks the dot-grid rhythm
+   for every element after it, permanently, because the background dots are
+   a fixed, un-scrolling pattern — there's no self-correcting later. Reach
+   for this class for that line instead of ad hoc inline styles, so getting
+   the rhythm right is the easy default, not something to remember. */
+.ox-directive-title {
+  font-weight: 700;
+  line-height: var(--ox-grid);
+  margin: 0;
+}
+
+/* A grid-aligned inline pill/badge. Two layers on purpose:
+   `.ox-pill` is an invisible "slot" exactly one grid row tall, so the
+   surrounding rhythm stays correct; `.ox-pill-chip` is the actual small
+   visible capsule, sized for its content and vertically centered inside
+   the slot. Without the split, making the visible chip look right forces
+   the chip itself to be a full 41px tall, which reads as oversized. */
+.ox-pill {
+  display: inline-flex;
+  align-items: center;
+  /* `line-height` does nothing for a flex container's own sizing — flex
+     boxes size from content, not leading — which is why this needs an
+     explicit `height` instead. That was the actual bug: the slot was
+     silently collapsing to the chip's ~30px content height rather than
+     reserving the full grid row. */
+  height: var(--ox-grid);
+}
+.ox-pill-chip {
+  display: inline-block;
+  line-height: 1.4;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--ox-color-selected-bg);
+  box-shadow: inset 0 0 0 1px var(--ox-color-selected-border);
+}
+
+/* ── Selected interactable ──────────────────────────────────────────── */
+/* New in OxMarkdown — no old-system equivalent. Applied by OxEditor when an
+   interactable is selected — see the oxmarkdown skill's "Interactables"
+   section. Outline, not a border, so it doesn't shift layout on select. */
+
+.ox-selected {
+  background: var(--ox-color-selected-bg);
+}
+
+/* ── Editing mode: the contentEditable surface itself ──────────────────── */
+/* `OxEditor` (`mode="editing"`) renders Lexical's real contentEditable
+   inside the SAME `.ox-content` wrapper Interacting/static rendering uses,
+   so headings/lists/blockquotes/links above all apply unmodified — Lexical
+   produces the same tag shapes (`<h1>`, `<ul><li>`, ...) for those. Only
+   things with no static-rendering equivalent (the caret surface itself, the
+   checklist's native DOM shape, code blocks) need rules here. */
+
+/* `--ox-min-rows` is set inline by `components/OxEditor.tsx`, computed
+   from the SAME `minRows` prop/clamping `MinRowsPlugin.tsx` uses for its
+   actual padding (`normalizeMinRows`) — so the visual `min-height` and
+   the real padded-row count can't drift apart. Defaults to 4 if unset
+   (a plain `.ox-content`/`OxRenderer` with no editor around it at all).
+   The min-height alone would only make clicking below short content
+   land at the nearest real position (the end of the last actual line);
+   it's `MinRowsPlugin` padding the document with real empty rows up to
+   the same count that makes clicking anywhere in this box land on the
+   exact row clicked, not just "somewhere near the end." */
+.ox-editing-surface {
+  outline: none;
+  min-height: calc(var(--ox-grid) * var(--ox-min-rows, 4));
+}
+.ox-editing-placeholder {
+  position: absolute;
+  top: 8px;
+  color: var(--ox-color-subtle);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Nested (2nd-order+) lists are indented one full grid cell per level,
+   editor-only (scoped to `.ox-editing-surface`, the contentEditable
+   root) — matches the "one line = one row" code-editor feel Editing
+   mode is meant to have, where the source markdown's own nesting should
+   read visually as indentation, not just a different bullet glyph. The
+   static renderer deliberately keeps nested lists un-indented (the
+   bullet glyph itself changes per level instead, `—` vs `–` above) —
+   that's ordinary passive prose, with no code-editor expectation to
+   match. `li > ul`/`li > ol` only ever matches a NESTED list (the
+   top-level list is a direct child of `.ox-content`, never of an `li`),
+   and each level's own margin stacks on top of its ancestor's, so a
+   3rd-order list ends up two grid cells in without any extra rule. */
+.ox-editing-surface li > ul,
+.ox-editing-surface li > ol {
+  margin-left: var(--ox-grid);
+}
+
+/* ── File directive (`::file{...}`) ────────────────────────────────────── */
+/* Shared by both rendering paths (`components/OxRenderer.tsx`'s static
+   `FileDirectiveLayout`, reused live in `oxmarkdown/editingNodes.tsx`) —
+   not "Editing mode" specific, unlike most rules in this file below this
+   point. A fixed-size placeholder thumbnail (no real preview yet — see
+   `oxmarkdown/fileDirective.ts`'s header on why: there's no real vault
+   upload wired up yet, so nothing durable to actually preview) plus a
+   caption alongside it, always the full row (`display: flex`, never the
+   shrink-to-fit `inline-block` every other directive gets from
+   `InteractiveDirective` — this directive bypasses that wrapper entirely). */
+.ox-file-directive {
+  display: flex;
+  align-items: flex-start;
+  margin: 0;
+  /* Positioning context for `.ox-file-remove-slot`, which sits OUTSIDE
+     this flex row entirely (not a flex child — see that rule). */
+  position: relative;
+}
+.ox-file-thumb {
+  width: 74px;
+  height: 74px;
+  margin: 4px 3px 4px calc(-1 * var(--ox-grid) + 2px);
+  flex-shrink: 0;
+  display: block;
+  border-radius: 4px;
+  background: var(--ox-color-code-bg);
+  border: 1px solid var(--ox-color-border);
+  /* Only affects the real `<img>` case (a placeholder `<div>` while an
+     upload is still pending, or when there's no `onUploadFile` wired up
+     at all, ignores it harmlessly) — crops rather than distorts a
+     non-square photo within the fixed 74x74 box. */
+  object-fit: cover;
+}
+.ox-file-thumb[data-upload-error="true"] {
+  border-color: var(--red, #a63b31);
+}
+
+.ox-file-caption {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The remove (X) button's SLOT sits OUTSIDE the flex row entirely —
+   `position: absolute` against `.ox-file-directive` (`position: relative`
+   above), not a flex child — so it sticks out `--ox-grid` (41px) past
+   the row's own right edge instead of taking up space the caption would
+   otherwise get, mirroring how the thumbnail sticks out past the LEFT
+   edge via a negative margin. Vertically centered against the row's
+   full height via `top: 50%` + `transform: translateY(-50%)` (the
+   normal way to center an absolutely-positioned element without knowing
+   its height up front). Still exactly one grid cell wide so the 36px
+   button inside it sits centered within a real grid-cell-sized column,
+   not an arbitrary width (CircleButton sets its own width/height via an
+   inline style, from its `size` prop, which no CSS class could
+   override, so sizing/centering has to live on this wrapper regardless
+   of flow). `.circle-btn-red` itself (root.css) owns the button's
+   actual look.
+
+   `.ox-content` (the ancestor `overflow-x: hidden` lives on) reserves a
+   full `--ox-grid` on BOTH sides for exactly this reason — see that
+   rule's own comment. */
+.ox-file-remove-slot {
+  position: absolute;
+  top: 3px;
+  right: calc(-1 * var(--ox-grid));
+  width: var(--ox-grid);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* No dot grid on a `::file{...}` caption editor — it reads as a small
+   annotation field next to a thumbnail, not its own document (see
+   `editingNodes.tsx`, which passes this as the nested `<OxEditor>`'s
+   `className`). Only the background image is disabled; every other
+   `.ox-content` rule (gutter, rhythm, colors) still applies normally.
+   The dot grid itself lives on a NESTED `.ox-dot-grid` child div (see
+   that class above), not on `.ox-content` directly, so the override has
+   to reach that child specifically — setting `background-image: none`
+   on `.ox-content.ox-file-caption-editor` alone is a no-op, since
+   `background-image` isn't inherited and the child sets its own. */
+.ox-content.ox-file-caption-editor {
+  margin-bottom: 0 !important;
+}
+.ox-content.ox-file-caption-editor > .ox-dot-grid {
+  background-image: none;
+  padding-bottom: 0;
+}
+
+/* ── File image zoom modal (`components/OxRenderer.tsx`'s
+   `FileImageModal`) — clicking a `::file{...}` image thumbnail opens
+   this, on a dimmed backdrop, same z-index tier as `Modal.tsx`'s own
+   overlay (1000; both are app-level modals, never open at once). Shares
+   `stamps`' `surfaceBase` (packages/stamps/src/surface.css.ts) for its
+   panel background/border so it flips for dark mode the same way every
+   other panel does, with no override needed here. */
+img.ox-file-thumb {
+  cursor: zoom-in;
+}
+.ox-file-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ox-grid);
+  background: rgba(0, 0, 0, 0.75);
+}
+.ox-file-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: min(1200px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+}
+/* Sits ON TOP of the image (absolute, not a flex child) with its own
+   background so it stays legible over a bright photo regardless of what
+   the image itself looks like right under it. */
+.ox-file-modal-close-slot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  border-radius: 9999px;
+  background: var(--farground);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+@media (prefers-color-scheme: dark) {
+  .ox-file-modal-close-slot {
+    background: var(--dark-farground);
+  }
+}
+.ox-file-modal-image-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: var(--ox-grid);
+}
+/* "Fit" state (the default) — never upscales past the image's real size,
+   only ever constrains it down to fit. A further click swaps in
+   `.ox-file-modal-image--full` below, which is only ever offered
+   (`canZoomFurther`) when this actually had to scale the image down. */
+.ox-file-modal-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+.ox-file-modal-image--full {
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+}
+.ox-file-modal-caption {
+  flex-shrink: 0;
+  padding: var(--ox-grid);
+  border-top: 1px solid var(--ox-color-border);
+}
+
+/* The persistent "add file" trigger below the editor
+   (`oxmarkdown/AddFileLinkPlugin.tsx`) — a themed link (accent color +
+   underline), even though it's really a `<button>` (it triggers an
+   action, not navigation — see that file's header). */
+.ox-add-file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 6px;
+  margin-left: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ox-color-link);
+  text-decoration: underline;
+  font-family: var(--ox-font-family);
+  font-size: 14px;
+}
+.ox-add-file-link svg {
+  flex-shrink: 0;
+}
+
+/* ── Card directive (`::card{file="..."}`) ──────────────────
+   A Card's own separate vault file, mounted here as a leaf directive —
+   bleeds outward past `.ox-content`'s own gutters on BOTH sides (a
+   negative margin exactly canceling them, plus a matching inward padding
+   on the header row that cancels THAT), so it visually "sits on top of"
+   the day's frame while its own text still lands on the same column as
+   everything else — genuinely overhanging the day frame's own edge by
+   `8px` on each side (matching the `daily-log-v2` mockup's own
+   `CARD_BLEED`), not just reaching it.
+
+   `.ox-content`'s `overflow-x: hidden` clips any descendant's bleed at
+   `.ox-content`'s OWN border-box edge — no matter how large a negative
+   margin the descendant itself uses. Confirmed directly: a card can
+   never bleed past that edge on its own. Padding doesn't move that edge
+   either (it's INSIDE the border-box) — only `.ox-content`'s OWN margin
+   does. So the OUTER prose editor that hosts a Card needs `.ox-card-host`
+   (below): a small negative margin that widens `.ox-content`'s OWN
+   border-box by exactly the overhang amount, with a matching INCREASE to
+   its padding so the prose text's own position doesn't shift at all —
+   only the (invisible, until something bleeds into it) edge of the box
+   moves. This card's own bleed then exactly cancels that WIDER padding,
+   landing its edge at `.ox-card-host`'s new, wider border-box edge —
+   which sits exactly `8px` past the day frame's visual border (`DayContainer`
+   itself adds no padding of its own — `components/DailyLogDay.tsx`).
+   `stamps`' `surfaceBase` supplies the actual fill/border look — nothing
+   card-specific there. */
+.ox-card-directive {
+  margin: 0 calc(-1 * (var(--ox-grid) + 8px)) 16px calc(-1 * (var(--ox-grid) + 8px));
+  padding: 8px;
+}
+
+/* Applied to the OUTER prose `<OxEditor>` in `fruits_.daily-log.tsx`
+ * (the one a `::card{...}` directive is nested inside) — see
+ * `.ox-card-directive`'s own comment above for the full reasoning. NOT
+ * applied to a card's own (nested) `.ox-content`, or anywhere a
+ * `::card{...}` can't appear — there's nothing for it to make room for
+ * there. */
+.ox-content.ox-card-host {
+  margin: 0 -8px;
+  padding: 0 calc(var(--ox-grid) + 8px);
+}
+.ox-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 var(--ox-grid) 8px var(--ox-grid);
+  border-bottom: 1px solid var(--ox-color-border);
+  padding-bottom: 10px;
+}
+.ox-card-header-info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+/* Deliberately its OWN color rule, not `.subtle-text` (which this used
+   to rely on for color, per its className in `OxRenderer.tsx`) — a link
+   should read as a link (the same `--ox-color-link` every other one in
+   this system uses), not blend into muted secondary text. */
+.ox-card-open-link {
+  color: var(--ox-color-link);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+/* A Card's content area keeps its OWN `.ox-content` (the nested
+   `<OxEditor>` renders one), so this wrapper needs no padding/background
+   of its own — just lays out the header above the content. */
+.ox-card-content {
+  min-width: 0;
+}
+
+/* An OPTIMISTIC placeholder, added to the UI the instant "Add a card" is
+   clicked, before the server round trip that actually creates the
+   underlying vault file has finished — see `ResolvedCard.pending`
+   (`oxmarkdown/cardDirective.ts`). Dims the WHOLE card (header included —
+   simplest, most honest signal that this row isn't fully real yet) but
+   only disables pointer events on the CONTENT area: the header's "open
+   project" link already points at a real, known project, so there's no
+   reason to block it. */
+.ox-card-directive--pending {
+  opacity: 0.55;
+}
+.ox-card-directive--pending .ox-card-content {
+  pointer-events: none;
+}
+
+/* ── Editing mode: checklist ──────────────── */
+/* ── Editing mode: checklist ───────────────────────────────────────── */
+/* `@lexical/list`'s native checklist shape differs from Interacting mode's
+   static markup: there's no separate `.ox-task-checkbox` glyph element —
+   the `<li role="checkbox">` itself IS the checkbox (see `registerCheckList`
+   in `@lexical/list`), with the label as its direct text content. Visually
+   matched to the static glyph (same size/border/checkmark), not a literal
+   DOM reuse. Both classes below also satisfy `.ox-task-item`.
+
+   Checklist items DELIBERATELY keep the same gutter dash every other list
+   item gets (`::before`, below) — a checkbox is still a list item, and the
+   markdown still starts with the same `-` marker every other bullet does
+   (`- [ ] text`, not just `[ ] text`); hiding the dash specifically for
+   checkboxes would visually claim they're a different kind of list than
+   they actually are. Because of that, this class pair is DELIBERATELY
+   `:not(.ox-task-item)`-EXCLUDED from nothing — the shared
+   `ul > li:not(.ox-task-item)::before` rule above only ever applied to
+   plain bullets to begin with; checklist items get their OWN, separate
+   `::before` rule right below instead, producing the identical dash via a
+   different selector, not a shared one. This means the checkbox glyph
+   itself has to move to `::after` (a real element only has two pseudo-
+   elements to work with) — the checkmark that used to live on `::after`
+   is now folded into the SAME `::after` as a conditional background-image
+   on top of the box, rather than a separate layer.
+
+   `display: block` (NOT the `display: flex` that shared `.ox-task-item`
+   rule above sets) is a real, deliberate override, not redundant — found
+   via a genuine cross-browser bug, not assumed: that `display: flex` was
+   written for the STATIC renderer's OWN structure (a real
+   `.ox-task-checkbox` button laid out next to a `.ox-task-text` span),
+   which Editing mode doesn't have at all (the checkbox here is a
+   pseudo-element with nothing to lay out alongside — the item's own
+   children are just its ordinary text). Chrome tolerates the mismatch;
+   Firefox does not: a flex container's height comes from its flex items'
+   own sizes, and `line-height` has no effect there (it's an inline-
+   formatting-context property) — so an EMPTY item (Lexical's "no content"
+   shape is a bare `<br>`, which contributes zero height as a flex item)
+   collapsed to a real, confirmed `0px` computed height in Firefox
+   specifically (reproduced directly via Playwright's Firefox engine, not
+   assumed from a screenshot), with the checkbox glyph's `top: 50%`
+   centering math resolving against that collapsed 0px instead of the
+   intended 41px. Reverting to normal block layout here restores the exact
+   same mechanism the blank-line paragraphs already rely on (plain
+   `line-height` reliably sizing an empty block, verified earlier this
+   session) — Editing mode's checklist items never needed flex at all. */
+.ox-content .ox-task-item-editing--checked,
+.ox-content .ox-task-item-editing--unchecked {
+  display: block;
+  position: relative;
+  padding-left: var(--ox-grid);
+  line-height: var(--ox-grid);
+  outline: none;
+}
+.ox-content .ox-task-item-editing--checked::before,
+.ox-content .ox-task-item-editing--unchecked::before {
+  content: "—";
+  position: absolute;
+  left: -18px;
+  font-size: 14px;
+  color: var(--ox-color-accent);
+  pointer-events: none;
+  user-select: none;
+  line-height: inherit;
+}
+.ox-content ul ul .ox-task-item-editing--checked::before,
+.ox-content ul ul .ox-task-item-editing--unchecked::before {
+  content: "–";
+}
+/* `left: 0` (not centered in the grid cell, unlike the static
+   `.ox-task-checkbox`) on purpose: `OxChecklistPlugin.tsx`'s click-to-
+   toggle hit-test reads THIS pseudo-element's computed `width` (see that
+   file's `handleCheckItemEvent`) and checks the click's x-position
+   against `[li.left, li.left + width]` — if the glyph doesn't actually
+   start at the `<li>`'s left edge, clicks land outside where the code
+   thinks the checkbox is and silently do nothing (found by testing a real
+   click, not assumed — the same reasoning that used to apply to
+   `::before`, before the checkbox moved to `::after` to free `::before`
+   for the gutter dash above, applies identically here now). */
+   .ox-content .ox-task-item-editing--checked:hover::after,
+   .ox-content .ox-task-item-editing--unchecked:hover::after {
+     cursor: pointer;
+   }
+
+   .ox-content .ox-task-item-editing--checked::after,
+.ox-content .ox-task-item-editing--unchecked::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  transform: translateY(-50%);
+  width: 23px;
+  height: 23px;
+  border-radius: 5px;
+  border: 2.5px solid var(--ox-color-accent);
+  box-sizing: border-box;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: calc(100% - 3px);
+}
+.ox-content .ox-task-item-editing--checked::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cline x1='2.5' y1='2.5' x2='7.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='7.5' y1='2.5' x2='2.5' y2='7.5' stroke='%237f5b8b' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+.ox-content .ox-task-item-editing--checked {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.ox-content .ox-task-item-editing--checked:focus,
+.ox-content .ox-task-item-editing--unchecked:focus {
+  background: var(--ox-color-selected-bg);
+}
+
+/* An EMPTY checklist item (freshly inserted, or the new one Enter creates)
+   ALWAYS keeps showing the checkbox glyph, even with no text yet — a
+   previous version of this rule made an empty item fall back to a plain
+   bullet (reasoning: GFM's serializer can't represent `[ ]`/`[x]` for an
+   item with no text at all, so the live glyph would be "lying" about what
+   it can export as). That turned out to be the wrong tradeoff in practice:
+   it broke the ordinary "press Enter to continue a checklist" flow — the
+   fresh item would flash to a plain bullet the instant it was created,
+   before there was ever a chance to type into it. The GFM limitation is
+   real (confirmed directly against `mdast-util-gfm-task-list-item` AND
+   `micromark-extension-gfm-task-list-item`'s source — an empty checkbox
+   item is fundamentally unparseable/unserializable in GFM, full stop, not
+   a bug in either library), but it only matters if the document is
+   actually serialized while the item is STILL empty — a rare, transient
+   edge case, not the common case this rule was optimizing for. Left
+   empty, it exports as a bare `-`; `ChecklistPlugin.tsx`'s normalization
+   transform then self-heals it back to an unchecked checkbox on reimport
+   (parent list is still check-type, so `checked` gets reset to `false`),
+   so the only real cost is losing a checked/unchecked distinction on an
+   item that was never given any content anyway. See
+   `oxmarkdown/ChecklistOutdentPlugin.tsx` for the actual fix to the
+   related "Enter on an empty item" concern: graduated outdent
+   (checkbox → plain bullet → exit) instead of a glyph that changes shape
+   out from under you. */
+
+/* ── Editing mode: code blocks ─────────────────────────────────────────── */
+/* `@lexical/code`'s `CodeNode` always renders a `<code>` element, even for
+   a block — this class (set via the Lexical theme's `code` key) overrides
+   the plain inline-`code` rule above with block padding/background,
+   matching `.ox-code-block`'s static look. No syntax highlighting on
+   purpose — that's what pulled in a full CodeMirror/Prism dependency in
+   the old system; see the oxmarkdown skill's TODO 1. */
+.ox-content code.ox-code-block-editing {
+  display: block;
+  background: var(--ox-color-code-bg);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 8px 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-family: ui-monospace, "SF Mono", "Fira Code", monospace;
+}
+
+/* ── Editing mode: opaque passthrough (tables, raw HTML, ...) ──────────── */
+/* See `oxmarkdown/editingNodes.ts` — content with no rich editing UI yet,
+   shown read-only (via the same static renderer `OxRenderer` uses) rather
+   than silently dropped. */
+.ox-opaque {
+  cursor: default;
+}
+.ox-opaque--block {
+  display: block;
+}
+
+/* ── Editing mode: slash-command menu ──────────────────────────────────── */
+/* Reuses `.ox-popover`'s box styling (position/portal/directionality/
+   mobile-sheet layout all handled by the shared `OxPopover` component —
+   see `oxmarkdown/OxPopover.tsx` and `SlashCommandPlugin.tsx`) with its
+   own list-of-buttons layout. */
+.ox-slash-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  padding: 4px;
+}
+.ox-slash-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ox-slash-menu-item:hover {
+  background: var(--ox-color-selected-bg);
+}
+
+/* ── Directive attribute popover ───────────────────────────────────────── */
+/* The generic "adjust attributes without hand-editing the directive text"
+   affordance — see OxEditor.tsx / oxmarkdown/interactive.ts. Works for any
+   directive since it only lists whatever flat attrs the node already has. */
+
+/* Positioned/portaled/sized by the shared `OxPopover` component
+   (`oxmarkdown/OxPopover.tsx`, built on `@floating-ui/react`) — not by CSS
+   `top`/`left` here. `position: fixed` below is just the resting default;
+   `OxPopover` supplies the real `top`/`left`/`transform`/`max-height` as an
+   inline style on top of it (flipped/shifted to stay on-screen, capped to
+   whatever vertical space is actually available). Rendered through a
+   portal straight into `document.body` regardless — a popover living
+   inside whatever scroll container its trigger happens to sit in will get
+   clipped the moment that container scrolls; `position: fixed` inside the
+   actual DOM tree doesn't save you from that, it has to not be inside
+   there at all. `overflow-y: auto` pairs with that inline `max-height` so
+   content that doesn't fit scrolls WITHIN the popover instead of
+   overflowing the viewport. z-index is deliberately way above anything
+   else in the app (Modal.tsx's overlay is 1000). */
+.ox-popover {
+  position: fixed;
+  z-index: 2000;
+  min-width: 220px;
+  max-height: min(60vh, 400px);
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--ox-color-code-bg);
+  border: 1px solid var(--ox-color-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--ox-color-text);
+}
+
+/* ── Mobile: full-width bottom sheet, not a floating box ─────────────────
+   Below the `640px` breakpoint (`OxPopover`'s `useIsMobileViewport`), ANY
+   `.ox-popover` renders here instead of at a computed floating position —
+   see the oxmarkdown skill's "Mobile UX" TODO: one predictable location
+   beats a contextually-positioned box that risks getting clipped by, or
+   fighting with, the on-screen keyboard. */
+.ox-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 1999;
+}
+
+.ox-popover--sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  width: 100%;
+  min-width: 0;
+  max-height: min(70vh, 480px);
+  border-radius: 12px 12px 0 0;
+  padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+  font-size: 0.95rem;
+}
+
+/* Purely a visual "this is a sheet" affordance — not draggable, just a
+   familiar signal borrowed from native bottom sheets. */
+.ox-popover-sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ox-color-border);
+  margin: 0 auto 10px;
+}
+
+.ox-popover-title {
+  font-weight: 700;
+  color: var(--ox-color-accent);
+  margin-bottom: 6px;
+}
+
+.ox-popover-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.ox-popover-field span {
+  opacity: 0.6;
+}
+
+.ox-popover-field input {
+  font-family: inherit;
+  font-size: inherit;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--ox-color-border);
+  background: transparent;
+  color: inherit;
+}
+
+.ox-popover-field:last-child {
+  margin-bottom: 0;
+}
+
+/* ── @ mention menu (MentionPlugin.tsx) ────────────────────────── */
+/* Deliberately NOT `.ox-popover` — that class sets its OWN `position:
+   fixed`, which would fight the positioning `LexicalTypeaheadMenuPlugin`
+   already computes for the anchor element this gets portaled into (see
+   MentionPlugin.tsx's header for why that's still safe against the same
+   scroll-clipping bug `.ox-popover` exists to avoid). Same visual chrome,
+   no position/top/left of its own. */
+.ox-mention-menu {
+  z-index: 2000;
+  min-width: 200px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--ox-color-code-bg);
+  border: 1px solid var(--ox-color-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--ox-color-text);
+  list-style: none;
+  margin: 0;
+}
+.ox-mention-menu-item {
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ox-mention-menu-item--active {
+  background: var(--ox-color-selected-bg);
+}
+
+/* Mobile: same full-width bottom-sheet treatment as `.ox-popover--sheet`
+   (see there for the rationale), applied via a plain media query rather
+   than `OxPopover`/`useIsMobileViewport` — this menu is portaled into
+   `LexicalTypeaheadMenuPlugin`'s OWN anchor div (see the header comment
+   above), not `OxPopover`, so there's no JS hook here to key off of.
+   `position: fixed` on the `<ul>` itself escapes that anchor div's
+   `position: absolute` cleanly (fixed positioning is relative to the
+   viewport regardless of an ancestor's `position`, as long as nothing
+   between them sets a `transform`/`filter`/`perspective` — confirmed
+   `LexicalTypeaheadMenuPlugin`'s anchor div sets none of those). */
+@media (max-width: 640px) {
+  .ox-mention-menu {
+    position: fixed;
+    inset: auto 0 0 0;
+    width: 100%;
+    min-width: 0;
+    max-height: min(70vh, 480px);
+    border-radius: 12px 12px 0 0;
+    padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+    font-size: 0.95rem;
+  }
+}
+
+/* ── Toggle List (`:::toggle{...}`) ──────────────────────────────────── */
+/* A Notion-style collapsible block — see `oxmarkdown/OxToggleNode.ts`'s
+   header for the markdown shape and why it's a real container, not a
+   directive/decorator. `.ox-toggle-summary` is shared by BOTH rendering
+   paths (the live Lexical `OxToggleSummaryNode` in Editing mode, and
+   `OxRenderer.tsx`'s static/Interacting-mode markup) — both produce the
+   exact same `<div class="ox-toggle-summary">` shape, so one set of rules
+   covers both, unlike the checklist (whose two modes genuinely differ in
+   DOM shape — see "Editing mode: checklist", above).
+
+   The caret glyph is a `::before` pseudo-element living WITHIN the
+   summary's own reserved `padding-left` (`left: 0`, matching the
+   checkbox glyph's own convention below — see that section's comment on
+   why: `OxTogglePlugin.tsx`'s click-to-toggle hit-test reads this
+   pseudo's computed `width` and checks the click's x-position against
+   `[rect.left, rect.left + width]`, which only agrees with what's
+   actually rendered if the glyph starts flush at the element's own left
+   edge, not centered or offset). Rotates via a plain CSS transform keyed
+   off `.ox-toggle--collapsed` on the ANCESTOR `.ox-toggle` — collapsed
+   points right, expanded points down, the same convention Notion and
+   most other collapsible-block UIs use.
+
+   Collapsing hides body content two different ways depending on which
+   rendering path produced the DOM: Editing mode's live Lexical tree MUST
+   keep the summary and every body node as flat, direct siblings of
+   `.ox-toggle` (Lexical's own children reconciliation requires this —
+   see `OxToggleNode.ts`), so collapsing there hides every sibling after
+   the first via `:not(:first-child)`. The static/Interacting renderer has
+   no such constraint and wraps body content in its own `.ox-toggle-body`
+   div instead (simpler to conditionally render/hide) — one rule below
+   covers both shapes. */
+
+.ox-toggle-summary {
+  position: relative;
+  font-weight: 700;
+  line-height: var(--ox-grid);
+  cursor: default;
+  /* The static renderer's `.ox-toggle-summary` IS a real `<summary>`
+     element (see `OxRenderer.tsx`'s `<details>`/`<summary>` toggle) —
+     browsers give that a native disclosure marker by default (Chrome/
+     Safari via `::-webkit-details-marker`, Firefox via `::marker`), which
+     would otherwise show up ALONGSIDE our own custom `::before` caret
+     below. Editing mode's `.ox-toggle-summary` is a plain `<div>`, so
+     these are harmless no-ops there. */
+  list-style: none;
+}
+.ox-toggle-summary::-webkit-details-marker {
+  display: none;
+}
+.ox-toggle-summary::marker {
+  content: none;
+}
+/* The caret lives IN THE GUTTER (a negative `left` offset, same
+   convention as the `#`/`##`/`###`/`>` markers above), NOT in reserved
+   inline padding the way the checkbox glyph is — the title text itself
+   stays flush with the rest of the document's column, matching how a
+   Card's own title has no icon marker pushing its text sideways either.
+   `OxTogglePlugin.tsx`'s click-to-toggle hit-test reads this pseudo's
+   OWN computed `left`/`width` directly rather than assuming a fixed
+   offset, so this can move without needing a matching JS change. */
+.ox-toggle-summary::before {
+  content: "";
+  position: absolute;
+  left: -38px;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translateY(-50%) rotate(90deg);
+  transition: transform 0.12s ease-out;
+  background-color: var(--ox-color-accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l8 7-8 7z'/%3E%3C/svg%3E") center / 14px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l8 7-8 7z'/%3E%3C/svg%3E") center / 14px no-repeat;
+  cursor: pointer;
+}
+.ox-toggle--collapsed > .ox-toggle-summary::before {
+  transform: translateY(-50%) rotate(0deg);
+}
+.ox-toggle-body {
+  padding-left: var(--ox-grid);
+}
+.ox-toggle--collapsed > :not(:first-child),
+.ox-toggle--collapsed > .ox-toggle-body {
+  display: none;
+}
+/* Editing mode's body children are flat siblings of the summary (see this
+   section's header) — indent them to match the static renderer's
+   `.ox-toggle-body` wrapper, and give the FIRST of them (right after the
+   summary) no extra top margin of its own, matching how a heading's
+   first following paragraph doesn't either. */
+.ox-toggle > *:not(.ox-toggle-summary) {
+  padding-left: var(--ox-grid);
+}
+
+/* ── Grid layout (`:::grid{columns="N"}` / `::col`) ─────────────────────── */
+/* A basic side-by-side layout, built the same way `:::toggle` is: a
+   first-class, always-available built-in, not a caller-registered
+   directive — see `OxRenderer.tsx`'s `renderDirective` for the markdown
+   shape and cell-splitting logic.
+
+   STATIC/Interacting-mode ONLY — there is deliberately no Editing-mode
+   rendering for this (see that same comment in `OxRenderer.tsx`). This is
+   a fine place for that limitation to live: a grid's whole POINT is a
+   passive, read-only layout (image galleries, side-by-side comparisons),
+   so "can't type inside it" was never the goal the way it was for
+   `::file`'s caption or `::card`'s content. */
+.ox-grid-directive {
+  display: grid;
+  grid-template-columns: repeat(var(--ox-grid-columns, 2), 1fr);
+  gap: var(--ox-grid);
+}
+
+/* Each cell keeps its OWN normal block rhythm (`renderBlockNodes`, same as
+   the top-level document) — a cell with several paragraphs/a heading still
+   reads top-to-bottom exactly like ordinary prose, just narrower. */
+.ox-grid-cell > *:not(:first-child) {
+  margin-top: var(--ox-grid);
+}
+
+/* Below the same breakpoint every other OxMarkdown mobile treatment uses
+   (`OxPopover`, the `@`-mention menu) — a grid narrow enough to need a
+   phone screen at all reads better as stacked single-column content than
+   squeezed side-by-side columns. */
+@media (max-width: 640px) {
+  .ox-grid-directive {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Gallery (`:::gallery{max-columns="N"}`) ─────────────────────── */
+/* A basic photo grid, same built-in category as `:::grid` above — see
+   `OxRenderer.tsx`'s `renderDirective` for the markdown shape (plain
+   `![alt](url)` images as children, no new per-photo syntax) and the
+   column-count rules (1 photo → 1 column, 2–6 → 2, 7+ → 3, capped by
+   `max-columns`, itself capped at 3 — see `GALLERY_COLUMN_CAP`).
+
+   STATIC/Interacting-mode ONLY, same deliberate limitation as `:::grid`
+   (see that section's own comment) — Editing mode shows the generic
+   "Unknown block" placeholder instead. */
+.ox-gallery-directive {
+  display: grid;
+  grid-template-columns: repeat(var(--ox-gallery-columns, 3), 1fr);
+  gap: var(--ox-grid);
+}
+
+.ox-gallery-item {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ox-gallery-item img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--ox-color-code-bg);
+  border: 1px solid var(--ox-color-border);
+}
+
+.ox-gallery-item figcaption {
+  font-size: 0.85rem;
+  color: var(--ox-color-subtle);
+  line-height: 1.3;
+}
+
+/* Same breakpoint every other OxMarkdown mobile treatment uses
+   (`OxPopover`, the `@`-mention menu, `.ox-grid-directive`) — collapses to
+   a single column rather than squeezing photos too small to see clearly. */
+@media (max-width: 640px) {
+  .ox-gallery-directive {
+    grid-template-columns: 1fr;
+  }
+}

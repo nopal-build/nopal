@@ -5,8 +5,8 @@ import { Breadcrumb } from "../components/Breadcrumb";
 import { FramesVisualPreview } from "../features/ViewFinder/FramesVisualPreview";
 import { NumberInput } from "../components/NumberInput";
 import { useFrames, formatVolume, formatWeight } from "../hooks/useFrames";
-import type { MetaFunction } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import type { MetaFunction } from "react-router";
+import { Link } from "react-router";
 
 export const meta: MetaFunction = () => [
   { title: "Volume Calculator by Frames | Nopal Tools" },
@@ -198,7 +198,7 @@ export default function FramesVolumeCalc() {
             </div>
           </div>
 
-          {/* Timeline Frames List */}
+          {/* Frames List */}
           <div className="relative mb-6 pl-8">
             {/* Vertical line — from center of first dot to center of last dot */}
             {frames.length > 1 && (

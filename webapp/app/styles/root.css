@@ -1,38 +1,134 @@
+html {
+  overflow-y: scroll;
+}
+
+/* ── Palette (Tier 1) ─────────────────────────────────────────────────────
+   Raw color values, grouped into nature-themed families (on brand for a
+   company named after the prickly pear cactus) on a 100–900 scale,
+   populated lazily — only the rungs an existing color actually needs
+   exist today; the rest are free to add later without a naming debate.
+   Literal color names (`--purple`, `--green`, …) are kept as plain
+   aliases right below: faster to say/remember than "plum-700", and
+   nothing already using them needs to change. Prefer the semantic
+   tokens (Tier 2, further down) in new component code — reach for a
+   palette/literal name directly only when a semantic role doesn't exist
+   yet. See the `stamps` package for the typed JS equivalents of all of
+   this (`palette`, `colors`, `semanticColors` in `tokens.ts`). */
 :root {
-  /* TODO: At some point create a more offical color spread, e.g. purple-100 to purple-900 */
+  /* Plum (brand primary / purple) */
+  --plum-200: #c8b8ce;
+  --plum-300: #7f5b8b;
+  --plum-400: #817186;
+  --plum-700: #3f2b46;
+
+  /* Cactus (green) */
+  --cactus-300: #86cb97;
+  --cactus-500: #5da06d;
+
+  /* Clay (red / terracotta) */
+  --clay-300: #f6c8c3;
+  --clay-500: #a63b31;
+
+  /* Dune (yellow) */
+  --dune-300: #fcf0c4;
+  --dune-500: #ffeaa4;
+
+  /* Bloom (pink — cactus flower) */
+  --bloom-500: #d3a0e5;
+
+  /* Moonlight (pale accent blue/lavender) */
+  --moonlight-500: #c4c6fc;
+
+  /* Surface (neutral scene backdrop) — day is the warm, sunlit scene;
+     night is the same scene after dark. Was farground/midground/
+     foreground + dark-farground/dark-midground/dark-foreground. */
+  --surface-day-100: #fff9f1;
+  --surface-day-300: #ede4da;
+  --surface-day-500: #e5d6c5;
+  --surface-night-100: #494a72;
+  --surface-night-300: #6d6e99;
+  --surface-night-500: #8d8eb4;
+
   --white: #fff;
-  --purple: #3f2b46;
-  --purple-light: #7f5b8b;
-  --pink: #d3a0e5;
-  --yellow: #ffeaa4;
-  --yellow-light: #fcf0c4;
-  --green: #5da06d;
-  --green-light: #86cb97;
-  --red: #a63b31;
-  --red-light: #f6c8c3;
 
-  --moon: #c4c6fc;
+  /* ── Literal aliases ──────────────────────────────────────────────────
+     Same values as specific palette rungs above — kept so "purple"/
+     "green"/etc. keep working everywhere they're already used. */
+  --purple: var(--plum-700);
+  --purple-light: var(--plum-300);
+  --pink: var(--bloom-500);
+  --yellow: var(--dune-500);
+  --yellow-light: var(--dune-300);
+  --green: var(--cactus-500);
+  --green-light: var(--cactus-300);
+  --red: var(--clay-500);
+  --red-light: var(--clay-300);
+  --moon: var(--moonlight-500);
 
-  --farground: #fff9f1;
-  --midground: #ede4da;
-  --foreground: #e5d6c5;
+  --farground: var(--surface-day-100);
+  --midground: var(--surface-day-300);
+  --foreground: var(--surface-day-500);
+  --dark-farground: var(--surface-night-100);
+  --dark-midground: var(--surface-night-300);
+  --dark-foreground: var(--surface-night-500);
 
-  --dark-farground: #494a72;
-  --dark-midground: #6d6e99;
-  --dark-foreground: #8d8eb4;
+  --text-subtle: var(--plum-400);
+  --text-subtle-dark: var(--plum-200);
 
-  --text-subtle: #817186;
-  --text-subtle-dark: #c8b8ce;
+  /* ── Semantic tokens (Tier 2) ─────────────────────────────────────────
+     The names components should actually reach for. Each one already
+     resolves correctly for the current color scheme (see the dark-mode
+     override right below), so consumers never need their own
+     `@media (prefers-color-scheme: dark)` block just to pick the right
+     color. Add more of these as per-component `@media` overrides get
+     folded in over time — don't add a new one-off `@media` block to a
+     component when a semantic token could exist here instead. */
+  --color-text-primary: var(--plum-700);
+  --color-text-brand: var(--plum-300);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-danger: var(--clay-500);
+  --color-surface-page: var(--white);
+  --color-surface-card: var(--surface-day-100);
+  --color-surface-inset: var(--surface-day-300);
+  --color-surface-border: var(--surface-day-500);
+
+  /* Form fields deliberately don't follow the day/night surface swap
+     above — inputs keep an "ink on paper" look (dark text/border on a
+     pale background) in BOTH schemes rather than inverting to a dark
+     field on a dark page, which is why `field-text` doesn't change
+     between the two blocks below. */
+  --color-field-bg: var(--white);
+  --color-field-border: var(--surface-night-500);
+  --color-field-text: var(--surface-night-100);
+
+  /* The active nav-link highlight. Text color is intentionally NOT part
+     of this token — it stays literal `--purple` in both schemes (see
+     `navLink.css.ts`), since the highlight itself is already dark (day)
+     or solid white (night), so dark purple text stays readable against
+     it either way. */
+  --color-nav-active-bg: var(--surface-day-500);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-text-primary: var(--white);
+    --color-text-brand: var(--moon);
+    --color-text-subtle: var(--text-subtle-dark);
+    --color-text-danger: var(--clay-300);
+    --color-surface-page: var(--purple);
+    --color-surface-card: var(--surface-night-100);
+    --color-surface-inset: var(--surface-night-300);
+    --color-surface-border: var(--surface-night-500);
+    --color-field-bg: var(--surface-day-100);
+    --color-field-border: var(--surface-day-500);
+    --color-nav-active-bg: var(--white);
+  }
 }
 
 body {
-  background-color: white;
-  color: var(--purple);
+  background-color: var(--color-surface-page);
+  color: var(--color-text-primary);
   min-height: 100vh;
-  @media (prefers-color-scheme: dark) {
-    background-color: var(--purple);
-    color: white;
-  }
 }
 
 .page-wrapper {
@@ -54,20 +150,12 @@ body {
   z-index: 2;
 }
 
-/* Link */
-.link {
-  color: var(--green);
-  &:hover {
-    text-decoration: underline;
-  }
-  @media (prefers-color-scheme: dark) {
-    color: var(--green-light);
-  }
-}
+/* .link retired — fully migrated to packages/stamps/src/link.css.ts. See
+   the `link` export there instead of adding this class back here. */
 
 /* Buttons */
 .btn {
-  border-radius: 4px;
+  border-radius: 8px;
   display: inline-flex;
 }
 .btn-primary {
@@ -99,6 +187,7 @@ body {
   color: white;
 }
 
+
 .btn-yellow {
   @apply btn;
   background-color: var(--btn-color, var(--farground));
@@ -114,51 +203,104 @@ body {
 
 .btn-outline {
   border: 1px solid var(--midground);
+  /* Every call site was already adding 4px rounding (`rounded` /
+     inline borderRadius) — bake it in so forgetting it isn't possible. */
+  border-radius: 4px;
   @media (prefers-color-scheme: dark) {
     border-color: var(--dark-midground);
   }
 }
 
-.good-box-boarder {
-  border: 1px solid var(--foreground);
-  border-radius: 4px;
+/* Round icon-only button (see components/CircleButton.tsx) — transparent
+   by default, tinted background + purple text on hover/focus/active. The
+   hover background must come from a dedicated dark-mode pair here rather
+   than a bare `var(--foreground)` — that variable doesn't flip itself, so
+   pairing it with dark-mode text (which does flip) would wash out to
+   light-on-light. */
+/* .circle-btn/.circle-btn-green/.circle-btn-red moved to
+   packages/stamps/src/circleButton.css.ts (a vanilla-extract recipe) —
+   see the `CircleButton` component there instead of adding these classes
+   back here. */
+
+/* Badge variants moved to packages/stamps/src/badge.css.ts (a
+   vanilla-extract recipe) — see the `Badge` component there instead of
+   adding `.badge-*` classes back here. */
+
+/* The scrollable list area of a SearchCollection (and the profile page's
+   hand-rolled copy of that shell) — a "well" that matches the page
+   background (white light / --purple dark) so rows inside can be plain
+   `Surface` cards: their backgrounds, text colors, and anything
+   scheme-aware inside them (MoreMenu, subtle-text, …) flip normally.
+   Top radius is 1px inside Surface's 8px so the well doesn't poke
+   out of the shell's border. */
+.collection-well {
+  background: white;
+  border-radius: 7px 7px 0 0;
   @media (prefers-color-scheme: dark) {
-    border-color: var(--dark-foreground);
+    background: var(--purple);
   }
 }
 
-/* Good Box */
-.good-box {
-  border: 1px solid var(--foreground);
-  background: var(--farground);
+/* Menu item row inside a dropdown/action-menu panel (e.g. MoreMenu). Text
+   color is left to the caller (`purple-text`/`red-text` etc, which already
+   flip for dark mode) — this class only owns the hover background, which
+   needs its own dark-mode pair for the same reason `.circle-btn` does. */
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
   border-radius: 4px;
-  hr {
-    border-color: var(--foreground);
-    @media (prefers-color-scheme: dark) {
-    }
+  padding: 8px 10px;
+  transition: background 150ms;
+
+  &:hover:not(:disabled) {
+    background: var(--foreground);
   }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   @media (prefers-color-scheme: dark) {
-    border-color: var(--dark-foreground);
-    background: var(--dark-farground);
-    hr {
-      border-color: var(--dark-foreground);
+    &:hover:not(:disabled) {
+      background: var(--dark-foreground);
     }
   }
 }
 
-.good-box-hover:hover {
-  cursor: pointer;
-  border-color: var(--purple-light);
-  box-shadow: 0px 0px 8px rgba(0, 0, 0, 0.05);
-  .good-arrow svg path {
-    stroke: var(--green);
-  }
+/* Readonly "copy this command" inputs — a nested "well" look inside a
+   Surface, distinct from the box's own background. */
+.code-input {
+  background: var(--midground);
+  border: 1px solid var(--foreground);
+  border-radius: 6px;
+  color: var(--text-subtle);
   @media (prefers-color-scheme: dark) {
-    border-color: var(--pink);
-    .good-arrow svg path {
-      stroke: var(--green-light);
-    }
+    background: var(--dark-midground);
+    border-color: var(--dark-foreground);
+    color: var(--text-subtle-dark);
   }
+}
+
+/* Multi-line usage-snippet blocks (see the styles guide) — accent purple in
+   light mode; plain white in dark, where --purple-light is too dim against a
+   dark Surface. */
+.code-block {
+  color: var(--purple-light);
+  @media (prefers-color-scheme: dark) {
+    color: white;
+  }
+}
+
+/* .good-box/.good-box-hover/.good-box-boarder retired — fully migrated
+   to packages/stamps/src/surface.css.ts (`surfaceBase`, `surfaceHoverable`,
+   `surfaceBorderOnly`) and the `Surface` component built on them. Don't
+   add these classes back — reach for `stamps/Surface` instead. */
+
+.good-white-box {
+  border: 1px solid var(--foreground);
+  background: var(--white);
+  border-radius: 8px;
 }
 
 /* Five Factors */
@@ -222,7 +364,7 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 16px 8px;
-    border-radius: 4px;
+    border-radius: 8px;
     cursor: pointer;
     z-index: 1;
 
@@ -246,7 +388,7 @@ body {
     visibility: hidden;
     background: var(--purple-light);
     z-index: 2;
-    border-radius: 4px;
+    border-radius: 8px;
   }
 
   .dropdown-content li {
@@ -572,10 +714,12 @@ body {
 
 /* Text Colors */
 .purple-light-text {
-  color: var(--purple-light);
-  @media (prefers-color-scheme: dark) {
-    color: var(--moon);
-  }
+  /* Semantic token already resolves per-scheme — see :root above. */
+  color: var(--color-text-brand);
+}
+
+.purple-text {
+  color: var(--color-text-primary);
 }
 
 .green-text {
@@ -604,6 +748,9 @@ body {
     color: var(--red);
   }
 }
+.subtle-text {
+  color: var(--color-text-subtle);
+}
 
 /* Lists */
 .dash-list {
@@ -617,19 +764,21 @@ body {
 /* Scenes */
 .scene1 {
   min-height: 450px;
-  background: url("/app/images/home/ocotillo.svg") bottom left 30px no-repeat,
+  background:
+    url("/app/images/home/ocotillo.svg") bottom left 30px no-repeat,
     url("/app/images/home/pricklyPear.svg") bottom 10px left no-repeat,
     url("/app/images/home/home.svg") bottom right -20px no-repeat,
     url("/app/images/home/ground.svg") bottom -1px left / 50% no-repeat,
     url("/app/images/home/backRocks.svg") bottom -25px right 180px no-repeat;
 
   @media (prefers-color-scheme: dark) {
-    background: url("/app/images/home/ocotillo-dark.svg") bottom left 30px
-        no-repeat,
+    background:
+      url("/app/images/home/ocotillo-dark.svg") bottom left 30px no-repeat,
       url("/app/images/home/pricklyPear-dark.svg") bottom 10px left no-repeat,
       url("/app/images/home/home-dark.svg") bottom right -20px no-repeat,
       url("/app/images/home/ground-dark.svg") bottom left / 50% no-repeat,
-      url("/app/images/home/backRocks-dark.svg") bottom -25px right 180px no-repeat;
+      url("/app/images/home/backRocks-dark.svg") bottom -25px right 180px
+        no-repeat;
   }
 }
 
@@ -654,16 +803,17 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  background: url("/app/images/home/frontRocks.svg") bottom left / auto 100%
-      no-repeat,
+  background:
+    url("/app/images/home/frontRocks.svg") bottom left / auto 100% no-repeat,
     url("/app/images/home/pricklyPearFruit.svg") bottom left / auto 85%
       no-repeat,
     url("/app/images/home/homeShadow.svg") top 40px right 146px / auto 100%
       no-repeat;
 
   @media (prefers-color-scheme: dark) {
-    background: url("/app/images/home/frontRocks-dark.svg") bottom left / auto
-        100% no-repeat,
+    background:
+      url("/app/images/home/frontRocks-dark.svg") bottom left / auto 100%
+        no-repeat,
       url("/app/images/home/pricklyPearFruit-dark.svg") bottom left / auto 85%
         no-repeat,
       url("/app/images/home/homeShadow-dark.svg") top 40px right 146px / auto
@@ -929,6 +1079,13 @@ body {
   }
 }
 
+/* === App Layout === */
+/* .app-layout, .app-nav-active-bg, .app-topbar (+ its descendant
+   classes), .app-topnav (+ its descendant classes), and .app-main are all
+   retired — fully migrated to packages/stamps/src/appLayoutShell.css.ts
+   and navLink.css.ts. See AppLayout.tsx (webapp/app/components) instead
+   of adding these classes back here. */
+
 /* Background Classes */
 .midground-bg {
   background-color: var(--midground);
@@ -943,3 +1100,6 @@ body {
     border-color: var(--dark-midground);
   }
 }
+
+/* .input-component moved to packages/stamps/src/input.css.ts (a
+   vanilla-extract recipe) — see the `Input` component there. */

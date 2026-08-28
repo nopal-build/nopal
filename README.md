@@ -6,18 +6,14 @@ This repo houses all our software that helps us communicate, learn and share kno
 
 ## Tech Stack
 Remix for our front-end.
-Rust + SurrealDB for our logic and data.
 
 ### Helpful commands:
 
 ```
-# Install Webapp Dependencies
-$ cd ./webapp
-$ npm install
+# Run Dev Environment (Makefile)
+$ make dev
 
-# Run webapp:
-$ cd ./webapp
-$ npm run dev
+# Older - - -
 
 # Nopal CLI
 $ cd ./crates

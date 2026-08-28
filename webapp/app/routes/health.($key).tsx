@@ -1,7 +1,7 @@
-import type { Collection } from "../data/generic.server";
+import type { Collection } from "robustness-core/data/generic.server";
 import type { MaterialRecord } from "../data/notion/types";
-import { useLoaderData, useLocation, useNavigate } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { useLoaderData, useLocation, useNavigate } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { GbScore } from "../components/GbScore";
 import { NotionText } from "../components/NotionText";
 import { GoodArrow } from "../components/GoodAssets";
@@ -9,6 +9,7 @@ import { isPublished } from "../data/materials";
 import { getCacheControlHeader } from "../util/getCacheControlHeader.server";
 import { getAllMaterials } from "../data/notion/materials.server";
 import { getAllAssemblies } from "../data/notion/assemblies.server";
+import { surfaceBase, surfaceHoverable } from "stamps/surface.css";
 
 export function headers() {
   return {
@@ -72,7 +73,7 @@ export function HealthItem({
       onClick={() => {
         navigation(`/${type}/${slug}`, { state: { returnUrl } });
       }}
-      className="good-box good-box-hover p-4 flex flex-col justify-between"
+      className={`${surfaceBase} ${surfaceHoverable} p-4 flex flex-col justify-between`}
     >
       <div>
         <div className="mt-8 gap-2 flex justify-center items-end">

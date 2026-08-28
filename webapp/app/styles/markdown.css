@@ -48,6 +48,37 @@
   img {
     @apply pb-4;
   }
+
+  /* ── Image grid layout ─────────────────────────────────────────────────── *
+   * Paragraphs that contain only <img> tags are turned into a flex row:      *
+   *   • 1 image  → full width, natural aspect ratio                          *
+   *   • 2+ images → equal columns, square-cropped for a clean grid           */
+  p:has(> img) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-start;
+    padding-bottom: 8px;
+  }
+
+  p:has(> img) > img {
+    flex: 1 1 180px;
+    min-width: 0;
+    border-radius: 8px;
+    padding-bottom: 0;
+  }
+
+  /* Single image: fill the row naturally */
+  p:has(> img:only-child) > img {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Multiple images: square crop so the grid looks tidy */
+  p:has(> img:not(:only-child)) > img {
+    aspect-ratio: 1;
+    object-fit: cover;
+  }
   b,
   strong {
     @apply font-bold;

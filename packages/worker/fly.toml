@@ -1,0 +1,34 @@
+# fly.toml for PhyLog's queue worker — its own Fly app (see the `phylog`
+# skill's "Scaling & Process Isolation" section for why this isn't a
+# process group under the webapp app: it now has a genuinely different,
+# much smaller dependency graph, and scaling/deploying it independently
+# is the whole point).
+#
+# TODO before first deploy: this app doesn't exist yet. Create it first
+# (from the repo root):
+#
+#   fly apps create <a-unique-name> --org <your-org>
+#
+# then update `app` below to match, and set its secrets (same DATABASE_*/
+# S3_*/ANTHROPIC_API_KEY values as the webapp app, plus REDIS_URL once a
+# Redis instance exists — see the `phylog` skill):
+#
+#   fly secrets set -a <a-unique-name> DATABASE_URL=... REDIS_URL=... ...
+#
+# Build context is the REPO ROOT — deploy from the repo root:
+#
+#   fly deploy . --config packages/worker/fly.toml --dockerfile packages/worker/Dockerfile
+#
+# (`make deploy` does this for you once the app exists.)
+
+app = 'nopal-phylog-worker'
+primary_region = 'lax'
+
+[build]
+
+# No [http_service] — this app never serves HTTP, so it gets no public
+# listener at all. It just needs to stay running to drain the queue.
+[[vm]]
+memory = '1gb'
+cpu_kind = 'shared'
+cpus = 1
