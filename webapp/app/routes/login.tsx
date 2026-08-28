@@ -140,7 +140,12 @@ export default function Login() {
               required
               placeholder="you@nature.yeah"
             />
-            {actionData?.error && <div className="red-text">{authError}</div>}
+            {actionData?.error && (
+              <div className="red-text">{actionData.error}</div>
+            )}
+            {!actionData?.error && authError && (
+              <div className="red-text">{authError}</div>
+            )}
             <div className={sprinkles({ textAlign: "right" })}>
               <button className={button({ variant: "secondary" })} type="submit">
                 Send Code
