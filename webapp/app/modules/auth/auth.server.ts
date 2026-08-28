@@ -57,7 +57,15 @@ export const authenticator = new Authenticator<Human>();
 authenticator.use(
   new TOTPStrategy(
     {
-      secret: process.env.ENCRYPTION_SECRET || "NOT_A_STRONG_SECRET",
+      // remix-auth-totp encrypts the TOTP/magic-link payload as a JWE
+      // (AES-256-GCM), which strictly requires a 64-character hex key --
+      // unlike SESSION_SECRET below (any string works for cookie signing),
+      // an arbitrary fallback string here made EVERY login attempt fail
+      // with "Secret must be a string with 64 hex characters." for anyone
+      // without their own ENCRYPTION_SECRET set. This fallback is valid hex
+      // so local dev works out of the box; real deployments always set a
+      // real ENCRYPTION_SECRET (Fly secret), which takes precedence.
+      secret: process.env.ENCRYPTION_SECRET || "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       magicLinkPath: "/magic-link",
       emailSentRedirect: "/verify",
       successRedirect: "/fruits",
