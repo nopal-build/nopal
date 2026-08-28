@@ -34,7 +34,12 @@ services:
   # little redundant disk use locally, in exchange for zero cross-container
   # install coordination.
   webapp:
-    image: node:22.23.2-slim
+    # Dockerfile.dev (repo root) — not node:22.23.2-slim directly — so
+    # build-essential/python are present before `pnpm install` runs; see
+    # that file's own comment for why.
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
     working_dir: /app
     ports:
       - "3000:3000"
@@ -64,7 +69,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
-    command: sh -c "corepack enable pnpm && pnpm install --store-dir /pnpm-store && pnpm --filter remix run dev"
+    command: sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter remix run dev"
     depends_on:
       db:
         condition: service_healthy
@@ -93,7 +98,10 @@ services:
   # SAME reason the webapp's own dev server already hot-reloads those
   # same files) and respawns the whole process on any change.
   worker:
-    image: node:22.23.2-slim
+    # Same Dockerfile.dev as `webapp` — see the comment there.
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
     working_dir: /app
     restart: unless-stopped
     volumes:
@@ -118,7 +126,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
-    command: sh -c "corepack enable pnpm && pnpm install --store-dir /pnpm-store && pnpm --filter worker run dev"
+    command: sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter worker run dev"
     depends_on:
       db:
         condition: service_healthy

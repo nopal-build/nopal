@@ -21,8 +21,10 @@ deploy:
 	fly deploy . --config packages/worker/fly.toml --dockerfile packages/worker/Dockerfile
 
 ## Start the database and webapp together, then seed the database.
+## --build keeps the webapp/worker dev image (Dockerfile.dev) in sync
+## whenever it changes — a no-op, cache-hit rebuild otherwise.
 dev:
-	docker compose up -d --wait
+	docker compose up -d --wait --build
 
 	@echo ""
 	@echo "  ✓ SurrealDB  →  http://localhost:8080"

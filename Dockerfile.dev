@@ -1,0 +1,27 @@
+# syntax = docker/dockerfile:1
+#
+# Local dev image for the `webapp`/`worker` services in docker-compose.yml.
+# NOT used for production — see webapp/Dockerfile and
+# packages/worker/Dockerfile for those multi-stage builds.
+#
+# node:${NODE_VERSION}-slim doesn't ship Python or a C/C++ toolchain, which
+# some native optional deps (e.g. msgpackr-extract, pulled in transitively
+# via bullmq's msgpackr dependency) need in order to compile from source
+# when no prebuilt binary is available for the platform. The production
+# Dockerfiles already install these; this mirrors that install step so
+# local dev doesn't hit a "node-gyp ... Python not found" error during
+# `pnpm install`.
+#
+# No source is COPY'd here — docker-compose.yml bind-mounts the whole repo
+# into /app at runtime, and `pnpm install` itself runs as part of each
+# service's `command:`, same as before this file existed.
+ARG NODE_VERSION=22.23.2
+FROM node:${NODE_VERSION}-slim
+
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y build-essential node-gyp pkg-config python-is-python3 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable pnpm
+
+WORKDIR /app
