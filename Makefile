@@ -36,13 +36,20 @@ start: dev
 
 ## Seed the running database with default namespaces, databases, and users.
 ## Depends on migrate so the tables exist before data is inserted.
+## Runs seed:data INSIDE the webapp container (not on the host) — the host
+## never has webapp's node_modules installed (docker-compose keeps them in
+## an isolated named volume), so a host-side `npm run seed:data` fails with
+## "command not found" (Error 127) even when Docker itself is fine.
 seed: migrate
 	cat db/seed.surql | docker compose exec -T db /surreal sql \
 		--endpoint http://localhost:8080 \
 		--user $(SURREAL_USER) \
 		--pass $(SURREAL_PASS) \
 		--pretty
-	cd webapp && DATABASE_USERNAME=$(SURREAL_USER) DATABASE_PASSWORD=$(SURREAL_PASS) npm run seed:data
+	docker compose exec -T \
+		-e DATABASE_USERNAME=$(SURREAL_USER) -e DATABASE_PASSWORD=$(SURREAL_PASS) \
+		--workdir /app/webapp \
+		webapp npm run seed:data
 	@echo ""
 	@echo "  DB users:"
 	@echo "    root   user: $$SURREAL_USER        pass: $$SURREAL_PASS"
