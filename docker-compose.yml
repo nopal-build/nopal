@@ -70,6 +70,19 @@ services:
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
     command: sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter remix run dev"
+    # Hits the real dev server, so `docker compose up --wait` (used by
+    # `make dev`) actually blocks until `pnpm install` AND `server.js` are
+    # both done, not just until the container process has started. Without
+    # this, `make reset`'s `migrate`/`seed` steps could exec into webapp
+    # before its node_modules were ready (e.g. "vite-node: not found",
+    # Error 127) — a real, hit-in-practice race, not hypothetical.
+    # generous retries*interval to cover a cold, from-scratch pnpm install.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
     depends_on:
       db:
         condition: service_healthy
@@ -127,6 +140,15 @@ services:
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
     command: sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter worker run dev"
+    # worker has no HTTP server to curl, so this checks for vite-node's
+    # bin instead — a reliable stand-in for "pnpm install finished" (the
+    # same install step webapp's healthcheck is really waiting out too).
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/packages/worker/node_modules/.bin/vite-node || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
     depends_on:
       db:
         condition: service_healthy

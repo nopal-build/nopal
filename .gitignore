@@ -20,6 +20,11 @@ remix/build
 build/
 .pnpm-store/
 
+# React Router's generated type-checking cache (`react-router typegen`,
+# run automatically by dev/build/typecheck) — entirely derived from
+# app/routes/, never hand-edited, same category as .next/.svelte-kit/.
+webapp/.react-router/
+
 # Playwright screenshots from webapp/scripts/visual-check.ts
 webapp/tmp/
 
