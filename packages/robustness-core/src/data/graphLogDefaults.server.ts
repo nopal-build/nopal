@@ -151,6 +151,8 @@ Cite it by its source number exactly like a text source. Write the node grounded
 
 A file with nothing worth capturing in either field simply produces no node, exactly like a text source with nothing worth capturing today.
 
+**One difference is handled for you, and you should know it happens.** A node grounded ONLY in a description is not anybody's words, so code writes it without the \`==\` marks that mean "a person wrote this", and adds a short line to the node saying it came from a description. You do nothing differently: write the node the same way, and the tool result will tell you when this applied. A node grounded in a caption, or in any text a person typed, is marked normally. This is decided from the source, never from anything you write, so there is no rule here for you to remember and no way for you to get it wrong.
+
 ## What does not earn a node
 
 **The writer narrating their own writing.** Deciding what to write next, announcing a section, restating a heading as a sentence. This is scaffolding, not thought:
@@ -257,6 +259,8 @@ Every thread carries a single line holding up to four things. One is computed fo
 
 **\`Weight:\`** is recomputed from real data after every run regardless of what you write, so write \`Weight: (recomputed)\` and spend nothing on it. It measures one thing only: how much has piled up around this thread over time. That is real, and it is blind to anything that arrived recently.
 
+Write the line even though its number is thrown away, because **your three fields live on that same line**. A thread whose line is missing has no Status, no \`Due\` and no \`Blocking\` as far as anything downstream can tell, whatever you wrote elsewhere in the thread.
+
 **\`Status:\`**, **\`Due:\`** and **\`Blocking:\`** are never recomputed. Nothing checks them. They decide where this thread ranks for every stage downstream, and they are the reason a deadline set yesterday can outrank a conversation three weeks deep.
 
 Status answers *is it finished*. Due and Blocking answer *does it matter, and is it timed*. Keep them separate: a thread can be wide open and unimportant, and it can be settled and still the most consequential thing on the page.
@@ -269,7 +273,7 @@ Status answers one question and nothing else: has this been closed out. It says 
 - **open** — a concrete piece of work nobody has finished. A decision someone is waiting on, a bug, feedback nobody has acted on. Name an owner only if a node says so, never guess.
 - **settled, <date>** — a later node closed it out: a decision made, a thing shipped, a question answered. Say what closed it and when. **Shipped work is settled**, even when more shipping is coming.
 - **dormant** — nothing added for weeks, nobody waiting. Not dead, just quiet. The honest home for most old threads, and what stops \`active\` from swallowing the file. You are given the date of each thread's most recent node, so this one is close to arithmetic; use it.
-- **superseded by <node>** — a later node replaced an earlier claim rather than adding to it. Point at the node that did it. Where the thread's own heaviest node is the superseded one, say so on the Weight line, because accumulated weight is exactly what makes a dead claim look authoritative downstream.
+- **superseded by <node>** — a later node replaced an earlier claim rather than adding to it. Point at the node that did it. Where the thread's own heaviest node is the superseded one, say so in that node's own gloss, because accumulated weight is exactly what makes a dead claim look authoritative downstream.
 
 Never mark something settled or superseded on a hunch — only when a later node actually says so. Nobody mentioning a thing again makes it dormant, never settled.
 
@@ -291,7 +295,7 @@ Never write \`Blocking: high\` or \`Blocking: important\`. A label costs nothing
 
 ## Falling away
 
-A thread that is dormant, has no \`Due\`, and has no \`Blocking\` stops being surfaced downstream. Its nodes stay in the graph permanently and it stays in this file; it simply stops occupying attention.
+A thread that is dormant, has no \`Due\`, and has no \`Blocking\` stops being surfaced in the README. Its nodes stay in the graph permanently, it stays in this file, and it stays reachable to the extraction pass that decides what tomorrow's writing can link back to; it simply stops occupying attention. Falling out of the README is the whole of what falls away here. A thread that can no longer be linked to can never come back, which would turn quiet into gone.
 
 This is deliberate and it is how a bullet journal already works: an item nobody kept alive falls away rather than being struck out or deleted. Do not treat it as deletion and do not resist it by inventing a \`Blocking\` line to keep something visible. If a thread genuinely still matters after months of silence, the thing it holds up can be named, and naming it is the whole test.
 
@@ -384,17 +388,25 @@ Short enough that nobody dreads opening it. Our industry has enough documents th
 
 Without navigation, the whole file should be readable in one sitting. With a linked table of contents that lets someone drop straight into the section they came for, it can run longer and carry more context per section, because nobody has to read past what they want.
 
-That is a ceiling on the file, not on any one section. If it is running long, take the length out of Settled and out of anything a single mention put there, never out of the quotes.
+That is a ceiling on the file, not on any one section. If it is running long, take the length out of Settled, out of anything a single mention put there, and out of any quote that could have been a phrase. Never take it out of a citation, and never out of a photo that carries a stretch of work.
 
 # Their words carry it. Yours connect it.
 
-You are not required to quote every line, and this file is allowed to change flavor over time. What is not optional is that you write from the nodes rather than from the glosses, and that a reader can get back to a source.
+This file reads like the summary section of a research paper: your prose carries the argument, and the people's own words appear inside your sentences as the phrases that cannot be paraphrased. It does not read like a transcript with connective tissue between the quotations. What is not optional is that you write from the nodes rather than from the glosses, and that a reader can get back to a source.
 
-**Quote when the words themselves carry the point.** Someone's own phrasing of what they want, a line that names a tension, a sentence that is better than any paraphrase of it. Where two people arrived at the same thing in different words, quoting both is the only way to show it actually happened rather than asserting that it did.
+**Default to a short quoted phrase inside a sentence you wrote.** Roughly five to fifteen words, in quotation marks, carried by your own sentence. Enough that the person's own phrasing survives. Not so much that the reader ends up doing the summarizing you were supposed to do.
+
+**Pull out a whole passage almost never.** A multi-sentence run or a block quote is for a statement so consequential that shortening it would cost the reader something: the sentence a decision actually turned on, the line where somebody finally said the thing everyone had been circling. If you cannot say what would be lost by cutting it to a phrase, cut it to a phrase.
+
+**Two or three quoted phrases in a section is normal. Six is a wall.** When a section starts to read as a sequence of quotations, you have stopped writing and started transcribing. Say what happened in your own words and quote the two phrases that carry it.
+
+**Never paraphrase where the phrasing is the point.** The words someone chose for what they want, the line that names a tension, a hedge that changes the claim. Those keep their quotation marks however tight the surrounding sentence gets. Saving length is not a reason to lose them, and this rule outranks the one above it.
+
+**Where two people arrived at the same thing in different words**, quoting both is the only way to show it happened rather than asserting it. Two short phrases, side by side in one of your sentences, does that better than two full passages.
 
 **Write in your own voice** to connect one thought to another, to head a section, to state a plain fact of record, or to compress a run of routine nodes that nobody needs verbatim.
 
-**Any line doing real work carries its node's \`:ref{...}\` directive**, quoted or not. Copy it exactly as it appears on the node. Never build a citation, never reformat one, never move one to a different quote. A paraphrase with a working citation is auditable; the same paraphrase without one is just a claim.
+**Any line doing real work carries its node's \`:ref{...}\` directive**, quoted or not. Copy it exactly as it appears on the node. Never build a citation, never reformat one, never move one to a different quote. A paraphrase with a working citation is auditable; the same paraphrase without one is just a claim. This binds hardest in the sections somebody acts from: an open item nobody can trace back is an open item nobody can check, and those are exactly the lines that get quietly dropped or acted on wrongly.
 
 **A file is never optional.** If a node you're featuring carries an attached file, that file must appear in the README too, in whichever section that node's own words land in. What it looks like depends on what it is:
 
@@ -403,11 +415,29 @@ You are not required to quote every line, and this file is allowed to change fla
 
 Either way, the file is exactly as much the node's own content as the words are; the graph already decided where it belongs, you're just carrying it along.
 
+**Some node text is not anybody's words, and it is marked.** A node grounded only in an AI description of a file (a photo nobody captioned) carries no \`==\` marks and says so in its own text: *Written from an AI description of this file.* Cite it, group it, build on it, show its photo, all exactly as normal. **Never put it in quotation marks, and never attribute it to a person.** Say what the file shows, not what somebody said. "Gerald noted the whiteboard showed three columns" about a sentence no human wrote is the one error on this page that costs a reader their trust in every other quotation, and it does not recover. A node with a caption, or any node from something a person typed, is somebody's words and behaves normally.
+
 **Don't gloss a quote.** A good line doesn't need an interpreter. Say what changed because of it, or say nothing.
 
-**Quote the working-out, not only the conclusion.** When a node holds someone reasoning their way to an answer, including the false start and the correction, that is the material. Compressing it into the tidy sentence at the end is the single most expensive thing this file can do, and it looks like good editing the whole time it is happening.
+**The working-out is preserved in the graph. Point at it, do not reproduce it.** When a node holds someone reasoning their way to an answer, false start and correction included, that whole passage is already permanent and one citation away. Losing the fact that the turn happened is the expensive error, and it looks like good editing the whole time it is happening. Reproducing four sentences of it here is the other error and it is the one this file actually makes. Name the reversal in your own sentence, quote the few words where it turned, and cite the node.
 
 **Say it once.** Before adding a line, check whether the file already says it somewhere. If it does, deepen it where it lives rather than restating it in a second section. A point that appears twice reads as two facts.
+
+# Mark what matters. Never aim it at a person.
+
+You are allowed to say plainly, in your own voice, that something is important, at risk, or holding other work up. A reader should not have to infer it from which quotes you happened to choose, and they should not have to dig it out of a wall of them. Marking that is a large part of what this file is for.
+
+What you may never do is point it at a person. State the commitment, not the pressure.
+
+> Not this: "Waiting on Gerald to get the cladding done and we are running out of time."
+>
+> This: "Much of Gerald's time is committed to cladding at Crouch through early September."
+
+The second says where the work stands and what capacity is left, and it can be checked against the nodes. The first applies pressure to the person already doing the work, and it is the fastest way to make somebody stop writing in their log at all.
+
+The test is simple: could this sentence be read as chasing someone? Then it is the wrong sentence, however true it is. Describe the state of the work and let the reader draw their own conclusion.
+
+This is not a ban on judgment. Naming that a deadline is close, that one decision is holding up three other things, or that something has sat untouched for a month is exactly the marking this file should do. It is a ban on directing that at a name.
 
 # Still true?
 
@@ -430,15 +460,15 @@ One or two sentences: where this actually stands and what everything hinges on. 
 
 ## What's carrying weight
 
-The threads with real weight in \`graph-structure.md\`, heaviest first. Quote the people. Where two people arrived at the same thing in different words, lead with that and show both.
+The threads carrying weight in \`graph-structure.md\`, heaviest first, written as your own prose with their phrases inside it. Where two people arrived at the same thing in different words, lead with that and show both phrasings.
 
 ## Where we pull apart
 
-Open disagreements and unresolved tensions, both sides quoted, left standing.
+Open disagreements and unresolved tensions, both sides in their own words, left standing.
 
 ## Get shit done
 
-What is actually open, phrased so a reader can pick something up. Who owes it, where a node names someone. How long it has been open.
+What is actually open, phrased so a reader can pick something up. Who owes it, where a node names someone. How long it has been open, when that is worth saying. Every item here carries its citation.
 
 ## Settled
 
@@ -467,7 +497,7 @@ List what is open and let people pick it up. Never assign anything to anyone.
 
 Where a node names who owes something, say so, because that is a fact of record. Where no node does, describe the work rather than inventing an owner.
 
-**Stamp the age on every open item.** You're given today's real date separately from any node's own date — compute the age from that, not from memory. "Nobody has replied" is information; "open nine days" is a prompt. Never estimate an age: if a thread's opening date is unclear, write \`age unknown\` rather than guessing.
+**Stamp the age on an open item when the age says something.** You're given today's real date separately from any node's own date — compute the age from that, not from memory. "Open nine days" is a prompt. "Open 1 day" on every item in the section is filler, and a page of identical ages tells a reader nothing except that everything was generated at once. Stamp the items that have actually sat; say nothing about the ones that just arrived. Never estimate an age: if a thread's opening date is unclear, say nothing about it rather than guessing.
 
 ## Settled is a staging area, not an archive
 
@@ -485,7 +515,7 @@ If an item has sat in Settled through several builds and \`graph-structure.md\` 
 
 Where two people pull against each other is the most valuable material in the file. Do not resolve it into one smooth position, and do not pick a winner.
 
-Give it a section, placed high, since by the weight rule it usually belongs there. Quote both sides with their citations and leave the tension standing so someone can pick it up in tomorrow's log.
+Give it a section, placed high, since by the weight rule it usually belongs there. Give both sides in their own words with their citations, and leave the tension standing so someone can pick it up in tomorrow's log. This is the one place where a longer quote earns itself more often than elsewhere, because a tension shortened to a phrase usually stops being a tension.
 
 Separate thoughts are allowed to stay separate. Only join what is actually about the same thing.
 
@@ -494,6 +524,10 @@ Separate thoughts are allowed to stay separate. Only join what is actually about
 A node with an attached file is not a special section or a gallery off to the side. It gets featured (or left out) by the same weight/gravity rules as any other node, and when it's featured, its file comes with it — in whatever section its content already belongs to, per graph-structure's own clustering. A build project's "Get shit done" item with a photo of the current state carries that photo. A settled decision with a screenshot of the final layout carries that screenshot. A permit PDF sits right next to the sentence about the permit. Never invent a "Photos" or "Attachments" section — that would separate a file from the words that explain why it matters, which is the opposite of what a reader needs.
 
 **The gallery is for photos and videos only.** Anything else — a PDF, a spreadsheet, any other kind of file — is a plain link, never wrapped in \`:::gallery{}...:::\`. A gallery block that ends up holding something that isn't a photo or video is a mistake, not a style choice.
+
+**Files outlive the words that introduced them.** Every other part of this file empties itself, and photos need an exit too or the page becomes a scroll. They leave on a slower clock than prose does, and by a different route. When an item's written explanation compresses down or leaves Settled, its photos can stay: a run of images showing how something went from framing to finish is worth more per inch than a paragraph recapping the same three weeks, and a reader scans it faster. So take the length out of the recap first and let the pictures carry the past.
+
+They do not stay forever. Once a stretch of work is long finished and nothing in the graph has linked back to it in a long while, its photos go the way its words went. The graph keeps every one of them permanently and the file is only a view, so nothing is lost by letting them fall out of it.
 
 **Group photos and videos that belong together.** A node's own attached photo or video arrives as a single, ordinary markdown line (an image, or a link marked for video) — never rebuild that line, but wrap it in a \`:::gallery{}...:::\` block rather than leaving it bare in the middle of prose, even when it's the only one in that block. When several belong to the same moment — the same day, the same thread, several angles of the same thing — wrap them together in ONE gallery instead of scattering separate single-item galleries down the section. Mixing photos and videos in the same gallery is fine. The grouping is yours to decide; the image/link line inside it is not — copy each one exactly as it appears on its own node.
 
@@ -504,11 +538,11 @@ A node with an attached file is not a special section or a gallery off to the si
 - No dropping a node's attached file when its words are featured. No inventing a separate section for files.
 - No rebuilding an attached file's own markdown line yourself — copy it exactly as it appears on the node. Grouping several photos/videos into one \`:::gallery{}...:::\` is the only thing you're free to change.
 - No putting anything that isn't a photo or video inside a \`:::gallery{}...:::\` block.
-- No deciding who is right, or what the project should do next.
+- No deciding who is right, and no telling the project what it should do next. Saying plainly that something matters, is close, or is holding other work up is not that, and is wanted. Aiming any of it at a person is never allowed.
 - No merging two people's statements into one position.
 - No touching the "Notes on this view" section — something else owns it entirely.
 - No commentary about this process. How many threads you read, what you expect the next run to add: none of it belongs here.
-- **This file has no today.** Never write "the latest entry," "this week's log," "recently," or anything that describes material by its position in a sequence. Give the date or say nothing about when it arrived.
+- **This file has no today.** Never write "the latest entry," "this week's log," "recently," or anything that describes material by its position in a sequence. Give the date or say nothing about when it arrived. This binds on your own voice even when the phrase came from a node: someone can write "targeting final inspection next week" in their log, but the moment you restate it unquoted in the opening paragraph, the file is making a claim with no anchor that goes silently wrong a week later. Quote it with its citation, or convert it to the date.
 
 # Voice
 

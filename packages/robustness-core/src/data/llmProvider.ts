@@ -40,15 +40,58 @@ export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "other";
 /** Token counts only — no dollar estimate here on purpose. Usage tracking
  * (`phylogMetrics.server.ts`) is deliberately tokens-only for now; a $
  * conversion can be layered on top later without touching this interface.
- * `cacheReadTokens`/`cacheWriteTokens` are here even though nothing uses
- * prompt caching yet, so turning it on later doesn't need an interface
- * change. */
+ * `cacheReadTokens`/`cacheWriteTokens` were added here before anything
+ * used prompt caching, so turning it on later wouldn't need an interface
+ * change. All three GraphLog agent loops now both request caching and
+ * accumulate these -- they're optional because a provider may not report
+ * them, NOT because they're unused. Anything that sums an `LlmUsage`
+ * needs to sum these two as well, or the cost estimate silently prices
+ * cached tokens at full rate. */
 export type LlmUsage = {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
 };
+
+/**
+ * Decides which of one response's tool calls may actually be executed this
+ * turn: every read, but AT MOST ONE WRITE.
+ *
+ * A provider may return several `tool_use` blocks in a single response, and
+ * all of them are generated into that ONE response's output budget. A write
+ * call's input carries real content (a node's text, a cluster's whole node
+ * list, a README section's prose), so N writes in a turn is N pieces of
+ * content against one `max_tokens`. That is not theoretical: it truncated a
+ * real `sync-graph` day, and later a real `graph-structure` batch at six
+ * `update_cluster` calls in one turn.
+ *
+ * Reads are unrestricted on purpose. A `get_node` call's input is one id;
+ * batching several costs nothing in output, and throttling them would just
+ * spend turns.
+ *
+ * A rejected call is NOT dropped: the caller feeds `rejectionMessage` back
+ * as its tool result, and the model re-issues it on a later turn. The
+ * alternative (executing it anyway) is what the loops used to do.
+ *
+ * Shared by all three agent loops rather than hand-rolled in each, because
+ * this is one invariant and three copies of it drift. See ADR-013
+ * (docs/adr/0013-turn-limit-never-the-content-limit.md, kept out of the public repo) for why the
+ * per-turn bound is a bound on ONE PASS, never on how much content a day or
+ * a run may hold.
+ */
+export function planTurnToolCalls<T extends { name: string }>(
+  calls: T[],
+  isWrite: (name: string) => boolean,
+): { call: T; execute: boolean }[] {
+  let wrote = false;
+  return calls.map((call) => {
+    if (!isWrite(call.name)) return { call, execute: true };
+    if (wrote) return { call, execute: false };
+    wrote = true;
+    return { call, execute: true };
+  });
+}
 
 export type LlmResponse = {
   /** Any plain text the model produced alongside (or instead of) a tool

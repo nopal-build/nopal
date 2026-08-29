@@ -1553,7 +1553,13 @@ img.ox-file-thumb {
   gap: 4px;
 }
 
-.ox-gallery-item img {
+/* Photos AND video share one box. The `img` half of this rule already
+   existed; `video` had no styling whatsoever, so a landscape clip rendered
+   at its own intrinsic size next to square-cropped photos, blew out its
+   row's height, and left roughly a column's worth of dead space beside it
+   on a real README. Uniform cells are what keep a grid a grid. */
+.ox-gallery-item img,
+.ox-gallery-item video {
   display: block;
   width: 100%;
   aspect-ratio: 1 / 1;
@@ -1561,6 +1567,16 @@ img.ox-file-thumb {
   border-radius: 4px;
   background: var(--ox-color-code-bg);
   border: 1px solid var(--ox-color-border);
+}
+
+/* Video is CONTAINED, not cropped, unlike the photos above. Cropping a
+   photo to a square loses the edges of a composition; cropping a video
+   also cuts off whatever a person was pointing at, and there's no
+   thumbnail-picking step here to compensate. Letterboxing inside the same
+   square keeps every cell the same size while still showing the whole
+   frame. The background above fills the bars. */
+.ox-gallery-item video {
+  object-fit: contain;
 }
 
 .ox-gallery-item figcaption {

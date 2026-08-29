@@ -29,12 +29,41 @@
  * content there is" problem `graph-structure.server.ts` already hit and
  * fixed at the whole-graph level (see that file's own module doc). NOW: a
  * bounded tool-calling loop (`add_node`, one tool call per node) builds
- * the day up incrementally, accumulated in memory and written ONCE the
- * day is fully processed — a day's file is still all-or-nothing (an
- * interrupted/truncated day still writes nothing and is retried whole
- * next run, exactly as before), but the OUTPUT of any single completion
- * is now just one node's worth of text, not a whole day's, so the
- * original truncation mode is no longer reachable in ordinary use.
+ * the day up incrementally, so the OUTPUT of any single completion is now
+ * just one node's worth of text, not a whole day's, and the original
+ * truncation mode is no longer reachable in ordinary use.
+ *
+ * A DAY IS NO LONGER ALL-OR-NOTHING, AND IS NO LONGER ONE CONVERSATION.
+ * Both of those were real, confirmed defects rather than design choices,
+ * and they compounded each other.
+ *
+ * With one node added per turn, `MAX_TURNS` and "how many nodes a day may
+ * hold" were the same number: a runaway-loop guard had silently become a
+ * data ceiling at about 29 nodes. A day that reached it had EVERY node
+ * discarded before the write, recorded as a retryable error, and retried
+ * next run against the identical limit, failing identically, forever. It
+ * was not silent and it was not recoverable, and the log line said "will
+ * retry next run" about something that never could succeed. Run 16's
+ * timeline shows how near that was: five nodes took six turns, so two
+ * people writing normally reached seventeen and three reached the wall.
+ *
+ * NOW: a day is a LOOP OF PASSES over the same sources. Each pass is a
+ * fresh, small conversation bounded by `MAX_TURNS`, is told what today
+ * already holds so it doesn't repeat itself, and commits what it captured
+ * into shared executor state before the next pass starts. The loop ends
+ * when a pass adds nothing new, which is the model saying these sources
+ * are exhausted. `MAX_TURNS` now bounds a PASS, which is what a
+ * runaway-loop guard should bound (ADR-013), and there is no node ceiling
+ * left at all, only a cost curve.
+ *
+ * AND A DAY IS ALWAYS WRITTEN. If a day ends early for any reason, every
+ * node captured is still written to its file, and the file is written
+ * WITHOUT its `sourceHash` so the next run cannot mistake it for finished
+ * and reprocesses it from source. The shortfall is reported on the run
+ * (see `SyncGraphResult.incomplete`). A partial day that says it is
+ * partial is strictly better than no day claiming it will retry, and this
+ * is the only place in this pipeline that could ever lose a person's
+ * actual writing.
  *
  * A REAL, CONFIRMED FOLLOW-ON BUG, found against a real production run of
  * the redesign above (not theoretical): "one tool call per node" was only
@@ -174,6 +203,7 @@ import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvide
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
+import { planTurnToolCalls } from "./llmProvider";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
 
 const GRAPH_LOG_PREFIX = "graph-log-";
@@ -211,7 +241,7 @@ function extractHeadings(markdown: string): NodeHeading[] {
   return out;
 }
 
-function existingSourceHash(content: string | null): string | null {
+export function existingSourceHash(content: string | null): string | null {
   if (!content) return null;
   const { frontmatter } = splitFrontmatter(content);
   if (!frontmatter) return null;
@@ -224,10 +254,33 @@ function existingSourceHash(content: string | null): string | null {
   }
 }
 
-function buildGraphLogContent(input: { date: string; hash: string; body: string }): string {
+/**
+ * `hash` is null when this day was written INCOMPLETE -- some of its
+ * sources were captured and some were not.
+ *
+ * Writing no `sourceHash` is what makes the day come back. The day's
+ * up-to-date check compares the stored hash against a freshly computed
+ * one, so a day with no stored hash can never match, and the next run
+ * reprocesses it from its sources. The captured nodes are real, permanent
+ * and immediately usable by every downstream stage in the meantime, which
+ * is the whole point: a partial day that says it is partial is strictly
+ * better than no day at all (ADR-011).
+ *
+ * Never "fix" this by stamping the hash anyway to save the reprocessing
+ * cost. That is precisely the move that would make a partial day look
+ * finished and lose the rest of somebody's writing permanently, silently,
+ * and with no way to tell from the file that anything is missing.
+ */
+export function buildGraphLogContent(input: {
+  date: string;
+  hash: string | null;
+  body: string;
+  incompleteReason?: string | null;
+}): string {
   const frontmatter = stringifyYaml({
     date: input.date,
-    sourceHash: input.hash,
+    ...(input.hash ? { sourceHash: input.hash } : {}),
+    ...(input.incompleteReason ? { incomplete: input.incompleteReason } : {}),
     generatedAt: new Date().toISOString(),
   }).trimEnd();
   return `---\n${frontmatter}\n---\n\n${input.body.trim()}\n`;
@@ -397,26 +450,64 @@ const TOOLS: ToolDefinition[] = [
  * structurally guaranteed instead of merely requested). Blocks are joined
  * with a blank line, since separate `==...==` spans are exactly how a
  * multi-paragraph verbatim passage must be represented at all. */
-function renderQuoteBlocks(rawBlocks: unknown): string | null {
+function renderQuoteBlocks(rawBlocks: unknown, highlight: boolean = true): string | null {
   if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) return null;
+  const mark = (text: string) => (highlight ? `==${text}==` : text);
   const parts: string[] = [];
   for (const raw of rawBlocks) {
     if (!raw || typeof raw !== "object") continue;
     const block = raw as Record<string, unknown>;
     if (block.type === "paragraph") {
       const text = String(block.text ?? "").trim();
-      if (text) parts.push(`==${text}==`);
+      if (text) parts.push(mark(text));
     } else if (block.type === "list") {
       const items = Array.isArray(block.items)
         ? block.items.map((i) => String(i).trim()).filter(Boolean)
         : [];
       if (items.length === 0) continue;
       const ordered = block.ordered === true;
-      parts.push(items.map((item, i) => `${ordered ? `${i + 1}.` : "-"} ==${item}==`).join("\n"));
+      parts.push(items.map((item, i) => `${ordered ? `${i + 1}.` : "-"} ${mark(item)}`).join("\n"));
     }
   }
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
+
+/**
+ * `==` MEANS A PERSON WROTE THIS, AND CODE DECIDES IT (ADR-012).
+ *
+ * For a text source, `blocks` are somebody's verbatim words and the
+ * highlight is simply true. Attachments broke that: for a file source the
+ * skill asks for "your own words grounded in whatever Caption/Description
+ * text you were actually given", and the code then applied `==` the same
+ * way regardless. A photo with a human caption is still a person talking.
+ * A photo with only a machine-written description produces AI prose
+ * wearing the one mark in this system that means verbatim human words.
+ *
+ * That is the failure that costs trust rather than accuracy. A reader who
+ * finds one quotation attributed to a colleague who never wrote it starts
+ * doubting every other quotation on the page, and that does not recover.
+ *
+ * Not captioning a photo must not cost somebody their content, so the node
+ * is still written, still linkable, still groupable. It just must not be
+ * quotable as a person.
+ *
+ * ADR-012 (docs/adr/0012-highlight-means-a-person-wrote-this.md, kept out of the public repo).
+ */
+function isHumanAuthoredSource(fileInfo: SourceFileInfo | null): boolean {
+  // A text source (not an attachment) is the person's own writing.
+  if (!fileInfo) return true;
+  // An attachment counts when the uploader wrote a caption -- their own
+  // words, zero AI, deliberately independent of whether sync-knowledge
+  // ever ran.
+  return !!fileInfo.caption?.trim();
+}
+
+/** Written by code into the node's own permanent text, never by the model
+ * and never as an instruction it has to remember. The fact travels with
+ * the node forever, so every later stage and every human reader sees it
+ * without needing to have been told the rule. */
+const DESCRIPTION_ONLY_PROVENANCE =
+  "*Written from an AI description of this file. Not a quotation, and not anyone's words.*";
 
 type SourceFileInfo = { fileId: string; name: string; caption?: string; contentType: string };
 
@@ -496,8 +587,14 @@ function createSyncGraphExecutors(input: {
 }): {
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>;
   getNodeBlocks: () => string[];
+  /** One short line per node captured for this day SO FAR, across every
+   * pass. Fed back into the next pass's own prompt so it can see what
+   * today already holds and not re-capture it -- the mechanism that makes
+   * a day safe to split across several conversations. */
+  getCapturedSummaries: () => string[];
 } {
   const nodeBlocks: string[] = [];
+  const capturedSummaries: string[] = [];
   let nextNumber = 1;
 
   const executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>> = {
@@ -506,7 +603,12 @@ function createSyncGraphExecutors(input: {
       if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= input.sourceCitations.length) {
         return `Error: sourceIndex must be an integer between 0 and ${input.sourceCitations.length - 1}`;
       }
-      const quoteBody = renderQuoteBlocks(toolInput.blocks);
+      // ADR-012: whether this node's text is somebody's words is decided
+      // HERE, from the source, before the model's blocks are rendered.
+      // The model is never asked to know or remember it.
+      const fileInfo = input.sourceFiles[sourceIndex];
+      const humanAuthored = isHumanAuthoredSource(fileInfo);
+      const quoteBody = renderQuoteBlocks(toolInput.blocks, humanAuthored);
       if (!quoteBody) return "Error: blocks must include at least one non-empty paragraph or list block";
       const setup = typeof toolInput.setup === "string" ? toolInput.setup.trim() : "";
       // If this node cites an ATTACHED FILE (a photo, a video, a PDF,
@@ -519,9 +621,15 @@ function createSyncGraphExecutors(input: {
       // photo inline in its own permanent text, so every later stage
       // (graph-structure's pre-fetch, graph-project-view) sees it
       // automatically.
-      const fileInfo = input.sourceFiles[sourceIndex];
       const attachedMedia = fileInfo ? buildAttachedMediaMarkdown(fileInfo) : null;
-      const quote = [setup || null, quoteBody, attachedMedia].filter(Boolean).join("\n\n");
+      const quote = [
+        setup || null,
+        quoteBody,
+        humanAuthored ? null : DESCRIPTION_ONLY_PROVENANCE,
+        attachedMedia,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
 
       const number = nextNumber;
       const rawSameDay = Array.isArray(toolInput.sameDayLinks) ? toolInput.sameDayLinks : [];
@@ -563,23 +671,110 @@ function createSyncGraphExecutors(input: {
           .filter(Boolean)
           .join("\n"),
       );
+      // Enough for a later pass to recognize this node as already
+      // captured without re-reading its whole text. Deliberately the
+      // node's own words rather than a paraphrase: the next pass is
+      // comparing against the same sources this one read.
+      const preview = quoteBody.replace(/\s+/g, " ").replace(/==/g, "").trim().slice(0, 160);
+      capturedSummaries.push(`Node ${number} (from Source ${sourceIndex}): "${preview}"`);
       nextNumber++;
 
-      return `Added Node ${number}.${droppedCount > 0 ? ` (dropped ${droppedCount} link id(s) -- invalid, or over the ${MAX_LINKS_PER_NODE}-link cap)` : ""}`;
+      return `Added Node ${number}.${humanAuthored ? "" : " (written UNHIGHLIGHTED and marked as description-grounded -- this source has no human caption, so its text is not anyone's words and must never be quoted or attributed to a person)"}${droppedCount > 0 ? ` (dropped ${droppedCount} link id(s) -- invalid, or over the ${MAX_LINKS_PER_NODE}-link cap)` : ""}`;
     },
   };
 
-  return { executors, getNodeBlocks: () => nodeBlocks };
+  return { executors, getNodeBlocks: () => nodeBlocks, getCapturedSummaries: () => capturedSummaries };
 }
 
-/** Generous relative to a single day's realistic node count — a very
- * prolific day might have 10-20 nodes; 30 turns leaves real headroom
- * without being unbounded. Each turn's own output is small (one node) —
- * see `runSyncGraphDayLoop`'s own "at most one add_node executed per
- * turn" enforcement below for why that's now actually GUARANTEED, not
- * just assumed — so a higher ceiling here costs more calls, not more
- * truncation risk. */
+/**
+ * BOUNDS ONE PASS, NOT ONE DAY. This is the distinction ADR-013 exists
+ * for, and getting it wrong is what made a busy day permanently
+ * unwritable.
+ *
+ * With one `add_node` executed per turn, this number and "how many nodes
+ * a day may hold" used to be the same number. A runaway-loop guard had
+ * quietly become a data ceiling at about 29 nodes, and a day that reached
+ * it had every one of its nodes discarded, with a log line promising a
+ * retry that would fail identically forever. Run 16's own timeline shows
+ * how close that was: 2026-08-19 took six turns for five nodes, so two
+ * people writing normally reached seventeen and three reached the wall.
+ *
+ * A day is now a sequence of passes (`MAX_PASSES_PER_DAY`), each a fresh
+ * conversation, each committing what it captured before the next starts.
+ * This bounds one of those. A day that needs more nodes than one pass can
+ * hold simply takes another pass.
+ *
+ * ADR-013 (docs/adr/0013-turn-limit-never-the-content-limit.md, kept out of the public repo).
+ *
+ * Do NOT "fix" a future ceiling by raising this. Raising it moves the
+ * cliff without removing it, and a cliff hit once a year is worse than one
+ * hit weekly, because nobody remembers it exists.
+ */
 const MAX_TURNS = 30;
+
+/**
+ * A runaway guard on the pass loop, never the content limit.
+ *
+ * The loop's real terminator is a pass that adds nothing new, which is the
+ * model saying these sources are exhausted. This exists only so a model
+ * that keeps finding "one more node" forever cannot spend without bound.
+ * At ~29 nodes a pass it allows a single day far past anything a human
+ * team produces, so in practice it should never be what stops a day.
+ *
+ * If it ever IS hit, the day is still written with everything captured and
+ * the shortfall is reported. It is not another discard path.
+ */
+const MAX_PASSES_PER_DAY = 8;
+
+/** What one pass's ending means for the day as a whole.
+ *
+ * Split out from the loop (same reason, and the same precedent, as
+ * `capNodeLinks`) because this is the judgment that decides whether a
+ * person's day is recorded as finished or as partial, and it has four
+ * cases that are easy to collapse into two by accident:
+ *
+ *   - added > 0                  -> keep going, the pass was productive.
+ *   - added 0, ended cleanly     -> DONE. The model has nothing left to
+ *                                   take from these sources. This is the
+ *                                   loop's real terminator.
+ *   - added 0, ended badly       -> STUCK. Another identical pass would
+ *                                   fail identically. Stop and report.
+ *   - productive at the cap      -> the cap itself is the shortfall.
+ *
+ * The two `added === 0` cases are the ones that must not merge: one is a
+ * successful day and the other is a truncated one, and they look the same
+ * from the outside (a pass that captured nothing).
+ */
+export function classifyPassEnding(input: {
+  added: number;
+  truncated: boolean;
+  hitMaxTurns: boolean;
+  passesCompleted: number;
+  maxPasses: number;
+  maxTurns: number;
+}): { stop: boolean; shortfall: string | null } {
+  if (input.added > 0) {
+    // Productive. Only the cap can stop us here, and if it does, the cap
+    // is the shortfall -- there was more to capture.
+    if (input.passesCompleted >= input.maxPasses) {
+      return { stop: true, shortfall: `still finding new nodes after ${input.maxPasses} passes` };
+    }
+    return { stop: false, shortfall: null };
+  }
+  if (input.truncated) {
+    return {
+      stop: true,
+      shortfall: "a pass was cut off by the model's own output limit before capturing anything",
+    };
+  }
+  if (input.hitMaxTurns) {
+    return {
+      stop: true,
+      shortfall: `a pass hit its ${input.maxTurns}-turn limit before capturing anything`,
+    };
+  }
+  return { stop: true, shortfall: null };
+}
 
 async function runSyncGraphDayLoop(
   provider: LlmProvider,
@@ -590,6 +785,7 @@ async function runSyncGraphDayLoop(
   perf: GraphLogPerfRecorder,
   date: string,
   projectFolderId: string,
+  pass: number,
 ): Promise<{ usage: LlmUsage; model: string | null; truncated: boolean; hitMaxTurns: boolean }> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
@@ -613,6 +809,19 @@ async function runSyncGraphDayLoop(
     callCounter.count++;
     usage.inputTokens += response.usage.inputTokens;
     usage.outputTokens += response.usage.outputTokens;
+    // Cache counts come back on EVERY response and were being dropped on
+    // the floor right here, in all three agent loops -- which is the
+    // whole reason the dashboard read a 0% cache hit rate across every
+    // call ever made. Nothing else in the path was wrong: the provider
+    // marks the blocks, `LlmUsage` carries the fields, the table has both
+    // columns, the daily rollup sums them and the UI renders them. They
+    // just never got added up, so `recordGraphLogUsage` saw undefined and
+    // stored zero. This also makes `estimatedCostUsd` right for the first
+    // time -- cached reads and writes are priced differently from plain
+    // input tokens (`llmPricing.ts`), so a run with real cache traffic
+    // was being costed as if it had none.
+    usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + (response.usage.cacheReadTokens ?? 0);
+    usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + (response.usage.cacheWriteTokens ?? 0);
     model = response.model;
 
     // One perf event PER TURN (a real, individually-timed API call),
@@ -628,6 +837,7 @@ async function runSyncGraphDayLoop(
       name: "turn",
       params: {
         date,
+        pass: pass + 1,
         turn: turn + 1,
         stopReason: response.stopReason,
         toolCalls: response.toolCalls.map((c) => c.name),
@@ -661,17 +871,15 @@ async function runSyncGraphDayLoop(
     // that SAME turn is rejected without being applied, so the model
     // simply re-issues it on a later turn instead of it silently
     // succeeding twice or being dropped.
-    let executedThisTurn = false;
-    for (const call of response.toolCalls) {
-      let resultText: string;
-      if (executedThisTurn) {
-        resultText =
-          "Not processed -- only the FIRST add_node call in a turn is executed, to keep each turn's own output small. Call add_node again on your next turn for this node.";
-      } else {
-        const executor = executors[call.name];
-        resultText = executor ? await executor(call.input) : `Unknown tool: ${call.name}`;
-        executedThisTurn = true;
-      }
+    // `add_node` is this stage's only tool and it is a write, so every
+    // call here is throttled. Routed through the shared helper anyway:
+    // this is the same invariant `graph-structure` and `graph-project-view`
+    // now enforce, it was found here first, and three copies of one rule
+    // is how the rule drifts. See `planTurnToolCalls` for the full why.
+    for (const { call, execute } of planTurnToolCalls(response.toolCalls, () => true)) {
+      const resultText = execute
+        ? ((await executors[call.name]?.(call.input)) ?? `Unknown tool: ${call.name}`)
+        : "Not processed -- only the FIRST add_node call in a turn is executed, to keep each turn's own output small. Call add_node again on your next turn for this node.";
       messages.push({ role: "tool_result", toolCallId: call.id, content: resultText });
     }
     if (response.stopReason !== "tool_use") break;
@@ -688,7 +896,15 @@ function buildSystemPrompt(skillContent: string, graphStructureBody: string | nu
   return `You are GraphLog's sync-graph step, extracting citable nodes from one day's synced content at a time, per a project owner's own instructions. Call add_node once per node worth capturing today, citing it by its sourceIndex — never write a :ref{...} yourself, it's attached automatically from real data. Call add_node ONE TIME PER TURN, then stop and wait for its result before calling it again for the next node — never call add_node more than once in the same response, even on a busy day with many nodes to add; only your first call each turn is actually processed, any extra calls in the same turn are rejected and must be retried on a later turn. Only use sameDayLinks/backwardLinks ids you were actually shown as candidates; an invented one is silently dropped and reported back to you. Stop calling add_node once you've captured everything worth capturing today — if nothing from today is worth capturing at all, make no tool calls.\n\n${skillContent}\n\n---\n\n${structureSection}`;
 }
 
-function buildUserPrompt(input: { date: string; sourceBlocks: string[]; liveCandidates: string[] }): string {
+function buildUserPrompt(input: {
+  date: string;
+  sourceBlocks: string[];
+  liveCandidates: string[];
+  /** Empty on a day's first pass. On later passes, one line per node
+   * already captured today -- see `MAX_PASSES_PER_DAY` for why a day is a
+   * sequence of passes rather than one conversation. */
+  alreadyCaptured: string[];
+}): string {
   return [
     `Today's date being processed: ${input.date}`,
     input.sourceBlocks.join("\n\n---\n\n"),
@@ -696,6 +912,17 @@ function buildUserPrompt(input: { date: string; sourceBlocks: string[]; liveCand
       ? `Earlier days' nodes not yet reflected in graph-structure.md, which you may also link back to by id (never invent one not listed here):\n${input.liveCandidates.map((c) => `- ${c}`).join("\n")}`
       : null,
     "You may also link a node to another node you add earlier this same day, in either direction, via sameDayLinks.",
+    // Deliberately LAST, so everything above it is byte-identical across
+    // every pass of one day. Nothing reads that property yet -- each pass
+    // is a fresh conversation and only turn 2+ of a conversation gets a
+    // message-level cache breakpoint today -- but it means caching the
+    // shared prefix across passes later is a provider change alone,
+    // rather than also a prompt-ordering change. See 1.7: a multi-pass day
+    // re-sends its sources once per pass, and that is exactly the cost
+    // curve worth measuring before optimizing.
+    input.alreadyCaptured.length > 0
+      ? `ALREADY CAPTURED FOR THIS DAY by an earlier pass over these same sources -- ${input.alreadyCaptured.length} node(s). These are written and permanent. Do NOT add them again, and do not rephrase them into new nodes. Add ONLY what these same sources still hold that is not represented above. If everything worth capturing today is already here, make no tool calls at all:\n${input.alreadyCaptured.map((c) => `- ${c}`).join("\n")}`
+      : null,
   ]
     .filter(Boolean)
     .join("\n\n---\n\n");
@@ -711,6 +938,14 @@ export type SyncGraphDayResult = {
    * no `graph-log-*.md` file exists for it (possibly because a PREVIOUS
    * file for this exact day was just deleted, if its sources changed). */
   empty: boolean;
+  /** How many nodes this day's file ended up holding. 0 for an empty or
+   * unchanged day. One half of 1.7's cost-per-node denominator: the run
+   * timeline already implied this number and nothing stored it. */
+  nodes: number;
+  /** How many passes this day took. A day that needed more than one is a
+   * day the old single-conversation shape would have been at risk of
+   * discarding, so this is worth watching directly. */
+  passes: number;
 };
 
 export type SyncGraphResult =
@@ -720,6 +955,26 @@ export type SyncGraphResult =
        * no-op, no files examined, no model called. */
       skipped: boolean;
       days: SyncGraphDayResult[];
+      /** Total nodes written across every day this run. */
+      nodesWritten: number;
+      /** Reasons this stage finished WITHOUT doing everything it set out
+       * to, one human-readable line each; empty when it finished clean.
+       *
+       * `ok: true` here means "nothing threw and whatever was captured is
+       * safely committed", NOT "the stage did its whole job". Those came
+       * apart in a real run: a truncated batch left this stage's own work
+       * half-done and its downstream stage producing nothing, and the run
+       * still reported OK at the top. A partial result that says it is
+       * partial is fine (ADR-011 -- a budget bounds how late the derived
+       * layer runs, never what is kept); a partial result that reports
+       * itself as complete is not. `graphLogAgent.server.ts` collects
+       * these across all five stages so the run's own status can say so.
+       *
+       * Deliberately NOT `ok: false`: every case here is resumable, made
+       * real progress, and is picked up by the next run. Failing the job
+       * outright would discard that progress in the reporting and invite
+       * a retry of work that already landed. */
+      incomplete: string[];
     }
   | { ok: false; error: string };
 
@@ -746,7 +1001,7 @@ export async function runSyncGraph(
 
   const skill = await getProjectStageSkill(projectFolder, "GRAPH.md");
   if (isSkipInstruction(skill)) {
-    return { ok: true, skipped: true, days: [] };
+    return { ok: true, skipped: true, days: [], nodesWritten: 0, incomplete: [] };
   }
   if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
@@ -756,13 +1011,13 @@ export async function runSyncGraph(
   const syncsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "syncs");
   if (!syncsFolder) {
     log("sync-graph: no syncs/ folder yet — nothing to do.");
-    return { ok: true, skipped: false, days: [] };
+    return { ok: true, skipped: false, days: [], nodesWritten: 0, incomplete: [] };
   }
 
   const candidates = await collectDatedCandidates(projectFolder.human_id, syncsFolder._id);
   if (candidates.length === 0) {
     log("sync-graph: no dated files under syncs/ yet — nothing to do.");
-    return { ok: true, skipped: false, days: [] };
+    return { ok: true, skipped: false, days: [], nodesWritten: 0, incomplete: [] };
   }
 
   const byDate = new Map<string, GraphCandidate[]>();
@@ -836,6 +1091,16 @@ export async function runSyncGraph(
   let textLlm: LlmProvider | undefined = opts.provider;
   const callCounter = { count: 0 };
   const days: SyncGraphDayResult[] = [];
+  // One line per day this run failed to capture. Every entry here is a
+  // day whose nodes were DISCARDED WHOLE (see the truncated/hitMaxTurns
+  // branches below), which is the single most consequential thing this
+  // pipeline can do wrong -- it is somebody's actual writing, and the
+  // log line has always said "will retry next run" about something that
+  // retries identically and fails identically. Until that is properly
+  // fixed (Part 0 / ADR-013: a day becomes a loop of committing passes,
+  // not one conversation), the very least this owes the run is to stop
+  // reporting OK while it happens.
+  const incomplete: string[] = [];
 
   for (const date of dates) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
@@ -952,7 +1217,7 @@ export async function runSyncGraph(
     const existing = existingListing ? await getFileRefById(existingListing._id) : undefined;
 
     if (existing && existingSourceHash(existing.content) === newHash) {
-      days.push({ date, changed: false, empty: false });
+      days.push({ date, changed: false, empty: false, nodes: 0, passes: 0 });
       continue;
     }
 
@@ -971,8 +1236,12 @@ export async function runSyncGraph(
       .filter(([id]) => id.split("#")[0] < date)
       .map(([, label]) => label);
 
-    const userPrompt = buildUserPrompt({ date, sourceBlocks, liveCandidates });
-    const { executors, getNodeBlocks } = createSyncGraphExecutors({
+    // ONE SET OF EXECUTORS FOR THE WHOLE DAY, shared across every pass.
+    // Node numbering (`nextNumber`) and the captured-node list live in
+    // that closure, so pass 2 continues from Node 18 rather than
+    // restarting at Node 1, and `sameDayLinks` validation still holds
+    // across a pass boundary.
+    const { executors, getNodeBlocks, getCapturedSummaries } = createSyncGraphExecutors({
       date,
       sourceCitations,
       sourceFiles,
@@ -982,64 +1251,65 @@ export async function runSyncGraph(
     const callStart = Date.now();
     try {
       textLlm ??= new AnthropicProvider();
-      const { usage, model, truncated, hitMaxTurns } = await runSyncGraphDayLoop(
-        textLlm,
-        system,
-        userPrompt,
-        callCounter,
-        executors,
-        perf,
-        date,
-        projectFolder._id,
-      );
 
-      if (truncated) {
-        log(`sync-graph: ${date}'s output was cut off by the model's own output limit — skipped, will retry next run.`);
-        const durationMs = Date.now() - callStart;
-        await recordGraphLogUsage({
-          humanId: actingHumanId,
-          projectFolderId: projectFolder._id,
-          stage: "sync-graph",
-          kind: "graph-extract",
-          model: model ?? undefined,
-          usage,
-          durationMs,
-          outcome: "error",
-          errorKind: "incomplete",
+      // A DAY IS A LOOP OF PASSES, NOT ONE CONVERSATION.
+      //
+      // This is the whole Part 0 fix. Each pass is a fresh, small
+      // conversation over the SAME sources, told what today already holds
+      // so it doesn't repeat itself, and every node it captures is
+      // committed into the shared executor state before the next pass
+      // starts. The loop ends when a pass adds nothing new, which is the
+      // model saying these sources are exhausted.
+      //
+      // There is no node ceiling left, only a cost curve. `MAX_TURNS`
+      // bounds a pass, which is what a runaway-loop guard should bound
+      // (ADR-013), and the day is bounded by the sources actually running
+      // out rather than by a constant.
+      //
+      // Note what a pass hitting `MAX_TURNS` means now: it is a FULL pass,
+      // the normal way a busy day proceeds, not a failure. It is only a
+      // problem when a pass fills up having added nothing, which means it
+      // is stuck rather than working.
+      const dayUsage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
+      let dayModel: string | null = null;
+      let shortfall: string | null = null;
+      let passes = 0;
+
+      while (passes < MAX_PASSES_PER_DAY) {
+        const before = getNodeBlocks().length;
+        const passPrompt = buildUserPrompt({
+          date,
+          sourceBlocks,
+          liveCandidates,
+          alreadyCaptured: getCapturedSummaries(),
         });
-        await perf.event({
-          process: "sync-graph",
-          type: "llm",
-          name: "day",
-          params: { date },
-          durationMs,
-          outcome: "error",
+        const { usage, model, truncated, hitMaxTurns } = await runSyncGraphDayLoop(
+          textLlm,
+          system,
+          passPrompt,
+          callCounter,
+          executors,
+          perf,
+          date,
+          projectFolder._id,
+          passes,
+        );
+        passes++;
+        dayUsage.inputTokens += usage.inputTokens;
+        dayUsage.outputTokens += usage.outputTokens;
+        dayUsage.cacheReadTokens = (dayUsage.cacheReadTokens ?? 0) + (usage.cacheReadTokens ?? 0);
+        dayUsage.cacheWriteTokens = (dayUsage.cacheWriteTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
+        dayModel = model ?? dayModel;
+        const ending = classifyPassEnding({
+          added: getNodeBlocks().length - before,
+          truncated,
+          hitMaxTurns,
+          passesCompleted: passes,
+          maxPasses: MAX_PASSES_PER_DAY,
+          maxTurns: MAX_TURNS,
         });
-        continue;
-      }
-      if (hitMaxTurns) {
-        log(`sync-graph: ${date} hit its turn limit before finishing — skipped, will retry next run.`);
-        const durationMs = Date.now() - callStart;
-        await recordGraphLogUsage({
-          humanId: actingHumanId,
-          projectFolderId: projectFolder._id,
-          stage: "sync-graph",
-          kind: "graph-extract",
-          model: model ?? undefined,
-          usage,
-          durationMs,
-          outcome: "error",
-          errorKind: "incomplete",
-        });
-        await perf.event({
-          process: "sync-graph",
-          type: "llm",
-          name: "day",
-          params: { date },
-          durationMs,
-          outcome: "error",
-        });
-        continue;
+        shortfall = ending.shortfall;
+        if (ending.stop) break;
       }
 
       const durationMs = Date.now() - callStart;
@@ -1048,29 +1318,59 @@ export async function runSyncGraph(
         projectFolderId: projectFolder._id,
         stage: "sync-graph",
         kind: "graph-extract",
-        model: model ?? undefined,
-        usage,
+        model: dayModel ?? undefined,
+        usage: dayUsage,
         durationMs,
-        outcome: "success",
+        outcome: shortfall ? "error" : "success",
+        errorKind: shortfall ? "incomplete" : undefined,
       });
       await perf.event({
         process: "sync-graph",
         type: "llm",
         name: "day",
-        params: { date },
+        params: { date, passes, nodes: getNodeBlocks().length, shortfall },
         durationMs,
+        outcome: shortfall ? "error" : "ok",
       });
 
       const nodeBlocks = getNodeBlocks();
       if (nodeBlocks.length === 0) {
-        log(`sync-graph: ${date} — nothing worth capturing.`);
+        // Genuinely nothing to capture, or stuck before capturing
+        // anything. Either way nothing is being thrown away here.
+        if (shortfall) {
+          incomplete.push(`${date} captured nothing: ${shortfall}`);
+          log(`sync-graph: ${date} — ${shortfall}; nothing captured, will retry next run.`);
+        } else {
+          log(`sync-graph: ${date} — nothing worth capturing.`);
+        }
         headingsByDate.delete(date);
-        days.push({ date, changed: true, empty: true });
+        days.push({ date, changed: true, empty: true, nodes: 0, passes });
         continue;
       }
 
+      // THE DAY IS WRITTEN WHETHER OR NOT IT FINISHED. A partial day is
+      // written without its `sourceHash`, so the next run cannot mistake
+      // it for complete and reprocesses it from source; the nodes captured
+      // are permanent and usable downstream immediately. What must never
+      // happen again is the old behaviour: `continue` before the write,
+      // discarding every node of somebody's day, logged as a retry that
+      // retried into the same wall forever.
+      if (shortfall) {
+        incomplete.push(
+          `${date} written incomplete (${nodeBlocks.length} node(s) captured): ${shortfall}`,
+        );
+        log(
+          `sync-graph: ${date} — ${shortfall}; wrote the ${nodeBlocks.length} node(s) captured, remainder picked up next run.`,
+        );
+      }
+
       const graphFolder = await ensureProjectGraphFolder(projectFolder);
-      const content = buildGraphLogContent({ date, hash: newHash, body: nodeBlocks.join("\n\n") });
+      const content = buildGraphLogContent({
+        date,
+        hash: shortfall ? null : newHash,
+        incompleteReason: shortfall,
+        body: nodeBlocks.join("\n\n"),
+      });
       const created = await createFileRef({
         human_id: projectFolder.human_id,
         name: graphLogFileName(date),
@@ -1081,8 +1381,10 @@ export async function runSyncGraph(
       if (!created) continue;
 
       headingsByDate.set(date, extractHeadings(content));
-      log(`sync-graph: wrote ${graphLogFileName(date)} (${nodeBlocks.length} node(s)).`);
-      days.push({ date, changed: true, empty: false });
+      log(
+        `sync-graph: wrote ${graphLogFileName(date)} (${nodeBlocks.length} node(s) over ${passes} pass(es))${shortfall ? " — INCOMPLETE" : ""}.`,
+      );
+      days.push({ date, changed: true, empty: false, nodes: nodeBlocks.length, passes });
     } catch (err) {
       log(`sync-graph: ${date} couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
       const durationMs = Date.now() - callStart;
@@ -1106,5 +1408,11 @@ export async function runSyncGraph(
     }
   }
 
-  return { ok: true, skipped: false, days };
+  return {
+    ok: true,
+    skipped: false,
+    days,
+    nodesWritten: days.reduce((sum, d) => sum + d.nodes, 0),
+    incomplete,
+  };
 }

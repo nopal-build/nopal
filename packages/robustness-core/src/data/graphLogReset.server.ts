@@ -9,10 +9,15 @@
  *   - `resetProjectView` — deletes every direct child of the project
  *     folder EXCEPT `skills`/`syncs`/`graph` (and clears `README.md`'s
  *     BODY, front matter preserved, since Sharing Roles and lifecycle
- *     `status` live ONLY in that front matter). In practice this
- *     project folder shape means there's rarely anything else TO delete
- *     here yet — this exists mainly to clear a stale README body and
- *     catch anything unexpected left at the root.
+ *     `status` live ONLY in that front matter), then clears
+ *     `graph-project-view`'s `appliedByProjectView` marker off
+ *     `graph-structure.md`'s front matter. In practice this project
+ *     folder shape means there's rarely anything else TO delete here yet
+ *     — this exists mainly to clear a stale README body and catch
+ *     anything unexpected left at the root. That last marker step is not
+ *     bookkeeping: it's the difference between a view that rebuilds on
+ *     the next run and one that stays empty indefinitely. See the step
+ *     itself for the mechanism.
  *   - `resetGraph` — deletes the `Graph` space folder outright (every
  *     `graph-log-*.md` file AND `graph-structure.md`, so both
  *     `graph-structure`'s own `asOfGraphHash` and `graph-project-view`'s
@@ -43,6 +48,7 @@
 import {
   deleteFileRef,
   deleteVaultFolderCascade,
+  getFileRefById,
   getReadmeFileForFolder,
   listFolderChildren,
   updateFileRef,
@@ -50,6 +56,7 @@ import {
 } from "./vault.server";
 import { splitFrontmatter, withReadmeBody } from "./project.types";
 import { findProjectGraphFolder } from "./projectN02.server";
+import { clearGraphStructureAppliedMarker, GRAPH_STRUCTURE_FILE } from "./graphStructure.server";
 import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
 
 /** Folder types that survive `resetProjectView` — the human-writable
@@ -62,6 +69,13 @@ export type ProjectViewResetSummary = {
   deletedFolders: string[];
   deletedFiles: string[];
   readmeCleared: boolean;
+  /** True when `graph-structure.md`'s `appliedByProjectView` marker was
+   * actually present and has now been dropped — see the clearing step at
+   * the end of `resetProjectView` for why this reset is incomplete
+   * without it. False when there was no marker (or no structure file) to
+   * clear, which is the normal case for a project whose view has never
+   * run. */
+  projectViewMarkerCleared: boolean;
 };
 
 /**
@@ -75,6 +89,7 @@ export async function resetProjectView(folder: VaultFolder): Promise<ProjectView
   const deletedFolders: string[] = [];
   const deletedFiles: string[] = [];
   let readmeCleared = false;
+  let projectViewMarkerCleared = false;
 
   for (const child of folders) {
     if (child.is_folder_type_root && PROJECT_VIEW_SURVIVES.has(child.folder_type ?? "")) continue;
@@ -97,7 +112,30 @@ export async function resetProjectView(folder: VaultFolder): Promise<ProjectView
     }
   }
 
-  return { deletedFolders, deletedFiles, readmeCleared };
+  // Clearing the README body is only HALF of a project-view reset. Both
+  // idempotency markers live on `graph-structure.md`'s front matter, and
+  // this reset deliberately leaves the `graph` folder alone (that's
+  // `resetGraph`'s job) -- so `appliedByProjectView` still matches
+  // `asOfGraphHash` here, and `graph-project-view`'s own up-to-date check
+  // would skip the very next run and leave the README empty until
+  // something unrelated changed the graph. Only the applied marker is
+  // dropped; `asOfGraphHash` belongs to `graph-structure` and stays.
+  const graphFolder = await findProjectGraphFolder(folder);
+  if (graphFolder) {
+    const { files: graphFiles } = await listFolderChildren(folder.human_id, graphFolder._id);
+    const structureListing = graphFiles.find((f) => f.name === GRAPH_STRUCTURE_FILE);
+    if (structureListing) {
+      const structureFile = await getFileRefById(structureListing._id);
+      if (structureFile?.content) {
+        projectViewMarkerCleared = await clearGraphStructureAppliedMarker(
+          structureListing._id,
+          structureFile.content,
+        );
+      }
+    }
+  }
+
+  return { deletedFolders, deletedFiles, readmeCleared, projectViewMarkerCleared };
 }
 
 export type GraphResetSummary = {

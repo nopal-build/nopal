@@ -122,10 +122,70 @@ export function parseGraphLogNodes(date: string, body: string): GraphLogNode[] {
  * `buildNodeBlock`, which also carries inbound/outbound link facts that
  * matter for CLUSTERING a node but not for writing prose from one.
  */
-export function formatNodeVerbatim(node: GraphLogNode): string {
-  return [`${node.date} Node ${node.number} (${node.authorName ?? "Unknown"}) [id: ${node.id}]:`, node.quote, node.refLine]
+/**
+ * Drops the `verbose="true"` attribute from a `:ref{...}` line, leaving
+ * everything else byte-identical.
+ *
+ * Two callers, and they must use the SAME function or the second one
+ * silently breaks. `graph-project-view` hands node text to the model in
+ * view mode (`refDirective.ts`: verbose is for graph-log files, every
+ * other use omits it), and the coverage report decides whether a node was
+ * featured by looking for its citation in the finished README. If the
+ * stripping and the matching disagree by one attribute, every node reads
+ * as dropped.
+ *
+ * Normalizing BOTH sides through here is what makes the comparison
+ * independent of which mode the citation happens to be in.
+ */
+export function stripRefVerbose(text: string): string {
+  return text.replace(/\s+verbose="true"/g, "");
+}
+
+export function formatNodeVerbatim(node: GraphLogNode, today?: string): string {
+  // The age is handed over as a NUMBER rather than left as two dates for
+  // the model to subtract. `PROJECT_VIEW.md` asks it to work out each open
+  // item's age from today against a node's date; the code holds both
+  // exactly. Same family as the citation itself, a cluster's weight, and
+  // the link counts: arithmetic the code can do exactly is never the
+  // model's job, and a model doing date subtraction over prose is a way to
+  // get a confidently wrong number into a README.
+  const age = today ? daysBetweenIso(node.date, today) : null;
+  const ageNote = age === null ? "" : ` [${age} day(s) ago]`;
+  // VIEW MODE CITATION. `verbose="true"` is right in a graph-log file and
+  // wrong everywhere else -- `refDirective.ts` says so outright: verbose
+  // is for graph-log entries, every other use omits it. Verbose renders a
+  // spelled-out `Name · date · source` block after the sentence; without
+  // it, `RefDirectiveMarker` renders a small inline `*` opening a popover
+  // with the same information.
+  //
+  // The README inherited the record's citation style purely because the
+  // model is told to copy the node's `:ref{...}` exactly as it appears,
+  // which is the right rule and stays. Eleven block attributions is what
+  // turned a README into a wall. So the mode is decided HERE, in code, by
+  // handing the view a citation already in the form it should use. The
+  // model still copies exactly and never edits a directive.
+  //
+  // MUST stay `stripRefVerbose`: `computeCoverageReport` decides a node
+  // was featured by matching this same line against the README, and
+  // normalizes through the same function. Render a view citation any other
+  // way and every node silently reports as dropped.
+  return [
+    `${node.date}${ageNote} Node ${node.number} (${node.authorName ?? "Unknown"}) [id: ${node.id}]:`,
+    node.quote,
+    node.refLine ? stripRefVerbose(node.refLine) : "",
+  ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** Whole days between two ISO `YYYY-MM-DD` dates. Deliberately crude (no
+ * timezone reasoning): the inputs are date-only and the consumer is prose
+ * about how long ago something was, not an hour-accurate figure. */
+function daysBetweenIso(fromIso: string, toIso: string): number {
+  const from = Date.parse(`${fromIso}T00:00:00Z`);
+  const to = Date.parse(`${toIso}T00:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to)) return 0;
+  return Math.max(0, Math.round((to - from) / 86_400_000));
 }
 
 // Matches all three shapes `syncGraph.server.ts`'s own
