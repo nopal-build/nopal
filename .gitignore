@@ -40,3 +40,6 @@ webapp/tmp/
 # reasoning itself. See docs/adr/0001-nodes-are-permanent-and-verbatim.md
 # and its siblings.
 docs/adr/
+
+# Temporary files
+tmp/
