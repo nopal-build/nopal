@@ -286,6 +286,18 @@ export async function createVaultFolder(data: {
    * `createFileRef`'s own doc for why (only `scripts/pull-daily-logs.ts`
    * needs this today). */
   id?: string;
+  /** Skip this function's own post-create auto-provisioning
+   * (`ensureProjectN02`/`applyWebsiteShape` below) even though the folder
+   * ends up typed `project-n02`/`website` — see the "isNewProject" forced
+   * default just below for why passing NO `folder_type` isn't enough to
+   * opt out on its own. Exists for exactly one caller,
+   * `scripts/pull-daily-logs.ts`: it wants to pull a project's real
+   * remote tree (its real Skills/Syncs/Graph folders, real ids and all)
+   * BEFORE any auto-seed can create a same-named placeholder first and
+   * race it — see that script's own "A REAL, CONFIRMED BUG" note. The
+   * caller is responsible for invoking `ensureProjectN02` itself once the
+   * real tree is in. */
+  deferAutoProvision?: boolean;
 }): Promise<VaultFolder | undefined> {
   const now = new Date().toISOString();
 
@@ -350,13 +362,14 @@ export async function createVaultFolder(data: {
   // GRAPH_STRUCTURE.md, PROJECT_VIEW.md (`projectN02.server` itself calls
   // back into this function to create that Skills folder — see the import
   // comment above). Gated on the folder's ACTUAL resulting type, not just
-  // `isNewProject`.
-  if (folder && folder.folder_type === "project-n02" && folder.is_folder_type_root) {
+  // `isNewProject` — and skippable via `deferAutoProvision` (see its own
+  // doc above) for the one caller that needs to pull the real tree first.
+  if (!data.deferAutoProvision && folder && folder.folder_type === "project-n02" && folder.is_folder_type_root) {
     await ensureProjectN02(folder);
   }
   // Same idea, for a `website` project's own scaffolding (README.md +
   // _site-settings.json) — see `website.server.ts`.
-  if (folder && folder.folder_type === "website" && folder.is_folder_type_root) {
+  if (!data.deferAutoProvision && folder && folder.folder_type === "website" && folder.is_folder_type_root) {
     await applyWebsiteShape(folder);
   }
 

@@ -578,11 +578,11 @@ async function main() {
           continue;
         }
         const existingLocal = await getFolderById(remoteProject._id);
-        // A REAL, CONFIRMED BUG, found and fixed here: tagging the local
-        // project `project-n02` immediately at creation used to fire
+        // A REAL, CONFIRMED BUG, found (twice) here: tagging the local
+        // project `project-n02` immediately at creation fires
         // `createVaultFolder`'s own `ensureProjectN02` side effect (auto-
         // provisioning a Skills folder, seeded with the DEFAULT skill
-        // text) BEFORE `pullFolderTree` below ever got a chance to bring
+        // text) BEFORE `pullFolderTree` below ever gets a chance to bring
         // in the REAL remote Skills folder (its own original id, its own
         // real content) -- leaving every freshly-pulled project-n02
         // project with TWO "Skills" folders, neither one deduped by the
@@ -590,11 +590,20 @@ async function main() {
         // `applyProjectN02Shape`), since that fix only prevents the SAME
         // code path racing against itself, not two genuinely different
         // creation paths (auto-provision vs. a real pull) each producing
-        // one. Fixed by creating the local project UNTYPED here, pulling
-        // the real tree first, and only THEN applying the remote's own
-        // type below -- by the time `ensureProjectN02` runs, the real
-        // Skills folder (if any) already exists, so it's a safe no-op
-        // seed rather than a duplicate.
+        // one.
+        //
+        // The first fix attempted here just omitted `folder_type` below,
+        // assuming that left the folder untyped until the retag after
+        // `pullFolderTree`. It didn't: `createVaultFolder`'s own
+        // "isNewProject" default forces any direct child of the `projects`
+        // root to `project-n02` regardless of what the caller passes, so
+        // the auto-seed still fired immediately and the duplicate came
+        // back. Fixed for real with `deferAutoProvision` (see
+        // `createVaultFolder`'s own doc, `vault.server.ts`) -- the folder
+        // still ends up typed `project-n02` right away, but the auto-seed
+        // itself is skipped until the explicit `ensureProjectN02` call
+        // below, by which point the real tree (including a real remote
+        // Skills folder, if any) has already been pulled in.
         const localProject =
           existingLocal ??
           (await createVaultFolder({
@@ -602,6 +611,7 @@ async function main() {
             human_id: humanId,
             name: remoteProject.name,
             parent_folder_id: localProjectsRoot._id,
+            deferAutoProvision: true,
           }))!;
         if (!existingLocal) projectsCreated++;
         console.log(`  → ${remoteProject.name}`);
