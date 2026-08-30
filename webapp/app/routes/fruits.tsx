@@ -199,7 +199,16 @@ function DailyLogPreview({
   );
 
   return (
-    <div className="mb-10">
+    // Capped at the same `680px` the real Daily Log page's own container
+    // uses (`fruits_.daily-log.tsx`) — the preview renders the entry
+    // through the identical `.daily-log-day` frame + OxMarkdown renderer,
+    // so an uncapped full-bleed block here would both look absurd on an
+    // ultrawide monitor and re-wrap the prose at a completely different
+    // measure than the page the "Keep writing" link goes to. Left-aligned
+    // (no `margin: 0 auto`) to stay flush with the greeting above it and
+    // the projects list below, which are left-aligned in the page
+    // container too.
+    <div className="mb-10" style={{ maxWidth: "680px" }}>
       <DayTitle className="purple-light-text">Daily Log</DayTitle>
 
       {today === null ? (
