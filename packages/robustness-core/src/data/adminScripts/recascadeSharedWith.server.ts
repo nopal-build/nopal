@@ -1,11 +1,13 @@
 // =============================================================================
-// One-off migration/repair: re-cascade `shared_with` onto every descendant
-// of a shared folder.
+// Admin script: re-cascade `shared_with` onto every descendant of a shared
+// folder.
 //
-// Run via: npx vite-node scripts/migrate-recascade-shared-with.ts [--dry-run]
-// (DB connection comes from the same env/defaults as `npm run seed:data` --
-// point DATABASE_URL/DATABASE_USERNAME/DATABASE_PASSWORD at whichever
-// environment you want to repair, e.g. production, before running this.)
+// Registered in `adminScriptsRegistry.server.ts` as "recascade-shared-with"
+// -- run it from /fruits/maker/scripts, not directly. Formerly a one-off
+// CLI script (`webapp/scripts/migrate-recascade-shared-with.ts`), ported
+// here so it runs on the worker (which already holds the real prod DB
+// credentials as Fly secrets) instead of requiring a local `vite-node` +
+// `fly proxy` tunnel every time it needs a re-run.
 //
 // Bug this fixes: `createVaultFolder` inherited `vault_root_key` and
 // `folder_type` from a parent folder, but NOT `shared_with` -- so any
@@ -18,20 +20,13 @@
 // `vault.server.ts`'s `createVaultFolder`; this script repairs data
 // created before that fix.
 //
-// WHY IT NEEDED FIXING AGAIN: this script used to select only
-// `folder_type = "project-n01"` -- the project type at the time it was
-// written. Projects have since become `project-n02`, so it silently
-// matched NOTHING and the drift it exists to repair went untouched.
-// Re-confirmed the hard way: `pull-daily-logs.ts` died listing the
-// `Skills` folder inside a SHARED "Crouch Casita" project, which 404s for
-// the collaborator while the project itself lists fine.
-//
-// So this no longer filters by folder type at all. It selects share
-// ANCHORS -- any folder with a non-empty `shared_with` whose parent isn't
-// itself shared (the same "the folder that was ACTUALLY shared, not one of
-// its descendants" definition `getTopLevelSharedFolders` uses) -- and
-// repairs downward from each. That can't go stale the next time a folder
-// type is renamed.
+// This selects share ANCHORS -- any folder with a non-empty `shared_with`
+// whose parent isn't itself shared (the same "the folder that was
+// ACTUALLY shared, not one of its descendants" definition
+// `getTopLevelSharedFolders` uses) -- and repairs downward from each, so
+// it can't go stale if a folder type is ever renamed (see this script's
+// git history for the exact way selecting by `folder_type` bit us once
+// already).
 //
 // UNION, NOT OVERWRITE: `cascadeShareVaultFolder` stamps every descendant
 // with the anchor's list verbatim. That's right at share-time, but wrong
@@ -41,13 +36,11 @@
 // cascading should already have given, never take any away.
 //
 // Idempotent -- safe to re-run (a folder with no drift is a no-op).
-// `--dry-run` prints what WOULD change without writing anything.
 // =============================================================================
 
-import { query, formatRecord, merge } from "robustness-core/data/generic.server";
-import type { VaultFolder } from "robustness-core/data/vault.types";
-
-const DRY_RUN = process.argv.includes("--dry-run");
+import { query, formatRecord, merge } from "../generic.server";
+import type { VaultFolder } from "../vault.types";
+import type { AdminScriptRunOpts, AdminScriptResult } from "./types";
 
 function sharedWith(folder: VaultFolder): string[] {
   return Array.isArray(folder.shared_with) ? folder.shared_with : [];
@@ -86,11 +79,11 @@ async function descendants(parentId: string): Promise<VaultFolder[]> {
   return out;
 }
 
-async function main() {
+export async function run({ dryRun, log }: AdminScriptRunOpts): Promise<AdminScriptResult> {
   const shared = await allSharedFolders();
   const anchors = shareAnchors(shared);
-  console.log(
-    `${shared.length} shared folder(s) total; ${anchors.length} share anchor(s) to repair from.${DRY_RUN ? " (dry run)" : ""}`,
+  log(
+    `${shared.length} shared folder(s) total; ${anchors.length} share anchor(s) to repair from.${dryRun ? " (dry run)" : ""}`,
   );
 
   let foldersRepaired = 0;
@@ -106,15 +99,13 @@ async function main() {
     if (drifted.length === 0) continue;
 
     anchorsWithDrift++;
-    console.log(
-      `\n-- "${anchor.name}" (${anchor._id}, owner ${anchor.human_id}) shared_with ${JSON.stringify(want)}`,
-    );
+    log(`"${anchor.name}" (${anchor._id}, owner ${anchor.human_id}) shared_with ${JSON.stringify(want)}`);
     for (const folder of drifted) {
       const union = Array.from(new Set([...sharedWith(folder), ...want]));
-      console.log(
-        `   ${DRY_RUN ? "would fix" : "fixing"}: "${folder.name}" (${folder._id}) ${JSON.stringify(sharedWith(folder))} -> ${JSON.stringify(union)}`,
+      log(
+        `  ${dryRun ? "would fix" : "fixing"}: "${folder.name}" (${folder._id}) ${JSON.stringify(sharedWith(folder))} -> ${JSON.stringify(union)}`,
       );
-      if (!DRY_RUN) {
+      if (!dryRun) {
         await merge("vault_folders", folder._id, {
           shared_with: union,
           updated_at: new Date().toISOString(),
@@ -124,15 +115,7 @@ async function main() {
     }
   }
 
-  console.log(
-    `\nDone. ${foldersRepaired} folder(s) ${DRY_RUN ? "would be" : ""} repaired across ${anchorsWithDrift} shared folder(s).`,
-  );
-  if (DRY_RUN) console.log("Dry run — nothing was written.");
+  const summary = `${foldersRepaired} folder(s) ${dryRun ? "would be" : ""} repaired across ${anchorsWithDrift} shared folder(s).`;
+  log(summary);
+  return { summary };
 }
-
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error("Migration failed:", err);
-    process.exit(1);
-  });

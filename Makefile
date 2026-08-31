@@ -5,6 +5,7 @@ SURREAL_PASS ?= root
 
 # ── Prod database access (for data-migration scripts) ─────────────────────
 DB_APP ?= db-thrumming-water-5938
+WEBAPP_APP ?= webapp-billowing-meadow-8538
 PROXY_PORT ?= 8081
 
 # ── Full-stack dev lifecycle ───────────────────────────────────────────────────
@@ -64,16 +65,35 @@ migrate:
 	sh db/migrate.sh
 
 ## Run a data-migration script from webapp/scripts/ against the PROD database,
-## tunneled through a temporary `fly proxy` (no public DB access required):
-##   make migrate-prod SCRIPT=migrate-vault-root-keys.ts SURREAL_PASS=<prod-pass>
-##   make migrate-prod SCRIPT=migrate-backfill-sharing-roles.ts SURREAL_PASS=<prod-pass> ARGS="--dry-run"
-## SURREAL_USER defaults to root; ARGS is passed through to the script
-## verbatim (e.g. `--dry-run`); the proxy is torn down when the script exits.
-## Scripts should be idempotent — safe to re-run if anything goes sideways.
+## tunneled through a temporary `fly proxy` (no public DB access required).
+## Credentials are pulled LIVE from the webapp app's own Fly secrets — the
+## exact DATABASE_USERNAME/DATABASE_PASSWORD the deployed app itself
+## connects with — via `fly ssh console`, so you never need to know or
+## paste the prod password by hand:
+##   make migrate-prod SCRIPT=migrate-vault-root-keys.ts
+##   make migrate-prod SCRIPT=migrate-backfill-sharing-roles.ts ARGS="--dry-run"
+## Pass SURREAL_USER=/SURREAL_PASS= explicitly to override (e.g. to connect
+## as the SurrealDB root user instead of the app's scoped one) — doing so
+## skips the live fetch. ARGS is passed through to the script verbatim;
+## the proxy is torn down when the script exits. Scripts should be
+## idempotent — safe to re-run if anything goes sideways.
 migrate-prod:
-	@test -n "$(SCRIPT)" || { echo "Usage: make migrate-prod SCRIPT=<file in webapp/scripts/> SURREAL_PASS=<prod-pass> [ARGS=\"--dry-run\"]"; exit 1; }
+	@test -n "$(SCRIPT)" || { echo "Usage: make migrate-prod SCRIPT=<file in webapp/scripts/> [ARGS=\"--dry-run\"]"; exit 1; }
 	@test -f "webapp/scripts/$(SCRIPT)" || { echo "webapp/scripts/$(SCRIPT) not found"; exit 1; }
-	@printf 'Run webapp/scripts/%s %s against PROD (%s) as %s? [y/N] ' "$(SCRIPT)" "$(ARGS)" "$(DB_APP)" "$(SURREAL_USER)"; \
+	@if [ "$(origin SURREAL_USER)" = "command line" ] || [ "$(origin SURREAL_PASS)" = "command line" ]; then \
+		DB_USER="$(SURREAL_USER)"; DB_PASS="$(SURREAL_PASS)"; \
+		echo "Using manually-provided credentials (user: $$DB_USER)."; \
+	else \
+		echo "Fetching live DB credentials from $(WEBAPP_APP) (same ones the deployed app uses)..."; \
+		CREDS=$$(fly ssh console -a $(WEBAPP_APP) -C 'printenv DATABASE_USERNAME DATABASE_PASSWORD' 2>/dev/null); \
+		DB_USER=$$(echo "$$CREDS" | sed -n '1p' | tr -d '\r'); \
+		DB_PASS=$$(echo "$$CREDS" | sed -n '2p' | tr -d '\r'); \
+		if [ -z "$$DB_USER" ] || [ -z "$$DB_PASS" ]; then \
+			echo "Couldn't fetch DATABASE_USERNAME/DATABASE_PASSWORD from $(WEBAPP_APP) — is 'fly' logged in with ssh access? Pass SURREAL_USER=... SURREAL_PASS=... to override."; \
+			exit 1; \
+		fi; \
+	fi; \
+	printf 'Run webapp/scripts/%s %s against PROD (%s) as %s? [y/N] ' "$(SCRIPT)" "$(ARGS)" "$(DB_APP)" "$$DB_USER"; \
 	read -r answer; \
 	[ "$$answer" = "y" ] || { echo "Aborted."; exit 1; }; \
 	echo "Opening tunnel to $(DB_APP) on localhost:$(PROXY_PORT)..."; \
@@ -87,7 +107,7 @@ migrate-prod:
 	curl -s -o /dev/null http://localhost:$(PROXY_PORT)/health || { echo "Tunnel never became ready — is 'fly' logged in?"; exit 1; }; \
 	echo "Tunnel ready — running $(SCRIPT) $(ARGS) against prod..."; \
 	cd webapp && DATABASE_URL=http://localhost:$(PROXY_PORT)/rpc \
-		DATABASE_USERNAME=$(SURREAL_USER) DATABASE_PASSWORD=$(SURREAL_PASS) \
+		DATABASE_USERNAME="$$DB_USER" DATABASE_PASSWORD="$$DB_PASS" \
 		npx vite-node scripts/$(SCRIPT) $(ARGS)
 
 ## Restart the webapp container, clearing the Vite dep cache first.

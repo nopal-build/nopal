@@ -1,0 +1,32 @@
+// Shared types for the Admin Scripts registry (`adminScriptsRegistry.server.ts`).
+// Kept in their own type-only file so an individual script module (e.g.
+// `recascadeSharedWith.server.ts`) and the registry that lists it can each
+// import these without importing EACH OTHER.
+
+/** What a registered script's `run` is handed. Mirrors the `{ log }` shape
+ * every GraphLog stage function already takes (`syncKnowledge.server.ts`
+ * etc.) -- `log` is the ONLY way a script should report progress; never
+ * `console.log` directly, since the worker forwards every `log` call both
+ * to BullMQ's own `job.log()` (for live tailing while a run is in
+ * progress) and into the run's permanent audit row (`adminScriptRuns.server.ts`),
+ * which console output would never reach. */
+export type AdminScriptRunOpts = {
+  dryRun: boolean;
+  log: (line: string) => void;
+};
+
+/** `summary` is the one-line result shown on the run's own history row
+ * (e.g. "12 folder(s) repaired across 5 anchor(s)."), distinct from the
+ * full `log` -- the audit trail keeps both. */
+export type AdminScriptResult = {
+  summary: string;
+};
+
+export type AdminScriptDefinition = {
+  /** Stable id -- used as the BullMQ job name AND the audit row's
+   * `script_name`, so never rename one without migrating the other. */
+  name: string;
+  label: string;
+  description: string;
+  run: (opts: AdminScriptRunOpts) => Promise<AdminScriptResult>;
+};
