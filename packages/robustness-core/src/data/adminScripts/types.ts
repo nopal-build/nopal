@@ -41,5 +41,13 @@ export type AdminScriptDefinition = {
    * non-empty -- e.g. a folder id a script can't infer on its own,
    * versus an optional project name that defaults to scanning everything. */
   argRequired?: boolean;
+  /** Set when a script is believed to no longer be useful -- the drift it
+   * repairs has been fully cleaned up, or was tied to a one-time rollout
+   * that's long done -- but is being kept around rather than deleted
+   * outright, in case it's ever needed again. Shown with a "Deprecated"
+   * badge and moved into its own de-emphasized section on the Run page,
+   * never hidden entirely -- an admin should still be able to see it and
+   * why, and still run it if the judgment call above turns out wrong. */
+  deprecated?: { reason: string };
   run: (opts: AdminScriptRunOpts) => Promise<AdminScriptResult>;
 };
