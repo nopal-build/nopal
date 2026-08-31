@@ -27,17 +27,19 @@ import { getAdminScriptRun } from "robustness-core/data/adminScriptRuns.server";
 import { getAdminScriptJobLog } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 
-async function requireMakerAccess(request: Request) {
+// Super only -- see `fruits_.maker_.scripts.tsx`'s own doc on why this is
+// stricter than the usual Admin-or-Super Maker bar.
+async function requireAdminScriptsAccess(request: Request) {
   const user = await getUser(request);
   if (!user) throw redirect("/login");
-  if (user.role !== "Admin" && user.role !== "Super") {
+  if (user.role !== "Super") {
     throw data("Forbidden", { status: 403 });
   }
   return user;
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requireMakerAccess(request);
+  await requireAdminScriptsAccess(request);
   const runId = params.runId;
   if (!runId) throw data("Missing run id", { status: 400 });
 
@@ -69,7 +71,7 @@ export function ErrorBoundary() {
           <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
             <Badge variant="danger">403</Badge>
             <h1 className="font-bold text-xl">Access Denied</h1>
-            <p className="text-sm subtle-text">Admin Script runs are only available to Admin and Super accounts.</p>
+            <p className="text-sm subtle-text">Admin Script runs are only available to Super accounts.</p>
             <Link to="/fruits/maker/scripts" className={`${link} ${textSize.sm}`}>
               ← Back to Admin Scripts
             </Link>

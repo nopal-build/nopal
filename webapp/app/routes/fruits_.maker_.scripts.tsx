@@ -30,17 +30,21 @@ import { listRecentAdminScriptRuns } from "robustness-core/data/adminScriptRuns.
 import { isAnyAdminScriptRunning, enqueueAdminScriptJob } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 
-async function requireMakerAccess(request: Request) {
+// Super only, NOT the usual Admin-or-Super Maker bar -- unlike GraphLog's
+// own staff override (which only ever touches ONE project's own data),
+// these scripts can mutate arbitrary rows across the whole database in
+// production. Keep this stricter than `requireMakerAccess` elsewhere.
+async function requireAdminScriptsAccess(request: Request) {
   const user = await getUser(request);
   if (!user) throw redirect("/login");
-  if (user.role !== "Admin" && user.role !== "Super") {
+  if (user.role !== "Super") {
     throw data("Forbidden", { status: 403 });
   }
   return user;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireMakerAccess(request);
+  await requireAdminScriptsAccess(request);
 
   const [scripts, recentRuns, running] = await Promise.all([
     listAdminScripts(),
@@ -61,7 +65,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const user = await requireMakerAccess(request);
+  const user = await requireAdminScriptsAccess(request);
 
   const form = await request.formData();
   const scriptName = form.get("scriptName");
@@ -93,7 +97,7 @@ export function ErrorBoundary() {
           <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
             <Badge variant="danger">403</Badge>
             <h1 className="font-bold text-xl">Access Denied</h1>
-            <p className="text-sm subtle-text">Admin Scripts are only available to Admin and Super accounts.</p>
+            <p className="text-sm subtle-text">Admin Scripts are only available to Super accounts.</p>
             <Link to="/fruits/maker" className={`${link} ${textSize.sm}`}>
               ← Back to Maker
             </Link>
