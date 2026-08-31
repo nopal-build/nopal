@@ -266,12 +266,13 @@ async function processAdminScriptJob(job: Job<AdminScriptJobData, unknown, strin
     humanId: job.data.actingHumanId,
     scriptName: job.data.scriptName,
     dryRun: job.data.dryRun,
+    args: job.data.args,
   });
 
   try {
     const script = getAdminScript(job.data.scriptName);
     if (!script) throw new Error(`Unknown admin script: "${job.data.scriptName}"`);
-    const result = await script.run({ dryRun: job.data.dryRun, log: onProgress });
+    const result = await script.run({ dryRun: job.data.dryRun, args: job.data.args, log: onProgress });
     await finishAdminScriptRun(job.id!, { ok: true, summary: result.summary, log: logLines });
     return result;
   } catch (err) {

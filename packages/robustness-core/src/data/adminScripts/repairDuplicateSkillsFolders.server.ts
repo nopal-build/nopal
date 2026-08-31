@@ -1,5 +1,5 @@
 // =============================================================================
-// One-off repair: duplicate "Skills" folders left behind by a real,
+// Admin script: repair duplicate "Skills" folders left behind by a real,
 // confirmed bug in `pull-daily-logs.ts` (fixed alongside this script) —
 // tagging a freshly-pulled local project `project-n02` immediately at
 // creation fired `createVaultFolder`'s own `ensureProjectN02` side effect
@@ -10,8 +10,6 @@
 // `projectN02.server.ts`'s own deterministic-id fix (that fix only
 // prevents the SAME code path racing against itself, not two genuinely
 // different creation paths each producing one).
-//
-// Run via: npx vite-node scripts/repair-duplicate-skills-folders.ts [--dry-run]
 //
 // For every project-n02 folder with 2+ "Skills" folders, deletes whichever
 // one has the deterministic auto-provisioned id
@@ -27,14 +25,14 @@
 // left is a no-op).
 // =============================================================================
 
-import { getDb } from "robustness-core/data/db.server";
-import { query, formatRecord } from "robustness-core/data/generic.server";
+import { query, formatRecord } from "../generic.server";
 import {
   listFolderChildren,
   deleteVaultFolderCascade,
   systemVaultFolderKey,
   type VaultFolder,
-} from "robustness-core/data/vault.server";
+} from "../vault.server";
+import type { AdminScriptRunOpts, AdminScriptResult } from "./types";
 
 async function findAllProjectN02Folders(): Promise<VaultFolder[]> {
   const result = await query<[VaultFolder[]]>(
@@ -43,17 +41,9 @@ async function findAllProjectN02Folders(): Promise<VaultFolder[]> {
   return (result?.[0] ?? []).map(formatRecord);
 }
 
-async function main() {
-  const dryRun = process.argv.includes("--dry-run");
-
-  const db = await getDb();
-  if (!db) {
-    console.error("Could not connect to SurrealDB — aborting.");
-    process.exit(1);
-  }
-
+export async function run({ dryRun, log }: AdminScriptRunOpts): Promise<AdminScriptResult> {
   const projects = await findAllProjectN02Folders();
-  console.log(`Scanning ${projects.length} project-n02 folder(s) for duplicate Skills folders${dryRun ? " (dry run)" : ""}...\n`);
+  log(`Scanning ${projects.length} project-n02 folder(s) for duplicate Skills folders.${dryRun ? " (dry run)" : ""}`);
 
   let repaired = 0;
   let skipped = 0;
@@ -68,23 +58,24 @@ async function main() {
     const real = skillsFolders.filter((f) => f._id !== deterministicId);
 
     if (autoProvisioned.length === 0 || real.length === 0) {
-      console.log(`! "${project.name}" (${project._id}): ${skillsFolders.length} Skills folders, none matching the expected auto-provisioned id — skipping, review manually.`);
+      log(
+        `! "${project.name}" (${project._id}): ${skillsFolders.length} Skills folders, none matching the expected auto-provisioned id — skipping, review manually.`,
+      );
       skipped++;
       continue;
     }
 
-    console.log(`"${project.name}" (${project._id}): deleting ${autoProvisioned.length} auto-provisioned duplicate(s), keeping ${real.length} real one(s).`);
+    log(
+      `"${project.name}" (${project._id}): ${dryRun ? "would delete" : "deleting"} ${autoProvisioned.length} auto-provisioned duplicate(s), keeping ${real.length} real one(s).`,
+    );
     for (const dupe of autoProvisioned) {
       if (!dryRun) await deleteVaultFolderCascade(dupe._id);
-      console.log(`   - deleted ${dupe._id}`);
+      log(`   - ${dryRun ? "would delete" : "deleted"} ${dupe._id}`);
     }
     repaired++;
   }
 
-  console.log(`\n${dryRun ? "Would repair" : "Repaired"} ${repaired} project(s), skipped ${skipped} ambiguous one(s).`);
+  const summary = `${repaired} project(s) ${dryRun ? "would be" : ""} repaired, ${skipped} ambiguous one(s) skipped.`;
+  log(summary);
+  return { summary };
 }
-
-main().catch((err) => {
-  console.error("Repair failed:", err);
-  process.exit(1);
-});

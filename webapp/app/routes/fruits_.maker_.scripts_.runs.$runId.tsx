@@ -186,6 +186,7 @@ export default function FruitsMakerScriptsRun() {
             <span>By {humanName}</span>
             <span>Started {formatDatetime(run.started_at)}</span>
             <span>Duration {formatDuration(run.duration_ms)}</span>
+            {run.args.length > 0 && <span>Args: {run.args.join(", ")}</span>}
             {liveState && <span>Job state: {liveState}</span>}
           </div>
           {run.summary && (

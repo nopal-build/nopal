@@ -12,6 +12,10 @@
  * which console output would never reach. */
 export type AdminScriptRunOpts = {
   dryRun: boolean;
+  /** Positional arguments from the UI's own single free-text field (see
+   * `AdminScriptDefinition.argLabel` below) -- empty for a script that
+   * takes none. */
+  args: string[];
   log: (line: string) => void;
 };
 
@@ -28,5 +32,14 @@ export type AdminScriptDefinition = {
   name: string;
   label: string;
   description: string;
+  /** If set, the Run form shows a single free-text input with this
+   * label, and whatever's typed becomes `args[0]` (`args` stays `[]` if
+   * left blank). `null`/omitted for a script that takes no argument at
+   * all. */
+  argLabel?: string;
+  /** Whether the Run form blocks submission until the arg field is
+   * non-empty -- e.g. a folder id a script can't infer on its own,
+   * versus an optional project name that defaults to scanning everything. */
+  argRequired?: boolean;
   run: (opts: AdminScriptRunOpts) => Promise<AdminScriptResult>;
 };

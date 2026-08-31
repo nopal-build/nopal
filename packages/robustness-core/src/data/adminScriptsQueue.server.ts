@@ -33,6 +33,7 @@ export type AdminScriptJobData = {
   actingHumanId: string;
   scriptName: string;
   dryRun: boolean;
+  args: string[];
 };
 
 let queue: Queue<AdminScriptJobData, unknown, string> | undefined;

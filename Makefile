@@ -70,13 +70,22 @@ migrate:
 ## exact DATABASE_USERNAME/DATABASE_PASSWORD the deployed app itself
 ## connects with — via `fly ssh console`, so you never need to know or
 ## paste the prod password by hand:
-##   make migrate-prod SCRIPT=migrate-vault-root-keys.ts
-##   make migrate-prod SCRIPT=migrate-backfill-sharing-roles.ts ARGS="--dry-run"
+##   make migrate-prod SCRIPT=demo-project.ts
+##   make migrate-prod SCRIPT=mint-cli-token.ts ARGS="someone@example.com"
 ## Pass SURREAL_USER=/SURREAL_PASS= explicitly to override (e.g. to connect
 ## as the SurrealDB root user instead of the app's scoped one) — doing so
 ## skips the live fetch. ARGS is passed through to the script verbatim;
 ## the proxy is torn down when the script exits. Scripts should be
 ## idempotent — safe to re-run if anything goes sideways.
+##
+## Repair/maintenance scripts that mutate prod data have mostly moved to
+## the Admin Scripts registry instead (`adminScriptsRegistry.server.ts`,
+## run from /fruits/maker/scripts) — this target is now mainly for
+## whatever's left under webapp/scripts/ (local/dev tooling like
+## `pull-daily-logs.ts`, one-off content imports, etc).
+## See that registry's own module doc before adding a new one-off script
+## here — if it's likely to be RE-RUN regularly against production,
+## register it there instead.
 migrate-prod:
 	@test -n "$(SCRIPT)" || { echo "Usage: make migrate-prod SCRIPT=<file in webapp/scripts/> [ARGS=\"--dry-run\"]"; exit 1; }
 	@test -f "webapp/scripts/$(SCRIPT)" || { echo "webapp/scripts/$(SCRIPT) not found"; exit 1; }

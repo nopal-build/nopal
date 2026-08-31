@@ -1,11 +1,6 @@
 // =============================================================================
-// One-off migration/repair: backfill missing Sharing Role entries for
-// humans who already have legacy VIEW access to a project.
-//
-// Run via: npx vite-node scripts/migrate-backfill-sharing-roles.ts [--dry-run]
-// (DB connection comes from the same env/defaults as `npm run seed:data` —
-// point DATABASE_URL/DATABASE_USERNAME/DATABASE_PASSWORD at whichever
-// environment you want to repair, e.g. production, before running this.)
+// Admin script: backfill missing Sharing Role entries for humans who
+// already have legacy VIEW access to a project.
 //
 // Bug this fixes: PhyLog's Sharing Roles (`projectSharing.server.ts`)
 // replaced the old plain `shared_with: string[] | "everyone"` sharing
@@ -21,13 +16,6 @@
 // `shared_with`, that human silently has full view access but no Role —
 // `getProjectRole` returns `null` for them, same as a total stranger.
 //
-// This is exactly what happened when Austin had un-explained "view works,
-// but skills-editing always 403s, and he's not in the Share modal's list"
-// symptoms on a project that predates Sharing Roles — re-sharing him fixed
-// it because `setProjectSharing` writes both the README `sharing` list AND
-// re-cascades `shared_with` from scratch, but the drift can affect any
-// pre-existing collaborator on any project, not just one.
-//
 // For every project folder with a non-empty `shared_with`: for each human
 // id in there that ISN'T the project's own creator and has NO entry in the
 // project's current `sharing` list, add one with the least-privileged
@@ -37,47 +25,45 @@
 // Existing `sharing` entries are left completely untouched.
 //
 // Idempotent — safe to re-run (a project with no drift is a no-op).
-// `--dry-run` prints what WOULD change without writing anything.
+//
+// NOTE: this originally selected `folder_type = "project-n01"` -- the
+// project type at the time it was written. Projects have since become
+// `project-n02` (same drift `migrate-recascade-shared-with.ts`'s own
+// history hit), so it silently matched NOTHING for a long stretch. Fixed
+// here on the same port that moved this into the registry.
 // =============================================================================
 
-import { query, formatRecord } from "robustness-core/data/generic.server";
-import { getFolderById } from "robustness-core/data/vault.server";
-import {
-  getProjectSharing,
-  setProjectSharing,
-  type ProjectSharingEntry,
-} from "robustness-core/data/projectSharing.server";
-import { getSharingRoles } from "robustness-core/data/sharingRoles.server";
-import { getHumansById } from "robustness-core/data/humans.server";
-import type { VaultFolder } from "robustness-core/data/vault.types";
-
-const DRY_RUN = process.argv.includes("--dry-run");
+import { query, formatRecord } from "../generic.server";
+import { getFolderById } from "../vault.server";
+import { getProjectSharing, setProjectSharing, type ProjectSharingEntry } from "../projectSharing.server";
+import { getSharingRoles } from "../sharingRoles.server";
+import { getHumansById } from "../humans.server";
+import type { VaultFolder } from "../vault.types";
+import type { AdminScriptRunOpts, AdminScriptResult } from "./types";
 
 async function sharedProjectFolders(): Promise<VaultFolder[]> {
   const result = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders
-     WHERE folder_type = "project-n01"
+     WHERE folder_type = "project-n02"
        AND is_folder_type_root = true
        AND vault_root_key = "projects"`,
   );
   const all = (result?.[0] ?? []).map(formatRecord);
-  return all.filter(
-    (f) => Array.isArray(f.shared_with) && f.shared_with.length > 0,
-  );
+  return all.filter((f) => Array.isArray(f.shared_with) && f.shared_with.length > 0);
 }
 
-async function main(): Promise<void> {
+export async function run({ dryRun, log }: AdminScriptRunOpts): Promise<AdminScriptResult> {
   const roles = await getSharingRoles();
   const defaultRole = roles.find((r) => !r.is_owner)?.name ?? roles[0]?.name;
   if (!defaultRole) {
-    console.error("No sharing roles defined at all — aborting.");
-    process.exitCode = 1;
-    return;
+    const message = "No sharing roles defined at all — aborting.";
+    log(message);
+    return { summary: message };
   }
-  console.log(`Default backfill role: "${defaultRole}"${DRY_RUN ? " (dry run — no writes)" : ""}`);
+  log(`Default backfill role: "${defaultRole}"${dryRun ? " (dry run — no writes)" : ""}`);
 
   const projects = await sharedProjectFolders();
-  console.log(`Found ${projects.length} project(s) with existing shared_with entries.\n`);
+  log(`Found ${projects.length} project(s) with existing shared_with entries.`);
 
   let touched = 0;
   for (const project of projects) {
@@ -98,32 +84,29 @@ async function main(): Promise<void> {
     const nameFor = (id: string) =>
       humans.find((h) => h._id === id)?.name || humans.find((h) => h._id === id)?.email || id;
 
-    console.log(`-- "${folder.name}" (${folder._id})`);
+    log(`"${folder.name}" (${folder._id})`);
     for (const humanId of missing) {
-      console.log(`   + ${nameFor(humanId)} (${humanId}) -> role "${defaultRole}" (had view access, no role)`);
+      log(`  ${dryRun ? "would add" : "adding"}: ${nameFor(humanId)} (${humanId}) -> role "${defaultRole}" (had view access, no role)`);
     }
 
-    if (!DRY_RUN) {
+    if (!dryRun) {
       const newEntries: ProjectSharingEntry[] = [
         ...sharing,
         ...missing.map((human) => ({ human, role: defaultRole })),
       ];
       // Acting as the project's own creator — always an implicit Owner
       // (`getProjectRole`), so this always passes `setProjectSharing`'s own
-      // permission check regardless of who runs this script.
+      // permission check regardless of who runs this.
       const result = await setProjectSharing(folder.human_id, folder, newEntries);
       if (!result.ok) {
-        console.log(`   ! failed: ${result.error}`);
+        log(`  ! failed: ${result.error}`);
         continue;
       }
     }
     touched++;
   }
 
-  console.log(`\n${DRY_RUN ? "Would touch" : "Touched"} ${touched} project(s).`);
+  const summary = `${touched} project(s) ${dryRun ? "would be" : ""} touched.`;
+  log(summary);
+  return { summary };
 }
-
-main().catch((err) => {
-  console.error("Migration failed:", err);
-  process.exitCode = 1;
-});

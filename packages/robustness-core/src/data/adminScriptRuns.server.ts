@@ -24,6 +24,7 @@ export type AdminScriptRun = Data & {
   script_name: string;
   human_id: string;
   dry_run: boolean;
+  args: string[];
   started_at: string;
   finished_at: string | null;
   duration_ms: number | null;
@@ -49,6 +50,7 @@ export async function startAdminScriptRun(input: {
   humanId: string;
   scriptName: string;
   dryRun: boolean;
+  args: string[];
 }): Promise<void> {
   try {
     await ensureTables();
@@ -56,6 +58,7 @@ export async function startAdminScriptRun(input: {
       script_name: input.scriptName,
       human_id: input.humanId,
       dry_run: input.dryRun,
+      args: input.args,
       started_at: new Date().toISOString(),
       finished_at: null,
       duration_ms: null,
@@ -88,6 +91,7 @@ export async function finishAdminScriptRun(
       script_name: row.script_name,
       human_id: row.human_id,
       dry_run: row.dry_run,
+      args: row.args,
       started_at: row.started_at,
       finished_at: new Date().toISOString(),
       duration_ms: Date.now() - startedAtMs,

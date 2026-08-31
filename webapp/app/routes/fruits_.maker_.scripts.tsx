@@ -25,7 +25,7 @@ import { surfaceBase } from "stamps/surface.css";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
-import { listAdminScripts } from "robustness-core/data/adminScriptsRegistry.server";
+import { listAdminScripts, getAdminScript } from "robustness-core/data/adminScriptsRegistry.server";
 import { listRecentAdminScriptRuns } from "robustness-core/data/adminScriptRuns.server";
 import { isAnyAdminScriptRunning, enqueueAdminScriptJob } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
@@ -57,7 +57,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const humanNameById = new Map(humans.map((h) => [h._id, h.name]));
 
   return {
-    scripts: scripts.map(({ name, label, description }) => ({ name, label, description })),
+    scripts: scripts.map(({ name, label, description, argLabel, argRequired }) => ({
+      name,
+      label,
+      description,
+      argLabel,
+      argRequired,
+    })),
     recentRuns,
     running,
     humanNameById: Object.fromEntries(humanNameById),
@@ -70,8 +76,19 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const scriptName = form.get("scriptName");
   const dryRun = form.get("dryRun") === "on";
+  const argValue = form.get("arg");
   if (typeof scriptName !== "string" || !scriptName) {
     return data({ error: "Missing scriptName" }, { status: 400 });
+  }
+
+  const script = getAdminScript(scriptName);
+  if (!script) {
+    return data({ error: `Unknown script: "${scriptName}"` }, { status: 400 });
+  }
+
+  const arg = typeof argValue === "string" ? argValue.trim() : "";
+  if (script.argRequired && !arg) {
+    return data({ error: `"${script.argLabel ?? "argument"}" is required.` }, { status: 400 });
   }
 
   if (await isAnyAdminScriptRunning()) {
@@ -82,6 +99,7 @@ export async function action({ request }: ActionFunctionArgs) {
     actingHumanId: user._id,
     scriptName,
     dryRun,
+    args: arg ? [arg] : [],
   });
 
   return redirect(`/fruits/maker/scripts/runs/${jobId}`);
@@ -192,6 +210,24 @@ export default function FruitsMakerScripts() {
                 </p>
                 <Form method="post" className="flex items-center gap-4 flex-wrap">
                   <input type="hidden" name="scriptName" value={script.name} />
+                  {script.argLabel && (
+                    <label className="flex items-center gap-2 text-sm font-mono subtle-text">
+                      {script.argLabel}
+                      <input
+                        type="text"
+                        name="arg"
+                        required={script.argRequired ?? false}
+                        className="text-sm font-mono rounded"
+                        style={{
+                          padding: "4px 8px",
+                          border: "1px solid var(--midground)",
+                          background: "transparent",
+                          color: "inherit",
+                          minWidth: "160px",
+                        }}
+                      />
+                    </label>
+                  )}
                   <label className="flex items-center gap-2 text-sm font-mono subtle-text">
                     <input type="checkbox" name="dryRun" defaultChecked />
                     Dry run
@@ -239,6 +275,9 @@ export default function FruitsMakerScripts() {
                     <Badge variant="accent">{run.script_name}</Badge>
                     {run.dry_run && <Badge variant="neutral">dry run</Badge>}
                     <RunStatusBadge ok={run.ok} />
+                    {run.args.length > 0 && (
+                      <span className="text-xs font-mono subtle-text">({run.args.join(", ")})</span>
+                    )}
                     <span className="text-xs font-mono subtle-text">
                       by {humanNameById[run.human_id] ?? run.human_id}
                     </span>
