@@ -1386,7 +1386,19 @@ export async function runSyncGraph(
       );
       days.push({ date, changed: true, empty: false, nodes: nodeBlocks.length, passes });
     } catch (err) {
-      log(`sync-graph: ${date} couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
+      const message = err instanceof Error ? err.message : "unknown error";
+      log(`sync-graph: ${date} couldn't be processed (${message}).`);
+      /** A REAL, CONFIRMED GAP: this catch recorded the failure to perf
+       * and usage, but never to `incomplete` -- so a day that threw was
+       * indistinguishable, in the run's own reported result, from a day
+       * with nothing worth capturing. With an invalid ANTHROPIC_API_KEY
+       * every single day threw a 401 in ~100ms and the run still finished
+       * `ok: true`, "finished clean", 0 nodes written, no error recorded
+       * on `graphlog_runs` at all -- the only visible symptom being a
+       * blank README, with nothing anywhere to say why. That is exactly
+       * what the `incomplete` declaration above already says this stage
+       * owes a run: stop reporting OK while this happens. */
+      incomplete.push(`${date} couldn't be processed: ${message}`);
       const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
         humanId: actingHumanId,
