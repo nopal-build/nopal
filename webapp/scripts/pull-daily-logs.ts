@@ -400,6 +400,10 @@ type PullCounts = {
   /** Text files whose content an EARLIER run couldn't read (see
    * `remoteFileOrNull`) and this one filled in. */
   contentBackfilled: number;
+  /** Sub-folders the host refused to list, whose subtree was skipped —
+   * see `pullFolderTree`'s own note on the un-cascaded `shared_with` that
+   * causes it. */
+  foldersUnreadable: number;
 };
 
 /** Our own local S3 keys always start with this prefix (see `api.vault.upload.tsx`'s
@@ -477,8 +481,30 @@ async function pullFolderTree(
   remoteFolderId: string,
   localParentId: string,
   counts: PullCounts,
+  label: string,
 ): Promise<void> {
-  const { folders, files } = await remoteChildren(host, token, remoteFolderId);
+  /** A REAL, CONFIRMED BUG, reproduced here: this listing THREW, and since
+   * nothing catches it, one unreadable sub-folder killed the entire run —
+   * every project after the one being pulled was silently never reached
+   * ("6 referenced projects", 2 pulled, no error about the other 4).
+   *
+   * It is genuinely reachable: sharing cascades `shared_with` onto
+   * descendants at share-time, but a sub-folder CREATED INSIDE an already
+   * shared project (a project's own auto-provisioned `Skills` folder, say)
+   * is born without it, so the collaborator can list the project yet gets
+   * 404 on that one child. `migrate-recascade-shared-with.ts` repairs
+   * exactly this, but only for `project-n01` — today's projects are
+   * `project-n02`, so it no longer matches them at all.
+   *
+   * Skipping the subtree keeps everything else — the rest of this project,
+   * and every project after it. */
+  const children = await remoteChildrenOrNull(host, token, remoteFolderId);
+  if (!children) {
+    console.warn(`  ! Skipping "${label}" — ${host} won't let this token list it.`);
+    counts.foldersUnreadable++;
+    return;
+  }
+  const { folders, files } = children;
 
   for (const listing of files) {
     const isText = listing.content_type.startsWith("text/");
@@ -568,7 +594,7 @@ async function pullFolderTree(
         // new local parent instead (see `createVaultFolder`'s own doc).
         folder_type: sub.is_folder_type_root ? sub.folder_type ?? null : undefined,
       }))!;
-    await pullFolderTree(host, token, humanId, sub._id, localSub._id, counts);
+    await pullFolderTree(host, token, humanId, sub._id, localSub._id, counts, `${label}/${sub.name}`);
   }
 }
 
@@ -708,6 +734,7 @@ async function main() {
     filesSkipped: 0,
     attachmentsCopied: 0,
     contentBackfilled: 0,
+    foldersUnreadable: 0,
   };
   if (referencedProjectIds.size > 0) {
     console.log(`\nPulling ${referencedProjectIds.size} referenced project(s)...`);
@@ -796,7 +823,15 @@ async function main() {
           }))!;
         if (!existingLocal) projectsCreated++;
         console.log(`  → ${remoteProject.name}`);
-        await pullFolderTree(host, token, humanId, remoteProject._id, localProject._id, projectCounts);
+        await pullFolderTree(
+          host,
+          token,
+          humanId,
+          remoteProject._id,
+          localProject._id,
+          projectCounts,
+          remoteProject.name,
+        );
 
         if (!existingLocal && remoteProject.is_folder_type_root && remoteProject.folder_type) {
           await merge("vault_folders", localProject._id, {
@@ -815,6 +850,11 @@ async function main() {
     console.log(
       `Done with projects. ${projectsCreated} project folder(s) created, ${projectCounts.filesCreated} file(s) created, ${projectCounts.filesSkipped} already present (skipped), ${projectCounts.attachmentsCopied} attachment(s) copied to local S3, ${projectCounts.contentBackfilled} file(s) had missing content backfilled.`,
     );
+    if (projectCounts.foldersUnreadable > 0) {
+      console.log(
+        `${projectCounts.foldersUnreadable} sub-folder(s) couldn't be listed and were skipped — usually a folder created INSIDE an already-shared project, which never got the project's \`shared_with\` cascaded onto it (see \`migrate-recascade-shared-with.ts\`, which only covers the older \`project-n01\` type).`,
+      );
+    }
     if (projectsUnreachable > 0) {
       console.log(
         `${projectsUnreachable} referenced project(s) could not be read from ${host} at all — a Card pointing at one will still show "Unknown project" locally. Ask its owner to share it with ${email}, then re-run.`,
