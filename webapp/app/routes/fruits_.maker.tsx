@@ -179,7 +179,7 @@ function StampsPromoCard() {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 export default function FruitsMaker() {
-  const { days, stats, graphLogUsage } = useLoaderData<typeof loader>();
+  const { user, days, stats, graphLogUsage } = useLoaderData<typeof loader>();
 
   return (
     <AppLayout>
@@ -322,6 +322,42 @@ export default function FruitsMaker() {
             />
           </div>
         </section>
+
+        {/* ── Admin Scripts ─────────────────────────── */}
+        {/* Super only -- these scripts can mutate arbitrary rows across
+            the whole database in production, stricter than everything
+            else on this Admin-or-Super page. Hidden entirely for Admins
+            rather than shown as a dead link to a 403. */}
+        {user.role === "Super" && (
+          <section className="mb-12">
+            <hr
+              style={{
+                borderColor: "currentColor",
+                opacity: 0.12,
+                margin: "0 0 24px",
+              }}
+            />
+            <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
+              <h2
+                className="font-bold text-lg font-mono purple-text"
+                style={{ margin: 0 }}
+              >
+                Admin Scripts
+              </h2>
+              <Link
+                to="/fruits/maker/scripts"
+                prefetch="intent"
+                className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
+              >
+                Run/view →
+              </Link>
+            </div>
+            <p className="text-sm subtle-text" style={{ margin: 0 }}>
+              Repair/maintenance scripts, run against production by the worker — no local prod
+              credentials needed. Super only.
+            </p>
+          </section>
+        )}
 
         {/* ── Stamps ─────────────────────────── */}
         <section>

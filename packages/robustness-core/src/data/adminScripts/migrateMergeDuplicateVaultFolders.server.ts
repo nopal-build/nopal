@@ -1,8 +1,5 @@
 // =============================================================================
-// One-off migration: merge duplicate vault folders
-//
-// Run via: npx vite-node scripts/migrate-merge-duplicate-vault-folders.ts
-//          npx vite-node scripts/migrate-merge-duplicate-vault-folders.ts --dry-run
+// Admin script: merge duplicate vault folders.
 //
 // `getOrCreateVaultFolder`/`ensureVaultRootFolders` (vault.server.ts) used to
 // do a plain "SELECT, then CREATE if missing" check with no atomicity —
@@ -20,7 +17,7 @@
 // `getOrCreateVaultFolder`/`ensureVaultRootFolders` are now fixed (a
 // deterministic per-(human, name, parent) folder id, created via an atomic
 // `UPSERT`) so this can't happen again going forward — this script is the
-// one-time cleanup for whatever duplicates already exist.
+// cleanup for whatever duplicates already exist.
 //
 // For every human, walks the folder tree top-down (root-level first, then
 // each surviving folder's own children, recursively) and merges every group
@@ -29,14 +26,16 @@
 // then the now-empty duplicate is deleted.
 //
 // Idempotent — safe to re-run (a tree with no duplicates left is a no-op).
+// Run "Dedupe daily-log readme.md mirrors" AFTER this — merging duplicate
+// date folders can leave more than one readme.md file_ref in the same
+// (now-canonical) folder.
 // =============================================================================
 
-import { getDb } from "robustness-core/data/db.server";
-import { query, formatRecord, merge, remove } from "robustness-core/data/generic.server";
-import type { VaultFolder, FileRef } from "robustness-core/data/vault.types";
-import type { Human } from "robustness-core/data/humans.server";
+import { query, formatRecord, merge, remove } from "../generic.server";
+import type { VaultFolder, FileRef } from "../vault.types";
+import type { Human } from "../humans.server";
+import type { AdminScriptRunOpts, AdminScriptResult } from "./types";
 
-const DRY_RUN = process.argv.includes("--dry-run");
 const now = () => new Date().toISOString();
 
 async function allHumans(): Promise<Human[]> {
@@ -44,10 +43,7 @@ async function allHumans(): Promise<Human[]> {
   return (result?.[0] ?? []).map(formatRecord);
 }
 
-async function foldersByParent(
-  humanId: string,
-  parentFolderId: string | null,
-): Promise<VaultFolder[]> {
+async function foldersByParent(humanId: string, parentFolderId: string | null): Promise<VaultFolder[]> {
   const result = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders
      WHERE human_id = $humanId AND parent_folder_id = $parentFolderId
@@ -58,10 +54,7 @@ async function foldersByParent(
 }
 
 async function filesByFolder(folderId: string): Promise<FileRef[]> {
-  const result = await query<[FileRef[]]>(
-    `SELECT * FROM file_refs WHERE folder_id = $folderId`,
-    { folderId },
-  );
+  const result = await query<[FileRef[]]>(`SELECT * FROM file_refs WHERE folder_id = $folderId`, { folderId });
   return (result?.[0] ?? []).map(formatRecord);
 }
 
@@ -70,28 +63,30 @@ async function filesByFolder(folderId: string): Promise<FileRef[]> {
  * grandchildren that collide by name after reparenting — the caller's own
  * recursive walk re-checks `canonical`'s children fresh, which catches
  * that case the same way it catches any other pre-existing duplicate. */
-async function mergeFolderInto(duplicate: VaultFolder, canonical: VaultFolder): Promise<void> {
+async function mergeFolderInto(
+  duplicate: VaultFolder,
+  canonical: VaultFolder,
+  dryRun: boolean,
+  log: (line: string) => void,
+): Promise<void> {
   const children = await foldersByParent(duplicate.human_id, duplicate._id);
   for (const child of children) {
-    console.log(`    reparent folder "${child.name}" (${child._id}) -> ${canonical._id}`);
-    if (!DRY_RUN) {
-      await merge("vault_folders", child._id, {
-        parent_folder_id: canonical._id,
-        updated_at: now(),
-      });
+    log(`    ${dryRun ? "would reparent" : "reparent"} folder "${child.name}" (${child._id}) -> ${canonical._id}`);
+    if (!dryRun) {
+      await merge("vault_folders", child._id, { parent_folder_id: canonical._id, updated_at: now() });
     }
   }
 
   const files = await filesByFolder(duplicate._id);
   for (const file of files) {
-    console.log(`    reparent file "${file.name}" (${file._id}) -> ${canonical._id}`);
-    if (!DRY_RUN) {
+    log(`    ${dryRun ? "would reparent" : "reparent"} file "${file.name}" (${file._id}) -> ${canonical._id}`);
+    if (!dryRun) {
       await merge("file_refs", file._id, { folder_id: canonical._id, updated_at: now() });
     }
   }
 
-  console.log(`    delete now-empty duplicate folder "${duplicate.name}" (${duplicate._id})`);
-  if (!DRY_RUN) {
+  log(`    ${dryRun ? "would delete" : "delete"} now-empty duplicate folder "${duplicate.name}" (${duplicate._id})`);
+  if (!dryRun) {
     await remove("vault_folders", duplicate._id);
   }
 }
@@ -100,7 +95,12 @@ async function mergeFolderInto(duplicate: VaultFolder, canonical: VaultFolder): 
  * (for `humanId`), then recurses into whatever's left to catch duplicates
  * at any depth — this is how a duplicate "daily-logs" ROOT and a duplicate
  * date-named folder underneath it both get caught by the same walk. */
-async function mergeDuplicateSiblings(humanId: string, parentFolderId: string | null): Promise<void> {
+async function mergeDuplicateSiblings(
+  humanId: string,
+  parentFolderId: string | null,
+  dryRun: boolean,
+  log: (line: string) => void,
+): Promise<number> {
   const siblings = await foldersByParent(humanId, parentFolderId);
   const byName = new Map<string, VaultFolder[]>();
   for (const folder of siblings) {
@@ -109,47 +109,34 @@ async function mergeDuplicateSiblings(humanId: string, parentFolderId: string | 
     byName.set(folder.name, group);
   }
 
+  let merged = 0;
   const survivors: VaultFolder[] = [];
   for (const [name, group] of byName) {
     // Already `ORDER BY created_at ASC` — the first is the oldest.
     const [canonical, ...duplicates] = group;
     survivors.push(canonical);
     if (duplicates.length === 0) continue;
-    console.log(
-      `  human ${humanId}: merging ${duplicates.length} duplicate(s) of "${name}" into ${canonical._id}`,
-    );
+    log(`  human ${humanId}: merging ${duplicates.length} duplicate(s) of "${name}" into ${canonical._id}`);
     for (const duplicate of duplicates) {
-      await mergeFolderInto(duplicate, canonical);
+      await mergeFolderInto(duplicate, canonical, dryRun, log);
+      merged++;
     }
   }
 
   for (const survivor of survivors) {
-    await mergeDuplicateSiblings(humanId, survivor._id);
+    merged += await mergeDuplicateSiblings(humanId, survivor._id, dryRun, log);
   }
+  return merged;
 }
 
-async function main() {
-  // Just proves connectivity — `getDb()` caches a SINGLE connection for the
-  // whole process (see `db.server.ts`'s own doc) and every query below
-  // reuses this exact same connection, so it must NOT be closed here. An
-  // earlier version of this script called `db.close()` right after this
-  // check, which killed the one cached connection every other query in
-  // this script goes on to (silently) reuse — `generic.server.ts`'s
-  // `query()` swallows the resulting error rather than throwing, so this
-  // failed silently as "Checking 0 human(s)" instead of a visible crash.
-  await getDb();
-
-  if (DRY_RUN) console.log("DRY RUN — no changes will be written.\n");
-
+export async function run({ dryRun, log }: AdminScriptRunOpts): Promise<AdminScriptResult> {
   const humans = await allHumans();
-  console.log(`Checking ${humans.length} human(s) for duplicate vault folders…`);
+  log(`Checking ${humans.length} human(s) for duplicate vault folders…${dryRun ? " (dry run)" : ""}`);
+  let totalMerged = 0;
   for (const human of humans) {
-    await mergeDuplicateSiblings(human._id, null);
+    totalMerged += await mergeDuplicateSiblings(human._id, null, dryRun, log);
   }
-  console.log("\n✓ Done.");
+  const summary = `${totalMerged} duplicate folder(s) ${dryRun ? "would be" : ""} merged across ${humans.length} human(s).`;
+  log(summary);
+  return { summary };
 }
-
-main().catch((err) => {
-  console.error("Migration failed:", err);
-  process.exit(1);
-});

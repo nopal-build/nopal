@@ -1,5 +1,5 @@
 // =============================================================================
-// One-off repair: backfill a missing `date` on an already-synced Daily
+// Admin script: backfill a missing `date` on an already-synced Daily
 // Logs file (a Card's own text, or an attachment) inside a project's
 // `syncs/Daily Logs/` folder.
 //
@@ -14,14 +14,14 @@
 // shape itself (`YYYY-MM-DD-humanId.md` / `YYYY-MM-DD-humanId-name`), no
 // need to touch content or ask anywhere else for it.
 //
-// Run via: npx vite-node scripts/backfill-synced-daily-log-dates.ts "Project Name"
-//          (or with no project name to scan every project-n02 folder)
+// Argument: an optional project name (scans every project-n02 folder if
+// left blank).
 // =============================================================================
 
-import { getDb } from "robustness-core/data/db.server";
-import { query, formatRecord } from "robustness-core/data/generic.server";
-import { listFolderChildren, updateFileRef, type VaultFolder } from "robustness-core/data/vault.server";
-import { parseSyncedCardFileName, parseSyncedAttachmentFileName } from "robustness-core/data/dailyLogSync.server";
+import { query, formatRecord } from "../generic.server";
+import { listFolderChildren, updateFileRef, type VaultFolder } from "../vault.server";
+import { parseSyncedCardFileName, parseSyncedAttachmentFileName } from "../dailyLogSync.server";
+import type { AdminScriptRunOpts, AdminScriptResult } from "./types";
 
 function dateFromSyncedName(name: string): string | null {
   return parseSyncedCardFileName(name)?.date ?? parseSyncedAttachmentFileName(name)?.date ?? null;
@@ -39,19 +39,16 @@ async function findProjectFolders(name: string | undefined): Promise<VaultFolder
   return (result?.[0] ?? []).map(formatRecord);
 }
 
-async function main() {
-  const projectName = process.argv[2];
-
-  const db = await getDb();
-  if (!db) {
-    console.error("Could not connect to SurrealDB — aborting.");
-    process.exit(1);
-  }
+export async function run({ args, dryRun, log }: AdminScriptRunOpts): Promise<AdminScriptResult> {
+  const projectName = args[0]?.trim() || undefined;
 
   const projects = await findProjectFolders(projectName);
   if (projects.length === 0) {
-    console.error(projectName ? `No project-n02 folder named "${projectName}" found.` : "No project-n02 folders found.");
-    process.exit(1);
+    const message = projectName
+      ? `No project-n02 folder named "${projectName}" found.`
+      : "No project-n02 folders found.";
+    log(message);
+    return { summary: message };
   }
 
   let totalFixed = 0;
@@ -68,20 +65,20 @@ async function main() {
     for (const file of files) {
       const recovered = dateFromSyncedName(file.name);
       if (recovered && file.date !== recovered) {
-        await updateFileRef(file._id, { date: recovered });
+        log(
+          `  ${dryRun ? "would fix" : "fixing"}: "${file.name}" (${file._id}) date ${file.date ?? "(none)"} -> ${recovered}`,
+        );
+        if (!dryRun) await updateFileRef(file._id, { date: recovered });
         fixed++;
       }
     }
     if (fixed > 0) {
-      console.log(`"${project.name}": backfilled date on ${fixed} file(s).`);
+      log(`"${project.name}": ${dryRun ? "would backfill" : "backfilled"} date on ${fixed} file(s).`);
       totalFixed += fixed;
     }
   }
 
-  console.log(`\nDone. ${totalFixed} file(s) backfilled across ${projects.length} project(s) scanned.`);
+  const summary = `${totalFixed} file(s) ${dryRun ? "would be" : ""} backfilled across ${projects.length} project(s) scanned.`;
+  log(summary);
+  return { summary };
 }
-
-main().catch((err) => {
-  console.error("Backfill failed:", err);
-  process.exit(1);
-});

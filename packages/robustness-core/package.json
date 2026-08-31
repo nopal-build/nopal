@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
+    "./data/adminScriptRuns.server": "./src/data/adminScriptRuns.server.ts",
+    "./data/adminScriptsQueue.server": "./src/data/adminScriptsQueue.server.ts",
+    "./data/adminScriptsRegistry.server": "./src/data/adminScriptsRegistry.server.ts",
     "./data/anthropicProvider.server": "./src/data/anthropicProvider.server.ts",
     "./data/apiTokens.server": "./src/data/apiTokens.server.ts",
 
