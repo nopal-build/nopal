@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { getFileRefById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
+import { canViewFileRef, getFileRefById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
 import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
 
 /**
@@ -16,7 +16,8 @@ import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
  *     presign a URL for, so the client Blob-downloads the inline text
  *     itself (see `triggerFileDownload` in `fruits_.vault.tsx`).
  *
- * Only the file owner may download via this endpoint.
+ * The file's owner, or anyone granted view access through a shared
+ * folder, may download via this endpoint (`canViewFileRef`).
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const scoped = await getScopedUserFromRequest(request);
@@ -35,7 +36,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  if (file.human_id !== user._id) {
+  // The owner, or anyone with view access through a shared folder — the
+  // same rule `/api/vault/view/:fileId` already applies to these exact
+  // bytes (it presigns the very same S3 object), so owner-only here only
+  // ever meant a shared-in collaborator could VIEW an attachment inline
+  // but not save it, and `pull-daily-logs.ts` could never copy the bytes
+  // of a shared project's attachments locally. Sync-scoped tokens stay
+  // owner-only.
+  const permitted = syncScoped
+    ? file.human_id === user._id
+    : await canViewFileRef(user._id, file);
+  if (!permitted) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
