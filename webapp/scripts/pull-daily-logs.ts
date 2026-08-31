@@ -228,6 +228,37 @@ async function remoteFile(host: string, token: string, fileId: string): Promise<
 }
 
 /**
+ * `remoteFile` that never throws — one unreadable file must not abort a
+ * whole pull, exactly like `localizeAttachment` already refuses to.
+ *
+ * This is NOT hypothetical: `/api/vault/:fileId` was owner-only until
+ * recently, so on a deployment that hasn't picked up the `canViewFileRef`
+ * change yet, every file inside a project that was merely SHARED with you
+ * answers 404 — and the pull died mid-project on the first one. Skipping
+ * still gets the folder tree, names and structure of that project locally
+ * (a Card can at least resolve its real project name); only the file
+ * CONTENT is missing, and a later re-run against an updated deployment
+ * fills it in, since a content-less local file is still "already pulled"
+ * by id.
+ */
+async function remoteFileOrNull(
+  host: string,
+  token: string,
+  fileId: string,
+  fileName: string,
+): Promise<RemoteFullFile | null> {
+  try {
+    return await remoteFile(host, token, fileId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `  ! Could not read "${fileName}" remotely (${message.split("\n")[0]}) — pulled without content.`,
+    );
+    return null;
+  }
+}
+
+/**
  * Resolves the token's OWN daily-log storage folder, mirroring
  * `resolveDailyLogsFolder` (`vault.server.ts`) over HTTP instead of DB
  * access — see the `graphlog` skill's "Daily Logs symlink" section. The
@@ -293,7 +324,14 @@ async function ensureLocalHuman(id: string, email: string, name: string): Promis
   }
 }
 
-type PullCounts = { filesCreated: number; filesSkipped: number; attachmentsCopied: number };
+type PullCounts = {
+  filesCreated: number;
+  filesSkipped: number;
+  attachmentsCopied: number;
+  /** Text files whose content an EARLIER run couldn't read (see
+   * `remoteFileOrNull`) and this one filled in. */
+  contentBackfilled: number;
+};
 
 /** Our own local S3 keys always start with this prefix (see `api.vault.upload.tsx`'s
  * own convention, mirrored here) — a raw production key never will, so this
@@ -397,16 +435,29 @@ async function pullFolderTree(
       if (recoveredDate && existingFile.date !== recoveredDate) {
         await merge("file_refs", existingFile._id, { date: recoveredDate });
       }
+      // Backfill CONTENT for a text file pulled while its remote read was
+      // failing (see `remoteFileOrNull`) — without this, "already pulled"
+      // by id would mean an empty README.md/SKILL.md stays empty forever,
+      // even once the deployment can serve it.
+      if (isText && !existingFile.content) {
+        const refetched = await remoteFileOrNull(host, token, listing._id, listing.name);
+        if (refetched?.content) {
+          await merge("file_refs", existingFile._id, { content: refetched.content });
+          counts.contentBackfilled++;
+        }
+      }
       continue;
     }
 
-    const full = isText
-      ? await remoteFile(host, token, listing._id)
-      : await remoteFile(host, token, listing._id).catch(() => null);
+    const full = await remoteFileOrNull(host, token, listing._id, listing.name);
 
     let s3Key: string | null = null;
     let s3Url: string | null = null;
-    if (full?.s3_key) {
+    // Try the bytes when the metadata read says there ARE bytes — or when
+    // that read failed outright on a non-text file, since `s3_key` is the
+    // one thing the children listing doesn't carry and `localizeAttachment`
+    // fails soft anyway.
+    if (full?.s3_key || (!full && !isText)) {
       const localized = await localizeAttachment(
         host, token, humanId, localParentId, listing._id, listing.name,
       );
@@ -510,13 +561,12 @@ async function main() {
         continue;
       }
 
-      const full = isText
-        ? await remoteFile(host, token, listing._id)
-        : await remoteFile(host, token, listing._id).catch(() => null);
+      const full = await remoteFileOrNull(host, token, listing._id, listing.name);
 
       let s3Key: string | null = null;
       let s3Url: string | null = null;
-      if (full?.s3_key) {
+      // See the same check in `pullFolderTree` above.
+      if (full?.s3_key || (!full && !isText)) {
         const localized = await localizeAttachment(
           host, token, humanId, localDateFolder._id, listing._id, listing.name,
         );
@@ -558,9 +608,15 @@ async function main() {
     // repairs a day left stale by an earlier, partial run.
     const readmeListing = files.find((f) => f.name.toLowerCase() === "readme.md");
     if (readmeListing) {
-      const readme = await remoteFile(host, token, readmeListing._id);
-      await cacheDailyLog(humanId, dateFolder.name, readme.content ?? "");
-      daysCached++;
+      // These are the token's OWN days, so this read should always
+      // succeed — but a single unreadable one still shouldn't take down a
+      // 19-day pull, so it degrades to "day not cached" like everything
+      // else here.
+      const readme = await remoteFileOrNull(host, token, readmeListing._id, readmeListing.name);
+      if (readme) {
+        await cacheDailyLog(humanId, dateFolder.name, readme.content ?? "");
+        daysCached++;
+      }
     }
 
     if (i % 20 === 0) {
@@ -574,7 +630,12 @@ async function main() {
 
   // ── Projects referenced by a pulled Card ───────────────────────
   let projectsCreated = 0;
-  const projectCounts: PullCounts = { filesCreated: 0, filesSkipped: 0, attachmentsCopied: 0 };
+  const projectCounts: PullCounts = {
+    filesCreated: 0,
+    filesSkipped: 0,
+    attachmentsCopied: 0,
+    contentBackfilled: 0,
+  };
   if (referencedProjectIds.size > 0) {
     console.log(`\nPulling ${referencedProjectIds.size} referenced project(s)...`);
     const remoteProjectsRoot = root.folders.find((f) => f.vault_root_key === "projects");
@@ -669,7 +730,7 @@ async function main() {
     }
 
     console.log(
-      `Done with projects. ${projectsCreated} project folder(s) created, ${projectCounts.filesCreated} file(s) created, ${projectCounts.filesSkipped} already present (skipped), ${projectCounts.attachmentsCopied} attachment(s) copied to local S3.`,
+      `Done with projects. ${projectsCreated} project folder(s) created, ${projectCounts.filesCreated} file(s) created, ${projectCounts.filesSkipped} already present (skipped), ${projectCounts.attachmentsCopied} attachment(s) copied to local S3, ${projectCounts.contentBackfilled} file(s) had missing content backfilled.`,
     );
   }
 
