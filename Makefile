@@ -1,4 +1,4 @@
-.PHONY: dev start seed migrate migrate-prod down stop reset clean deploy restart cli release-cli update-cli-version
+.PHONY: dev start seed migrate migrate-prod down stop reset clean deploy restart restart-worker restart-all cli release-cli update-cli-version
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -91,10 +91,30 @@ migrate-prod:
 		npx vite-node scripts/$(SCRIPT) $(ARGS)
 
 ## Restart the webapp container, clearing the Vite dep cache first.
-## Use this after package changes or whenever the dev server needs a clean reload.
+## Use this after package changes or whenever the dev server needs a clean
+## reload. Does NOT restart the worker (see `restart-worker` below) --
+## despite the name, this is webapp-only.
 restart:
 	docker compose exec webapp rm -rf /app/webapp/node_modules/.vite
 	docker compose restart webapp
+
+## Restart the GraphLog worker container, clearing its own Vite dep cache
+## first -- the worker's own half of `restart` above. `worker.ts` reads
+## webapp/.env (ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID, DATABASE_*, ...)
+## exactly ONCE, at its own process startup -- neither editing that file
+## nor `worker`'s `--watch` dev mode (which only follows the JS import
+## graph, never .env) ever reloads it. Any .env change needs this, not
+## just package changes, or the worker keeps running on a stale value
+## (a rotated API key, a newly-added workspace id, etc.) until it's
+## restarted by hand.
+restart-worker:
+	docker compose exec worker rm -rf /app/packages/worker/node_modules/.vite
+	docker compose restart worker
+
+## Restart both webapp and worker -- run this (not just `restart`) after
+## ANY webapp/.env change, so neither container is silently still
+## running on a stale secret.
+restart-all: restart restart-worker
 
 ## Stop all containers (data is preserved in named volumes).
 down:
