@@ -85,6 +85,7 @@ import { merge } from "robustness-core/data/generic.server";
 import { getDb } from "robustness-core/data/db.server";
 import { ensureProjectN02 } from "robustness-core/data/projectN02.server";
 import { parseSyncedCardFileName, parseSyncedAttachmentFileName } from "robustness-core/data/dailyLogSync.server";
+import { parseProjectManifest } from "robustness-core/data/project.types";
 import { RecordId } from "surrealdb";
 import type { VaultFolder } from "robustness-core/data/vault.types";
 
@@ -258,6 +259,74 @@ async function remoteFileOrNull(
   }
 }
 
+/** `remoteChildren` that answers `null` instead of throwing when the
+ * folder isn't readable by this token (404) — used to PROBE whether a
+ * project is reachable at all, where "no" is a real answer, not an error. */
+async function remoteChildrenOrNull(
+  host: string,
+  token: string,
+  folderId: string,
+): Promise<{ folders: VaultFolder[]; files: RemoteFileListing[] } | null> {
+  try {
+    return await remoteChildren(host, token, folderId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves a project a Card points at but that the `projects` root listing
+ * (even `?withShared=1`) never returned.
+ *
+ * `getTopLevelSharedFolders` — what `withShared` merges in — deliberately
+ * returns only the folder that was ACTUALLY shared, filtering out any
+ * shared folder whose parent is itself shared. So a project reachable
+ * because something ABOVE it was shared with you never appears in that
+ * list, even though `canViewFolder` grants you full access to it (sharing
+ * cascades `shared_with` onto every descendant). Same for a project whose
+ * `shared_with` cache has drifted from its README's own `sharing:` front
+ * matter (see `projectSharing.server.ts` — that array is a DERIVED cache).
+ *
+ * There is no "GET one folder by id" endpoint, so reachability is probed
+ * by listing the project's own children: a 404 means genuinely no access,
+ * anything else means we can read it and should pull it. The folder RECORD
+ * itself still isn't available that way, so its display name comes from
+ * its own README.md front matter (`title:`) — falling back to the id,
+ * which at least keeps the project distinguishable locally rather than
+ * dropping it entirely.
+ */
+async function resolveUnlistedProject(
+  host: string,
+  token: string,
+  projectId: string,
+): Promise<VaultFolder | null> {
+  const children = await remoteChildrenOrNull(host, token, projectId);
+  if (!children) return null;
+
+  const readmeListing = children.files.find((f) => f.name.toLowerCase() === "readme.md");
+  const readme = readmeListing
+    ? await remoteFileOrNull(host, token, readmeListing._id, readmeListing.name)
+    : null;
+  const title = readme?.content
+    ? parseProjectManifest(readme.content).manifest?.title
+    : undefined;
+
+  return {
+    _id: projectId,
+    name: title || projectId,
+    // Unknown — the folder record itself was never readable. Only used to
+    // decide whether to log "shared with you by ...", so an empty owner
+    // just means that line reads as unknown rather than being wrong.
+    human_id: "",
+    parent_folder_id: null,
+    // A Card only ever points `projectFolderId` at a real project, so
+    // this is safe to assert — and it's what makes `ensureProjectN02`
+    // run for it below, exactly as for a listed project.
+    is_folder_type_root: true,
+    folder_type: "project-n02",
+  } as VaultFolder;
+}
+
 /**
  * Resolves the token's OWN daily-log storage folder, mirroring
  * `resolveDailyLogsFolder` (`vault.server.ts`) over HTTP instead of DB
@@ -331,6 +400,10 @@ type PullCounts = {
   /** Text files whose content an EARLIER run couldn't read (see
    * `remoteFileOrNull`) and this one filled in. */
   contentBackfilled: number;
+  /** Sub-folders the host refused to list, whose subtree was skipped —
+   * see `pullFolderTree`'s own note on the un-cascaded `shared_with` that
+   * causes it. */
+  foldersUnreadable: number;
 };
 
 /** Our own local S3 keys always start with this prefix (see `api.vault.upload.tsx`'s
@@ -408,8 +481,30 @@ async function pullFolderTree(
   remoteFolderId: string,
   localParentId: string,
   counts: PullCounts,
+  label: string,
 ): Promise<void> {
-  const { folders, files } = await remoteChildren(host, token, remoteFolderId);
+  /** A REAL, CONFIRMED BUG, reproduced here: this listing THREW, and since
+   * nothing catches it, one unreadable sub-folder killed the entire run —
+   * every project after the one being pulled was silently never reached
+   * ("6 referenced projects", 2 pulled, no error about the other 4).
+   *
+   * It is genuinely reachable: sharing cascades `shared_with` onto
+   * descendants at share-time, but a sub-folder CREATED INSIDE an already
+   * shared project (a project's own auto-provisioned `Skills` folder, say)
+   * is born without it, so the collaborator can list the project yet gets
+   * 404 on that one child. `migrate-recascade-shared-with.ts` repairs
+   * exactly this, but only for `project-n01` — today's projects are
+   * `project-n02`, so it no longer matches them at all.
+   *
+   * Skipping the subtree keeps everything else — the rest of this project,
+   * and every project after it. */
+  const children = await remoteChildrenOrNull(host, token, remoteFolderId);
+  if (!children) {
+    console.warn(`  ! Skipping "${label}" — ${host} won't let this token list it.`);
+    counts.foldersUnreadable++;
+    return;
+  }
+  const { folders, files } = children;
 
   for (const listing of files) {
     const isText = listing.content_type.startsWith("text/");
@@ -499,7 +594,7 @@ async function pullFolderTree(
         // new local parent instead (see `createVaultFolder`'s own doc).
         folder_type: sub.is_folder_type_root ? sub.folder_type ?? null : undefined,
       }))!;
-    await pullFolderTree(host, token, humanId, sub._id, localSub._id, counts);
+    await pullFolderTree(host, token, humanId, sub._id, localSub._id, counts, `${label}/${sub.name}`);
   }
 }
 
@@ -630,11 +725,16 @@ async function main() {
 
   // ── Projects referenced by a pulled Card ───────────────────────
   let projectsCreated = 0;
+  /** Referenced projects the host refused outright — the one outcome that
+   * is NOT fixable by re-running, so it's summarized at the end rather
+   * than left as a line scrolled past mid-run. */
+  let projectsUnreachable = 0;
   const projectCounts: PullCounts = {
     filesCreated: 0,
     filesSkipped: 0,
     attachmentsCopied: 0,
     contentBackfilled: 0,
+    foldersUnreadable: 0,
   };
   if (referencedProjectIds.size > 0) {
     console.log(`\nPulling ${referencedProjectIds.size} referenced project(s)...`);
@@ -656,9 +756,19 @@ async function main() {
       );
 
       for (const projectId of referencedProjectIds) {
-        const remoteProject = remoteProjects.find((f) => f._id === projectId);
+        // The listing is only the first place to look: it covers projects
+        // you own plus the ones shared with you DIRECTLY. A project you
+        // reach through a shared ANCESTOR is fully readable but never
+        // listed — see `resolveUnlistedProject`, which probes for exactly
+        // that before giving up.
+        const remoteProject =
+          remoteProjects.find((f) => f._id === projectId) ??
+          (await resolveUnlistedProject(host, token, projectId));
         if (!remoteProject) {
-          console.log(`  ! Skipping ${projectId} — not visible under your remote projects/ (neither yours nor shared with you).`);
+          projectsUnreachable++;
+          console.log(
+            `  ! Skipping ${projectId} — ${host} won't let this token read it (not yours, and not shared with you).`,
+          );
           continue;
         }
         // A shared-in project is owned REMOTELY by someone else, but there
@@ -668,7 +778,7 @@ async function main() {
         // all locally. Ids still match production exactly, so every
         // `::card{projectFolderId="..."}` directive in a pulled Card
         // resolves to it.
-        if (remoteProject.human_id !== humanId) {
+        if (remoteProject.human_id && remoteProject.human_id !== humanId) {
           console.log(`  (shared with you by ${remoteProject.human_id} — pulling as a local project)`);
         }
         if (!shouldPullProject(remoteProject.name, projectsFilter, ignoreProjects)) {
@@ -713,7 +823,15 @@ async function main() {
           }))!;
         if (!existingLocal) projectsCreated++;
         console.log(`  → ${remoteProject.name}`);
-        await pullFolderTree(host, token, humanId, remoteProject._id, localProject._id, projectCounts);
+        await pullFolderTree(
+          host,
+          token,
+          humanId,
+          remoteProject._id,
+          localProject._id,
+          projectCounts,
+          remoteProject.name,
+        );
 
         if (!existingLocal && remoteProject.is_folder_type_root && remoteProject.folder_type) {
           await merge("vault_folders", localProject._id, {
@@ -732,6 +850,16 @@ async function main() {
     console.log(
       `Done with projects. ${projectsCreated} project folder(s) created, ${projectCounts.filesCreated} file(s) created, ${projectCounts.filesSkipped} already present (skipped), ${projectCounts.attachmentsCopied} attachment(s) copied to local S3, ${projectCounts.contentBackfilled} file(s) had missing content backfilled.`,
     );
+    if (projectCounts.foldersUnreadable > 0) {
+      console.log(
+        `${projectCounts.foldersUnreadable} sub-folder(s) couldn't be listed and were skipped — usually a folder created INSIDE an already-shared project, which never got the project's \`shared_with\` cascaded onto it (see \`migrate-recascade-shared-with.ts\`, which only covers the older \`project-n01\` type).`,
+      );
+    }
+    if (projectsUnreachable > 0) {
+      console.log(
+        `${projectsUnreachable} referenced project(s) could not be read from ${host} at all — a Card pointing at one will still show "Unknown project" locally. Ask its owner to share it with ${email}, then re-run.`,
+      );
+    }
   }
 
   console.log(
