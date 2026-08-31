@@ -51,9 +51,30 @@ export type GraphLogRun = Data & {
   started_at: string;
   finished_at: string | null;
   duration_ms: number | null;
-  /** `null` while still in progress. */
+  /** `null` while still in progress. Reflects only whether the job THREW.
+   * A run can be `ok: true` and still not have done its job — see
+   * `incomplete`. */
   ok: boolean | null;
   error: string | null;
+  /** Reasons the pipeline finished without doing everything it set out
+   * to, one line per stage issue, `null`/empty on a clean run. See
+   * `graphLogAgent.server.ts`'s `GraphLogPipelineResult.incomplete`.
+   *
+   * Read this before trusting `ok`. A stage that hits an output limit or
+   * a turn limit commits what it captured and returns successfully so the
+   * next run can resume, which is correct — but it meant a run holding a
+   * truncated `graph-structure` batch and a `graph-project-view` that
+   * consequently produced nothing still displayed as OK. */
+  incomplete: string[] | null;
+  /** 1.7's denominators for this run — null for a job that doesn't produce
+   * any (a reset, a single-stage run). See `GraphLogRunStats`. Stored on
+   * the run rather than the usage rollup because they are RUN-scoped
+   * facts: the rollup buckets by date/human/project/stage/model, and
+   * "how big was the graph" doesn't belong to any one of those. */
+  nodes_written: number | null;
+  days_written: number | null;
+  graph_node_count: number | null;
+  thread_count: number | null;
 };
 
 export type GraphLogRunEvent = Data & {
@@ -222,11 +243,24 @@ export async function startGraphLogRun(input: {
 
 /** Marks a run row finished — `ok`/`error` reflect the OUTER job's own
  * outcome (thrown vs. not), same as BullMQ's own completed/failed split.
+ * `incomplete` is the separate, softer signal: the job did not throw, but
+ * one or more stages did not finish their work and will be retried. A run
+ * with a non-empty `incomplete` must never be presented as simply OK.
  * Never throws. A no-op if the run row doesn't exist (e.g. `startGraphLogRun`
  * itself failed earlier for the same run). */
 export async function finishGraphLogRun(
   runId: string,
-  outcome: { ok: boolean; error?: string | null },
+  outcome: {
+    ok: boolean;
+    error?: string | null;
+    incomplete?: string[] | null;
+    stats?: {
+      nodesWritten: number;
+      daysWritten: number;
+      graphNodeCount: number | null;
+      threadCount: number | null;
+    } | null;
+  },
 ): Promise<void> {
   try {
     await ensureTables();
@@ -246,6 +280,11 @@ export async function finishGraphLogRun(
       duration_ms: Date.now() - startedAtMs,
       ok: outcome.ok,
       error: outcome.ok ? null : (outcome.error ?? "Unknown error"),
+      incomplete: outcome.incomplete?.length ? outcome.incomplete : null,
+      nodes_written: outcome.stats?.nodesWritten ?? null,
+      days_written: outcome.stats?.daysWritten ?? null,
+      graph_node_count: outcome.stats?.graphNodeCount ?? null,
+      thread_count: outcome.stats?.threadCount ?? null,
     });
   } catch (err) {
     console.error("GraphLog run tracking failed to finish (non-fatal):", err);

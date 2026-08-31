@@ -2005,7 +2005,7 @@ export default function VaultV2Page() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replacing, setReplacing] = useState(false);
-  const [graphLogBusy, setGraphLogBusy] = useState<"run" | "reset" | "cancel" | null>(null);
+  const [graphLogBusy, setGraphLogBusy] = useState<"run" | "reset" | "cancel" | "reseed-skills" | null>(null);
   const [graphLogScheduleBusy, setGraphLogScheduleBusy] = useState(false);
   const [graphLogStatus, setGraphLogStatus] = useState<GraphLogProjectStatus | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -2507,6 +2507,43 @@ export default function VaultV2Page() {
     }
   };
 
+  /** Overwrites this project's `skills/*.md` with the current defaults
+   * (`api.graphlog.reseed-skills.tsx`) -- unlike Run/Reset/Stop this never
+   * touches the Graph or README, so it's offered regardless of whether a
+   * pipeline job is running or idle (the server still refuses it while one
+   * is actually running -- see that route's own 409 guard). Reports which
+   * files changed via `window.alert`, same convention `enqueueFiles`'s own
+   * "skipped" summary above uses. */
+  const handleReseedGraphLogSkills = async () => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    if (
+      !window.confirm(
+        `Reseed GraphLog skill files for "${folder.name}" to the current defaults? Any skill file that differs from the current default is overwritten -- including hand edits. This never touches the Graph or README.`,
+      )
+    ) {
+      return;
+    }
+    setGraphLogBusy("reseed-skills");
+    try {
+      const data = await apiJson("/api/graphlog/reseed-skills", {
+        method: "POST",
+        body: JSON.stringify({ projectFolderId: folder._id }),
+      });
+      const results = (data?.results ?? []) as { file: string; outcome: string }[];
+      const changed = results.filter((r) => r.outcome === "reseeded");
+      if (data) {
+        window.alert(
+          changed.length > 0
+            ? `Reseeded: ${changed.map((r) => r.file).join(", ")}`
+            : "Already on the current defaults -- nothing to reseed.",
+        );
+      }
+    } finally {
+      setGraphLogBusy(null);
+    }
+  };
+
   /** Stops whatever's currently running/queued (`api.graphlog.cancel.tsx`)
    * -- a queued job is removed outright; an already-active one gets a
    * cooperative flag and stops at its own next safe checkpoint, so this
@@ -2959,6 +2996,11 @@ export default function VaultV2Page() {
       label: graphLogScheduled ? "Disable GraphLog Schedule" : "Enable GraphLog Schedule",
       onClick: handleToggleGraphLogSchedule,
       disabled: graphLogScheduleBusy,
+    });
+    moreActions.push({
+      label: graphLogBusy === "reseed-skills" ? "Reseeding Skills…" : "Reseed GraphLog Skills to Defaults",
+      onClick: handleReseedGraphLogSkills,
+      disabled: graphLogBusy !== null,
     });
     if (graphLogRunning) {
       // A running project can't be Run again or Reset out from under

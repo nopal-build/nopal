@@ -225,10 +225,15 @@ function formatRunDuration(ms: number | null): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/** Three states — see the run detail page's own copy of this for why a
+ * run that didn't throw still isn't necessarily OK. Kept in sync by hand;
+ * they're four lines each and this list is the place a stuck project gets
+ * noticed, so it must not disagree with the detail view. */
 function RunStatusBadge({ run }: { run: GraphLogRun }) {
   if (run.ok === null) return <Badge variant="warning">Running…</Badge>;
-  if (run.ok) return <Badge variant="success">OK</Badge>;
-  return <Badge variant="danger">Failed</Badge>;
+  if (!run.ok) return <Badge variant="danger">Failed</Badge>;
+  if (run.incomplete && run.incomplete.length > 0) return <Badge variant="warning">Incomplete</Badge>;
+  return <Badge variant="success">OK</Badge>;
 }
 
 function RecentRunsSection({
@@ -297,6 +302,10 @@ export default function FruitsMakerGraphLog() {
   const humanNameById: Record<string, string> = Object.fromEntries(
     Object.entries(humanById).map(([id, h]) => [id, h.name]),
   );
+
+  // Hoisted so the null check narrows inside the map below -- TypeScript
+  // can't carry narrowing on a property access into a closure.
+  const costPerNode = usage.costPerNodeByStage;
 
   const maxDateCalls = Math.max(1, ...usage.byDate.map((d) => d.callCount));
   const maxProjectCalls = Math.max(1, ...usage.byProject.map((p) => p.callCount));
@@ -402,11 +411,75 @@ export default function FruitsMakerGraphLog() {
                   </div>
                   <div className="text-xs font-mono subtle-text">
                     {s.inputTokens.toLocaleString()} in / {s.outputTokens.toLocaleString()} out ·{" "}
+                    {s.cacheReadTokens.toLocaleString()} cache-read /{" "}
+                    {s.cacheWriteTokens.toLocaleString()} cache-write ·{" "}
                     {(s.durationMs / 1000).toFixed(1)}s total · ${s.estimatedCostUsd.toFixed(2)}
                   </div>
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        {/* ── Cost as a rate ─────────────────────────────────────────────── */}
+        {/* 1.7. A total says nothing on its own — a bigger number could be a
+            busier week or a more expensive pipeline. These are the rates.
+            Read `graph-project-view`'s line differently from the other two:
+            it's bounded by NODE_PREFETCH_BUDGET by design, so its cost per
+            node should FALL on a busy day. If it holds steady, its budget
+            has stopped bounding it. */}
+        <section className="mb-12">
+          <SectionHeader>Cost Per Node</SectionHeader>
+          <div className={`${surfaceBase} p-5`}>
+            {costPerNode === null ? (
+              <p className="text-sm subtle-text">
+                No nodes written in this range, so there is no rate to show. (A rate with a zero
+                denominator is unknown, not zero.)
+              </p>
+            ) : (
+              <>
+                <p className="text-xs font-mono subtle-text" style={{ marginTop: 0 }}>
+                  {usage.nodesWrittenInRange.toLocaleString()} node(s) written across{" "}
+                  {usage.runCount} run(s)
+                </p>
+                {(Object.keys(STAGE_LABELS) as GraphLogStage[]).map((stage) => (
+                  <div
+                    key={stage}
+                    className="flex items-center justify-between flex-wrap gap-2 py-2"
+                    style={{ borderBottom: "1px solid var(--midground)" }}
+                  >
+                    <span className="font-bold text-sm">{STAGE_LABELS[stage]}</span>
+                    <span className="text-xs font-mono subtle-text">
+                      ${(costPerNode[stage] ?? 0).toFixed(4)} / node
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="mb-12">
+          <SectionHeader>Cost Per Run, By Project</SectionHeader>
+          <div className={`${surfaceBase} p-5`}>
+            {usage.costPerRunByProject.length === 0 ? (
+              <p className="text-sm subtle-text">No completed runs in this range.</p>
+            ) : (
+              usage.costPerRunByProject.map((p) => (
+                <div
+                  key={p.projectFolderId}
+                  className="flex items-center justify-between flex-wrap gap-2 py-2"
+                  style={{ borderBottom: "1px solid var(--midground)" }}
+                >
+                  <span className="font-bold text-sm">
+                    {projectNameById[p.projectFolderId] ?? p.projectFolderId}
+                  </span>
+                  <span className="text-xs font-mono subtle-text">
+                    ${p.costPerRunUsd.toFixed(3)} / run · {p.runCount} run(s)
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </section>
 

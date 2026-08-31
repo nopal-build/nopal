@@ -127,6 +127,40 @@ async function runGraphLogJob(
   }
 }
 
+/** Pulls the pipeline's own `incomplete` lines off whatever a job
+ * returned. Every agentic stage result and the full-pipeline result carry
+ * the same field, and the deterministic reset jobs carry none, so one
+ * shape-check covers all of them without the switch above having to
+ * report its own outcome a second time. */
+/** Pulls the full-pipeline run's own 1.7 denominators off whatever a job
+ * returned. Only a `"run"` job carries these (a single-stage or reset job
+ * has no whole-run picture to report), so the shape check doubles as the
+ * "does this job have stats" test. */
+function collectRunStats(result: unknown): {
+  nodesWritten: number;
+  daysWritten: number;
+  graphNodeCount: number | null;
+  threadCount: number | null;
+} | null {
+  if (!result || typeof result !== "object") return null;
+  const stats = (result as { stats?: unknown }).stats;
+  if (!stats || typeof stats !== "object") return null;
+  const s = stats as Record<string, unknown>;
+  if (typeof s.nodesWritten !== "number" || typeof s.daysWritten !== "number") return null;
+  return {
+    nodesWritten: s.nodesWritten,
+    daysWritten: s.daysWritten,
+    graphNodeCount: typeof s.graphNodeCount === "number" ? s.graphNodeCount : null,
+    threadCount: typeof s.threadCount === "number" ? s.threadCount : null,
+  };
+}
+
+function collectIncomplete(result: unknown): string[] {
+  if (!result || typeof result !== "object") return [];
+  const value = (result as { incomplete?: unknown }).incomplete;
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
 async function processGraphLogJob(job: Job<GraphLogJobData, unknown, GraphLogJobName>): Promise<unknown> {
   const onProgress = (line: string) => {
     job.log(line).catch((err) => console.error("Failed to write job log line:", err));
@@ -150,7 +184,16 @@ async function processGraphLogJob(job: Job<GraphLogJobData, unknown, GraphLogJob
     const release = await acquireProjectGraphLogLock(job.data.projectFolderId, onProgress);
     try {
       const result = await runGraphLogJob(job, projectFolder, onProgress, perf);
-      await finishGraphLogRun(job.id!, { ok: true });
+      // A job that didn't throw is not automatically a run that did its
+      // job: an agentic stage that hit an output or turn limit commits
+      // what it captured and returns successfully so the next run can
+      // resume. Correct behaviour, but it used to display as a plain OK.
+      // Carried through to the run row so the report can say otherwise.
+      await finishGraphLogRun(job.id!, {
+        ok: true,
+        incomplete: collectIncomplete(result),
+        stats: collectRunStats(result),
+      });
       return result;
     } finally {
       await release();

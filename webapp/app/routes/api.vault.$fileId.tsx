@@ -5,6 +5,7 @@ import {
 } from "../modules/auth/auth.server";
 import {
   canWriteToFolderId,
+  canViewFileRef,
   getFileRefById,
   updateFileRef,
   deleteFileRef,
@@ -27,14 +28,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Public cards are readable by anyone; otherwise only the owner — via
-  // session OR bearer token (the CLI's read path for `vault cat` / `info`,
-  // and the sync engine's inline-content pulls). Sync-scoped tokens can
-  // only read files under syncs/.
+  // Public cards are readable by anyone; otherwise the owner OR anyone
+  // with view access through a shared folder (`canViewFileRef` — the same
+  // rule `/api/vault/view/:fileId` already applies to the very same
+  // files' BYTES, so keeping this one owner-only just meant a shared-in
+  // collaborator could see a file's image but never read its markdown) —
+  // via session OR bearer token (the CLI's read path for `vault cat` /
+  // `info`, and the sync engine's inline-content pulls). Sync-scoped
+  // tokens can only read files under syncs/, and stay owner-only.
   if (!file.is_public) {
     const scoped = await getScopedUserFromRequest(request);
-    if (!scoped || file.human_id !== scoped.user._id) {
+    if (!scoped) {
       // 404 (not 403) so non-owners can't probe which ids exist.
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+    const permitted = scoped.syncScoped
+      ? file.human_id === scoped.user._id
+      : await canViewFileRef(scoped.user._id, file);
+    if (!permitted) {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
     if (scoped.syncScoped && !(await isFolderUnderSyncs(file.folder_id))) {

@@ -139,6 +139,7 @@ import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvide
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
+import { planTurnToolCalls } from "./llmProvider";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
 
 const GRAPH_STRUCTURE_FILE_NAME = "graph-structure.md";
@@ -172,6 +173,46 @@ export async function markGraphStructureApplied(fileId: string, content: string,
   const frontmatter = stringifyYaml({ ...meta, appliedByProjectView: hash }).trimEnd();
   await updateFileRef(fileId, { content: `---\n${frontmatter}\n---\n${body}` });
 }
+
+/** The inverse of `markGraphStructureApplied` — drops `appliedByProjectView`
+ * while leaving `asOfGraphHash`/`generatedAt` exactly as they are. Returns
+ * false (and writes nothing) when the marker wasn't set in the first place.
+ *
+ * Exists for `graphLogReset.server.ts`'s `resetProjectView`, and this is
+ * NOT a nicety: both idempotency markers live on `graph-structure.md`, and
+ * a project-view reset deliberately does not touch the `graph` folder. So
+ * without this, clearing the README leaves `appliedByProjectView` still
+ * equal to `asOfGraphHash`, `graph-project-view`'s own up-to-date check
+ * short-circuits on the very next run, and the README stays empty until
+ * something unrelated changes the graph — a reset whose entire purpose is
+ * rebuilding the view, guaranteeing the view can never be rebuilt. (This
+ * was a real, live failure, not a reading of the code.) `resetGraph`
+ * doesn't need an equivalent: it deletes the whole folder, so both markers
+ * go with it. */
+export async function clearGraphStructureAppliedMarker(fileId: string, content: string): Promise<boolean> {
+  const rewritten = withoutProjectViewMarker(content);
+  if (rewritten === null) return false;
+  await updateFileRef(fileId, { content: rewritten });
+  return true;
+}
+
+/** Pure half of `clearGraphStructureAppliedMarker`, split out the same way
+ * (and for the same reason) as `syncGraph.server.ts`'s `capNodeLinks` — so
+ * the regression test can exercise "the applied marker goes, the graph
+ * hash stays" directly, with no vault round-trip. Returns null when there
+ * was no marker to clear, so the caller can skip the write entirely. */
+export function withoutProjectViewMarker(content: string): string | null {
+  const meta = parseGraphStructureFrontmatter(content);
+  if (meta.appliedByProjectView === undefined) return null;
+  const { body } = splitFrontmatter(content);
+  const { appliedByProjectView: _dropped, ...rest } = meta;
+  const frontmatter = stringifyYaml(rest).trimEnd();
+  return `---\n${frontmatter}\n---\n${body}`;
+}
+
+/** The one file name this stage owns, exported so `resetProjectView` can
+ * find it without re-declaring the literal. */
+export const GRAPH_STRUCTURE_FILE = GRAPH_STRUCTURE_FILE_NAME;
 
 function buildGraphStructureContent(meta: GraphStructureFrontmatter, body: string): string {
   const frontmatter = stringifyYaml(meta).trimEnd();
@@ -257,7 +298,15 @@ export type ClusterFields = {
  * model's real judgment calls (never recomputed, unlike Weight itself),
  * read back deterministically wherever code needs to ACT on them (the
  * sort order below; `graph-project-view`'s "fell away" detection). A
- * cluster with no recognizable Weight line has none of these. */
+ * cluster with no recognizable Weight line has none of these.
+ *
+ * THAT LAST SENTENCE IS THE WHOLE OF ADR-014
+ * (docs/adr/0014-status-lives-on-the-weight-line.md, kept out of the
+ * public repo). The `Weight:` line is the CARRIER for a thread's three
+ * judged fields, not a display of its weight, so deleting the skill
+ * instruction that asks for it -- which looks like a pure cleanup, since
+ * the weight value itself is unconditionally recomputed -- silently
+ * strips every thread of its Status, Due and Blocking instead. */
 export function parseClusterFields(section: ReadmeSection): ClusterFields {
   const line = section.content.split("\n").find((l) => WEIGHT_LINE_RE.test(l.trim())) ?? "";
   const statusRaw = STATUS_FIELD_RE.exec(line)?.[1];
@@ -287,17 +336,72 @@ export function hasFallenAway(section: ReadmeSection): boolean {
   return fields.statusCategory === "dormant" && !fields.hasDue && !fields.hasBlocking;
 }
 
+/**
+ * Counts what the model actually judged, across every cluster after a
+ * clean finish. A counter, not a judgment: nothing here changes a run's
+ * outcome or corrects a field.
+ *
+ * The reason it exists at all is that this whole redesign happened because
+ * nine of ten threads said `active`, nothing said settled or superseded,
+ * and nobody knew until a human read the file weeks later. This line would
+ * have said it on run one. `parseClusterFields` had exactly two callers,
+ * `rankCluster` and `hasFallenAway`, and neither of them counts anything.
+ *
+ * The two directions to watch are opposite. Everything collapsing to one
+ * Status is the failure that already happened: a label costs nothing to
+ * type, so the safest one wins. A climbing `Blocking` share is the alarm
+ * for the other direction, since `Blocking` is supposed to be rare and
+ * name a real consequence.
+ */
+/** Real threads only — the same intro/`Unclustered` exclusions every other
+ * per-cluster pass in this file applies, so the reported thread count means
+ * the same thing the file's own headings do. */
+function countNamedClusters(sections: ReadmeSection[]): number {
+  return sections.filter(
+    (s) => s.heading !== "" && s.heading.toLowerCase() !== "unclustered",
+  ).length;
+}
+
+export function summarizeClusterFields(sections: ReadmeSection[]): string {
+  let active = 0;
+  let dormant = 0;
+  let settled = 0;
+  let superseded = 0;
+  let due = 0;
+  let blocking = 0;
+  for (const section of sections) {
+    if (section.heading === "" || section.heading.toLowerCase() === "unclustered") continue;
+    const fields = parseClusterFields(section);
+    if (fields.statusCategory === "settled") settled++;
+    else if (fields.statusCategory === "superseded") superseded++;
+    else if (fields.statusCategory === "dormant") dormant++;
+    else active++;
+    if (fields.hasDue) due++;
+    if (fields.hasBlocking) blocking++;
+  }
+  return `active ${active}, dormant ${dormant}, settled ${settled}, superseded ${superseded}; Due ${due}, Blocking ${blocking}`;
+}
+
 /** Restates a thread's Weight line from LIVE backlink data — pure
  * arithmetic, run unconditionally over every cluster after every clean
  * finish, regardless of whether the model touched that cluster this run.
  * A cluster's own Status text (if present, after "· Status:") is
- * preserved verbatim; only the numbers/dates before it are replaced. A
- * cluster with no recognizable "Weight:" line at all is left untouched
- * rather than guessing where to insert one. */
-function refreshClusterWeight(section: ReadmeSection, backlinks: Map<string, BacklinkInfo>): ReadmeSection {
+ * preserved verbatim; only the numbers/dates before it are replaced.
+ *
+ * A cluster with NO recognizable "Weight:" line gets one written for it,
+ * as the cluster's first line. It used to be skipped instead, which was
+ * the worst of both: the model is told to write `Weight: (recomputed)` on
+ * every cluster and to spend no effort on it, this function overwrites
+ * whatever it wrote unconditionally, and a cluster that missed the line
+ * was then left with no Weight and no Status parsing at all
+ * (`parseClusterFields` reads both off that one line, so a cluster without
+ * it silently has no Due, no Blocking and no status either). Code writing
+ * the line closes that gap and lets the instruction come out of the skill:
+ * every `update_cluster` call on every run was spending output tokens on a
+ * line guaranteed to be discarded. */
+export function refreshClusterWeight(section: ReadmeSection, backlinks: Map<string, BacklinkInfo>): ReadmeSection {
   const lines = section.content.split("\n");
   const weightLineIndex = lines.findIndex((l) => WEIGHT_LINE_RE.test(l.trim()));
-  if (weightLineIndex === -1) return section;
 
   const nodeIds = nodeIdsInSection(section);
   let count = 0;
@@ -315,6 +419,13 @@ function refreshClusterWeight(section: ReadmeSection, backlinks: Map<string, Bac
   const weightText = count === 0 || !earliest || !latest
     ? "Weight: no inbound links yet"
     : `Weight: ${count} inbound link${count === 1 ? "" : "s"}, ${authors.size} ${authors.size === 1 ? "person" : "people"}, ${earliest} \u2192 ${latest}`;
+
+  if (weightLineIndex === -1) {
+    // No Weight line at all: write one in, ahead of whatever the cluster
+    // does have. No Status suffix to preserve, because the Status lived on
+    // the line that isn't there.
+    return { heading: section.heading, content: [weightText, ...lines].join("\n") };
+  }
 
   const statusMatch = STATUS_SUFFIX_RE.exec(lines[weightLineIndex]);
   const newLines = [...lines];
@@ -543,9 +654,20 @@ function createStructureExecutors(input: {
  * first-ever build (or a fallback full rebuild against an unparseable
  * previous file, see this file's own module doc) may need one
  * update_cluster call per thread, and a real project can have dozens.
- * Each turn is still small/bounded (one cluster's worth of output), so a
- * higher ceiling here costs proportionally more calls, not more risk. */
+ * Each turn is small/bounded (one cluster's worth of output), so a higher
+ * ceiling here costs proportionally more calls, not more risk -- and that
+ * is now ENFORCED in the loop below (at most one write call executed per
+ * turn) rather than assumed, which is what this comment used to do while
+ * a real run truncated on six `update_cluster` calls in one turn.
+ *
+ * Per ADR-013 this bounds one BATCH, never how many nodes a run may
+ * contain: a batch that hits the limit commits what it placed and the
+ * next run picks up the still-unplaced remainder. */
 const MAX_TURNS = 40;
+
+/** The two tools whose call input carries a whole cluster's worth of
+ * content, and so the two `planTurnToolCalls` throttles. */
+const isStructureWrite = (name: string) => name === "update_cluster" || name === "remove_cluster";
 
 /** Splits a large new-node delta (a first-ever build, or a fallback full
  * rebuild against an unparseable previous file) into separate, smaller
@@ -594,6 +716,10 @@ async function runStructureAgentLoop(
     callCounter.count++;
     usage.inputTokens += response.usage.inputTokens;
     usage.outputTokens += response.usage.outputTokens;
+    // Cache counts, same as `syncGraph.server.ts`'s own loop -- see there
+    // for why these were missing everywhere and what it cost us.
+    usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + (response.usage.cacheReadTokens ?? 0);
+    usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + (response.usage.cacheWriteTokens ?? 0);
     model = response.model;
 
     // One perf event PER TURN -- see `syncGraph.server.ts`'s own
@@ -627,9 +753,30 @@ async function runStructureAgentLoop(
 
     messages.push({ role: "assistant", content: response.text ?? "", toolCalls: response.toolCalls });
     if (response.toolCalls.length === 0) break;
-    for (const call of response.toolCalls) {
-      const executor = executors[call.name];
-      const resultText = executor ? await executor(call.input) : `Unknown tool: ${call.name}`;
+    // At most ONE WRITE call (update_cluster/remove_cluster) executed per
+    // turn -- the same enforcement, for the same reason, that
+    // `syncGraph.server.ts`'s own loop applies to `add_node`. Every tool
+    // call in one response shares that response's single output budget,
+    // and an `update_cluster` call carries a whole cluster's node list as
+    // its input, so N clusters in one turn is N clusters' worth of
+    // generated output against one `DEFAULT_MAX_TOKENS`. That is exactly
+    // how a real run truncated: six `update_cluster` calls in a single
+    // turn on a large graph, `stopReason: "max_tokens"`, batch discarded.
+    //
+    // `MAX_TURNS`'s own comment above has always CLAIMED each turn is
+    // "one cluster's worth of output". Until now nothing made that true;
+    // it was an assumption sitting next to a constant, which is precisely
+    // the state `add_node` was in before its own identical fix. The
+    // system prompt asks for one call per cluster too, but a prompt is
+    // never trusted here for something code can just enforce.
+    //
+    // `get_node` is deliberately NOT limited: it's a read, its call input
+    // is a single id, and batching several costs nothing in output. The
+    // budget problem belongs entirely to the writes.
+    for (const { call, execute } of planTurnToolCalls(response.toolCalls, isStructureWrite)) {
+      const resultText = execute
+        ? ((await executors[call.name]?.(call.input)) ?? `Unknown tool: ${call.name}`)
+        : "Not processed -- only the FIRST update_cluster/remove_cluster call in a turn is executed, to keep each turn's own output within its limit. Call it again on your next turn for this cluster.";
       messages.push({ role: "tool_result", toolCallId: call.id, content: resultText });
     }
     if (response.stopReason !== "tool_use") break;
@@ -659,7 +806,21 @@ ${skillContent}`;
  * the raw material for that judgment. Skips a cluster with no real nodes
  * (a stray heading) and the intro/Unclustered pseudo-sections, which have
  * no meaningful "most recent node" of their own. */
-function buildClusterFactsBlock(sections: ReadmeSection[], allNodesById: Map<string, GraphLogNode>): string | null {
+/** Whole days between two ISO `YYYY-MM-DD` dates. Deliberately crude (no
+ * timezone reasoning) because the inputs are date-only and the consumer is
+ * a judgment about "weeks", not an hour-accurate figure. */
+function daysBetween(fromIso: string, toIso: string): number {
+  const from = Date.parse(`${fromIso}T00:00:00Z`);
+  const to = Date.parse(`${toIso}T00:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to)) return 0;
+  return Math.max(0, Math.round((to - from) / 86_400_000));
+}
+
+function buildClusterFactsBlock(
+  sections: ReadmeSection[],
+  allNodesById: Map<string, GraphLogNode>,
+  today: string,
+): string | null {
   const lines: string[] = [];
   for (const section of sections) {
     if (section.heading === "" || section.heading.toLowerCase() === "unclustered") continue;
@@ -675,18 +836,36 @@ function buildClusterFactsBlock(sections: ReadmeSection[], allNodesById: Map<str
     }
     if (!mostRecent && mentionedDates.size === 0) continue;
     const mentioned = mentionedDates.size > 0 ? [...mentionedDates].sort().join(", ") : "none found";
-    lines.push(`- "${section.heading}" — most recent node: ${mostRecent ?? "unknown"}; dates mentioned in its nodes' own text: ${mentioned}`);
+    // The gap is handed over as a NUMBER rather than left as two dates for
+    // the model to subtract. Same family as citations, weights and link
+    // counts: arithmetic the code can do exactly is never the model's job.
+    // This is the specific figure `GRAPH_STRUCTURE.md`'s own dormancy rule
+    // ("nothing added for weeks") is written against, so without it that
+    // rule was asking for a judgment whose input didn't exist.
+    const quiet = mostRecent ? `; ${daysBetween(mostRecent, today)} day(s) quiet since then` : "";
+    lines.push(
+      `- "${section.heading}" — most recent node: ${mostRecent ?? "unknown"}${quiet}; dates mentioned in its nodes' own text: ${mentioned}`,
+    );
   }
   if (lines.length === 0) return null;
   return `Per-thread mechanical facts (you decide what they mean — a commitment vs. a passing mention, dormant vs. just quiet):\n\n${lines.join("\n")}`;
 }
 
 function buildUserPrompt(input: {
+  today: string;
   existingStructureBody: string | null;
   clusterFactsBlock: string | null;
   newNodeBlocks: string[];
 }): string {
   return [
+    // This stage is asked to decide whether a thread is dormant ("nothing
+    // added for weeks") and whether a date inside a node is a live
+    // commitment or a passing mention. Neither question has an answer
+    // without knowing what NOW is, and this prompt did not contain the
+    // current date anywhere -- `graph-project-view` was handed one, its
+    // sibling was not. The mechanical facts below give every reference
+    // point except this one.
+    `Today's actual date: ${input.today}`,
     input.existingStructureBody
       ? `The CURRENT graph-structure.md:\n\n${input.existingStructureBody}`
       : "No graph-structure.md exists yet -- every node below needs a fresh home.",
@@ -709,6 +888,39 @@ export type GraphStructureResult =
        * (including a deterministic weight-only refresh with no LLM call
        * at all); false when it was already fully up to date. */
       changed: boolean;
+      /** Total nodes across every `graph-log-*.md` at the end of this run,
+       * and total threads in `graph-structure.md`. Null when this stage
+       * didn't get far enough to know (skipped, no graph yet, stopped
+       * early).
+       *
+       * 1.7's missing denominators. This stage already parses every node
+       * in the graph and every cluster in the index in order to do its own
+       * job, so these cost nothing to report and are the terms that make
+       * the cost curves legible: extraction's INPUT scales with graph size
+       * (all of `graph-structure.md` rides in `sync-graph`'s system prompt
+       * as the link-candidate list and is resent every turn), so extraction
+       * cost is roughly nodes-that-day multiplied by graph size. One run at
+       * one graph size is not a curve. */
+      graphNodeCount: number | null;
+      threadCount: number | null;
+      /** Reasons this stage finished WITHOUT doing everything it set out
+       * to, one human-readable line each; empty when it finished clean.
+       *
+       * `ok: true` here means "nothing threw and whatever was captured is
+       * safely committed", NOT "the stage did its whole job". Those came
+       * apart in a real run: a truncated batch left this stage's own work
+       * half-done and its downstream stage producing nothing, and the run
+       * still reported OK at the top. A partial result that says it is
+       * partial is fine (ADR-011 -- a budget bounds how late the derived
+       * layer runs, never what is kept); a partial result that reports
+       * itself as complete is not. `graphLogAgent.server.ts` collects
+       * these across all five stages so the run's own status can say so.
+       *
+       * Deliberately NOT `ok: false`: every case here is resumable, made
+       * real progress, and is picked up by the next run. Failing the job
+       * outright would discard that progress in the reporting and invite
+       * a retry of work that already landed. */
+      incomplete: string[];
     }
   | { ok: false; error: string };
 
@@ -739,7 +951,7 @@ export async function runGraphStructure(
 
   const skill = await getProjectStageSkill(projectFolder, "GRAPH_STRUCTURE.md");
   if (isSkipInstruction(skill)) {
-    return { ok: true, skipped: true, changed: false };
+    return { ok: true, skipped: true, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
   }
   if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
@@ -748,7 +960,7 @@ export async function runGraphStructure(
   const graphFolder = await findProjectGraphFolder(projectFolder);
   if (!graphFolder) {
     log("graph-structure: no Graph/ folder yet — nothing to do.");
-    return { ok: true, skipped: false, changed: false };
+    return { ok: true, skipped: false, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
   }
 
   const { files } = await listFolderChildren(projectFolder.human_id, graphFolder._id);
@@ -759,7 +971,7 @@ export async function runGraphStructure(
 
   if (graphLogListings.length === 0) {
     log("graph-structure: no graph-log files yet — nothing to do.");
-    return { ok: true, skipped: false, changed: false };
+    return { ok: true, skipped: false, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
   }
 
   const allNodes: GraphLogNode[] = [];
@@ -779,12 +991,12 @@ export async function runGraphStructure(
 
   if (existing && existingMeta.asOfGraphHash === newHash) {
     log("graph-structure: up to date, nothing changed since last run.");
-    return { ok: true, skipped: false, changed: false };
+    return { ok: true, skipped: false, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
   }
 
   if (allNodes.length === 0) {
     log("graph-structure: no parsed nodes found in any graph-log file — nothing to organize.");
-    return { ok: true, skipped: false, changed: false };
+    return { ok: true, skipped: false, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
   }
 
   const backlinks = computeBacklinkIndex(allNodes);
@@ -812,7 +1024,15 @@ export async function runGraphStructure(
     );
     if (existing) await updateFileRef(existing._id, { content });
     log("graph-structure: no new nodes to place — refreshed weights only, no LLM call.");
-    return { ok: true, skipped: false, changed: true };
+    log(`graph-structure: ${summarizeClusterFields(refreshed)}.`);
+    return {
+      ok: true,
+      skipped: false,
+      changed: true,
+      graphNodeCount: allNodes.length,
+      threadCount: countNamedClusters(refreshed),
+      incomplete: [],
+    };
   }
 
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
@@ -841,6 +1061,11 @@ export async function runGraphStructure(
     backlinks,
   });
 
+  // Same source `graph-project-view` uses for its own `Today's actual
+  // date:` line -- date-only, UTC, computed once per run so every batch in
+  // one run agrees about what today is.
+  const today = new Date().toISOString().slice(0, 10);
+
   const runCallStart = Date.now();
   try {
     const llm = opts.provider ?? new AnthropicProvider();
@@ -855,9 +1080,9 @@ export async function runGraphStructure(
       const { sections: currentSections } = getCurrent();
       const existingStructureBody =
         currentSections.length > 0 ? joinReadmeSections(currentSections).trim() : null;
-      const clusterFactsBlock = buildClusterFactsBlock(currentSections, allNodesById);
+      const clusterFactsBlock = buildClusterFactsBlock(currentSections, allNodesById, today);
       const newNodeBlocks = batchNodes.map((n) => buildNodeBlock(n, backlinks));
-      const userPrompt = buildUserPrompt({ existingStructureBody, clusterFactsBlock, newNodeBlocks });
+      const userPrompt = buildUserPrompt({ today, existingStructureBody, clusterFactsBlock, newNodeBlocks });
       const batchLabel = batches.length > 1 ? ` (batch ${batchIndex + 1}/${batches.length})` : "";
 
       const callStart = Date.now();
@@ -894,17 +1119,47 @@ export async function runGraphStructure(
         outcome: truncated ? "error" : "ok",
       });
 
+      // Each of these three leaves the file half-organized, and every one
+      // of them ALSO leaves `asOfGraphHash` unstamped, which makes
+      // `graph-project-view` skip its next run entirely. That downstream
+      // consequence is the reason these have to be reported rather than
+      // just logged: one truncated batch here is a silently empty view
+      // stage there, and the run used to call the pair of them OK.
       if (truncated) {
-        log(`graph-structure: a turn was cut off by the model's own output limit${batchLabel} — will retry next run.`);
-        return { ok: true, skipped: false, changed: anyCommitted() };
+        const reason = `a turn was cut off by the model's own output limit${batchLabel}`;
+        log(`graph-structure: ${reason} — will retry next run.`);
+        return {
+          ok: true,
+          skipped: false,
+          changed: anyCommitted(),
+          graphNodeCount: null,
+          threadCount: null,
+          incomplete: [reason],
+        };
       }
       if (hitMaxTurns) {
-        log(`graph-structure: hit its turn limit before finishing${batchLabel} — will retry next run.`);
-        return { ok: true, skipped: false, changed: anyCommitted() };
+        const reason = `hit its turn limit before finishing${batchLabel}`;
+        log(`graph-structure: ${reason} — will retry next run.`);
+        return {
+          ok: true,
+          skipped: false,
+          changed: anyCommitted(),
+          graphNodeCount: null,
+          threadCount: null,
+          incomplete: [reason],
+        };
       }
       if (hadRefusal()) {
-        log(`graph-structure: had at least one refused edit${batchLabel} — will retry next run.`);
-        return { ok: true, skipped: false, changed: anyCommitted() };
+        const reason = `had at least one refused edit${batchLabel}`;
+        log(`graph-structure: ${reason} — will retry next run.`);
+        return {
+          ok: true,
+          skipped: false,
+          changed: anyCommitted(),
+          graphNodeCount: null,
+          threadCount: null,
+          incomplete: [reason],
+        };
       }
     }
 
@@ -915,10 +1170,16 @@ export async function runGraphStructure(
     const finalPlaced = buildMembershipIndex(finalSections);
     const stillMissing = allNodes.filter((n) => !finalPlaced.has(n.id));
     if (stillMissing.length > 0) {
-      log(
-        `graph-structure: ${stillMissing.length} node(s) still unplaced after this run (e.g. ${stillMissing[0].id}) — will retry next run.`,
-      );
-      return { ok: true, skipped: false, changed: anyCommitted() };
+      const reason = `${stillMissing.length} node(s) still unplaced (e.g. ${stillMissing[0].id})`;
+      log(`graph-structure: ${reason} after this run — will retry next run.`);
+      return {
+          ok: true,
+          skipped: false,
+          changed: anyCommitted(),
+          graphNodeCount: null,
+          threadCount: null,
+          incomplete: [reason],
+        };
     }
 
     // Clean finish: recompute every cluster's Weight line from live
@@ -936,7 +1197,15 @@ export async function runGraphStructure(
     if (fileId) await updateFileRef(fileId, { content: reconciledContent });
 
     log(`graph-structure: placed ${newNodes.length} new node(s) across ${reconciled.length} cluster(s).`);
-    return { ok: true, skipped: false, changed: true };
+    log(`graph-structure: ${summarizeClusterFields(reconciled)}.`);
+    return {
+      ok: true,
+      skipped: false,
+      changed: true,
+      graphNodeCount: allNodes.length,
+      threadCount: countNamedClusters(reconciled),
+      incomplete: [],
+    };
   } catch (err) {
     log(`graph-structure: couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
     const durationMs = Date.now() - runCallStart;
@@ -957,6 +1226,13 @@ export async function runGraphStructure(
       durationMs,
       outcome: "error",
     });
-    return { ok: true, skipped: false, changed: anyCommitted() };
+    return {
+      ok: true,
+      skipped: false,
+      changed: anyCommitted(),
+      graphNodeCount: null,
+      threadCount: null,
+      incomplete: [`stopped on an error: ${err instanceof Error ? err.message : String(err)}`],
+    };
   }
 }

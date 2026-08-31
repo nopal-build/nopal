@@ -318,8 +318,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     output. Fixed with BOTH a floor and a ceiling, deliberately, not just
     one (a tool alone is one skill edit away from silently reverting to
     paraphrase with nothing erroring, which is exactly how this failed
-    the first time — see ADR-006, `docs/adr/` kept out of the public
-    repo):
+    the first time — see ADR-006, `docs/adr/`):
     - **Pre-fetch (the floor)** — `buildNodePrefetchBlock` walks
       `graph-structure.md`'s own top threads (already importance-sorted,
       see the next bullet) top-down and hands the model every member
@@ -1471,13 +1470,13 @@ feedback loops (e.g. the three-link cap, ranking by distinct authors
 before raw count, quiet threads staying in `sync-graph`'s candidate list).
 Removing any of them is silent — nothing errors, the system just slowly
 stops doing the thing it was built to do. The reasoning for each is kept
-in `docs/adr/000N-slug.md`, numbered so code can point at one directly
-(`// brake, not a default — see ADR-002`) without spelling out the
-reasoning inline. **That directory is deliberately git-ignored and kept
-OUT of the public repo** (see `.gitignore`) — the one-line code comment is
-enough to stop a careless change without publishing the reasoning itself;
-ask whoever holds the ADR file directly if you need to read one and don't
-have the directory locally.
+in `docs/adr/000N-slug.md` (index and format in `docs/adr/README.md`),
+numbered so code can point at one directly (`// brake, not a default —
+see ADR-002`) without spelling out the reasoning inline in every call
+site. **This directory is committed and public**, deliberately — hiding
+the "why" from contributors (human or agent) working from a plain clone
+would recreate exactly the blind spot these records exist to close.
+Read the relevant ADR before touching anything it's cited from.
 
 ## Related skills
 

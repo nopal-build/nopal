@@ -218,7 +218,53 @@ export type GraphLogUsageSummary = {
   estimatedCostUsd: number;
   pricingStale: boolean;
   pricingAgeDays: number;
-  byStage: Record<GraphLogStage, { callCount: number; inputTokens: number; outputTokens: number; durationMs: number; estimatedCostUsd: number }>;
+  /** Per-stage totals, INCLUDING cache tokens — 1.1 made those real (they
+   * were accumulated nowhere and stored as zero, which is why the
+   * dashboard read a 0% cache hit rate across every call), and 1.7 wants
+   * them broken out per stage because the three stages have different
+   * cache profiles: `sync-graph` and `graph-structure` both carry a large
+   * stable system prompt worth caching hard, while `graph-project-view`
+   * doesn't pass `cacheSystemPrompt` at all and relies on the provider's
+   * own multi-turn heuristic. That difference is invisible in a single
+   * total. */
+  byStage: Record<
+    GraphLogStage,
+    {
+      callCount: number;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      durationMs: number;
+      estimatedCostUsd: number;
+    }
+  >;
+  /** 1.7's two derived rates, and the run facts they come from.
+   *
+   * Cost was always a TOTAL, which says nothing on its own: a bigger total
+   * could mean a busier week or a more expensive pipeline and there was no
+   * way to tell. These make it a rate.
+   *
+   * `costPerNodeByStage` divides each stage's cost in the range by the
+   * nodes WRITTEN in the range. Note what that means per stage, because
+   * the three are deliberately different shapes and the number is only
+   * interpretable if you know which: `sync-graph` should track nodes
+   * fairly directly but climb as the graph grows (all of
+   * `graph-structure.md` rides in its system prompt and is resent every
+   * turn, so its cost is roughly nodes-that-day times graph-size);
+   * `graph-structure` is the same shape but gentler; `graph-project-view`
+   * is bounded by design (`NODE_PREFETCH_BUDGET`) and should stay roughly
+   * FLAT as the graph grows, which means its cost-per-node should FALL on
+   * a busy day rather than hold steady. A view stage whose cost per node
+   * is constant is a sign its budget stopped bounding it.
+   *
+   * Null when nothing was written in the range — a rate with a zero
+   * denominator is not zero, it is unknown, and showing 0 would read as
+   * "free". */
+  nodesWrittenInRange: number;
+  runCount: number;
+  costPerNodeByStage: Record<GraphLogStage, number | null> | null;
+  costPerRunByProject: ({ projectFolderId: string; runCount: number; costPerRunUsd: number })[];
   byProject: ({ projectFolderId: string } & UsageTotals)[];
   byHuman: ({ humanId: string } & UsageTotals)[];
   byDate: ({ date: string } & UsageTotals)[];
@@ -228,6 +274,23 @@ function startOfRange(days: number): string {
   const cutoff = new Date();
   cutoff.setUTCDate(cutoff.getUTCDate() - days);
   return cutoff.toISOString().slice(0, 10);
+}
+
+/** Just the two run columns this rollup needs — deliberately not the whole
+ * `GraphLogRun`, so a change to that row's shape can't quietly widen what
+ * this query pulls back on every dashboard load. */
+type GraphLogRunCounts = { project_folder_id: string; nodes_written: number | null };
+
+function emptyStageTotals(): GraphLogUsageSummary["byStage"][GraphLogStage] {
+  return {
+    callCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    durationMs: 0,
+    estimatedCostUsd: 0,
+  };
 }
 
 function emptyTotals(): UsageTotals {
@@ -261,11 +324,15 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
     pricingStale: isPricingStale(),
     pricingAgeDays: pricingAgeDays(),
     byStage: {
-      "sync-knowledge": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
-      "sync-graph": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
-      "graph-structure": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
-      "graph-project-view": { callCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0, estimatedCostUsd: 0 },
+      "sync-knowledge": emptyStageTotals(),
+      "sync-graph": emptyStageTotals(),
+      "graph-structure": emptyStageTotals(),
+      "graph-project-view": emptyStageTotals(),
     },
+    nodesWrittenInRange: 0,
+    runCount: 0,
+    costPerNodeByStage: null,
+    costPerRunByProject: [],
     byProject: [],
     byHuman: [],
     byDate: [],
@@ -297,6 +364,8 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
     stageBucket.callCount += row.call_count;
     stageBucket.inputTokens += row.input_tokens;
     stageBucket.outputTokens += row.output_tokens;
+    stageBucket.cacheReadTokens += rowCacheRead;
+    stageBucket.cacheWriteTokens += rowCacheWrite;
     stageBucket.durationMs += row.duration_ms;
     stageBucket.estimatedCostUsd += rowCost;
 
@@ -314,10 +383,51 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
     }
   }
 
+  // The denominators live on the RUN rows (see `GraphLogRun`'s own
+  // `nodes_written` note for why they're run-scoped rather than bucketed
+  // into the usage rollup), so they're read separately and joined here
+  // rather than being available on a usage row.
+  const runRows = await query<[GraphLogRunCounts[]]>(
+    `SELECT project_folder_id, nodes_written FROM graphlog_runs
+     WHERE started_at >= $since AND ok = true`,
+    { since },
+  );
+  // No `formatRecord` here: this SELECT names two columns, so the rows
+  // carry no `id` for it to rewrite, and running it would only widen the
+  // type back to `Data`.
+  const runs: GraphLogRunCounts[] = runRows?.[0] ?? [];
+  const runsByProject = new Map<string, number>();
+  for (const r of runs) {
+    summary.runCount += 1;
+    summary.nodesWrittenInRange += r.nodes_written ?? 0;
+    runsByProject.set(r.project_folder_id, (runsByProject.get(r.project_folder_id) ?? 0) + 1);
+  }
+
+  if (summary.nodesWrittenInRange > 0) {
+    summary.costPerNodeByStage = {
+      "sync-knowledge": summary.byStage["sync-knowledge"].estimatedCostUsd / summary.nodesWrittenInRange,
+      "sync-graph": summary.byStage["sync-graph"].estimatedCostUsd / summary.nodesWrittenInRange,
+      "graph-structure": summary.byStage["graph-structure"].estimatedCostUsd / summary.nodesWrittenInRange,
+      "graph-project-view":
+        summary.byStage["graph-project-view"].estimatedCostUsd / summary.nodesWrittenInRange,
+    };
+  }
+
   summary.avgDurationMs = summary.callCount > 0 ? Math.round(totalDurationMs / summary.callCount) : 0;
   summary.byProject = [...byProject.entries()]
     .map(([projectFolderId, v]) => ({ projectFolderId, ...v }))
     .sort((a, b) => b.callCount - a.callCount);
+  summary.costPerRunByProject = [...byProject.entries()]
+    .map(([projectFolderId, v]) => {
+      const runCount = runsByProject.get(projectFolderId) ?? 0;
+      return {
+        projectFolderId,
+        runCount,
+        costPerRunUsd: runCount > 0 ? v.estimatedCostUsd / runCount : 0,
+      };
+    })
+    .filter((p) => p.runCount > 0)
+    .sort((a, b) => b.costPerRunUsd - a.costPerRunUsd);
   summary.byHuman = [...byHuman.entries()]
     .map(([humanId, v]) => ({ humanId, ...v }))
     .sort((a, b) => b.callCount - a.callCount);

@@ -185,10 +185,15 @@ const TYPE_LABEL: Record<GraphLogPerfEventType, string> = {
   other: "Other",
 };
 
-function RunStatusBadge({ ok }: { ok: boolean | null }) {
+/** Three states, not two. A run that didn't throw but left a stage's work
+ * unfinished is NOT OK, and showing it as OK is how a truncated
+ * `graph-structure` batch plus a `graph-project-view` that produced
+ * nothing sat under a green badge. The reasons render below the header. */
+function RunStatusBadge({ ok, incomplete }: { ok: boolean | null; incomplete: string[] | null }) {
   if (ok === null) return <Badge variant="warning">Running…</Badge>;
-  if (ok) return <Badge variant="success">OK</Badge>;
-  return <Badge variant="danger">Failed</Badge>;
+  if (!ok) return <Badge variant="danger">Failed</Badge>;
+  if (incomplete && incomplete.length > 0) return <Badge variant="warning">Incomplete</Badge>;
+  return <Badge variant="success">OK</Badge>;
 }
 
 function TypeBadge({ type }: { type: GraphLogPerfEventType }) {
@@ -325,7 +330,7 @@ export default function FruitsMakerGraphLogRun() {
               <Badge variant="accent">{run.job_name}</Badge>
               <span className="font-bold text-lg">{projectName}</span>
             </div>
-            <RunStatusBadge ok={run.ok} />
+            <RunStatusBadge ok={run.ok} incomplete={run.incomplete} />
           </div>
           <div className="text-xs font-mono subtle-text flex flex-wrap gap-3">
             <span>By {humanName}</span>
@@ -333,10 +338,43 @@ export default function FruitsMakerGraphLogRun() {
             <span>Duration {formatDuration(run.duration_ms)}</span>
             <span>{events.length} event(s)</span>
           </div>
+          {/* 1.7's denominators. Cost was always recorded; what was missing
+              was anything to divide it by, so every run looked like every
+              other run and no curve was visible. Only a full "run" job
+              carries these. */}
+          {run.nodes_written !== null && run.nodes_written !== undefined && (
+            <div className="text-xs font-mono subtle-text flex flex-wrap gap-3" style={{ marginTop: "6px" }}>
+              <span>
+                {run.nodes_written} node(s) written
+                {run.days_written ? ` across ${run.days_written} day(s)` : ""}
+              </span>
+              {run.graph_node_count !== null && run.graph_node_count !== undefined && (
+                <span>graph now {run.graph_node_count} node(s)</span>
+              )}
+              {run.thread_count !== null && run.thread_count !== undefined && (
+                <span>{run.thread_count} thread(s)</span>
+              )}
+            </div>
+          )}
           {run.error && (
             <p className="text-sm mt-3" style={{ margin: 0, marginTop: "12px", color: "var(--red)" }}>
               {run.error}
             </p>
+          )}
+          {run.incomplete && run.incomplete.length > 0 && (
+            <div className="text-sm" style={{ marginTop: "12px" }}>
+              <p style={{ margin: 0, marginBottom: "4px" }}>
+                Finished, but {run.incomplete.length} stage issue(s) left work undone. Each is retried
+                on the next run.
+              </p>
+              <ul style={{ margin: 0, paddingLeft: "20px" }}>
+                {run.incomplete.map((line, i) => (
+                  <li key={i} className="font-mono text-xs subtle-text">
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
 

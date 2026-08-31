@@ -151,8 +151,18 @@ export interface OxTreeRendererProps {
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
 export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
+  const ambiguousRefFirstNames = useMemo(() => collectAmbiguousRefFirstNames(doc), [doc]);
   return (
-    <>{renderBlockNodes(doc.children, { directives, definitions, interactive, resolveCard, resolveGalleryFolder })}</>
+    <>
+      {renderBlockNodes(doc.children, {
+        directives,
+        definitions,
+        interactive,
+        resolveCard,
+        resolveGalleryFolder,
+        ambiguousRefFirstNames,
+      })}
+    </>
   );
 }
 
@@ -162,6 +172,54 @@ interface RenderCtx {
   interactive?: OxInteractive;
   resolveCard?: CardResolver;
   resolveGalleryFolder?: GalleryFolderResolver;
+  /** First names that belong to more than one cited person IN THIS
+   * DOCUMENT — those keep their full name; everyone else shortens to their
+   * first name. Computed once per document (see
+   * `collectAmbiguousRefFirstNames`), because a single `:ref` can't know
+   * on its own whether its first name is unique. */
+  ambiguousRefFirstNames?: Set<string>;
+}
+
+/** Which first names are shared by two or more cited people in this
+ * document.
+ *
+ * A citation reads better as "Gerald" than "Gerald L", and a page carrying
+ * a dozen of them reads much better. But shortening unconditionally would
+ * silently merge two different people the moment a project has a Gerald L
+ * and a Gerald M, which is a worse failure than a slightly long name: the
+ * reader has no way to tell it happened. So the shortening is conditional,
+ * and the condition needs the whole document, not one directive.
+ *
+ * Scoped to the rendered document rather than the project, because that is
+ * what this component can actually see. Two people who share a first name
+ * but never appear on the same page will each render short, which is
+ * correct: there is no ambiguity for that reader to resolve. */
+function collectAmbiguousRefFirstNames(doc: OxDocument): Set<string> {
+  const fullNamesByFirst = new Map<string, Set<string>>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as { type?: string; name?: string; children?: unknown[] };
+    if (n.type === "textDirective" && n.name === "ref") {
+      const parsed = parseRefAttrs(node as DirectiveNode);
+      if (parsed?.name) {
+        const first = refFirstName(parsed.name);
+        const set = fullNamesByFirst.get(first) ?? new Set<string>();
+        set.add(parsed.name);
+        fullNamesByFirst.set(first, set);
+      }
+    }
+    if (Array.isArray(n.children)) for (const child of n.children) visit(child);
+  };
+  for (const node of doc.children) visit(node);
+  const ambiguous = new Set<string>();
+  for (const [first, fullNames] of fullNamesByFirst) {
+    if (fullNames.size > 1) ambiguous.add(first);
+  }
+  return ambiguous;
+}
+
+function refFirstName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? name;
 }
 
 function collectDefinitions(doc: OxDocument): Map<string, Definition> {
@@ -621,7 +679,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
   // `ctx.interactive` branch at all, unlike the generic directive-attrs
   // popover other directives get further down.
   if (node.type === "textDirective" && node.name === "ref") {
-    return <RefDirectiveStatic key={key} node={node} />;
+    return <RefDirectiveStatic key={key} node={node} ambiguousFirstNames={ctx.ambiguousRefFirstNames} />;
   }
 
   // `::card{file="..."}` — same category, see `oxmarkdown/cardDirective.ts`.
@@ -1226,14 +1284,32 @@ function CardDirectiveStatic({
 function formatRefDatetime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
+  // DATE ONLY, NO TIME. GraphLog synthesizes every node's datetime at noon
+  // (`${date}T12:00:00Z` in `syncGraph.server.ts`) because a synced day
+  // carries a date and not a clock time. Rendering that produced a page
+  // where every citation read "12:00 PM" -- eleven identical timestamps on
+  // one README. That is fake precision, and it is the kind of detail that
+  // makes a reader start wondering what else on the page is invented,
+  // which costs more than the time was ever worth. The date is what is
+  // actually known, so the date is what is shown.
+  //
+  // The raw ISO string is untouched in the directive either way, so a real
+  // time can be displayed again the day nodes start carrying one.
   return d.toLocaleString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
     timeZone: "UTC",
   });
+}
+
+/** The name to display for a citation: first name alone, unless another
+ * cited person in this same document shares it. See
+ * `collectAmbiguousRefFirstNames` for why the whole document is needed to
+ * answer that. */
+function refDisplayName(name: string, ambiguous?: Set<string>): string {
+  const first = refFirstName(name);
+  return ambiguous?.has(first) ? name : first;
 }
 
 /** Best-effort link target for a cited human's name — same `/humanId:path`
@@ -1247,16 +1323,23 @@ function humanProfileHref(humanId: string): string {
   return `/${humanId}:root`;
 }
 
-function RefDirectiveStatic({ node }: { node: DirectiveNode }) {
+function RefDirectiveStatic({
+  node,
+  ambiguousFirstNames,
+}: {
+  node: DirectiveNode;
+  ambiguousFirstNames?: Set<string>;
+}) {
   const parsed = parseRefAttrs(node);
   if (!parsed) {
     return <span className="ox-directive-unknown">:ref</span>;
   }
   const { name, humanId, datetime, location, verbose } = parsed;
+  const shown = refDisplayName(name, ambiguousFirstNames);
   const nameNode = humanId ? (
-    <a href={humanProfileHref(humanId)}>{name}</a>
+    <a href={humanProfileHref(humanId)}>{shown}</a>
   ) : (
-    <span>{name}</span>
+    <span>{shown}</span>
   );
 
   if (verbose) {
@@ -1270,7 +1353,11 @@ function RefDirectiveStatic({ node }: { node: DirectiveNode }) {
 
   return (
     <RefDirectiveMarker
+      // The popover shows the FULL name deliberately, even when the inline
+      // marker is shortened: the popover is where a reader goes to resolve
+      // exactly this kind of question.
       name={name}
+      shortName={shown}
       humanId={humanId}
       datetime={formatRefDatetime(datetime)}
       location={location}
@@ -1280,11 +1367,16 @@ function RefDirectiveStatic({ node }: { node: DirectiveNode }) {
 
 function RefDirectiveMarker({
   name,
+  shortName,
   humanId,
   datetime,
   location,
 }: {
   name: string;
+  /** What the accessible label says. The visible glyph is always `*`; this
+   * is what a screen reader announces, so it matches what a sighted reader
+   * would see if the mark spelled a name out. */
+  shortName?: string;
   humanId?: string;
   datetime: string;
   location: string;
@@ -1298,7 +1390,7 @@ function RefDirectiveMarker({
       className="ox-ref ox-ref-marker"
       role="button"
       tabIndex={0}
-      aria-label={`Reference: ${name}`}
+      aria-label={`Reference: ${shortName ?? name}`}
       onClick={toggle}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {

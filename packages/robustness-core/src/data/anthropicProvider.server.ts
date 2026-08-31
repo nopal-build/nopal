@@ -183,14 +183,29 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
   private client: Anthropic;
   private model: string;
 
-  constructor(options: { apiKey?: string; model?: string } = {}) {
+  constructor(options: { apiKey?: string; model?: string; workspaceId?: string } = {}) {
     const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new Error(
         "ANTHROPIC_API_KEY is not set — required to use GraphLog's Anthropic provider.",
       );
     }
-    this.client = new Anthropic({ apiKey });
+    // Required by any API key that isn't pinned to exactly one workspace
+    // at creation (a "Personal"/service-account key scoped to "all
+    // workspaces you have access to", which is what the Console hands you
+    // by default -- even picking the org's own Default Workspace there
+    // isn't enough to avoid this, see the `graphlog` skill's own "API key
+    // is invalid"/"anthropic-workspace-id is required" writeup). Optional
+    // on purpose: a key genuinely scoped to one workspace at creation
+    // (legacy Workspace keys, or a Personal/service-account key pinned to
+    // a non-default workspace) works fine with this header omitted, and
+    // Anthropic ignores it being absent rather than erroring -- so this
+    // is safe to leave unset for that key type.
+    const workspaceId = options.workspaceId ?? process.env.ANTHROPIC_WORKSPACE_ID;
+    this.client = new Anthropic({
+      apiKey,
+      defaultHeaders: workspaceId ? { "anthropic-workspace-id": workspaceId } : undefined,
+    });
     this.model = options.model ?? process.env.PHYLOG_ANTHROPIC_MODEL ?? DEFAULT_MODEL;
   }
 

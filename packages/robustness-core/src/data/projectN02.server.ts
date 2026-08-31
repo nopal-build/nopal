@@ -26,10 +26,11 @@ import {
   getFileRefById,
   getFolderById,
   listFolderChildren,
+  updateFileRef,
   type VaultFolder,
 } from "./vault.server";
 import { merge } from "./generic.server";
-import { getAllEffectiveGraphLogDefaultSkills } from "./graphLogDefaults.server";
+import { getAllEffectiveGraphLogDefaultSkills, type GraphLogDefaultStage } from "./graphLogDefaults.server";
 import { systemVaultFolderKey } from "./vault.server";
 import { CONTAINER_FOLDER_TYPES, isContainerFolderTypeKey } from "./vaultFolderTypes";
 
@@ -110,6 +111,85 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
   }
 
   return current;
+}
+
+// ─── Reseeding (retroactive) ───────────────────────────────────────────
+
+/** The four seeded skill file names, keyed the same way
+ * `getAllEffectiveGraphLogDefaultSkills` keys its result — kept next to
+ * `ensureSkillFile`'s own identical mapping (`applyProjectN02Shape`
+ * above) since `reseedProjectN02Skills` below is that function's
+ * overwrite-instead-of-only-if-missing sibling. */
+const SKILL_FILE_NAMES: Record<GraphLogDefaultStage, string> = {
+  knowledge: "KNOWLEDGE.md",
+  graph: "GRAPH.md",
+  graphStructure: "GRAPH_STRUCTURE.md",
+  projectView: "PROJECT_VIEW.md",
+};
+
+export type SkillReseedOutcome = "reseeded" | "unchanged" | "missing";
+
+export type SkillReseedEntry = {
+  file: string;
+  outcome: SkillReseedOutcome;
+  previousLength?: number;
+  newLength?: number;
+};
+
+/**
+ * Force-overwrites this project's `skills/*.md` files with the CURRENT
+ * effective defaults (an admin override on `/fruits/maker/graphlog/
+ * defaults` if one is set, else the hardcoded built-in) — the
+ * retroactive half `applyProjectN02Shape`'s own seeding deliberately
+ * isn't (see that function's doc: brand-new projects only). This is the
+ * Vault's own "More Actions" → Reseed GraphLog Skills entry
+ * (`fruits_.vault.tsx`), replacing the need to run
+ * `scripts/reseed-graphlog-skills.ts` by hand every time a default
+ * changes.
+ *
+ * Deliberately does NOT try to guess whether a file "looks hand-edited"
+ * the way that script's fingerprint list does — this is triggered by a
+ * human looking at THIS one project in the Vault and explicitly asking
+ * to reseed it, so that judgment call is theirs at the point of the
+ * click (the confirm dialog), not a hand-maintained fingerprint's. A
+ * file whose content already equals the current default is left
+ * untouched and reported `"unchanged"` rather than rewritten, so
+ * re-clicking this after it already ran is always a no-op. A project
+ * with no `skills` folder yet reports nothing (nothing to reseed —
+ * the next `ensureProjectN02` call creates it from scratch instead).
+ */
+export async function reseedProjectN02Skills(folder: VaultFolder): Promise<SkillReseedEntry[]> {
+  const { folders } = await listFolderChildren(folder.human_id, folder._id);
+  const skillsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "skills");
+  if (!skillsFolder) return [];
+
+  const { files } = await listFolderChildren(folder.human_id, skillsFolder._id);
+  const effective = await getAllEffectiveGraphLogDefaultSkills();
+
+  const results: SkillReseedEntry[] = [];
+  for (const stage of Object.keys(SKILL_FILE_NAMES) as GraphLogDefaultStage[]) {
+    const file = SKILL_FILE_NAMES[stage];
+    const listing = files.find((f) => f.name.toLowerCase() === file.toLowerCase());
+    if (!listing) {
+      results.push({ file, outcome: "missing" });
+      continue;
+    }
+    const current = await getFileRefById(listing._id);
+    const currentContent = current?.content ?? "";
+    const nextContent = effective[stage].content;
+    if (currentContent === nextContent) {
+      results.push({ file, outcome: "unchanged" });
+      continue;
+    }
+    await updateFileRef(listing._id, { content: nextContent });
+    results.push({
+      file,
+      outcome: "reseeded",
+      previousLength: currentContent.length,
+      newLength: nextContent.length,
+    });
+  }
+  return results;
 }
 
 /**

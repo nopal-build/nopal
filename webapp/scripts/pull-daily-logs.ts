@@ -35,7 +35,12 @@
 // name instead of "Unknown project", and for `nopal graphlog run` to have a
 // real README.md (and SKILL.md) to work with locally. Deliberately NOT
 // your entire `projects/` tree — only the ones your pulled Cards actually
-// point at.
+// point at. Projects you did NOT create but were SHARED with you count
+// here too (`?withShared=1`, same flag the CLI's own `Client::children`
+// always passes) — a Card can reference any project you can see, and
+// those used to be skipped outright, leaving them as "Unknown project"
+// locally. A shared project is mirrored as the local human's OWN project
+// (there's only one human in local dev), keeping its production id.
 //
 // Non-text attachments (images, PDFs, ...) have their actual BYTES copied
 // into local S3 too — not just their `s3_key`/`s3_url` pointer, which would
@@ -197,12 +202,24 @@ async function remoteJson<T>(host: string, token: string, path: string): Promise
   return (await res.json()) as T;
 }
 
+/**
+ * `withShared` merges every project someone ELSE shared with this token's
+ * human into the result — only meaningful when `folderId` is that human's
+ * own top-level `projects` root (see
+ * `api.vault.folders.$folderId.children.tsx`'s own doc). Without it, a
+ * Card pointing at a project you didn't create resolves to nothing and is
+ * skipped entirely, which is exactly the gap this closes; the CLI
+ * (`crates/core/src/vault.rs`'s `Client::children`) always passes it, for
+ * the same reason.
+ */
 async function remoteChildren(
   host: string,
   token: string,
   folderId: string,
+  opts: { withShared?: boolean } = {},
 ): Promise<{ folders: VaultFolder[]; files: RemoteFileListing[] }> {
-  return remoteJson(host, token, `/api/vault/folders/${folderId}/children`);
+  const query = opts.withShared ? "?withShared=1" : "";
+  return remoteJson(host, token, `/api/vault/folders/${folderId}/children${query}`);
 }
 
 async function remoteFile(host: string, token: string, fileId: string): Promise<RemoteFullFile> {
@@ -565,24 +582,44 @@ async function main() {
     const localProjectsRoot = localRoots.find((f) => f.vault_root_key === "projects");
 
     if (remoteProjectsRoot && localProjectsRoot) {
-      const { folders: remoteProjects } = await remoteChildren(host, token, remoteProjectsRoot._id);
+      // `withShared: true` so a project someone ELSE created and shared
+      // with you gets pulled too — a Card can reference any project you
+      // can SEE, not just one you own, and skipping those left every such
+      // Card showing "Unknown project" locally (and gave `nopal graphlog
+      // run` no local README.md/SKILL.md to work with for them).
+      const { folders: remoteProjects } = await remoteChildren(
+        host,
+        token,
+        remoteProjectsRoot._id,
+        { withShared: true },
+      );
 
       for (const projectId of referencedProjectIds) {
         const remoteProject = remoteProjects.find((f) => f._id === projectId);
         if (!remoteProject) {
-          console.log(`  ! Skipping ${projectId} — not found under your remote projects/ (maybe someone else's shared project).`);
+          console.log(`  ! Skipping ${projectId} — not visible under your remote projects/ (neither yours nor shared with you).`);
           continue;
+        }
+        // A shared-in project is owned REMOTELY by someone else, but there
+        // is only ever one human in local dev — so it's mirrored as this
+        // human's own project (`human_id: humanId` throughout, under their
+        // own local `projects` root), which is what makes it show up at
+        // all locally. Ids still match production exactly, so every
+        // `::card{projectFolderId="..."}` directive in a pulled Card
+        // resolves to it.
+        if (remoteProject.human_id !== humanId) {
+          console.log(`  (shared with you by ${remoteProject.human_id} — pulling as a local project)`);
         }
         if (!shouldPullProject(remoteProject.name, projectsFilter, ignoreProjects)) {
           console.log(`  - Skipping "${remoteProject.name}" (excluded by --projects/--ignoreProject).`);
           continue;
         }
         const existingLocal = await getFolderById(remoteProject._id);
-        // A REAL, CONFIRMED BUG, found and fixed here: tagging the local
-        // project `project-n02` immediately at creation used to fire
+        // A REAL, CONFIRMED BUG, found (twice) here: tagging the local
+        // project `project-n02` immediately at creation fires
         // `createVaultFolder`'s own `ensureProjectN02` side effect (auto-
         // provisioning a Skills folder, seeded with the DEFAULT skill
-        // text) BEFORE `pullFolderTree` below ever got a chance to bring
+        // text) BEFORE `pullFolderTree` below ever gets a chance to bring
         // in the REAL remote Skills folder (its own original id, its own
         // real content) -- leaving every freshly-pulled project-n02
         // project with TWO "Skills" folders, neither one deduped by the
@@ -590,11 +627,20 @@ async function main() {
         // `applyProjectN02Shape`), since that fix only prevents the SAME
         // code path racing against itself, not two genuinely different
         // creation paths (auto-provision vs. a real pull) each producing
-        // one. Fixed by creating the local project UNTYPED here, pulling
-        // the real tree first, and only THEN applying the remote's own
-        // type below -- by the time `ensureProjectN02` runs, the real
-        // Skills folder (if any) already exists, so it's a safe no-op
-        // seed rather than a duplicate.
+        // one.
+        //
+        // The first fix attempted here just omitted `folder_type` below,
+        // assuming that left the folder untyped until the retag after
+        // `pullFolderTree`. It didn't: `createVaultFolder`'s own
+        // "isNewProject" default forces any direct child of the `projects`
+        // root to `project-n02` regardless of what the caller passes, so
+        // the auto-seed still fired immediately and the duplicate came
+        // back. Fixed for real with `deferAutoProvision` (see
+        // `createVaultFolder`'s own doc, `vault.server.ts`) -- the folder
+        // still ends up typed `project-n02` right away, but the auto-seed
+        // itself is skipped until the explicit `ensureProjectN02` call
+        // below, by which point the real tree (including a real remote
+        // Skills folder, if any) has already been pulled in.
         const localProject =
           existingLocal ??
           (await createVaultFolder({
@@ -602,6 +648,7 @@ async function main() {
             human_id: humanId,
             name: remoteProject.name,
             parent_folder_id: localProjectsRoot._id,
+            deferAutoProvision: true,
           }))!;
         if (!existingLocal) projectsCreated++;
         console.log(`  → ${remoteProject.name}`);
