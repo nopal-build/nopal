@@ -79,17 +79,46 @@ export async function getHumans(): Promise<Humans | undefined> {
   return select<Human>(`humans`);
 }
 
+/**
+ * The LOGIN path (login.tsx, auth.server.ts, webauthn.server.ts), so which
+ * row this returns decides which identity a session is bound to.
+ *
+ * It used to take `result[0][0]` off an unordered SELECT. With two rows
+ * sharing an address — routine locally, where `make reset` seeded fixture
+ * humans at the team's real emails and `pull-daily-logs.ts` then added a
+ * second row at the real production id — that was a coin flip, and it
+ * could land differently between machines and between resets on the same
+ * machine. `ORDER BY id` makes it a decision instead of an accident.
+ *
+ * `id`, not a timestamp: `humans` rows carry no creation time at all, so
+ * ordering by one would sort every row by the same missing value and
+ * change nothing. The id is stable, present on every row, and identical
+ * across machines, which is the property actually wanted here.
+ *
+ * `db/migrations/0010_humans_email_unique.surql` should make the >1 case
+ * unreachable — which is exactly why the warning below is worth keeping.
+ * If it ever fires, something got past the index.
+ */
 export async function getHumanByEmail(
   email: string,
 ): Promise<Human | undefined> {
   const result = await query<[Human[]]>(
-    `SELECT * FROM humans WHERE string::lowercase(email) = $email OR aliasEmails CONTAINS $email;`,
+    `SELECT * FROM humans WHERE string::lowercase(email) = $email OR aliasEmails CONTAINS $email ORDER BY id ASC;`,
     {
       email: email.trim().toLowerCase(),
     },
   );
 
-  const record = result?.[0]?.[0] || undefined;
+  const matches = result?.[0] ?? [];
+  if (matches.length > 1) {
+    console.warn(
+      `getHumanByEmail: ${matches.length} humans rows share "${email.trim().toLowerCase()}" (${matches
+        .map((h) => String(h.id?.id ?? h._id))
+        .join(", ")}). The unique index on humans.email should make this impossible — logging in as the lowest id. See ADR-015.`,
+    );
+  }
+
+  const record = matches[0] || undefined;
   return record ? formatRecord(record) : undefined;
 }
 
