@@ -315,6 +315,9 @@ importers:
       tailwindcss:
         specifier: ^3.4.3
         version: 3.4.19(yaml@2.9.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
       vite:
         specifier: ^5.2.12
         version: 5.4.21(@types/node@26.2.0)
