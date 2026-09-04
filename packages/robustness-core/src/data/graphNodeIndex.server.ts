@@ -213,10 +213,18 @@ export function extractAttachedFileLines(quote: string): string[] {
 
 export type BacklinkInfo = {
   count: number;
-  /** Distinct author NAMES of the nodes linking in — not ids, since two
-   * different people are the strongest weight signal `GRAPH_STRUCTURE.md`
-   * cares about (see the `graphlog` skill), and names are what a prompt
-   * can use directly without another lookup.
+  /** Distinct author HUMAN IDS of the nodes linking in — two different
+   * people are the strongest weight signal `GRAPH_STRUCTURE.md` cares
+   * about (see the `graphlog` skill), and the id is the only half of a
+   * citation that stays distinct per person no matter what happened to
+   * the display name.
+   *
+   * It used to hold names, which is how ADR-015's failure ran: every
+   * contributor with no local `humans` row resolved to the same literal
+   * "Unknown", so this set — the one thing standing between one loud
+   * writer and the whole ranking — collapsed to size 1 for all of them at
+   * once, and nothing errored. See ADR-015; a name is for reading, an id
+   * is for counting.
    *
    * brake, not a default — see ADR-003 (docs/adr/0003-rank-by-distinct-authors.md,
    * kept out of the public repo). Every caller that RANKS by weight (see
@@ -230,7 +238,13 @@ export type BacklinkInfo = {
    * numbers usually agree) is silent — nothing errors, convergence just
    * stops showing up in the ranking and whoever writes the most starts
    * winning every one of them. */
-  fromAuthors: Set<string>;
+  fromAuthorIds: Set<string>;
+  /** The same people's DISPLAY NAMES, for the one place that shows them
+   * (`graphStructure.server.ts`'s own `buildNodeBlock` writes them into a
+   * prompt line). Never counted -- counting these is the bug ADR-015
+   * exists to close, and the reason the two sets are separate rather than
+   * one set doing both jobs. */
+  fromAuthorNames: Set<string>;
   earliestDate: string;
   latestDate: string;
 };
@@ -251,16 +265,25 @@ export function computeBacklinkIndex(allNodes: GraphLogNode[]): Map<string, Back
       const targetId = nodeId(link.date, link.number);
       if (!byId.has(targetId)) continue; // the model named a link that doesn't exist — ignore, don't fabricate.
       const existing = index.get(targetId);
+      // Identity, in descending order of trustworthiness: the human id
+      // (distinct per person even when the name isn't), then the name (a
+      // graph written before ADR-015 has no ids at all), then the node's
+      // own id — which is unique, so two genuinely unattributable nodes
+      // count as two people rather than silently merging into one. Never
+      // a shared literal: that is exactly what "Unknown" was.
+      const authorId = node.authorHumanId ?? node.authorName ?? node.id;
       const authorName = node.authorName ?? "Unknown";
       if (existing) {
         existing.count += 1;
-        existing.fromAuthors.add(authorName);
+        existing.fromAuthorIds.add(authorId);
+        existing.fromAuthorNames.add(authorName);
         if (node.date < existing.earliestDate) existing.earliestDate = node.date;
         if (node.date > existing.latestDate) existing.latestDate = node.date;
       } else {
         index.set(targetId, {
           count: 1,
-          fromAuthors: new Set([authorName]),
+          fromAuthorIds: new Set([authorId]),
+          fromAuthorNames: new Set([authorName]),
           earliestDate: node.date,
           latestDate: node.date,
         });

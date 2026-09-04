@@ -95,9 +95,9 @@ describe("ADR-003: distinct authors before raw count", () => {
     const oneAuthor = backlinks.get("2026-08-01#1")!;
     const twoAuthors = backlinks.get("2026-08-01#2")!;
     expect(oneAuthor.count).toBe(3);
-    expect(oneAuthor.fromAuthors.size).toBe(1);
+    expect(oneAuthor.fromAuthorIds.size).toBe(1);
     expect(twoAuthors.count).toBe(2);
-    expect(twoAuthors.fromAuthors.size).toBe(2);
+    expect(twoAuthors.fromAuthorIds.size).toBe(2);
   });
 
   it("a two-author thread ranks above a heavier one-author thread", () => {
