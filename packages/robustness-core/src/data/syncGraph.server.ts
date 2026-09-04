@@ -331,6 +331,55 @@ function resolveCandidateAttribution(name: string): CandidateAttribution {
   return { isAttachment: false };
 }
 
+/**
+ * The contributor ids this run cannot put a NAME to — a known human id
+ * (parsed straight out of a synced daily-log filename, so it is a real
+ * person who really wrote something) with no matching row in `humans`,
+ * or a row whose name is blank.
+ *
+ * brake, not a default — see ADR-015 (docs/adr/0015-a-node-must-name-its-
+ * author.md). Exported so the regression test can exercise the rule
+ * without a vault round-trip, same reason `capNodeLinks` is.
+ */
+export function unresolvedContributorIds(
+  ids: Iterable<string>,
+  humanNameById: Map<string, string>,
+): string[] {
+  const missing = new Set<string>();
+  for (const id of ids) {
+    const name = humanNameById.get(id);
+    if (!name || !name.trim()) missing.add(id);
+  }
+  return [...missing].sort();
+}
+
+/**
+ * One contributor's real display name, or a thrown error — never a
+ * placeholder (ADR-015).
+ *
+ * The harshness is deliberate and the reason is that the damage is not
+ * repairable in place: a name is baked into the node's `:ref{...}` at
+ * write time and a node is permanent (ADR-001), while the day's
+ * `sourceHash` covers only source file id and content hash. Seeding the
+ * missing human afterwards therefore changes nothing already written and
+ * the day is skipped as up-to-date -- the graph has to be reset and
+ * rebuilt. Failing here costs one error message.
+ *
+ * Unreachable in practice: `runSyncGraph` checks every contributor id up
+ * front, before writing anything, via `unresolvedContributorIds` above.
+ * This is the guarantee at the actual write point, so no future edit can
+ * reintroduce a placeholder by drifting the two sets apart.
+ */
+export function contributorNameOrThrow(humanId: string, humanNameById: Map<string, string>): string {
+  const name = humanNameById.get(humanId);
+  if (!name || !name.trim()) {
+    throw new Error(
+      `sync-graph: refusing to write a node attributed to humans:${humanId}, which has no name in this database. A citation names a person (ADR-015); it never carries a placeholder.`,
+    );
+  }
+  return name;
+}
+
 /** Finds a candidate's own sibling knowledge sidecar (`_knowledge/<name>.knowledge.md`
  * next to it), if `sync-knowledge` has already produced one — see that
  * stage's own module doc for the naming convention. */
@@ -1041,6 +1090,26 @@ export async function runSyncGraph(
   const humans = await getHumansById([...contributorIds]);
   const humanNameById = new Map(humans.map((h) => [h._id, h.name]));
 
+  // Stop before writing anything, rather than degrade to a placeholder
+  // name -- ADR-015. `ok: false`, not `incomplete`: `incomplete` is for a
+  // partial result that made real progress and is resumable next run
+  // (ADR-011), and this is the opposite. Nothing here is resumable
+  // because nothing here should be written at all: every node this run
+  // would produce for these people would be permanently mis-attributed,
+  // and the day's `sourceHash` (source file id + content hash only) would
+  // then skip them forever.
+  const unresolved = unresolvedContributorIds(contributorIds, humanNameById);
+  if (unresolved.length > 0) {
+    return {
+      ok: false,
+      error:
+        `sync-graph: ${unresolved.length} contributor(s) in this project's synced daily logs have no named row in \`humans\`, ` +
+        `so their nodes could not be attributed to a person: ${unresolved.map((id) => `humans:${id}`).join(", ")}. ` +
+        `A node always names its author (ADR-015), so nothing was written. ` +
+        `Seed or pull these humans (locally: \`scripts/pull-daily-logs.ts\`, which resolves every contributor via /api/humans/related) and re-run.`,
+    };
+  }
+
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
   const extraSkillFiles = await listExtraSkillFiles(projectFolder);
   const skillContent = [skill, generalSkill, ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`)]
@@ -1174,8 +1243,13 @@ export async function runSyncGraph(
       if (sidecar) hashParts.push(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
       if (caption) hashParts.push(`caption:${candidate.fileId}:${caption}`);
 
+      // A KNOWN id with no row is an error (ADR-015). NO id at all is a
+      // different case entirely and is left exactly as it was: a sync
+      // source that isn't a daily-log copy carries no attribution to
+      // resolve, and never did -- `resolveCandidateAttribution` returns
+      // empty for it by design.
       const contributorName = attribution.humanId
-        ? humanNameById.get(attribution.humanId) ?? "Unknown"
+        ? contributorNameOrThrow(attribution.humanId, humanNameById)
         : "Unknown";
       const displayName = attribution.originalName ?? source.name;
 
