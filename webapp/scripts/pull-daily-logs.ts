@@ -972,13 +972,19 @@ async function main(): Promise<number> {
     console.log(
       `Done with projects. ${projectsCreated} project folder(s) created, ${projectCounts.filesCreated} file(s) created, ${projectCounts.filesSkipped} already present (skipped), ${projectCounts.attachmentsCopied} attachment(s) copied to local S3, ${projectCounts.contentBackfilled} file(s) had missing content backfilled.`,
     );
+    // Both of these were summary lines you could scroll past, and
+    // downstream nothing knew the local copy was incomplete. A skipped
+    // subtree is not a smaller README, it is a README missing whatever
+    // those people wrote — same shape of failure as an unresolvable
+    // contributor above, so it gets the same answer: exit nonzero.
     if (projectCounts.foldersUnreadable > 0) {
-      console.log(
-        `${projectCounts.foldersUnreadable} sub-folder(s) couldn't be listed and were skipped — usually a folder created INSIDE an already-shared project, which never got the project's \`shared_with\` cascaded onto it (see \`migrate-recascade-shared-with.ts\`, which only covers the older \`project-n01\` type).`,
+      fatal.push(
+        `${projectCounts.foldersUnreadable} sub-folder(s) couldn't be listed and were skipped — usually a folder created INSIDE an already-shared project, which never got the project's \`shared_with\` cascaded onto it (see \`migrate-recascade-shared-with.ts\`).\n` +
+          `  Whatever those subtrees hold is simply absent locally, silently.`,
       );
     }
     if (projectsUnreachable > 0) {
-      console.log(
+      fatal.push(
         `${projectsUnreachable} referenced project(s) could not be read from ${host} at all — a Card pointing at one will still show "Unknown project" locally. Ask its owner to share it with ${email}, then re-run.`,
       );
     }
