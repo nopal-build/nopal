@@ -227,7 +227,7 @@ function buildGraphStructureContent(meta: GraphStructureFrontmatter, body: strin
 function buildNodeBlock(node: GraphLogNode, backlinks: Map<string, BacklinkInfo>): string {
   const info = backlinks.get(node.id);
   const inbound = info
-    ? `Inbound links: ${info.count} (${[...info.fromAuthors].join(", ")}; ${info.earliestDate} to ${info.latestDate})`
+    ? `Inbound links: ${info.count} (${[...info.fromAuthorNames].join(", ")}; ${info.earliestDate} to ${info.latestDate})`
     : "Inbound links: none yet";
   const outbound = node.links.length > 0
     ? `Outbound links: ${node.links.map((l) => `-> ${l.date} Node ${l.number}`).join(", ")}`
@@ -412,7 +412,10 @@ export function refreshClusterWeight(section: ReadmeSection, backlinks: Map<stri
     const info = backlinks.get(id);
     if (!info) continue;
     count += info.count;
-    for (const a of info.fromAuthors) authors.add(a);
+    // People, counted by id — see ADR-015 and `distinctAuthorsInSection`
+    // below. This line writes the "N people" a reader sees on the Weight
+    // line, and it drifted from the ranking the moment names collapsed.
+    for (const a of info.fromAuthorIds) authors.add(a);
     if (!earliest || info.earliestDate < earliest) earliest = info.earliestDate;
     if (!latest || info.latestDate > latest) latest = info.latestDate;
   }
@@ -440,7 +443,7 @@ function totalInboundCount(nodeIds: string[], backlinks: Map<string, BacklinkInf
 /** The union of distinct linking authors across every node in a
  * cluster — brake, not a default, see ADR-003 (docs/adr/0003-rank-by-
  * distinct-authors.md, kept out of the public repo, and the matching note
- * on `BacklinkInfo.fromAuthors` in `graphNodeIndex.server.ts`). This is
+ * on `BacklinkInfo.fromAuthorIds` in `graphNodeIndex.server.ts`). This is
  * read BEFORE raw count in `rankCluster` below — never replace that
  * ordering with a plain count/sum, even though the two usually agree. */
 function distinctAuthorsInSection(nodeIds: string[], backlinks: Map<string, BacklinkInfo>): number {
@@ -448,7 +451,10 @@ function distinctAuthorsInSection(nodeIds: string[], backlinks: Map<string, Back
   for (const id of nodeIds) {
     const info = backlinks.get(id);
     if (!info) continue;
-    for (const a of info.fromAuthors) authors.add(a);
+    // `fromAuthorIds`, never `fromAuthorNames` — see ADR-015. Keying this
+    // on the display name is not a cosmetic difference: it is how the
+    // whole ranking below degenerated without erroring.
+    for (const a of info.fromAuthorIds) authors.add(a);
   }
   return authors.size;
 }

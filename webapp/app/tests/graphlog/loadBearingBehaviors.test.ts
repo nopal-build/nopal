@@ -15,6 +15,8 @@ import {
   classifyPassEnding,
   buildGraphLogContent,
   existingSourceHash,
+  unresolvedContributorIds,
+  contributorNameOrThrow,
 } from "robustness-core/data/syncGraph.server";
 import { computeBacklinkIndex, extractDatesFromText, type GraphLogNode } from "robustness-core/data/graphNodeIndex.server";
 import {
@@ -95,9 +97,9 @@ describe("ADR-003: distinct authors before raw count", () => {
     const oneAuthor = backlinks.get("2026-08-01#1")!;
     const twoAuthors = backlinks.get("2026-08-01#2")!;
     expect(oneAuthor.count).toBe(3);
-    expect(oneAuthor.fromAuthors.size).toBe(1);
+    expect(oneAuthor.fromAuthorIds.size).toBe(1);
     expect(twoAuthors.count).toBe(2);
-    expect(twoAuthors.fromAuthors.size).toBe(2);
+    expect(twoAuthors.fromAuthorIds.size).toBe(2);
   });
 
   it("a two-author thread ranks above a heavier one-author thread", () => {
@@ -117,6 +119,80 @@ describe("ADR-003: distinct authors before raw count", () => {
     ];
     const sorted = sortClustersByWeight(sections, backlinks);
     expect(sorted.map((s) => s.heading)).toEqual(["Two from two authors", "Three from one author"]);
+  });
+});
+
+// ── ADR-015 — a node names its author; counts key on the id ─────────────
+//
+// The failure this guards ran end to end without erroring: a contributor
+// with no local `humans` row resolved to the literal "Unknown" at write
+// time, so EVERY such contributor became the same author, and the two
+// places that count people counted one.
+
+describe("ADR-015: a node must name its author", () => {
+  it("counts two ided-but-unnamed authors as two people, not one", () => {
+    // Both names absent -- exactly the state a degraded pull produces.
+    // Keyed on the name, this set is size 1 and the whole ADR-003 ranking
+    // below it goes flat. Keyed on the id, it is 2.
+    const unnamed = (id: string, humanId: string, links: { date: string; number: number }[]): GraphLogNode => {
+      const [date, number] = id.split("#");
+      return {
+        id, date, number: Number(number), quote: "",
+        authorName: null, authorHumanId: humanId,
+        refLine: `:ref{name="" human-id="${humanId}" datetime="${date}T12:00:00Z" location="/x"}`,
+        links,
+      };
+    };
+    const target = { date: "2026-08-01", number: 1 };
+    const backlinks = computeBacklinkIndex([
+      node("2026-08-01#1"),
+      unnamed("2026-08-02#1", "human_a", [target]),
+      unnamed("2026-08-03#1", "human_b", [target]),
+    ]);
+    expect(backlinks.get("2026-08-01#1")!.fromAuthorIds.size).toBe(2);
+  });
+
+  it("never merges two authors with neither an id nor a name", () => {
+    const anonymous = (id: string, links: { date: string; number: number }[]): GraphLogNode => {
+      const [date, number] = id.split("#");
+      return {
+        id, date, number: Number(number), quote: "",
+        authorName: null, authorHumanId: null, refLine: ":ref{}", links,
+      };
+    };
+    const target = { date: "2026-08-01", number: 1 };
+    const backlinks = computeBacklinkIndex([
+      node("2026-08-01#1"),
+      anonymous("2026-08-02#1", [target]),
+      anonymous("2026-08-03#1", [target]),
+    ]);
+    expect(backlinks.get("2026-08-01#1")!.fromAuthorIds.size).toBe(2);
+  });
+
+  it("still shows real names where names are what is displayed", () => {
+    const backlinks = computeBacklinkIndex([
+      node("2026-08-01#1"),
+      node("2026-08-02#1", [{ date: "2026-08-01", number: 1 }], "Alice"),
+      node("2026-08-03#1", [{ date: "2026-08-01", number: 1 }], "Bob"),
+    ]);
+    expect([...backlinks.get("2026-08-01#1")!.fromAuthorNames].sort()).toEqual(["Alice", "Bob"]);
+  });
+
+  it("reports a known contributor id with no humans row as unresolved", () => {
+    const known = new Map([["human_a", "Alice"]]);
+    expect(unresolvedContributorIds(["human_a", "human_b"], known)).toEqual(["human_b"]);
+    // A row with a BLANK name names nobody either -- `name=""` in a
+    // citation is the same lie as "Unknown", just quieter.
+    expect(unresolvedContributorIds(["human_c"], new Map([["human_c", "   "]]))).toEqual(["human_c"]);
+    expect(unresolvedContributorIds(["human_a"], known)).toEqual([]);
+  });
+
+  it("raises rather than producing a node for a known id with no row", () => {
+    const known = new Map([["human_a", "Alice"]]);
+    expect(contributorNameOrThrow("human_a", known)).toBe("Alice");
+    expect(() => contributorNameOrThrow("human_b", known)).toThrow(/humans:human_b/);
+    // The point of the throw: no placeholder ever reaches a `:ref{}`.
+    expect(() => contributorNameOrThrow("human_b", known)).not.toThrow(/Unknown/);
   });
 });
 

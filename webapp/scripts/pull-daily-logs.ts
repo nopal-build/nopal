@@ -42,6 +42,20 @@
 // locally. A shared project is mirrored as the local human's OWN project
 // (there's only one human in local dev), keeping its production id.
 //
+// EVERY CONTRIBUTOR GETS A REAL LOCAL IDENTITY, or this script fails.
+// Your own raw daily-log Cards are the only Cards pulled; everyone else's
+// writing arrives as the project's already-synced `syncs/Daily Logs/`
+// mirror. So this script used to create exactly ONE local `humans` row
+// (yours) while pulling several people's words, and `sync-graph` resolved
+// every one of those other people to the same literal "Unknown" -- which
+// then went into their nodes' citations permanently, made every non-
+// puller count as a single author in ADR-003's ranking, and made pulling
+// MORE people's logs produce a WORSE README than pulling nobody's. See
+// ADR-015. Every contributor id in the pulled mirror is now resolved to a
+// real name and email via `/api/humans/related` and written to a local
+// `humans` row; one that can't be resolved exits nonzero rather than
+// leaving a plausible-looking, mis-attributed local copy behind.
+//
 // Non-text attachments (images, PDFs, ...) have their actual BYTES copied
 // into local S3 too — not just their `s3_key`/`s3_url` pointer, which would
 // be meaningless once presigned against local MinIO's own, completely
@@ -104,6 +118,14 @@ import type { VaultFolder } from "robustness-core/data/vault.types";
  * need to ask production for it. */
 function dateFromSyncedName(name: string): string | null {
   return parseSyncedCardFileName(name)?.date ?? parseSyncedAttachmentFileName(name)?.date ?? null;
+}
+
+/** The CONTRIBUTOR behind a mirrored daily-log file, off the same two
+ * filename shapes `dateFromSyncedName` reads -- for every contributor
+ * other than whoever ran this script, that filename is the only place
+ * their identity exists locally at all. See `ensureContributorHumans`. */
+function contributorIdFromSyncedName(name: string): string | null {
+  return parseSyncedCardFileName(name)?.humanId ?? parseSyncedAttachmentFileName(name)?.humanId ?? null;
 }
 
 type Args = {
@@ -327,6 +349,37 @@ async function resolveUnlistedProject(
   } as VaultFolder;
 }
 
+type RemoteRelatedHuman = { _id: string; name: string; email: string };
+
+/**
+ * Every human this token can see -- the same list the vault's own share
+ * picker uses, exposed as JSON for the CLI (`nopal vault share --with`).
+ *
+ * This is what lets a pulled node name a REAL person. Without it this
+ * script creates exactly ONE local `humans` row (the puller's own, see
+ * `ensureLocalHuman`), while the mirrored `syncs/Daily Logs/` tree it
+ * pulls carries writing from everyone on the project -- so every other
+ * contributor had no local identity at all and `sync-graph` resolved them
+ * all to the same literal "Unknown" (ADR-015).
+ *
+ * For an Admin or Super `getRelatedHumans` returns every other human, so
+ * the whole team resolves in this one call. For anyone else it returns
+ * only relationship-scoped humans, which is a real and legitimate way to
+ * hit the hard stop in `ensureContributorHumans` below.
+ */
+async function remoteRelatedHumans(host: string, token: string): Promise<RemoteRelatedHuman[]> {
+  try {
+    const { humans } = await remoteJson<{ humans: RemoteRelatedHuman[] }>(host, token, "/api/humans/related");
+    return humans;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Could not read /api/humans/related from ${host} (${message.split("\n")[0]}).\n` +
+        `Without it every contributor other than you pulls in nameless, and a nameless contributor is exactly what this script exists to stop producing.`,
+    );
+  }
+}
+
 /**
  * Resolves the token's OWN daily-log storage folder, mirroring
  * `resolveDailyLogsFolder` (`vault.server.ts`) over HTTP instead of DB
@@ -393,6 +446,52 @@ async function ensureLocalHuman(id: string, email: string, name: string): Promis
   }
 }
 
+/**
+ * Gives every contributor whose writing this pull brought down a REAL
+ * local `humans` row — their actual name and email, from
+ * `/api/humans/related`.
+ *
+ * A contributor this token cannot resolve FAILS the run (ADR-015). That
+ * is deliberately harsher than skipping them, and the reason is that the
+ * damage is not repairable afterwards: `sync-graph` bakes the name into
+ * each node's `:ref{}` at write time, a node is permanent, and the day's
+ * `sourceHash` covers only source file id and content hash — so seeding
+ * the human later changes nothing already written and the day is skipped
+ * as up to date. A partial identity set does not produce a partial
+ * README; it produces a complete-looking one that is missing whole
+ * people. That is the failure this whole script's identity handling
+ * exists to close, so it stops here instead.
+ *
+ * The puller's own id is excluded: `getRelatedHumans` never returns you
+ * to yourself, and `ensureLocalHuman` has already created that row.
+ */
+async function ensureContributorHumans(
+  contributorIds: Set<string>,
+  ownHumanId: string,
+  related: RemoteRelatedHuman[],
+): Promise<string[]> {
+  const byId = new Map(related.map((h) => [h._id, h]));
+  const unresolvable: string[] = [];
+  let created = 0;
+
+  for (const id of [...contributorIds].sort()) {
+    if (id === ownHumanId) continue;
+    const human = byId.get(id);
+    if (!human || !human.name.trim()) {
+      unresolvable.push(id);
+      continue;
+    }
+    await ensureLocalHuman(id, human.email, human.name);
+    created++;
+    console.log(`  → humans:${id} (${human.name} <${human.email}>)`);
+  }
+
+  console.log(
+    `Resolved ${created} other contributor(s) to a real local humans row.`,
+  );
+  return unresolvable;
+}
+
 type PullCounts = {
   filesCreated: number;
   filesSkipped: number;
@@ -404,6 +503,11 @@ type PullCounts = {
    * see `pullFolderTree`'s own note on the un-cascaded `shared_with` that
    * causes it. */
   foldersUnreadable: number;
+  /** Every human id seen in a mirrored daily-log filename — i.e. everyone
+   * whose writing this pull is bringing down. Not a count: these are
+   * turned into real local `humans` rows by `ensureContributorHumans`,
+   * and a single one that can't be named fails the run (ADR-015). */
+  contributorIds: Set<string>;
 };
 
 /** Our own local S3 keys always start with this prefix (see `api.vault.upload.tsx`'s
@@ -508,6 +612,11 @@ async function pullFolderTree(
 
   for (const listing of files) {
     const isText = listing.content_type.startsWith("text/");
+    // Recorded BEFORE the already-pulled check below: a re-run skips
+    // every file and would otherwise collect nobody, leaving the identity
+    // check with nothing to check.
+    const contributorId = contributorIdFromSyncedName(listing.name);
+    if (contributorId) counts.contributorIds.add(contributorId);
     const existingFile = await getFileRefById(listing._id);
     if (existingFile) {
       counts.filesSkipped++;
@@ -598,8 +707,14 @@ async function pullFolderTree(
   }
 }
 
-async function main() {
+async function main(): Promise<number> {
   const { host, token, email, name, projectsFilter, ignoreProjects } = parseArgs();
+
+  /** Reasons this pull is NOT usable, collected as they happen and
+   * reported together at the end — each one also makes the process exit
+   * nonzero. An incomplete local copy that exits 0 is a README that looks
+   * fine and is missing entire people. */
+  const fatal: string[] = [];
 
   console.log(`Reading daily-logs from ${host} ...`);
   const root = await remoteChildren(host, token, "root");
@@ -609,6 +724,12 @@ async function main() {
 
   await ensureLocalHuman(humanId, email, name);
   console.log(`Upserted local humans:${humanId} (${email}).`);
+
+  // Fetched once, up front, and used at the very end — every contributor
+  // in the mirrored logs must resolve to one of these before this pull
+  // counts as usable. See `ensureContributorHumans`.
+  const related = await remoteRelatedHumans(host, token);
+  console.log(`${host} can resolve ${related.length} other human(s) for this token.`);
 
   // Mirrors the same personal/syncs/Daily Logs resolution remotely just
   // used, straight from the app's own vault.server.ts, so this can't drift
@@ -735,6 +856,7 @@ async function main() {
     attachmentsCopied: 0,
     contentBackfilled: 0,
     foldersUnreadable: 0,
+    contributorIds: new Set<string>(),
   };
   if (referencedProjectIds.size > 0) {
     console.log(`\nPulling ${referencedProjectIds.size} referenced project(s)...`);
@@ -850,25 +972,60 @@ async function main() {
     console.log(
       `Done with projects. ${projectsCreated} project folder(s) created, ${projectCounts.filesCreated} file(s) created, ${projectCounts.filesSkipped} already present (skipped), ${projectCounts.attachmentsCopied} attachment(s) copied to local S3, ${projectCounts.contentBackfilled} file(s) had missing content backfilled.`,
     );
+    // Both of these were summary lines you could scroll past, and
+    // downstream nothing knew the local copy was incomplete. A skipped
+    // subtree is not a smaller README, it is a README missing whatever
+    // those people wrote — same shape of failure as an unresolvable
+    // contributor above, so it gets the same answer: exit nonzero.
     if (projectCounts.foldersUnreadable > 0) {
-      console.log(
-        `${projectCounts.foldersUnreadable} sub-folder(s) couldn't be listed and were skipped — usually a folder created INSIDE an already-shared project, which never got the project's \`shared_with\` cascaded onto it (see \`migrate-recascade-shared-with.ts\`, which only covers the older \`project-n01\` type).`,
+      fatal.push(
+        `${projectCounts.foldersUnreadable} sub-folder(s) couldn't be listed and were skipped — usually a folder created INSIDE an already-shared project, which never got the project's \`shared_with\` cascaded onto it (see \`migrate-recascade-shared-with.ts\`).\n` +
+          `  Whatever those subtrees hold is simply absent locally, silently.`,
       );
     }
     if (projectsUnreachable > 0) {
-      console.log(
+      fatal.push(
         `${projectsUnreachable} referenced project(s) could not be read from ${host} at all — a Card pointing at one will still show "Unknown project" locally. Ask its owner to share it with ${email}, then re-run.`,
       );
     }
   }
 
+  // ── Contributor identity ────────────────────────────────────────
+  //
+  // Runs LAST because the ids come out of the mirrored tree pulled above,
+  // but before anything reads that tree — `nopal graphlog run` is a
+  // separate command, and this pull is the gate in front of it.
+  if (projectCounts.contributorIds.size > 0) {
+    console.log(`\nResolving ${projectCounts.contributorIds.size} contributor(s) found in synced daily logs...`);
+    const unresolvable = await ensureContributorHumans(projectCounts.contributorIds, humanId, related);
+    if (unresolvable.length > 0) {
+      fatal.push(
+        `${unresolvable.length} contributor(s) in the pulled daily logs could not be resolved to a real person: ` +
+          `${unresolvable.map((id) => `humans:${id}`).join(", ")}.\n` +
+          `  ${host} did not return them from /api/humans/related, so this pull has their WRITING but not their NAME.\n` +
+          `  Next step: ask an admin to relate this account to them, or re-run as an admin, then re-pull.\n` +
+          `  Running graphlog against this local copy would attribute their nodes to nobody, permanently (ADR-015).`,
+      );
+    }
+  }
+
+  if (fatal.length > 0) {
+    console.error(`\nThis pull is INCOMPLETE and must not be used to build a graph:\n`);
+    for (const reason of fatal) console.error(`- ${reason}`);
+    console.error(
+      `\nNothing above is repaired by re-running graphlog: a node's author is written into it permanently, so a bad pull becomes a bad graph that only a reset and rebuild clears.`,
+    );
+    return 1;
+  }
+
   console.log(
     `\nLog into local dev as ${email} to see this data.`,
   );
+  return 0;
 }
 
 main()
-  .then(() => process.exit(0))
+  .then((code) => process.exit(code))
   .catch((err) => {
     console.error(err);
     process.exit(1);
