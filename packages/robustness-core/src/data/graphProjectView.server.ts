@@ -662,12 +662,37 @@ function buildNodePrefetchBlock(
  * the code knows, and to get it wrong quietly when the pre-fetch happens
  * to show one person's nodes first. */
 function describeWriters(allNodes: GraphLogNode[]): string {
-  const names = [...new Set(allNodes.map((n) => n.authorName).filter((n): n is string => !!n))].sort();
-  if (names.length === 0) return "Distinct people who have written in this graph: unknown.";
-  if (names.length === 1) {
-    return `Distinct people who have written in this graph: 1 (${names[0]}). This is a one-person project — convergence, agreement and "several people keep returning to this" are not claims the graph can support here.`;
+  // HOW MANY is counted by human id; WHO is read off the names. Counting
+  // names is the ADR-015 bug in its most damaging form: the one-person
+  // branch below is a CONSTRAINT the model is handed, and a multi-author
+  // graph whose names had collapsed used to satisfy `names.length === 1`
+  // and be told, wrongly, that convergence was unclaimable here.
+  const byId = new Map<string, string | null>();
+  for (const node of allNodes) {
+    // Same identity ladder as `computeBacklinkIndex` -- see ADR-015. A
+    // node with no id at all is still a person; falling back to the name
+    // (then to the node's own id) keeps a pre-ADR-015 graph counting the
+    // way it always did rather than reporting everyone as one writer.
+    const id = node.authorHumanId ?? node.authorName ?? node.id;
+    const existing = byId.get(id);
+    if (!existing) byId.set(id, node.authorName ?? null);
   }
-  return `Distinct people who have written in this graph: ${names.length} (${names.join(", ")}).`;
+  if (byId.size === 0) return "Distinct people who have written in this graph: unknown.";
+
+  // Defensive, and should be unreachable: `sync-graph` refuses to write a
+  // node whose author it cannot name (ADR-015), so an id with no name
+  // means a node written before that rule, or a bug upstream of here.
+  const names = [...byId.values()].filter((n): n is string => !!n).sort();
+  const unnamed = byId.size - names.length;
+  const who = [
+    names.join(", ") || null,
+    unnamed > 0 ? `${unnamed} unnamed` : null,
+  ].filter(Boolean).join(", and ");
+
+  if (byId.size === 1) {
+    return `Distinct people who have written in this graph: 1 (${who}). This is a one-person project — convergence, agreement and "several people keep returning to this" are not claims the graph can support here.`;
+  }
+  return `Distinct people who have written in this graph: ${byId.size} (${who}).`;
 }
 
 function buildUserPrompt(input: {
