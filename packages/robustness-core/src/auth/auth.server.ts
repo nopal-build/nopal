@@ -92,7 +92,7 @@ authenticator.use(
       secret: process.env.ENCRYPTION_SECRET || "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       magicLinkPath: "/magic-link",
       emailSentRedirect: "/verify",
-      successRedirect: "/fruits",
+      successRedirect: "/",
       failureRedirect: "/verify",
       sendTOTP: async ({ email, code, magicLink }) => {
         if (!sendTotpEmailImpl) {
@@ -133,13 +133,13 @@ authenticator.use(
 
       // If `/login` was reached via a `redirectTo` (e.g. from `/cli-login`),
       // it stashed the target in its own short-lived cookie — honor it here
-      // instead of the default `/fruits`, then clear that cookie.
+      // instead of the default `/` (the app's dashboard), then clear that cookie.
       const redirectTo = getRedirectToCookie(request);
       const headers = new Headers();
       headers.append("Set-Cookie", await sessionStorage.commitSession(session));
       if (redirectTo) headers.append("Set-Cookie", buildRedirectCookie(null));
 
-      throw redirect(redirectTo ?? "/fruits", { headers });
+      throw redirect(redirectTo ?? "/", { headers });
     },
   ),
   "TOTP",
@@ -167,7 +167,7 @@ export async function authenticateWithRedirect(
         err.headers.append("Set-Cookie", buildRedirectCookie(redirectTo));
       } catch (e) {
         // Headers may be immutable in some runtimes — worst case the
-        // redirectTo is lost and login just lands on /fruits as normal.
+        // redirectTo is lost and login just lands on the dashboard as normal.
         console.error("Failed to attach redirectTo cookie:", e);
       }
     }

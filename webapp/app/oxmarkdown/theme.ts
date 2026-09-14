@@ -1,4 +1,8 @@
 /**
+ * DUPLICATED from fruits/app/oxmarkdown/theme.ts (read-only-render subset
+ * only -- see webapp/app/components/OxRenderer.tsx's own comment for why).
+ * Not shared; keep both in sync by hand.
+ *
  * OxMarkdown theme contract — a small, typed set of overridable tokens.
  * `styles/oxmarkdown.css` defines sensible defaults (nopal's existing
  * palette, system font stack, the 41px grid) directly in CSS, so the

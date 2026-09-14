@@ -1,0 +1,1105 @@
+html {
+  overflow-y: scroll;
+}
+
+/* ── Palette (Tier 1) ─────────────────────────────────────────────────────
+   Raw color values, grouped into nature-themed families (on brand for a
+   company named after the prickly pear cactus) on a 100–900 scale,
+   populated lazily — only the rungs an existing color actually needs
+   exist today; the rest are free to add later without a naming debate.
+   Literal color names (`--purple`, `--green`, …) are kept as plain
+   aliases right below: faster to say/remember than "plum-700", and
+   nothing already using them needs to change. Prefer the semantic
+   tokens (Tier 2, further down) in new component code — reach for a
+   palette/literal name directly only when a semantic role doesn't exist
+   yet. See the `stamps` package for the typed JS equivalents of all of
+   this (`palette`, `colors`, `semanticColors` in `tokens.ts`). */
+:root {
+  /* Plum (brand primary / purple) */
+  --plum-200: #c8b8ce;
+  --plum-300: #7f5b8b;
+  --plum-400: #817186;
+  --plum-700: #3f2b46;
+
+  /* Cactus (green) */
+  --cactus-300: #86cb97;
+  --cactus-500: #5da06d;
+
+  /* Clay (red / terracotta) */
+  --clay-300: #f6c8c3;
+  --clay-500: #a63b31;
+
+  /* Dune (yellow) */
+  --dune-300: #fcf0c4;
+  --dune-500: #ffeaa4;
+
+  /* Bloom (pink — cactus flower) */
+  --bloom-500: #d3a0e5;
+
+  /* Moonlight (pale accent blue/lavender) */
+  --moonlight-500: #c4c6fc;
+
+  /* Surface (neutral scene backdrop) — day is the warm, sunlit scene;
+     night is the same scene after dark. Was farground/midground/
+     foreground + dark-farground/dark-midground/dark-foreground. */
+  --surface-day-100: #fff9f1;
+  --surface-day-300: #ede4da;
+  --surface-day-500: #e5d6c5;
+  --surface-night-100: #494a72;
+  --surface-night-300: #6d6e99;
+  --surface-night-500: #8d8eb4;
+
+  --white: #fff;
+
+  /* ── Literal aliases ──────────────────────────────────────────────────
+     Same values as specific palette rungs above — kept so "purple"/
+     "green"/etc. keep working everywhere they're already used. */
+  --purple: var(--plum-700);
+  --purple-light: var(--plum-300);
+  --pink: var(--bloom-500);
+  --yellow: var(--dune-500);
+  --yellow-light: var(--dune-300);
+  --green: var(--cactus-500);
+  --green-light: var(--cactus-300);
+  --red: var(--clay-500);
+  --red-light: var(--clay-300);
+  --moon: var(--moonlight-500);
+
+  --farground: var(--surface-day-100);
+  --midground: var(--surface-day-300);
+  --foreground: var(--surface-day-500);
+  --dark-farground: var(--surface-night-100);
+  --dark-midground: var(--surface-night-300);
+  --dark-foreground: var(--surface-night-500);
+
+  --text-subtle: var(--plum-400);
+  --text-subtle-dark: var(--plum-200);
+
+  /* ── Semantic tokens (Tier 2) ─────────────────────────────────────────
+     The names components should actually reach for. Each one already
+     resolves correctly for the current color scheme (see the dark-mode
+     override right below), so consumers never need their own
+     `@media (prefers-color-scheme: dark)` block just to pick the right
+     color. Add more of these as per-component `@media` overrides get
+     folded in over time — don't add a new one-off `@media` block to a
+     component when a semantic token could exist here instead. */
+  --color-text-primary: var(--plum-700);
+  --color-text-brand: var(--plum-300);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-danger: var(--clay-500);
+  --color-surface-page: var(--white);
+  --color-surface-card: var(--surface-day-100);
+  --color-surface-inset: var(--surface-day-300);
+  --color-surface-border: var(--surface-day-500);
+
+  /* Form fields deliberately don't follow the day/night surface swap
+     above — inputs keep an "ink on paper" look (dark text/border on a
+     pale background) in BOTH schemes rather than inverting to a dark
+     field on a dark page, which is why `field-text` doesn't change
+     between the two blocks below. */
+  --color-field-bg: var(--white);
+  --color-field-border: var(--surface-night-500);
+  --color-field-text: var(--surface-night-100);
+
+  /* The active nav-link highlight. Text color is intentionally NOT part
+     of this token — it stays literal `--purple` in both schemes (see
+     `navLink.css.ts`), since the highlight itself is already dark (day)
+     or solid white (night), so dark purple text stays readable against
+     it either way. */
+  --color-nav-active-bg: var(--surface-day-500);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-text-primary: var(--white);
+    --color-text-brand: var(--moon);
+    --color-text-subtle: var(--text-subtle-dark);
+    --color-text-danger: var(--clay-300);
+    --color-surface-page: var(--purple);
+    --color-surface-card: var(--surface-night-100);
+    --color-surface-inset: var(--surface-night-300);
+    --color-surface-border: var(--surface-night-500);
+    --color-field-bg: var(--surface-day-100);
+    --color-field-border: var(--surface-day-500);
+    --color-nav-active-bg: var(--white);
+  }
+}
+
+body {
+  background-color: var(--color-surface-page);
+  color: var(--color-text-primary);
+  min-height: 100vh;
+}
+
+.page-wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.page-wrapper > .scene1 {
+  flex: 1;
+}
+
+/* Simple Container */
+.simple-container {
+  @apply container;
+  @apply mx-auto;
+  @apply max-w-screen-sm;
+  position: relative;
+  z-index: 2;
+}
+
+/* .link retired — fully migrated to packages/stamps/src/link.css.ts. See
+   the `link` export there instead of adding this class back here. */
+
+/* Buttons */
+.btn {
+  border-radius: 8px;
+  display: inline-flex;
+}
+.btn-primary {
+  @apply btn;
+  background-color: var(--btn-color, var(--purple));
+  padding: 16px 32px;
+  color: white;
+  text-wrap: nowrap;
+  @media (prefers-color-scheme: dark) {
+    background-color: white;
+    color: var(--btn-color, var(--purple));
+  }
+}
+.btn-purple {
+  @apply btn;
+  background-color: var(--btn-color, var(--purple));
+  color: white;
+  text-wrap: nowrap;
+  @media (prefers-color-scheme: dark) {
+    background-color: white;
+    color: var(--btn-color, var(--purple));
+  }
+}
+
+.btn-secondary {
+  @apply btn;
+  background-color: var(--btn-color, var(--green));
+  padding: 8px 16px;
+  color: white;
+}
+
+
+.btn-yellow {
+  @apply btn;
+  background-color: var(--btn-color, var(--farground));
+  border: 1px solid var(--border-color, var(--foreground));
+  padding: 8px 16px;
+  color: var(--purple-light);
+  @media (prefers-color-scheme: dark) {
+    background-color: var(--dark-farground);
+    border-color: var(--dark-foreground);
+    color: white;
+  }
+}
+
+.btn-outline {
+  border: 1px solid var(--midground);
+  /* Every call site was already adding 4px rounding (`rounded` /
+     inline borderRadius) — bake it in so forgetting it isn't possible. */
+  border-radius: 4px;
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--dark-midground);
+  }
+}
+
+/* Round icon-only button (see components/CircleButton.tsx) — transparent
+   by default, tinted background + purple text on hover/focus/active. The
+   hover background must come from a dedicated dark-mode pair here rather
+   than a bare `var(--foreground)` — that variable doesn't flip itself, so
+   pairing it with dark-mode text (which does flip) would wash out to
+   light-on-light. */
+/* .circle-btn/.circle-btn-green/.circle-btn-red moved to
+   packages/stamps/src/circleButton.css.ts (a vanilla-extract recipe) —
+   see the `CircleButton` component there instead of adding these classes
+   back here. */
+
+/* Badge variants moved to packages/stamps/src/badge.css.ts (a
+   vanilla-extract recipe) — see the `Badge` component there instead of
+   adding `.badge-*` classes back here. */
+
+/* The scrollable list area of a SearchCollection (and the profile page's
+   hand-rolled copy of that shell) — a "well" that matches the page
+   background (white light / --purple dark) so rows inside can be plain
+   `Surface` cards: their backgrounds, text colors, and anything
+   scheme-aware inside them (MoreMenu, subtle-text, …) flip normally.
+   Top radius is 1px inside Surface's 8px so the well doesn't poke
+   out of the shell's border. */
+.collection-well {
+  background: white;
+  border-radius: 7px 7px 0 0;
+  @media (prefers-color-scheme: dark) {
+    background: var(--purple);
+  }
+}
+
+/* Menu item row inside a dropdown/action-menu panel (e.g. MoreMenu). Text
+   color is left to the caller (`purple-text`/`red-text` etc, which already
+   flip for dark mode) — this class only owns the hover background, which
+   needs its own dark-mode pair for the same reason `.circle-btn` does. */
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border-radius: 4px;
+  padding: 8px 10px;
+  transition: background 150ms;
+
+  &:hover:not(:disabled) {
+    background: var(--foreground);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    &:hover:not(:disabled) {
+      background: var(--dark-foreground);
+    }
+  }
+}
+
+/* Readonly "copy this command" inputs — a nested "well" look inside a
+   Surface, distinct from the box's own background. */
+.code-input {
+  background: var(--midground);
+  border: 1px solid var(--foreground);
+  border-radius: 6px;
+  color: var(--text-subtle);
+  @media (prefers-color-scheme: dark) {
+    background: var(--dark-midground);
+    border-color: var(--dark-foreground);
+    color: var(--text-subtle-dark);
+  }
+}
+
+/* Multi-line usage-snippet blocks (see the styles guide) — accent purple in
+   light mode; plain white in dark, where --purple-light is too dim against a
+   dark Surface. */
+.code-block {
+  color: var(--purple-light);
+  @media (prefers-color-scheme: dark) {
+    color: white;
+  }
+}
+
+/* .good-box/.good-box-hover/.good-box-boarder retired — fully migrated
+   to packages/stamps/src/surface.css.ts (`surfaceBase`, `surfaceHoverable`,
+   `surfaceBorderOnly`) and the `Surface` component built on them. Don't
+   add these classes back — reach for `stamps/Surface` instead. */
+
+.good-white-box {
+  border: 1px solid var(--foreground);
+  background: var(--white);
+  border-radius: 8px;
+}
+
+/* Five Factors */
+.five-factors {
+  @apply font-mono;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  h6 {
+    font-size: 16px;
+    margin-bottom: 4px;
+  }
+}
+
+.good-progress {
+  width: 100%;
+  height: 4px;
+  background: var(--midground);
+  border-radius: 4px;
+  position: relative;
+  .good-dot {
+    height: 8px;
+    width: 8px;
+    position: absolute;
+    top: -2px;
+    border-radius: 8px;
+    transition: left 2s ease-in-out;
+  }
+  .good-bar {
+    height: 4px;
+    border-radius: 4px;
+    transition: width 2s ease-in-out;
+  }
+  @media (prefers-color-scheme: dark) {
+    background: var(--dark-midground);
+  }
+}
+
+.good-progress-hover:hover {
+  border-color: var(--purple-light);
+  box-shadow: 0px 0px 8px rgba(0, 0, 0, 0.05);
+  .good-arrow svg path {
+    stroke: var(--green);
+  }
+}
+
+/* Dropdown */
+.dropdown {
+  max-width: 13em;
+  position: relative;
+  width: 100%;
+  display: inline-flex;
+
+  .dropdown-btn {
+    background: var(--purple);
+    font-size: 18px;
+    width: 100%;
+    border: none;
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 1;
+
+    .arrow {
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid white;
+    }
+  }
+  .dropdown-btn:focus-within + .dropdown-content {
+    visibility: visible;
+  }
+  .dropdown-btn:focus-within > .arrow {
+    transform: rotate(180deg);
+  }
+  .dropdown-content {
+    list-style: none;
+    position: absolute;
+    top: 3.2em;
+    width: 100%;
+    visibility: hidden;
+    background: var(--purple-light);
+    z-index: 2;
+    border-radius: 8px;
+  }
+
+  .dropdown-content li {
+    &::before {
+      content: "";
+    }
+  }
+  .dropdown-content li:hover {
+    background: var(--purple);
+  }
+  .dropdown-content li a {
+    display: block;
+    padding: 16px 8px;
+    color: white;
+    text-decoration: none;
+    cursor: pointer;
+  }
+}
+
+.text-dropdown {
+  position: relative;
+  display: inline-flex;
+
+  .dropdown-btn {
+    font-size: 18px;
+    width: 100%;
+    background: white;
+    border: none;
+    border-bottom: 2px solid var(--green-light);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 4px;
+    border-radius: 0;
+    cursor: pointer;
+    z-index: 1;
+
+    .arrow {
+      margin-left: 4px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid var(--green-light);
+    }
+
+    &:hover {
+      border-bottom-color: var(--green);
+      .arrow {
+        border-top-color: var(--green);
+      }
+    }
+  }
+
+  &:focus-within {
+    .dropdown-content {
+      visibility: visible;
+    }
+    .arrow {
+      transform: rotate(180deg);
+    }
+  }
+
+  .dropdown-content {
+    list-style: none;
+    position: absolute;
+    top: 29px;
+    right: -1px;
+    width: 100%;
+    visibility: hidden;
+    z-index: 2;
+    padding: 0;
+    li {
+      a {
+        display: block;
+        padding: 16px 8px;
+        color: var(--purple);
+        text-decoration: none;
+        cursor: pointer;
+      }
+      &:hover {
+        background: var(--midground);
+      }
+      &::before {
+        content: "";
+      }
+    }
+  }
+}
+
+/* Header */
+.header {
+  .sun {
+    width: 20%;
+    min-width: 80px;
+    max-width: 142px;
+  }
+  .moon {
+    width: 20%;
+    min-width: 30px;
+    max-width: 62px;
+    margin-left: 25px;
+    margin-bottom: 25px;
+    @media (min-width: 640px) {
+      margin-left: 40px;
+      margin-right: 40px;
+      margin-bottom: 40px;
+    }
+  }
+
+  @media (max-width: 639px) {
+    h1 img {
+      max-width: 80%;
+    }
+    .sun,
+    .moon {
+      width: 5%;
+      position: absolute;
+      top: 4px;
+      left: 124px;
+    }
+    nav {
+      margin-right: 0px;
+    }
+  }
+}
+.main-nav {
+  white-space: nowrap;
+}
+
+.main-nav a.main-nav-item {
+  position: relative;
+  &:after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0.5rem;
+    right: 0.5rem;
+    height: 4px;
+    background-color: transparent;
+    border-radius: 2px;
+  }
+  &:hover:after {
+    background-color: var(--purple-light);
+  }
+  &.active:after {
+    background-color: var(--green);
+  }
+}
+
+/* Hamburger Menu */
+.hamburger-menu {
+  display: none;
+  padding: 8px;
+  z-index: 1;
+  border-radius: 4px;
+  &:hover,
+  &:focus {
+    background-color: var(--farground);
+    @media (prefers-color-scheme: dark) {
+      background-color: var(--dark-midground);
+    }
+  }
+}
+.menu-bars {
+  @apply ml-2;
+}
+.menu-bars > div {
+  width: 24px;
+  height: 3px;
+  background-color: var(--purple);
+  margin: 4px 0;
+  @media (prefers-color-scheme: dark) {
+    background-color: var(--farground);
+  }
+}
+
+@media (max-width: 496px) {
+  .hamburger-menu {
+    display: flex;
+  }
+  .main-nav {
+    display: none;
+    position: absolute;
+    top: 64px;
+    right: 16px;
+    min-width: 50%;
+    background: white;
+    border: 1px solid var(--foreground);
+    z-index: 3;
+    border-radius: 4px;
+    @media (prefers-color-scheme: dark) {
+      background-color: var(--dark-midground);
+      border: 1px solid var(--dark-farground);
+    }
+  }
+  .main-nav a.main-nav-item {
+    display: block;
+    text-align: right;
+    &:after {
+      left: 0px;
+      bottom: 8px;
+      top: 8px;
+      right: unset;
+      width: 4px;
+      height: auto;
+      border-top-left-radius: 2px;
+      border-bottom-left-radius: 2px;
+    }
+  }
+  .good-menu {
+    width: 100%;
+  }
+}
+
+/* Good Menu */
+.good-menu {
+  display: inline-block;
+  .main-nav-item {
+    cursor: pointer;
+  }
+
+  ul {
+    flex-wrap: wrap;
+    z-index: 3;
+    border-radius: 8px;
+    border: 1px solid var(--foreground);
+    background: white;
+    padding: 16px;
+    display: inline-flex;
+    gap: 16px;
+    @media (prefers-color-scheme: dark) {
+      border-color: var(--dark-foreground);
+      background: var(--purple);
+    }
+  }
+  li a {
+    width: 212px;
+    height: 212px;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    text-align: center;
+    padding: 16px 0;
+
+    .title {
+      display: inline-block;
+      font-size: 20px;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+    .desc {
+      margin-top: 8px;
+      display: inline-block;
+      font-size: 14px;
+      color: var(--purple-light);
+      line-height: 20px;
+      @media (prefers-color-scheme: dark) {
+        color: white;
+      }
+    }
+
+    .good-arrow {
+      display: inline-flex;
+      width: 100%;
+      justify-content: flex-end;
+      padding-right: 16px;
+    }
+  }
+}
+@media (prefers-color-scheme: dark) {
+  .good-arrow svg path {
+    stroke: white;
+  }
+}
+.good-menu-container {
+  position: absolute;
+  top: 88px;
+  left: 0;
+  width: 100%;
+  display: none;
+  justify-content: center;
+
+  > svg {
+    position: absolute;
+    left: calc(50% - 48px);
+    top: -28px;
+    transform: scalex(-1);
+    z-index: 4;
+    @media (prefers-color-scheme: dark) {
+      path {
+        stroke: white;
+      }
+    }
+  }
+
+  @media (max-width: 744px) {
+    ul {
+      width: min-content;
+    }
+  }
+  @media (max-width: 639px) {
+    top: 80px;
+    justify-content: flex-end;
+    padding-right: 16px;
+    ul {
+      flex-direction: column;
+      align-items: center;
+    }
+    > svg {
+      left: calc(100% - 224px);
+    }
+  }
+}
+
+/* Footer */
+.footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+}
+
+/* Text Colors */
+.purple-light-text {
+  /* Semantic token already resolves per-scheme — see :root above. */
+  color: var(--color-text-brand);
+}
+
+.purple-text {
+  color: var(--color-text-primary);
+}
+
+.green-text {
+  color: var(--green);
+  @media (prefers-color-scheme: dark) {
+    color: var(--green-light);
+  }
+}
+
+.green-light-text {
+  color: var(--green-light);
+  @media (prefers-color-scheme: dark) {
+    color: var(--green);
+  }
+}
+
+.red-text {
+  color: var(--red);
+  @media (prefers-color-scheme: dark) {
+    color: var(--red-light);
+  }
+}
+.red-light-text {
+  color: var(--red-light);
+  @media (prefers-color-scheme: dark) {
+    color: var(--red);
+  }
+}
+.subtle-text {
+  color: var(--color-text-subtle);
+}
+
+/* Lists */
+.dash-list {
+  li:before,
+  dd:before {
+    content: "- ";
+    text-indent: 0px;
+  }
+}
+
+/* Scenes */
+.scene1 {
+  min-height: 450px;
+  background:
+    url("/app/images/home/ocotillo.svg") bottom left 30px no-repeat,
+    url("/app/images/home/pricklyPear.svg") bottom 10px left no-repeat,
+    url("/app/images/home/home.svg") bottom right -20px no-repeat,
+    url("/app/images/home/ground.svg") bottom -1px left / 50% no-repeat,
+    url("/app/images/home/backRocks.svg") bottom -25px right 180px no-repeat;
+
+  @media (prefers-color-scheme: dark) {
+    background:
+      url("/app/images/home/ocotillo-dark.svg") bottom left 30px no-repeat,
+      url("/app/images/home/pricklyPear-dark.svg") bottom 10px left no-repeat,
+      url("/app/images/home/home-dark.svg") bottom right -20px no-repeat,
+      url("/app/images/home/ground-dark.svg") bottom left / 50% no-repeat,
+      url("/app/images/home/backRocks-dark.svg") bottom -25px right 180px
+        no-repeat;
+  }
+}
+
+.scene0 {
+  height: 75vh;
+  min-height: 384px;
+  max-height: 600px;
+  background-color: var(--farground);
+  position: relative;
+  @media (prefers-color-scheme: dark) {
+    background-color: var(--dark-farground);
+  }
+}
+.scene0-content {
+  z-index: 2;
+  position: relative;
+}
+.scene0-bg {
+  position: absolute;
+  z-index: 1;
+  top: -40px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background:
+    url("/app/images/home/frontRocks.svg") bottom left / auto 100% no-repeat,
+    url("/app/images/home/pricklyPearFruit.svg") bottom left / auto 85%
+      no-repeat,
+    url("/app/images/home/homeShadow.svg") top 40px right 146px / auto 100%
+      no-repeat;
+
+  @media (prefers-color-scheme: dark) {
+    background:
+      url("/app/images/home/frontRocks-dark.svg") bottom left / auto 100%
+        no-repeat,
+      url("/app/images/home/pricklyPearFruit-dark.svg") bottom left / auto 85%
+        no-repeat,
+      url("/app/images/home/homeShadow-dark.svg") top 40px right 146px / auto
+        100% no-repeat;
+  }
+}
+.scene0-shadow-bg {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 148px;
+  background-color: var(--midground);
+  z-index: 0;
+
+  @media (prefers-color-scheme: dark) {
+    background-color: var(--dark-midground);
+  }
+}
+
+/* Carousel */
+.arch-carousel {
+  overflow: hidden;
+  .carousel {
+    max-width: 740px;
+    margin: 0 auto;
+  }
+
+  .arch-slide {
+    margin-left: -9.3%;
+    margin-right: 9.3%;
+    gap: 2.4%;
+  }
+  .arch-filler {
+    border-radius: 4px;
+    z-index: 1;
+    max-width: 16.2%;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .arch-img {
+    border-radius: 4px;
+    z-index: 10;
+    max-width: 79%;
+    flex-shrink: 0;
+  }
+  .last-slide {
+    position: absolute;
+    width: 16.2%;
+    right: -6.9%;
+    top: 8px;
+    img {
+      max-width: 100%;
+    }
+  }
+}
+
+.carousel {
+  width: 100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+}
+.carousel-indicators {
+  display: inline-flex;
+  gap: 16px;
+  align-items: center;
+  li {
+    cursor: pointer;
+    height: 16px;
+    width: 16px;
+    border: 4px solid white;
+    border-radius: 16px;
+    background-color: var(--foreground);
+
+    &.active,
+    &.active:hover {
+      border-color: var(--green);
+      background-color: var(--green);
+    }
+    &:hover {
+      border-color: var(--foreground);
+    }
+  }
+  @media (prefers-color-scheme: dark) {
+    li {
+      border-color: var(--purple);
+      background-color: var(--dark-foreground);
+
+      &.active,
+      &.active:hover {
+        border-color: var(--green-light);
+        background-color: var(--green-light);
+      }
+      &:hover {
+        border-color: var(--dark-foreground);
+      }
+    }
+  }
+}
+.carousel-content {
+  top: 0;
+  display: flex;
+  position: absolute;
+  transition: 400ms ease;
+  transform: translateX(0);
+}
+.carousel-item {
+  width: 100vw;
+  img {
+    max-width: 100vw;
+  }
+}
+
+/* Folder Tabs */
+.folder-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--foreground);
+  gap: 8px;
+  align-items: flex-end;
+  a {
+    @apply font-mono;
+    font-size: 20px;
+    color: var(--purple-light);
+    margin-bottom: -1px;
+    display: flex;
+    align-items: flex-end;
+    padding: 8px 16px;
+    background-color: rgba(255, 255, 255, 0.5);
+    border: 1px solid var(--foreground);
+    border-top-right-radius: 8px;
+    border-top-left-radius: 8px;
+
+    &.active {
+      border-bottom-color: white;
+      color: var(--green);
+      padding-top: 16px;
+      @media (prefers-color-scheme: dark) {
+        color: var(--green-light);
+        border-bottom-color: var(--purple) !important;
+      }
+    }
+    @media (prefers-color-scheme: dark) {
+      color: white;
+    }
+  }
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--dark-farground);
+    a {
+      background-color: var(--dark-background);
+      border-color: var(--dark-farground);
+    }
+  }
+}
+
+/* Breadcrumbs */
+.breadcrumbs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+
+  a {
+    color: var(--text-subtle);
+  }
+  a:hover {
+    color: var(--purple-light);
+    text-decoration: underline;
+  }
+  svg {
+    transform: rotate(-180deg);
+    path {
+      stroke: var(--text-subtle);
+    }
+  }
+  @media (prefers-color-scheme: dark) {
+    a {
+      color: var(--text-subtle-dark);
+    }
+    svg {
+      path {
+        stroke: var(--text-subtle-dark);
+      }
+    }
+  }
+}
+
+/* Video Container */
+.video-container {
+  position: relative;
+  width: 100%;
+  padding-bottom: 56.25%; /* 16:9 aspect ratio */
+  iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+/* SVG */
+.foreground-fill {
+  fill: var(--foreground);
+  @media (prefers-color-scheme: dark) {
+    fill: var(--dark-foreground);
+  }
+}
+
+.midground-fill {
+  fill: var(--midground);
+  @media (prefers-color-scheme: dark) {
+    fill: var(--dark-midground);
+  }
+}
+
+.farground-fill {
+  fill: var(--farground);
+  @media (prefers-color-scheme: dark) {
+    fill: var(--dark-farground);
+  }
+}
+
+.foreground-stroke {
+  stroke: var(--foreground);
+  @media (prefers-color-scheme: dark) {
+    stroke: var(--dark-foreground);
+  }
+}
+
+.midground-stroke {
+  stroke: var(--midground);
+  @media (prefers-color-scheme: dark) {
+    stroke: var(--dark-midground);
+  }
+}
+
+.farground-stroke {
+  stroke: var(--farground);
+  @media (prefers-color-scheme: dark) {
+    stroke: var(--dark-farground);
+  }
+}
+
+.red-stroke {
+  stroke: var(--red);
+  @media (prefers-color-scheme: dark) {
+    stroke: var(--red-light);
+  }
+}
+
+.purple-light-stroke {
+  stroke: var(--purple-light);
+  @media (prefers-color-scheme: dark) {
+    stroke: var(--moon);
+  }
+}
+
+.purple-light-fill {
+  fill: var(--purple-light);
+  @media (prefers-color-scheme: dark) {
+    fill: var(--moon);
+  }
+}
+
+/* === App Layout === */
+/* .app-layout, .app-nav-active-bg, .app-topbar (+ its descendant
+   classes), .app-topnav (+ its descendant classes), and .app-main are all
+   retired — fully migrated to packages/stamps/src/appLayoutShell.css.ts
+   and navLink.css.ts. See AppLayout.tsx (webapp/app/components) instead
+   of adding these classes back here. */
+
+/* Background Classes */
+.midground-bg {
+  background-color: var(--midground);
+  @media (prefers-color-scheme: dark) {
+    background-color: var(--dark-midground);
+  }
+}
+
+.slider-dog {
+  border: 2px solid var(--midground);
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--dark-midground);
+  }
+}
+
+/* .input-component moved to packages/stamps/src/input.css.ts (a
+   vanilla-extract recipe) — see the `Input` component there. */

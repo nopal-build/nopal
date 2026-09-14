@@ -16,17 +16,13 @@ import { createLegalDocument } from "robustness-core/data/legalDocuments.server"
 import { sendEmail } from "../util/email.server";
 import { WaiverComplete } from "../emails/waiverComplete";
 
-// Fallback for contexts with no `Request` available. Any call site with
-// access to the incoming request should pass it in so the link points at
-// the actual host (localhost in dev, nopal.build in prod).
-const FALLBACK_APP_BASE_URL = "https://nopal.build";
-function getAppBaseUrl(request?: Request): string {
-  if (request) {
-    const url = new URL(request.url);
-    return `${url.protocol}//${url.host}`;
-  }
-  return FALLBACK_APP_BASE_URL;
-}
+// The signed WC waiver PDF is viewable in-app (self-service or staff) at
+// /api/legal-documents/view/:docId -- which lives on the APP service
+// (o.nopal.build), not this one, since login/vault/legal-documents all
+// moved there (see docs/marketing-app-split-plan.md). This route can no
+// longer derive that link from its own request the way it could when both
+// lived on one host, so it's env-driven instead, with a sane prod default.
+const APP_BASE_URL = process.env.APP_BASE_URL || "https://o.nopal.build";
 
 export const meta: MetaFunction = () => [
   {
@@ -163,7 +159,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // all, so their email relies solely on the attachment — no link that
     // could either 404 or (worse) need to be made guessable/public again.
     const adminPdfUrl = doc
-      ? `${getAppBaseUrl(request)}/api/legal-documents/view/${doc._id}`
+      ? `${APP_BASE_URL}/api/legal-documents/view/${doc._id}`
       : undefined;
 
     // 4. Send emails (fire-and-forget errors so we don't fail the response)

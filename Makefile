@@ -1,4 +1,4 @@
-.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-worker restart-all cli release-cli update-cli-version
+.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-fruits restart-worker restart-all cli release-cli update-cli-version
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -10,40 +10,46 @@ PROXY_PORT ?= 8081
 
 # ── Full-stack dev lifecycle ───────────────────────────────────────────────────
 
-## Run unit tests and deploy the webapp, GraphLog worker, and db to Fly.io.
-## webapp/worker both build from the REPO ROOT (they're pnpm workspace
-## members depending on packages/robustness-core + packages/oxmarkdown-core),
-## so `fly deploy` runs from here with explicit --config/--dockerfile instead
-## of `cd`-ing into each app's own directory.
+## Run unit tests and deploy webapp, fruits, the GraphLog worker, and db to
+## Fly.io. webapp/fruits/worker all build from the REPO ROOT (they're pnpm
+## workspace members depending on packages/robustness-core +
+## packages/oxmarkdown-core), so `fly deploy` runs from here with explicit
+## --config/--dockerfile instead of `cd`-ing into each app's own directory.
 deploy:
 	pnpm --filter remix run test --run
+	pnpm --filter fruits run test --run
 	cd db && fly deploy
 	fly deploy . --config webapp/fly.toml --dockerfile webapp/Dockerfile
+	fly deploy . --config fruits/fly.toml --dockerfile fruits/Dockerfile
 	fly deploy . --config packages/worker/fly.toml --dockerfile packages/worker/Dockerfile
 
-## Deploy the webapp ONLY, to the staging Fly app (see webapp/fly.staging.toml).
-## Staging has no worker/DB of its own — it shares prod's SurrealDB instance,
-## scoped to an isolated `staging` database (make clone-staging-db populates it).
+## Deploy webapp AND fruits, to their respective staging Fly apps (see
+## webapp/fly.staging.toml, fruits/fly.staging.toml). Staging has no
+## worker/DB of its own — both share prod's SurrealDB instance, scoped to
+## an isolated `staging` database (make clone-staging-db populates it).
 deploy-staging:
 	pnpm --filter remix run test --run
+	pnpm --filter fruits run test --run
 	fly deploy . --config webapp/fly.staging.toml --dockerfile webapp/Dockerfile
+	fly deploy . --config fruits/fly.staging.toml --dockerfile fruits/Dockerfile
 
-## Start the database and webapp together, then seed the database.
-## --build keeps the webapp/worker dev image (Dockerfile.dev) in sync
-## whenever it changes — a no-op, cache-hit rebuild otherwise.
+## Start the database, webapp, and fruits together, then seed the database.
+## --build keeps the dev image (Dockerfile.dev) in sync whenever it
+## changes — a no-op, cache-hit rebuild otherwise.
 ##
-## Also brings up a local Caddy reverse proxy (see Caddyfile) fronting the
-## webapp at https://nopal.dev / https://o.nopal.dev instead of bare
-## localhost:3000 — requires a one-time `/etc/hosts` entry and cert trust,
-## see README.md's "Local development domains" section (or just run
-## `make trust-local-certs` for the cert half). localhost:3000 still works
+## Also brings up a local Caddy reverse proxy (see Caddyfile) fronting
+## webapp/fruits at https://nopal.dev / https://o.nopal.dev instead of bare
+## localhost:3000/3001 — requires a one-time `/etc/hosts` entry and cert
+## trust, see README.md's "Local development domains" section (or just run
+## `make trust-local-certs` for the cert half). Plain localhost still works
 ## too, untouched, if you'd rather skip that setup.
 dev:
 	docker compose up -d --wait --build
 
 	@echo ""
 	@echo "  ✓ SurrealDB  →  http://localhost:8080"
-	@echo "  ✓ Webapp     →  http://localhost:3000  (or https://nopal.dev, https://o.nopal.dev — see README)"
+	@echo "  ✓ Webapp     →  http://localhost:3000  (or https://nopal.dev — see README)"
+	@echo "  ✓ Fruits      →  http://localhost:3001  (or https://o.nopal.dev — see README)"
 	@echo "  ✓ GraphLog worker running (see 'docker compose logs -f worker')"
 	@echo "  ✓ Logs       →  http://localhost:9999"
 	@echo ""
@@ -174,11 +180,17 @@ clone-staging-db:
 
 ## Restart the webapp container, clearing the Vite dep cache first.
 ## Use this after package changes or whenever the dev server needs a clean
-## reload. Does NOT restart the worker (see `restart-worker` below) --
-## despite the name, this is webapp-only.
+## reload. Does NOT restart fruits/worker (see `restart-fruits`/
+## `restart-worker` below) -- despite the name, this is webapp-only.
 restart:
 	docker compose exec webapp rm -rf /app/webapp/node_modules/.vite
 	docker compose restart webapp
+
+## Restart the fruits container, clearing its own Vite dep cache first --
+## the fruits half of `restart` above.
+restart-fruits:
+	docker compose exec fruits rm -rf /app/fruits/node_modules/.vite
+	docker compose restart fruits
 
 ## Restart the GraphLog worker container, clearing its own Vite dep cache
 ## first -- the worker's own half of `restart` above. `worker.ts` reads
@@ -193,10 +205,10 @@ restart-worker:
 	docker compose exec worker rm -rf /app/packages/worker/node_modules/.vite
 	docker compose restart worker
 
-## Restart both webapp and worker -- run this (not just `restart`) after
-## ANY webapp/.env change, so neither container is silently still
-## running on a stale secret.
-restart-all: restart restart-worker
+## Restart webapp, fruits, and worker -- run this (not just `restart`)
+## after ANY .env change, so no container is silently still running on a
+## stale secret.
+restart-all: restart restart-fruits restart-worker
 
 ## Stop all containers (data is preserved in named volumes).
 down:

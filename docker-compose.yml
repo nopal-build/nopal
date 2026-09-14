@@ -93,6 +93,61 @@ services:
       redis:
         condition: service_healthy
 
+  # The product app (o.nopal.build in prod, o.nopal.dev locally via Caddy --
+  # see the repo-root Caddyfile) -- split out from webapp, see
+  # docs/marketing-app-split-plan.md. Same bind-mount-the-whole-repo pattern
+  # as webapp above, and for the same reason (pnpm workspace visibility) --
+  # own complete set of node_modules volumes too, so the two containers'
+  # installs never race on shared files.
+  fruits:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    ports:
+      - "3001:3000"
+
+    volumes:
+      - .:/app
+      - fruits_node_modules:/app/node_modules
+      - fruits_pkg_node_modules:/app/fruits/node_modules
+      - fruits_robustness_core_node_modules:/app/packages/robustness-core/node_modules
+      - fruits_oxmarkdown_core_node_modules:/app/packages/oxmarkdown-core/node_modules
+      - fruits_worker_node_modules:/app/packages/worker/node_modules
+      - fruits_stamps_node_modules:/app/packages/stamps/node_modules
+      - fruits_pnpm_store:/pnpm-store
+    environment:
+      NODE_ENV: development
+      CI: "true"
+      DATABASE_URL: http://db:8080/rpc
+      DATABASE_USERNAME: ${APP_USER:-root}
+      DATABASE_PASSWORD: ${APP_PASS:-root}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_HOSTNAME: localhost:9000
+      S3_FORCE_PATH_STYLE: "true"
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
+      REDIS_URL: redis://redis:6379
+    command: sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter fruits run dev"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
   # GraphLog's queue worker (`packages/worker/worker.ts`) — its own
   # workspace package with its own, much smaller dependency graph (no
   # React/etc); NOT sharing webapp's node_modules. Restarts on crash so
@@ -239,6 +294,8 @@ services:
     depends_on:
       webapp:
         condition: service_healthy
+      fruits:
+        condition: service_healthy
 
 volumes:
   surreal_data:
@@ -249,6 +306,13 @@ volumes:
   webapp_worker_node_modules:
   webapp_stamps_node_modules:
   webapp_pnpm_store:
+  fruits_node_modules:
+  fruits_pkg_node_modules:
+  fruits_robustness_core_node_modules:
+  fruits_oxmarkdown_core_node_modules:
+  fruits_worker_node_modules:
+  fruits_stamps_node_modules:
+  fruits_pnpm_store:
   worker_node_modules:
   worker_pkg_node_modules:
   worker_robustness_core_node_modules:

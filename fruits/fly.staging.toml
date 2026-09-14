@@ -1,0 +1,52 @@
+# fly.toml for a staging copy of fruits — same image as fly.toml, deployed
+# to its own Fly app so it never touches production traffic.
+#
+# First-time setup (create the app first — `fly apps create
+# fruits-staging`, or whatever name fits alongside `nopal-webapp-staging`):
+#   1. Copy prod's secrets to staging (see webapp/scripts/copy-secrets-to-staging.sh
+#      for the pattern this should follow), run from YOUR terminal, never
+#      through a third party.
+#   2. make deploy-staging
+#   3. make clone-staging-db SURREAL_PASS=<prod-pass>   (populates the
+#      `staging` database — shared with webapp's own staging copy, empty
+#      until this runs at least once)
+#
+# Build context is the REPO ROOT — deploy from the repo root:
+#
+#   fly deploy . --config fruits/fly.staging.toml --dockerfile fruits/Dockerfile
+
+app = 'fruits-staging' # TODO: replace with the real Fly-assigned app name once created
+primary_region = 'lax'
+
+[build]
+
+[deploy]
+strategy = 'bluegreen'
+
+[env]
+# The only thing that differs from prod's own env/secrets — see
+# packages/robustness-core/src/data/db.server.ts. Everything else
+# (DATABASE_URL, credentials, NS) is identical to prod on purpose: this
+# is the SAME SurrealDB instance, just a different `database` selected --
+# the SAME `staging` database webapp's own staging copy already uses.
+DATABASE_DATABASE = 'staging'
+
+[http_service]
+internal_port = 3000
+force_https = true
+auto_stop_machines = 'stop'
+auto_start_machines = true
+min_machines_running = 0
+processes = ['app']
+
+[[http_service.checks]]
+grace_period = '10s'
+interval = '15s'
+method = 'GET'
+path = '/api/health'
+timeout = '5s'
+
+[[vm]]
+memory = '1gb'
+cpu_kind = 'shared'
+cpus = 1

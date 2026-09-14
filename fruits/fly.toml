@@ -1,0 +1,47 @@
+# fly.toml app configuration file for the fruits app (o.nopal.build) --
+# split out from webapp, see docs/marketing-app-split-plan.md.
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+# Build context is the REPO ROOT (fruits depends on the `robustness-core`/
+# `oxmarkdown-core`/`stamps` workspace packages) — deploy from the repo root:
+#
+#   fly deploy . --config fruits/fly.toml --dockerfile fruits/Dockerfile
+#
+# (`make deploy` does this for you.) GraphLog's queue worker is its own,
+# separate Fly app — see packages/worker/fly.toml. webapp (marketing,
+# nopal.build) is also its own separate Fly app — see webapp/fly.toml. A
+# staging copy of THIS app lives at fly.staging.toml (`make deploy-staging`),
+# same image, separate Fly app, pointed at an isolated `staging` database
+# instead of prod's `opuntia` (see db/clone-to-staging.sh).
+
+app = 'fruits' # TODO: replace with the real Fly-assigned app name once created (`fly apps create`)
+primary_region = 'lax'
+
+[build]
+
+# Zero-downtime deploys: boot a full parallel machine per existing one,
+# wait for /api/health to pass on all of them, THEN flip traffic and kill
+# the old ones — requires at least one health check (below) to be defined.
+[deploy]
+strategy = 'bluegreen'
+
+[http_service]
+internal_port = 3000
+force_https = true
+auto_stop_machines = false
+auto_start_machines = true
+min_machines_running = 2
+processes = ['app']
+
+[[http_service.checks]]
+grace_period = '10s'
+interval = '15s'
+method = 'GET'
+path = '/api/health'
+timeout = '5s'
+
+[[vm]]
+memory = '1gb'
+cpu_kind = 'shared'
+cpus = 1

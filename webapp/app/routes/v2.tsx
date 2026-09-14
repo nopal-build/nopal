@@ -4,7 +4,8 @@
 // chrome to prove the OxMarkdown-driven CMS pipeline out end to end.
 // Styled entirely with `stamps` (sprinkles + tokens + navLink/link
 // recipes) rather than a hand-rolled stylesheet — see the `stamps`
-// component guide (`fruits_.styles.tsx`) for the full inventory.
+// component guide (`fruits/app/routes/styles.tsx`, the app's living style
+// guide) for the full inventory.
 import { Link, Outlet, useLoaderData } from "react-router";
 import {
   getPrimaryWebsiteFolder,

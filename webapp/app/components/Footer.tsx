@@ -1,6 +1,18 @@
 import { Link, NavLink } from "react-router";
 import { ReactNode } from "react";
 
+// The app (login, dashboard, everything else that used to live at
+// /fruits/*) is a separate service now -- see
+// docs/marketing-app-split-plan.md. `process.env.NODE_ENV` (unlike an
+// arbitrary env var) is one of the few things Vite inlines into the
+// CLIENT bundle too, so this is safe to reference directly in a component
+// that renders on both server and client, unlike most other env vars in
+// this app (which are server-only).
+const APP_URL =
+  process.env.NODE_ENV === "production"
+    ? "https://o.nopal.build"
+    : "https://o.nopal.dev";
+
 function ContactUsLinks() {
   return (
     <div className="flex gap-4 items-center">
@@ -52,13 +64,12 @@ export function FooterBase({ children }: { children?: ReactNode }) {
           >
             Tools
           </NavLink>
-          <NavLink
-            prefetch="render"
+          <a
             className="ml-4 hover:underline text-nowrap"
-            to="/login"
+            href={`${APP_URL}/login`}
           >
             Login
-          </NavLink>
+          </a>
           <NavLink
             prefetch="render"
             className="ml-4 hover:underline text-nowrap"
