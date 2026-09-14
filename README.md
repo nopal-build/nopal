@@ -27,6 +27,34 @@ $ cargo run --package nopal-api
 $ grpcui --plaintext 0.0.0.0:8080
 ```
 
+## Local development domains
+
+`make dev` also brings up a local [Caddy](https://caddyserver.com) reverse
+proxy (see `Caddyfile`) so the webapp is reachable at custom hostnames
+instead of bare `localhost:3000` — `nopal.dev` for the marketing site and
+`o.nopal.dev` reserved for the product app once it's split into its own
+service (see `docs/marketing-app-split-plan.md`). Both currently point at
+the same webapp container until that split happens.
+
+One-time setup (both steps are required — `.dev` hostnames are forced to
+HTTPS by every major browser, so this isn't optional the way it might be
+with e.g. `.local` or `.test`):
+
+1. Add these to `/etc/hosts` (can't be automated from inside a container):
+   ```
+   127.0.0.1 nopal.dev
+   127.0.0.1 o.nopal.dev
+   ```
+2. Run `make trust-local-certs` to trust Caddy's local CA (macOS only for
+   now — see the target's own comment in the `Makefile` for the manual
+   Linux equivalent).
+
+After that, `https://nopal.dev` and `https://o.nopal.dev` work like any
+other HTTPS site — no cert warnings, and WebAuthn/passkeys work correctly
+(they require a secure context, which a custom `http://` hostname doesn't
+satisfy). Plain `http://localhost:3000` keeps working too, unchanged, if you
+prefer not to bother with any of this.
+
 
 # Deploy
 

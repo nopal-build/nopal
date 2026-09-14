@@ -1,4 +1,4 @@
-.PHONY: dev start seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-worker restart-all cli release-cli update-cli-version
+.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-worker restart-all cli release-cli update-cli-version
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -31,18 +31,48 @@ deploy-staging:
 ## Start the database and webapp together, then seed the database.
 ## --build keeps the webapp/worker dev image (Dockerfile.dev) in sync
 ## whenever it changes — a no-op, cache-hit rebuild otherwise.
+##
+## Also brings up a local Caddy reverse proxy (see Caddyfile) fronting the
+## webapp at https://nopal.dev / https://o.nopal.dev instead of bare
+## localhost:3000 — requires a one-time `/etc/hosts` entry and cert trust,
+## see README.md's "Local development domains" section (or just run
+## `make trust-local-certs` for the cert half). localhost:3000 still works
+## too, untouched, if you'd rather skip that setup.
 dev:
 	docker compose up -d --wait --build
 
 	@echo ""
 	@echo "  ✓ SurrealDB  →  http://localhost:8080"
-	@echo "  ✓ Webapp     →  http://localhost:3000"
+	@echo "  ✓ Webapp     →  http://localhost:3000  (or https://nopal.dev, https://o.nopal.dev — see README)"
 	@echo "  ✓ GraphLog worker running (see 'docker compose logs -f worker')"
 	@echo "  ✓ Logs       →  http://localhost:9999"
 	@echo ""
 
 ## Alias for `make dev`.
 start: dev
+
+## One-time setup: trusts the local Caddy reverse proxy's self-signed CA
+## (see Caddyfile) in your OS's trust store, so browsers accept
+## https://nopal.dev / https://o.nopal.dev without a security warning.
+## Safe to re-run any time (e.g. after `make clean` wipes the caddy_data
+## volume and regenerates a new CA). macOS only for now — on Linux, import
+## the printed .crt path into your distro's ca-certificates store by hand.
+trust-local-certs:
+	docker compose up -d caddy
+	@echo "Waiting for Caddy to generate its local CA root cert..."
+	@for i in $$(seq 1 30); do \
+		docker compose exec caddy test -f /data/caddy/pki/authorities/local/root.crt && break; \
+		sleep 1; \
+	done
+	docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt /tmp/nopal-caddy-root.crt
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		echo "Adding Caddy's local root CA to the macOS System keychain (you'll be prompted for your password)..."; \
+		sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/nopal-caddy-root.crt; \
+		echo "✓ Trusted — restart your browser, then visit https://nopal.dev"; \
+	else \
+		echo "Non-macOS host — import /tmp/nopal-caddy-root.crt into your OS/browser trust store by hand."; \
+		echo "  Debian/Ubuntu: sudo cp /tmp/nopal-caddy-root.crt /usr/local/share/ca-certificates/nopal-caddy.crt && sudo update-ca-certificates"; \
+	fi
 
 ## Seed the running database with default namespaces, databases, and users.
 ## Depends on migrate so the tables exist before data is inserted.

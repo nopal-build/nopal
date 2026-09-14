@@ -1,0 +1,28 @@
+# Local-dev-only reverse proxy — gives the webapp custom, HTTPS-backed
+# hostnames (nopal.dev / o.nopal.dev) instead of bare localhost:3000. NOT
+# used in production (Fly terminates TLS itself there — see webapp/fly.toml).
+#
+# `.dev` is on the browser HSTS-preload list, so Chrome/Firefox refuse plain
+# HTTP on ANY `.dev` hostname, even ones nobody but you resolves. `tls
+# internal` makes Caddy mint certs from its own local CA instead of trying
+# (and failing) to get a real one from Let's Encrypt for a non-public
+# hostname. The browser won't trust that CA until you run it through your
+# OS's trust store once — see `make trust-local-certs`.
+#
+# Requires `127.0.0.1 nopal.dev` and `127.0.0.1 o.nopal.dev` in your
+# /etc/hosts (can't be automated from inside a container) — see README.md's
+# "Local development domains" section.
+
+nopal.dev {
+	tls internal
+	reverse_proxy webapp:3000
+}
+
+# TODO(fruits split): once the product app is split out into its own
+# `fruits` service (see docs/marketing-app-split-plan.md, Phase 3), point
+# this at `fruits:3001` instead. Proxies to the same `webapp` container for
+# now since that's still where /fruits/* actually lives.
+o.nopal.dev {
+	tls internal
+	reverse_proxy webapp:3000
+}

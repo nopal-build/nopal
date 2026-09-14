@@ -222,6 +222,24 @@ services:
     environment:
       DOZZLE_NO_ANALYTICS: true
 
+  # Local-only HTTPS reverse proxy — see Caddyfile at the repo root. Gives
+  # nopal.dev/o.nopal.dev real hostnames + browser-trusted HTTPS instead of
+  # bare localhost:3000 (required, not cosmetic — see Caddyfile's own
+  # comment on `.dev`'s HSTS preload + WebAuthn's secure-context
+  # requirement). Not used in production; Fly terminates TLS itself there.
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      webapp:
+        condition: service_healthy
+
 volumes:
   surreal_data:
   webapp_node_modules:
@@ -240,3 +258,5 @@ volumes:
   worker_pnpm_store:
   minio_data:
   redis_data:
+  caddy_data:
+  caddy_config:
