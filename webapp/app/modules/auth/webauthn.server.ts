@@ -26,17 +26,43 @@ import {
 const RP_NAME = "Nopal";
 
 /**
- * The RP ID and origin are derived from the request itself rather than an
- * env var. This keeps registration/login working correctly across
- * localhost, staging, and production domains without extra config, as long
- * as the app is always served from the domain the passkey should be scoped
- * to.
+ * The RP ID can be pinned via `WEBAUTHN_RP_ID` so a passkey registered on
+ * one hostname (e.g. `nopal.build`) keeps verifying correctly even when the
+ * ceremony is later served from a DIFFERENT hostname sharing the same
+ * registrable domain (e.g. `o.nopal.build`) -- WebAuthn allows `rpID` to be
+ * any registrable domain suffix of the origin, so `"nopal.build"` is valid
+ * for both. Falls back to deriving from the request itself (today's
+ * behavior, pre-pinning) when unset -- a safe default for any environment
+ * (a fresh preview deploy, a contributor's fork, ...) that hasn't set it.
+ *
+ * IMPORTANT: this must be set correctly BEFORE a passkey ceremony is ever
+ * served from a second hostname on the same registrable domain -- changing
+ * `rpID` for a host that already has real registered passkeys breaks every
+ * one of them (RP ID mismatch), with no user-facing explanation. See
+ * docs/marketing-app-split-plan.md's "Critical risks" #1.
  */
 function getRpID(request: Request): string {
-  return new URL(request.url).hostname;
+  return process.env.WEBAUTHN_RP_ID || new URL(request.url).hostname;
 }
 
-function getOrigin(request: Request): string {
+/**
+ * `@simplewebauthn/server` checks the ceremony's origin exactly, separately
+ * from `rpID` above -- so once the app is reachable from more than one
+ * origin sharing the same `rpID` (e.g. `https://nopal.build` AND
+ * `https://o.nopal.build`), all of them need to be listed here explicitly.
+ * `verifyRegistrationResponse`/`verifyAuthenticationResponse` both accept
+ * either a single origin or an array, so this is additive -- comma-
+ * separated via `WEBAUTHN_ALLOWED_ORIGINS`, falling back to the request's
+ * own origin (today's single-origin behavior) when unset.
+ */
+function getExpectedOrigin(request: Request): string | string[] {
+  const configured = process.env.WEBAUTHN_ALLOWED_ORIGINS;
+  if (configured) {
+    return configured
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+  }
   const url = new URL(request.url);
   return `${url.protocol}//${url.host}`;
 }
@@ -113,7 +139,7 @@ export async function verifyPasskeyRegistration(
     verification = await verifyRegistrationResponse({
       response,
       expectedChallenge,
-      expectedOrigin: getOrigin(request),
+      expectedOrigin: getExpectedOrigin(request),
       expectedRPID: getRpID(request),
     });
   } catch (err) {
@@ -260,7 +286,7 @@ export async function verifyPasskeyAuthentication(
     verification = await verifyAuthenticationResponse({
       response,
       expectedChallenge,
-      expectedOrigin: getOrigin(request),
+      expectedOrigin: getExpectedOrigin(request),
       expectedRPID: getRpID(request),
       credential: {
         id: passkey.credentialId,

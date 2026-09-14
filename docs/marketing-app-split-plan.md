@@ -1,8 +1,9 @@
 # Splitting `nopal.build` (marketing) from the app (`o.nopal.build`)
 
-Status: Phase 0 (local dev custom domains) done. Phases 1+ not started. This
-is a planning doc, not a changelog — update it as decisions get made or
-revised.
+Status: Phase 0 (local dev custom domains) and Phase 1 (WebAuthn RP ID /
+origin pinning + session cookie domain groundwork) done. Phases 2+ not
+started. This is a planning doc, not a changelog — update it as decisions
+get made or revised.
 
 ## Goal
 
