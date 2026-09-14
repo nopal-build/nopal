@@ -4,6 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
+    "./auth/auth.server": "./src/auth/auth.server.ts",
+    "./auth/session.server": "./src/auth/session.server.ts",
+    "./auth/webauthn.server": "./src/auth/webauthn.server.ts",
+
     "./data/adminScriptRuns.server": "./src/data/adminScriptRuns.server.ts",
     "./data/adminScriptsQueue.server": "./src/data/adminScriptsQueue.server.ts",
     "./data/adminScriptsRegistry.server": "./src/data/adminScriptsRegistry.server.ts",
@@ -63,10 +67,14 @@
     "@aws-sdk/client-s3": "^3.797.0",
     "@aws-sdk/lib-storage": "^3.797.0",
     "@aws-sdk/s3-request-presigner": "^3.1048.0",
+    "@simplewebauthn/server": "^13.3.2",
     "archiver": "^7.0.1",
     "bullmq": "^5.60.0",
     "ioredis": "^5.9.0",
     "oxmarkdown-core": "workspace:*",
+    "react-router": "^7.14.0",
+    "remix-auth": "^4.2.0",
+    "remix-auth-totp": "^4.0.0",
     "sharp": "^0.35.3",
     "surrealdb": "^1.3.2",
     "yaml": "^2.9.0"

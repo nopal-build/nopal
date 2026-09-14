@@ -1,9 +1,10 @@
 # Splitting `nopal.build` (marketing) from the app (`o.nopal.build`)
 
-Status: Phase 0 (local dev custom domains) and Phase 1 (WebAuthn RP ID /
-origin pinning + session cookie domain groundwork) done. Phases 2+ not
-started. This is a planning doc, not a changelog — update it as decisions
-get made or revised.
+Status: Phase 0 (local dev custom domains), Phase 1 (WebAuthn RP ID /
+origin pinning + session cookie domain groundwork), and Phase 2 (shared
+auth code extracted into `robustness-core`) done. Phases 3+ not started.
+This is a planning doc, not a changelog — update it as decisions get made
+or revised.
 
 ## Goal
 
@@ -237,16 +238,41 @@ local rehearsal environment for risks #1–#2 before touching prod.
   This is the safety checkpoint — if anything's going to break passkeys,
   better to find out here than after the split.
 
-### Phase 2 — Extract shared auth code into a workspace package
+### Phase 2 — Extract shared auth code into a workspace package (done)
 
-- Move `app/modules/auth/{auth.server,session.server,webauthn.server}.ts`
-  into a new `packages/auth-core` (or fold into `robustness-core` if you'd
-  rather not add another package — `robustness-core` already owns
-  `passkeys.server.ts`/`humans.server.ts`, so there's a decent argument for
-  just extending it instead of introducing a 4th package).
-- Update all current `../modules/auth/...` imports in `webapp/app` to the
-  new package path. No behavior change — this is a pure move, validated by
-  `npm run typecheck` + existing tests passing.
+Moved `app/modules/auth/{auth.server,session.server,webauthn.server}.ts`
+into `packages/robustness-core/src/auth/` (extended `robustness-core`
+rather than adding a 4th package — it already owned
+`passkeys.server.ts`/`humans.server.ts`, so this kept workspace sprawl
+down), exported as `robustness-core/auth/{auth,session,webauthn}.server`.
+
+One wrinkle found while doing this that the plan hadn't accounted for:
+`auth.server.ts` wasn't a pure, self-contained move — its TOTP strategy
+sends a login-code email by importing `util/email.server.ts` (Resend/SMTP)
+and the `LoginCode` React email template directly, and neither of those
+belongs in `robustness-core` (no React/email-provider deps anywhere else
+in that package). Fixed by extracting a small dependency-injection seam,
+`configureAuth({ sendTotpEmail })`, in the shared module — whichever app
+owns the login flow calls it once, wiring up its own email-sending, before
+any real login attempt. `webapp/app/modules/auth/*.ts` are now TEMPORARY
+thin re-export shims (`export * from "robustness-core/auth/..."`, plus the
+`configureAuth` call for auth.server.ts) — kept only so today's still-in-
+webapp routes (`/login`, `/verify`, all `/api/*`, ...) keep working
+unchanged until Phase 3+ actually moves them to `o.nopal.build`, at which
+point this whole shim directory should be deleted outright rather than
+kept around.
+
+Also added to `robustness-core/package.json`: `react-router`,
+`remix-auth`, `remix-auth-totp`, `@simplewebauthn/server` (matching
+webapp's existing versions) as real dependencies, since the moved code
+needs them directly now.
+
+Validated: `tsc --noEmit` clean, full `vitest run` (82 tests) passing, and
+a real end-to-end manual test — seeded the local dev DB, POSTed to
+`/login` with a real seeded human over `https://nopal.dev`, got the
+expected `302 → /verify`, and confirmed Mailpit actually received the
+"Nopal Login Code" email — proving the `configureAuth` wiring executes
+correctly through the new shared-package boundary, not just type-checks.
 
 ### Phase 3 — Scaffold `fruits/` as a new service
 
@@ -334,9 +360,12 @@ local rehearsal environment for risks #1–#2 before touching prod.
 
 ## Open questions to settle before starting
 
-1. **Where does login live?** Recommended: entirely on `o.nopal.build`
-   (simplest, no cross-domain cookie). Confirm marketing's "Log in" CTA is
-   fine just being an external link.
+1. ~~**Where does login live?**~~ **Resolved:** entirely on `o.nopal.build`
+   — the marketing site needs no session information at all. Marketing's
+   "Log in" CTA becomes a plain external link once Phase 3+ lands. This
+   also means the session-cookie-domain groundwork from Phase 1 is (by
+   design) never expected to actually be exercised — kept only because
+   it was a free, inert knob to add.
 2. **New package name** — `nopal/fruits` proposed; alternatives `nopal/app`
    (risks confusion with `webapp/app/`), `nopal/product`, `nopal/o`.
 3. **Auth module home** — new `packages/auth-core`, or fold into
