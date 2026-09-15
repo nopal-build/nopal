@@ -1,13 +1,16 @@
 # fly.toml for a staging copy of fruits — same image as fly.toml, deployed
 # to its own Fly app so it never touches production traffic.
 #
-# First-time setup (create the app first — `fly apps create
-# fruits-staging`, or whatever name fits alongside `nopal-webapp-staging`):
-#   1. Copy prod's secrets to staging (see webapp/scripts/copy-secrets-to-staging.sh
-#      for the pattern this should follow), run from YOUR terminal, never
-#      through a third party.
-#   2. make deploy-staging
-#   3. make clone-staging-db SURREAL_PASS=<prod-pass>   (populates the
+# First-time setup -- see docs/phase-7-cutover-runbook.md for the full,
+# ordered sequence. Short version:
+#   1. fly apps create nopal-fruits   (prod app must exist FIRST --
+#      staging's secrets are copied from it, not from webapp)
+#   2. fly apps create fruits-staging
+#   3. sh fruits/scripts/copy-secrets-from-webapp.sh   (bootstraps nopal-fruits
+#      from webapp's prod secrets -- run this before step 4)
+#   4. sh fruits/scripts/copy-secrets-to-staging.sh   (nopal-fruits -> fruits-staging)
+#   5. make deploy-staging
+#   6. make clone-staging-db SURREAL_PASS=<prod-pass>   (populates the
 #      `staging` database — shared with webapp's own staging copy, empty
 #      until this runs at least once)
 #
@@ -15,7 +18,7 @@
 #
 #   fly deploy . --config fruits/fly.staging.toml --dockerfile fruits/Dockerfile
 
-app = 'fruits-staging' # TODO: replace with the real Fly-assigned app name once created
+app = 'fruits-staging'
 primary_region = 'lax'
 
 [build]

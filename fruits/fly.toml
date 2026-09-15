@@ -15,7 +15,7 @@
 # same image, separate Fly app, pointed at an isolated `staging` database
 # instead of prod's `opuntia` (see db/clone-to-staging.sh).
 
-app = 'fruits' # TODO: replace with the real Fly-assigned app name once created (`fly apps create`)
+app = 'nopal-fruits' # matches the nopal-phylog-worker/nopal-webapp-staging naming convention -- confirm available with `fly apps create nopal-fruits` (Fly app names are globally unique); edit this + fly.staging.toml + the runbook if taken.
 primary_region = 'lax'
 
 [build]
@@ -25,6 +25,30 @@ primary_region = 'lax'
 # the old ones — requires at least one health check (below) to be defined.
 [deploy]
 strategy = 'bluegreen'
+
+# CRITICAL, not cosmetic -- see docs/marketing-app-split-plan.md's
+# "Critical risks" #1 and docs/phase-7-cutover-runbook.md. Every passkey
+# registered by an existing user was registered while this app's routes
+# were served from nopal.build (today: nopal.build/fruits) -- WebAuthn
+# binds a credential to whatever rpID was active AT REGISTRATION time.
+# Without this pin, `webauthn.server.ts`'s `getRpID` falls back to
+# deriving the rpID from the request's own hostname, which becomes
+# "o.nopal.build" the moment this app goes live there -- silently
+# breaking passkey login for every existing user, with no user-facing
+# explanation. "nopal.build" is valid here even though this app is
+# served from the o.nopal.build SUBDOMAIN -- WebAuthn allows rpID to be
+# any registrable-domain suffix of the actual origin.
+#
+# Deliberately NOT set in fly.staging.toml -- staging's DB is a clone of
+# prod's (see db/clone-to-staging.sh), so it also contains those same
+# real rpID="nopal.build" passkey credentials, but staging has never been
+# reachable from anything OTHER than its own fly.dev/staging hostname --
+# passkey login there was already broken before this change (hostname-
+# derived rpID never matched the cloned credentials' real "nopal.build"),
+# so there is nothing to preserve by pinning it there too. TOTP
+# (email-code) login is unaffected either way -- it isn't domain-bound.
+[env]
+WEBAUTHN_RP_ID = 'nopal.build'
 
 [http_service]
 internal_port = 3000

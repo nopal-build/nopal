@@ -3,9 +3,15 @@
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
 
-# ── Prod database access (for data-migration scripts) ─────────────────────
+# ── Prod database access (for data-migration scripts) ─────────────────
 DB_APP ?= db-thrumming-water-5938
 WEBAPP_APP ?= webapp-billowing-meadow-8538
+# The app's own prod Fly app (o.nopal.build) -- see fruits/fly.toml and
+# docs/phase-7-cutover-runbook.md. Not yet consumed by migrate-prod below
+# (that target still only runs webapp/scripts/* against webapp's own
+# credentials) -- kept here so the naming decision lives in one place,
+# ready for whenever a fruits-side equivalent is needed.
+FRUITS_APP ?= nopal-fruits
 PROXY_PORT ?= 8081
 
 # ── Full-stack dev lifecycle ───────────────────────────────────────────────────

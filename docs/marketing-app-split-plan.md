@@ -3,13 +3,18 @@
 Status: Phases 0–4 done, plus the internal-linking half of Phase 5 (see
 Phase 3's own writeup for why 3/4/5 ended up as one combined pass), plus
 Phase 6's code changes (CLI/desktop app host migration — release itself
-deliberately held back, see Phase 6's own writeup). The app (`fruits/`)
-is fully split out and passing every validation check locally at
-`o.nopal.dev`. Not done yet: Phase 5's cross-service email-link audit
-beyond what Phase 3 already covered, and Phase 7 (actual Fly infra —
-provisioning the new app, DNS, staging rehearsal, prod cutover, AND
-cutting the held-back CLI release at the same time). This is a planning
-doc, not a
+deliberately held back, see Phase 6's own writeup), plus everything in
+Phase 7 that doesn't require live Fly/DNS credentials (app names decided
+and set in `fly.toml`, `WEBAUTHN_RP_ID` pinned, `webapp/server.js`'s
+legacy-route redirect written and verified locally, secret-bootstrap
+scripts written). The app (`fruits/`) is fully split out and passing
+every validation check locally at `o.nopal.dev`. Not done yet: Phase 5's
+cross-service email-link audit beyond what Phase 3 already covered, and
+actually EXECUTING Phase 7's remaining steps (creating the real Fly apps,
+DNS, staging rehearsal, prod cutover, cutting the held-back CLI release)
+— see **`docs/phase-7-cutover-runbook.md`** for the exact, ordered
+command sequence; that's the actionable next step, not this doc. This is
+a planning doc, not a
 changelog — update it as decisions get made or revised.
 
 ## Goal
@@ -479,34 +484,66 @@ plus DB/GraphLog-worker health, raised alongside this phase but tracked
 as its own doc since it's a genuinely separate piece of work with its own
 build-vs-buy decision.
 
-### Phase 7 — Infra/DNS & cutover
+### Phase 7 — Infra/DNS & cutover (prep done; execution needs real Fly/DNS access)
 
-- Provision the new Fly app (`fly apps create` for `fruits`, or whatever
-  Fly-generated name, per the existing `webapp-billowing-meadow-8538`/
-  `nopal-phylog-worker` naming precedent).
-- Add `o.nopal.build` as a custom domain on the new Fly app; issue/confirm
-  TLS cert.
-- Deploy `fruits` to staging first (mirrors `fly.staging.toml`'s existing
-  pattern — shared SurrealDB instance, isolated `staging` database) and do a
-  full manual pass: login, passkey register + login, Daily Log, Vault
-  upload, GraphLog run, CLI login against staging's app host.
-- Add a redirect at `nopal.build` for legacy `/fruits*` deep links (bookmarks,
-  old emails) — a simple `308` to the equivalent `o.nopal.build` path, kept
-  indefinitely or for a defined deprecation window.
-- Flip DNS/deploy `fruits` to prod. Watch error rates + `/api/health` on both
-  apps closely for the first 24h — this is the actual go/no-go moment for
-  risks #1–#3.
+Everything that can be prepared without actually touching Fly/DNS is
+done; the full ordered command sequence for the rest lives in
+**`docs/phase-7-cutover-runbook.md`** — that doc is now the source of
+truth for actually executing this phase, not this section.
+
+What shipped in this prep pass:
+- App names decided: `nopal-fruits` (prod), `fruits-staging` (staging) —
+  set in `fruits/fly.toml`/`fly.staging.toml` (were `TODO` placeholders).
+- `fruits/fly.toml` now pins `WEBAUTHN_RP_ID = 'nopal.build'` as a plain
+  `[env]` entry (not a secret — nothing sensitive about it) — THE
+  critical risk #1 mitigation, now actually wired to ship with the code
+  instead of being a manual step someone could forget. Deliberately NOT
+  set on staging — see the `fly.toml` comment for why (staging's cloned-
+  from-prod passkeys already can't work there regardless, for an
+  unrelated pre-existing reason).
+- `webapp/fly.toml`/`fly.staging.toml` now set `APP_BASE_URL` explicitly
+  (prod: `o.nopal.build`; staging: `fruits-staging.fly.dev`, so staging's
+  own cross-service links don't accidentally point at prod).
+- `webapp/server.js` now redirects (`308`, method/body-preserving) every
+  legacy `/fruits*` path, the moved auth/public-sharing routes, and every
+  `/api/*` except `/api/health` to the equivalent `APP_BASE_URL` path —
+  the actual code for the "Add a redirect" bullet this section used to
+  have. Verified locally: all of `/fruits`, `/fruits/vault?folder=...`,
+  `/login`, `/verify`, `/cli-login`, `/welcome/:token`, `/card/:id`,
+  `/public/file/:id`, and `/api/vault/upload` 308 correctly;
+  `/api/health`/marketing pages are unaffected. **Not live until
+  actually deployed** — ships in the same deploy as the real cutover,
+  never before (see the runbook's own "one thing that can go wrong"
+  section for why the ordering here specifically matters).
+- `fruits/scripts/copy-secrets-from-webapp.sh` (one-time bootstrap:
+  webapp prod → `nopal-fruits`) and `fruits/scripts/copy-secrets-to-
+  staging.sh` (ongoing: `nopal-fruits` → `fruits-staging`, exact mirror
+  of webapp's own existing script) — deliberately exclude
+  `ANTHROPIC_API_KEY`/`ANTHROPIC_WORKSPACE_ID` from the staging copy
+  (same reasoning webapp's own staging secrets already apply: no real
+  LLM spend from a test environment).
+- `Makefile`: added `FRUITS_APP` alongside the existing `DB_APP`/
+  `WEBAPP_APP` (not consumed by `migrate-prod` yet — just centralizes the
+  naming decision for whenever a fruits-side equivalent is needed).
+
+Still needs a human with real Fly/DNS access, in order (see the runbook
+for exact commands): create the two Fly apps, run the secret-bootstrap
+scripts, deploy to staging and do a full manual QA pass, issue the
+`o.nopal.build` TLS cert (prints its own required DNS record — add it at
+your registrar), merge to `main`, approve the production deploy, verify
+prod immediately (passkey login with a real existing account is the
+single most important check), then cut the CLI release that Phase 6 held
+back.
 
 ### Phase 8 — Cleanup
 
 - Remove the `/fruits*` redirect once confident no meaningful traffic still
-  hits it (check Fly logs / analytics first).
+  hits it (check Fly logs / analytics first) — see the runbook's own
+  cleanup step.
 - Delete dead code paths left behind in `webapp` (unused `AppLayout`-only
   CSS, etc.).
-- Update `AGENTS.md` in both `webapp/` and the new `fruits/` to reflect the
-  split (the UI-conventions section — shared components, `stamps` usage
-  rules — should mostly just get copied into `fruits/AGENTS.md` verbatim,
-  since that's where almost all of that guidance actually applies now).
+- ~~Update `AGENTS.md` in both `webapp/` and the new `fruits/`~~ done in
+  Phase 3.
 
 ## Open questions to settle before starting
 
