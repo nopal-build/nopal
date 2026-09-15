@@ -42,6 +42,32 @@ const KEYRING_USER: &str = "default";
 /// Default wait for the terminal-oriented `login()`/CLI flow.
 const LOGIN_TIMEOUT_SECS: u64 = 300; // 5 minutes
 
+/// Nopal split its product app (login, vault, everything that used to live
+/// under `/fruits`) out to its own host, `o.nopal.build`, some time after
+/// this CLI first shipped -- see `docs/marketing-app-split-plan.md` in the
+/// main repo. Anyone who logged in before that split has `nopal.build`
+/// saved as their host on disk forever: this process never re-derives a
+/// saved credential's host from `DEFAULT_HOST`, only ever loads exactly
+/// what was written at login time -- so without this, they'd silently keep
+/// hitting a host that no longer serves any of these endpoints until they
+/// happened to run `nopal login` again. Rewritten in place, once, the
+/// moment a stored credential is loaded -- mirrors the keychain->file
+/// migration in `load_credentials` below, just for a changed host instead
+/// of a changed storage location.
+const LEGACY_PROD_HOST: &str = "https://nopal.build";
+const CURRENT_PROD_HOST: &str = "https://o.nopal.build";
+
+/// Returns the corrected host if `host` is the legacy pre-split value,
+/// `None` if it's already current (or a non-default host, e.g. staging or
+/// a local dev server -- never touched).
+fn migrate_legacy_host(host: &str) -> Option<String> {
+    if host.trim_end_matches('/') == LEGACY_PROD_HOST {
+        Some(CURRENT_PROD_HOST.to_string())
+    } else {
+        None
+    }
+}
+
 const CALLBACK_HTML_OK: &str = r#"<!doctype html>
 <html>
   <head><meta charset="utf-8"><title>Nopal</title></head>
@@ -320,7 +346,12 @@ pub fn save_sync_credentials(creds: &SyncCredentials) -> Result<()> {
 
 pub fn load_sync_credentials() -> Option<SyncCredentials> {
     let contents = fs::read_to_string(sync_credentials_path()).ok()?;
-    serde_json::from_str(&contents).ok()
+    let mut creds: SyncCredentials = serde_json::from_str(&contents).ok()?;
+    if let Some(new_host) = migrate_legacy_host(&creds.host) {
+        creds.host = new_host;
+        let _ = save_sync_credentials(&creds);
+    }
+    Some(creds)
 }
 
 pub fn delete_sync_credentials() -> bool {
@@ -349,27 +380,30 @@ fn save_credentials(creds: &Credentials) -> Result<()> {
 }
 
 pub fn load_credentials() -> Option<Credentials> {
-    if let Some(creds) = load_credentials_from_file() {
-        return Some(creds);
+    let mut creds = load_credentials_from_file().or_else(|| {
+        // One-time migration for anyone who logged in before this change: a
+        // credential may still be sitting in the keychain from an older CLI
+        // version. Pull it out, persist it to the file, and remove it from
+        // the keychain so this is the LAST time this process ever touches
+        // the keychain -- and the last keychain permission prompt `nopal`
+        // ever causes for this human, rather than one on every run.
+        let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()?;
+        let json = entry.get_password().ok()?;
+        let creds = serde_json::from_str::<Credentials>(&json).ok()?;
+        let _ = save_credentials_to_file(&creds);
+        let _ = entry.delete_password();
+        Some(creds)
+    })?;
+
+    // One-time migration for anyone who logged in before the marketing/app
+    // split (see `migrate_legacy_host`'s own comment above) -- applies
+    // regardless of which of the two paths above the credential came from.
+    if let Some(new_host) = migrate_legacy_host(&creds.host) {
+        creds.host = new_host;
+        let _ = save_credentials_to_file(&creds);
     }
 
-    // One-time migration for anyone who logged in before this change: a
-    // credential may still be sitting in the keychain from an older CLI
-    // version. Pull it out, persist it to the file, and remove it from
-    // the keychain so this is the LAST time this process ever touches
-    // the keychain -- and the last keychain permission prompt `nopal`
-    // ever causes for this human, rather than one on every run.
-    if let Ok(entry) = Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-        if let Ok(json) = entry.get_password() {
-            if let Ok(creds) = serde_json::from_str::<Credentials>(&json) {
-                let _ = save_credentials_to_file(&creds);
-                let _ = entry.delete_password();
-                return Some(creds);
-            }
-        }
-    }
-
-    None
+    Some(creds)
 }
 
 fn delete_credentials() -> Result<()> {
@@ -419,4 +453,42 @@ fn save_credentials_to_file(creds: &Credentials) -> Result<()> {
 fn load_credentials_from_file() -> Option<Credentials> {
     let contents = fs::read_to_string(credentials_file_path()).ok()?;
     serde_json::from_str(&contents).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrates_legacy_prod_host() {
+        assert_eq!(
+            migrate_legacy_host("https://nopal.build"),
+            Some("https://o.nopal.build".to_string())
+        );
+    }
+
+    #[test]
+    fn migrates_legacy_prod_host_with_trailing_slash() {
+        assert_eq!(
+            migrate_legacy_host("https://nopal.build/"),
+            Some("https://o.nopal.build".to_string())
+        );
+    }
+
+    #[test]
+    fn leaves_current_prod_host_untouched() {
+        assert_eq!(migrate_legacy_host("https://o.nopal.build"), None);
+    }
+
+    #[test]
+    fn leaves_non_default_hosts_untouched() {
+        // Staging, a local dev server, a self-hosted fork, etc. -- anything
+        // that isn't EXACTLY the legacy prod default must never be rewritten.
+        assert_eq!(
+            migrate_legacy_host("https://nopal-webapp-staging.fly.dev"),
+            None
+        );
+        assert_eq!(migrate_legacy_host("http://localhost:3000"), None);
+        assert_eq!(migrate_legacy_host("https://nopal.dev"), None);
+    }
 }

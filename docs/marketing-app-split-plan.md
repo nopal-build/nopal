@@ -1,12 +1,15 @@
 # Splitting `nopal.build` (marketing) from the app (`o.nopal.build`)
 
 Status: Phases 0–4 done, plus the internal-linking half of Phase 5 (see
-Phase 3's own writeup for why 3/4/5 ended up as one combined pass). The
-app (`fruits/`) is fully split out and passing every validation check
-locally at `o.nopal.dev`. Not done yet: Phase 5's cross-service email-
-link audit beyond what Phase 3 already covered, Phase 6 (CLI/desktop app
-compatibility), and Phase 7 (actual Fly infra — provisioning the new app,
-DNS, staging rehearsal, prod cutover). This is a planning doc, not a
+Phase 3's own writeup for why 3/4/5 ended up as one combined pass), plus
+Phase 6's code changes (CLI/desktop app host migration — release itself
+deliberately held back, see Phase 6's own writeup). The app (`fruits/`)
+is fully split out and passing every validation check locally at
+`o.nopal.dev`. Not done yet: Phase 5's cross-service email-link audit
+beyond what Phase 3 already covered, and Phase 7 (actual Fly infra —
+provisioning the new app, DNS, staging rehearsal, prod cutover, AND
+cutting the held-back CLI release at the same time). This is a planning
+doc, not a
 changelog — update it as decisions get made or revised.
 
 ## Goal
@@ -352,6 +355,12 @@ cross-service mechanism (a signed preview link/token minted by the app,
 most likely) — a real product/security decision, deliberately not made as
 part of this migration. Flagged clearly in that file's own comment.
 
+**Decision (post-Phase-3 check-in):** `/v2/*` stays in `webapp` as-is for
+now, regression included — it's still a work in progress and it isn't
+clear yet whether this CMS approach sticks around at all. Revisit "move
+it into `fruits` as a preview surface" (raised as an option, not chosen)
+only once/if `/v2` is actually committed to as a real feature.
+
 **Other things discovered and handled along the way:**
 - `api.health.tsx` is **duplicated**, not moved — each service's own
   `fly.toml` health check needs its own `/api/health`.
@@ -437,14 +446,38 @@ real Caddy HTTPS proxy from Phase 0), ran DB migrations + seed, and:
   registration) lives — almost certainly `fruits`, since it ends in the
   logged-in dashboard — and make sure invite emails link there directly.
 
-### Phase 6 — CLI/desktop app compatibility (risk #3)
+### Phase 6 — CLI/desktop app compatibility (risk #3) (code done; release deliberately held back)
 
-- Bump `DEFAULT_HOST` in `crates/cli` and `crates/app`.
-- Add the one-time saved-host migration in `crates/core/src/auth.rs`.
-- Update `crates/cli/src/vault.rs`'s URL builders to drop `/fruits`.
-- Cut a new CLI release (`make release-cli`) alongside the web cutover, not
-  after — an out-of-sync CLI release is exactly the silent-breakage
-  scenario described in risk #3.
+- ~~Bump `DEFAULT_HOST` in `crates/cli` and `crates/app`~~ done — both now
+  default to `https://o.nopal.build`.
+- ~~Add the one-time saved-host migration in `crates/core/src/auth.rs`~~
+  done, as `migrate_legacy_host` — applied on load to BOTH `Credentials`
+  (`load_credentials`) and `SyncCredentials` (`load_sync_credentials`,
+  which the plan hadn't originally called out: the watcher's sync-scoped
+  token is loaded independently of the main login and would otherwise
+  have kept using its own stale saved host forever, bypassing the main
+  migration entirely). Covered by 4 new unit tests in `crates/core/src/
+  auth.rs` (legacy host, legacy host with trailing slash, current host
+  left alone, staging/local/other hosts left alone).
+- ~~Update `crates/cli/src/vault.rs`'s URL builders to drop `/fruits`~~
+  done (`nopal vault open`).
+- **Still open, deliberately:** cutting the actual CLI release
+  (`make release-cli`). The plan's own guidance ("alongside the web
+  cutover, not after") is why this is code-complete but NOT released
+  yet — Phase 7 (actual Fly deploy/DNS) hasn't happened, so
+  `o.nopal.build` doesn't serve anything in production today. Releasing
+  now would ship a CLI whose new-login default 404s until Phase 7
+  actually lands. Release this at the same time as Phase 7's cutover, not
+  before.
+- Verified: `cargo check` clean across `nopal-core`/`nopal`/`nopal-app`,
+  `cargo test -p nopal-core` passing (4/4 new tests), a `cargo clippy`
+  pass showing only pre-existing warnings unrelated to these changes.
+
+See also `docs/status-page-spec.md` (spec only, not built) — a separate,
+related initiative: a public `status.nopal.build` covering both services
+plus DB/GraphLog-worker health, raised alongside this phase but tracked
+as its own doc since it's a genuinely separate piece of work with its own
+build-vs-buy decision.
 
 ### Phase 7 — Infra/DNS & cutover
 
