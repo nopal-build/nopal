@@ -11,6 +11,7 @@
 import { afterEach, describe, it, expect } from "vitest";
 import {
   capNodeLinks,
+  listSplitBounce,
   MAX_LINKS_PER_NODE,
   classifyPassEnding,
   buildGraphLogContent,
@@ -35,6 +36,8 @@ import {
   withoutProjectViewMarker,
   summarizeClusterFields,
   refreshClusterWeight,
+  reviewClusterWrite,
+  MAX_NODES_PER_THREAD,
 } from "robustness-core/data/graphStructure.server";
 import {
   buildSystemPrompt,
@@ -1074,16 +1077,17 @@ describe("a heading the model wrote is read as heading text", () => {
 });
 
 describe("each stage runs on its measured model and effort", () => {
-  // The grid of 2026-09-11 (see STAGE_DEFAULTS). Pinned so a change here
-  // is a decision, not a drift.
+  // The grid of 2026-09-11 and the held-structure control of 2026-09-14
+  // (see STAGE_DEFAULTS). Pinned so a change here is a decision, not a
+  // drift.
   const saved = { ...process.env };
   afterEach(() => { for (const k of Object.keys(process.env)) if (k.startsWith("PHYLOG_ANTHROPIC")) delete process.env[k]; Object.assign(process.env, saved); });
 
-  it("defaults: Sonnet medium for extraction, Sonnet high for structure, Opus medium for the README", () => {
+  it("defaults: Sonnet medium for extraction, Sonnet high for structure, Fable high for the README", () => {
     for (const k of Object.keys(process.env)) if (k.startsWith("PHYLOG_ANTHROPIC")) delete process.env[k];
     expect(modelForStage("sync-graph")).toEqual({ model: "claude-sonnet-5", effort: "medium" });
     expect(modelForStage("graph-structure")).toEqual({ model: "claude-sonnet-5", effort: "high" });
-    expect(modelForStage("graph-project-view")).toEqual({ model: "claude-opus-5", effort: "medium" });
+    expect(modelForStage("graph-project-view")).toEqual({ model: "claude-fable-5-1", effort: "high" });
     expect(modelForStage("sync-knowledge")).toEqual({ model: "claude-sonnet-5" });
   });
 
@@ -1380,6 +1384,83 @@ describe("graph-structure prunes membership lines whose node is gone", () => {
     const { sections: pruned, dropped } = pruneStaleMembership(sections, new Map([[live.id, live]]));
     expect(dropped).toEqual([]);
     expect(pruned[0]).toBe(sections[0]);
+  });
+});
+
+// ── A list of several items is asked the unit question once ──────────────
+//
+// GRAPH.md shows a four-bullet section as four nodes and Sonnet, at medium
+// and at high, still wrote it as one on every run. The tool result is the
+// one channel a literal reader answers to, so the first add_node carrying
+// a list of three or more items is bounced with the question and the same
+// blocks sent again are accepted.
+
+describe("a list of several items is bounced once with the unit question", () => {
+  const list = (n: number) => [{ type: "paragraph", text: "Black Locust Cladding" }, { type: "list", items: Array.from({ length: n }, (_, i) => `item ${i}`) }];
+
+  it("keys a list of three or more items and passes shorter lists and plain paragraphs through", () => {
+    expect(listSplitBounce(list(4))?.items).toBe(4);
+    expect(listSplitBounce([{ type: "list", items: ["a", "b", "c"] }])?.items).toBe(3);
+    expect(listSplitBounce(list(2))).toBeNull();
+    expect(listSplitBounce([{ type: "paragraph", text: "one thought" }])).toBeNull();
+    expect(listSplitBounce(undefined)).toBeNull();
+  });
+
+  it("keys the same blocks the same way, so a resend is recognized", () => {
+    expect(listSplitBounce(list(4))?.key).toBe(listSplitBounce(list(4))?.key);
+    expect(listSplitBounce(list(4))?.key).not.toBe(listSplitBounce(list(3))?.key);
+  });
+});
+
+// ── A Due is a date somebody wrote; a thread has a ceiling ───────────────
+//
+// Both rules were stated in GRAPH_STRUCTURE.md and enforced by nobody. A
+// README reported a schedule "due 2026-10-20" that no node held (the model
+// added two months to "in the next 2 months", written 8/20), and one
+// 69-node graph came out as 3 threads on a run that never counted.
+
+describe("a Due the model computed is dropped before the cluster is saved", () => {
+  const written = { ...node("2026-08-20#1"), quote: "==Inspection is set for 2026-09-02 and Cam leaves October 20, 2026.==" };
+  const nodes = new Map([[written.id, written]]);
+
+  it("keeps a Due that a node in the cluster actually carries, either date form", () => {
+    for (const due of ["2026-09-02", "October 20, 2026"]) {
+      const section = { heading: "Schedule", content: `Weight: x · Status: open · Due: ${due} · Blocking: filming\n- 2026-08-20 Node 1 (A) — dates` };
+      const { section: kept, notes } = reviewClusterWrite(section, nodes);
+      expect(kept).toBe(section);
+      expect(notes).toEqual([]);
+    }
+  });
+
+  it("strips a Due no node carries, keeps the fields around it, and names what it dropped", () => {
+    const section = { heading: "Schedule", content: "Weight: x · Status: open · Due: 2026-10-20 · Blocking: filming\n- 2026-08-20 Node 1 (A) — dates" };
+    const { section: kept, notes } = reviewClusterWrite(section, nodes);
+    expect(kept.content).toBe("Weight: x · Status: open · Blocking: filming\n- 2026-08-20 Node 1 (A) — dates");
+    expect(parseClusterFields(kept).hasDue).toBe(false);
+    expect(parseClusterFields(kept).hasBlocking).toBe(true);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('Dropped "Due: 2026-10-20"');
+  });
+
+  it("strips a trailing Due cleanly and leaves a cluster with no Weight line alone", () => {
+    const trailing = { heading: "Schedule", content: "Weight: x · Status: open · Due: next week\n- 2026-08-20 Node 1 (A) — dates" };
+    expect(reviewClusterWrite(trailing, nodes).section.content).toBe("Weight: x · Status: open\n- 2026-08-20 Node 1 (A) — dates");
+    const bare = { heading: "Schedule", content: "- 2026-08-20 Node 1 (A) — dates" };
+    expect(reviewClusterWrite(bare, nodes)).toEqual({ section: bare, notes: [] });
+  });
+});
+
+describe("a cluster over the thread ceiling is saved but told to split", () => {
+  it("says nothing at the ceiling and names the overflow one past it", () => {
+    const lines = (n: number) => Array.from({ length: n }, (_, i) => `- 2026-08-20 Node ${i + 1} (A) — gloss`).join("\n");
+    const nodes = new Map(Array.from({ length: MAX_NODES_PER_THREAD + 1 }, (_, i) => { const n = node(`2026-08-20#${i + 1}`); return [n.id, n] as const; }));
+    const at = { heading: "Siding", content: `Weight: x · Status: active\n${lines(MAX_NODES_PER_THREAD)}` };
+    expect(reviewClusterWrite(at, nodes).notes).toEqual([]);
+    const over = { heading: "Siding", content: `Weight: x · Status: active\n${lines(MAX_NODES_PER_THREAD + 1)}` };
+    const { section, notes } = reviewClusterWrite(over, nodes);
+    expect(section).toBe(over);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain(`${MAX_NODES_PER_THREAD + 1} nodes`);
   });
 });
 

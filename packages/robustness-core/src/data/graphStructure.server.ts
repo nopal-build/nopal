@@ -364,6 +364,70 @@ export function parseClusterFields(section: ReadmeSection): ClusterFields {
   };
 }
 
+/** The ceiling `GRAPH_STRUCTURE.md` states for one thread. Not enforced:
+ * a cluster over it is still committed, and the tool result names the
+ * overflow so the model splits it on a later turn. Five runs on one
+ * 69-node graph built 3, 8, 14, 15 and 3 threads with the ceiling stated
+ * only in prose; the literal reader never counted. */
+export const MAX_NODES_PER_THREAD = 15;
+
+/**
+ * What code has to say about one `update_cluster` write before it is
+ * committed, in the form of the cluster as it will be saved plus notes
+ * for the tool result. Two checks, both from `GRAPH_STRUCTURE.md`'s own
+ * rules, both cases where a number or a date the skill only DESCRIBED
+ * turned out to need code behind it:
+ *
+ * - A `Due:` that matches no date found in the cluster's own nodes is
+ *   dropped. A README once reported a schedule "due 2026-10-20" that no
+ *   node held: the structure stage had added two months to a line
+ *   written on 8/20, and the README stated the arithmetic as a fact.
+ *   `extractDatesFromText` is the same function that hands the model its
+ *   candidate dates, so "a date somebody wrote" means exactly the set it
+ *   was shown.
+ * - A cluster over `MAX_NODES_PER_THREAD` is committed as written but
+ *   the result says so and asks for the split.
+ */
+export function reviewClusterWrite(
+  section: ReadmeSection,
+  allNodesById: Map<string, GraphLogNode>,
+): { section: ReadmeSection; notes: string[] } {
+  const notes: string[] = [];
+  let content = section.content;
+  const lines = content.split("\n");
+  const weightLineIndex = lines.findIndex((l) => WEIGHT_LINE_RE.test(l.trim()));
+  const nodeIds = nodeIdsInSection(section);
+
+  if (weightLineIndex !== -1) {
+    const dueRaw = DUE_FIELD_RE.exec(lines[weightLineIndex])?.[1];
+    if (isRealFieldValue(dueRaw)) {
+      const due = (dueRaw ?? "").trim();
+      const written = new Set<string>();
+      for (const id of nodeIds) {
+        const node = allNodesById.get(id);
+        if (!node) continue;
+        for (const d of extractDatesFromText(node.quote)) written.add(d.toLowerCase());
+      }
+      if (!written.has(due.toLowerCase())) {
+        const newLines = [...lines];
+        newLines[weightLineIndex] = lines[weightLineIndex].replace(/\s*·\s*Due:\s*[^·]*?(?=\s*·|\s*$)/i, "");
+        content = newLines.join("\n");
+        notes.push(
+          `Dropped "Due: ${due}": no node in this cluster carries that date, and a Due is only ever a date somebody wrote. Choose from the dates handed to you for this thread, or leave the field off.`,
+        );
+      }
+    }
+  }
+
+  if (nodeIds.length > MAX_NODES_PER_THREAD) {
+    notes.push(
+      `This cluster now holds ${nodeIds.length} nodes, over the ${MAX_NODES_PER_THREAD}-node ceiling. Split it by the question being argued: write each new cluster with update_cluster, then rewrite this one without the nodes that moved.`,
+    );
+  }
+
+  return { section: content === section.content ? section : { heading: section.heading, content }, notes };
+}
+
 /** A thread that's "fallen away" per `GRAPH_STRUCTURE.md`'s own "Falling
  * away" section (ADR-009) — dormant, no Due, no Blocking. Its nodes stay
  * in the graph permanently and it stays in graph-structure.md (so
@@ -660,13 +724,15 @@ function createStructureExecutors(input: {
         return `Error: refused -- cluster "${heading}" currently has real content; sending empty content would erase it. Use remove_cluster if you genuinely want to delete it.`;
       }
 
+      const reviewed = reviewClusterWrite({ heading: existing?.heading ?? heading, content }, allNodesById);
       const updated = existing
-        ? currentSections.map((s, i) => (i === existingIndex ? { heading: existing.heading, content } : s))
-        : [...currentSections, { heading, content }];
+        ? currentSections.map((s, i) => (i === existingIndex ? reviewed.section : s))
+        : [...currentSections, reviewed.section];
       const ok = await commit(updated);
       if (!ok) return "Error: failed to save cluster update";
       log(`graph-structure -- ${existing ? "updated" : "added"} cluster "${heading}".`);
-      return `${existing ? "Updated" : "Added"} cluster "${heading}".`;
+      for (const note of reviewed.notes) log(`graph-structure -- "${heading}": ${note}`);
+      return `${existing ? "Updated" : "Added"} cluster "${heading}".${reviewed.notes.length > 0 ? ` ${reviewed.notes.join(" ")}` : ""}`;
     },
     remove_cluster: async (toolInput) => {
       const heading = headingText(String(toolInput.heading ?? ""));
@@ -707,8 +773,16 @@ function createStructureExecutors(input: {
  *
  * Per ADR-013 this bounds one BATCH, never how many nodes a run may
  * contain: a batch that hits the limit commits what it placed and the
- * next run picks up the still-unplaced remainder. */
-const MAX_TURNS = 40;
+ * next run picks up the still-unplaced remainder.
+ *
+ * 40 -> 60 on 2026-09-14. With a thread defined as one question and the
+ * fifteen-node ceiling reported back on every write, a from-scratch
+ * build of a 75-node graph went from 8 threads in ~30 calls to 14
+ * threads in 37, then hit 40 one node short on the next sample. The
+ * README stage then rightly refused to build from an index with no
+ * clean finish, which in production would cost a day. The extra turns
+ * are the splits the skill now asks for, so the cap moves with them. */
+const MAX_TURNS = 60;
 
 /** The two tools whose call input carries a whole cluster's worth of
  * content, and so the two `planTurnToolCalls` throttles. */
@@ -890,8 +964,11 @@ function buildClusterFactsBlock(
     // ("nothing added for weeks") is written against, so without it that
     // rule was asking for a judgment whose input didn't exist.
     const quiet = mostRecent ? `; ${daysBetween(mostRecent, today)} day(s) quiet since then` : "";
+    // The count is handed over for the same reason as the gap: the
+    // skill's ceiling on a thread's size was a number the model had to
+    // count for itself, and on a literal reader that meant it never did.
     lines.push(
-      `- "${section.heading}" — most recent node: ${mostRecent ?? "unknown"}${quiet}; dates mentioned in its nodes' own text: ${mentioned}`,
+      `- "${section.heading}" — ${nodeIds.length} node${nodeIds.length === 1 ? "" : "s"}; most recent node: ${mostRecent ?? "unknown"}${quiet}; dates mentioned in its nodes' own text: ${mentioned}`,
     );
   }
   if (lines.length === 0) return null;
