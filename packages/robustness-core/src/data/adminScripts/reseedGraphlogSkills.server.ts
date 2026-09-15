@@ -46,8 +46,14 @@ const PREVIOUS_DEFAULT_FINGERPRINTS: Record<string, string[]> = {
   "GRAPH.md": [
     "Be generous. The graph is allowed to be large. A missing node is invisible forever, and everything downstream is built from what you leave.\n\n## What does not earn a node",
     "with nothing worth capturing today.\n\n## What does not earn a node",
+    // The 2026-09-14 round replaced "be generous" with a threshold.
+    "Be generous. The graph is allowed to be large.",
   ],
-  "GRAPH_STRUCTURE.md": ["say so on the Weight line"],
+  "GRAPH_STRUCTURE.md": [
+    "say so on the Weight line",
+    // The 2026-09-14 round replaced the size guide with a definition and a ceiling.
+    "Aim for threads of roughly three to twelve nodes",
+  ],
   "PROJECT_VIEW.md": [
     "You never read graph-log files or daily logs directly, and you never count links or judge weight yourself",
     "Don't gloss a quote.",

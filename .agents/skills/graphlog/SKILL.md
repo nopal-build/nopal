@@ -380,7 +380,23 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     nodes' own text (`graphNodeIndex.server.ts`'s new
     `extractDatesFromText`) — so the model's only real judgment is
     deciding what those dates MEAN (a commitment vs. a passing mention),
-    never finding them. **Known, deliberately unresolved risk (ADR-008's
+    never finding them. Since 2026-09-14 a third fact travels with them,
+    the thread's node count, and two of the skill's own rules got code
+    behind them (`reviewClusterWrite`, run on every `update_cluster`
+    before commit): a `Due:` matching no date found in the cluster's own
+    nodes is stripped and reported back (a README once stated a schedule
+    "due 2026-10-20" that the model had computed from "in the next 2
+    months" written 8/20 -- no node held it), and a cluster past
+    `MAX_NODES_PER_THREAD` (15) is committed but told to split. The
+    2026-09-11 model grid is why: five runs on one 69-node graph built 3
+    to 15 threads with the ceiling stated only in prose. The same day
+    `sync-graph`'s `add_node` gained a one-time bounce
+    (`listSplitBounce`): the first call carrying a list of three or more
+    items is answered with GRAPH.md's unit question rather than added,
+    and the same blocks resent are accepted. GRAPH.md shows a four-bullet
+    section as four nodes and Sonnet 5 at medium and high still wrote it
+    as one on every run; the tool result is the channel a literal reader
+    answers to. **Known, deliberately unresolved risk (ADR-008's
     own "known consequence")**: `sync-graph` receives this SAME ordering
     as its backward-link candidate list, so the sort now also shapes what
     tomorrow's nodes link to, which shapes weight, which shapes the sort —

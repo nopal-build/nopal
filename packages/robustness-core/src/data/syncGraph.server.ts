@@ -551,6 +551,38 @@ const TOOLS: ToolDefinition[] = [
  * structurally guaranteed instead of merely requested). Blocks are joined
  * with a blank line, since separate `==...==` spans are exactly how a
  * multi-paragraph verbatim passage must be represented at all. */
+/** The list size at which `add_node` asks the unit question once. */
+const LIST_BOUNCE_MIN_ITEMS = 3;
+
+/**
+ * Whether an `add_node` call's blocks hold a list of several items, and
+ * a key that identifies exactly those blocks, so the executor can bounce
+ * the FIRST such call with `GRAPH.md`'s own two-step test and accept the
+ * same blocks when they come back unchanged.
+ *
+ * Why code asks at all: `GRAPH.md` (2026-09-14) shows a real four-bullet
+ * section under a heading and says it is four nodes, and Sonnet 5 at
+ * medium and at high still wrote it as one node on every run, while
+ * Opus split it unprompted under the previous skill. A worked example
+ * in the skill did not move the literal reader; the tool result is the
+ * channel it answers to (the same reason dropped links and thread
+ * overflow are reported there). One bounce per distinct list, never a
+ * refusal of the list itself: a shopping list is one node and the
+ * resend costs one turn.
+ */
+export function listSplitBounce(rawBlocks: unknown): { key: string; items: number } | null {
+  if (!Array.isArray(rawBlocks)) return null;
+  let items = 0;
+  for (const block of rawBlocks) {
+    if (block && typeof block === "object" && (block as { type?: unknown }).type === "list") {
+      const list = (block as { items?: unknown }).items;
+      if (Array.isArray(list)) items += list.length;
+    }
+  }
+  if (items < LIST_BOUNCE_MIN_ITEMS) return null;
+  return { key: JSON.stringify(rawBlocks), items };
+}
+
 function renderQuoteBlocks(rawBlocks: unknown, highlight: boolean = true): string | null {
   if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) return null;
   const mark = (text: string) => (highlight ? `==${text}==` : text);
@@ -706,12 +738,22 @@ function createSyncGraphExecutors(input: {
   const capturedSummaries: string[] = [];
   const droppedLinks = { invalid: 0, overCap: 0 };
   let nextNumber = 1;
+  const bouncedLists = new Set<string>();
 
   const executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>> = {
     add_node: async (toolInput) => {
       const sourceIndex = Number(toolInput.sourceIndex);
       if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= input.sourceCitations.length) {
         return `Error: sourceIndex must be an integer between 0 and ${input.sourceCitations.length - 1}`;
+      }
+      // A list of several items is bounced ONCE with the unit question,
+      // and accepted as written when it comes back unchanged. See
+      // `listSplitBounce` for why the skill's own worked example was not
+      // enough.
+      const bounce = listSplitBounce(toolInput.blocks);
+      if (bounce && !bouncedLists.has(bounce.key)) {
+        bouncedLists.add(bounce.key);
+        return `Not added yet. This node is a list of ${bounce.items} items. Decide which it is: if each item states something on its own (progress, a plan, an estimate, a problem, a decision), it is ${bounce.items} nodes, so add them one per turn, each with the heading as its first block. If the items are one enumeration (things to buy, people who were there, materials, the steps of one procedure), call add_node again with exactly the same blocks and it will be added as one node.`;
       }
       // ADR-012: whether this node's text is somebody's words is decided
       // HERE, from the source, before the model's blocks are rendered.

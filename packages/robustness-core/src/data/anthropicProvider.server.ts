@@ -73,7 +73,19 @@ export type GraphLogModelStage = "sync-knowledge" | "sync-graph" | "graph-struct
  * - `graph-project-view` is where judgment shows. Only Opus read time
  *   across the graph ("targeted next week" written 16 days ago and still
  *   open; an estimate made under 115-degree days never re-estimated).
- *   Opus at medium kept that for about 70% of Opus at high.
+ *   Opus at medium kept that for about 70% of Opus at high. Then on
+ *   2026-09-14, with PROJECT_VIEW.md rewritten as goals and boundaries
+ *   rather than steps, a held-structure control (one Sonnet-built index,
+ *   two READMEs per cell) put Fable 5.1 at high ahead: no uncited
+ *   thread and no invented fact in three readings, openers that name
+ *   what nobody has logged movement on and for how long, at a fixed
+ *   $0.10 to $0.15 more per README (output tokens cost double, it
+ *   writes fewer; the part that grows with the graph is cached input,
+ *   cheaper on Fable). Austin's call: the output skills are heading
+ *   toward Fable's strengths, not away. Re-measure when the next output
+ *   skill exists. Fable refuses through `stop_reason: "refusal"`, which
+ *   `mapStopReason` reports as "other"; a refused pass shows as a
+ *   stopped run, not a silent empty README.
  * - `sync-knowledge` describes photos and extracts sidecars; untested in
  *   the grid, left on the previous default.
  *
@@ -87,7 +99,7 @@ const STAGE_DEFAULTS: Record<GraphLogModelStage, { model: string; effort?: LlmEf
   "sync-knowledge": { model: DEFAULT_MODEL },
   "sync-graph": { model: DEFAULT_MODEL, effort: "medium" },
   "graph-structure": { model: DEFAULT_MODEL, effort: "high" },
-  "graph-project-view": { model: "claude-opus-5", effort: "medium" },
+  "graph-project-view": { model: "claude-fable-5-1", effort: "high" },
 };
 
 /** The model and effort `stage` runs on, after env overrides. Exported

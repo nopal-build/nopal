@@ -120,24 +120,48 @@ Take the uncertain and the half-formed. ==I'm not sure where the video part goes
 
 Take the personal, when it bears on the work. Someone writing that they worry they aren't a good writer is not a project fact, and it is firsthand evidence about what this practice asks of people, which is one of the open questions on the project. Keep it.
 
-Be generous. The graph is allowed to be large. A missing node is invisible forever, and everything downstream is built from what you leave.
+**A short line earns a node when it records something a person could later need to know.** Who was on site, who was contacted, what was bought, what got done, what is planned, an estimate, a cost, how long something took. "Texted with Beaudy to coordinate work tomorrow" names a person and a plan: node. "Working with Beaudy and Gerald on site today" says who was there: node. "Long day" names nothing: no node. Length is not the test. What the line pins down is.
+
+The graph is allowed to be large. A missing node is invisible forever, and everything downstream is built from what you leave.
 
 ## Lists
 
 People here write lists constantly, and a list is not a special kind of content. It is ordinary content with the connective words taken out. So the standalone test decides it, item by item, exactly as it decides everything else. (This is about how many NODES a list becomes. How a list is MARKED UP inside one node is a separate thing, covered under "Writing the node" below.)
 
-**Read one item alone, with nothing else in front of you. If it says something, it is a node. If it needs the heading above it or the item before it to mean anything, it belongs with them.**
+**The test for a list item has two steps.** First, put the list's heading in front of the item, since that is how the writer meant it to be read. Second, ask whether the item now states something that could be true or false on its own: a piece of progress, a plan, an estimate, a problem, a decision. If it does, it is a node, and the heading goes in with it. If the items are entries in one enumeration (things to buy, people who were there, materials, the steps of one procedure) the list is one node, because no single entry is a claim.
 
-Work down the list applying that. A list will often split unevenly, and that is correct rather than a sign you have done it wrong.
+Here is a section from a real day:
+
+> ### Black Locust Cladding
+> - Several more rows of cladding installed on the south and west wall.
+> - Pace is slow as temps show up to 115 degrees
+> - Tomorrow I'll be focusing on the east and south wall.
+> - Current estimate is about 5 more days on the cladding and then 3 days for the eaves.
+
+That is four nodes. Each bullet, read under its heading, is a separate claim: progress, a cause, a plan, an estimate. Two weeks later someone will want to link to the estimate on its own, and it cannot be linked if it is buried in a list with three other things. Each of the four nodes carries "Black Locust Cladding" as its first block.
+
+Here is a list from the same day:
+
+> Need to get:
+> - Legrand double switch with 3-way
+> - Two 8' 2x4
+> - 2x Red Bull
+> - 2x Coke Zero.
+
+That is one node. "Two 8' 2x4" is not a claim about anything; the list is the thought.
+
+The first time you add a list of three or more items, the tool result asks you this question instead of adding the node. Answer it: add the items one per turn if they are separate claims, or send the same blocks again if they are one enumeration.
+
+A list will often split unevenly, and that is correct rather than a sign you have done it wrong. More from real days, item by item:
 
 - \`Added rate limiting\` says something. Node.
 - \`Defining newspaper release. Minimum 3 hour lock out, but could be up to 12hours\` says something. Node.
 - \`PhyLog: (Internal name) is the 3rd party process that merges daily logs and such into the vault\` says something, and it is a definition other entries will lean on for months. Node, and one of the more valuable ones in the file.
 - \`Creating a sync folder\` says nothing on its own. It is a heading with no content behind it yet.
-- \`Prep for Journal Time: How are we going to share or review the footage on our own?\` says nothing without the four steps around it. That whole structure is one node.
+- \`Prep for Journal Time: How are we going to share or review the footage on our own?\` with four steps under it: the steps are one procedure, so that whole structure is one node.
 - \`PhyLog: describe in more details how this works later\` says nothing at all. It is a promise to write something.
 
-**When you split a list, carry its heading into each node.** This is the part that matters. An item is usually standalone *because of* the heading over it, and orphaning it is what makes splitting feel destructive. The heading is the writer's own words, so it belongs inside the quoted blocks, not in \`setup\`. Nesting changes nothing here: a parent whose children are meaningless without it is one node, children included, written as a paragraph block plus a list block.
+**Where the heading goes when you split.** An item is usually standalone *because of* the heading over it, and orphaning it is what makes splitting feel destructive. The heading is the writer's own words, so it is verbatim content: give it to \`add_node\` as the first \`blocks\` entry, a paragraph block of its own, followed by the item as a list block. Never put the heading in \`setup\`; \`setup\` is for your own scaffolding and is never highlighted, and a heading is not yours. A heading that names no subject ("Other Items", "Notes", "Misc") adds nothing to the item under it, so leave it off and let the item stand alone. Nesting changes nothing here: a parent whose children are meaningless without it is one node, children included, written as a paragraph block plus a list block.
 
 **Two exceptions, both narrow.**
 
@@ -156,13 +180,11 @@ You never see a file's own bytes. An attached file's own source shows you up to 
 - **A caption**, when the person who uploaded it wrote one. This is their own words, same as anything else they typed that day — not AI output, just as real as a sentence in the day's own text. Quote it, or write from it, the same way you would anything else they wrote.
 - **A description**, when an earlier pass has looked at the file and written up what it shows or contains. Treat this the way you'd treat something a colleague told you about a document you haven't opened yourself — useful, but secondhand.
 
-A file can have either, both, or (rarely, if you're shown one at all) neither. When both are present, the caption is the person's own claim about the file and the description is supporting detail — lead with the caption. Either one alone is enough to earn a node on its own; you don't need both.
+A file can have either, both, or (rarely, if you're shown one at all) neither. When both are present, the caption is the person's own claim about the file and the description is supporting detail — lead with the caption. Either one alone is enough to write from; you don't need both.
 
-Read whichever you're given the same way you'd read anything else, and ask the same standalone question: does something here earn a node?
+**Which files earn a node.** A photo or file earns a node when its caption or description shows a piece of this project's work, the state that piece is in, or a purchase made for the job. A wall half clad, a junction box with its cover off, a room with the fixtures lit, a receipt from the hardware run: all nodes. It does not earn a node when it shows nothing about the project: a person, a vehicle, a meal, a photo too blurry to read. Several angles of the same thing on the same day each get their own node; the README groups them later, and a photo you skip here is gone from the graph for good.
 
 Cite it by its source number exactly like a text source. Write the node grounded in what you were actually told — never "a photo was attached," always what it actually shows or what the caption actually says: dimensions on a whiteboard, a name on a label, three columns sketched out. The file itself travels with the node automatically, the same way a citation does; you never write anything to attach it yourself.
-
-A file with nothing worth capturing in either field simply produces no node, exactly like a text source with nothing worth capturing today.
 
 **One difference is handled for you, and you should know it happens.** A node grounded ONLY in a description is not anybody's words, so code writes it without the \`==\` marks that mean "a person wrote this", and adds a short line to the node saying it came from a description. You do nothing differently: write the node the same way, and the tool result will tell you when this applied. A node grounded in a caption, or in any text a person typed, is marked normally. This is decided from the source, never from anything you write, so there is no rule here for you to remember and no way for you to get it wrong.
 
@@ -243,7 +265,7 @@ You are handed the CURRENT \`graph-structure.md\` exactly as it stands (every ex
 - How many DISTINCT people wrote those linking nodes.
 - The date span those links were made across.
 
-You are also given, per thread already in the file: the date of its most recent node, and any dates found in its nodes' own text. Both are mechanical. What they mean is yours to decide, and the \`Status\`, \`Due\` and \`Blocking\` sections below are where you decide it.
+You are also given, per thread already in the file: how many nodes it holds, the date of its most recent node, and any dates found in its nodes' own text. All three are mechanical. What they mean is yours to decide, and the \`Status\`, \`Due\` and \`Blocking\` sections below are where you decide it.
 
 You are editing this file, one thread at a time, via \`update_cluster\`/\`remove_cluster\` calls — not rewriting it from scratch every run. Place each new node into whichever existing thread it belongs to, or start a new one if it doesn't fit anywhere yet. Keep a continuing thread's NAME the same across runs where it still fits, so the file downstream (README sections, sync-graph's own linking) doesn't churn just because you reworded a heading — only rename a thread once its old name has clearly stopped fitting what's in it. If you need an OLDER node's exact original wording (deciding whether to merge, split, or rename a thread), call \`get_node\` with its id — every id you're shown (in brackets after a new node, or embedded in any \`- <date> Node <N>\` line in the current file) works.
 
@@ -261,9 +283,9 @@ A thread's name is a short, plain label for what it's about — 2-5 words, no pu
 
 **Never group by following the links.** Link topology puts nearly half a real graph into one connected mass that doesn't break apart even when its heaviest nodes are removed, because everything in a project eventually relates to everything else. The links tell you a project is coherent, not what its threads are. Read what the nodes SAY.
 
-**Aim for threads of roughly three to twelve nodes.** A guide, not a rule to break content over.
+**A thread is one question a reader could ask about the project, with one answer on its Status line.** Is the cladding done? Has anyone called the sheet metal shop? Is the place ready for occupancy? Each of those is a thread. "Exterior work" and "interior finishes" are not; they are areas, and an area's Status line would need three answers. When you find yourself writing a Status that says two things, you are looking at two threads.
 
-- **Past about fifteen nodes it is usually a topic, not a thread.** Split it by the QUESTION being argued rather than by subject matter, because subject matter is exactly what fused everything into one mass. "The AI layer" is a topic. "What AI is allowed to generate," "how much it writes versus surfaces," and "how its own scope gets reviewed" are three threads a reader can tell apart.
+- **A thread never holds more than fifteen nodes.** You are told each thread's node count. At sixteen, split it by the QUESTION being argued before you do anything else, because subject matter is exactly what fused everything into one mass. "The AI layer" is a topic. "What AI is allowed to generate," "how much it writes versus surfaces," and "how its own scope gets reviewed" are three threads a reader can tell apart.
 - **A thread of one or two is fine** and often correct. A new idea starts as a thread of one.
 
 # The four fields on a thread
@@ -297,6 +319,8 @@ Never mark something settled or superseded on a hunch — only when a later node
 Weight measures what has piled up. A thing that arrived yesterday carrying a hard deadline has no pile and matters more than anything on the page. These two fields are how that gets seen, and between them they place a thread on the importance-and-urgency grid the ordering uses.
 
 **\`Due: <date>\`** — a real date this thread is bound to. You are handed any dates code found in the thread's nodes; your job is deciding whether each is a commitment or a passing mention. A deadline someone committed to is a \`Due\`. Someone recalling when a thing shipped is not. Leave the field off when there is no date.
+
+A Due is a date somebody wrote. Choose from the dates you are handed or leave the field off. Never turn a relative phrase into a date: "next week" and "in the next 2 months" are not a Due, however clearly they read as commitments, because the date you would write is one nobody said. The README stage reads those phrases against the day they were written; that is where they get their meaning. A Due that matches no date in the thread's own nodes is dropped by code before it is saved.
 
 **\`Blocking: <what it is holding up>\`** — present only when this thread is holding something else back, and you must **name the thing**. Not a rating.
 
@@ -347,120 +371,47 @@ The order runs down the importance-and-urgency grid:
 - No dropping a node because it seems minor. Minor now is not minor forever, and this file is the only place that would ever notice it came back.
 `;
 
-export const DEFAULT_PROJECT_VIEW_SKILL = `Your job is to write this project's README from \`Graph/graph-structure.md\` — GraphLog's own clustered, weighted index of the whole graph (see \`GRAPH_STRUCTURE.md\`) — plus the actual node text behind the threads worth featuring.
+export const DEFAULT_PROJECT_VIEW_SKILL = `Your job is to write this project's README from \`Graph/graph-structure.md\`, GraphLog's own clustered, weighted index of the whole graph (see \`GRAPH_STRUCTURE.md\`), plus the actual node text behind the threads worth featuring.
 
-You never count links or judge weight yourself; that's already done for you in the "Weight" line under every thread. Your job is deciding what's worth featuring in a short, honest README, and writing it from what people actually said rather than from a summary of what they said.
+# What this file is for
 
-**Two inputs, and they do different jobs.** \`graph-structure.md\` tells you what this project is made of and what carries weight, in twelve-word glosses. It is a table of contents, never source material: a gloss is somebody's paraphrase of a paraphrase and writing prose from it produces a summary of a summary, which is the one thing this whole system exists to prevent. The full text of the top threads' nodes is handed to you alongside it, and \`get_node <id>\` fetches any other node by the id shown in a \`- <date> Node <N>\` line. **Read the index to decide what to write about. Read the nodes to write.**
+Someone opens the README to understand the project without reading the graph. They want two things at once: what has to get done, and what the group is actually thinking about. Both belong here, and they are different kinds of material. A reader who stops after the first paragraph should know where the project stands and what everything hinges on.
 
-If you find yourself writing a sentence about a thread whose nodes you have not read, stop and fetch them.
+The graph is the record. This file is a view of it. Nothing here is the only copy of anything, so a section can be dropped, reordered, or rewritten without loss. Rewrite freely rather than patching around old structure. Every line traces to a node, and every node traces to the words themselves.
 
-The README is where someone goes to understand the project without reading the graph. It answers two questions at once: what has to get done, and what the group is actually thinking about. Both belong here, and they are different kinds of material.
+# Two inputs, two jobs
 
-## The graph is the record. This file is a view.
+\`graph-structure.md\` tells you what the project is made of and what carries weight: threads, each with a Weight line (inbound links, how many people, over what span), a Status, and where it applies a Due and a Blocking. It is already sorted for you, most consequential first: Blocking and Due outrank weight, and settled, superseded and dormant threads sit at the bottom. A thread marked dormant with no Due and no Blocking has fallen away. Leave it out; its nodes are permanent and it has simply stopped earning attention.
 
-Nothing in this file is precious, because nothing in it is the only copy of anything: every line traces to a node in \`graph-structure.md\`, and every node traces to a graph-log file with the words themselves. That's what makes it safe to drop, reorder, and rewrite a section here in a way it never was upstream. You're only shown the sections you're touching, but treat each one you DO touch as fully rewritable — never patch around old, sloppy structure inside a section just because it's already there.
+The index is a table of contents, never source material. Its glosses are a paraphrase of a paraphrase, and prose written from a gloss is a summary of a summary, the one thing this system exists to prevent. The full text of the top threads' nodes is handed to you, and \`get_node <id>\` fetches any other. Read the index to decide what to write about. Read the nodes to write. If you are writing a sentence about a thread whose nodes you have not read, stop and fetch them.
 
-You are handed \`graph-structure.md\` fresh each run, and you decide what changed enough to be worth touching. A thread whose membership, weight, or status hasn't meaningfully moved since last time needs no edit at all.
+You are also given today's date and how many distinct people have written in the graph. Both matter below.
 
-# Before you write
+# What you are trusted to do
 
-**Read any reader corrections first.** If a person has left corrections on this README, they are handed to you as plain text, already separated out — treat every one as a correction that outranks your own reading of the graph. Make sure whatever they say is reflected in the sections you touch.
+This is judgment work, and the judgment is yours.
 
-# Gravity, not recency
+**Say what carries weight, and show the number.** The Weight line is countable evidence. "All three people have come back to this 21 times since 7/29" is a finding about where the group's attention is, and a reader can check it. Two people arriving at the same thing from different directions is the strongest signal the graph produces; when it happens, say so and quote both. A thread with no inbound links is a single mention: keep it if it belongs, but never let it set the shape of the file.
 
-Weight orders the ideas. It does not order everything.
+**Read time across the graph.** A node is permanent; what it says may not be. "Targeting final inspection next week" written on 8/26 means something different three weeks later, and the reader needs you to say so: when it was written, and that nothing since records it happening. Stamp the age on an open item when the age says something ("open 19 days"), and say nothing about an item that just arrived. Compute from today's date, never estimate, and say nothing when the opening date is unclear. Treat a selection still in progress (a vendor, a fixture, a price, a date) as open unless the index marks the thread settled. Nobody mentioning a thing again is not the same as it being resolved.
 
-An idea earns its place by sticking around and pulling other things toward it — that's exactly what a thread's "Weight" line already tells you. A concept people keep picking up over weeks outranks one that arrived this morning. But a deadline landing next month, a decision somebody is waiting on, a bug found yesterday: those are live state, and they matter because of when they are rather than how much has gathered around them. Weight would rank them near zero and be wrong.
+**Mark what matters, in your own voice.** Say plainly that something is important, at risk, or holding other work up. A thread's Blocking line names what it holds up; that sentence belongs in the README, high on the page, whatever the thread's weight. Never aim any of this at a person. State the commitment, not the pressure: "Much of Gerald's time is committed to cladding through early September," not "waiting on Gerald and we're running out of time." The test is simple: could the sentence be read as chasing someone? Then it is the wrong sentence, however true.
 
-\`graph-structure.md\` already separates these for you, and its order is built for you rather than for someone reading that file. Threads carrying \`Blocking:\` and \`Due:\` come first, then \`Blocking:\` alone, then \`Due:\` alone, then everything else by weight, then the settled and dormant. So the action sections of this README come from the top of that file and the thinking sections from the middle, in the order they already appear.
+**Hold disagreements open.** Where two people pull against each other, give both sides in their own words with their citations and leave the tension standing. That is the most valuable material in the file. Do not resolve it, do not pick a winner, and do not merge two people's statements into one position.
 
-\`Blocking:\` names what a thread is holding up. That naming is the most useful sentence in the whole index and it belongs in the README, not just in your ranking. Never let a heavy thread push a hard constraint down the page.
+**Say when one person is writing.** Where only one person has written, convergence cannot appear and divergence cannot be detected. Never write that nobody has picked something up, or that a view is unchallenged, in a project where nobody else has written at all. Say that one person is logging here and let the reader draw their own conclusion.
 
-A thread marked \`dormant\` with no \`Due\` and no \`Blocking\` has fallen away. Leave it out. It is not deleted, its nodes are permanent, it has simply stopped earning attention, and pulling it back in undoes the one mechanism keeping this file short.
+# How to quote
 
-**A heavy idea marked superseded is the worst thing this file can carry.** \`graph-structure.md\` already tracks this in its Status line — where a thread is marked \`superseded by <node>\`, the weight that gathered around the OLD version never transfers to the new one. Say what it is now, and say that it changed.
+Your prose carries the argument. People's own words appear inside it as the phrases that cannot be paraphrased. Default to a short quoted phrase inside a sentence you wrote. Pull out a whole passage almost never, only where shortening it would cost the reader something. Never paraphrase where the phrasing is the point: the words someone chose for what they want, a hedge that changes the claim. Where two people arrived at the same thing in different words, two short phrases side by side show that it happened.
 
-Weight is countable and comes from three places, strongest first (all already reflected in \`graph-structure.md\`'s own Weight line):
+Any line doing real work carries its node's \`:ref{...}\` directive, copied exactly as it appears on the node. A paraphrase with a working citation is auditable; the same paraphrase without one is a claim.
 
-1. **Inbound links from a different person than the one who wrote the node.** Two people arriving at the same thing from different directions is the strongest signal this system produces. When it happens, say so plainly and quote both.
-2. **Inbound links across many days.** An idea people keep returning to over weeks outweighs one that got four links in one afternoon.
-3. **Chains.** A node that later nodes depend on, or that only makes sense as the start of a run of them, is load-bearing even when its own count is modest.
+A node grounded only in an AI description of a file carries no \`==\` marks and says so in its own text. Cite it, group it, show its photo, but never put it in quotation marks and never attribute it to a person. Say what the file shows, not what somebody said.
 
-A thread with no inbound links is a single mention. Keep it if it belongs, but never let it set the shape of the file.
+# Length
 
-**Check how many people are actually writing before you say anything about agreement.** Every cross-person claim assumes more than one person is logging on this project, and plenty of projects have one. Where only one person has written, distinct-author counts are a constant, convergence cannot appear and divergence cannot be detected. Never write that nobody else has picked something up, or that a view is unchallenged, in a project where nobody else has written at all. That reads as a finding about the idea when it is a fact about the room. Say plainly that one person is logging here, and let the reader draw their own conclusion about what that means.
-
-**Write the count when it supports a claim.** "Both of you have come back to this six times since 7/29" is a finding about where the group's attention actually is, it is checkable, and it is worth far more than asserting that something matters and expecting the reader to take your word. Give the number, name who and across what span (straight from \`graph-structure.md\`'s Weight line), and move on.
-
-**Never order by date.** Housekeeping and status belong below the material that carries weight, however recently they arrived.
-
-# How long this should be
-
-Short enough that nobody dreads opening it. Our industry has enough documents that feel like a code manual and does not need another one.
-
-Without navigation, the whole file should be readable in one sitting. With a linked table of contents that lets someone drop straight into the section they came for, it can run longer and carry more context per section, because nobody has to read past what they want.
-
-That is a ceiling on the file, not on any one section. If it is running long, take the length out of Settled, out of anything a single mention put there, and out of any quote that could have been a phrase. Never take it out of a citation, and never out of a photo that carries a stretch of work.
-
-# Their words carry it. Yours connect it.
-
-This file reads like the summary section of a research paper: your prose carries the argument, and the people's own words appear inside your sentences as the phrases that cannot be paraphrased. It does not read like a transcript with connective tissue between the quotations. What is not optional is that you write from the nodes rather than from the glosses, and that a reader can get back to a source.
-
-**Default to a short quoted phrase inside a sentence you wrote.** Roughly five to fifteen words, in quotation marks, carried by your own sentence. Enough that the person's own phrasing survives. Not so much that the reader ends up doing the summarizing you were supposed to do.
-
-**Pull out a whole passage almost never.** A multi-sentence run or a block quote is for a statement so consequential that shortening it would cost the reader something: the sentence a decision actually turned on, the line where somebody finally said the thing everyone had been circling. If you cannot say what would be lost by cutting it to a phrase, cut it to a phrase.
-
-**Two or three quoted phrases in a section is normal. Six is a wall.** When a section starts to read as a sequence of quotations, you have stopped writing and started transcribing. Say what happened in your own words and quote the two phrases that carry it.
-
-**Never paraphrase where the phrasing is the point.** The words someone chose for what they want, the line that names a tension, a hedge that changes the claim. Those keep their quotation marks however tight the surrounding sentence gets. Saving length is not a reason to lose them, and this rule outranks the one above it.
-
-**Where two people arrived at the same thing in different words**, quoting both is the only way to show it happened rather than asserting it. Two short phrases, side by side in one of your sentences, does that better than two full passages.
-
-**Write in your own voice** to connect one thought to another, to head a section, to state a plain fact of record, or to compress a run of routine nodes that nobody needs verbatim.
-
-**Any line doing real work carries its node's \`:ref{...}\` directive**, quoted or not. Copy it exactly as it appears on the node. Never build a citation, never reformat one, never move one to a different quote. A paraphrase with a working citation is auditable; the same paraphrase without one is just a claim. This binds hardest in the sections somebody acts from: an open item nobody can trace back is an open item nobody can check, and those are exactly the lines that get quietly dropped or acted on wrongly.
-
-**A file is never optional.** If a node you're featuring carries an attached file, that file must appear in the README too, in whichever section that node's own words land in. What it looks like depends on what it is:
-
-- **A photo or video** — you'll see an ordinary \`![alt](url)\` image or a \`[alt](url)\` link marked for video sitting right in the node's own text. Wrap it in a \`:::gallery{}...:::\` block. Never describe a photo instead of showing it, and never feature a node's words while leaving its photo or video behind.
-- **Anything else** (a PDF, a doc, ...) — you'll see a plain \`[name](url)\` link. Leave it as a plain link, inline with the words that explain why it matters. Never put it in a gallery, and never invent a description of what it contains beyond what the node's own words already say.
-
-Either way, the file is exactly as much the node's own content as the words are; the graph already decided where it belongs, you're just carrying it along.
-
-**Some node text is not anybody's words, and it is marked.** A node grounded only in an AI description of a file (a photo nobody captioned) carries no \`==\` marks and says so in its own text: *Written from an AI description of this file.* Cite it, group it, build on it, show its photo, all exactly as normal. **Never put it in quotation marks, and never attribute it to a person.** Say what the file shows, not what somebody said. "Gerald noted the whiteboard showed three columns" about a sentence no human wrote is the one error on this page that costs a reader their trust in every other quotation, and it does not recover. A node with a caption, or any node from something a person typed, is somebody's words and behaves normally.
-
-**Don't gloss a quote.** A good line doesn't need an interpreter. Say what changed because of it, or say nothing.
-
-**The working-out is preserved in the graph. Point at it, do not reproduce it.** When a node holds someone reasoning their way to an answer, false start and correction included, that whole passage is already permanent and one citation away. Losing the fact that the turn happened is the expensive error, and it looks like good editing the whole time it is happening. Reproducing four sentences of it here is the other error and it is the one this file actually makes. Name the reversal in your own sentence, quote the few words where it turned, and cite the node.
-
-**Say it once.** Before adding a line, check whether the file already says it somewhere. If it does, deepen it where it lives rather than restating it in a second section. A point that appears twice reads as two facts.
-
-# Mark what matters. Never aim it at a person.
-
-You are allowed to say plainly, in your own voice, that something is important, at risk, or holding other work up. A reader should not have to infer it from which quotes you happened to choose, and they should not have to dig it out of a wall of them. Marking that is a large part of what this file is for.
-
-What you may never do is point it at a person. State the commitment, not the pressure.
-
-> Not this: "Waiting on Gerald to get the cladding done and we are running out of time."
->
-> This: "Much of Gerald's time is committed to cladding at Crouch through early September."
-
-The second says where the work stands and what capacity is left, and it can be checked against the nodes. The first applies pressure to the person already doing the work, and it is the fastest way to make somebody stop writing in their log at all.
-
-The test is simple: could this sentence be read as chasing someone? Then it is the wrong sentence, however true it is. Describe the state of the work and let the reader draw their own conclusion.
-
-This is not a ban on judgment. Naming that a deadline is close, that one decision is holding up three other things, or that something has sat untouched for a month is exactly the marking this file should do. It is a ban on directing that at a name.
-
-# Still true?
-
-A node is permanent. What it says may not be.
-
-\`graph-structure.md\`'s own Status line already tells you when a thread has moved — settled, superseded, or still open. Trust it; it was built by following the graph's own links forward, the same check you'd otherwise have to do by hand.
-
-Where a thread is marked superseded, say what it is now and when it changed. Where a thread is still open and visibly moving, write it as what was said and when, not as the current state.
-
-**A selection still in progress reads most like a settled decision exactly when it is least settled.** Vendor picks, hires, who is doing what this week, prices, dates. Treat any of these as open unless \`graph-structure.md\` marks the thread settled. Nobody mentioning something again is not the same as it being resolved.
+Short enough that nobody dreads opening it. If it is running long, take the length out of Settled, out of anything a single mention put there, and out of any quote that could have been a phrase. Never out of a citation, and never out of a photo that carries a stretch of work. Say each thing once; a point that appears twice reads as two facts.
 
 # The shape
 
@@ -492,72 +443,27 @@ Decided or done, with the operative fact: a date, a number, a name.
 Things nobody has answered yet.
 \`\`\`
 
-A quiet project has thin or empty sections, and that emptiness is honest signal. Don't manufacture depth to fill a heading.
+A quiet project has thin or empty sections, and that emptiness is honest signal. Don't manufacture depth to fill a heading. A build project and a thinking project fill different sections, and the same project changes over months; let the threads decide, and never announce the choice in the file.
 
-## On the two lanes
+**Get shit done is a surface, not an assignment.** List what is open so a reader can pick something up. Where a node names who owes something, say so, because that is a fact of record. Where none does, describe the work rather than inventing an owner.
 
-Some projects are mostly physical work and some are mostly thinking, and most are both at once. The same project changes character over months. Let \`graph-structure.md\`'s own threads decide which sections carry the file, and never announce the choice in the file itself. The reader wants the project, not a note about how this was assembled.
-
-But surface both lanes even when one dominates. A build project still has ideas worth holding, and a thinking project still has things somebody has to do. A file that shows only one of them has dropped half its job.
-
-## Get shit done is a surface, not an assignment
-
-List what is open and let people pick it up. Never assign anything to anyone.
-
-Where a node names who owes something, say so, because that is a fact of record. Where no node does, describe the work rather than inventing an owner.
-
-**Stamp the age on an open item when the age says something.** You're given today's real date separately from any node's own date — compute the age from that, not from memory. "Open nine days" is a prompt. "Open 1 day" on every item in the section is filler, and a page of identical ages tells a reader nothing except that everything was generated at once. Stamp the items that have actually sat; say nothing about the ones that just arrived. Never estimate an age: if a thread's opening date is unclear, say nothing about it rather than guessing.
-
-## Settled is a staging area, not an archive
-
-Every other section empties itself. Settled only accretes, and a growing list of things that stopped mattering makes the whole file less worth opening.
-
-Because the graph is the record, dropping something here loses nothing. Each pass, take each item out by one of three exits:
-
-1. **It was live and stopped mattering.** A bug that got fixed, a blocker that cleared, a status that was true for a week. Drop it.
-2. **It was dated and the date passed.** Keep it while it is ahead, drop it once it is history.
-3. **It still explains something.** A decision later work rests on stays, stated once, in its shortest useful form.
-
-If an item has sat in Settled through several builds and \`graph-structure.md\` shows nothing has linked back to it since, let it go.
-
-# Hold the disagreements open
-
-Where two people pull against each other is the most valuable material in the file. Do not resolve it into one smooth position, and do not pick a winner.
-
-Give it a section, placed high, since by the weight rule it usually belongs there. Give both sides in their own words with their citations, and leave the tension standing so someone can pick it up in tomorrow's log. This is the one place where a longer quote earns itself more often than elsewhere, because a tension shortened to a phrase usually stops being a tension.
-
-Separate thoughts are allowed to stay separate. Only join what is actually about the same thing.
+**Settled empties itself.** Every other section clears on its own; Settled only accretes. Each pass, take items out: a thing that was live and stopped mattering goes; a dated thing goes once the date is history; a decision later work rests on stays, stated once, in its shortest form. Dropping something here loses nothing, because the graph is the record.
 
 # Files travel with their nodes
 
-A node with an attached file is not a special section or a gallery off to the side. It gets featured (or left out) by the same weight/gravity rules as any other node, and when it's featured, its file comes with it — in whatever section its content already belongs to, per graph-structure's own clustering. A build project's "Get shit done" item with a photo of the current state carries that photo. A settled decision with a screenshot of the final layout carries that screenshot. A permit PDF sits right next to the sentence about the permit. Never invent a "Photos" or "Attachments" section — that would separate a file from the words that explain why it matters, which is the opposite of what a reader needs.
+A node's attached photo or video belongs in the section its words land in, inside a \`:::gallery{}...:::\` block, with several from the same moment grouped in one gallery. Any other file is a plain link next to the words that explain it. Copy the image or link line exactly as it appears on the node. Never describe a photo instead of showing it, never feature a node's words and leave its file behind, and never invent a Photos section. Photos leave the file on a slower clock than prose: when a recap compresses, its pictures can stay and carry the past, until the work is long finished and nothing links back to it.
 
-**The gallery is for photos and videos only.** Anything else — a PDF, a spreadsheet, any other kind of file — is a plain link, never wrapped in \`:::gallery{}...:::\`. A gallery block that ends up holding something that isn't a photo or video is a mistake, not a style choice.
+# What never happens
 
-**Files outlive the words that introduced them.** Every other part of this file empties itself, and photos need an exit too or the page becomes a scroll. They leave on a slower clock than prose does, and by a different route. When an item's written explanation compresses down or leaves Settled, its photos can stay: a run of images showing how something went from framing to finish is worth more per inch than a paragraph recapping the same three weeks, and a reader scans it faster. So take the length out of the recap first and let the pictures carry the past.
-
-They do not stay forever. Once a stretch of work is long finished and nothing in the graph has linked back to it in a long while, its photos go the way its words went. The graph keeps every one of them permanently and the file is only a view, so nothing is lost by letting them fall out of it.
-
-**Group photos and videos that belong together.** A node's own attached photo or video arrives as a single, ordinary markdown line (an image, or a link marked for video) — never rebuild that line, but wrap it in a \`:::gallery{}...:::\` block rather than leaving it bare in the middle of prose, even when it's the only one in that block. When several belong to the same moment — the same day, the same thread, several angles of the same thing — wrap them together in ONE gallery instead of scattering separate single-item galleries down the section. Mixing photos and videos in the same gallery is fine. The grouping is yours to decide; the image/link line inside it is not — copy each one exactly as it appears on its own node.
-
-# What never happens in this pass
-
-- No claim that isn't grounded in a thread \`graph-structure.md\` actually gives you. If something obvious seems missing, it is missing, and the file should read that way.
-- No citation you built yourself, and no name or date from anywhere but a node's own directive.
-- No dropping a node's attached file when its words are featured. No inventing a separate section for files.
-- No rebuilding an attached file's own markdown line yourself — copy it exactly as it appears on the node. Grouping several photos/videos into one \`:::gallery{}...:::\` is the only thing you're free to change.
-- No putting anything that isn't a photo or video inside a \`:::gallery{}...:::\` block.
-- No deciding who is right, and no telling the project what it should do next. Saying plainly that something matters, is close, or is holding other work up is not that, and is wanted. Aiming any of it at a person is never allowed.
-- No merging two people's statements into one position.
-- No section for comments, notes on this view, or anything else addressed to the reader about the file itself. A reader's own notes live elsewhere; if an older README still carries a "Notes on this view" section, leave it exactly as it is.
-- No commentary about this process. How many threads you read, what you expect the next run to add: none of it belongs here.
-- **This file has no today.** Never write "the latest entry," "this week's log," "recently," or anything that describes material by its position in a sequence. Give the date or say nothing about when it arrived. This binds on your own voice even when the phrase came from a node: someone can write "targeting final inspection next week" in their log, but the moment you restate it unquoted in the opening paragraph, the file is making a claim with no anchor that goes silently wrong a week later. Quote it with its citation, or convert it to the date.
+- No claim a node does not ground. If something obvious seems missing, it is missing, and the file should read that way.
+- No citation you built, reformatted, or moved to a different quote. No name or date from anywhere but a node's own directive.
+- No today. Never "recently," "this week," or "the latest entry." Give the date or say nothing about when it arrived. This binds on your own voice even when the phrase came from a node: quote it with its citation, or convert it to the date.
+- No telling the project what to do next, and no deciding who is right.
+- No section addressed to the reader about the file itself, and no commentary about this process. If a reader has left corrections in "Notes on this view," they outrank your own reading of the graph: reflect them in the sections you touch, and never edit that section yourself.
 
 # Voice
 
-Read \`VOICE.md\` and follow it. It governs how sentences are written, never how much is kept.
-
-If it isn't available: write from inside the work rather than above it, keep the honest record of what failed and what got tried first, and use no em dashes.
+Write from inside the work rather than above it. Keep the honest record of what failed and what got tried first. No em dashes.
 `;
 
 // ─── Overrides ───────────────────────────────────────────────────────
