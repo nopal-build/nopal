@@ -36,11 +36,11 @@ is redirecting to a host that isn't actually serving anything yet.
 
 ## 0. Pre-flight
 
-- [ ] You're logged into the right Fly org: `fly auth whoami`.
+- [x] You're logged into the right Fly org: `fly auth whoami`.
 - [ ] This branch's code is what you intend to ship (Phases 0–6 of
       `docs/marketing-app-split-plan.md` — confirm `git log` matches your
       expectation).
-- [ ] You have prod's SurrealDB password handy (needed for
+- [x] You have prod's SurrealDB password handy (needed for
       `clone-staging-db` later) and DNS registrar access for `nopal.build`.
 
 ## 1. Create the Fly apps
@@ -59,18 +59,67 @@ already assumes whatever name ends up there, so keep the two in sync.
 
 ```sh
 sh fruits/scripts/copy-secrets-from-webapp.sh   # webapp prod -> nopal-fruits
-sh fruits/scripts/copy-secrets-to-staging.sh    # nopal-fruits -> fruits-staging
 ```
 
-Then sanity-check nothing was missed — compare the two lists by eye:
+The script normally auto-detects a running webapp machine to read from —
+you should NOT need to pass `WEBAPP_PROD_MACHINE=` explicitly. If it
+reports it couldn't determine one (e.g. `fly` isn't actually on your
+`PATH` yet, even though the shell found *some* `fly`/`flyctl` binary —
+check with `fly version`; on macOS a Homebrew install can sit unlinked at
+`/opt/homebrew/Cellar/flyctl/...` until `brew link flyctl`), grab a real
+machine id yourself and pass THAT — never the app name itself:
+
+```sh
+fly machine list --app webapp-billowing-meadow-8538   # copy an ID from the ID column
+WEBAPP_PROD_MACHINE=<the-id-above> sh fruits/scripts/copy-secrets-from-webapp.sh
+```
+
+**Then bootstrap `fruits-staging` too — directly from webapp, NOT from
+`nopal-fruits`.** `copy-secrets-to-staging.sh` (`nopal-fruits ->
+fruits-staging`) needs a LIVE machine on `nopal-fruits` to SSH into and
+read values back off of, but per this runbook's own ordering,
+`nopal-fruits` doesn't get its first real deploy until step 7 — there's
+nothing running on it yet to read from. Reuse the from-webapp script
+instead, pointed at the staging app as its destination (same secrets
+list; the two genuinely-webapp-only exclusions `copy-secrets-to-staging.sh`
+would otherwise apply — `ANTHROPIC_API_KEY`/`ANTHROPIC_WORKSPACE_ID` — are
+harmless to include here too as long as they're still unset on webapp,
+see below):
+
+```sh
+FRUITS_PROD_APP=fruits-staging sh fruits/scripts/copy-secrets-from-webapp.sh
+```
+
+Ignore that command's own closing suggestion to `fly deploy ... fruits/fly.toml`
+(it always prints the prod config, regardless of `FRUITS_PROD_APP`) —
+step 3's `make deploy-staging` is what actually applies these.
+Once `nopal-fruits` has a real running machine post-cutover, go back to
+using the normal `copy-secrets-to-staging.sh` for any future secret
+rotation — this workaround is only needed for this one-time bootstrap.
+
+Then sanity-check nothing was missed — compare the lists by eye:
 
 ```sh
 fly secrets list --app webapp-billowing-meadow-8538
 fly secrets list --app nopal-fruits
+fly secrets list --app fruits-staging
 ```
 
 (Only names/digests are shown, never values — see either script's own
 comment for why they read values off a running machine instead.)
+
+**If either script reports a secret as "empty on webapp — skipping,"
+confirm whether that's expected before moving on** — it means webapp
+genuinely has no such secret set at all (not just unreadable), so
+whatever depends on it will behave in `fruits` exactly as it already
+does in `webapp` today. `SORTER_ENABLED` empty is normal (opt-in,
+defaults off). `ANTHROPIC_API_KEY`/`ANTHROPIC_WORKSPACE_ID` empty means
+GraphLog/Maker's AI stages aren't configured with real credentials in
+prod AT ALL yet — every stage already fails clean (`isGraphLogAgentConfigured()`
+gates each one, returning `{ ok: false, error: "GraphLog isn't configured
+(missing ANTHROPIC_API_KEY)" }` rather than crashing), so this is a
+known, pre-existing gap this migration doesn't need to fix — just don't
+mistake it for something this script broke.
 
 `WEBAUTHN_RP_ID` and `APP_BASE_URL` are **not** set via `fly secrets` —
 they're plain (non-sensitive) `[env]` entries already committed in

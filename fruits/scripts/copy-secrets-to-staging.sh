@@ -13,6 +13,18 @@ set -e
 #   sh fruits/scripts/copy-secrets-to-staging.sh
 #
 # Safe to re-run any time prod secrets rotate.
+#
+# Needs a LIVE, running machine on PROD_APP to SSH into and read values
+# back off of (see copy-secrets-from-webapp.sh's own comment for why --
+# `fly secrets` never lets you retrieve a value once set). For the very
+# FIRST bootstrap this is a problem: nopal-fruits doesn't get its first
+# real deploy until the cutover runbook's own step 7, so there's nothing
+# running on it yet. For that one-time case, bootstrap fruits-staging
+# directly from webapp instead (see docs/phase-7-cutover-runbook.md's
+# step 2):
+#   FRUITS_PROD_APP=fruits-staging sh fruits/scripts/copy-secrets-from-webapp.sh
+# Only reach for THIS script once nopal-fruits actually has a running
+# machine (post-cutover), for ongoing secret rotation.
 PROD_APP="${PROD_APP:-nopal-fruits}"
 STAGING_APP="${STAGING_APP:-fruits-staging}"
 PROD_MACHINE="${PROD_MACHINE:-}"
