@@ -1,9 +1,9 @@
-// app/routes/fruits_.styles_.oxmarkdown.tsx
+// app/routes/styles_.oxmarkdown.tsx
 //
 // A dedicated, evolving page for OxMarkdown — reachable from the Design
 // System page (`/styles`), not nested under it (this file's name
 // breaks nesting at both `fruits_` and `styles_`, same convention as
-// `fruits_.vault.tsx` breaking nesting under `fruits`).
+// `vault.tsx` breaking nesting under `fruits`).
 //
 // Two purposes, both maintained going forward as OxMarkdown grows:
 //   1. A live playground — edit markdown, see it render, try theme
@@ -35,7 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return { user };
 }
 
-// ─── Helpers (mirrors fruits_.styles.tsx's Section/Label pattern) ────────────
+// ─── Helpers (mirrors styles.tsx's Section/Label pattern) ────────────
 
 function Section({
   id,

@@ -6,7 +6,7 @@ import { getGraphLogProjectStatus } from "robustness-core/data/graphLogQueue.ser
 /**
  * GET /api/graphlog/status?projectFolderId=...
  *
- * The Vault's permanent GraphLog status line (`fruits_.vault.tsx`) polls
+ * The Vault's permanent GraphLog status line (`vault.tsx`) polls
  * this — is a job currently running/queued for this project, when did
  * the last one finish (if ever), and is the project enrolled in the
  * nightly automatic run (see `graphLogSchedule.server.ts`). Also what

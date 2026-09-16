@@ -1,4 +1,4 @@
-// app/routes/fruits_.profile.tsx
+// app/routes/profile.tsx
 import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {

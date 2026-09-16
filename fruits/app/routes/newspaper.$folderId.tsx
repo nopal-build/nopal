@@ -1,4 +1,4 @@
-// app/routes/fruits_.newspaper.$folderId.tsx
+// app/routes/newspaper.$folderId.tsx
 // The Project Newspaper — the rolled-up view of one project folder (under
 // the `projects` vault root), driven by the manifest front matter on its
 // README.md — see `app/data/project.types.ts` for the manifest grammar and

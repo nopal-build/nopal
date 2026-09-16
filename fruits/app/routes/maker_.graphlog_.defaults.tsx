@@ -1,6 +1,6 @@
-// app/routes/fruits_.maker_.graphlog_.defaults.tsx
+// app/routes/maker_.graphlog_.defaults.tsx
 // Review/edit UI for GraphLog's default skill content (knowledge/graph/
-// project-view) — mirrors fruits_.maker_.phylog_.defaults.tsx exactly,
+// project-view) — mirrors maker_.phylog_.defaults.tsx exactly,
 // split out from /maker/graphlog for the same reason PhyLog's own
 // defaults editor is split from its usage dashboard. Admin/Super only,
 // same gate.

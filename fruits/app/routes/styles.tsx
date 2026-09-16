@@ -1,4 +1,4 @@
-// app/routes/fruits_.styles.tsx
+// app/routes/styles.tsx
 import { useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect, data } from "react-router";
@@ -298,7 +298,7 @@ export default function FruitsStyles() {
                   → extract a local, unexported function component in that
                   same file (e.g. <Code>RelationshipCard</Code>,{" "}
                   <Code>WaiverCard</Code>, <Code>ApiTokenCard</Code> in{" "}
-                  <Code>fruits_.profile.tsx</Code>). It doesn&apos;t need to
+                  <Code>profile.tsx</Code>). It doesn&apos;t need to
                   move to <Code>app/components/</Code> yet.
                 </div>
                 <div>
@@ -310,7 +310,7 @@ export default function FruitsStyles() {
                   live example to this page in the same change (see{" "}
                   <Code>#collections</Code> below for how{" "}
                   <Code>SearchCollection</Code> and <Code>CopyField</Code>{" "}
-                  were pulled out of <Code>fruits_.profile.tsx</Code>).
+                  were pulled out of <Code>profile.tsx</Code>).
                 </div>
                 <div>
                   <span className="font-bold purple-text">
@@ -1188,7 +1188,7 @@ export default function FruitsStyles() {
                 {"<CopyField>"} — read-only value + Copy button
               </div>
               <p className="text-xs subtle-text mb-3">
-                Pulled out of <Code>fruits_.profile.tsx</Code> per the
+                Pulled out of <Code>profile.tsx</Code> per the
                 pattern in <Code>#component-guide</Code> above. Use for
                 install commands, API keys, share links — anything
                 the user needs to copy verbatim. It degrades gracefully:
@@ -1218,7 +1218,7 @@ export default function FruitsStyles() {
                 search field
               </div>
               <p className="text-xs subtle-text mb-3">
-                Pulled out of <Code>fruits_.profile.tsx</Code> per the
+                Pulled out of <Code>profile.tsx</Code> per the
                 pattern in <Code>#component-guide</Code> above.{" "}
                 A <Code>Surface</Code> shell for "search/filter a list, and
                 optionally add a new entry" UI: fixed-height scrollable list
@@ -1259,7 +1259,7 @@ export default function FruitsStyles() {
                 <Code>resultsSlot</Code> instead of{" "}
                 <Code>items</Code>/<Code>renderItem</Code> to take over the
                 whole list area. See the Relationships list in{" "}
-                <Code>fruits_.profile.tsx</Code> for the full example: it
+                <Code>profile.tsx</Code> for the full example: it
                 wraps <Code>{"<SearchCollection>"}</Code> in a{" "}
                 <Code>{"<Form>"}</Code> so the search field doubles as an
                 "add/invite by email" field.
@@ -1276,7 +1276,7 @@ export default function FruitsStyles() {
                 page background (white / <Code>--purple</Code>), so rows
                 inside should just be plain <Code>Surface</Code> cards (as
                 above, and <Code>RelationshipCard</Code> in{" "}
-                <Code>fruits_.profile.tsx</Code>). Don't force{" "}
+                <Code>profile.tsx</Code>). Don't force{" "}
                 <Code>var(--white)</Code> backgrounds with explicit text
                 colors — plain Surface rows flip for dark mode on their
                 own, and so does everything inside them (
@@ -1299,7 +1299,7 @@ export default function FruitsStyles() {
                 Dependency-free centered dialog — backdrop and{" "}
                 <Code>Escape</Code> both close it. Use it for confirmations
                 and short forms (e.g. the "Switch account" flow in{" "}
-                <Code>fruits_.profile.tsx</Code>), not for full-page content.
+                <Code>profile.tsx</Code>), not for full-page content.
               </p>
               <div>
                 <button
@@ -1403,7 +1403,7 @@ export default function FruitsStyles() {
                 a <Code>btn-primary</Code>, <Code>btn-outline</Code>, or
                 anything else. This replaces the hand-rolled per-row "…"
                 menu in <Code>RelationshipCard</Code> (
-                <Code>fruits_.profile.tsx</Code>).
+                <Code>profile.tsx</Code>).
               </p>
 
               <Label>Default trigger (CircleButton + MoreIcon)</Label>

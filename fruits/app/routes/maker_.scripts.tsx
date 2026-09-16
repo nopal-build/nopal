@@ -1,10 +1,10 @@
-// app/routes/fruits_.maker_.scripts.tsx
+// app/routes/maker_.scripts.tsx
 // Admin Scripts — repair/maintenance scripts registered in
 // `adminScriptsRegistry.server.ts`, runnable instead of locally against a
 // `fly proxy` tunnel (see that registry's own module doc for why). Super
 // only. This index page leads with Recent Runs (the thing you're usually
 // here to check) and a button to start a new one
-// (/maker/scripts/new, `fruits_.maker_.scripts_.new.tsx`) — every
+// (/maker/scripts/new, `maker_.scripts_.new.tsx`) — every
 // run's outcome is permanently recorded to `admin_script_runs`
 // (`adminScriptRuns.server.ts`) and viewable at
 // /maker/scripts/runs/:runId.

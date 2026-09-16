@@ -22,7 +22,7 @@ import {
  * viewer's own top-level `projects` root container — own projects win on
  * a name collision. Deliberately opt-in, NOT the default: the web
  * Vault's own sidebar already surfaces shared projects as a separate
- * "Shared with me" section (`fruits_.vault.tsx`'s own
+ * "Shared with me" section (`vault.tsx`'s own
  * `topLevelSharedFolders`), so merging them into `projects/`'s own lazy
  * children too would just duplicate that entry point in the tree. The
  * CLI/GUI app (`crates/core/src/vault.rs`'s `Client::children`) has no

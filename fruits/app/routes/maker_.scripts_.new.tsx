@@ -1,10 +1,10 @@
-// app/routes/fruits_.maker_.scripts_.new.tsx
+// app/routes/maker_.scripts_.new.tsx
 // Start a new Admin Script run. Lists registered scripts NEWEST first
 // (`listAdminScripts()` returns them chronologically, oldest first — see
 // `adminScriptsRegistry.server.ts`'s own module doc — so this just
 // reverses it), with deprecated ones broken out into their own
 // de-emphasized section rather than mixed in or hidden. Super only, same
-// gate as `fruits_.maker_.scripts.tsx`.
+// gate as `maker_.scripts.tsx`.
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   Link,
@@ -26,9 +26,9 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { listAdminScripts, getAdminScript } from "robustness-core/data/adminScriptsRegistry.server";
 import { isAnyAdminScriptRunning, enqueueAdminScriptJob } from "robustness-core/data/adminScriptsQueue.server";
 
-// Same gate as `fruits_.maker_.scripts.tsx` -- duplicated rather than
+// Same gate as `maker_.scripts.tsx` -- duplicated rather than
 // imported, matching every other Maker sub-page's own local
-// `requireMakerAccess` copy (e.g. `fruits_.maker_.graphlog_.runs.$runId.tsx`).
+// `requireMakerAccess` copy (e.g. `maker_.graphlog_.runs.$runId.tsx`).
 async function requireAdminScriptsAccess(request: Request) {
   const user = await getUser(request);
   if (!user) throw redirect("/login");

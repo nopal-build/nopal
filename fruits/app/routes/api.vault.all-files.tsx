@@ -7,7 +7,7 @@ import { getAllFileListingsForHuman } from "robustness-core/data/vault.server";
  *
  * Every file *metadata* listing (never content) across the signed-in
  * human's OWN vault, in one request — used by the Vault page
- * (`fruits_.vault.tsx`) to warm its per-folder children cache for every
+ * (`vault.tsx`) to warm its per-folder children cache for every
  * folder at once shortly after the page mounts, so opening any of the
  * viewer's own folders (sidebar or main view) feels instant instead of
  * waiting on a fresh per-folder fetch the first time.

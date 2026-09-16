@@ -1,6 +1,6 @@
 /**
  * The Daily Log's day-framing components, used by the real route
- * (`routes/fruits_.daily-log.tsx`). See `styles/dailyLog.css` for
+ * (`routes/daily-log.tsx`). See `styles/dailyLog.css` for
  * `.daily-log-day`.
  */
 

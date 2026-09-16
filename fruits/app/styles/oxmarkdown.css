@@ -986,7 +986,7 @@ img.ox-file-thumb {
   padding: 8px;
 }
 
-/* Applied to the OUTER prose `<OxEditor>` in `fruits_.daily-log.tsx`
+/* Applied to the OUTER prose `<OxEditor>` in `daily-log.tsx`
  * (the one a `::card{...}` directive is nested inside) — see
  * `.ox-card-directive`'s own comment above for the full reasoning. NOT
  * applied to a card's own (nested) `.ox-content`, or anywhere a

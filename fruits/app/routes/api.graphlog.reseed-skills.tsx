@@ -12,7 +12,7 @@ import { reseedProjectN02Skills } from "robustness-core/data/projectN02.server";
  * `GRAPH_STRUCTURE.md` / `PROJECT_VIEW.md` with the CURRENT effective
  * defaults (`reseedProjectN02Skills`, `projectN02.server.ts`) — the
  * Vault's own "More Actions" → Reseed GraphLog Skills entry
- * (`fruits_.vault.tsx`), so a default-skill change no longer requires
+ * (`vault.tsx`), so a default-skill change no longer requires
  * running `scripts/reseed-graphlog-skills.ts` by hand against a named
  * project. Deterministic and fast (plain file writes, no LLM call), so
  * like `daily-log-sync` this is a single synchronous request/response,

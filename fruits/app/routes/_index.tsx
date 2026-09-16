@@ -159,7 +159,7 @@ function localDateString(): string {
 }
 
 /** A read-only `CardResolver` for the dashboard preview — same shape
- * `fruits_.daily-log.tsx`'s own `buildCardResolver` builds, minus the
+ * `daily-log.tsx`'s own `buildCardResolver` builds, minus the
  * save wiring (`onChange` is never actually invoked: `OxRenderer` below
  * is rendered with no `interactive`, so a `::card{...}` renders through
  * the plain static path, not a live editable one — see `OxRenderer`'s
@@ -200,7 +200,7 @@ function DailyLogPreview({
 
   return (
     // Capped at the same `680px` the real Daily Log page's own container
-    // uses (`fruits_.daily-log.tsx`) — the preview renders the entry
+    // uses (`daily-log.tsx`) — the preview renders the entry
     // through the identical `.daily-log-day` frame + OxMarkdown renderer,
     // so an uncapped full-bleed block here would both look absurd on an
     // ultrawide monitor and re-wrap the prose at a completely different

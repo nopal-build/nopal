@@ -1,6 +1,6 @@
-// app/routes/fruits_.maker_.graphlog.tsx
+// app/routes/maker_.graphlog.tsx
 // GraphLog usage deep-dive — linked from /maker's summary section.
-// Mirrors fruits_.maker_.phylog.tsx exactly, against GraphLog's own
+// Mirrors maker_.phylog.tsx exactly, against GraphLog's own
 // tables/stage set. Admin/Super only, same gate as the parent Maker
 // dashboard.
 import type { LoaderFunctionArgs } from "react-router";

@@ -13,7 +13,7 @@ import { setGraphLogScheduled } from "robustness-core/data/graphLogSchedule.serv
  * unattended every night is a different kind of call than triggering one
  * run by hand, so it doesn't get the same "or you own it" carve-out.
  * Thin client: the Vault's "More Actions" → Enable/Disable GraphLog
- * Schedule entry (`fruits_.vault.tsx`).
+ * Schedule entry (`vault.tsx`).
  *
  * Body:
  *   projectFolderId — required.

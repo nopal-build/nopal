@@ -1,4 +1,4 @@
-// app/routes/fruits_.maker.tsx
+// app/routes/maker.tsx
 import type { LoaderFunctionArgs } from "react-router";
 import {
   Link,

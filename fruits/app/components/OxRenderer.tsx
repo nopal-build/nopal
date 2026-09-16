@@ -1278,7 +1278,7 @@ function CardDirectiveStatic({
  * (confirmed directly — this shipped as a real hydration-mismatch bug on
  * `/styles/oxmarkdown` once already), so React throws a hydration
  * error the moment the client's re-render produces different text than
- * what the server sent down. Same fix `fruits_.profile.tsx`'s
+ * what the server sent down. Same fix `profile.tsx`'s
  * `formatSignedAt` already applies for the same reason — see its own
  * comment. */
 function formatRefDatetime(iso: string): string {

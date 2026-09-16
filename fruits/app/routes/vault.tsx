@@ -1,4 +1,4 @@
-// app/routes/fruits_.vault.tsx
+// app/routes/vault.tsx
 // The Vault — GitHub-style file browser with a cached folder tree.
 // URL state: ?folder=<folderId> OR ?file=<fileId>; neither → root view.
 import type { LoaderFunctionArgs } from "react-router";

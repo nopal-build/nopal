@@ -14,7 +14,7 @@ import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
  *   - Content-only (markdown, a sync-api run's `.csv`/`.md`, `_schema.json`,
  *     ...): `{ content, contentType, filename }` — there's no S3 object to
  *     presign a URL for, so the client Blob-downloads the inline text
- *     itself (see `triggerFileDownload` in `fruits_.vault.tsx`).
+ *     itself (see `triggerFileDownload` in `vault.tsx`).
  *
  * The file's owner, or anyone granted view access through a shared
  * folder, may download via this endpoint (`canViewFileRef`).

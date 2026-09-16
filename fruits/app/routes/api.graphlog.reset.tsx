@@ -37,7 +37,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // An Admin/Super may trigger this against ANY project or personal space,
   // not just ones they own or hold an owner-tier Sharing Role on -- the
   // Vault's own "More Actions" → Reset GraphLog entry is gated the same way
-  // client-side (see `fruits_.vault.tsx`). Same "staff override" pattern
+  // client-side (see `vault.tsx`). Same "staff override" pattern
   // `api.legal-documents.view.$docId.tsx` already uses.
   const isStaff = user.role === "Admin" || user.role === "Super";
   if (!role?.isOwner && !isStaff) {

@@ -1,4 +1,4 @@
-// app/routes/fruits_.maker_.graphlog_.runs.$runId.tsx
+// app/routes/maker_.graphlog_.runs.$runId.tsx
 // One GraphLog run's own performance timeline — every API/LLM/function-
 // call event that run produced, in the order it actually happened, each
 // with a right-aligned duration bar. Linked from the "Recent Runs" list

@@ -1,4 +1,4 @@
-/* Daily Log day-framing styles, used by `fruits_.daily-log.tsx` via
+/* Daily Log day-framing styles, used by `daily-log.tsx` via
    `components/DailyLogDay.tsx`'s `DayContainer`/`DayTitle`.
    `--foreground`/`--midground` and their `--dark-*` counterparts don't
    auto-swap by themselves (see root.css), so anything using them needs

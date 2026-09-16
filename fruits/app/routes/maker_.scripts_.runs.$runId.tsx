@@ -1,4 +1,4 @@
-// app/routes/fruits_.maker_.scripts_.runs.$runId.tsx
+// app/routes/maker_.scripts_.runs.$runId.tsx
 // One Admin Script run's own record — reads the permanent audit row
 // (`admin_script_runs`, `adminScriptRuns.server.ts`) plus, while still
 // running, live log lines tailed straight from the BullMQ job itself
@@ -27,7 +27,7 @@ import { getAdminScriptRun } from "robustness-core/data/adminScriptRuns.server";
 import { getAdminScriptJobLog } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 
-// Super only -- see `fruits_.maker_.scripts.tsx`'s own doc on why this is
+// Super only -- see `maker_.scripts.tsx`'s own doc on why this is
 // stricter than the usual Admin-or-Super Maker bar.
 async function requireAdminScriptsAccess(request: Request) {
   const user = await getUser(request);
@@ -156,7 +156,7 @@ export default function FruitsMakerScriptsRun() {
   const revalidator = useRevalidator();
 
   // Auto-refresh while still running -- same "poll until settled" idiom
-  // the Vault's own GraphLog status line uses (`fruits_.vault.tsx`'s
+  // the Vault's own GraphLog status line uses (`vault.tsx`'s
   // `refreshGraphLogStatus`), just via a full loader revalidation instead
   // of a bespoke fetch, since this page has nothing else live on it.
   useEffect(() => {

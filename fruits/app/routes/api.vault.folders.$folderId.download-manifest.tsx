@@ -13,7 +13,7 @@ import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
  *
  * Everything a client needs to trigger a "download every file in this
  * folder" batch — one call instead of N round trips, one per file (see
- * `fruits_.vault.tsx`'s `handleDownloadAll`). DIRECT child files only —
+ * `vault.tsx`'s `handleDownloadAll`). DIRECT child files only —
  * a file inside a nested sub-folder is NOT included. This deliberately
  * isn't a zip: each entry becomes its own separate, staggered browser
  * download (see the vault skill for why) — a flat batch of individual

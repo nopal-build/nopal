@@ -1,4 +1,4 @@
-/* ── Vault — GitHub-style file browser (fruits_.vault.tsx) ──────────────────
+/* ── Vault — GitHub-style file browser (vault.tsx) ──────────────────
    Also imported by card.$fileId.tsx (public card view) for
    .vault-readme-section.
 
@@ -274,7 +274,7 @@
 
 /* Debug aid: the current viewer's Sharing Role (+ every collaborator's,
    for an owner-tier viewer) at the top of a project's own folder view —
-   see `ProjectRoleBanner` in `fruits_.vault.tsx`. */
+   see `ProjectRoleBanner` in `vault.tsx`. */
 .vault-project-role-banner {
   display: flex;
   flex-wrap: wrap;
