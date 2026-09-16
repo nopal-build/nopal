@@ -122,8 +122,9 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import {
-  findProjectGraphFolder,
   classifyStageSkill,
+  composeStageSkill,
+  findProjectGraphFolder,
   getProjectStageSkill,
   isSkipInstruction,
   listExtraSkillFiles,
@@ -149,7 +150,18 @@ const GRAPH_LOG_RE = /^graph-log-(\d{4}-\d{2}-\d{2})\.md$/;
 type GraphStructureFrontmatter = {
   asOfGraphHash?: string;
   generatedAt?: string;
+  /** Fingerprint of the GRAPH_STRUCTURE.md skill (plus SKILL.md and extra
+   * skill files) this index was last threaded under. Provenance: reported
+   * as drift when it differs from the current one, and acted on only when
+   * a run asks for it (`rebuildStale`), which re-threads the whole graph
+   * from scratch rather than placing "new" nodes into threads drawn under
+   * old rules. See `composeStageSkill`. */
+  skillFingerprint?: string;
   appliedByProjectView?: string;
+  /** `graph-project-view`'s twin of `skillFingerprint`: the PROJECT_VIEW.md
+   * fingerprint the README was last written under. Stamped and cleared
+   * together with `appliedByProjectView`. */
+  appliedSkillFingerprint?: string;
 };
 
 export function parseGraphStructureFrontmatter(content: string | null): GraphStructureFrontmatter {
@@ -168,10 +180,19 @@ export function parseGraphStructureFrontmatter(content: string | null): GraphStr
  * `generatedAt` — `graph-project-view`'s own idempotency marker, exported
  * for that stage to call directly rather than duplicating the
  * read-modify-write here. */
-export async function markGraphStructureApplied(fileId: string, content: string, hash: string): Promise<void> {
+export async function markGraphStructureApplied(
+  fileId: string,
+  content: string,
+  hash: string,
+  skillFingerprint: string,
+): Promise<void> {
   const { body } = splitFrontmatter(content);
   const meta = parseGraphStructureFrontmatter(content);
-  const frontmatter = stringifyYaml({ ...meta, appliedByProjectView: hash }).trimEnd();
+  const frontmatter = stringifyYaml({
+    ...meta,
+    appliedByProjectView: hash,
+    appliedSkillFingerprint: skillFingerprint,
+  }).trimEnd();
   await updateFileRef(fileId, { content: `---\n${frontmatter}\n---\n${body}` });
 }
 
@@ -204,9 +225,9 @@ export async function clearGraphStructureAppliedMarker(fileId: string, content: 
  * was no marker to clear, so the caller can skip the write entirely. */
 export function withoutProjectViewMarker(content: string): string | null {
   const meta = parseGraphStructureFrontmatter(content);
-  if (meta.appliedByProjectView === undefined) return null;
+  if (meta.appliedByProjectView === undefined && meta.appliedSkillFingerprint === undefined) return null;
   const { body } = splitFrontmatter(content);
-  const { appliedByProjectView: _dropped, ...rest } = meta;
+  const { appliedByProjectView: _dropped, appliedSkillFingerprint: _droppedToo, ...rest } = meta;
   const frontmatter = stringifyYaml(rest).trimEnd();
   return `---\n${frontmatter}\n---\n${body}`;
 }
@@ -1012,6 +1033,11 @@ export type GraphStructureResult =
        * (including a deterministic weight-only refresh with no LLM call
        * at all); false when it was already fully up to date. */
       changed: boolean;
+      /** True when `graph-structure.md` was threaded under an older
+       * GRAPH_STRUCTURE.md than the current one (or carries no stamp) as
+       * this run FOUND it. Reported on every run; acted on only under
+       * `rebuildStale`. Absent on the early-return paths. */
+      staleSkill?: boolean;
       /** Total nodes across every `graph-log-*.md` at the end of this run,
        * and total threads in `graph-structure.md`. Null when this stage
        * didn't get far enough to know (skipped, no graph yet, stopped
@@ -1053,6 +1079,11 @@ export interface RunGraphStructureOptions {
   log?: (line: string) => void;
   /** Timeline recorder for this run — see `graphLogPerf.server.ts`. */
   perf?: GraphLogPerfRecorder;
+  /** Re-thread the whole graph from scratch when `graph-structure.md` was
+   * threaded under an older GRAPH_STRUCTURE.md (or has no stamp at all).
+   * Off by default: a normal run only reports the drift. Set by the
+   * `rerun-outputs` job. See `composeStageSkill`. */
+  rebuildStale?: boolean;
 }
 
 /**
@@ -1111,6 +1142,12 @@ export async function runGraphStructure(
     return { ok: true, skipped: false, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
   }
 
+  // Composed before the hash, not beside the prompt, because the skill is
+  // part of the hash. See `composeStageSkill`.
+  const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
+  const extraSkillFiles = await listExtraSkillFiles(projectFolder);
+  const { content: skillContent, fingerprint: skillFingerprint } = composeStageSkill(skill, generalSkill, extraSkillFiles);
+
   // What reading the graph itself lost, reported on EVERY return below
   // (ADR-016). A day with null content used to be skipped AND left out of
   // the hash, so the graph "changed" and the day was absent from the
@@ -1141,7 +1178,17 @@ export async function runGraphStructure(
   const existing = structureListing ? await getFileRefById(structureListing._id) : undefined;
   const existingMeta = parseGraphStructureFrontmatter(existing?.content ?? null);
 
-  if (existing && existingMeta.asOfGraphHash === newHash) {
+  // Drift is reported on every run; a rebuild happens only when asked.
+  // An index with no stamp at all predates stamping and counts as stale.
+  const staleSkill = !!existing && existingMeta.skillFingerprint !== skillFingerprint;
+  const rethread = staleSkill && opts.rebuildStale === true;
+  if (staleSkill && !rethread) {
+    log(
+      "graph-structure: graph-structure.md was threaded under an older GRAPH_STRUCTURE.md and was left as it is (Rerun GraphLog Outputs re-threads it).",
+    );
+  }
+
+  if (existing && existingMeta.asOfGraphHash === newHash && !rethread) {
     log("graph-structure: up to date, nothing changed since last run.");
     // Both counts are already in hand here (every node was just parsed
     // to compute the hash, and the index is the file being compared), so
@@ -1156,6 +1203,7 @@ export async function runGraphStructure(
       graphNodeCount: allNodes.length,
       threadCount: countNamedClusters(splitReadmeSections(splitFrontmatter(existing.content ?? "").body)),
       incomplete: loadIssues,
+      staleSkill,
     };
   }
 
@@ -1187,9 +1235,32 @@ export async function runGraphStructure(
     log(`graph-structure: ${linkDiag.dangling} link(s) point at nodes no longer in the graph and carry no weight.`);
   }
   const allNodesById = new Map(allNodes.map((n) => [n.id, n]));
+  // The stamp says which skill THREADED this index, so it is only set on
+  // a from-scratch build (no index yet, or a re-thread). The incremental
+  // path places a few new nodes into threads drawn under whatever skill
+  // drew them, and keeps that stamp; an unstamped index stays unstamped
+  // and keeps reading as stale until it is re-threaded once. A re-thread
+  // also drops `graph-project-view`'s applied markers: the node set (and
+  // so `asOfGraphHash`) may be identical after re-threading, and the
+  // README must still reconcile against the new threads.
   const baseMeta: GraphStructureFrontmatter = { ...existingMeta };
+  if (!existing || rethread) baseMeta.skillFingerprint = skillFingerprint;
+  if (rethread) {
+    delete baseMeta.appliedByProjectView;
+    delete baseMeta.appliedSkillFingerprint;
+    log(
+      existingMeta.skillFingerprint
+        ? "graph-structure: re-threading every node from scratch under the current GRAPH_STRUCTURE.md."
+        : "graph-structure: this index has no skill stamp; re-threading every node from scratch under the current GRAPH_STRUCTURE.md.",
+    );
+  }
 
-  const rawExistingSections = existing ? splitReadmeSections(splitFrontmatter(existing.content ?? "").body) : [];
+  // A re-thread is the one case where the existing threads are NOT the
+  // starting point. The incremental path below only ever places nodes
+  // that no thread holds yet, so under a new thread definition it would
+  // place nothing and the old threads would stand forever.
+  const rawExistingSections =
+    existing && !rethread ? splitReadmeSections(splitFrontmatter(existing.content ?? "").body) : [];
   const { sections: existingSections, dropped: staleIds } = pruneStaleMembership(rawExistingSections, allNodesById);
   if (staleIds.length > 0) {
     const issue =
@@ -1230,11 +1301,6 @@ export async function runGraphStructure(
     };
   }
 
-  const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
-  const extraSkillFiles = await listExtraSkillFiles(projectFolder);
-  const skillContent = [skill, generalSkill, ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`)]
-    .filter(Boolean)
-    .join("\n\n");
   const system = buildSystemPrompt(skillContent);
 
   const sortedNewNodes = newNodes.sort((a, b) =>

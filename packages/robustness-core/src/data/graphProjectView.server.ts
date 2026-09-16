@@ -99,6 +99,7 @@ import {
 } from "./project.types";
 import {
   classifyStageSkill,
+  composeStageSkill,
   findProjectGraphFolder,
   getProjectStageSkill,
   isSkipInstruction,
@@ -934,6 +935,11 @@ export type GraphProjectViewResult =
        * it (`graph-structure.md`'s own `asOfGraphHash` didn't match its
        * `appliedByProjectView`) AND at least one section was edited. */
       changed: boolean;
+      /** True when README.md was last written under an older
+       * PROJECT_VIEW.md than the current one (or before stamping) as this
+       * run FOUND it. Reported on every run; acted on only under
+       * `rebuildStale`. Absent on the early-return paths. */
+      staleSkill?: boolean;
       summary: string[];
       /** Null whenever this run didn't get far enough to check (skipped,
        * no graph yet, truncated, refused, errored, ...) — only a CLEAN
@@ -965,6 +971,11 @@ export interface RunGraphProjectViewOptions {
   log?: (line: string) => void;
   /** Timeline recorder for this run — see `graphLogPerf.server.ts`. */
   perf?: GraphLogPerfRecorder;
+  /** Reconcile the README again when it was last written under an older
+   * PROJECT_VIEW.md (or before stamping), even though the graph has not
+   * changed. Off by default: a normal run only reports the drift. Set by
+   * the `rerun-outputs` job. See `composeStageSkill`. */
+  rebuildStale?: boolean;
 }
 
 /** Everything that does not change between passes within one run. It
@@ -1392,7 +1403,7 @@ export function coverageFromJobResult(result: unknown): {
 export function readmeChangedFromJobResult(jobName: string, result: unknown): boolean | null {
   if (!result || typeof result !== "object") return null;
   const r = result as Record<string, unknown>;
-  if (jobName === "run") return typeof r.readmeChanged === "boolean" ? r.readmeChanged : null;
+  if (jobName === "run" || jobName === "rerun-outputs") return typeof r.readmeChanged === "boolean" ? r.readmeChanged : null;
   if (jobName === "graph-project-view") return typeof r.changed === "boolean" ? r.changed : null;
   return null;
 }
@@ -1501,7 +1512,27 @@ export async function runGraphProjectView(
     log(`graph-project-view: ${reason}.`);
     return { ok: true, skipped: false, changed: false, summary: [], coverage: null, incomplete: [reason] };
   }
-  if (meta.appliedByProjectView === meta.asOfGraphHash) {
+  // Composed before the up-to-date check, not beside the prompt, because
+  // drift is reported here. See `composeStageSkill`.
+  const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
+  const extraSkillFiles = await listExtraSkillFiles(projectFolder);
+  const { content: skillContent, fingerprint: skillFingerprint } = composeStageSkill(skill, generalSkill, extraSkillFiles);
+  const applied = meta.appliedByProjectView === meta.asOfGraphHash;
+  const staleSkill = applied && meta.appliedSkillFingerprint !== skillFingerprint;
+  const rewrite = staleSkill && opts.rebuildStale === true;
+  if (staleSkill && !rewrite) {
+    log(
+      "graph-project-view: README.md was written under an older PROJECT_VIEW.md and was left as it is (Rerun GraphLog Outputs rewrites it).",
+    );
+  }
+  if (rewrite) {
+    log(
+      meta.appliedSkillFingerprint
+        ? "graph-project-view: reconciling README.md again under the current PROJECT_VIEW.md."
+        : "graph-project-view: README.md has no skill stamp; reconciling it under the current PROJECT_VIEW.md.",
+    );
+  }
+  if (applied && !rewrite) {
     // The README is not rewritten, but it still exists and the graph is
     // still the graph, so coverage is measurable and gets measured. This
     // used to return `coverage: null`, which the run page reads (correctly)
@@ -1519,7 +1550,8 @@ export async function runGraphProjectView(
           new Map(allNodes.map((n) => [n.id, n])),
         )
       : null;
-    return { ok: true, skipped: false, changed: false, summary: [], coverage, incomplete: [] };
+    return { ok: true, skipped: false, changed: false,
+      staleSkill, summary: [], coverage, incomplete: [] };
   }
 
   // 1.1's own floor+ceiling (ADR-006): read every graph-log file's real
@@ -1548,11 +1580,6 @@ export async function runGraphProjectView(
   const today = new Date().toISOString().slice(0, 10);
   const nodeTextBlock = buildNodePrefetchBlock(structureSections, allNodesById, today);
 
-  const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
-  const extraSkillFiles = await listExtraSkillFiles(projectFolder);
-  const skillContent = [skill, generalSkill, ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`)]
-    .filter(Boolean)
-    .join("\n\n");
   const structureBody = splitFrontmatter(structureFile.content).body;
   const system = buildSystemPrompt(skillContent, {
     today,
@@ -1853,7 +1880,7 @@ export async function runGraphProjectView(
       await updateFileRef(fileId, { content: reconciledContent });
     }
 
-    await markGraphStructureApplied(structureListing._id, structureFile.content, meta.asOfGraphHash);
+    await markGraphStructureApplied(structureListing._id, structureFile.content, meta.asOfGraphHash, skillFingerprint);
     const changed = summaries.length > 0;
     log(
       changed

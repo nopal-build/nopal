@@ -205,11 +205,13 @@ import {
 import { getHumansById } from "./humans.server";
 import {
   classifyStageSkill,
+  composeStageSkill,
   ensureProjectGraphFolder,
   findProjectGraphFolder,
   getProjectStageSkill,
   isSkipInstruction,
   listExtraSkillFiles,
+  readSkillFingerprint,
 } from "./projectN02.server";
 import { parseSyncedCardFileName, parseSyncedAttachmentFileName, syncedAttachmentFileName } from "./dailyLogSync.server";
 import { extractFileAttachments } from "./sorter.server";
@@ -304,10 +306,15 @@ export function buildGraphLogContent(input: {
   hash: string | null;
   body: string;
   incompleteReason?: string | null;
+  /** Which GRAPH.md (plus SKILL.md and extra skill files) extracted this
+   * day — provenance only, never part of the up-to-date check. See
+   * `composeStageSkill`. */
+  skillFingerprint?: string;
 }): string {
   const frontmatter = stringifyYaml({
     date: input.date,
     ...(input.hash ? { sourceHash: input.hash } : {}),
+    ...(input.skillFingerprint ? { skillFingerprint: input.skillFingerprint } : {}),
     ...(input.incompleteReason ? { incomplete: input.incompleteReason } : {}),
     generatedAt: new Date().toISOString(),
   }).trimEnd();
@@ -1190,6 +1197,10 @@ export type SyncGraphResult =
       days: SyncGraphDayResult[];
       /** Total nodes written across every day this run. */
       nodesWritten: number;
+      /** Days that are up to date by sources but were extracted under an
+       * older GRAPH.md than the current one. Reported, never acted on by
+       * this stage (see `composeStageSkill`). Absent on early returns. */
+      staleDays?: number;
       /** Reasons this stage finished WITHOUT doing everything it set out
        * to, one human-readable line each; empty when it finished clean.
        *
@@ -1304,9 +1315,7 @@ export async function runSyncGraph(
 
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
   const extraSkillFiles = await listExtraSkillFiles(projectFolder);
-  const skillContent = [skill, generalSkill, ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`)]
-    .filter(Boolean)
-    .join("\n\n");
+  const { content: skillContent, fingerprint: skillFingerprint } = composeStageSkill(skill, generalSkill, extraSkillFiles);
 
   // `graph-structure.md` (if it exists) is the PRIMARY source for "nodes
   // from a previous run you may link back to" -- a real, glossed,
@@ -1362,6 +1371,7 @@ export async function runSyncGraph(
   // not one conversation), the very least this owes the run is to stop
   // reporting OK while it happens.
   const incomplete: string[] = [];
+  let staleDays = 0;
 
   for (const date of dates) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
@@ -1511,6 +1521,11 @@ export async function runSyncGraph(
       log(`sync-graph: ${graphLogFileName(date)} has front matter this run could not read; re-extracting the day and rewriting it.`);
     }
     if (existing && existingHash.hash === newHash) {
+      // Up to date by sources; may still hold nodes extracted under an
+      // older GRAPH.md. Counted and reported, never re-extracted on that
+      // basis alone: nodes are permanent (ADR-001) and re-extraction is
+      // the expensive, deliberate `reset-graph` (see `composeStageSkill`).
+      if (readSkillFingerprint(existing.content) !== skillFingerprint) staleDays += 1;
       days.push({ date, changed: false, empty: false, nodes: 0 });
       continue;
     }
@@ -1692,6 +1707,7 @@ export async function runSyncGraph(
         date,
         hash: shortfall ? null : newHash,
         incompleteReason: shortfall,
+        skillFingerprint,
         body: nodeBlocks.join("\n\n"),
       });
       const created = existing
@@ -1763,11 +1779,15 @@ export async function runSyncGraph(
     }
   }
 
+  if (staleDays > 0) {
+    log(`sync-graph: ${staleDays} of ${days.length} day(s) were extracted under an older GRAPH.md and were left as they are (reset-graph re-extracts them).`);
+  }
   return {
     ok: true,
     skipped: false,
     days,
     nodesWritten: days.reduce((sum, d) => sum + d.nodes, 0),
     incomplete,
+    staleDays,
   };
 }

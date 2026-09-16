@@ -96,6 +96,34 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   Idempotent via a content hash deciding what still needs (re)covering,
   same convention every other GraphLog stage's own idempotency uses (see
   "IDEMPOTENT via..." notes throughout this skill).
+- **Every stage STAMPS the skill it ran under, and no stage re-runs on
+  that basis by itself** (since 2026-09-15, `composeStageSkill` +
+  `readSkillFingerprint` in `projectN02.server.ts`: a 16-hex fingerprint
+  of the stage skill + `SKILL.md` + every extra skill file, i.e. exactly
+  the text the model reads). No stage's up-to-date hash sees the skill,
+  so a rewritten skill produces nothing for existing output: the past
+  keeps the old skill's output and only new content meets the new rules
+  (confirmed on Crouch Casita the day after PR #48 rewrote all three
+  skills and a reseed-then-run was a clean no-op). That is deliberate: a
+  skill under revision is uploaded and run on one or two projects over
+  and over, and rebuilding every project on each upload would be waste.
+  So: sidecars, day files and `graph-structure.md` carry
+  `skillFingerprint`; `graph-structure.md` also carries
+  `appliedSkillFingerprint` beside `appliedByProjectView` for the README.
+  Every run reports drift per stage and one `run: skill drift: ...`
+  summary line, with zero model calls. Acting on it is a choice per
+  project: **`rerun-outputs`** (Vault "Rerun GraphLog Outputs (stale
+  only)", `nopal graphlog rerun-outputs`, `api.graphlog.rerun-outputs.tsx`)
+  runs graph-structure then graph-project-view with `rebuildStale`, so
+  the structure is re-threaded from scratch (not incrementally: the
+  incremental path only places unplaced nodes and would leave the old
+  threads standing) and the README reconciled again, each only where its
+  stamp is stale, and the graph is never touched. Re-extracting days
+  under a new `GRAPH.md` is only ever `reset-graph`, destructive and in
+  red, because it is the expensive one. A file written before stamping
+  has no fingerprint and reads as stale until rebuilt once. The
+  model/effort a stage runs on (`STAGE_DEFAULTS`) is not part of the
+  fingerprint.
 - **sync-graph** — reads a project's `syncs/` tree (including
   `_knowledge/*.knowledge.md`) and, per `skills/GRAPH.md`, extracts
   citable nodes — verbatim or near-verbatim statements worth remembering
@@ -1182,7 +1210,9 @@ skill was born from:
    ONCE per invocation — not once per graph-log day — gated on
    `graph-structure.md`'s own `asOfGraphHash` versus the
    `appliedByProjectView` marker this stage stamps onto that SAME file
-   once an update completes cleanly. **A run is a LOOP OF PASSES** (same
+   once an update completes cleanly (`appliedSkillFingerprint` beside it
+   records which `PROJECT_VIEW.md` wrote the README; a mismatch is
+   reported as drift and acted on only under `rebuildStale`). **A run is a LOOP OF PASSES** (same
    ADR-013 shape as `sync-graph`'s day loop and `graph-structure`'s
    batches): pass 1 is one bounded tool-calling conversation
    (`update_section`/`remove_section`, `MAX_TURNS` bounds the PASS, never
@@ -1332,7 +1362,10 @@ skill was born from:
      next attempt's diff naturally finds only the still-missing ones.
    - **Idempotent via an aggregate hash of every graph-log file's OWN
      `sourceHash`**, stored as `asOfGraphHash` on `graph-structure.md`'s
-     own front matter — UNCHANGED from before this redesign. What
+     own front matter — UNCHANGED from before this redesign (the skill
+     fingerprint is stored beside it as `skillFingerprint`, reported as
+     drift on a mismatch, and re-threads every node from scratch only
+     under `rebuildStale`). What
      changed is WHEN it's written: interim tool-call commits during a
      run persist the file's BODY immediately, but `asOfGraphHash` itself
      is only stamped once the whole run finishes cleanly AND the safety
