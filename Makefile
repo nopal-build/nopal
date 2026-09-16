@@ -129,7 +129,7 @@ migrate:
 ##
 ## Repair/maintenance scripts that mutate prod data have mostly moved to
 ## the Admin Scripts registry instead (`adminScriptsRegistry.server.ts`,
-## run from /fruits/maker/scripts) — this target is now mainly for
+## run from /maker/scripts) — this target is now mainly for
 ## whatever's left under webapp/scripts/ (local/dev tooling like
 ## `pull-daily-logs.ts`, one-off content imports, etc).
 ## See that registry's own module doc before adding a new one-off script

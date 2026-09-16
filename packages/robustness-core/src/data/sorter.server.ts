@@ -302,7 +302,7 @@ export async function fileCardAttachments(
       date,
       actingHumanId,
       kind: "file-added",
-      summary: `Added file "${added.name}" — [View](/fruits/vault?file=${added._id})`,
+      summary: `Added file "${added.name}" — [View](/vault?file=${added._id})`,
       sourceRef,
       changesets,
     });
@@ -408,7 +408,7 @@ export async function sortDailyLog(
         date,
         actingHumanId: humanId,
         kind: "mention",
-        summary: `Mentioned in the daily log — [View](/fruits/vault?file=${readmeFileId})`,
+        summary: `Mentioned in the daily log — [View](/vault?file=${readmeFileId})`,
         sourceRef: readmeFileId,
       });
       if (created) entriesWritten++;
@@ -426,7 +426,7 @@ export async function sortDailyLog(
         date,
         actingHumanId: humanId,
         kind: "task",
-        summary: `Completed task: "${taskText}" — [View](/fruits/vault?file=${card.fileId})`,
+        summary: `Completed task: "${taskText}" — [View](/vault?file=${card.fileId})`,
         sourceRef: `${card.fileId}:${taskText}`,
       });
       if (created) entriesWritten++;

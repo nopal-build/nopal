@@ -92,7 +92,7 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
   if (skillsFolder) {
     // Seeds with the CURRENT effective defaults (an admin's override, if
     // set, else the hardcoded built-in) -- not a stale hardcoded string,
-    // so a change made on /fruits/maker/graphlog/defaults applies to
+    // so a change made on /maker/graphlog/defaults applies to
     // every project created from that point on.
     const effective = await getAllEffectiveGraphLogDefaultSkills();
     await Promise.all([
@@ -139,12 +139,12 @@ export type SkillReseedEntry = {
 
 /**
  * Force-overwrites this project's `skills/*.md` files with the CURRENT
- * effective defaults (an admin override on `/fruits/maker/graphlog/
+ * effective defaults (an admin override on `/maker/graphlog/
  * defaults` if one is set, else the hardcoded built-in) — the
  * retroactive half `applyProjectN02Shape`'s own seeding deliberately
  * isn't (see that function's doc: brand-new projects only). This is the
  * Vault's own "More Actions" → Reseed GraphLog Skills entry
- * (`fruits_.vault.tsx`), replacing the need to run
+ * (`fruits/app/routes/vault.tsx`), replacing the need to run
  * `scripts/reseed-graphlog-skills.ts` by hand every time a default
  * changes.
  *

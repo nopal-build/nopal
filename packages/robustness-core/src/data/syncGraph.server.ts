@@ -1469,7 +1469,7 @@ export async function runSyncGraph(
           name: contributorName,
           humanId: attribution.humanId,
           datetime: `${date}T12:00:00Z`,
-          location: `/fruits/vault?file=${source._id}`,
+          location: `/vault?file=${source._id}`,
           verbose: true,
         }),
       );

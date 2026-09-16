@@ -505,7 +505,7 @@ Interacting mode first, without needing that decision resolved.
    (parse/serialize, no React import), `OxRenderer`/`OxTreeRenderer`
    (`components/OxRenderer.tsx`), themed via `styles/oxmarkdown.css` +
    `oxmarkdown/theme.ts`. Demo/decision log:
-   `routes/fruits_.styles_.oxmarkdown.tsx`.
+   `fruits/app/routes/styles_.oxmarkdown.tsx`.
 2. **Done — interactables + Interacting-mode `OxEditor`**, no Lexical
    needed. `oxmarkdown/interactive.ts` (the `OxInteractive` contract),
    `OxTreeRenderer` (so `OxEditor` mutates the exact tree it renders, not a
@@ -558,7 +558,7 @@ Interacting mode first, without needing that decision resolved.
    (`findLeafDirectiveOccurrences`/`replaceDirectiveAttrInMatch`)
    `fileReferences.server.ts` still uses for File Referencing & Renaming's
    rename propagation, independent of rendering.
-   - **Done**: Daily Log (`routes/fruits_.daily-log.tsx`) — rebuilt fresh on
+   - **Done**: Daily Log (`fruits/app/routes/daily-log.tsx`) — rebuilt fresh on
      `OxEditor` (today's entry `mode="editing"`, past entries
      `mode="interacting"`), not a compatibility-preserving port. `@`
      mentions, file/image upload (step 10), and Cards (step 11) are all
@@ -579,13 +579,13 @@ Interacting mode first, without needing that decision resolved.
      margin + matching inward padding increase (so text position doesn't
      shift), giving the bleeding child a wider edge to land against.
    - **Done — every markdown view in the Vault and its public/card routes,
-     including `ProjectView.tsx`.** `fruits_.vault.tsx` (folder README
-     fallback, file-view fallback, `skills`/`graph` carve-outs, and the
-     `project-n01` anchor README branch via `ProjectView`),
+     including `ProjectView.tsx`.** `fruits/app/routes/vault.tsx` (folder
+     README fallback, file-view fallback, `skills`/`graph` carve-outs, and
+     the `project-n01` anchor README branch via `ProjectView`),
      `card.$fileId.tsx`, `public.file.$fileId.tsx`,
      `public.folder.$folderId.tsx`, and the Newspaper route
-     (`fruits_.newspaper.$folderId.tsx`) all render via plain `OxRenderer`
-     now. `ProjectView.tsx` dropped its whole `csv-table`/`gallery`/`svg`/
+     (`fruits/app/routes/newspaper.$folderId.tsx`) all render via plain
+     `OxRenderer` now. `ProjectView.tsx` dropped its whole `csv-table`/`gallery`/`svg`/
      `note` directive registry and `layout: "grid"`/per-block `size`
      support entirely, rather than porting it — an explicit product
      decision, not an oversight: legacy directives in old `project-n01`
@@ -595,7 +595,7 @@ Interacting mode first, without needing that decision resolved.
      }` — no more `files`/`folders`/`csvFields` directive resolution).
      A project's own `skills/*.md` files (see the `vault`/`graphlog`
      skills) render via a real `<OxEditor>`
-     (`SkillFileEditor` in `fruits_.vault.tsx`, mode `"editing"`/
+     (`SkillFileEditor` in `fruits/app/routes/vault.tsx`, mode `"editing"`/
      `"interacting"` per the existing write-permission check), since they
      never contained the legacy directive registry's directives at all.
 7. **Done — `@` mentions** (`oxmarkdown/mention.ts`, `MentionPlugin.tsx`).

@@ -429,7 +429,7 @@ A read-only attribution mark — who said/wrote something, when, and where
 it came from. Lives in `oxmarkdown-core/src/refDirective.ts`
 (`RefAttrs`/`buildRefDirectiveMarkdown`/`parseRefAttrs`), rendered by
 `components/OxRenderer.tsx`'s `RefDirectiveStatic`/`RefDirectiveMarker`.
-Demoed in `routes/fruits_.styles_.oxmarkdown.tsx`'s "Try it" playground.
+Demoed in `fruits/app/routes/styles_.oxmarkdown.tsx`'s "Try it" playground.
 
 - A TEXT directive (`:ref{...}`, inline, no children) — same built-in
   tier as `::file{...}`/`::card{...}` (never a caller-registered
@@ -458,7 +458,7 @@ Demoed in `routes/fruits_.styles_.oxmarkdown.tsx`'s "Try it" playground.
   `timeZone: "UTC"` — `toLocaleString(undefined, ...)` resolves to
   whatever locale/timezone the RUNTIME is in (server during SSR, browser
   during hydration), which caused a real hydration mismatch once. Same
-  fix `fruits_.profile.tsx`'s `formatSignedAt` uses, for the same reason.
+  fix `fruits/app/routes/profile.tsx`'s `formatSignedAt` uses, for the same reason.
 - **Known, accepted gap**: `humanProfileHref` builds an `/{humanId}:root`
   href (same `/humanId:path` shape the `oxmarkdown` skill documents for
   `@`-mentions), but there's no real human-profile PAGE to resolve it to
