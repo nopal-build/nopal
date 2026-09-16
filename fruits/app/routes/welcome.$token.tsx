@@ -11,13 +11,13 @@ import {
   Link,
 } from "react-router";
 import { startRegistration } from "@simplewebauthn/browser";
-import { Layout } from "../components/Layout";
-import { Footer } from "../components/Footer";
+import { AuthShell, AuthErrorText } from "../components/AuthShell";
 import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { button } from "stamps/button.css";
 import { link } from "stamps/link.css";
+import { colors, semanticColors } from "stamps/tokens";
 import { getUser, updateUserSession } from "../modules/auth/auth.server";
 import { sessionStorage } from "../modules/auth/session.server";
 import {
@@ -127,85 +127,69 @@ function ExistingSessionChoice({
     actionData && "success" in actionData ? actionData : undefined;
 
   return (
-    <Layout>
-      <div className="scene1">
-        <div
-          className={sprinkles({ px: 4, py: 12 })}
-          style={{ width: "100%", maxWidth: "24rem", margin: "0 auto" }}
-        >
-          <h1
-            className={`${textSize["3xl"]} purple-light-text ${sprinkles({
-              fontWeight: "bold",
-              mb: 4,
-            })}`}
-          >
-            You're already signed in
-          </h1>
-          <div
-            className={`${surfaceBase} ${sprinkles({
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              p: 4,
-            })}`}
-          >
-            <p className={textSize.sm} style={{ color: "var(--text-subtle)" }}>
-              You're signed in as <strong>{existingUser.email}</strong>, but
-              this passkey setup link was sent to{" "}
-              <strong>{invitedEmail}</strong>. What would you like to do?
-            </p>
+    <AuthShell title="You're already signed in">
+      <div
+        className={`${surfaceBase} ${sprinkles({
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          p: 4,
+        })}`}
+      >
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+          You're signed in as <strong>{existingUser.email}</strong>, but
+          this passkey setup link was sent to{" "}
+          <strong>{invitedEmail}</strong>. What would you like to do?
+        </p>
 
-            {aliasSuccess ? (
-              <div className={textSize.sm} style={{ color: "var(--green)" }}>
-                Done — {aliasSuccess.email} now signs in to this same
-                account.
-              </div>
-            ) : (
-              <div
-                className={sprinkles({ display: "flex", flexDirection: "column", gap: 2 })}
-              >
-                <Link
-                  to="/"
-                  className={`${button({ variant: "secondary" })} ${sprinkles({
-                    justifyContent: "center",
-                    textAlign: "center",
-                  })}`}
-                >
-                  Stay signed in as {existingUser.email}
-                </Link>
-
-                <Form method="post">
-                  <input type="hidden" name="intent" value="alias" />
-                  <button
-                    className={`${button({ variant: "secondary" })} ${sprinkles({
-                      justifyContent: "center",
-                    })}`}
-                    style={{ width: "100%" }}
-                    type="submit"
-                  >
-                    That's me — add {invitedEmail} as an alias
-                  </button>
-                </Form>
-
-                <Form method="post">
-                  <input type="hidden" name="intent" value="logout" />
-                  <button
-                    className={`${button({ variant: "secondary" })} ${sprinkles({
-                      justifyContent: "center",
-                    })}`}
-                    style={{ width: "100%" }}
-                    type="submit"
-                  >
-                    Log out and set up {invitedEmail} instead
-                  </button>
-                </Form>
-              </div>
-            )}
+        {aliasSuccess ? (
+          <div className={textSize.sm} style={{ color: colors.green }}>
+            Done — {aliasSuccess.email} now signs in to this same
+            account.
           </div>
-        </div>
+        ) : (
+          <div
+            className={sprinkles({ display: "flex", flexDirection: "column", gap: 2 })}
+          >
+            <Link
+              to="/"
+              className={`${button({ variant: "secondary" })} ${sprinkles({
+                justifyContent: "center",
+                textAlign: "center",
+              })}`}
+            >
+              Stay signed in as {existingUser.email}
+            </Link>
+
+            <Form method="post">
+              <input type="hidden" name="intent" value="alias" />
+              <button
+                className={`${button({ variant: "secondary" })} ${sprinkles({
+                  justifyContent: "center",
+                })}`}
+                style={{ width: "100%" }}
+                type="submit"
+              >
+                That's me — add {invitedEmail} as an alias
+              </button>
+            </Form>
+
+            <Form method="post">
+              <input type="hidden" name="intent" value="logout" />
+              <button
+                className={`${button({ variant: "secondary" })} ${sprinkles({
+                  justifyContent: "center",
+                })}`}
+                style={{ width: "100%" }}
+                type="submit"
+              >
+                Log out and set up {invitedEmail} instead
+              </button>
+            </Form>
+          </div>
+        )}
       </div>
-      <Footer></Footer>
-    </Layout>
+    </AuthShell>
   );
 }
 
@@ -275,56 +259,44 @@ function PasskeySetup({
   }
 
   return (
-    <Layout>
-      <div className="scene1">
-        <div
-          className={sprinkles({ px: 4, py: 12 })}
-          style={{ width: "100%", maxWidth: "24rem", margin: "0 auto" }}
-        >
-          <h1
-            className={`${textSize["3xl"]} purple-light-text ${sprinkles({
-              fontWeight: "bold",
-              mb: 4,
-            })}`}
-          >
-            Welcome, {invitedName}
-          </h1>
-          <div
-            className={`${surfaceBase} ${sprinkles({
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              p: 4,
-            })}`}
-          >
-            <p className={textSize.sm} style={{ color: "var(--text-subtle)" }}>
-              Set up a passkey so you can sign in instantly with your
-              fingerprint, face, or PIN — no email codes to wait for.
-            </p>
-            {error && <div className={`red-text ${textSize.sm}`}>{error}</div>}
-            <div className={sprinkles({ textAlign: "right" })}>
-              <button
-                className={button({ variant: "secondary" })}
-                type="button"
-                disabled={busy}
-                onClick={handleCreatePasskey}
-              >
-                {busy ? "Setting up…" : "Create a passkey"}
-              </button>
-            </div>
+    <AuthShell title={`Welcome, ${invitedName}`}>
+      <div
+        className={`${surfaceBase} ${sprinkles({
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          p: 4,
+        })}`}
+      >
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+          Set up a passkey so you can sign in instantly with your
+          fingerprint, face, or PIN — no email codes to wait for.
+        </p>
+        {error && (
+          <div className={textSize.sm}>
+            <AuthErrorText>{error}</AuthErrorText>
           </div>
-          <div className={sprinkles({ mt: 8, textAlign: "center" })}>
-            <Link
-              to={`/login?email=${encodeURIComponent(invitedEmail)}`}
-              className={link}
-            >
-              Skip for now — I'll use an email code
-            </Link>
-          </div>
+        )}
+        <div className={sprinkles({ textAlign: "right" })}>
+          <button
+            className={button({ variant: "secondary" })}
+            type="button"
+            disabled={busy}
+            onClick={handleCreatePasskey}
+          >
+            {busy ? "Setting up…" : "Create a passkey"}
+          </button>
         </div>
       </div>
-      <Footer></Footer>
-    </Layout>
+      <div className={sprinkles({ mt: 8, textAlign: "center" })}>
+        <Link
+          to={`/login?email=${encodeURIComponent(invitedEmail)}`}
+          className={link}
+        >
+          Skip for now — I'll use an email code
+        </Link>
+      </div>
+    </AuthShell>
   );
 }
 

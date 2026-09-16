@@ -5,8 +5,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { getFileRefById } from "robustness-core/data/vault.server";
 import type { FileRef } from "robustness-core/data/vault.types";
-import { Layout } from "../components/Layout";
-import { Footer } from "../components/Footer";
+import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
 import "../styles/vault.css";
 
@@ -26,21 +25,10 @@ export default function PublicCardPage() {
   const { file } = useLoaderData<{ file: FileRef }>();
 
   return (
-    <Layout>
-      <div className="scene1">
-        <div className="simple-container p-4" style={{ maxWidth: "760px" }}>
-          <h1
-            className="font-mono font-bold purple-light-text"
-            style={{ fontSize: "1.5rem", margin: "40px 0 24px" }}
-          >
-            {file.name.replace(/\.md$/i, "")}
-          </h1>
-          <div className="vault-readme-section">
-            <OxRenderer markdown={file.content ?? ""} />
-          </div>
-        </div>
+    <AuthShell title={file.name.replace(/\.md$/i, "")} maxWidth="760px">
+      <div className="vault-readme-section">
+        <OxRenderer markdown={file.content ?? ""} />
       </div>
-      <Footer />
-    </Layout>
+    </AuthShell>
   );
 }

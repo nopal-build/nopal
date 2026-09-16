@@ -12,11 +12,9 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, Form, useLoaderData, useActionData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { createApiTokenWithExchangeCode } from "robustness-core/data/apiTokens.server";
-import { Layout } from "../components/Layout";
-import { Footer } from "../components/Footer";
+import { AuthShell, AuthErrorText } from "../components/AuthShell";
 import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
-import { textSize } from "stamps/typography.css";
 import { button } from "stamps/button.css";
 
 function parsePort(value: string | null): string | null {
@@ -92,25 +90,9 @@ export default function CliLogin() {
 
   if ("error" in loaderData) {
     return (
-      <Layout>
-        <div className="scene1">
-          <div
-            className={sprinkles({ px: 4, py: 12 })}
-            style={{ width: "100%", maxWidth: "36rem", margin: "0 auto" }}
-          >
-            <h1
-              className={`${textSize["3xl"]} purple-light-text ${sprinkles({
-                fontWeight: "bold",
-                mb: 4,
-              })}`}
-            >
-              CLI Login
-            </h1>
-            <div className="red-text">{loaderData.error}</div>
-          </div>
-        </div>
-        <Footer></Footer>
-      </Layout>
+      <AuthShell title="CLI Login" maxWidth="36rem">
+        <AuthErrorText>{loaderData.error}</AuthErrorText>
+      </AuthShell>
     );
   }
 
@@ -118,84 +100,54 @@ export default function CliLogin() {
 
   if (actionData && "denied" in actionData) {
     return (
-      <Layout>
-        <div className="scene1">
-          <div
-            className={sprinkles({ px: 4, py: 12 })}
-            style={{ width: "100%", maxWidth: "36rem", margin: "0 auto" }}
-          >
-            <h1
-              className={`${textSize["3xl"]} purple-light-text ${sprinkles({
-                fontWeight: "bold",
-                mb: 4,
-              })}`}
-            >
-              CLI Login
-            </h1>
-            <p>Denied. You can close this tab and return to your terminal.</p>
-          </div>
-        </div>
-        <Footer></Footer>
-      </Layout>
+      <AuthShell title="CLI Login" maxWidth="36rem">
+        <p>Denied. You can close this tab and return to your terminal.</p>
+      </AuthShell>
     );
   }
 
   return (
-    <Layout>
-      <div className="scene1">
-        <div
-          className={sprinkles({ px: 4, py: 12 })}
-          style={{ width: "100%", maxWidth: "36rem", margin: "0 auto" }}
-        >
-          <h1
-            className={`${textSize["3xl"]} purple-light-text ${sprinkles({
-              fontWeight: "bold",
-              mb: 4,
-            })}`}
-          >
-            Authorize CLI access
-          </h1>
-          <div className={`${surfaceBase} ${sprinkles({ p: 4 })}`}>
-            <p className={sprinkles({ mb: 4 })}>
-              A command-line tool on <strong>{hostname}</strong> wants access to
-              your Nopal account (<strong>{email}</strong>).
-            </p>
-            {actionData && "error" in actionData && (
-              <div className={`red-text ${sprinkles({ mb: 4 })}`}>{actionData.error}</div>
-            )}
-            <Form
-              method="POST"
-              className={sprinkles({
-                display: "flex",
-                alignItems: "center",
-                gap: 2,
-                justifyContent: "flex-end",
-              })}
-            >
-              <input type="hidden" name="port" value={port} />
-              <input type="hidden" name="state" value={state} />
-              <input type="hidden" name="hostname" value={hostname} />
-              <button
-                className={button({ variant: "secondary", tint: "danger" })}
-                type="submit"
-                name="intent"
-                value="deny"
-              >
-                Deny
-              </button>
-              <button
-                className={button({ variant: "secondary" })}
-                type="submit"
-                name="intent"
-                value="approve"
-              >
-                Authorize
-              </button>
-            </Form>
+    <AuthShell title="Authorize CLI access" maxWidth="36rem">
+      <div className={`${surfaceBase} ${sprinkles({ p: 4 })}`}>
+        <p className={sprinkles({ mb: 4 })}>
+          A command-line tool on <strong>{hostname}</strong> wants access to
+          your Nopal account (<strong>{email}</strong>).
+        </p>
+        {actionData && "error" in actionData && (
+          <div className={sprinkles({ mb: 4 })}>
+            <AuthErrorText>{actionData.error}</AuthErrorText>
           </div>
-        </div>
+        )}
+        <Form
+          method="POST"
+          className={sprinkles({
+            display: "flex",
+            alignItems: "center",
+            gap: 2,
+            justifyContent: "flex-end",
+          })}
+        >
+          <input type="hidden" name="port" value={port} />
+          <input type="hidden" name="state" value={state} />
+          <input type="hidden" name="hostname" value={hostname} />
+          <button
+            className={button({ variant: "secondary", tint: "danger" })}
+            type="submit"
+            name="intent"
+            value="deny"
+          >
+            Deny
+          </button>
+          <button
+            className={button({ variant: "secondary" })}
+            type="submit"
+            name="intent"
+            value="approve"
+          >
+            Authorize
+          </button>
+        </Form>
       </div>
-      <Footer></Footer>
-    </Layout>
+    </AuthShell>
   );
 }

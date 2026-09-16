@@ -388,12 +388,28 @@ footer, no legacy CSS classes, nothing borrowed from webapp at all.
 `AuthErrorText` (also in that file) replaces the legacy `.red-text`
 class with `semanticColors.textDanger`.
 
-**Not yet done, same underlying issue:** `cli-login.tsx`,
-`welcome.$token.tsx`, `card.$fileId.tsx`, `public.file.$fileId.tsx`, and
-`public.folder.$folderId.tsx` still use `Layout`/`Footer`/`.scene1` —
-leave `Layout.tsx`/`Footer.tsx`/`GoodAssets.tsx` in `fruits/app/
-components` in place until those are migrated too (or decided against),
-since they're still real dependencies of those five files.
+**Update: done.** `cli-login.tsx`, `welcome.$token.tsx`,
+`card.$fileId.tsx`, `public.file.$fileId.tsx`, and
+`public.folder.$folderId.tsx` all converted to `AuthShell` too (widened
+its `title` prop to accept a `ReactNode`, not just a plain string, for
+the public vault pages' breadcrumb headings). With every consumer gone,
+`Layout.tsx`/`Footer.tsx`/`GoodAssets.tsx`/`useClickOutside.ts` and the
+marketing-only images they alone used (`nopal-v2.svg`, `nopal-dark-v2.
+svg`, `sun.svg`, `moon.svg`) were deleted from `fruits/app/` entirely —
+**every route in `fruits` is now free of webapp's marketing chrome.**
+Note: `fruits/app/styles/root.css` still carries the now-fully-unused
+`.scene1`/`.scene0*`/`.simple-container`/`.page-wrapper`/nav-related
+rules (dead CSS, harmless — a background-image rule that matches no
+element never fetches its image) — trimming that duplicated stylesheet
+down to only what `fruits` actually uses is a reasonable future cleanup,
+not done here.
+
+Verified the same way as the first three: `tsc --noEmit` clean, full
+`vitest run` (0 tests, unchanged), and a functional pass over the local
+Caddy proxy confirming each converted route still resolves/renders
+correctly (redirects for the auth-gated ones, real 404s through the new
+`AuthShell`-wrapped `ErrorBoundary`s for the public vault pages) with no
+trace of the old classes in the rendered output.
 
 **Other things discovered and handled along the way:**
 - `api.health.tsx` is **duplicated**, not moved — each service's own

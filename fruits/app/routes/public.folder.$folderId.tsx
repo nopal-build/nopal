@@ -14,8 +14,7 @@ import {
 } from "robustness-core/data/vault.server";
 import { isVaultRootFolder } from "robustness-core/data/vault.types";
 import { VAULT_ROOTS, isVaultRootKey } from "robustness-core/data/vaultRoots";
-import { Layout } from "../components/Layout";
-import { Footer } from "../components/Footer";
+import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
 import {
   fileIcon,
@@ -23,6 +22,7 @@ import {
   formatSize,
   isImageFile,
 } from "../util/publicVaultDisplay";
+import { semanticColors } from "stamps/tokens";
 import "../styles/vault.css";
 
 type Crumb = { id: string; label: string };
@@ -215,155 +215,147 @@ export default function PublicFolderPage() {
         : "↓ Download all (.zip)";
 
   return (
-    <Layout>
-      <div className="scene1">
-        <div className="simple-container p-4" style={{ maxWidth: "820px" }}>
-          <h1
-            className="font-mono font-bold purple-light-text"
-            style={{ fontSize: "1.1rem", margin: "40px 0 4px" }}
-          >
-            {crumbs.map((c, i) => (
-              <span key={c.id}>
-                {i > 0 && <span className="vault-v2-crumb-sep">/</span>}
-                {i === crumbs.length - 1 ? (
-                  <span>{c.label}</span>
-                ) : (
-                  <Link
-                    to={withRoot(`/public/folder/${c.id}`)}
-                    className="vault-v2-crumb"
-                  >
-                    {c.label}
-                  </Link>
-                )}
-              </span>
-            ))}
-          </h1>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "16px",
-              margin: "0 0 24px",
-            }}
-          >
-            <p
-              className="text-xs font-mono"
-              style={{ color: "var(--text-subtle)", margin: 0 }}
-            >
-              Published from Nopal
-            </p>
-            {children.files.length > 0 && (
-              <button
-                className="vault-toolbar-btn"
-                disabled={zipBusy}
-                onClick={handleDownloadAll}
-                title="Downloads every file in this folder as one .zip — sub-folders aren't included"
+    <AuthShell maxWidth="820px">
+      <h1
+        className="font-mono font-bold"
+        style={{ fontSize: "1.1rem", margin: "0 0 4px", color: semanticColors.textBrand }}
+      >
+        {crumbs.map((c, i) => (
+          <span key={c.id}>
+            {i > 0 && <span className="vault-v2-crumb-sep">/</span>}
+            {i === crumbs.length - 1 ? (
+              <span>{c.label}</span>
+            ) : (
+              <Link
+                to={withRoot(`/public/folder/${c.id}`)}
+                className="vault-v2-crumb"
               >
-                {zipButtonLabel}
-              </button>
+                {c.label}
+              </Link>
             )}
-          </div>
-          {zipState.phase === "error" && (
-            <p
-              className="vault-v2-upload-error font-mono"
-              style={{ margin: "-16px 0 24px", textAlign: "right" }}
-            >
-              {zipState.message}
-            </p>
-          )}
-
-          {children.folders.length === 0 && children.files.length === 0 ? (
-            <div className="vault-v2-empty">This folder is empty.</div>
-          ) : isAllImageGallery ? (
-            <div className="vault-gallery-grid">
-              {children.files.map((file) => (
-                <Link
-                  key={file._id}
-                  to={withRoot(`/public/file/${file._id}`)}
-                  className="vault-gallery-item"
-                >
-                  <img
-                    src={`/api/vault/public-thumb/${file._id}?v=${encodeURIComponent(file.updated_at)}`}
-                    alt={file.name}
-                    loading="lazy"
-                  />
-                  <span className="vault-gallery-item-name">{file.name}</span>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <div className="vault-v2-listing">
-              <div className="vault-v2-listing-header">
-                <span className="vault-v2-row-icon" aria-hidden="true" />
-                <span className="vault-v2-row-name">Name</span>
-                <span className="vault-v2-row-size">Size</span>
-                <span className="vault-v2-row-date">Last updated</span>
-              </div>
-              {children.folders.map((folder) => (
-                <Link
-                  key={folder._id}
-                  to={withRoot(`/public/folder/${folder._id}`)}
-                  className="vault-v2-row"
-                >
-                  <span className="vault-v2-row-icon">📁</span>
-                  <span className="vault-v2-row-name">{folder.name}</span>
-                  <span className="vault-v2-row-size" />
-                  <span className="vault-v2-row-date">
-                    {formatDate(folder.updated_at)}
-                  </span>
-                </Link>
-              ))}
-              {children.files.map((file) => (
-                <Link
-                  key={file._id}
-                  to={withRoot(`/public/file/${file._id}`)}
-                  className="vault-v2-row"
-                >
-                  <span className="vault-v2-row-icon">
-                    {fileIcon(file.content_type)}
-                  </span>
-                  <span className="vault-v2-row-name">{file.name}</span>
-                  <span className="vault-v2-row-size">
-                    {formatSize(file.size)}
-                  </span>
-                  <span className="vault-v2-row-date">
-                    {formatDate(file.updated_at)}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-
-          {readme && (
-            <div className="vault-readme-section" style={{ marginTop: "16px" }}>
-              <OxRenderer markdown={readme.content ?? ""} />
-            </div>
-          )}
-        </div>
+          </span>
+        ))}
+      </h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "16px",
+          margin: "0 0 24px",
+        }}
+      >
+        <p
+          className="text-xs font-mono"
+          style={{ color: semanticColors.textSubtle, margin: 0 }}
+        >
+          Published from Nopal
+        </p>
+        {children.files.length > 0 && (
+          <button
+            className="vault-toolbar-btn"
+            disabled={zipBusy}
+            onClick={handleDownloadAll}
+            title="Downloads every file in this folder as one .zip — sub-folders aren't included"
+          >
+            {zipButtonLabel}
+          </button>
+        )}
       </div>
-      <Footer />
-    </Layout>
+      {zipState.phase === "error" && (
+        <p
+          className="vault-v2-upload-error font-mono"
+          style={{ margin: "-16px 0 24px", textAlign: "right" }}
+        >
+          {zipState.message}
+        </p>
+      )}
+
+      {children.folders.length === 0 && children.files.length === 0 ? (
+        <div className="vault-v2-empty">This folder is empty.</div>
+      ) : isAllImageGallery ? (
+        <div className="vault-gallery-grid">
+          {children.files.map((file) => (
+            <Link
+              key={file._id}
+              to={withRoot(`/public/file/${file._id}`)}
+              className="vault-gallery-item"
+            >
+              <img
+                src={`/api/vault/public-thumb/${file._id}?v=${encodeURIComponent(file.updated_at)}`}
+                alt={file.name}
+                loading="lazy"
+              />
+              <span className="vault-gallery-item-name">{file.name}</span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <div className="vault-v2-listing">
+          <div className="vault-v2-listing-header">
+            <span className="vault-v2-row-icon" aria-hidden="true" />
+            <span className="vault-v2-row-name">Name</span>
+            <span className="vault-v2-row-size">Size</span>
+            <span className="vault-v2-row-date">Last updated</span>
+          </div>
+          {children.folders.map((folder) => (
+            <Link
+              key={folder._id}
+              to={withRoot(`/public/folder/${folder._id}`)}
+              className="vault-v2-row"
+            >
+              <span className="vault-v2-row-icon">📁</span>
+              <span className="vault-v2-row-name">{folder.name}</span>
+              <span className="vault-v2-row-size" />
+              <span className="vault-v2-row-date">
+                {formatDate(folder.updated_at)}
+              </span>
+            </Link>
+          ))}
+          {children.files.map((file) => (
+            <Link
+              key={file._id}
+              to={withRoot(`/public/file/${file._id}`)}
+              className="vault-v2-row"
+            >
+              <span className="vault-v2-row-icon">
+                {fileIcon(file.content_type)}
+              </span>
+              <span className="vault-v2-row-name">{file.name}</span>
+              <span className="vault-v2-row-size">
+                {formatSize(file.size)}
+              </span>
+              <span className="vault-v2-row-date">
+                {formatDate(file.updated_at)}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {readme && (
+        <div className="vault-readme-section" style={{ marginTop: "16px" }}>
+          <OxRenderer markdown={readme.content ?? ""} />
+        </div>
+      )}
+    </AuthShell>
   );
 }
 
 export function ErrorBoundary() {
   return (
-    <Layout>
-      <div className="scene1">
-        <div
-          className="simple-container p-4 text-center"
-          style={{ maxWidth: "600px", margin: "80px auto" }}
+    <AuthShell maxWidth="600px">
+      <div style={{ textAlign: "center" }}>
+        <h1
+          className="font-bold text-xl"
+          style={{ color: semanticColors.textBrand }}
         >
-          <h1 className="font-mono font-bold purple-light-text text-xl">
-            Not found
-          </h1>
-          <p className="text-sm font-mono" style={{ color: "var(--text-subtle)" }}>
-            This folder doesn't exist, or isn't published.
-          </p>
-        </div>
+          Not found
+        </h1>
+        <p className="text-sm font-mono" style={{ color: semanticColors.textSubtle }}>
+          This folder doesn't exist, or isn't published.
+        </p>
       </div>
-      <Footer />
-    </Layout>
+    </AuthShell>
   );
 }

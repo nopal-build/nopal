@@ -1,18 +1,19 @@
 // app/components/AuthShell.tsx
 //
-// Shared chrome for the pre-login/auth-flow pages (login, verify,
-// login-error, ...) — replaces the `Layout`/`Footer` marketing chrome +
-// `.scene1` hero art those pages used to borrow from webapp. That
-// dependency was never appropriate here (this app has no reason to pull
-// in webapp's CSS/images at all — see docs/marketing-app-split-plan.md),
-// and broke outright once the two apps' asset pipelines actually
-// separated (the `.scene1`/`.scene0*` background art in particular
-// references image paths that only ever existed in webapp).
+// Shared chrome for pages that appear before/without a session (login
+// flow, and the public, unauthenticated vault-sharing pages) — replaces
+// the `Layout`/`Footer` marketing chrome + `.scene1` hero art those pages
+// used to borrow from webapp. That dependency was never appropriate here
+// (this app has no reason to pull in webapp's CSS/images at all — see
+// docs/marketing-app-split-plan.md), and broke outright once the two
+// apps' asset pipelines actually separated (the `.scene1`/`.scene0*`
+// background art in particular references image paths that only ever
+// existed in webapp).
 //
 // Deliberately minimal: a centered logo (the same "no." mark
 // `AppLayout` uses, for visual continuity with the page a successful
 // login actually lands on) + a centered content column. No nav, no
-// footer — there's nothing to navigate to before you're signed in.
+// footer.
 import { Link } from "react-router";
 import type { ReactNode } from "react";
 import { semanticColors } from "stamps/tokens";
@@ -27,7 +28,10 @@ export function AuthShell({
   maxWidth = "24rem",
   children,
 }: {
-  title: string;
+  /** A plain string for most pages; a `ReactNode` (e.g. breadcrumb links)
+   * for the public vault-sharing pages' folder-path headings. Omit
+   * entirely for a page with no heading of its own. */
+  title?: ReactNode;
   maxWidth?: string;
   children: ReactNode;
 }) {
@@ -49,12 +53,14 @@ export function AuthShell({
         >
           <img src={isDark ? noLogoWhite : noLogoColor} alt="Nopal" style={{ height: "28px" }} />
         </Link>
-        <h1
-          className={`${textSize["3xl"]} ${sprinkles({ fontWeight: "bold", mb: 4 })}`}
-          style={{ color: semanticColors.textBrand }}
-        >
-          {title}
-        </h1>
+        {title && (
+          <h1
+            className={`${textSize["3xl"]} ${sprinkles({ fontWeight: "bold", mb: 4 })}`}
+            style={{ color: semanticColors.textBrand }}
+          >
+            {title}
+          </h1>
+        )}
         {children}
       </div>
     </div>
