@@ -152,20 +152,20 @@ unaffected and is the right way to test login on staging.)
 Against `https://fruits-staging.fly.dev` (or whatever custom domain you
 give it, if any — not required for staging):
 
-- [ ] `/login` → TOTP email code → lands on the dashboard (`/`).
-- [ ] `/daily-log` — write an entry, confirm it saves.
-- [ ] `/vault` — browse folders, upload a small file.
-- [ ] `/maker`, `/maker/graphlog` — loads for an Admin/Super account
+- [x] `/login` → TOTP email code → lands on the dashboard (`/`).
+- [x] `/daily-log` — write an entry, confirm it saves.
+- [x] `/vault` — browse folders, upload a small file.
+- [x] `/maker`, `/maker/graphlog` — loads for an Admin/Super account
       (GraphLog itself will fail without `ANTHROPIC_API_KEY` on staging —
       expected, see the secrets script's own comment; you're checking
       the page loads and shows a sane error, not that a real run
       succeeds).
-- [ ] `/styles` — the living style guide renders.
+- [x] `/styles` — the living style guide renders.
 
 Against `https://nopal-webapp-staging.fly.dev`:
 
-- [ ] `/`, `/about`, `/contact` still load.
-- [ ] `/fruits`, `/login`, `/api/vault/upload` each return a `308` to the
+- [x] `/`, `/about`, `/contact` still load.
+- [x] `/fruits`, `/login`, `/api/vault/upload` each return a `308` to the
       equivalent `fruits-staging.fly.dev` path (confirms the redirect +
       `APP_BASE_URL` wiring — see `webapp/fly.staging.toml`'s own
       comment for why staging points `APP_BASE_URL` at `fruits-staging`
@@ -173,18 +173,44 @@ Against `https://nopal-webapp-staging.fly.dev`:
 
 ## 5. DNS + TLS for `o.nopal.build`
 
+**First, allocate public IPs** — `fly apps create` (step 1) does NOT do
+this automatically the way `fly launch` normally would, so `nopal-fruits`
+starts with none at all:
+
+```sh
+fly ips allocate-v6 --app nopal-fruits
+fly ips allocate-v4 --shared --app nopal-fruits
+```
+
+Both are free (dedicated IPv6 always is; `--shared` IPv4 is too — a
+dedicated v4 costs money and isn't needed here). Mirrors what `webapp`
+already has (`fly ips list --app webapp-billowing-meadow-8538`).
+
 ```sh
 fly certs create o.nopal.build --app nopal-fruits
 ```
 
-This prints the exact DNS record to add (almost certainly a `CNAME`
-pointing at `nopal-fruits.fly.dev`, since `o.nopal.build` is a subdomain,
-not an apex domain — apex domains need `A`/`AAAA` instead, which is not
-this case). Add whatever it prints in your DNS registrar/provider for
-`nopal.build`, then confirm:
+Without the IPs above, this still "succeeds" but warns "Your app has no
+public IP addresses" and the cert can never actually verify — do the IP
+allocation first, not after.
+
+Then get the exact DNS records to add (don't guess — this varies):
 
 ```sh
-fly certs show o.nopal.build --app nopal-fruits
+fly certs setup o.nopal.build --app nopal-fruits
+```
+
+Pick ONE of the two options it prints — a single `CNAME` record
+(simplest, self-healing if Fly's IP ever changes) or the `A`+`AAAA` pair
+it lists as "recommended" (functionally equivalent for a subdomain like
+this one). Ignore the `_acme-challenge`/`_fly-ownership` records it also
+prints — those are only needed to validate the cert BEFORE pointing any
+real DNS at the app, which doesn't apply here since the main record
+goes up in this same step. Add whichever option you picked in your DNS
+registrar/provider for `nopal.build`, then confirm:
+
+```sh
+fly certs check o.nopal.build --app nopal-fruits
 ```
 
 Wait for this to report the cert as fully issued (DNS propagation can
