@@ -1,48 +1,90 @@
-.PHONY: dev start seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-worker restart-all cli release-cli update-cli-version
+.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-fruits restart-worker restart-all cli release-cli update-cli-version
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
 
-# ── Prod database access (for data-migration scripts) ─────────────────────
+# ── Prod database access (for data-migration scripts) ─────────────────
 DB_APP ?= db-thrumming-water-5938
 WEBAPP_APP ?= webapp-billowing-meadow-8538
+# The app's own prod Fly app (o.nopal.build) -- see fruits/fly.toml and
+# docs/phase-7-cutover-runbook.md. Not yet consumed by migrate-prod below
+# (that target still only runs webapp/scripts/* against webapp's own
+# credentials) -- kept here so the naming decision lives in one place,
+# ready for whenever a fruits-side equivalent is needed.
+FRUITS_APP ?= nopal-fruits
 PROXY_PORT ?= 8081
 
 # ── Full-stack dev lifecycle ───────────────────────────────────────────────────
 
-## Run unit tests and deploy the webapp, GraphLog worker, and db to Fly.io.
-## webapp/worker both build from the REPO ROOT (they're pnpm workspace
-## members depending on packages/robustness-core + packages/oxmarkdown-core),
-## so `fly deploy` runs from here with explicit --config/--dockerfile instead
-## of `cd`-ing into each app's own directory.
+## Run unit tests and deploy webapp, fruits, the GraphLog worker, and db to
+## Fly.io. webapp/fruits/worker all build from the REPO ROOT (they're pnpm
+## workspace members depending on packages/robustness-core +
+## packages/oxmarkdown-core), so `fly deploy` runs from here with explicit
+## --config/--dockerfile instead of `cd`-ing into each app's own directory.
 deploy:
 	pnpm --filter remix run test --run
+	pnpm --filter fruits run test --run
 	cd db && fly deploy
 	fly deploy . --config webapp/fly.toml --dockerfile webapp/Dockerfile
+	fly deploy . --config fruits/fly.toml --dockerfile fruits/Dockerfile
 	fly deploy . --config packages/worker/fly.toml --dockerfile packages/worker/Dockerfile
 
-## Deploy the webapp ONLY, to the staging Fly app (see webapp/fly.staging.toml).
-## Staging has no worker/DB of its own — it shares prod's SurrealDB instance,
-## scoped to an isolated `staging` database (make clone-staging-db populates it).
+## Deploy webapp AND fruits, to their respective staging Fly apps (see
+## webapp/fly.staging.toml, fruits/fly.staging.toml). Staging has no
+## worker/DB of its own — both share prod's SurrealDB instance, scoped to
+## an isolated `staging` database (make clone-staging-db populates it).
 deploy-staging:
 	pnpm --filter remix run test --run
+	pnpm --filter fruits run test --run
 	fly deploy . --config webapp/fly.staging.toml --dockerfile webapp/Dockerfile
+	fly deploy . --config fruits/fly.staging.toml --dockerfile fruits/Dockerfile
 
-## Start the database and webapp together, then seed the database.
-## --build keeps the webapp/worker dev image (Dockerfile.dev) in sync
-## whenever it changes — a no-op, cache-hit rebuild otherwise.
+## Start the database, webapp, and fruits together, then seed the database.
+## --build keeps the dev image (Dockerfile.dev) in sync whenever it
+## changes — a no-op, cache-hit rebuild otherwise.
+##
+## Also brings up a local Caddy reverse proxy (see Caddyfile) fronting
+## webapp/fruits at https://nopal.dev / https://o.nopal.dev instead of bare
+## localhost:3000/3001 — requires a one-time `/etc/hosts` entry and cert
+## trust, see README.md's "Local development domains" section (or just run
+## `make trust-local-certs` for the cert half). Plain localhost still works
+## too, untouched, if you'd rather skip that setup.
 dev:
 	docker compose up -d --wait --build
 
 	@echo ""
 	@echo "  ✓ SurrealDB  →  http://localhost:8080"
-	@echo "  ✓ Webapp     →  http://localhost:3000"
+	@echo "  ✓ Webapp     →  http://localhost:3000  (or https://nopal.dev — see README)"
+	@echo "  ✓ Fruits      →  http://localhost:3001  (or https://o.nopal.dev — see README)"
 	@echo "  ✓ GraphLog worker running (see 'docker compose logs -f worker')"
 	@echo "  ✓ Logs       →  http://localhost:9999"
 	@echo ""
 
 ## Alias for `make dev`.
 start: dev
+
+## One-time setup: trusts the local Caddy reverse proxy's self-signed CA
+## (see Caddyfile) in your OS's trust store, so browsers accept
+## https://nopal.dev / https://o.nopal.dev without a security warning.
+## Safe to re-run any time (e.g. after `make clean` wipes the caddy_data
+## volume and regenerates a new CA). macOS only for now — on Linux, import
+## the printed .crt path into your distro's ca-certificates store by hand.
+trust-local-certs:
+	docker compose up -d caddy
+	@echo "Waiting for Caddy to generate its local CA root cert..."
+	@for i in $$(seq 1 30); do \
+		docker compose exec caddy test -f /data/caddy/pki/authorities/local/root.crt && break; \
+		sleep 1; \
+	done
+	docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt /tmp/nopal-caddy-root.crt
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		echo "Adding Caddy's local root CA to the macOS System keychain (you'll be prompted for your password)..."; \
+		sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/nopal-caddy-root.crt; \
+		echo "✓ Trusted — restart your browser, then visit https://nopal.dev"; \
+	else \
+		echo "Non-macOS host — import /tmp/nopal-caddy-root.crt into your OS/browser trust store by hand."; \
+		echo "  Debian/Ubuntu: sudo cp /tmp/nopal-caddy-root.crt /usr/local/share/ca-certificates/nopal-caddy.crt && sudo update-ca-certificates"; \
+	fi
 
 ## Seed the running database with default namespaces, databases, and users.
 ## Depends on migrate so the tables exist before data is inserted.
@@ -87,7 +129,7 @@ migrate:
 ##
 ## Repair/maintenance scripts that mutate prod data have mostly moved to
 ## the Admin Scripts registry instead (`adminScriptsRegistry.server.ts`,
-## run from /fruits/maker/scripts) — this target is now mainly for
+## run from /maker/scripts) — this target is now mainly for
 ## whatever's left under webapp/scripts/ (local/dev tooling like
 ## `pull-daily-logs.ts`, one-off content imports, etc).
 ## See that registry's own module doc before adding a new one-off script
@@ -144,11 +186,17 @@ clone-staging-db:
 
 ## Restart the webapp container, clearing the Vite dep cache first.
 ## Use this after package changes or whenever the dev server needs a clean
-## reload. Does NOT restart the worker (see `restart-worker` below) --
-## despite the name, this is webapp-only.
+## reload. Does NOT restart fruits/worker (see `restart-fruits`/
+## `restart-worker` below) -- despite the name, this is webapp-only.
 restart:
 	docker compose exec webapp rm -rf /app/webapp/node_modules/.vite
 	docker compose restart webapp
+
+## Restart the fruits container, clearing its own Vite dep cache first --
+## the fruits half of `restart` above.
+restart-fruits:
+	docker compose exec fruits rm -rf /app/fruits/node_modules/.vite
+	docker compose restart fruits
 
 ## Restart the GraphLog worker container, clearing its own Vite dep cache
 ## first -- the worker's own half of `restart` above. `worker.ts` reads
@@ -163,10 +211,10 @@ restart-worker:
 	docker compose exec worker rm -rf /app/packages/worker/node_modules/.vite
 	docker compose restart worker
 
-## Restart both webapp and worker -- run this (not just `restart`) after
-## ANY webapp/.env change, so neither container is silently still
-## running on a stale secret.
-restart-all: restart restart-worker
+## Restart webapp, fruits, and worker -- run this (not just `restart`)
+## after ANY .env change, so no container is silently still running on a
+## stale secret.
+restart-all: restart restart-fruits restart-worker
 
 ## Stop all containers (data is preserved in named volumes).
 down:

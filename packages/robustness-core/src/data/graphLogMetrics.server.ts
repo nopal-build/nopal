@@ -6,8 +6,8 @@
  * `SKIP_MARKER`, are small, self-contained, deliberate duplications
  * rather than shared cross-file dependencies.
  *
- * `getGraphLogUsageSummary` (read by `/fruits/maker`'s "GraphLog Usage"
- * section and `/fruits/maker/graphlog`) and `pruneOldGraphLogUsageEvents`
+ * `getGraphLogUsageSummary` (read by `/maker`'s "GraphLog Usage"
+ * section and `/maker/graphlog`) and `pruneOldGraphLogUsageEvents`
  * (a `CRON_SECRET`-gated cleanup route) were added once the Maker
  * GraphLog page this file's own header used to say was a precondition
  * actually existed.
@@ -200,7 +200,7 @@ export async function pruneOldGraphLogUsageEvents(
   return { deleted: rows.length };
 }
 
-// ─── Aggregation for the /fruits/maker dashboards ──────────────────
+// ─── Aggregation for the /maker dashboards ──────────────────
 
 type UsageTotals = { callCount: number; inputTokens: number; outputTokens: number; estimatedCostUsd: number };
 

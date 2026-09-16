@@ -1,4 +1,8 @@
 /**
+ * DUPLICATED from fruits/app/oxmarkdown/interactive.ts -- see
+ * webapp/app/components/OxRenderer.tsx's own comment for why. Not shared;
+ * keep both in sync by hand.
+ *
  * The Interacting-mode contract `OxEditor` hands down to `OxRenderer`'s tree
  * walk. When absent, `OxRenderer` renders exactly as it did in step 1 (pure
  * static output) — nothing here changes that path. When present, task

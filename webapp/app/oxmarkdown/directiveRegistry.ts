@@ -1,4 +1,8 @@
 /**
+ * DUPLICATED from fruits/app/oxmarkdown/directiveRegistry.ts -- see
+ * webapp/app/components/OxRenderer.tsx's own comment for why. Not shared;
+ * keep both in sync by hand.
+ *
  * The directive-rendering contract shared between `OxRenderer` and (later)
  * `OxEditor` — callers register a renderer per directive name; `OxRenderer`
  * itself doesn't know what "csv-table" or "gallery" mean, only how to walk

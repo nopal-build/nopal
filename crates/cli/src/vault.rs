@@ -250,10 +250,10 @@ pub fn info(path: &str, json: bool) -> Result<(), Box<dyn Error + Send + Sync>> 
 pub fn open(path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
     let url = match resolve(&client, path)? {
-        Resolved::Root => format!("{}/fruits/vault", client.host),
-        Resolved::Folder(f) => format!("{}/fruits/vault?folder={}", client.host, f._id),
+        Resolved::Root => format!("{}/vault", client.host),
+        Resolved::Folder(f) => format!("{}/vault?folder={}", client.host, f._id),
         Resolved::File { file } => {
-            format!("{}/fruits/vault?file={}", client.host, file._id)
+            format!("{}/vault?file={}", client.host, file._id)
         }
     };
     println!("Opening {url}");

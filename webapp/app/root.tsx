@@ -228,6 +228,14 @@ export default function App() {
 
 export type RootLoaderData = {
   requestInfo: { clientHints: ClientHints };
+  // The app (login, dashboard, everything that used to live at /fruits/*)
+  // is a separate service now -- see docs/marketing-app-split-plan.md.
+  // Read from the SAME env var (and same default) as
+  // routes/docs.wc-waiver.tsx and server.js's own redirect middleware --
+  // this is what actually makes the split's staging env (fly.staging.toml
+  // points this at fruits-staging.fly.dev) reach every login link, not
+  // just the ones that happen to read process.env directly server-side.
+  appBaseUrl: string;
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -235,5 +243,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     requestInfo: {
       clientHints: getClientHints(request),
     },
+    appBaseUrl: process.env.APP_BASE_URL || "https://o.nopal.build",
   };
 }

@@ -1,5 +1,26 @@
-import { Link, NavLink } from "react-router";
+import { Link, NavLink, useRouteLoaderData } from "react-router";
 import { ReactNode } from "react";
+import type { RootLoaderData } from "../root";
+
+// The app (login, dashboard, everything else that used to live at
+// /fruits/*) is a separate service now -- see
+// docs/marketing-app-split-plan.md. Read from the root loader's
+// `appBaseUrl` (ultimately process.env.APP_BASE_URL) rather than
+// hardcoding it here -- this used to be a NODE_ENV-based guess
+// (prod/dev only, no staging case), which meant the "Login" link on
+// nopal-webapp-staging silently pointed at REAL prod (o.nopal.build)
+// instead of fruits-staging.fly.dev, since the Docker image's own
+// NODE_ENV is hardcoded to "production" for every deploy target, staging
+// included (see webapp/Dockerfile). `process.env.APP_BASE_URL` itself
+// isn't safe to reference directly in a component rendered on the
+// client too (Vite only inlines a small allowlist like NODE_ENV into the
+// client bundle, not arbitrary env vars) -- the root loader is what
+// actually resolves it per-request, server-side, and ships it down as
+// ordinary loader data instead.
+function useAppUrl(): string {
+  const rootData = useRouteLoaderData<RootLoaderData>("root");
+  return rootData?.appBaseUrl ?? "https://o.nopal.build";
+}
 
 function ContactUsLinks() {
   return (
@@ -19,6 +40,7 @@ function ContactUsLinks() {
 }
 
 export function FooterBase({ children }: { children?: ReactNode }) {
+  const appUrl = useAppUrl();
   return (
     <div className="scene0">
       <div className="scene0-bg" />
@@ -52,13 +74,12 @@ export function FooterBase({ children }: { children?: ReactNode }) {
           >
             Tools
           </NavLink>
-          <NavLink
-            prefetch="render"
+          <a
             className="ml-4 hover:underline text-nowrap"
-            to="/login"
+            href={`${appUrl}/login`}
           >
             Login
-          </NavLink>
+          </a>
           <NavLink
             prefetch="render"
             className="ml-4 hover:underline text-nowrap"

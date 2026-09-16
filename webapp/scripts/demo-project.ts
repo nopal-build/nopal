@@ -1,7 +1,8 @@
 // =============================================================================
 // One-off demo: creates a sample project folder with a manifest-driven
-// README.md so the `/fruits/newspaper/:folderId` view has something real to
-// render. Exercises the `::gallery{folder="..."}` leaf directive — see
+// README.md so the app's `/newspaper/:folderId` view (o.nopal.build --
+// see docs/marketing-app-split-plan.md) has something real to render.
+// Exercises the `::gallery{folder="..."}` leaf directive — see
 // `oxmarkdown-core/galleryDirective.ts`. Safe to re-run — deletes and
 // recreates the demo folder each time.
 //
@@ -169,7 +170,7 @@ async function main() {
   await uploadSvg(human._id, photos._id, "demo-1.svg", photoSvg("Demo day", "#c0533e"));
   await uploadSvg(human._id, photos._id, "demo-2.svg", photoSvg("Framing done", "#3f7f5c"));
 
-  console.log(`\n✓ Done. Visit /fruits/newspaper/${project._id} (as ${email}).`);
+  console.log(`\n✓ Done. Visit /newspaper/${project._id} on the app (o.nopal.build / o.nopal.dev) as ${email}.`);
 }
 
 main().catch((err) => {

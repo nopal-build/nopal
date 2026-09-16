@@ -27,6 +27,11 @@ strategy = 'bluegreen'
 # (DATABASE_URL, credentials, NS) is identical to prod on purpose: this
 # is the SAME SurrealDB instance, just a different `database` selected.
 DATABASE_DATABASE = 'staging'
+# Points staging's own "Log in"/legal-document links at fruits' STAGING
+# app, not prod's o.nopal.build — see webapp/fly.toml's own comment on
+# APP_BASE_URL for why this exists at all. Update if fruits-staging's
+# real Fly-assigned hostname/custom domain ends up different from this.
+APP_BASE_URL = 'https://fruits-staging.fly.dev'
 
 [http_service]
 internal_port = 3000

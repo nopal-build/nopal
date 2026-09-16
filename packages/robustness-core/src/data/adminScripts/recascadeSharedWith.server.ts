@@ -3,7 +3,7 @@
 // folder.
 //
 // Registered in `adminScriptsRegistry.server.ts` as "recascade-shared-with"
-// -- run it from /fruits/maker/scripts, not directly. Formerly a one-off
+// -- run it from /maker/scripts, not directly. Formerly a one-off
 // CLI script (`webapp/scripts/migrate-recascade-shared-with.ts`), ported
 // here so it runs on the worker (which already holds the real prod DB
 // credentials as Fly secrets) instead of requiring a local `vite-node` +

@@ -13,7 +13,7 @@
  *
  * Also holds an admin-editable-override layer (a single DB row,
  * `graphlog_default_skills`, one OPTIONAL field per stage) — added once
- * `/fruits/maker/graphlog/defaults` existed to review these from, not
+ * `/maker/graphlog/defaults` existed to review these from, not
  * before. See that module's own doc for the full reasoning (deliberately
  * NOT retroactive — only affects a brand new project's seed content going
  * forward, never an existing project's own already-seeded `skills/*.md`
@@ -508,7 +508,7 @@ export type EffectiveGraphLogDefaultSkill = {
   content: string;
   /** True when this is an admin-set override, not the hardcoded built-in
    * — drives the "Reset to built-in default" affordance on
-   * `/fruits/maker/graphlog/defaults`. */
+   * `/maker/graphlog/defaults`. */
   overridden: boolean;
 };
 
@@ -536,7 +536,7 @@ export async function getGraphLogDefaultsLastEdit(): Promise<{ updatedAt: string
 }
 
 /** All four at once, each labeled with whether it's overridden — what
- * `/fruits/maker/graphlog/defaults`'s own loader uses to render the
+ * `/maker/graphlog/defaults`'s own loader uses to render the
  * review/edit UI in a single round trip instead of four. */
 export async function getAllEffectiveGraphLogDefaultSkills(): Promise<
   Record<GraphLogDefaultStage, EffectiveGraphLogDefaultSkill>

@@ -1,4 +1,11 @@
 /**
+ * DUPLICATED from fruits/app/styles/oxmarkdown.css -- needed here too since
+ * webapp/app/components/OxRenderer.tsx is also duplicated (see its own
+ * comment for why). Includes some editor-only rules that never trigger
+ * here (webapp has no OxEditor), which is harmless -- not worth splitting
+ * out. Not shared; keep both copies in sync by hand if you touch
+ * OxMarkdown's visual design.
+ *
  * OxMarkdown — `.ox-content` + `.ox-tokens`
  *
  * Modeled off the MdxEditor design language (`mdxeditor.css` /

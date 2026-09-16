@@ -389,7 +389,7 @@ export async function getLatestCompletedGraphLogRun(projectFolderId: string): Pr
 }
 
 /** Most recent runs, newest first — powers the "Recent Runs" list on
- * `/fruits/maker/graphlog/defaults`. */
+ * `/maker/graphlog`. */
 export async function listRecentGraphLogRuns(limit = 20): Promise<GraphLogRun[]> {
   await ensureTables();
   const result = await query<[GraphLogRun[]]>(

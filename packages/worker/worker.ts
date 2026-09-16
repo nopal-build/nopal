@@ -317,7 +317,7 @@ console.log(`[worker] GraphLog worker listening on queue "${GRAPHLOG_QUEUE_NAME}
 
 // ─── Admin Scripts ─────────────────────────────────────────────────────────────
 // One-off/repair scripts registered in `adminScriptsRegistry.server.ts`,
-// triggered from /fruits/maker/scripts -- see that registry's own module
+// triggered from /maker/scripts -- see that registry's own module
 // doc for why this exists instead of running scripts locally against a
 // `fly proxy` tunnel.
 

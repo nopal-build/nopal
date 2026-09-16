@@ -18,6 +18,16 @@ primary_region = 'lax'
 
 [build]
 
+# The app service's own public URL -- webapp no longer serves login/vault/
+# etc itself (see docs/marketing-app-split-plan.md), but a couple of
+# marketing pages still need to link INTO the app (the "Log in" footer
+# link, the WC waiver admin-notification email's legal-document link).
+# Matches app/routes/docs.wc-waiver.tsx's own default when unset, so this
+# is set explicitly here mainly for documentation/safety, not because
+# anything breaks without it.
+[env]
+APP_BASE_URL = 'https://o.nopal.build'
+
 # Zero-downtime deploys: boot a full parallel machine per existing one,
 # wait for /api/health to pass on all of them, THEN flip traffic and kill
 # the old ones — requires at least one health check (below) to be defined.

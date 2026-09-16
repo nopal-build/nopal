@@ -17,7 +17,9 @@ mod vault_view;
 use app::NopalApp;
 
 /// The default Nopal host — same default the CLI's `nopal login` uses.
-pub const DEFAULT_HOST: &str = "https://nopal.build";
+/// The product app is its own service now, o.nopal.build — see
+/// docs/marketing-app-split-plan.md in the main repo.
+pub const DEFAULT_HOST: &str = "https://o.nopal.build";
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
