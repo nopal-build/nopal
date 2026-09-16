@@ -69,6 +69,12 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
+      # Points webapp's own login/legal-document links at the local fruits
+      # app -- see Footer.tsx's own comment for why this can't just be a
+      # NODE_ENV check. https, not http: fruits only actually works over
+      # the Caddy-fronted https://o.nopal.dev (WebAuthn needs a secure
+      # context) -- see the repo-root Caddyfile.
+      APP_BASE_URL: https://o.nopal.dev
     command: sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter remix run dev"
     # Hits the real dev server, so `docker compose up --wait` (used by
     # `make dev`) actually blocks until `pnpm install` AND `server.js` are
