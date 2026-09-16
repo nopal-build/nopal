@@ -5,7 +5,7 @@
 // against real content instead of fixtures.
 //
 // Usage (from webapp/):
-//   npx vite-node scripts/pull-daily-logs.ts --token=<bearer-token> --email=you@example.com [--host=https://nopal.build] [--name="Your Name"] [--projects=Sunny,Other] [--ignoreProject=Footage]
+//   npx vite-node scripts/pull-daily-logs.ts --token=<bearer-token> --email=you@example.com [--host=https://nopal.build] [--name="Your Name"] [--projects=Sunny,Other] [--ignoreProject=Footage] [--projectIds=<id,...>]
 //
 // Where to get --token: whatever bearer token your CLI is already using
 // against that host (`~/.config/nopal/credentials.json`, or your OS
@@ -28,6 +28,16 @@
 //                          (e.g. a raw-footage folder). Case-insensitive.
 // Neither flag affects daily-logs themselves — only which REFERENCED
 // projects get pulled alongside them.
+// --projectIds=id1,id2     ALSO pull these projects by folder id, whether
+//                          or not any of your own Cards reference them.
+//                          The case this exists for: testing GraphLog
+//                          against a project whose content is OTHER
+//                          people's logs (shared with you, so your token
+//                          can read it) — nothing of yours points at it,
+//                          so the Card walk below would never find it.
+//                          Goes through the same pull path as a referenced
+//                          project, so --projects/--ignoreProject still
+//                          apply to it by name.
 //
 // Also pulls down every PROJECT actually referenced by a Card among the
 // pulled days (recursively — the whole folder, including a `skills/`
@@ -144,6 +154,9 @@ type Args = {
    * include them — for a project with attachments too large to want
    * locally (e.g. a "Footage" folder of raw video). */
   ignoreProjects: string[];
+  /** Project folder ids to pull regardless of whether a Card references
+   * them — see the header's `--projectIds`. */
+  projectIds: string[];
 };
 
 function splitNames(value: string | undefined): string[] {
@@ -164,7 +177,7 @@ function parseArgs(): Args {
   const email = flags.get("email");
   if (!token || !email) {
     throw new Error(
-      "Usage: vite-node scripts/pull-daily-logs.ts --token=<bearer-token> --email=you@example.com [--host=https://nopal.build] [--name=\"Your Name\"] [--projects=Sunny,Other] [--ignoreProject=Footage]",
+      "Usage: vite-node scripts/pull-daily-logs.ts --token=<bearer-token> --email=you@example.com [--host=https://nopal.build] [--name=\"Your Name\"] [--projects=Sunny,Other] [--ignoreProject=Footage] [--projectIds=<id,...>]",
     );
   }
   return {
@@ -174,6 +187,7 @@ function parseArgs(): Args {
     name: flags.get("name") ?? email,
     projectsFilter: splitNames(flags.get("projects")),
     ignoreProjects: splitNames(flags.get("ignoreProject")),
+    projectIds: splitNames(flags.get("projectIds")).map((id) => id.replace(/^vault_folders:/, "")),
   };
 }
 
@@ -708,7 +722,7 @@ async function pullFolderTree(
 }
 
 async function main(): Promise<number> {
-  const { host, token, email, name, projectsFilter, ignoreProjects } = parseArgs();
+  const { host, token, email, name, projectsFilter, ignoreProjects, projectIds } = parseArgs();
 
   /** Reasons this pull is NOT usable, collected as they happen and
    * reported together at the end — each one also makes the process exit
@@ -744,7 +758,10 @@ async function main(): Promise<number> {
   let filesSkipped = 0;
   let daysCached = 0;
   let attachmentsCopied = 0;
-  const referencedProjectIds = new Set<string>();
+  // Seeded with `--projectIds` so a project nothing of yours references
+  // still takes the exact same path below as one a Card pointed at.
+  const referencedProjectIds = new Set<string>(projectIds);
+  if (projectIds.length > 0) console.log(`Also pulling ${projectIds.length} project(s) named by --projectIds.`);
 
   for (let i = 0; i < dateFolders.length; i++) {
     const dateFolder = dateFolders[i];

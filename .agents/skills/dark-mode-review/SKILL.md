@@ -1,3 +1,8 @@
+---
+name: dark-mode-review
+description: Visually verify Nopal's app (`fruits/`) pages in both light and dark mode by screenshotting them with `scripts/visual-check.ts` (Playwright, auto-authenticated). Use when asked to check, review, or fix dark mode / `prefers-color-scheme` styling, contrast issues, or CSS variable overrides in `fruits/app/styles/*.css`.
+---
+
 # Dark mode visual review
 
 Nopal's dark mode is driven entirely by `prefers-color-scheme` — there's no

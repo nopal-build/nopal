@@ -65,8 +65,21 @@ function parseRefLineAttrs(raw: string): { name: string | null; humanId: string 
  * its `### Node <N>` blocks. A block with no `:ref{...}` line (shouldn't
  * happen for real GraphLog output, but a hand-edited or malformed file is
  * possible) is skipped rather than guessed at.
+ *
+ * SKIPPED, BUT NEVER SILENTLY. A node dropped here is gone from
+ * graph-structure, from the README, from every backlink weight, and from
+ * the node count, forever, with nothing to say so -- and since the
+ * heading is written by the model and the `:ref` by code, a formatting
+ * drift between them shrinks the graph without a single error. Pass
+ * `diagnostics` to learn how many blocks were dropped; the two stages
+ * that read the graph report it through `incomplete` (ADR-016). The
+ * return shape is unchanged so the many pure callers stay pure.
  */
-export function parseGraphLogNodes(date: string, body: string): GraphLogNode[] {
+export function parseGraphLogNodes(
+  date: string,
+  body: string,
+  diagnostics?: { malformed: number },
+): GraphLogNode[] {
   const lines = body.split("\n");
   const blocks: string[][] = [];
   let current: string[] | null = null;
@@ -87,7 +100,12 @@ export function parseGraphLogNodes(date: string, body: string): GraphLogNode[] {
     const number = Number(headingMatch[1]);
 
     const refIndex = block.findIndex((l) => REF_LINE_RE.test(l.trim()));
-    if (refIndex === -1) continue; // malformed — no citation, skip rather than guess.
+    if (refIndex === -1) {
+      // malformed — no citation, skip rather than guess. Counted, not
+      // hidden: see the doc above.
+      if (diagnostics) diagnostics.malformed++;
+      continue;
+    }
     const refMatch = REF_LINE_RE.exec(block[refIndex].trim())!;
     const { name, humanId } = parseRefLineAttrs(refMatch[1]);
 
@@ -256,14 +274,28 @@ export type BacklinkInfo = {
  * simply has no entry — callers should treat a missing id as "0, no
  * authors, no span", not an error.
  */
-export function computeBacklinkIndex(allNodes: GraphLogNode[]): Map<string, BacklinkInfo> {
+export function computeBacklinkIndex(
+  allNodes: GraphLogNode[],
+  /** Optional counter for links whose target is not in the graph. Since
+   * `sync-graph` validates every id at write time, a dangling link at
+   * READ time means a graph-log file was deleted or regenerated with
+   * different numbering (a `reset-graph`, a rewritten day). Every such
+   * edge is weight that used to feed `refreshClusterWeight` and the
+   * ordering the coverage report calls "rank 1", and it used to degrade
+   * with nothing counting it (ADR-016). */
+  diagnostics?: { dangling: number },
+): Map<string, BacklinkInfo> {
   const byId = new Map(allNodes.map((n) => [n.id, n]));
   const index = new Map<string, BacklinkInfo>();
 
   for (const node of allNodes) {
     for (const link of node.links) {
       const targetId = nodeId(link.date, link.number);
-      if (!byId.has(targetId)) continue; // the model named a link that doesn't exist — ignore, don't fabricate.
+      if (!byId.has(targetId)) {
+        // the model named a link that doesn't exist — ignore, don't fabricate.
+        if (diagnostics) diagnostics.dangling++;
+        continue;
+      }
       const existing = index.get(targetId);
       // Identity, in descending order of trustworthiness: the human id
       // (distinct per person even when the name isn't), then the name (a

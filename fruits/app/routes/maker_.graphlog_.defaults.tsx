@@ -24,9 +24,11 @@ import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import {
   getAllEffectiveGraphLogDefaultSkills,
+  getGraphLogDefaultsLastEdit,
   setGraphLogDefaultSkillOverride,
   type GraphLogDefaultStage,
 } from "robustness-core/data/graphLogDefaults.server";
+import { getHumansById } from "robustness-core/data/humans.server";
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -40,7 +42,14 @@ async function requireMakerAccess(request: Request) {
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireMakerAccess(request);
   const defaultSkills = await getAllEffectiveGraphLogDefaultSkills();
-  return { defaultSkills };
+  const lastEdit = await getGraphLogDefaultsLastEdit();
+  const editor = lastEdit ? (await getHumansById([lastEdit.updatedByHumanId]))[0] : undefined;
+  return {
+    defaultSkills,
+    lastEdit: lastEdit
+      ? { updatedAt: lastEdit.updatedAt, by: editor?.name || editor?.email || lastEdit.updatedByHumanId }
+      : null,
+  };
 }
 
 const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "graph", "graphStructure", "projectView"]);
@@ -261,7 +270,7 @@ function DefaultSkillEditor({
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 export default function FruitsMakerGraphLogDefaults() {
-  const { defaultSkills } = useLoaderData<typeof loader>();
+  const { defaultSkills, lastEdit } = useLoaderData<typeof loader>();
 
   return (
     <AppLayout>
@@ -285,6 +294,11 @@ export default function FruitsMakerGraphLogDefaults() {
             the database, so this survives every deploy/restart just like any other app
             data -- it's not reset by redeploying `webapp`/`worker`.
           </p>
+          {lastEdit ? (
+            <p className="text-xs subtle-text" style={{ margin: 0, marginTop: "8px" }}>
+              Overrides last changed {new Date(lastEdit.updatedAt).toLocaleString()} by {lastEdit.by}.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-col gap-4">

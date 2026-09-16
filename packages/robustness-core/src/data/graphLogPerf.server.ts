@@ -75,6 +75,40 @@ export type GraphLogRun = Data & {
   days_written: number | null;
   graph_node_count: number | null;
   thread_count: number | null;
+  /** What `graph-project-view`'s own coverage check found once it had
+   * finished writing: which threads the README ended up citing nothing
+   * from, which fell away on purpose, and which attached files got
+   * dropped. See `CoverageReport` (`graphProjectView.server.ts`).
+   *
+   * `null` is NOT "clean" — it means NOTHING WAS MEASURED. Coverage is
+   * computed only on a fully clean finish, so every truncated, refused,
+   * turn-limited or skipped run records `null` here: the runs whose
+   * coverage you would most want are exactly the ones that have none.
+   * A measured-and-clean run stores an object with three empty arrays.
+   * Anything reading this must keep those two apart, or a run that never
+   * got far enough to check will read as a run that checked and passed.
+   *
+   * Stored as one object rather than three flat columns precisely so that
+   * distinction survives: three nulls cannot say which of the two it is.
+   *
+   * A MEASUREMENT, not a rule (see `CoverageReport`'s own doc). Nothing
+   * gates on it, nothing retries because of it, and it deliberately does
+   * not feed README.md's own incomplete banner — the first production run
+   * left four of ten threads unrepresented with no predictable pattern,
+   * so a warning wired to this today would fire on nearly every run and
+   * teach everyone to ignore it. It is here to accumulate the data that
+   * decides where a real threshold belongs. */
+  coverage: {
+    uncited_threads: string[];
+    threads_fell_away: string[];
+    dropped_files: string[];
+  } | null;
+  /** Whether this run edited README.md. Read next to `coverage`: a
+   * coverage figure on a run that changed nothing was measured against
+   * the README as it already stood, and the run page says which. `null`
+   * for a job that never touches the README (a reset, a sync-only job)
+   * and for rows written before this field existed. */
+  readme_changed: boolean | null;
 };
 
 export type GraphLogRunEvent = Data & {
@@ -260,6 +294,18 @@ export async function finishGraphLogRun(
       graphNodeCount: number | null;
       threadCount: number | null;
     } | null;
+    /** Deliberately its OWN outcome field rather than another key inside
+     * `stats`: `stats` is the full-pipeline denominator set, and the
+     * worker's own shape check for it keys on `nodesWritten`/`daysWritten`
+     * which only a `"run"` job ever produces. Coverage folded in there
+     * would be silently dropped for a single-stage `graph-project-view`
+     * job, which is the one job most worth measuring. */
+    coverage?: {
+      uncitedThreads: string[];
+      threadsFellAway: string[];
+      droppedFiles: string[];
+    } | null;
+    readmeChanged?: boolean | null;
   },
 ): Promise<void> {
   try {
@@ -285,6 +331,18 @@ export async function finishGraphLogRun(
       days_written: outcome.stats?.daysWritten ?? null,
       graph_node_count: outcome.stats?.graphNodeCount ?? null,
       thread_count: outcome.stats?.threadCount ?? null,
+      // This upsert replaces the row's content with exactly the fields
+      // named here, so a field written earlier in the run and left out
+      // of this list is erased at finish. Schemaless makes ADDING a field
+      // free; it does not make it survive this call.
+      coverage: outcome.coverage
+        ? {
+            uncited_threads: outcome.coverage.uncitedThreads,
+            threads_fell_away: outcome.coverage.threadsFellAway,
+            dropped_files: outcome.coverage.droppedFiles,
+          }
+        : null,
+      readme_changed: outcome.readmeChanged ?? null,
     });
   } catch (err) {
     console.error("GraphLog run tracking failed to finish (non-fatal):", err);

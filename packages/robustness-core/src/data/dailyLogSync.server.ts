@@ -156,6 +156,15 @@ export type DailyLogSyncResult = {
   unchanged: { date: string; humanId: string }[];
   /** A Card attachment copied in for the first time this run. */
   attachmentsCopied: { date: string; humanId: string; fileId: string; name: string }[];
+  /** Reasons this stage finished without doing everything it set out to,
+   * same shape every other stage uses. Empty on a clean run.
+   *
+   * An attachment that fails to copy is the whole of a photo's path into
+   * the graph: not copied here means sync-knowledge never sees it, which
+   * means no description, which means no node, which means it is absent
+   * from the README with nothing anywhere saying why. It was a bare
+   * `continue`. */
+  incomplete: string[];
 };
 
 /**
@@ -203,7 +212,8 @@ export async function runDailyLogSync(
   const range = date ? { since: date, until: date } : { since, until };
   const entries = await listCardEntriesForProject(projectFolderId, range);
 
-  const result: DailyLogSyncResult = { synced: [], unchanged: [], attachmentsCopied: [] };
+  const result: DailyLogSyncResult = { synced: [], unchanged: [], attachmentsCopied: [], incomplete: [] };
+  const uncopied: string[] = [];
 
   for (const { humanId, date: entryDate } of entries) {
     const cards = await getDailyLogCards(humanId, entryDate);
@@ -259,7 +269,13 @@ export async function runDailyLogSync(
       }
 
       const copied = await copyFileIntoFolder(attachment.fileId, dailyLogsFolder._id);
-      if (!copied) continue; // source file vanished mid-flight
+      if (!copied) {
+        // Source file vanished mid-flight. Still not an error that should
+        // fail the run, but no longer silent: this attachment has lost its
+        // only route into the graph.
+        uncopied.push(`${attachment.name} (${entryDate})`);
+        continue;
+      }
 
       // `copyFileIntoFolder` auto-dedupes against the SOURCE's own filename
       // (see its own doc) — rename to our deterministic name right after,
@@ -285,5 +301,12 @@ export async function runDailyLogSync(
     }
   }
 
+  if (uncopied.length > 0) {
+    result.incomplete.push(
+      `${uncopied.length} attachment(s) could not be copied out of their Card, so they have no path into the graph: ` +
+        uncopied.slice(0, 5).join(", ") +
+        (uncopied.length > 5 ? `, and ${uncopied.length - 5} more` : ""),
+    );
+  }
   return result;
 }

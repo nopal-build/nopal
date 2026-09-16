@@ -83,6 +83,17 @@
  * suspenders, since a clearer prompt still reduces how often the reject-
  * and-retry path even needs to fire.
  *
+ * That fix had a second half, and it shipped to graph-project-view first:
+ * the reject-and-retry above only runs on a response that came back
+ * CLEAN. A batch big enough to hit the ceiling arrives as `max_tokens`,
+ * and this loop used to discard that whole response before the pruning
+ * ever ran -- complete `add_node` calls and all. A real day (2026-08-26,
+ * Crouch Casita) was recorded as "captured nothing" that way, with the
+ * "retry next run" being the identical pass over identical sources. Now
+ * a cut-off turn executes its first COMPLETE call (`completedToolCalls`)
+ * and ends the pass; one node is a productive pass, so the pass loop
+ * carries on and the next pass captures the rest.
+ *
  * Each node gets a plain, predictable `### Node <N>` heading (an
  * incrementing counter per day's file, never an LLM-generated title —
  * see `GRAPH.md`) and a verbose `:ref{...}` citation
@@ -122,7 +133,9 @@
  * `KNOWLEDGE.md` change that only touches the sidecar still invalidates
  * the day, not just a source-file edit) — stored in the graph-log file's
  * own front matter. An unchanged day is a total no-op. A CHANGED day's
- * existing `graph-log-*.md` is DELETED and fully regenerated — never
+ * existing `graph-log-*.md` is fully regenerated and REPLACED IN PLACE
+ * once the new content exists (never deleted up front — a failed
+ * re-extraction keeps the previous day; see the day loop) — never
  * partially patched (see the `graphlog` skill's own doc on why: node
  * extraction is a single holistic judgment over the whole day, not
  * something that composes incrementally the way `graph-project-view`'s
@@ -186,15 +199,19 @@ import {
   deleteFileRef,
   getFileRefById,
   listFolderChildren,
+  updateFileRef,
   type VaultFolder,
 } from "./vault.server";
 import { getHumansById } from "./humans.server";
 import {
+  classifyStageSkill,
+  composeStageSkill,
   ensureProjectGraphFolder,
   findProjectGraphFolder,
   getProjectStageSkill,
   isSkipInstruction,
   listExtraSkillFiles,
+  readSkillFingerprint,
 } from "./projectN02.server";
 import { parseSyncedCardFileName, parseSyncedAttachmentFileName, syncedAttachmentFileName } from "./dailyLogSync.server";
 import { extractFileAttachments } from "./sorter.server";
@@ -202,8 +219,8 @@ import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
-import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
-import { planTurnToolCalls } from "./llmProvider";
+import { GraphLogCancelledError, throwIfGraphLogCancelled } from "./graphLogQueue.server";
+import { completedToolCalls, cutOffSourceIndex, planTurnToolCalls } from "./llmProvider";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
 
 const GRAPH_LOG_PREFIX = "graph-log-";
@@ -242,15 +259,28 @@ function extractHeadings(markdown: string): NodeHeading[] {
 }
 
 export function existingSourceHash(content: string | null): string | null {
-  if (!content) return null;
+  return readSourceHash(content).hash;
+}
+
+/**
+ * The hash, AND whether the front matter could be read at all. A bare
+ * `catch { return null }` made corrupt front matter indistinguishable
+ * from "no hash yet", which means "reprocess" -- so a file with
+ * permanently unparseable front matter was re-extracted by the model on
+ * every run, forever, at full cost, and reported itself as ordinary work.
+ * The caller now names it (ADR-016). Still reprocessed, since the day's
+ * content is what matters and the rewrite repairs the front matter.
+ */
+export function readSourceHash(content: string | null): { hash: string | null; unreadable: boolean } {
+  if (!content) return { hash: null, unreadable: false };
   const { frontmatter } = splitFrontmatter(content);
-  if (!frontmatter) return null;
+  if (!frontmatter) return { hash: null, unreadable: false };
   try {
     const data = parseYaml(frontmatter) as Record<string, unknown> | null;
     const hash = data?.sourceHash;
-    return typeof hash === "string" ? hash : null;
+    return { hash: typeof hash === "string" ? hash : null, unreadable: false };
   } catch {
-    return null;
+    return { hash: null, unreadable: true };
   }
 }
 
@@ -276,10 +306,15 @@ export function buildGraphLogContent(input: {
   hash: string | null;
   body: string;
   incompleteReason?: string | null;
+  /** Which GRAPH.md (plus SKILL.md and extra skill files) extracted this
+   * day — provenance only, never part of the up-to-date check. See
+   * `composeStageSkill`. */
+  skillFingerprint?: string;
 }): string {
   const frontmatter = stringifyYaml({
     date: input.date,
     ...(input.hash ? { sourceHash: input.hash } : {}),
+    ...(input.skillFingerprint ? { skillFingerprint: input.skillFingerprint } : {}),
     ...(input.incompleteReason ? { incomplete: input.incompleteReason } : {}),
     generatedAt: new Date().toISOString(),
   }).trimEnd();
@@ -423,6 +458,30 @@ function extractStructureNodeIds(body: string): Map<string, string> {
   return map;
 }
 
+/**
+ * graph-structure.md with one day's own `- <date> Node <N>` lines removed,
+ * for a day being REGENERATED.
+ *
+ * Found in a real run: a day whose sources had changed was re-extracted,
+ * the model was shown the structure with that day's previous nodes listed
+ * under their threads, and it concluded "these nodes already exist in the
+ * graph structure ... no new content to add today". The day came back
+ * empty and lost every node it had. Three days went that way in one run.
+ * The previous version of a regenerated day is NOT captured -- the whole
+ * point of regenerating is that its file is replaced -- so its lines
+ * must not be in front of the model as if it were. Structural, not
+ * instructed: the lines are gone, so there is nothing to misread.
+ */
+export function stripDayFromStructure(body: string, date: string): string {
+  return body
+    .split("\n")
+    .filter((line) => {
+      const match = STRUCTURE_NODE_LINE_RE.exec(line.trim());
+      return !(match && match[1] === date);
+    })
+    .join("\n");
+}
+
 /** Same shape as `extractStructureNodeIds`, but over `headingsByDate`'s
  * live/fallback heading lists (see `runSyncGraph`'s own module doc on
  * when each source is used). */
@@ -499,6 +558,38 @@ const TOOLS: ToolDefinition[] = [
  * structurally guaranteed instead of merely requested). Blocks are joined
  * with a blank line, since separate `==...==` spans are exactly how a
  * multi-paragraph verbatim passage must be represented at all. */
+/** The list size at which `add_node` asks the unit question once. */
+const LIST_BOUNCE_MIN_ITEMS = 3;
+
+/**
+ * Whether an `add_node` call's blocks hold a list of several items, and
+ * a key that identifies exactly those blocks, so the executor can bounce
+ * the FIRST such call with `GRAPH.md`'s own two-step test and accept the
+ * same blocks when they come back unchanged.
+ *
+ * Why code asks at all: `GRAPH.md` (2026-09-14) shows a real four-bullet
+ * section under a heading and says it is four nodes, and Sonnet 5 at
+ * medium and at high still wrote it as one node on every run, while
+ * Opus split it unprompted under the previous skill. A worked example
+ * in the skill did not move the literal reader; the tool result is the
+ * channel it answers to (the same reason dropped links and thread
+ * overflow are reported there). One bounce per distinct list, never a
+ * refusal of the list itself: a shopping list is one node and the
+ * resend costs one turn.
+ */
+export function listSplitBounce(rawBlocks: unknown): { key: string; items: number } | null {
+  if (!Array.isArray(rawBlocks)) return null;
+  let items = 0;
+  for (const block of rawBlocks) {
+    if (block && typeof block === "object" && (block as { type?: unknown }).type === "list") {
+      const list = (block as { items?: unknown }).items;
+      if (Array.isArray(list)) items += list.length;
+    }
+  }
+  if (items < LIST_BOUNCE_MIN_ITEMS) return null;
+  return { key: JSON.stringify(rawBlocks), items };
+}
+
 function renderQuoteBlocks(rawBlocks: unknown, highlight: boolean = true): string | null {
   if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) return null;
   const mark = (text: string) => (highlight ? `==${text}==` : text);
@@ -641,16 +732,35 @@ function createSyncGraphExecutors(input: {
    * today already holds and not re-capture it -- the mechanism that makes
    * a day safe to split across several conversations. */
   getCapturedSummaries: () => string[];
+  /** Link ids this day's nodes named that were NOT written: invented
+   * (not a real node) or over the per-node cap. Each was reported only in
+   * the `add_node` tool result -- to the model, and to nobody else -- so
+   * the graph's edge density was being clipped with no number anywhere.
+   * Aggregated onto the day's own timeline event and log line (ADR-016).
+   * The cap is ADR-002 and by design; the invented ones are the number
+   * to watch. */
+  getDroppedLinks: () => { invalid: number; overCap: number };
 } {
   const nodeBlocks: string[] = [];
   const capturedSummaries: string[] = [];
+  const droppedLinks = { invalid: 0, overCap: 0 };
   let nextNumber = 1;
+  const bouncedLists = new Set<string>();
 
   const executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>> = {
     add_node: async (toolInput) => {
       const sourceIndex = Number(toolInput.sourceIndex);
       if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= input.sourceCitations.length) {
         return `Error: sourceIndex must be an integer between 0 and ${input.sourceCitations.length - 1}`;
+      }
+      // A list of several items is bounced ONCE with the unit question,
+      // and accepted as written when it comes back unchanged. See
+      // `listSplitBounce` for why the skill's own worked example was not
+      // enough.
+      const bounce = listSplitBounce(toolInput.blocks);
+      if (bounce && !bouncedLists.has(bounce.key)) {
+        bouncedLists.add(bounce.key);
+        return `Not added yet. This node is a list of ${bounce.items} items. Decide which it is: if each item states something on its own (progress, a plan, an estimate, a problem, a decision), it is ${bounce.items} nodes, so add them one per turn, each with the heading as its first block. If the items are one enumeration (things to buy, people who were there, materials, the steps of one procedure), call add_node again with exactly the same blocks and it will be added as one node.`;
       }
       // ADR-012: whether this node's text is somebody's words is decided
       // HERE, from the source, before the model's blocks are rendered.
@@ -701,6 +811,8 @@ function createSyncGraphExecutors(input: {
         validBackward,
       );
       const droppedCount = invalidCount + overCapCount;
+      droppedLinks.invalid += invalidCount;
+      droppedLinks.overCap += overCapCount;
 
       const linkLines = [
         ...sameDayNumbers.map((n) => `- [${input.date} Node ${n}](./${graphLogFileName(input.date)}#node-${n})`),
@@ -732,7 +844,12 @@ function createSyncGraphExecutors(input: {
     },
   };
 
-  return { executors, getNodeBlocks: () => nodeBlocks, getCapturedSummaries: () => capturedSummaries };
+  return {
+    executors,
+    getNodeBlocks: () => nodeBlocks,
+    getCapturedSummaries: () => capturedSummaries,
+    getDroppedLinks: () => ({ ...droppedLinks }),
+  };
 }
 
 /**
@@ -801,6 +918,17 @@ export function classifyPassEnding(input: {
   passesCompleted: number;
   maxPasses: number;
   maxTurns: number;
+  /** When `truncated`: the source the dropped `add_node` call was writing
+   * a node for (`cutOffSourceIndex`), or null when the cut landed before
+   * any node was started. Only read in the STUCK case; a productive pass
+   * that also truncated keeps going and the turn event carries the detail. */
+  cutOffSource?: number | null;
+  /** When `truncated` and no node was started: whether the cut-off turn
+   * had produced thinking and nothing else. That is the shape a real day
+   * was lost to (thinking is on by default and counts against the output
+   * limit), and it wants a different fix (room to think, or less effort)
+   * than a node that grew too big. */
+  cutOffThinking?: boolean;
 }): { stop: boolean; shortfall: string | null } {
   if (input.added > 0) {
     // Productive. Only the cap can stop us here, and if it does, the cap
@@ -811,9 +939,18 @@ export function classifyPassEnding(input: {
     return { stop: false, shortfall: null };
   }
   if (input.truncated) {
+    // Two different next moves hide behind "cut off": mid-node means the
+    // model batched or bloated a node (a size problem); never started
+    // means it wrote prose instead of calling the tool (a prompt problem).
+    const doing =
+      typeof input.cutOffSource === "number"
+        ? `while writing a node for Source ${input.cutOffSource}, before capturing anything`
+        : input.cutOffThinking
+          ? "after spending the whole limit thinking, before it started any node"
+          : "before it started any node";
     return {
       stop: true,
-      shortfall: "a pass was cut off by the model's own output limit before capturing anything",
+      shortfall: `a pass was cut off by the model's own output limit ${doing}`,
     };
   }
   if (input.hitMaxTurns) {
@@ -835,12 +972,22 @@ async function runSyncGraphDayLoop(
   date: string,
   projectFolderId: string,
   pass: number,
-): Promise<{ usage: LlmUsage; model: string | null; truncated: boolean; hitMaxTurns: boolean }> {
+): Promise<{
+  usage: LlmUsage;
+  model: string | null;
+  truncated: boolean;
+  hitMaxTurns: boolean;
+  /** See `classifyPassEnding`'s `cutOffSource` and `cutOffThinking`. */
+  cutOffSource: number | null;
+  cutOffThinking: boolean;
+}> {
   const messages: LlmMessage[] = [{ role: "user", content: userPrompt }];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
   let model: string | null = null;
   let truncated = false;
   let hitMaxTurns = false;
+  let cutOffSource: number | null = null;
+  let cutOffThinking = false;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
@@ -890,6 +1037,17 @@ async function runSyncGraphDayLoop(
         turn: turn + 1,
         stopReason: response.stopReason,
         toolCalls: response.toolCalls.map((c) => c.name),
+        // Where the output tokens went. A turn that reports 8192 tokens
+        // and no tool call is not "the model produced nothing"; it is
+        // usually the model thinking to the limit, and until this was
+        // recorded that turn was unreadable from the run page.
+        thinkingBlocks: response.thinking.blocks,
+        thinking: response.thinking.text ? response.thinking.text.slice(0, 4000) : null,
+        // The cut-off call's JSON as far as it got, on a cut only. The
+        // API drops the block, so this is the only record of it.
+        partialToolCall: response.partialToolCall
+          ? { name: response.partialToolCall.name, inputJson: response.partialToolCall.inputJson.slice(0, 2000) }
+          : null,
         text: response.text?.trim() ? response.text.trim().slice(0, 8000) : null,
       },
       durationMs: Date.now() - turnStart,
@@ -897,7 +1055,35 @@ async function runSyncGraphDayLoop(
     });
 
     if (response.stopReason === "max_tokens") {
+      // The other half of the one-call-per-turn fix below. That fix
+      // prunes a batched response AFTER it comes back clean; a batch big
+      // enough to hit the output limit never comes back clean, so it
+      // never reached the pruning and the whole turn was discarded --
+      // complete `add_node` calls included. On a real day that meant
+      // "captured nothing", and the next run replays the identical pass.
+      // A cut-off response is not empty: every tool call before the last
+      // is fully generated (`completedToolCalls`), so execute the first
+      // of those (still one write per turn) and stop this pass. One node
+      // is enough for `classifyPassEnding` to see a productive pass, and
+      // the next pass -- a fresh conversation that lists what is already
+      // captured -- picks up the rest. Same shape as graph-project-view;
+      // the pass loop is this stage's recovery mechanism, not a retry.
       truncated = true;
+      // Read off the dropped call BEFORE `completedToolCalls` drops it --
+      // from the streamed prefix when the API dropped the block itself.
+      cutOffSource = cutOffSourceIndex(response.toolCalls, response.stopReason, response.partialToolCall?.inputJson);
+      cutOffThinking =
+        cutOffSource === null &&
+        response.toolCalls.length === 0 &&
+        !response.text?.trim() &&
+        response.thinking.blocks > 0;
+      for (const { call, execute } of planTurnToolCalls(
+        completedToolCalls(response.toolCalls, response.stopReason),
+        () => true,
+      )) {
+        if (!execute) continue;
+        await executors[call.name]?.(call.input);
+      }
       break;
     }
 
@@ -935,7 +1121,7 @@ async function runSyncGraphDayLoop(
     if (turn === MAX_TURNS - 1) hitMaxTurns = true;
   }
 
-  return { usage, model, truncated, hitMaxTurns };
+  return { usage, model, truncated, hitMaxTurns, cutOffSource, cutOffThinking };
 }
 
 function buildSystemPrompt(skillContent: string, graphStructureBody: string | null): string {
@@ -953,9 +1139,15 @@ function buildUserPrompt(input: {
    * already captured today -- see `MAX_PASSES_PER_DAY` for why a day is a
    * sequence of passes rather than one conversation. */
   alreadyCaptured: string[];
+  /** True when today's graph-log file already existed and is being
+   * regenerated because its sources changed -- see `stripDayFromStructure`. */
+  regenerating: boolean;
 }): string {
   return [
     `Today's date being processed: ${input.date}`,
+    input.regenerating
+      ? "Today's graph-log file is being REGENERATED from scratch because its sources changed. Its previous version is discarded and nothing from today counts as already captured: capture everything in today's sources that is worth a node, even if you would expect it to have been captured before."
+      : null,
     input.sourceBlocks.join("\n\n---\n\n"),
     input.liveCandidates.length > 0
       ? `Earlier days' nodes not yet reflected in graph-structure.md, which you may also link back to by id (never invent one not listed here):\n${input.liveCandidates.map((c) => `- ${c}`).join("\n")}`
@@ -991,10 +1183,9 @@ export type SyncGraphDayResult = {
    * unchanged day. One half of 1.7's cost-per-node denominator: the run
    * timeline already implied this number and nothing stored it. */
   nodes: number;
-  /** How many passes this day took. A day that needed more than one is a
-   * day the old single-conversation shape would have been at risk of
-   * discarding, so this is worth watching directly. */
-  passes: number;
+  // `passes` used to live here too, "worth watching directly" -- and was
+  // read by nothing (ADR-016). It is on the day's own timeline event,
+  // where the run page shows it.
 };
 
 export type SyncGraphResult =
@@ -1006,6 +1197,10 @@ export type SyncGraphResult =
       days: SyncGraphDayResult[];
       /** Total nodes written across every day this run. */
       nodesWritten: number;
+      /** Days that are up to date by sources but were extracted under an
+       * older GRAPH.md than the current one. Reported, never acted on by
+       * this stage (see `composeStageSkill`). Absent on early returns. */
+      staleDays?: number;
       /** Reasons this stage finished WITHOUT doing everything it set out
        * to, one human-readable line each; empty when it finished clean.
        *
@@ -1050,7 +1245,15 @@ export async function runSyncGraph(
 
   const skill = await getProjectStageSkill(projectFolder, "GRAPH.md");
   if (isSkipInstruction(skill)) {
-    return { ok: true, skipped: true, days: [], nodesWritten: 0, incomplete: [] };
+    // Same split as the other three agentic stages: an explicit `skip`
+    // is a decision and stays quiet, a never-seeded file is a broken
+    // project and says so. This stage was the one left out when the
+    // others were fixed, and it is the one that produces the graph at
+    // all -- a project missing GRAPH.md was a silent, instant, green run.
+    const reason = "skills/GRAPH.md is missing or empty, so this stage had no instructions and wrote no graph";
+    const missing = classifyStageSkill(skill) === "missing";
+    if (missing) log(`sync-graph: ${reason}.`);
+    return { ok: true, skipped: true, days: [], nodesWritten: 0, incomplete: missing ? [reason] : [] };
   }
   if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
@@ -1112,9 +1315,7 @@ export async function runSyncGraph(
 
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
   const extraSkillFiles = await listExtraSkillFiles(projectFolder);
-  const skillContent = [skill, generalSkill, ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`)]
-    .filter(Boolean)
-    .join("\n\n");
+  const { content: skillContent, fingerprint: skillFingerprint } = composeStageSkill(skill, generalSkill, extraSkillFiles);
 
   // `graph-structure.md` (if it exists) is the PRIMARY source for "nodes
   // from a previous run you may link back to" -- a real, glossed,
@@ -1170,6 +1371,7 @@ export async function runSyncGraph(
   // not one conversation), the very least this owes the run is to stop
   // reporting OK while it happens.
   const incomplete: string[] = [];
+  let staleDays = 0;
 
   for (const date of dates) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
@@ -1212,9 +1414,14 @@ export async function runSyncGraph(
     // previously had NO path into the graph at all, since it never
     // carried a `date` and was never offered as a source here).
     const sourceFiles: (SourceFileInfo | null)[] = [];
+    let uncaptionedSkipped = 0;
     for (const candidate of dayCandidates) {
       const source = await getFileRefById(candidate.fileId);
-      if (!source) continue;
+      if (!source) {
+        // Same condition sync-knowledge already logs; this one didn't.
+        log(`sync-graph: ${date}: a dated candidate (${candidate.fileId}) no longer resolves to a file and was skipped.`);
+        continue;
+      }
 
       const sidecar = await findKnowledgeSidecar(projectFolder.human_id, candidate);
       let knowledgeContent: string | null = null;
@@ -1237,7 +1444,10 @@ export async function runSyncGraph(
       // human's own caption are treated as two independent, either-is-
       // enough sources of grounding. The Card's own text content is
       // never skipped this way.
-      if (attribution.isAttachment && !knowledgeContent && !caption) continue;
+      if (attribution.isAttachment && !knowledgeContent && !caption) {
+        uncaptionedSkipped++;
+        continue;
+      }
 
       hashParts.push(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
       if (sidecar) hashParts.push(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
@@ -1282,6 +1492,22 @@ export async function runSyncGraph(
       );
     }
 
+    if (uncaptionedSkipped > 0) {
+      // Deliberate (a file with neither a human caption nor a description
+      // is nothing to ground a node in), and until now completely
+      // unreported: no counter, no log, no `incomplete`. A project with
+      // KNOWLEDGE.md on `skip` and forty uncaptioned photos got a clean
+      // green run and forty invisible files -- the case the incomplete
+      // banner was written for, in the one stage that never said so.
+      // Reported once per day, not once per file, so a photo-heavy day
+      // is one line.
+      // The banner says "will retry on the next run"; a retry does not fix
+      // this one, a person does, so the line says what would.
+      const reason = `${date}: ${uncaptionedSkipped} attached file(s) had neither a caption nor a description, so they never became nodes (a caption on the file, or KNOWLEDGE.md turned on, fixes this)`;
+      incomplete.push(reason);
+      log(`sync-graph: ${reason}.`);
+    }
+
     const newHash = aggregateHash(hashParts);
     const existingListing = existingGraphFolder
       ? (await listFolderChildren(projectFolder.human_id, existingGraphFolder._id)).files.find(
@@ -1290,14 +1516,31 @@ export async function runSyncGraph(
       : undefined;
     const existing = existingListing ? await getFileRefById(existingListing._id) : undefined;
 
-    if (existing && existingSourceHash(existing.content) === newHash) {
-      days.push({ date, changed: false, empty: false, nodes: 0, passes: 0 });
+    const existingHash = readSourceHash(existing?.content ?? null);
+    if (existing && existingHash.unreadable) {
+      log(`sync-graph: ${graphLogFileName(date)} has front matter this run could not read; re-extracting the day and rewriting it.`);
+    }
+    if (existing && existingHash.hash === newHash) {
+      // Up to date by sources; may still hold nodes extracted under an
+      // older GRAPH.md. Counted and reported, never re-extracted on that
+      // basis alone: nodes are permanent (ADR-001) and re-extraction is
+      // the expensive, deliberate `reset-graph` (see `composeStageSkill`).
+      if (readSkillFingerprint(existing.content) !== skillFingerprint) staleDays += 1;
+      days.push({ date, changed: false, empty: false, nodes: 0 });
       continue;
     }
 
-    if (existing) {
-      await deleteFileRef(existing._id);
-    }
+    // The existing day file is NOT deleted here. It used to be, before
+    // the model was ever called, so a day whose re-extraction then failed
+    // (a rate limit, a Stop, an outage) had its previous nodes erased and
+    // nothing written in their place -- a whole day of somebody's writing
+    // gone from the graph, and every citation of it in graph-structure
+    // and the README left dangling. Reproduced directly: a run whose
+    // model calls all failed deleted twelve days of graph-log files. A
+    // changed day is still fully regenerated (see the module doc), but
+    // the old file survives until the new content exists: replaced in
+    // place on a write, removed on a genuinely empty day, kept untouched
+    // on any failure (ADR-001, ADR-011).
 
     // Combine graph-structure.md's own ids with this run's own live/
     // fallback ones, restricted to STRICTLY earlier days — enforced here
@@ -1315,7 +1558,7 @@ export async function runSyncGraph(
     // that closure, so pass 2 continues from Node 18 rather than
     // restarting at Node 1, and `sameDayLinks` validation still holds
     // across a pass boundary.
-    const { executors, getNodeBlocks, getCapturedSummaries } = createSyncGraphExecutors({
+    const { executors, getNodeBlocks, getCapturedSummaries, getDroppedLinks } = createSyncGraphExecutors({
       date,
       sourceCitations,
       sourceFiles,
@@ -1324,7 +1567,7 @@ export async function runSyncGraph(
 
     const callStart = Date.now();
     try {
-      textLlm ??= new AnthropicProvider();
+      textLlm ??= AnthropicProvider.forStage("sync-graph");
 
       // A DAY IS A LOOP OF PASSES, NOT ONE CONVERSATION.
       //
@@ -1348,6 +1591,10 @@ export async function runSyncGraph(
       let dayModel: string | null = null;
       let shortfall: string | null = null;
       let passes = 0;
+      // A pass ends at its first cut-off turn, so this counts passes that
+      // were cut off. After a productive-but-truncated pass the day can
+      // still finish clean; this is how the day row says it happened.
+      let truncatedTurns = 0;
 
       while (passes < MAX_PASSES_PER_DAY) {
         const before = getNodeBlocks().length;
@@ -1355,11 +1602,20 @@ export async function runSyncGraph(
           date,
           sourceBlocks,
           liveCandidates,
+          regenerating: !!existing || [...structureIds.keys()].some((id) => id.startsWith(`${date}#`)),
           alreadyCaptured: getCapturedSummaries(),
         });
-        const { usage, model, truncated, hitMaxTurns } = await runSyncGraphDayLoop(
+        const { usage, model, truncated, hitMaxTurns, cutOffSource, cutOffThinking } = await runSyncGraphDayLoop(
           textLlm,
-          system,
+          // A day the structure already lists gets the structure without
+          // its own previous nodes (see `stripDayFromStructure`) -- whether
+          // its file still exists or only its lines do, since a day whose
+          // file is gone but whose lines remain was declined the same way
+          // in a real run. Every other day shares the run's one cached
+          // system prompt.
+          graphStructureBody && [...structureIds.keys()].some((id) => id.startsWith(`${date}#`))
+            ? buildSystemPrompt(skillContent, stripDayFromStructure(graphStructureBody, date))
+            : system,
           passPrompt,
           callCounter,
           executors,
@@ -1374,6 +1630,7 @@ export async function runSyncGraph(
         dayUsage.cacheReadTokens = (dayUsage.cacheReadTokens ?? 0) + (usage.cacheReadTokens ?? 0);
         dayUsage.cacheWriteTokens = (dayUsage.cacheWriteTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
         dayModel = model ?? dayModel;
+        if (truncated) truncatedTurns++;
         const ending = classifyPassEnding({
           added: getNodeBlocks().length - before,
           truncated,
@@ -1381,6 +1638,8 @@ export async function runSyncGraph(
           passesCompleted: passes,
           maxPasses: MAX_PASSES_PER_DAY,
           maxTurns: MAX_TURNS,
+          cutOffSource,
+          cutOffThinking,
         });
         shortfall = ending.shortfall;
         if (ending.stop) break;
@@ -1402,7 +1661,7 @@ export async function runSyncGraph(
         process: "sync-graph",
         type: "llm",
         name: "day",
-        params: { date, passes, nodes: getNodeBlocks().length, shortfall },
+        params: { date, passes, truncatedTurns, nodes: getNodeBlocks().length, shortfall, droppedLinks: getDroppedLinks() },
         durationMs,
         outcome: shortfall ? "error" : "ok",
       });
@@ -1413,12 +1672,17 @@ export async function runSyncGraph(
         // anything. Either way nothing is being thrown away here.
         if (shortfall) {
           incomplete.push(`${date} captured nothing: ${shortfall}`);
-          log(`sync-graph: ${date} — ${shortfall}; nothing captured, will retry next run.`);
-        } else {
-          log(`sync-graph: ${date} — nothing worth capturing.`);
+          log(
+            `sync-graph: ${date} — ${shortfall}; nothing captured${existing ? ", previous version of the day kept" : ""}, will retry next run.`,
+          );
+          // Stuck, not empty: the previous day file (and its headings)
+          // stay exactly as they were.
+          continue;
         }
+        log(`sync-graph: ${date} — nothing worth capturing.`);
+        if (existing) await deleteFileRef(existing._id);
         headingsByDate.delete(date);
-        days.push({ date, changed: true, empty: true, nodes: 0, passes });
+        days.push({ date, changed: true, empty: true, nodes: 0 });
         continue;
       }
 
@@ -1443,24 +1707,57 @@ export async function runSyncGraph(
         date,
         hash: shortfall ? null : newHash,
         incompleteReason: shortfall,
+        skillFingerprint,
         body: nodeBlocks.join("\n\n"),
       });
-      const created = await createFileRef({
-        human_id: projectFolder.human_id,
-        name: graphLogFileName(date),
-        content,
-        content_type: "text/markdown",
-        folder_id: graphFolder._id,
-      });
-      if (!created) continue;
+      const created = existing
+        ? await updateFileRef(existing._id, { content })
+        : await createFileRef({
+            human_id: projectFolder.human_id,
+            name: graphLogFileName(date),
+            content,
+            content_type: "text/markdown",
+            folder_id: graphFolder._id,
+          });
+      if (!created) {
+        // Up to MAX_PASSES_PER_DAY passes of paid model output were just
+        // rendered into `content`; losing the write is a real loss and
+        // used to be a bare `continue` -- no log line, no `incomplete`,
+        // no `days` entry, so the day was invisible in the result AND in
+        // the report. Every neighbouring failure branch reports; this one
+        // now does too. The hash was not stamped, so the next run retries.
+        const reason = `${date}: the graph-log file could not be ${existing ? "rewritten" : "created"} after ${nodeBlocks.length} node(s) were captured`;
+        incomplete.push(reason);
+        log(`sync-graph: ${reason}; will retry next run.`);
+        continue;
+      }
 
       headingsByDate.set(date, extractHeadings(content));
       log(
         `sync-graph: wrote ${graphLogFileName(date)} (${nodeBlocks.length} node(s) over ${passes} pass(es))${shortfall ? " — INCOMPLETE" : ""}.`,
       );
-      days.push({ date, changed: true, empty: false, nodes: nodeBlocks.length, passes });
+      days.push({ date, changed: true, empty: false, nodes: nodeBlocks.length });
     } catch (err) {
-      log(`sync-graph: ${date} couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
+      // A Stop is not a failed day. `throwIfGraphLogCancelled` runs inside
+      // this try (the per-turn checkpoint in the day loop), so without
+      // this every remaining day was caught here, logged as "couldn't be
+      // processed (Cancelled by an admin.)", and the stage went on to the
+      // next day only to be cancelled again. Let it reach the worker,
+      // which records a cancelled run as exactly that.
+      if (err instanceof GraphLogCancelledError) throw err;
+
+      const message = err instanceof Error ? err.message : "unknown error";
+      log(`sync-graph: ${date} couldn't be processed (${message}).`);
+      // This used to be the only error path in any agentic stage that
+      // reported NOTHING: not pushed to `incomplete`, not pushed to
+      // `days`. A rate-limited or overloaded day simply vanished, the
+      // run badged OK, and the README's incomplete banner was CLEARED --
+      // the exact failure `incomplete`'s own doc above says it exists to
+      // prevent. The hash was never stamped, so the next run retries; the
+      // report now says so, same as graph-structure and graph-project-view
+      // do on their own error paths. ADR-016: a log line is never the
+      // only place a finding lands.
+      incomplete.push(`${date} stopped on an error: ${message}`);
       const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
         humanId: actingHumanId,
@@ -1482,11 +1779,15 @@ export async function runSyncGraph(
     }
   }
 
+  if (staleDays > 0) {
+    log(`sync-graph: ${staleDays} of ${days.length} day(s) were extracted under an older GRAPH.md and were left as they are (reset-graph re-extracts them).`);
+  }
   return {
     ok: true,
     skipped: false,
     days,
     nodesWritten: days.reduce((sum, d) => sum + d.nodes, 0),
     incomplete,
+    staleDays,
   };
 }

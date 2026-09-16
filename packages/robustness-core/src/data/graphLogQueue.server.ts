@@ -42,6 +42,12 @@ export type GraphLogJobName =
   | "sync-graph"
   | "graph-structure"
   | "graph-project-view"
+  /** graph-structure then graph-project-view with `rebuildStale`: the two
+   * view stages re-thread / rewrite only where the stamp says an older
+   * skill wrote them, and the graph is never touched. The cheap,
+   * non-destructive counterpart of `reset-graph`. See `composeStageSkill`
+   * in `projectN02.server.ts`. */
+  | "rerun-outputs"
   | "reset"
   | "reset-project-view"
   | "reset-graph"

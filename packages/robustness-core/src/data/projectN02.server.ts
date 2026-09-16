@@ -29,6 +29,9 @@ import {
   updateFileRef,
   type VaultFolder,
 } from "./vault.server";
+import { createHash } from "node:crypto";
+import { parse as parseYaml } from "yaml";
+import { splitFrontmatter } from "./project.types";
 import { merge } from "./generic.server";
 import { getAllEffectiveGraphLogDefaultSkills, type GraphLogDefaultStage } from "./graphLogDefaults.server";
 import { systemVaultFolderKey } from "./vault.server";
@@ -132,8 +135,6 @@ export type SkillReseedOutcome = "reseeded" | "unchanged" | "missing";
 export type SkillReseedEntry = {
   file: string;
   outcome: SkillReseedOutcome;
-  previousLength?: number;
-  newLength?: number;
 };
 
 /**
@@ -182,12 +183,7 @@ export async function reseedProjectN02Skills(folder: VaultFolder): Promise<Skill
       continue;
     }
     await updateFileRef(listing._id, { content: nextContent });
-    results.push({
-      file,
-      outcome: "reseeded",
-      previousLength: currentContent.length,
-      newLength: nextContent.length,
-    });
+    results.push({ file, outcome: "reseeded" });
   }
   return results;
 }
@@ -306,6 +302,30 @@ export function isSkipInstruction(content: string | null | undefined): boolean {
   return (firstLine?.trim().toLowerCase() ?? "") === SKIP_MARKER;
 }
 
+/** What a stage's skill file actually SAYS, as opposed to whether the
+ * stage runs. `isSkipInstruction` above folds "missing" and "skip"
+ * together on purpose — both mean don't run — and that folding is
+ * correct for control flow but wrong for reporting: a project whose
+ * `PROJECT_VIEW.md` was never seeded looks identical, in the run record,
+ * to one whose owner deliberately wrote `skip`. The first is a broken
+ * project silently producing an empty README; the second is a working
+ * one. Callers use `isSkipInstruction` to decide whether to run and this
+ * to decide whether to say anything about it. */
+export type StageSkillDisposition = "missing" | "skip" | "instructions";
+
+export function classifyStageSkill(content: string | null | undefined): StageSkillDisposition {
+  // Deliberately the SAME first branch as `isSkipInstruction` above, not
+  // a tidier `content.trim().length === 0`. A whitespace-only file is
+  // already treated as instructions there (the blank-line scan finds no
+  // first line, and "" is not "skip"), so trimming here would make the
+  // two disagree about a case one of them decides the stage runs on.
+  // This split is about what gets REPORTED; it must never change what
+  // runs. Guarded by the lockstep assertion in loadBearingBehaviors.
+  if (!content) return "missing";
+  const firstLine = content.split("\n").find((line) => line.trim().length > 0);
+  return (firstLine?.trim().toLowerCase() ?? "") === SKIP_MARKER ? "skip" : "instructions";
+}
+
 /** Reads a project-n02's `skills/<name>` file content, or null if it (or
  * the skills folder itself) doesn't exist — malformed/missing is always
  * treated as "no instructions", never a hard failure. Shared by every
@@ -353,4 +373,63 @@ export async function listExtraSkillFiles(
     }),
   );
   return withContent.filter((f) => f.content.length > 0).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** What a stage's model actually reads as its instructions: the stage's
+ * own skill, the general `SKILL.md`, and every extra skill file, in that
+ * order. Every agentic stage used to build this join inline; it lives
+ * here so the fingerprint is taken over exactly the text that reaches
+ * the prompt.
+ *
+ * `fingerprint` is why this exists. Every stage decides "up to date" from
+ * a hash of its INPUTS (source files, the day files, the structure), and
+ * none of those hashes sees the skill. So a rewritten skill produces
+ * nothing for existing output: the past keeps the old skill's output and
+ * only new content meets the new rules. Confirmed on Crouch Casita on
+ * 2026-09-15, the day after PR #48 rewrote all three skills and a
+ * reseed-then-run was a clean no-op.
+ *
+ * DELIBERATELY NOT a cache key. Austin's call, same day: a skill under
+ * revision is uploaded and run on one or two projects over and over,
+ * and rebuilding every project automatically on each upload would be
+ * waste. So the fingerprint is STAMPED onto what each stage writes
+ * (`skillFingerprint` on sidecars, day files and `graph-structure.md`,
+ * `appliedSkillFingerprint` beside `appliedByProjectView`), every run
+ * REPORTS how much of a project's output is under an older skill, and a
+ * rebuild is a person's choice per project: the Vault's "Rerun GraphLog
+ * Outputs" (`rerun-outputs` job, `rebuildStale` on the two view stages)
+ * re-threads and rewrites the README only where the stamp is stale, and
+ * never touches the graph; the graph itself is only ever rebuilt by
+ * `reset-graph`, in red, because that is the expensive one.
+ *
+ * The model and effort a stage runs on (`STAGE_DEFAULTS`) are not part
+ * of this. Changing the model is a cost decision, not a change to what
+ * the output should say. */
+export function composeStageSkill(
+  skill: string | null,
+  generalSkill: string | null,
+  extraSkillFiles: { name: string; content: string }[],
+): { content: string; fingerprint: string } {
+  const content = [skill, generalSkill, ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`)]
+    .filter(Boolean)
+    .join("\n\n");
+  return { content, fingerprint: createHash("sha256").update(content).digest("hex").slice(0, 16) };
+}
+
+/** The `skillFingerprint` a GraphLog stage stamped into a file's front
+ * matter when it wrote it, or null when the file predates stamping or
+ * has no readable front matter. Compared against `composeStageSkill`'s
+ * current fingerprint to report drift; never used to decide a rerun on
+ * its own (see that function's doc). */
+export function readSkillFingerprint(content: string | null | undefined): string | null {
+  if (!content) return null;
+  const { frontmatter } = splitFrontmatter(content);
+  if (!frontmatter) return null;
+  try {
+    const data = parseYaml(frontmatter) as Record<string, unknown> | null;
+    const fp = data?.skillFingerprint;
+    return typeof fp === "string" ? fp : null;
+  } catch {
+    return null;
+  }
 }

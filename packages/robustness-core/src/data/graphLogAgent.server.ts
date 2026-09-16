@@ -34,7 +34,12 @@ import { runDailyLogSync } from "./dailyLogSync.server";
 import { runSyncKnowledge, type SyncKnowledgeResult } from "./syncKnowledge.server";
 import { runSyncGraph, type SyncGraphResult } from "./syncGraph.server";
 import { runGraphStructure, type GraphStructureResult } from "./graphStructure.server";
-import { runGraphProjectView, type GraphProjectViewResult } from "./graphProjectView.server";
+import {
+  runGraphProjectView,
+  syncReadmeIncompleteBanner,
+  type CoverageReport,
+  type GraphProjectViewResult,
+} from "./graphProjectView.server";
 import { getFolderById, type VaultFolder } from "./vault.server";
 import type { LlmProvider } from "./llmProvider";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -65,6 +70,18 @@ export type GraphLogPipelineResult =
        * every case is resumable and already committed real progress. What
        * was wrong was the reporting, not the recovery. */
       incomplete: string[];
+      /** `graph-project-view`'s own coverage check for this run, lifted to
+       * the top level beside `incomplete` so a caller never has to reach
+       * into a nested stage result to find it. `null` means NOT MEASURED
+       * (the view stage never reached a clean finish), never "measured and
+       * clean" — see `GraphLogRun.coverage`. */
+      coverage: CoverageReport | null;
+      /** Whether `graph-project-view` edited README.md this run. Beside
+       * `coverage` rather than inside `stats` for the same reason coverage
+       * is: it is a fact about the README, and the run page needs it to
+       * say whether a coverage figure was measured against a README this
+       * run wrote or one it left alone. */
+      readmeChanged: boolean;
       /** 1.7's denominators, so cost becomes a RATE rather than a total.
        *
        * The per-run and per-stage cost was already recorded; what was
@@ -106,6 +123,10 @@ export interface RunGraphLogPipelineOptions {
    * separate untagged runs. Omit to run with no timeline recorded (e.g. a
    * script/test with no job/run context). */
   perf?: GraphLogPerfRecorder;
+  /** Passed through to the two view stages: re-thread / rewrite where
+   * the stamp says an older skill wrote it. Never set by a normal run;
+   * the `rerun-outputs` job sets it. See `composeStageSkill`. */
+  rebuildStale?: boolean;
 }
 
 export async function runGraphLogPipeline(
@@ -166,6 +187,7 @@ export async function runGraphLogPipeline(
       provider: opts.provider,
       log,
       perf,
+      rebuildStale: opts.rebuildStale,
     }),
   );
   if (!graphStructure.ok) return { ok: false, error: graphStructure.error };
@@ -178,12 +200,20 @@ export async function runGraphLogPipeline(
       provider: opts.provider,
       log,
       perf,
+      rebuildStale: opts.rebuildStale,
     }),
   );
   if (!graphProjectView.ok) return { ok: false, error: graphProjectView.error };
   log(graphProjectView.skipped ? "run: graph-project-view skipped." : "run: graph-project-view done.");
 
+  // All FIVE stages, not the last three. `daily-log-sync` and
+  // `sync-knowledge` had no way to report anything at all, which is why a
+  // project that silently described no photos still finished green: the
+  // two stages that carry a photo from a Card into the graph were the two
+  // with no voice in this list.
   const incomplete = [
+    ...dailyLogSync.incomplete.map((r) => `daily-log-sync: ${r}`),
+    ...syncKnowledge.incomplete.map((r) => `sync-knowledge: ${r}`),
     ...syncGraph.incomplete.map((r) => `sync-graph: ${r}`),
     ...graphStructure.incomplete.map((r) => `graph-structure: ${r}`),
     ...graphProjectView.incomplete.map((r) => `graph-project-view: ${r}`),
@@ -205,6 +235,30 @@ export async function runGraphLogPipeline(
     `run: ${stats.nodesWritten} node(s) written across ${stats.daysWritten} day(s); graph now holds ${stats.graphNodeCount ?? "?"} node(s) in ${stats.threadCount ?? "?"} thread(s).`,
   );
 
+  // Skill drift, one line, every run. Each stage already said its own
+  // piece above; this is the summary a reader of the run page looks for.
+  // Nothing here triggers anything (see `composeStageSkill`): the graph
+  // is rebuilt only by reset-graph, the views only by rerun-outputs.
+  const drift: string[] = [];
+  if ((syncKnowledge.staleSidecars ?? 0) > 0) drift.push(`${syncKnowledge.staleSidecars} sidecar(s) under an older KNOWLEDGE.md`);
+  if ((syncGraph.staleDays ?? 0) > 0) drift.push(`${syncGraph.staleDays} day(s) under an older GRAPH.md`);
+  if (graphStructure.staleSkill) drift.push("structure under an older GRAPH_STRUCTURE.md");
+  if (graphProjectView.staleSkill) drift.push("README under an older PROJECT_VIEW.md");
+  log(drift.length > 0 ? `run: skill drift: ${drift.join("; ")}.` : "run: no skill drift; everything was written under the current skills.");
+
+  // The run report already said all of this, on a page nobody opens while
+  // the README looks fine. This puts it where a reader of the PROJECT sees
+  // it, in bold, on the first line. Deliberately last: it needs the whole
+  // run's outcome, and a clean run clears any banner an earlier one left.
+  const bannerChanged = await syncReadmeIncompleteBanner(projectFolder, incomplete);
+  if (bannerChanged) {
+    log(
+      incomplete.length > 0
+        ? "run: marked README.md as incomplete on its own first line."
+        : "run: cleared the incomplete notice from README.md.",
+    );
+  }
+
   return {
     ok: true,
     dailyLogSync,
@@ -213,6 +267,11 @@ export async function runGraphLogPipeline(
     graphStructure,
     graphProjectView,
     incomplete,
+    // Straight through from the stage. Null whenever the view stage did
+    // not reach a clean finish, which is most of the runs worth looking
+    // at -- the reader has to say "not measured", never "clean".
+    coverage: graphProjectView.coverage,
+    readmeChanged: graphProjectView.changed,
     stats,
   };
 }

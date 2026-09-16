@@ -288,6 +288,61 @@ export function withReadmeBody(originalMarkdown: string, newBody: string): strin
   return `---\n${frontmatter}\n---\n${newBody}`;
 }
 
+/**
+ * A README that GraphLog did not finish says so on its own first line, in
+ * bold, where a reader looking at the project sees it. Written by CODE,
+ * never by the model -- same rule as citations, weights, and section
+ * order (ADR-005, ADR-012): a warning the model could forget, reword or
+ * decline to write is not a warning.
+ *
+ * This exists because the failure got QUIETER, not louder, as it got
+ * better handled. A stage that ran out of output budget used to leave a
+ * blank README, which nobody could miss. Now it commits the sections it
+ * finished, so the same failure produces a page that reads perfectly well
+ * and is missing whole threads. The run report says so, on an admin page
+ * that nobody has a reason to open while the README looks fine.
+ *
+ * One line, followed by one blank line, so `stripIncompleteBanner` is an
+ * exact inverse and `splitReadmeSections` still sees the intro it always
+ * saw. Never more than one: applying twice replaces rather than stacks.
+ */
+export const README_INCOMPLETE_BANNER_PREFIX = "**This README is incomplete.**";
+
+/** How many reasons the banner names before it stops listing them. The
+ * banner is a prompt to go look at the run report, not a replacement for
+ * it. */
+const BANNER_REASON_LIMIT = 3;
+
+/** Removes the banner if present, leaving every other byte alone. Always
+ * safe to call: a body that never had one comes back identical.
+ *
+ * Called on the way IN as well as out -- the model is handed the README
+ * to edit, and a warning it can see is a warning it can "helpfully"
+ * delete or reword. It never sees this. */
+export function stripIncompleteBanner(body: string): string {
+  if (!body.startsWith(README_INCOMPLETE_BANNER_PREFIX)) return body;
+  const newlineIndex = body.indexOf("\n");
+  if (newlineIndex === -1) return "";
+  return body.slice(newlineIndex + 1).replace(/^\n/, "");
+}
+
+/** Puts the banner back on, replacing any existing one. An empty
+ * `reasons` means the run finished clean, which REMOVES the banner: the
+ * same call site that raises the warning is the one that clears it, so a
+ * fixed README cannot keep wearing a stale one. */
+export function withIncompleteBanner(body: string, reasons: string[]): string {
+  const clean = stripIncompleteBanner(body);
+  if (reasons.length === 0) return clean;
+  const shown = reasons.slice(0, BANNER_REASON_LIMIT);
+  const rest = reasons.length - shown.length;
+  const tail = rest > 0 ? `, and ${rest} more` : "";
+  const line =
+    `${README_INCOMPLETE_BANNER_PREFIX} The last build left work undone ` +
+    `(${shown.join("; ")}${tail}) and will retry on the next run. ` +
+    `Threads may be missing from the sections below.`;
+  return clean ? `${line}\n\n${clean}` : `${line}\n`;
+}
+
 export type ReadmeSection = {
   /** The H2 heading text (trimmed, exactly as written -- no normalization
    * beyond that), or "" for the INTRO -- everything before the first H2,

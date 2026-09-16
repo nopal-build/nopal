@@ -21,6 +21,9 @@ import { estimateCostUsd, isPricingStale, pricingAgeDays } from "./llmPricing";
 export type GraphLogStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view";
 export type GraphLogEventKind =
   | "photo-knowledge"
+  /** A video described from a few still frames -- its own kind so the
+   * cost of a clip (several images in one call) is visible on its own. */
+  | "video-knowledge"
   | "text-knowledge"
   | "graph-extract"
   | "graph-structure"
@@ -263,8 +266,27 @@ export type GraphLogUsageSummary = {
    * "free". */
   nodesWrittenInRange: number;
   runCount: number;
+  /** Errors in the range split by `error_kind`, read off the raw events
+   * table -- the one place the kind is stored, and until now nothing
+   * selected it (ADR-016). Thirty-seven rate limits and thirty-seven
+   * oversized images were the same number on this page, and they demand
+   * opposite fixes. */
+  errorsByKind: Record<GraphLogErrorKind, number>;
   costPerNodeByStage: Record<GraphLogStage, number | null> | null;
-  costPerRunByProject: ({ projectFolderId: string; runCount: number; costPerRunUsd: number })[];
+  /** Per project: cost in the range over COMPLETED runs, plus how many
+   * runs failed. A project whose every run in the range failed used to
+   * be filtered out of this table entirely -- the most expensive failure
+   * mode was the one it could not show -- and its cost still counted in
+   * `byProject`. It stays listed now with no per-run figure. */
+  costPerRunByProject: ({
+    projectFolderId: string;
+    runCount: number;
+    failedRunCount: number;
+    /** Null when no run in the range completed: a rate with a zero
+     * denominator is unknown, not zero. */
+    costPerRunUsd: number | null;
+    estimatedCostUsd: number;
+  })[];
   byProject: ({ projectFolderId: string } & UsageTotals)[];
   byHuman: ({ humanId: string } & UsageTotals)[];
   byDate: ({ date: string } & UsageTotals)[];
@@ -314,6 +336,7 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
     successCount: 0,
     skippedCount: 0,
     errorCount: 0,
+    errorsByKind: { rate_limited: 0, oversized_image: 0, incomplete: 0, other: 0 },
     inputTokens: 0,
     outputTokens: 0,
     cacheReadTokens: 0,
@@ -392,6 +415,22 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
      WHERE started_at >= $since AND ok = true`,
     { since },
   );
+  const failedRows = await query<[{ project_folder_id: string }[]]>(
+    `SELECT project_folder_id FROM graphlog_runs WHERE started_at >= $since AND ok = false`,
+    { since },
+  );
+  const failedByProject = new Map<string, number>();
+  for (const r of failedRows?.[0] ?? []) {
+    failedByProject.set(r.project_folder_id, (failedByProject.get(r.project_folder_id) ?? 0) + 1);
+  }
+  const kindRows = await query<[{ error_kind: GraphLogErrorKind | null; count: number }[]]>(
+    `SELECT error_kind, count() FROM graphlog_usage_events WHERE date >= $since AND outcome = 'error' GROUP BY error_kind`,
+    { since },
+  );
+  for (const r of kindRows?.[0] ?? []) {
+    const kind: GraphLogErrorKind = r.error_kind ?? "other";
+    summary.errorsByKind[kind] += r.count;
+  }
   // No `formatRecord` here: this SELECT names two columns, so the rows
   // carry no `id` for it to rewrite, and running it would only widen the
   // type back to `Data`.
@@ -423,11 +462,13 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
       return {
         projectFolderId,
         runCount,
-        costPerRunUsd: runCount > 0 ? v.estimatedCostUsd / runCount : 0,
+        failedRunCount: failedByProject.get(projectFolderId) ?? 0,
+        costPerRunUsd: runCount > 0 ? v.estimatedCostUsd / runCount : null,
+        estimatedCostUsd: v.estimatedCostUsd,
       };
     })
-    .filter((p) => p.runCount > 0)
-    .sort((a, b) => b.costPerRunUsd - a.costPerRunUsd);
+    .filter((p) => p.runCount > 0 || p.failedRunCount > 0)
+    .sort((a, b) => (b.costPerRunUsd ?? b.estimatedCostUsd) - (a.costPerRunUsd ?? a.estimatedCostUsd));
   summary.byHuman = [...byHuman.entries()]
     .map(([humanId, v]) => ({ humanId, ...v }))
     .sort((a, b) => b.callCount - a.callCount);

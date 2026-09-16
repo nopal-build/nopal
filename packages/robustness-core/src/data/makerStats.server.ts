@@ -21,6 +21,12 @@ export type MakerStats = {
   /** Humans who wrote at least one daily log within the selected range,
    * sorted by log count (most active first). */
   humansInRange: HumanActivity[];
+  /** Daily logs in the range whose `humanId` has no `humans` row. They
+   * count in `dailyLogCountInRange` and used to be silently dropped from
+   * `humansInRange`, so the table quietly failed to sum to the headline
+   * (ADR-016). The same class of gap sync-graph hard-fails on (ADR-015);
+   * here it is reported, keyed by the unresolved id. */
+  unattributedInRange: { humanId: string; logCount: number; lastLogDate: string }[];
 };
 
 function startOfRange(days: number): string {
@@ -51,18 +57,21 @@ export async function getMakerStats(days: MakerRangeDays): Promise<MakerStats> {
     }
   }
 
-  const humansInRange: HumanActivity[] = Array.from(byHuman.entries())
-    .map(([humanId, { count, lastDate }]) => {
-      const human = humanById.get(humanId);
-      return human ? { human, logCount: count, lastLogDate: lastDate } : null;
-    })
-    .filter((entry): entry is HumanActivity => entry !== null)
-    .sort((a, b) => b.logCount - a.logCount);
+  const humansInRange: HumanActivity[] = [];
+  const unattributedInRange: MakerStats["unattributedInRange"] = [];
+  for (const [humanId, { count, lastDate }] of byHuman.entries()) {
+    const human = humanById.get(humanId);
+    if (human) humansInRange.push({ human, logCount: count, lastLogDate: lastDate });
+    else unattributedInRange.push({ humanId, logCount: count, lastLogDate: lastDate });
+  }
+  humansInRange.sort((a, b) => b.logCount - a.logCount);
+  unattributedInRange.sort((a, b) => b.logCount - a.logCount);
 
   return {
     totalActiveHumans,
     totalInvitedHumans,
     dailyLogCountInRange: logsInRange.length,
     humansInRange,
+    unattributedInRange,
   };
 }

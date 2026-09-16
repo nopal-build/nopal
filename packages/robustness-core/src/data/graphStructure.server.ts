@@ -122,6 +122,8 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import {
+  classifyStageSkill,
+  composeStageSkill,
   findProjectGraphFolder,
   getProjectStageSkill,
   isSkipInstruction,
@@ -139,7 +141,7 @@ import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvide
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
-import { planTurnToolCalls } from "./llmProvider";
+import { headingText, planTurnToolCalls } from "./llmProvider";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
 
 const GRAPH_STRUCTURE_FILE_NAME = "graph-structure.md";
@@ -148,7 +150,18 @@ const GRAPH_LOG_RE = /^graph-log-(\d{4}-\d{2}-\d{2})\.md$/;
 type GraphStructureFrontmatter = {
   asOfGraphHash?: string;
   generatedAt?: string;
+  /** Fingerprint of the GRAPH_STRUCTURE.md skill (plus SKILL.md and extra
+   * skill files) this index was last threaded under. Provenance: reported
+   * as drift when it differs from the current one, and acted on only when
+   * a run asks for it (`rebuildStale`), which re-threads the whole graph
+   * from scratch rather than placing "new" nodes into threads drawn under
+   * old rules. See `composeStageSkill`. */
+  skillFingerprint?: string;
   appliedByProjectView?: string;
+  /** `graph-project-view`'s twin of `skillFingerprint`: the PROJECT_VIEW.md
+   * fingerprint the README was last written under. Stamped and cleared
+   * together with `appliedByProjectView`. */
+  appliedSkillFingerprint?: string;
 };
 
 export function parseGraphStructureFrontmatter(content: string | null): GraphStructureFrontmatter {
@@ -167,10 +180,19 @@ export function parseGraphStructureFrontmatter(content: string | null): GraphStr
  * `generatedAt` — `graph-project-view`'s own idempotency marker, exported
  * for that stage to call directly rather than duplicating the
  * read-modify-write here. */
-export async function markGraphStructureApplied(fileId: string, content: string, hash: string): Promise<void> {
+export async function markGraphStructureApplied(
+  fileId: string,
+  content: string,
+  hash: string,
+  skillFingerprint: string,
+): Promise<void> {
   const { body } = splitFrontmatter(content);
   const meta = parseGraphStructureFrontmatter(content);
-  const frontmatter = stringifyYaml({ ...meta, appliedByProjectView: hash }).trimEnd();
+  const frontmatter = stringifyYaml({
+    ...meta,
+    appliedByProjectView: hash,
+    appliedSkillFingerprint: skillFingerprint,
+  }).trimEnd();
   await updateFileRef(fileId, { content: `---\n${frontmatter}\n---\n${body}` });
 }
 
@@ -203,9 +225,9 @@ export async function clearGraphStructureAppliedMarker(fileId: string, content: 
  * was no marker to clear, so the caller can skip the write entirely. */
 export function withoutProjectViewMarker(content: string): string | null {
   const meta = parseGraphStructureFrontmatter(content);
-  if (meta.appliedByProjectView === undefined) return null;
+  if (meta.appliedByProjectView === undefined && meta.appliedSkillFingerprint === undefined) return null;
   const { body } = splitFrontmatter(content);
-  const { appliedByProjectView: _dropped, ...rest } = meta;
+  const { appliedByProjectView: _dropped, appliedSkillFingerprint: _droppedToo, ...rest } = meta;
   const frontmatter = stringifyYaml(rest).trimEnd();
   return `---\n${frontmatter}\n---\n${body}`;
 }
@@ -267,6 +289,44 @@ export function nodeIdsInSection(section: ReadmeSection): string[] {
 /** Exported for `graph-project-view.server.ts`'s own `get_node` id
  * validation — "same as `add_node` already does for link candidates"
  * (1.1). */
+/**
+ * Drops every `- <date> Node <N>` membership line whose node is no longer
+ * in the graph, and says how many.
+ *
+ * A day that was re-extracted is renumbered from 1, so its old ids may
+ * no longer exist; a day that came back empty leaves every one of its
+ * old ids behind. Those lines used to stay in the structure forever: the
+ * membership index counted them as placed, the README stage's own
+ * `get_node` validated them and then found nothing (a real run spent all
+ * twenty turns of a pass that way), and the coverage report ranked
+ * threads by nodes that did not exist. Pruned by code before the delta is
+ * computed, never left to the model (ADR-005: what is in the graph is
+ * computed). The count is reported, since a thread emptied this way is a
+ * thing a person would want to know happened.
+ */
+export function pruneStaleMembership(
+  sections: ReadmeSection[],
+  allNodesById: Map<string, GraphLogNode>,
+): { sections: ReadmeSection[]; dropped: string[] } {
+  const dropped: string[] = [];
+  const pruned = sections.map((section) => {
+    const kept: string[] = [];
+    for (const line of section.content.split("\n")) {
+      const match = NODE_LINE_RE.exec(line.trim());
+      if (match) {
+        const id = `${match[1]}#${Number(match[2])}`;
+        if (!allNodesById.has(id)) {
+          dropped.push(id);
+          continue;
+        }
+      }
+      kept.push(line);
+    }
+    return kept.length === section.content.split("\n").length ? section : { heading: section.heading, content: kept.join("\n") };
+  });
+  return { sections: pruned, dropped };
+}
+
 export function buildMembershipIndex(sections: ReadmeSection[]): Set<string> {
   const set = new Set<string>();
   for (const section of sections) {
@@ -323,6 +383,70 @@ export function parseClusterFields(section: ReadmeSection): ClusterFields {
     hasBlocking: isRealFieldValue(BLOCKING_FIELD_RE.exec(line)?.[1]),
     statusCategory,
   };
+}
+
+/** The ceiling `GRAPH_STRUCTURE.md` states for one thread. Not enforced:
+ * a cluster over it is still committed, and the tool result names the
+ * overflow so the model splits it on a later turn. Five runs on one
+ * 69-node graph built 3, 8, 14, 15 and 3 threads with the ceiling stated
+ * only in prose; the literal reader never counted. */
+export const MAX_NODES_PER_THREAD = 15;
+
+/**
+ * What code has to say about one `update_cluster` write before it is
+ * committed, in the form of the cluster as it will be saved plus notes
+ * for the tool result. Two checks, both from `GRAPH_STRUCTURE.md`'s own
+ * rules, both cases where a number or a date the skill only DESCRIBED
+ * turned out to need code behind it:
+ *
+ * - A `Due:` that matches no date found in the cluster's own nodes is
+ *   dropped. A README once reported a schedule "due 2026-10-20" that no
+ *   node held: the structure stage had added two months to a line
+ *   written on 8/20, and the README stated the arithmetic as a fact.
+ *   `extractDatesFromText` is the same function that hands the model its
+ *   candidate dates, so "a date somebody wrote" means exactly the set it
+ *   was shown.
+ * - A cluster over `MAX_NODES_PER_THREAD` is committed as written but
+ *   the result says so and asks for the split.
+ */
+export function reviewClusterWrite(
+  section: ReadmeSection,
+  allNodesById: Map<string, GraphLogNode>,
+): { section: ReadmeSection; notes: string[] } {
+  const notes: string[] = [];
+  let content = section.content;
+  const lines = content.split("\n");
+  const weightLineIndex = lines.findIndex((l) => WEIGHT_LINE_RE.test(l.trim()));
+  const nodeIds = nodeIdsInSection(section);
+
+  if (weightLineIndex !== -1) {
+    const dueRaw = DUE_FIELD_RE.exec(lines[weightLineIndex])?.[1];
+    if (isRealFieldValue(dueRaw)) {
+      const due = (dueRaw ?? "").trim();
+      const written = new Set<string>();
+      for (const id of nodeIds) {
+        const node = allNodesById.get(id);
+        if (!node) continue;
+        for (const d of extractDatesFromText(node.quote)) written.add(d.toLowerCase());
+      }
+      if (!written.has(due.toLowerCase())) {
+        const newLines = [...lines];
+        newLines[weightLineIndex] = lines[weightLineIndex].replace(/\s*·\s*Due:\s*[^·]*?(?=\s*·|\s*$)/i, "");
+        content = newLines.join("\n");
+        notes.push(
+          `Dropped "Due: ${due}": no node in this cluster carries that date, and a Due is only ever a date somebody wrote. Choose from the dates handed to you for this thread, or leave the field off.`,
+        );
+      }
+    }
+  }
+
+  if (nodeIds.length > MAX_NODES_PER_THREAD) {
+    notes.push(
+      `This cluster now holds ${nodeIds.length} nodes, over the ${MAX_NODES_PER_THREAD}-node ceiling. Split it by the question being argued: write each new cluster with update_cluster, then rewrite this one without the nodes that moved.`,
+    );
+  }
+
+  return { section: content === section.content ? section : { heading: section.heading, content }, notes };
 }
 
 /** A thread that's "fallen away" per `GRAPH_STRUCTURE.md`'s own "Falling
@@ -608,7 +732,7 @@ function createStructureExecutors(input: {
 
   const executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>> = {
     update_cluster: async (toolInput) => {
-      const heading = String(toolInput.heading ?? "").trim();
+      const heading = headingText(String(toolInput.heading ?? ""));
       const content = String(toolInput.content ?? "");
       if (!heading) return "Error: heading is required";
       const key = heading.toLowerCase();
@@ -621,16 +745,18 @@ function createStructureExecutors(input: {
         return `Error: refused -- cluster "${heading}" currently has real content; sending empty content would erase it. Use remove_cluster if you genuinely want to delete it.`;
       }
 
+      const reviewed = reviewClusterWrite({ heading: existing?.heading ?? heading, content }, allNodesById);
       const updated = existing
-        ? currentSections.map((s, i) => (i === existingIndex ? { heading: existing.heading, content } : s))
-        : [...currentSections, { heading, content }];
+        ? currentSections.map((s, i) => (i === existingIndex ? reviewed.section : s))
+        : [...currentSections, reviewed.section];
       const ok = await commit(updated);
       if (!ok) return "Error: failed to save cluster update";
       log(`graph-structure -- ${existing ? "updated" : "added"} cluster "${heading}".`);
-      return `${existing ? "Updated" : "Added"} cluster "${heading}".`;
+      for (const note of reviewed.notes) log(`graph-structure -- "${heading}": ${note}`);
+      return `${existing ? "Updated" : "Added"} cluster "${heading}".${reviewed.notes.length > 0 ? ` ${reviewed.notes.join(" ")}` : ""}`;
     },
     remove_cluster: async (toolInput) => {
-      const heading = String(toolInput.heading ?? "").trim();
+      const heading = headingText(String(toolInput.heading ?? ""));
       const key = heading.toLowerCase();
       const existingIndex = currentSections.findIndex((s) => s.heading.toLowerCase() === key);
       if (existingIndex === -1) return `Error: no cluster named "${heading}" found`;
@@ -668,8 +794,16 @@ function createStructureExecutors(input: {
  *
  * Per ADR-013 this bounds one BATCH, never how many nodes a run may
  * contain: a batch that hits the limit commits what it placed and the
- * next run picks up the still-unplaced remainder. */
-const MAX_TURNS = 40;
+ * next run picks up the still-unplaced remainder.
+ *
+ * 40 -> 60 on 2026-09-14. With a thread defined as one question and the
+ * fifteen-node ceiling reported back on every write, a from-scratch
+ * build of a 75-node graph went from 8 threads in ~30 calls to 14
+ * threads in 37, then hit 40 one node short on the next sample. The
+ * README stage then rightly refused to build from an index with no
+ * clean finish, which in production would cost a day. The extra turns
+ * are the splits the skill now asks for, so the cap moves with them. */
+const MAX_TURNS = 60;
 
 /** The two tools whose call input carries a whole cluster's worth of
  * content, and so the two `planTurnToolCalls` throttles. */
@@ -795,6 +929,8 @@ async function runStructureAgentLoop(
 function buildSystemPrompt(skillContent: string): string {
   return `You are GraphLog's graph-structure step, keeping Graph/graph-structure.md an accurate, organized, weighted index of the whole graph. You're handed the CURRENT graph-structure.md (already organized from every earlier run) plus only the node(s) that are genuinely new since last time -- place each new node into whichever existing cluster it belongs to, or start a new one via update_cluster if it doesn't fit anywhere yet. Only touch clusters that actually need a change, one update_cluster/remove_cluster call per cluster -- never try to redescribe the whole file in one call. If real restructuring is warranted (renaming, merging, or splitting threads), do it, but only through update_cluster/remove_cluster calls on the specific clusters involved. Call get_node if you need an older node's exact original wording before deciding to merge or split. Stop making tool calls once every new node has a home and any warranted restructuring is done -- if nothing needs to change at all, make no tool calls. Every node must end up with a home somewhere; never drop one because it seems minor.
 
+Make at most ONE update_cluster or remove_cluster call per response. Every tool call in one response is generated into that response's single output budget, and a cluster's whole node list travels in the call, so several writes at once is several clusters' worth of text against one limit -- the response gets cut off and the work in it is lost. Write one cluster, wait for the result, then write the next. Reads (get_node) are free to batch: call as many as you need in one go.
+
 Do not write any planning, reasoning, or summary text outside of a tool call -- go straight to calling update_cluster/remove_cluster/get_node with no preamble and no narration in between calls either. Your own output budget per turn is limited, and explanatory text spends it on nothing that ends up in the file.
 
 ${skillContent}`;
@@ -849,8 +985,11 @@ function buildClusterFactsBlock(
     // ("nothing added for weeks") is written against, so without it that
     // rule was asking for a judgment whose input didn't exist.
     const quiet = mostRecent ? `; ${daysBetween(mostRecent, today)} day(s) quiet since then` : "";
+    // The count is handed over for the same reason as the gap: the
+    // skill's ceiling on a thread's size was a number the model had to
+    // count for itself, and on a literal reader that meant it never did.
     lines.push(
-      `- "${section.heading}" — most recent node: ${mostRecent ?? "unknown"}${quiet}; dates mentioned in its nodes' own text: ${mentioned}`,
+      `- "${section.heading}" — ${nodeIds.length} node${nodeIds.length === 1 ? "" : "s"}; most recent node: ${mostRecent ?? "unknown"}${quiet}; dates mentioned in its nodes' own text: ${mentioned}`,
     );
   }
   if (lines.length === 0) return null;
@@ -894,6 +1033,11 @@ export type GraphStructureResult =
        * (including a deterministic weight-only refresh with no LLM call
        * at all); false when it was already fully up to date. */
       changed: boolean;
+      /** True when `graph-structure.md` was threaded under an older
+       * GRAPH_STRUCTURE.md than the current one (or carries no stamp) as
+       * this run FOUND it. Reported on every run; acted on only under
+       * `rebuildStale`. Absent on the early-return paths. */
+      staleSkill?: boolean;
       /** Total nodes across every `graph-log-*.md` at the end of this run,
        * and total threads in `graph-structure.md`. Null when this stage
        * didn't get far enough to know (skipped, no graph yet, stopped
@@ -935,6 +1079,11 @@ export interface RunGraphStructureOptions {
   log?: (line: string) => void;
   /** Timeline recorder for this run — see `graphLogPerf.server.ts`. */
   perf?: GraphLogPerfRecorder;
+  /** Re-thread the whole graph from scratch when `graph-structure.md` was
+   * threaded under an older GRAPH_STRUCTURE.md (or has no stamp at all).
+   * Off by default: a normal run only reports the drift. Set by the
+   * `rerun-outputs` job. See `composeStageSkill`. */
+  rebuildStale?: boolean;
 }
 
 /**
@@ -957,7 +1106,20 @@ export async function runGraphStructure(
 
   const skill = await getProjectStageSkill(projectFolder, "GRAPH_STRUCTURE.md");
   if (isSkipInstruction(skill)) {
-    return { ok: true, skipped: true, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
+    // Same split as `graphProjectView.server.ts`'s own: an explicit
+    // `skip` is a decision and stays quiet, a never-seeded file is a
+    // broken project and says so.
+    const reason = "skills/GRAPH_STRUCTURE.md is missing or empty, so this stage had no instructions and wrote nothing";
+    const missing = classifyStageSkill(skill) === "missing";
+    if (missing) log(`graph-structure: ${reason}.`);
+    return {
+      ok: true,
+      skipped: true,
+      changed: false,
+      graphNodeCount: null,
+      threadCount: null,
+      incomplete: missing ? [reason] : [],
+    };
   }
   if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
@@ -980,36 +1142,135 @@ export async function runGraphStructure(
     return { ok: true, skipped: false, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
   }
 
+  // Composed before the hash, not beside the prompt, because the skill is
+  // part of the hash. See `composeStageSkill`.
+  const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
+  const extraSkillFiles = await listExtraSkillFiles(projectFolder);
+  const { content: skillContent, fingerprint: skillFingerprint } = composeStageSkill(skill, generalSkill, extraSkillFiles);
+
+  // What reading the graph itself lost, reported on EVERY return below
+  // (ADR-016). A day with null content used to be skipped AND left out of
+  // the hash, so the graph "changed" and the day was absent from the
+  // structure with no line anywhere; a node block with no `:ref` line
+  // used to vanish from the graph, the README, and every weight.
+  const loadIssues: string[] = [];
   const allNodes: GraphLogNode[] = [];
   const hashParts: string[] = [];
+  const parseDiag = { malformed: 0 };
   for (const { listing, date } of graphLogListings) {
     const file = await getFileRefById(listing._id);
-    if (!file?.content) continue;
+    if (!file?.content) {
+      loadIssues.push(`${listing.name} exists but has no content, so its day is missing from the structure`);
+      continue;
+    }
     const { body, frontmatter } = splitFrontmatter(file.content);
     hashParts.push(`${date}:${frontmatter ?? file.content_hash ?? listing._id}`);
-    allNodes.push(...parseGraphLogNodes(date, body));
+    const before = parseDiag.malformed;
+    allNodes.push(...parseGraphLogNodes(date, body, parseDiag));
+    if (parseDiag.malformed > before) {
+      loadIssues.push(`${listing.name}: ${parseDiag.malformed - before} node block(s) have no :ref line and were left out of the graph`);
+    }
   }
+  for (const issue of loadIssues) log(`graph-structure: ${issue}.`);
 
   const newHash = aggregateHash(hashParts);
   const structureListing = files.find((f) => f.name === GRAPH_STRUCTURE_FILE_NAME);
   const existing = structureListing ? await getFileRefById(structureListing._id) : undefined;
   const existingMeta = parseGraphStructureFrontmatter(existing?.content ?? null);
 
-  if (existing && existingMeta.asOfGraphHash === newHash) {
+  // Drift is reported on every run; a rebuild happens only when asked.
+  // An index with no stamp at all predates stamping and counts as stale.
+  const staleSkill = !!existing && existingMeta.skillFingerprint !== skillFingerprint;
+  const rethread = staleSkill && opts.rebuildStale === true;
+  if (staleSkill && !rethread) {
+    log(
+      "graph-structure: graph-structure.md was threaded under an older GRAPH_STRUCTURE.md and was left as it is (Rerun GraphLog Outputs re-threads it).",
+    );
+  }
+
+  if (existing && existingMeta.asOfGraphHash === newHash && !rethread) {
     log("graph-structure: up to date, nothing changed since last run.");
-    return { ok: true, skipped: false, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
+    // Both counts are already in hand here (every node was just parsed
+    // to compute the hash, and the index is the file being compared), so
+    // a no-op run reports the graph's size like any other. Returning
+    // null made the run header drop its "graph now N node(s)" line on
+    // exactly the runs where nothing else on the page says how big the
+    // graph is.
+    return {
+      ok: true,
+      skipped: false,
+      changed: false,
+      graphNodeCount: allNodes.length,
+      threadCount: countNamedClusters(splitReadmeSections(splitFrontmatter(existing.content ?? "").body)),
+      incomplete: loadIssues,
+      staleSkill,
+    };
   }
 
   if (allNodes.length === 0) {
-    log("graph-structure: no parsed nodes found in any graph-log file — nothing to organize.");
-    return { ok: true, skipped: false, changed: false, graphNodeCount: null, threadCount: null, incomplete: [] };
+    // Distinct from "no graph-log files yet" above, which is a project
+    // that has never synced. Files exist here and parsed to nothing,
+    // which means sync-graph wrote something this parser can't read —
+    // and it silently starves every downstream stage of the graph.
+    const reason =
+      `${graphLogListings.length} graph-log file(s) exist but parsed to zero nodes, so there was nothing to organize`;
+    log(`graph-structure: ${reason}.`);
+    return {
+      ok: true,
+      skipped: false,
+      changed: false,
+      staleSkill,
+      graphNodeCount: null,
+      threadCount: null,
+      incomplete: [...loadIssues, reason],
+    };
   }
 
-  const backlinks = computeBacklinkIndex(allNodes);
+  const linkDiag = { dangling: 0 };
+  const backlinks = computeBacklinkIndex(allNodes, linkDiag);
+  if (linkDiag.dangling > 0) {
+    // Not a shortfall of THIS run (the edges were lost when a day was
+    // rewritten or the graph reset), so it goes to the log and the run's
+    // own event rather than `incomplete` -- but it goes somewhere, since
+    // every one of these is weight the ranking no longer sees.
+    log(`graph-structure: ${linkDiag.dangling} link(s) point at nodes no longer in the graph and carry no weight.`);
+  }
   const allNodesById = new Map(allNodes.map((n) => [n.id, n]));
+  // The stamp says which skill THREADED this index, so it is only set on
+  // a from-scratch build (no index yet, or a re-thread). The incremental
+  // path places a few new nodes into threads drawn under whatever skill
+  // drew them, and keeps that stamp; an unstamped index stays unstamped
+  // and keeps reading as stale until it is re-threaded once. A re-thread
+  // also drops `graph-project-view`'s applied markers: the node set (and
+  // so `asOfGraphHash`) may be identical after re-threading, and the
+  // README must still reconcile against the new threads.
   const baseMeta: GraphStructureFrontmatter = { ...existingMeta };
+  if (!existing || rethread) baseMeta.skillFingerprint = skillFingerprint;
+  if (rethread) {
+    delete baseMeta.appliedByProjectView;
+    delete baseMeta.appliedSkillFingerprint;
+    log(
+      existingMeta.skillFingerprint
+        ? "graph-structure: re-threading every node from scratch under the current GRAPH_STRUCTURE.md."
+        : "graph-structure: this index has no skill stamp; re-threading every node from scratch under the current GRAPH_STRUCTURE.md.",
+    );
+  }
 
-  const existingSections = existing ? splitReadmeSections(splitFrontmatter(existing.content ?? "").body) : [];
+  // A re-thread is the one case where the existing threads are NOT the
+  // starting point. The incremental path below only ever places nodes
+  // that no thread holds yet, so under a new thread definition it would
+  // place nothing and the old threads would stand forever.
+  const rawExistingSections =
+    existing && !rethread ? splitReadmeSections(splitFrontmatter(existing.content ?? "").body) : [];
+  const { sections: existingSections, dropped: staleIds } = pruneStaleMembership(rawExistingSections, allNodesById);
+  if (staleIds.length > 0) {
+    const issue =
+      `${staleIds.length} node(s) listed in graph-structure.md no longer exist in the graph and were dropped from it: ` +
+      staleIds.slice(0, 5).join(", ") +
+      (staleIds.length > 5 ? `, and ${staleIds.length - 5} more` : "");
+    loadIssues.push(issue);
+    log(`graph-structure: ${issue}.`);
+  }
   const placedIds = buildMembershipIndex(existingSections);
   const newNodes = allNodes.filter((n) => !placedIds.has(n.id));
 
@@ -1035,17 +1296,13 @@ export async function runGraphStructure(
       ok: true,
       skipped: false,
       changed: true,
+      staleSkill,
       graphNodeCount: allNodes.length,
       threadCount: countNamedClusters(refreshed),
-      incomplete: [],
+      incomplete: loadIssues,
     };
   }
 
-  const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
-  const extraSkillFiles = await listExtraSkillFiles(projectFolder);
-  const skillContent = [skill, generalSkill, ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`)]
-    .filter(Boolean)
-    .join("\n\n");
   const system = buildSystemPrompt(skillContent);
 
   const sortedNewNodes = newNodes.sort((a, b) =>
@@ -1074,7 +1331,7 @@ export async function runGraphStructure(
 
   const runCallStart = Date.now();
   try {
-    const llm = opts.provider ?? new AnthropicProvider();
+    const llm = opts.provider ?? AnthropicProvider.forStage("graph-structure");
     const callCounter = { count: 0 };
 
     for (const [batchIndex, batchNodes] of batches.entries()) {
@@ -1138,9 +1395,10 @@ export async function runGraphStructure(
           ok: true,
           skipped: false,
           changed: anyCommitted(),
+          staleSkill,
           graphNodeCount: null,
           threadCount: null,
-          incomplete: [reason],
+          incomplete: [...loadIssues, reason],
         };
       }
       if (hitMaxTurns) {
@@ -1150,9 +1408,10 @@ export async function runGraphStructure(
           ok: true,
           skipped: false,
           changed: anyCommitted(),
+          staleSkill,
           graphNodeCount: null,
           threadCount: null,
-          incomplete: [reason],
+          incomplete: [...loadIssues, reason],
         };
       }
       if (hadRefusal()) {
@@ -1162,9 +1421,10 @@ export async function runGraphStructure(
           ok: true,
           skipped: false,
           changed: anyCommitted(),
+          staleSkill,
           graphNodeCount: null,
           threadCount: null,
-          incomplete: [reason],
+          incomplete: [...loadIssues, reason],
         };
       }
     }
@@ -1176,15 +1436,21 @@ export async function runGraphStructure(
     const finalPlaced = buildMembershipIndex(finalSections);
     const stillMissing = allNodes.filter((n) => !finalPlaced.has(n.id));
     if (stillMissing.length > 0) {
-      const reason = `${stillMissing.length} node(s) still unplaced (e.g. ${stillMissing[0].id})`;
+      // Up to five named, then a count -- the same shape sync-knowledge and
+      // daily-log-sync use, instead of one example and a discarded list.
+      const reason =
+        `${stillMissing.length} node(s) still unplaced: ` +
+        stillMissing.slice(0, 5).map((n) => n.id).join(", ") +
+        (stillMissing.length > 5 ? `, and ${stillMissing.length - 5} more` : "");
       log(`graph-structure: ${reason} after this run — will retry next run.`);
       return {
           ok: true,
           skipped: false,
           changed: anyCommitted(),
+          staleSkill,
           graphNodeCount: null,
           threadCount: null,
-          incomplete: [reason],
+          incomplete: [...loadIssues, reason],
         };
     }
 
@@ -1208,9 +1474,10 @@ export async function runGraphStructure(
       ok: true,
       skipped: false,
       changed: true,
+      staleSkill,
       graphNodeCount: allNodes.length,
       threadCount: countNamedClusters(reconciled),
-      incomplete: [],
+      incomplete: loadIssues,
     };
   } catch (err) {
     log(`graph-structure: couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
@@ -1236,9 +1503,10 @@ export async function runGraphStructure(
       ok: true,
       skipped: false,
       changed: anyCommitted(),
+      staleSkill,
       graphNodeCount: null,
       threadCount: null,
-      incomplete: [`stopped on an error: ${err instanceof Error ? err.message : String(err)}`],
+      incomplete: [...loadIssues, `stopped on an error: ${err instanceof Error ? err.message : String(err)}`],
     };
   }
 }

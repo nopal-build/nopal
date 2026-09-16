@@ -357,7 +357,22 @@ export default function FruitsMakerGraphLog() {
             <StatCard label="Calls" value={usage.callCount} hint={`Last ${days} days`} />
             <StatCard label="Success" value={usage.successCount} />
             <StatCard label="Skipped" value={usage.skippedCount} />
-            <StatCard label="Errors" value={usage.errorCount} />
+            <StatCard
+              label="Errors"
+              value={usage.errorCount}
+              hint={
+                usage.errorCount > 0
+                  ? [
+                      usage.errorsByKind.rate_limited ? `${usage.errorsByKind.rate_limited} rate limited` : null,
+                      usage.errorsByKind.oversized_image ? `${usage.errorsByKind.oversized_image} oversized image` : null,
+                      usage.errorsByKind.incomplete ? `${usage.errorsByKind.incomplete} cut off or incomplete` : null,
+                      usage.errorsByKind.other ? `${usage.errorsByKind.other} other` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : undefined
+              }
+            />
           </div>
           <div className="flex flex-wrap gap-4">
             <StatCard label="Est. Cost" value={`$${usage.estimatedCostUsd.toFixed(2)}`} hint="baseline gauge, not billing" />
@@ -475,7 +490,10 @@ export default function FruitsMakerGraphLog() {
                     {projectNameById[p.projectFolderId] ?? p.projectFolderId}
                   </span>
                   <span className="text-xs font-mono subtle-text">
-                    ${p.costPerRunUsd.toFixed(3)} / run · {p.runCount} run(s)
+                    {p.costPerRunUsd === null
+                      ? `$${p.estimatedCostUsd.toFixed(3)} spent, no completed run`
+                      : `$${p.costPerRunUsd.toFixed(3)} / run · ${p.runCount} run(s)`}
+                    {p.failedRunCount > 0 ? ` · ${p.failedRunCount} failed` : ""}
                   </span>
                 </div>
               ))

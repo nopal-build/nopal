@@ -2005,7 +2005,7 @@ export default function VaultV2Page() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replacing, setReplacing] = useState(false);
-  const [graphLogBusy, setGraphLogBusy] = useState<"run" | "reset" | "cancel" | "reseed-skills" | null>(null);
+  const [graphLogBusy, setGraphLogBusy] = useState<"run" | "rerun-outputs" | "reset" | "cancel" | "reseed-skills" | null>(null);
   const [graphLogScheduleBusy, setGraphLogScheduleBusy] = useState(false);
   const [graphLogStatus, setGraphLogStatus] = useState<GraphLogProjectStatus | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -2485,6 +2485,33 @@ export default function VaultV2Page() {
     }
   };
 
+  /** Re-threads graph-structure.md and rewrites README.md only where an
+   * older skill wrote them (`api.graphlog.rerun-outputs.tsx`). Never
+   * touches the graph, so it is not `danger`; the graph is only rebuilt by
+   * Reset below, which is. A skill change is otherwise invisible to
+   * existing output on purpose -- see `composeStageSkill`. */
+  const handleRerunGraphLogOutputs = async () => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    if (
+      !window.confirm(
+        `Rerun GraphLog outputs for "${folder.name}"? This re-threads the structure and rewrites the README only if they were written under older skill files, and makes no model call if both are current. The graph itself is never touched.`,
+      )
+    ) {
+      return;
+    }
+    setGraphLogBusy("rerun-outputs");
+    try {
+      const data = await apiJson("/api/graphlog/rerun-outputs", {
+        method: "POST",
+        body: JSON.stringify({ projectFolderId: folder._id }),
+      });
+      if (data?.jobId) await refreshGraphLogStatus(folder._id);
+    } finally {
+      setGraphLogBusy(null);
+    }
+  };
+
   const handleResetGraphLog = async () => {
     if (current.kind !== "folder") return;
     const folder = current.folder;
@@ -2532,12 +2559,21 @@ export default function VaultV2Page() {
       });
       const results = (data?.results ?? []) as { file: string; outcome: string }[];
       const changed = results.filter((r) => r.outcome === "reseeded");
+      // "missing" is the one outcome that matters most and used to be
+      // filtered out of this message entirely: a project whose skill file
+      // was never seeded is a project whose stage is a permanent silent
+      // no-op, and the alert called it "already on the current defaults".
+      // Same for an empty result, which means no Skills folder at all.
+      const missing = results.filter((r) => r.outcome === "missing");
       if (data) {
-        window.alert(
-          changed.length > 0
-            ? `Reseeded: ${changed.map((r) => r.file).join(", ")}`
-            : "Already on the current defaults -- nothing to reseed.",
-        );
+        const lines: string[] = [];
+        if (results.length === 0) lines.push("This project has no Skills folder, so there was nothing to reseed.");
+        if (changed.length > 0) lines.push(`Reseeded: ${changed.map((r) => r.file).join(", ")}.`);
+        if (missing.length > 0) {
+          lines.push(`Missing and not created: ${missing.map((r) => r.file).join(", ")}. A stage with no skill file does nothing at all.`);
+        }
+        if (lines.length === 0) lines.push("Already on the current defaults. Nothing to reseed.");
+        window.alert(lines.join("\n"));
       }
     } finally {
       setGraphLogBusy(null);
@@ -2561,11 +2597,20 @@ export default function VaultV2Page() {
     }
     setGraphLogBusy("cancel");
     try {
-      const data = await apiJson("/api/graphlog/cancel", {
+      const data = (await apiJson("/api/graphlog/cancel", {
         method: "POST",
         body: JSON.stringify({ projectFolderId: folder._id }),
-      });
-      if (data) await refreshGraphLogStatus(folder._id);
+      })) as { wasActive?: boolean } | null;
+      if (data) {
+        // The difference the confirm dialog warns about: a queued job is
+        // gone at once, a running one finishes its current turn first.
+        window.alert(
+          data.wasActive
+            ? "Stopping. The run was already underway, so it finishes its current step first. This can take up to a minute."
+            : "Stopped. The run had not started yet, so nothing ran.",
+        );
+        await refreshGraphLogStatus(folder._id);
+      }
     } finally {
       setGraphLogBusy(null);
     }
@@ -3017,6 +3062,11 @@ export default function VaultV2Page() {
       moreActions.push({
         label: graphLogBusy === "run" ? "Running GraphLog…" : "Run GraphLog",
         onClick: handleRunGraphLog,
+        disabled: graphLogBusy !== null,
+      });
+      moreActions.push({
+        label: graphLogBusy === "rerun-outputs" ? "Rerunning Outputs…" : "Rerun GraphLog Outputs (stale only)",
+        onClick: handleRerunGraphLogOutputs,
         disabled: graphLogBusy !== null,
       });
       moreActions.push({

@@ -225,6 +225,13 @@ export default function FruitsMaker() {
               <Badge variant="neutral">Last {days} days</Badge>
             </div>
 
+            {stats.unattributedInRange.length > 0 ? (
+              <p className="text-sm subtle-text" style={{ marginBottom: "8px" }}>
+                {stats.unattributedInRange.reduce((n, u) => n + u.logCount, 0)} log(s) in this range belong to
+                an id with no humans row ({stats.unattributedInRange.map((u) => u.humanId).join(", ")}), so they
+                are counted above and missing from this table.
+              </p>
+            ) : null}
             {stats.humansInRange.length === 0 ? (
               <p className="text-sm subtle-text">
                 No daily logs were written in this range.

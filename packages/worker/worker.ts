@@ -21,7 +21,7 @@ import {
 import { runSyncKnowledge } from "robustness-core/data/syncKnowledge.server";
 import { runSyncGraph } from "robustness-core/data/syncGraph.server";
 import { runGraphStructure } from "robustness-core/data/graphStructure.server";
-import { runGraphProjectView } from "robustness-core/data/graphProjectView.server";
+import { coverageFromJobResult, readmeChangedFromJobResult, runGraphProjectView, syncReadmeIncompleteBanner } from "robustness-core/data/graphProjectView.server";
 import { runGraphLogPipeline } from "robustness-core/data/graphLogAgent.server";
 import {
   resetProjectView,
@@ -110,7 +110,60 @@ async function runGraphLogJob(
         perf,
       });
       if (!result.ok) throw new Error(result.error);
+      // The stage strips the README's incomplete banner before the model
+      // sees it (so the model cannot helpfully delete it) and relies on
+      // the PIPELINE to put it back from the whole run's outcome. Run as
+      // its own job there was no pipeline, so the banner came off and
+      // nothing restored it -- a silently CLEARED warning, the opposite
+      // of the "stale banner is the safe direction" its doc assumed. A
+      // lone stage can only vouch for itself, so this raises or clears
+      // from its own reasons, prefixed the way the pipeline prefixes
+      // them; the next nightly run re-judges the whole. ADR-016.
+      const changed = await syncReadmeIncompleteBanner(
+        projectFolder,
+        result.incomplete.map((r) => `graph-project-view: ${r}`),
+      );
+      if (changed) onProgress(result.incomplete.length > 0 ? "graph-project-view: marked README.md as incomplete on its own first line." : "graph-project-view: cleared the incomplete notice from README.md.");
       return result;
+    }
+    case "rerun-outputs": {
+      // The two view stages only, with `rebuildStale`. Neither extraction
+      // stage runs: the graph is never rebuilt here (that is reset-graph,
+      // and it is expensive on purpose). Each stage decides for itself
+      // whether its stamp is stale; when neither is, this costs no model
+      // call and says so.
+      const structure = await perf.time("graph-structure", "fn", "runGraphStructure", null, () =>
+        runGraphStructure(projectFolder, job.data.actingHumanId, { log: onProgress, perf, rebuildStale: true }),
+      );
+      if (!structure.ok) throw new Error(structure.error);
+      const view = await perf.time("graph-project-view", "fn", "runGraphProjectView", null, () =>
+        runGraphProjectView(projectFolder, job.data.actingHumanId, { log: onProgress, perf, rebuildStale: true }),
+      );
+      if (!view.ok) throw new Error(view.error);
+      // Same banner handling as the lone graph-project-view job above.
+      const bannerChanged = await syncReadmeIncompleteBanner(
+        projectFolder,
+        [...structure.incomplete.map((r) => `graph-structure: ${r}`), ...view.incomplete.map((r) => `graph-project-view: ${r}`)],
+      );
+      if (bannerChanged) onProgress(structure.incomplete.length + view.incomplete.length > 0 ? "rerun-outputs: marked README.md as incomplete on its own first line." : "rerun-outputs: cleared the incomplete notice from README.md.");
+      const structureWas = structure.staleSkill ?? false;
+      const readmeWas = view.staleSkill ?? false;
+      onProgress(
+        !structureWas && !readmeWas
+          ? "rerun-outputs: nothing stale; structure and README were already written under the current skills."
+          : `rerun-outputs: finished (${[structureWas ? "structure re-threaded" : "structure current", readmeWas ? "README rewritten" : "README current"].join(", ")}).`,
+      );
+      // `coverage` / `readmeChanged` at the top level, same as the pipeline
+      // result, so the run row reads them (`coverageFromJobResult`,
+      // `readmeChangedFromJobResult`).
+      return {
+        structure,
+        projectView: view,
+        structureWasStale: structureWas,
+        readmeWasStale: readmeWas,
+        coverage: view.coverage,
+        readmeChanged: view.changed,
+      };
     }
     case "run": {
       const result = await runGraphLogPipeline(
@@ -122,21 +175,33 @@ async function runGraphLogJob(
       if (!result.ok) throw new Error(result.error);
       return result;
     }
+    // Each reset's own summary (what it deleted, what it cleared) used to
+    // be a return value read only by the CLI; the Vault UI read the job
+    // id and nothing else. Recorded onto the run's timeline so the run
+    // page says what a reset did (ADR-016).
     case "reset-project-view": {
-      return await perf.time("reset-project-view", "fn", "resetProjectView", null, () =>
+      const result = await perf.time("reset-project-view", "fn", "resetProjectView", null, () =>
         resetProjectView(projectFolder),
       );
+      await perf.event({ process: "reset-project-view", type: "fn", name: "summary", params: { ...result }, durationMs: 0 });
+      return result;
     }
     case "reset-graph": {
-      return await perf.time("reset-graph", "fn", "resetGraph", null, () => resetGraph(projectFolder));
+      const result = await perf.time("reset-graph", "fn", "resetGraph", null, () => resetGraph(projectFolder));
+      await perf.event({ process: "reset-graph", type: "fn", name: "summary", params: { ...result }, durationMs: 0 });
+      return result;
     }
     case "reset-knowledge": {
-      return await perf.time("reset-knowledge", "fn", "resetKnowledge", null, () =>
+      const result = await perf.time("reset-knowledge", "fn", "resetKnowledge", null, () =>
         resetKnowledge(projectFolder),
       );
+      await perf.event({ process: "reset-knowledge", type: "fn", name: "summary", params: { ...result }, durationMs: 0 });
+      return result;
     }
     case "reset": {
-      return await perf.time("reset", "fn", "resetProjectAll", null, () => resetProjectAll(projectFolder));
+      const result = await perf.time("reset", "fn", "resetProjectAll", null, () => resetProjectAll(projectFolder));
+      await perf.event({ process: "reset", type: "fn", name: "summary", params: { ...result }, durationMs: 0 });
+      return result;
     }
     default:
       throw new Error(`Unknown GraphLog job name: ${job.name}`);
@@ -209,6 +274,8 @@ async function processGraphLogJob(job: Job<GraphLogJobData, unknown, GraphLogJob
         ok: true,
         incomplete: collectIncomplete(result),
         stats: collectRunStats(result),
+        coverage: coverageFromJobResult(result),
+        readmeChanged: readmeChangedFromJobResult(job.name, result),
       });
       return result;
     } finally {

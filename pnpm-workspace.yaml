@@ -6,6 +6,11 @@ packages:
 allowBuilds:
   es5-ext: true
   esbuild: true
+  # Downloads the ffmpeg binary for the platform running the install --
+  # the worker's Dockerfile runs `pnpm install` inside the linux image, so
+  # it gets linux-x64 there and a developer's Mac gets its own. Used by
+  # sync-knowledge to pull frames from a video attachment.
+  ffmpeg-static: true
   msgpackr-extract: true
 
 # Without this, `pnpm install` only resolves optional, platform-specific
@@ -39,3 +44,11 @@ supportedArchitectures:
 # exact repo checkout still exists on disk at the same path — useless once
 # copied alone into a Docker image.
 injectWorkspacePackages: true
+
+# ffmpeg-static's download helper (`@derhuerst/http-basic`) declares
+# `@types/node@10` as a runtime dependency, and pnpm's default hoisting
+# put that ten-year-old typings package where TypeScript found it first,
+# breaking `stream` types in unrelated files. Pin every resolution to the
+# version the rest of the workspace already compiles against.
+overrides:
+  "@types/node": "^26.2.0"

@@ -55,7 +55,8 @@ append-only, same as the graph it protects.
 | [0013](0013-turn-limit-never-the-content-limit.md) | The runaway-loop guard must never be the content limit. |
 | [0014](0014-status-lives-on-the-weight-line.md) | The three judged fields live on the `Weight:` line. The line is never optional. |
 | [0015](0015-a-node-must-name-its-author.md) | A node names its author. Counting people keys on the id, never the name. |
+| [0016](0016-a-measurement-without-a-reader-is-a-bug.md) | A measurement without a named reader is a bug. |
 
-All fifteen so far are GraphLog decisions (`graphlog` skill); this
+All sixteen so far are GraphLog decisions (`graphlog` skill); this
 directory isn't GraphLog-specific and future ADRs from other parts of
 Nopal belong here too, continuing the same numbering.

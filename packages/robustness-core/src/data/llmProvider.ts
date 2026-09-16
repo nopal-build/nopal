@@ -93,11 +93,128 @@ export function planTurnToolCalls<T extends { name: string }>(
   });
 }
 
+/**
+ * The tool calls from a response that are safe to execute, given how it
+ * stopped.
+ *
+ * A `max_tokens` response is not empty, it is CUT OFF. The provider still
+ * returns every content block generated before the limit, and only the
+ * LAST one can be half-finished — a `tool_use` whose JSON input stopped
+ * mid-string, which arrives here as a plausible-looking object with a
+ * field missing rather than as a parse error. Executing that writes
+ * half a section. Discarding the whole response instead (what the loops
+ * used to do) throws away the complete calls in front of it, which on a
+ * freshly-reset README is the difference between partial content and no
+ * content at all.
+ *
+ * So: drop the last call, keep the rest. A complete final call that
+ * happened to land exactly on the limit is lost too, which is the
+ * conservative direction — it is retried on the next run, and the
+ * alternative is guessing whether a truncated object is complete.
+ *
+ * Every other stop reason returns the calls untouched.
+ */
+export function completedToolCalls<T>(calls: T[], stopReason: StopReason): T[] {
+  return stopReason === "max_tokens" ? calls.slice(0, -1) : calls;
+}
+
+/**
+ * Which section the call `completedToolCalls` dropped was writing, when
+ * that can be known.
+ *
+ * The dropped call's input is a partial object, and `heading` is the
+ * first key in every section-writing schema, so it is usually intact
+ * even when `content` is the field that was cut. That name is the
+ * difference between "a pass was cut off" and "writing 'What's carrying
+ * weight' was cut off", which is what the next pass needs in order to
+ * write that one section shorter, and what a person needs when it keeps
+ * happening. Read it BEFORE `completedToolCalls` slices the call away;
+ * nothing downstream ever sees it again.
+ *
+ * `null` on any other stop reason, when there was no call at all, or when
+ * the cut landed inside the heading itself and the input has no string
+ * heading to read. The caller degrades to "a section" then, never guesses.
+ */
+export function cutOffHeading<T extends { input: Record<string, unknown> }>(
+  calls: T[],
+  stopReason: StopReason,
+): string | null {
+  if (stopReason !== "max_tokens") return null;
+  const last = calls[calls.length - 1];
+  if (!last) return null;
+  const heading = last.input?.heading;
+  return typeof heading === "string" ? heading : null;
+}
+
+/**
+ * Which source the `add_node` call `completedToolCalls` dropped was
+ * writing a node for, when that can be known. `sync-graph`'s twin of
+ * `cutOffHeading`: `sourceIndex` is the first key in `add_node`'s schema,
+ * so it is usually intact even when `blocks` is the field that was cut.
+ * A separate helper rather than a keyed `cutOffHeading` because the two
+ * schemas name different first fields and the read is three lines.
+ *
+ * `null` on any other stop reason, when there was no call at all, or
+ * when the cut landed before the index was written. The caller says
+ * "before it started any node" then, never guesses.
+ */
+export function cutOffSourceIndex<T extends { input: Record<string, unknown> }>(
+  calls: T[],
+  stopReason: StopReason,
+  /** The cut-off call's raw JSON prefix, when the provider streamed it
+   * (`LlmResponse.partialToolCall`). The API drops an unfinished
+   * `tool_use` block from the final message entirely, so on a real cut
+   * this is usually the ONLY place the index survives. */
+  partialToolJson?: string | null,
+): number | null {
+  if (stopReason !== "max_tokens") return null;
+  const last = calls[calls.length - 1];
+  const index = last?.input?.sourceIndex;
+  if (typeof index === "number" && Number.isInteger(index)) return index;
+  const fromPrefix = partialToolJson ? /"sourceIndex"\s*:\s*(\d+)/.exec(partialToolJson)?.[1] : undefined;
+  return fromPrefix !== undefined ? Number(fromPrefix) : null;
+}
+
+/**
+ * A heading the model wrote, as a heading: leading markdown hashes and
+ * the whitespace after them removed. Two models in the same test handed
+ * `update_cluster` the value "## Siding install", and code that only
+ * trimmed whitespace wrote `## ## Siding install` into graph-structure.md.
+ * The tool asks for the heading TEXT; this makes the code read it that
+ * way whatever the model does.
+ */
+export function headingText(raw: string): string {
+  return raw.trim().replace(/^#+\s*/, "").trim();
+}
+
+/** How hard the model is asked to think on one call. Maps to the API's
+ * `output_config.effort`; the API default is `high`. Passed per call so a
+ * stage that selects lines (extraction) and a stage that judges (the
+ * README) can spend differently -- see `AnthropicProvider`. */
+export type LlmEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
 export type LlmResponse = {
   /** Any plain text the model produced alongside (or instead of) a tool
    * call — e.g. its reasoning for NOT calling a tool this turn. */
   text: string | null;
   toolCalls: ToolCall[];
+  /** What the model spent on deliberation before (or instead of) any
+   * content this call. On the current model family thinking is ON BY
+   * DEFAULT and its tokens count against `max_tokens`, and nothing here
+   * surfaced it: a turn that hit the limit with `text` null and
+   * `toolCalls` empty read as "the model produced nothing", when it had
+   * produced 8192 tokens of thinking and been cut off before the first
+   * tool call. That is exactly how a real day was lost. `blocks` is how
+   * many thinking blocks arrived; `text` is the API's summary of them
+   * (requested by the provider), null when the model did not think or
+   * no summary was returned. */
+  thinking: { blocks: number; text: string | null };
+  /** The `tool_use` block that was still being generated when the model
+   * hit `max_tokens`, as the raw JSON prefix streamed so far. The final
+   * message omits an unfinished block entirely, so without streaming a
+   * cut mid-call is indistinguishable from a call that never started.
+   * Null on every other stop, and when the cut fell outside a tool call. */
+  partialToolCall: { name: string; inputJson: string } | null;
   stopReason: StopReason;
   usage: LlmUsage;
   /** Which model actually served this call — for usage tracking
@@ -129,6 +246,8 @@ export interface LlmProvider {
      * a WHOLE graph's total node count and keeps growing for as long as
      * the project exists). Omit for the provider's own normal default. */
     maxTokens?: number;
+    /** See `LlmEffort`. Omit for the provider's own default. */
+    effort?: LlmEffort;
   }): Promise<LlmResponse>;
 }
 
@@ -167,6 +286,24 @@ export type PhotoDescriptionResult = {
   model: string;
 };
 
+/** One of several images described together -- the frames of a video,
+ * in order. `label` is what the model is told about each ("0:17 into the
+ * clip"), so the description can say what changes between them. */
+export type LabeledImage = { imageBase64: string; mediaType: string; label: string };
+
+export type ImagesDescriptionInput = {
+  images: LabeledImage[];
+  /** Same role as `PhotoDescriptionInput.context`. */
+  context: string;
+  /** Replaces the single-photo system prompt: what these images are as a
+   * set and how to describe them. Assembled by the caller. */
+  framing: string;
+};
+
 export interface PhotoDescriber {
   describePhoto(input: PhotoDescriptionInput): Promise<PhotoDescriptionResult>;
+  /** Several images in one call, one description. A video is the case
+   * this exists for: a few stills, described as a sequence, so the whole
+   * pipeline downstream sees a video exactly as it sees a photo. */
+  describeImages(input: ImagesDescriptionInput): Promise<PhotoDescriptionResult>;
 }

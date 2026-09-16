@@ -23,6 +23,8 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type {
+  ImagesDescriptionInput,
+  LlmEffort,
   LlmMessage,
   LlmProvider,
   LlmResponse,
@@ -36,15 +38,82 @@ import type {
 } from "./llmProvider";
 
 const DEFAULT_MODEL = "claude-sonnet-5";
-// A tool-calling turn that re-emits a substantial chunk of content (a
-// README section, a cluster) in one call can truncate mid-generation
-// (stop_reason "max_tokens") at a smaller budget -- every caller's own
-// agent loop detects this and refuses to apply a truncated result, but a
-// generous default avoids hitting it at all for most calls. A caller
-// whose own output genuinely scales differently (e.g. `graph-structure`'s
-// original whole-graph-rebuild shape, since redesigned -- see the
-// `graphlog` skill) can still override via `maxTokens`.
-const DEFAULT_MAX_TOKENS = 8192;
+// `max_tokens` is NOT a content budget on this model family. Thinking is
+// on by default and its tokens count against the same limit, and the
+// model decides how much to think per call. At 8192 a busy day's first
+// turn spent the whole limit deliberating and returned NOTHING -- no
+// text, no tool call -- and the day was recorded as "captured nothing".
+// Every agent loop already bounds its own CONTENT per turn in code (one
+// write call per turn, `planTurnToolCalls`), so this number only has to
+// leave room for the model's deliberation. It is generous on purpose:
+// tokens are billed as used, not as budgeted, and a cut here costs a
+// whole turn's thinking with nothing to show for it. Streamed (below)
+// so a large limit never trips the SDK's non-streaming timeout.
+const DEFAULT_MAX_TOKENS = 32768;
+// The effort the API applies when none is sent. Named here so the
+// per-stage choice (`LlmEffort`) has a visible baseline; overridable
+// per provider (`PHYLOG_ANTHROPIC_EFFORT`) and per call (`effort`).
+const DEFAULT_EFFORT: LlmEffort | undefined = undefined;
+
+/** The GraphLog stages that call a model. */
+export type GraphLogModelStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view";
+
+/**
+ * Which model, at what effort, each stage runs on when nothing overrides
+ * it. Chosen from a measured grid (2026-09-11, Crouch Casita, three days
+ * and a full reset build per configuration; see the vault's coding loops
+ * for the tables), not from a general sense of which model is "better":
+ *
+ * - `sync-graph` selects lines from logs. Every model captured the same
+ *   content; effort changed cost and time, not what was kept. Sonnet at
+ *   medium matched Sonnet at high for three quarters of the cost.
+ * - `graph-structure` disagreed with itself about thread count (3 to 15
+ *   on one graph) more than the models disagreed with each other, so it
+ *   stays on the previous default until the skill pins granularity.
+ * - `graph-project-view` is where judgment shows. Only Opus read time
+ *   across the graph ("targeted next week" written 16 days ago and still
+ *   open; an estimate made under 115-degree days never re-estimated).
+ *   Opus at medium kept that for about 70% of Opus at high. Then on
+ *   2026-09-14, with PROJECT_VIEW.md rewritten as goals and boundaries
+ *   rather than steps, a held-structure control (one Sonnet-built index,
+ *   two READMEs per cell) put Fable 5.1 at high ahead: no uncited
+ *   thread and no invented fact in three readings, openers that name
+ *   what nobody has logged movement on and for how long, at a fixed
+ *   $0.10 to $0.15 more per README (output tokens cost double, it
+ *   writes fewer; the part that grows with the graph is cached input,
+ *   cheaper on Fable). Austin's call: the output skills are heading
+ *   toward Fable's strengths, not away. Re-measure when the next output
+ *   skill exists. Fable refuses through `stop_reason: "refusal"`, which
+ *   `mapStopReason` reports as "other"; a refused pass shows as a
+ *   stopped run, not a silent empty README.
+ * - `sync-knowledge` describes photos and extracts sidecars; untested in
+ *   the grid, left on the previous default.
+ *
+ * Override per stage with `PHYLOG_ANTHROPIC_MODEL_<STAGE>` /
+ * `PHYLOG_ANTHROPIC_EFFORT_<STAGE>` (stage upper-cased, dashes to
+ * underscores), or every stage at once with `PHYLOG_ANTHROPIC_MODEL` /
+ * `PHYLOG_ANTHROPIC_EFFORT`. A test that hands a stage its own
+ * `provider` bypasses all of this.
+ */
+const STAGE_DEFAULTS: Record<GraphLogModelStage, { model: string; effort?: LlmEffort }> = {
+  "sync-knowledge": { model: DEFAULT_MODEL },
+  "sync-graph": { model: DEFAULT_MODEL, effort: "medium" },
+  "graph-structure": { model: DEFAULT_MODEL, effort: "high" },
+  "graph-project-view": { model: "claude-fable-5-1", effort: "high" },
+};
+
+/** The model and effort `stage` runs on, after env overrides. Exported
+ * so the run page or a CLI can say what a stage WOULD use. */
+export function modelForStage(stage: GraphLogModelStage): { model: string; effort?: LlmEffort } {
+  const key = stage.toUpperCase().replace(/-/g, "_");
+  const d = STAGE_DEFAULTS[stage];
+  const model = process.env[`PHYLOG_ANTHROPIC_MODEL_${key}`] ?? process.env.PHYLOG_ANTHROPIC_MODEL ?? d.model;
+  const effort =
+    (process.env[`PHYLOG_ANTHROPIC_EFFORT_${key}`] as LlmEffort | undefined) ??
+    (process.env.PHYLOG_ANTHROPIC_EFFORT as LlmEffort | undefined) ??
+    d.effort;
+  return effort ? { model, effort } : { model };
+}
 /** Vision calls want a paragraph, not a whole README — kept separate from
  * `DEFAULT_MAX_TOKENS` so tightening one doesn't silently affect the
  * other. */
@@ -179,11 +248,40 @@ function toLlmUsage(usage: Anthropic.Usage): LlmUsage {
   };
 }
 
+/** The thinking configuration for a tool-calling call on `model`.
+ * Adaptive thinking with a readable summary on the current family: the
+ * summary costs nothing extra (display is visibility only, thinking is
+ * billed the same either way) and is what lets a run page say WHAT the
+ * model deliberated on a turn that produced no content. Haiku 4.5 still
+ * takes the old budget form and rejects `adaptive`, so it gets no
+ * thinking parameter at all (which on Haiku means no thinking). */
+function thinkingFor(model: string): Anthropic.MessageCreateParams["thinking"] | undefined {
+  if (model.startsWith("claude-haiku")) return undefined;
+  return { type: "adaptive", display: "summarized" } as Anthropic.MessageCreateParams["thinking"];
+}
+
+/** Whether `thinking: {type: "disabled"}` is accepted on `model`. Used
+ * only by the vision call, whose 512-token limit has no room for
+ * deliberation and whose output is a paragraph, not a tool call (the
+ * documented failure mode of disabling thinking is a tool call written
+ * into visible text, which cannot happen with no tools). */
+function canDisableThinking(model: string): boolean {
+  return !model.startsWith("claude-haiku") && !model.startsWith("claude-fable") && !model.startsWith("claude-mythos");
+}
+
 export class AnthropicProvider implements LlmProvider, PhotoDescriber {
   private client: Anthropic;
   private model: string;
+  private effort: LlmEffort | undefined;
 
-  constructor(options: { apiKey?: string; model?: string; workspaceId?: string } = {}) {
+  /** The provider a stage runs on when the caller hands it none -- see
+   * `STAGE_DEFAULTS`. Every stage's own `opts.provider ?? ...` default
+   * goes through here, so the per-stage choice lives in one table. */
+  static forStage(stage: GraphLogModelStage): AnthropicProvider {
+    return new AnthropicProvider(modelForStage(stage));
+  }
+
+  constructor(options: { apiKey?: string; model?: string; workspaceId?: string; effort?: LlmEffort } = {}) {
     const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new Error(
@@ -207,6 +305,7 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
       defaultHeaders: workspaceId ? { "anthropic-workspace-id": workspaceId } : undefined,
     });
     this.model = options.model ?? process.env.PHYLOG_ANTHROPIC_MODEL ?? DEFAULT_MODEL;
+    this.effort = options.effort ?? (process.env.PHYLOG_ANTHROPIC_EFFORT as LlmEffort | undefined) ?? DEFAULT_EFFORT;
   }
 
   async complete(input: {
@@ -215,6 +314,7 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     tools: ToolDefinition[];
     cacheSystemPrompt?: boolean;
     maxTokens?: number;
+    effort?: LlmEffort;
   }): Promise<LlmResponse> {
     // `messages.length > 1` means this ISN'T the first turn of a
     // multi-turn exchange -- there's already at least one prior
@@ -228,16 +328,42 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     const multiTurn = input.messages.length > 1;
     const cacheSystem = (input.cacheSystemPrompt ?? false) || multiTurn;
     const messages = toAnthropicMessages(input.messages);
-    const response = await this.client.messages.create({
+    const effort = input.effort ?? this.effort;
+    const thinking = thinkingFor(this.model);
+    // Streamed, for two reasons. The SDK's non-streaming path has a
+    // timeout that a large `max_tokens` can trip. And the final message
+    // OMITS a `tool_use` block that was cut off by `max_tokens`, so the
+    // stream is the only place its JSON prefix can be read -- which is
+    // the difference between "cut off writing a node for Source 3" and
+    // "produced nothing". `finalMessage()` still assembles the complete
+    // blocks the same way `create()` would return them.
+    const stream = this.client.messages.stream({
       model: this.model,
       max_tokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
       system: cacheSystem ? toAnthropicSystem(input.system) : input.system,
       messages: multiTurn ? withLastMessageCacheBreakpoint(messages) : messages,
       tools: toAnthropicTools(input.tools),
+      ...(thinking ? { thinking } : {}),
+      ...(effort ? { output_config: { effort } } : {}),
     });
+    // Only the LAST tool_use block can be the unfinished one; track the
+    // one currently open and its accumulated JSON.
+    let openTool: { name: string; inputJson: string; closed: boolean } | null = null;
+    for await (const event of stream) {
+      if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
+        openTool = { name: event.content_block.name, inputJson: "", closed: false };
+      } else if (event.type === "content_block_delta" && event.delta.type === "input_json_delta" && openTool) {
+        openTool.inputJson += event.delta.partial_json;
+      } else if (event.type === "content_block_stop" && openTool) {
+        openTool.closed = true;
+      }
+    }
+    const response = await stream.finalMessage();
 
     let text: string | null = null;
     const toolCalls: ToolCall[] = [];
+    let thinkingBlocks = 0;
+    let thinkingText: string | null = null;
     for (const block of response.content) {
       if (block.type === "text") {
         text = (text ?? "") + block.text;
@@ -247,13 +373,25 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
           name: block.name,
           input: block.input as Record<string, unknown>,
         });
+      } else if (block.type === "thinking") {
+        thinkingBlocks++;
+        if (block.thinking) thinkingText = (thinkingText ?? "") + block.thinking;
       }
     }
+    const stopReason = mapStopReason(response.stop_reason);
+    // A tool block that was still open when the stream ended, on a cut,
+    // is the one the API dropped. On any other stop every block closed.
+    const partialToolCall =
+      stopReason === "max_tokens" && openTool && !openTool.closed
+        ? { name: openTool.name, inputJson: openTool.inputJson }
+        : null;
 
     return {
       text,
       toolCalls,
-      stopReason: mapStopReason(response.stop_reason),
+      thinking: { blocks: thinkingBlocks, text: thinkingText },
+      partialToolCall,
+      stopReason,
       usage: toLlmUsage(response.usage),
       model: this.model,
     };
@@ -262,32 +400,50 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
   /** See `PhotoDescriber` (`llmProvider.ts`) for the design reasoning —
    * a plain, single-turn vision call, no tools, no message history. */
   async describePhoto(input: PhotoDescriptionInput): Promise<PhotoDescriptionResult> {
-    if (!ANTHROPIC_IMAGE_MEDIA_TYPES.has(input.mediaType)) {
-      throw new Error(`Unsupported image media type for description: ${input.mediaType}`);
+    return this.describeImages({
+      images: [{ imageBase64: input.imageBase64, mediaType: input.mediaType, label: "" }],
+      context: input.context,
+      framing: PHOTO_DESCRIPTION_SYSTEM_PROMPT,
+    });
+  }
+
+  /** Several images, one description. Each image is preceded by its label
+   * as a text block, so the model can refer to "the frame at 0:17". */
+  async describeImages(input: ImagesDescriptionInput): Promise<PhotoDescriptionResult> {
+    if (input.images.length === 0) throw new Error("describeImages needs at least one image");
+    for (const image of input.images) {
+      if (!ANTHROPIC_IMAGE_MEDIA_TYPES.has(image.mediaType)) {
+        throw new Error(`Unsupported image media type for description: ${image.mediaType}`);
+      }
     }
+    const content: Anthropic.ContentBlockParam[] = [];
+    for (const image of input.images) {
+      if (image.label) content.push({ type: "text", text: image.label });
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: image.mediaType as Anthropic.Base64ImageSource["media_type"],
+          data: image.imageBase64,
+        },
+      });
+    }
+    content.push({ type: "text", text: input.context || "(no additional context provided)" });
+
+    // 512 tokens is a paragraph, and on this model family thinking is on
+    // by default and counts against it -- the same latent cut as the
+    // tool-calling path, which happened not to bite here only because the
+    // model rarely deliberates over a photo. Made explicit rather than
+    // left to chance; a model that rejects the disabled form gets no
+    // parameter (Haiku: no thinking; Fable: always thinks, so the limit
+    // is raised instead -- see `PHOTO_DESCRIPTION_MAX_TOKENS`'s use).
+    const disable = canDisableThinking(this.model);
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: PHOTO_DESCRIPTION_MAX_TOKENS,
-      system: PHOTO_DESCRIPTION_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: input.mediaType as Anthropic.Base64ImageSource["media_type"],
-                data: input.imageBase64,
-              },
-            },
-            {
-              type: "text",
-              text: input.context || "(no additional context provided)",
-            },
-          ],
-        },
-      ],
+      max_tokens: disable || this.model.startsWith("claude-haiku") ? PHOTO_DESCRIPTION_MAX_TOKENS : PHOTO_DESCRIPTION_MAX_TOKENS * 8,
+      system: input.framing,
+      messages: [{ role: "user", content }],
+      ...(disable ? { thinking: { type: "disabled" } as Anthropic.MessageCreateParams["thinking"] } : {}),
     });
 
     const description = response.content
@@ -298,6 +454,10 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     return { description, usage: toLlmUsage(response.usage), model: this.model };
   }
 }
+
+/** The single-photo framing, exported so `sync-knowledge` can build the
+ * video framing from it rather than restating it. */
+export { PHOTO_DESCRIPTION_SYSTEM_PROMPT };
 
 /** Whether a real Anthropic call can be made right now — checked by both
  * API routes and the CLI, same "absent env var = feature off" convention

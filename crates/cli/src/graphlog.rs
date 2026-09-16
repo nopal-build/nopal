@@ -54,6 +54,13 @@ struct DailyLogSyncResult {
     unchanged: Vec<SyncedEntry>,
     #[serde(default)]
     attachments_copied: Vec<CopiedAttachment>,
+    /// Reasons the stage did not do everything it set out to (e.g. an
+    /// attachment that could not be copied out of its Card). This route
+    /// is synchronous -- no job, no run row -- so this struct is the
+    /// only reader; without the field serde dropped the lines on the
+    /// floor (ADR-016).
+    #[serde(default)]
+    incomplete: Vec<String>,
 }
 
 /// Runs `daily-log-sync` for `project_path` — every (day, contributor) with
@@ -79,6 +86,7 @@ pub fn daily_log_sync(
             "Nothing new to sync ({} day(s) already up to date).",
             result.unchanged.len()
         );
+        print_incomplete(&result.incomplete);
         return Ok(());
     }
 
@@ -97,6 +105,7 @@ pub fn daily_log_sync(
             result.unchanged.len()
         );
     }
+    print_incomplete(&result.incomplete);
 
     Ok(())
 }
@@ -382,6 +391,44 @@ pub fn run(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct RerunOutputsResult {
+    #[serde(default)]
+    structure_was_stale: bool,
+    #[serde(default)]
+    readme_was_stale: bool,
+}
+
+/// `nopal graphlog rerun-outputs --project <path>`
+///
+/// Runs graph-structure then graph-project-view with the server's
+/// `rebuildStale` set: each re-threads / rewrites only if its own skill
+/// stamp is older than the current skill, and otherwise makes no model
+/// call. The graph is never touched — that is `reset-graph`. See the
+/// `graphlog` skill.
+pub fn rerun_outputs(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog rerun-outputs: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/rerun-outputs", &body)?;
+    let result: RerunOutputsResult = poll_job(&client, &job_id)?;
+
+    if !result.structure_was_stale && !result.readme_was_stale {
+        println!("rerun-outputs: nothing stale; structure and README were already written under the current skills.");
+    } else {
+        println!(
+            "rerun-outputs: {}, {}.",
+            if result.structure_was_stale { "structure re-threaded" } else { "structure current" },
+            if result.readme_was_stale { "README rewritten" } else { "README current" },
+        );
+    }
+
+    Ok(())
+}
+
 // ─── Reset ───────────────────────────────────────────────────
 // `nopal graphlog reset` and its three narrower siblings — see the
 // `graphlog` skill and `graphLogReset.server.ts`'s own module doc for
@@ -396,6 +443,11 @@ struct ProjectViewResetResult {
     deleted_files: Vec<String>,
     #[serde(default)]
     readme_cleared: bool,
+    /// Whether graph-structure.md's `appliedByProjectView` marker was
+    /// cleared -- the half of a reset that used to be missed entirely,
+    /// and the confirmation a person most wants (ADR-016).
+    #[serde(default)]
+    project_view_marker_cleared: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -433,11 +485,23 @@ fn print_project_view_reset(result: &ProjectViewResetResult) {
     if result.readme_cleared {
         println!("README.md's body was cleared (front matter preserved).");
     }
+    if result.project_view_marker_cleared {
+        println!("graph-structure.md's applied marker was cleared; the next run rebuilds the README.");
+    }
     if result.deleted_folders.is_empty()
         && result.deleted_files.is_empty()
         && !result.readme_cleared
+        && !result.project_view_marker_cleared
     {
         println!("Nothing to reset — project view was already empty.");
+    }
+}
+
+/// One line per reason a stage finished without doing everything it set
+/// out to. Shared by every stage printer that has such a list.
+fn print_incomplete(incomplete: &[String]) {
+    for reason in incomplete {
+        println!("INCOMPLETE: {}", reason);
     }
 }
 

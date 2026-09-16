@@ -12,8 +12,9 @@
  * this does anything at all. When it's "skip", no files are examined, no
  * model is ever called.
  *
- * Walks every file under a project's `syncs/` tree (any connector folder,
- * not just `Daily Logs` — see the `vault` skill's Sync types section) and
+ * Walks every ATTACHMENT under a project's `syncs/` tree (any connector
+ * folder, not just `Daily Logs` — see the `vault` skill's Sync types
+ * section; never the synced Cards themselves, see `collectSyncCandidates`) and
  * asks an LLM, grounded in `KNOWLEDGE.md`'s own instructions, to pull out
  * concrete, extractable METADATA about it — names, dates, decisions — into
  * a sidecar `<name>.knowledge.md`. Deliberately NOT a narrative summary of
@@ -56,7 +57,18 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import { downloadFileBytes } from "./file.server";
-import { getProjectStageSkill, isSkipInstruction, listExtraSkillFiles } from "./projectN02.server";
+import { parseSyncedCardFileName } from "./dailyLogSync.server";
+import { formatSeconds, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
+import type { GraphLogEventKind } from "./graphLogMetrics.server";
+import type { PhotoDescriptionResult } from "./llmProvider";
+import {
+  classifyStageSkill,
+  composeStageSkill,
+  getProjectStageSkill,
+  isSkipInstruction,
+  listExtraSkillFiles,
+  readSkillFingerprint,
+} from "./projectN02.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -91,6 +103,22 @@ export type SyncKnowledgeResult =
        * image) — reported so a human can see what's being silently left
        * behind, not just "nothing happened". */
       unsupported: { fileId: string; name: string }[];
+      /** Sidecars that are up to date by content but were written under
+       * an older KNOWLEDGE.md than the current one. Reported, never acted
+       * on by this stage (see `composeStageSkill`). Absent on the
+       * early-return paths. */
+      staleSidecars?: number;
+      /** Reasons this stage finished without doing everything it set out
+       * to, in the same shape every other stage uses, so the pipeline can
+       * aggregate them and the run says so.
+       *
+       * This stage had no way to report ANYTHING until now, and it is the
+       * one that describes photos. A project whose `KNOWLEDGE.md` was
+       * never seeded skipped it in 201ms and the run said OK, so an
+       * uncaptioned photo had neither a caption nor a description, never
+       * earned a node, and never reached the README. Nothing about that
+       * was visible anywhere. */
+      incomplete: string[];
     }
   | { ok: false; error: string };
 
@@ -123,24 +151,43 @@ function knowledgeFileName(sourceName: string): string {
   return `${base}.knowledge.md`;
 }
 
-function buildKnowledgeContent(input: { sourceFileId: string; hash: string; body: string }): string {
+function buildKnowledgeContent(input: {
+  sourceFileId: string;
+  hash: string;
+  body: string;
+  extraMeta?: Record<string, unknown>;
+}): string {
   const frontmatter = stringifyYaml({
     source: input.sourceFileId,
     sourceHash: input.hash,
     generatedAt: new Date().toISOString(),
+    ...(input.extraMeta ?? {}),
   }).trimEnd();
   return `---\n${frontmatter}\n---\n\n${input.body}`;
 }
 
 /** Walks a project's `syncs/` tree recursively, collecting every real
  * file — skipping `_knowledge` folders entirely (see this module's own
- * header on why). */
+ * header on why), and skipping the synced daily-log CARDS themselves.
+ *
+ * ATTACHMENTS ONLY, by design. A Card is a person's own words, and
+ * `sync-graph` reads it verbatim one stage later (ADR-001, ADR-012); a
+ * model's "extracted metadata" about it is a second reading of the same
+ * text that sync-graph does not need, costs a call per Card per change,
+ * and is exactly the summary-of-a-summary shape ADR-006 and ADR-010 were
+ * written against. What this stage exists for is the file a Card cannot
+ * speak for: a photo, a video frame, a text attachment -- the thing that
+ * has no path into the graph until something describes it. A file whose
+ * name matches neither shape (a future non-daily-log sync source) is
+ * still a candidate: it is not a Card. */
 async function collectSyncCandidates(
   humanId: string,
   folderId: string,
 ): Promise<SyncKnowledgeCandidate[]> {
   const { folders, files } = await listFolderChildren(humanId, folderId);
-  const out: SyncKnowledgeCandidate[] = files.map((f) => ({ fileId: f._id, name: f.name }));
+  const out: SyncKnowledgeCandidate[] = files
+    .filter((f) => !parseSyncedCardFileName(f.name))
+    .map((f) => ({ fileId: f._id, name: f.name }));
   for (const sub of folders) {
     if (sub.name === KNOWLEDGE_FOLDER_NAME) continue;
     out.push(...(await collectSyncCandidates(humanId, sub._id)));
@@ -185,7 +232,13 @@ export async function runSyncKnowledge(
 
   const skill = await getProjectStageSkill(projectFolder, "KNOWLEDGE.md");
   if (isSkipInstruction(skill)) {
-    return { ok: true, skipped: true, entries: [], unsupported: [] };
+    // An explicit `skip` is a decision and stays quiet. A never-seeded
+    // file is a broken project that silently loses every uncaptioned
+    // photo, and says so. Same split as the other stages.
+    const missing = classifyStageSkill(skill) === "missing";
+    const reason = "skills/KNOWLEDGE.md is missing or empty, so no file was read and no photo was described";
+    if (missing) log(`sync-knowledge: ${reason}.`);
+    return { ok: true, skipped: true, entries: [], unsupported: [], incomplete: missing ? [reason] : [] };
   }
   if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
@@ -195,15 +248,13 @@ export async function runSyncKnowledge(
   const syncsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "syncs");
   if (!syncsFolder) {
     log("sync-knowledge: no syncs/ folder yet — nothing to do.");
-    return { ok: true, skipped: false, entries: [], unsupported: [] };
+    return { ok: true, skipped: false, entries: [], unsupported: [], incomplete: [] };
   }
 
   const candidates = await collectSyncCandidates(projectFolder.human_id, syncsFolder._id);
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
   const extraSkillFiles = await listExtraSkillFiles(projectFolder);
-  const skillContent = [skill, generalSkill, ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`)]
-    .filter(Boolean)
-    .join("\n\n");
+  const { content: skillContent, fingerprint: skillFingerprint } = composeStageSkill(skill, generalSkill, extraSkillFiles);
 
   let photoLlm: PhotoDescriber | undefined = opts.photoDescriber;
   let textLlm: LlmProvider | undefined = opts.provider;
@@ -213,6 +264,7 @@ export async function runSyncKnowledge(
 
   const entries: SyncKnowledgeEntry[] = [];
   const unsupported: { fileId: string; name: string }[] = [];
+  let staleSidecars = 0;
 
   for (const candidate of candidates) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
@@ -234,26 +286,65 @@ export async function runSyncKnowledge(
     const existing = existingListing ? await getFileRefById(existingListing._id) : undefined;
 
     if (existing && existingSourceHash(existing.content) === hash) {
+      // Up to date by content; may still be under an older KNOWLEDGE.md.
+      // Counted and reported, never re-run on that basis alone (see
+      // `composeStageSkill`).
+      if (readSkillFingerprint(existing.content) !== skillFingerprint) staleSidecars += 1;
       entries.push({ fileId: source._id, name: source.name, knowledgeFileId: existing._id, generated: false });
       continue;
     }
 
     let body: string | null = null;
+    /** Extra front-matter lines for a sidecar built from stills rather
+     * than the file itself -- see `attachmentFrames.server.ts`. */
+    let extraMeta: Record<string, unknown> = {};
     const isImage = isImageContentType(source.content_type) && !!source.s3_key;
-    const kind = isImage ? "photo-knowledge" : "text-knowledge";
+    const isVideo = isVideoContentType(source.content_type) && !!source.s3_key;
+    const kind: GraphLogEventKind = isVideo ? "video-knowledge" : isImage ? "photo-knowledge" : "text-knowledge";
     const callStart = Date.now();
     try {
-      if (isImage) {
-        photoLlm ??= new AnthropicProvider();
+      if (isImage || isVideo) {
+        photoLlm ??= AnthropicProvider.forStage("sync-knowledge");
         const bytes = await perf.time("sync-knowledge", "api", "downloadFileBytes", { fileId: source._id }, () =>
           downloadFileBytes(source.s3_key!),
         );
-        const result = await photoLlm.describePhoto({
-          imageBase64: bytes.toString("base64"),
-          mediaType: source.content_type,
-          context: `Knowledge-extraction instructions for this project:\n\n${skillContent}`,
-        });
-        body = result.description;
+        const context = `Knowledge-extraction instructions for this project:\n\n${skillContent}`;
+        let result: PhotoDescriptionResult;
+        if (isVideo) {
+          // A video is a few stills, described as a sequence. Frames only:
+          // narration is not heard, and the sidecar says so in its own
+          // front matter and first line, the way a description-grounded
+          // node says what it is.
+          const extension = source.name.split(".").pop() ?? "bin";
+          const { stills, durationSeconds } = await perf.time(
+            "sync-knowledge",
+            "fn",
+            "videoToStills",
+            { fileId: source._id, name: source.name },
+            () => videoToStills(bytes, extension),
+          );
+          const at = stills.map((f) => formatSeconds(f.atSeconds ?? 0));
+          result = await photoLlm.describeImages({
+            images: stills.map((f, i) => ({
+              imageBase64: f.jpegBase64,
+              mediaType: "image/jpeg",
+              label: `Frame ${i + 1} of ${stills.length}, ${at[i]} into the clip:`,
+            })),
+            context,
+            framing:
+              `You are describing a VIDEO attached to a project's daily-log Card, from ${stills.length} still frames taken in order across its ${formatSeconds(durationSeconds)} length. ` +
+              `Write one short, factual paragraph (3-5 sentences) capturing what the clip shows and what changes across the frames -- objects, people, setting, visible state of progress -- grounded ONLY in what is visible in the frames plus the text context you are given. ` +
+              `You cannot hear it: never describe sound, speech, or narration. Never speculate beyond what is visible. No preamble, no "the video shows" framing -- just the description itself.`,
+          });
+          extraMeta = { describedFrom: "video-frames", frames: stills.length, frameTimes: at, durationSeconds: Math.round(durationSeconds) };
+          body = `*Described from ${stills.length} still frames of a ${formatSeconds(durationSeconds)} video (at ${at.join(", ")}); no audio was heard.*\n\n${result.description}`;
+        } else {
+          // HEIC, and any other image format the model does not take, is
+          // turned into a JPEG first; a plain JPEG/PNG goes through as-is.
+          const image = await normalizeImageForVision(bytes, source.content_type);
+          result = await photoLlm.describePhoto({ imageBase64: image.base64, mediaType: image.mediaType, context });
+          body = result.description;
+        }
         const durationMs = Date.now() - callStart;
         await recordGraphLogUsage({
           humanId: actingHumanId,
@@ -268,12 +359,12 @@ export async function runSyncKnowledge(
         await perf.event({
           process: "sync-knowledge",
           type: "llm",
-          name: "describePhoto",
-          params: { fileId: source._id, name: source.name },
+          name: isVideo ? "describeVideoFrames" : "describePhoto",
+          params: { fileId: source._id, name: source.name, ...extraMeta },
           durationMs,
         });
       } else if (source.content) {
-        textLlm ??= new AnthropicProvider();
+        textLlm ??= AnthropicProvider.forStage("sync-knowledge");
         const cacheSystemPrompt = realTextCallsSoFar > 0;
         realTextCallsSoFar++;
         const response = await textLlm.complete({
@@ -382,7 +473,7 @@ export async function runSyncKnowledge(
       continue;
     }
 
-    const content = buildKnowledgeContent({ sourceFileId: source._id, hash, body });
+    const content = buildKnowledgeContent({ sourceFileId: source._id, hash, body, extraMeta: { ...extraMeta, skillFingerprint } });
     const knowledgeFileId = existing
       ? (await updateFileRef(existing._id, { content }))?._id
       : (
@@ -394,11 +485,39 @@ export async function runSyncKnowledge(
             folder_id: knowledgeFolder._id,
           })
         )?._id;
-    if (!knowledgeFileId) continue;
+    if (!knowledgeFileId) {
+      // The vision/extraction call was already made and already recorded
+      // as a success in usage metrics; the write is what failed. This was
+      // a bare `continue`: no log, not in `unsupported`, not in
+      // `incomplete`, so the dashboard showed a paid, successful
+      // description that produced no file. It is exactly what
+      // `unsupported` is for -- a file that reached this stage and has no
+      // path into the graph -- so it goes there and rides the existing
+      // `incomplete` line below.
+      log(`sync-knowledge: could not write "${name}" for "${source.name}" after describing it; will retry next run.`);
+      unsupported.push({ fileId: source._id, name: source.name });
+      continue;
+    }
 
     log(`sync-knowledge: wrote "${name}" for "${source.name}".`);
     entries.push({ fileId: source._id, name: source.name, knowledgeFileId, generated: true });
   }
 
-  return { ok: true, skipped: false, entries, unsupported };
+  // `unsupported` has always been collected "so a human can see what's
+  // being silently left behind" (see its own doc above) and has never had
+  // a reader. A file that reached this stage and produced nothing is a
+  // file that cannot reach the graph or the README, so it is exactly a
+  // reason the run did not do everything it set out to.
+  const incomplete: string[] =
+    unsupported.length > 0
+      ? [
+          `${unsupported.length} file(s) could not be read or described, so nothing about them can reach the graph: ` +
+            unsupported.slice(0, 5).map((u) => u.name).join(", ") +
+            (unsupported.length > 5 ? `, and ${unsupported.length - 5} more` : ""),
+        ]
+      : [];
+  if (staleSidecars > 0) {
+    log(`sync-knowledge: ${staleSidecars} sidecar(s) were written under an older KNOWLEDGE.md and were left as they are (reset-knowledge rewrites them).`);
+  }
+  return { ok: true, skipped: false, entries, unsupported, incomplete, staleSidecars };
 }
