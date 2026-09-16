@@ -329,7 +329,13 @@ now, per the resolved open question.
 apps — each one has a top-of-file comment saying so): `Layout`/`Footer`/
 `GoodAssets` (the moved auth/public-sharing pages kept marketing's exact
 chrome, unchanged, rather than getting new app-native chrome — a genuine
-follow-up worth reconsidering separately), `useSchemePref`/
+follow-up worth reconsidering separately -- **update:** actioned for the
+core login flow (`login`/`verify`/`login-error`), which now use a new
+`AuthShell` component instead — no `Layout`/`Footer`/`.scene1` at all;
+see the dedicated writeup below. `cli-login`, `welcome.$token`,
+`card.$fileId`, `public.file.$fileId`, and `public.folder.$folderId`
+still use the old pattern and have the identical issue — not yet done),
+`useSchemePref`/
 `useClickOutside`, `util/email.server.ts`, and — a discovery the plan
 hadn't accounted for — **`OxRenderer.tsx` and part of `app/oxmarkdown/`**.
 Marketing's own `/v2/*` pages (`WebsitePageView.tsx`, an in-progress
@@ -365,6 +371,29 @@ now, regression included — it's still a work in progress and it isn't
 clear yet whether this CMS approach sticks around at all. Revisit "move
 it into `fruits` as a preview surface" (raised as an option, not chosen)
 only once/if `/v2` is actually committed to as a real feature.
+
+**Follow-up, actioned post-Phase-3: `AuthShell` replaces `Layout`/
+`Footer`/`.scene1` for the core login flow.** The duplicated marketing
+chrome didn't just look out of place on app pages — `.scene1`/`.scene0*`
+(hero background art) reference image paths that only ever existed in
+webapp, so those pages rendered with visibly broken/missing artwork, not
+just "technically the wrong nav." Fixed for `login.tsx`, `verify.tsx`,
+and `login-error.tsx` (the three pages of the actual TOTP/passkey login
+journey — tightly coupled, so fixing one without the others would have
+just moved the jarring inconsistency one screen later) with a new
+`fruits/app/components/AuthShell.tsx`: a minimal centered-card layout
+using only `stamps` (`semanticColors`, `sprinkles`, `textSize`) plus the
+same small "no." logo mark `AppLayout` already uses — no nav, no
+footer, no legacy CSS classes, nothing borrowed from webapp at all.
+`AuthErrorText` (also in that file) replaces the legacy `.red-text`
+class with `semanticColors.textDanger`.
+
+**Not yet done, same underlying issue:** `cli-login.tsx`,
+`welcome.$token.tsx`, `card.$fileId.tsx`, `public.file.$fileId.tsx`, and
+`public.folder.$folderId.tsx` still use `Layout`/`Footer`/`.scene1` —
+leave `Layout.tsx`/`Footer.tsx`/`GoodAssets.tsx` in `fruits/app/
+components` in place until those are migrated too (or decided against),
+since they're still real dependencies of those five files.
 
 **Other things discovered and handled along the way:**
 - `api.health.tsx` is **duplicated**, not moved — each service's own

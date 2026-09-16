@@ -14,8 +14,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { button } from "stamps/button.css";
 import { link } from "stamps/link.css";
-import { Layout } from "../components/Layout";
-import { Footer } from "../components/Footer";
+import { AuthShell, AuthErrorText } from "../components/AuthShell";
 import { Link } from "react-router";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -42,92 +41,78 @@ export default function Verify() {
     authError?.includes("expired") || authError?.includes("verification");
 
   return (
-    <Layout>
-      <div className="scene1">
-        <div
-          className={sprinkles({ px: 4, py: 12 })}
-          style={{ width: "100%", maxWidth: "24rem", margin: "0 auto" }}
+    <AuthShell title="Verify Login Code">
+      <p className={sprinkles({ fontStyle: "italic", mb: 8 })}>
+        Check your email for "the code"
+      </p>
+      <div
+        className={`${surfaceBase} ${textSize.xl} ${sprinkles({
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          p: 4,
+        })}`}
+        style={{ width: "auto" }}
+      >
+        <Form
+          method="POST"
+          className={sprinkles({ display: "flex", flexDirection: "column", gap: 4 })}
         >
-          <h1
-            className={`${textSize["3xl"]} purple-light-text ${sprinkles({
-              fontWeight: "bold",
-              mb: 2,
-            })}`}
-          >
-            Verify Login Code
-          </h1>
-          <p className={sprinkles({ fontStyle: "italic", mb: 8 })}>
-            Check your email for "the code"
-          </p>
-          <div
-            className={`${surfaceBase} ${textSize.xl} ${sprinkles({
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              p: 4,
-            })}`}
-            style={{ width: "auto" }}
-          >
-            <Form
-              method="POST"
-              className={sprinkles({ display: "flex", flexDirection: "column", gap: 4 })}
-            >
-              <input type="hidden" value={authEmail} name="authEmail" />
-              <Input
-                label="Code"
-                name="code"
-                required
-                placeholder="123456"
-              />
-              {authError && !shouldRequestCode && (
-                <div className="red-text">{authError}</div>
-              )}
-              <div className={sprinkles({ textAlign: "right" })}>
-                <button className={button({ variant: "secondary" })} type="submit">
-                  Continue
+          <input type="hidden" value={authEmail} name="authEmail" />
+          <Input
+            label="Code"
+            name="code"
+            required
+            placeholder="123456"
+          />
+          {authError && !shouldRequestCode && <AuthErrorText>{authError}</AuthErrorText>}
+          <div className={sprinkles({ textAlign: "right" })}>
+            <button className={button({ variant: "secondary" })} type="submit">
+              Continue
+            </button>
+          </div>
+        </Form>
+        {authError?.includes("expired") ? (
+          <div className={`${textSize.lg} ${sprinkles({ mt: 2 })}`}>
+            <AuthErrorText>
+              That code has expired, when you are ready{" "}
+              <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
+                <button className={link} type="submit">
+                  click here to request a new code
                 </button>
-              </div>
+              </Form>
+              .
+            </AuthErrorText>
+          </div>
+        ) : authError?.includes("verification") ? (
+          <div className={`${textSize.lg} ${sprinkles({ mt: 2 })}`}>
+            <AuthErrorText>
+              We lost your session, when you are ready{" "}
+              <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
+                <button className={link} type="submit">
+                  click here to request a new code
+                </button>
+              </Form>
+              .
+            </AuthErrorText>
+          </div>
+        ) : (
+          <div className={`${textSize.lg} ${sprinkles({ textAlign: "right" })}`}>
+            ...or{" "}
+            <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
+              <button className={link} type="submit">
+                request new code
+              </button>
             </Form>
-            {authError?.includes("expired") ? (
-              <div className={`${textSize.lg} red-text ${sprinkles({ mt: 2 })}`}>
-                That code has expired, when you are ready{" "}
-                <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
-                  <button className={link} type="submit">
-                    click here to request a new code
-                  </button>
-                </Form>
-                .
-              </div>
-            ) : authError?.includes("verification") ? (
-              <div className={`${textSize.lg} red-text ${sprinkles({ mt: 2 })}`}>
-                We lost your session, when you are ready{" "}
-                <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
-                  <button className={link} type="submit">
-                    click here to request a new code
-                  </button>
-                </Form>
-                .
-              </div>
-            ) : (
-              <div className={`${textSize.lg} ${sprinkles({ textAlign: "right" })}`}>
-                ...or{" "}
-                <Form method="POST" className={sprinkles({ display: "inline-flex" })}>
-                  <button className={link} type="submit">
-                    request new code
-                  </button>
-                </Form>
-                .
-              </div>
-            )}
+            .
           </div>
-          <div className={sprinkles({ mt: 8 })}>
-            <Link to="/login" className={link}>
-              ← Back to login
-            </Link>
-          </div>
-        </div>
+        )}
       </div>
-      <Footer></Footer>
-    </Layout>
+      <div className={sprinkles({ mt: 8 })}>
+        <Link to="/login" className={link}>
+          ← Back to login
+        </Link>
+      </div>
+    </AuthShell>
   );
 }

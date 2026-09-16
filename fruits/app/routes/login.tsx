@@ -4,8 +4,8 @@ import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { button } from "stamps/button.css";
-import { Layout } from "../components/Layout";
-import { Footer } from "../components/Footer";
+import { semanticColors } from "stamps/tokens";
+import { AuthShell, AuthErrorText } from "../components/AuthShell";
 import { useLoaderData, useActionData, useNavigate, Form } from "react-router";
 import {
   data,
@@ -107,82 +107,64 @@ export default function Login() {
   }
 
   return (
-    <Layout>
-      <div className="scene1">
-        <div
-          className={sprinkles({ px: 4, py: 12 })}
-          style={{ width: "100%", maxWidth: "24rem", margin: "0 auto" }}
-        >
-          <h1
-            className={`${textSize["3xl"]} purple-light-text ${sprinkles({
-              fontWeight: "bold",
-              mb: 4,
-            })}`}
-          >
-            Login
-          </h1>
-          <Form
-            method="POST"
-            className={`${surfaceBase} ${sprinkles({
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              p: 4,
-            })}`}
-          >
-            {redirectTo && (
-              <input type="hidden" name="redirectTo" value={redirectTo} />
-            )}
-            <Input
-              label="Email"
-              name="email"
-              defaultValue={prefillEmail}
-              required
-              placeholder="you@nature.yeah"
-            />
-            {actionData?.error && (
-              <div className="red-text">{actionData.error}</div>
-            )}
-            {!actionData?.error && authError && (
-              <div className="red-text">{authError}</div>
-            )}
-            <div className={sprinkles({ textAlign: "right" })}>
-              <button className={button({ variant: "secondary" })} type="submit">
-                Send Code
-              </button>
-            </div>
-          </Form>
-
-          <div
-            className={sprinkles({ textAlign: "center", my: 4 })}
-            style={{ color: "var(--text-subtle)" }}
-          >
-            or
-          </div>
-
-          <div
-            className={`${surfaceBase} ${sprinkles({
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-              p: 4,
-            })}`}
-          >
-            {passkeyError && (
-              <div className={`red-text ${textSize.sm}`}>{passkeyError}</div>
-            )}
-            <button
-              className={button({ variant: "secondary" })}
-              type="button"
-              disabled={passkeyBusy}
-              onClick={handlePasskeyLogin}
-            >
-              {passkeyBusy ? "Signing in…" : "Sign in with a passkey"}
-            </button>
-          </div>
+    <AuthShell title="Login">
+      <Form
+        method="POST"
+        className={`${surfaceBase} ${sprinkles({
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          p: 4,
+        })}`}
+      >
+        {redirectTo && (
+          <input type="hidden" name="redirectTo" value={redirectTo} />
+        )}
+        <Input
+          label="Email"
+          name="email"
+          defaultValue={prefillEmail}
+          required
+          placeholder="you@nature.yeah"
+        />
+        {actionData?.error && <AuthErrorText>{actionData.error}</AuthErrorText>}
+        {!actionData?.error && authError && <AuthErrorText>{authError}</AuthErrorText>}
+        <div className={sprinkles({ textAlign: "right" })}>
+          <button className={button({ variant: "secondary" })} type="submit">
+            Send Code
+          </button>
         </div>
+      </Form>
+
+      <div
+        className={sprinkles({ textAlign: "center", my: 4 })}
+        style={{ color: semanticColors.textSubtle }}
+      >
+        or
       </div>
-      <Footer></Footer>
-    </Layout>
+
+      <div
+        className={`${surfaceBase} ${sprinkles({
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+          p: 4,
+        })}`}
+      >
+        {passkeyError && (
+          <div className={textSize.sm}>
+            <AuthErrorText>{passkeyError}</AuthErrorText>
+          </div>
+        )}
+        <button
+          className={button({ variant: "secondary" })}
+          type="button"
+          disabled={passkeyBusy}
+          onClick={handlePasskeyLogin}
+        >
+          {passkeyBusy ? "Signing in…" : "Sign in with a passkey"}
+        </button>
+      </div>
+    </AuthShell>
   );
 }
