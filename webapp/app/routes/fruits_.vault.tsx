@@ -2005,7 +2005,7 @@ export default function VaultV2Page() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replacing, setReplacing] = useState(false);
-  const [graphLogBusy, setGraphLogBusy] = useState<"run" | "reset" | "cancel" | "reseed-skills" | null>(null);
+  const [graphLogBusy, setGraphLogBusy] = useState<"run" | "rerun-outputs" | "reset" | "cancel" | "reseed-skills" | null>(null);
   const [graphLogScheduleBusy, setGraphLogScheduleBusy] = useState(false);
   const [graphLogStatus, setGraphLogStatus] = useState<GraphLogProjectStatus | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -2476,6 +2476,33 @@ export default function VaultV2Page() {
     setGraphLogBusy("run");
     try {
       const data = await apiJson("/api/graphlog/run", {
+        method: "POST",
+        body: JSON.stringify({ projectFolderId: folder._id }),
+      });
+      if (data?.jobId) await refreshGraphLogStatus(folder._id);
+    } finally {
+      setGraphLogBusy(null);
+    }
+  };
+
+  /** Re-threads graph-structure.md and rewrites README.md only where an
+   * older skill wrote them (`api.graphlog.rerun-outputs.tsx`). Never
+   * touches the graph, so it is not `danger`; the graph is only rebuilt by
+   * Reset below, which is. A skill change is otherwise invisible to
+   * existing output on purpose -- see `composeStageSkill`. */
+  const handleRerunGraphLogOutputs = async () => {
+    if (current.kind !== "folder") return;
+    const folder = current.folder;
+    if (
+      !window.confirm(
+        `Rerun GraphLog outputs for "${folder.name}"? This re-threads the structure and rewrites the README only if they were written under older skill files, and makes no model call if both are current. The graph itself is never touched.`,
+      )
+    ) {
+      return;
+    }
+    setGraphLogBusy("rerun-outputs");
+    try {
+      const data = await apiJson("/api/graphlog/rerun-outputs", {
         method: "POST",
         body: JSON.stringify({ projectFolderId: folder._id }),
       });
@@ -3035,6 +3062,11 @@ export default function VaultV2Page() {
       moreActions.push({
         label: graphLogBusy === "run" ? "Running GraphLog…" : "Run GraphLog",
         onClick: handleRunGraphLog,
+        disabled: graphLogBusy !== null,
+      });
+      moreActions.push({
+        label: graphLogBusy === "rerun-outputs" ? "Rerunning Outputs…" : "Rerun GraphLog Outputs (stale only)",
+        onClick: handleRerunGraphLogOutputs,
         disabled: graphLogBusy !== null,
       });
       moreActions.push({

@@ -58,7 +58,7 @@ import {
   type UncitedThread,
   readmeChangedFromJobResult,
 } from "robustness-core/data/graphProjectView.server";
-import { classifyStageSkill, isSkipInstruction } from "robustness-core/data/projectN02.server";
+import { classifyStageSkill, composeStageSkill, isSkipInstruction, readSkillFingerprint } from "robustness-core/data/projectN02.server";
 import { DEFAULT_PROJECT_VIEW_SKILL } from "robustness-core/data/graphLogDefaults.server";
 import {
   README_INCOMPLETE_BANNER_PREFIX,
@@ -352,28 +352,80 @@ describe("extractDatesFromText", () => {
 // and also "works": it just silently makes a project-view reset re-run
 // the whole graph-structure stage as well.
 
+describe("a stage's skill is fingerprinted, stamped, and reported, never a cache key", () => {
+  // Every stage decides "up to date" from a hash of its inputs that never
+  // includes the skill, so a rewritten skill produces nothing for
+  // existing output (Crouch Casita, 2026-09-15). The fingerprint is
+  // taken over exactly the text the model reads, stamped on what the
+  // stage writes, and compared to report drift; a rebuild is a person's
+  // choice (rerun-outputs, reset-graph), never automatic.
+  const extras = [{ name: "VOICE.md", content: "Write plainly." }];
+
+  it("reads the stamp back from a written file, and null from an unstamped one", () => {
+    const stamped = buildGraphLogContent({ date: "2026-09-15", hash: "abc", body: "### Node 1\n:ref{}", skillFingerprint: "feedfacefeedface" });
+    expect(readSkillFingerprint(stamped)).toBe("feedfacefeedface");
+    expect(stamped).toContain("sourceHash: abc");
+    const unstamped = buildGraphLogContent({ date: "2026-09-15", hash: "abc", body: "### Node 1\n:ref{}" });
+    expect(readSkillFingerprint(unstamped)).toBeNull();
+    expect(unstamped).not.toContain("skillFingerprint");
+    expect(readSkillFingerprint("no front matter here")).toBeNull();
+  });
+
+  it("stamping never changes the source hash a day is judged current by", () => {
+    const a = buildGraphLogContent({ date: "2026-09-15", hash: "abc", body: "x", skillFingerprint: "1111111111111111" });
+    const b = buildGraphLogContent({ date: "2026-09-15", hash: "abc", body: "x", skillFingerprint: "2222222222222222" });
+    expect(readSourceHash(a).hash).toBe("abc");
+    expect(readSourceHash(b).hash).toBe("abc");
+  });
+
+  it("is stable for the same instructions", () => {
+    const a = composeStageSkill("Do the thing.", "General.", extras);
+    const b = composeStageSkill("Do the thing.", "General.", extras);
+    expect(a.fingerprint).toBe(b.fingerprint);
+    expect(a.fingerprint).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("changes when the stage skill, the general skill, or an extra file changes", () => {
+    const base = composeStageSkill("Do the thing.", "General.", extras).fingerprint;
+    expect(composeStageSkill("Do the thing, but thinner.", "General.", extras).fingerprint).not.toBe(base);
+    expect(composeStageSkill("Do the thing.", "General, revised.", extras).fingerprint).not.toBe(base);
+    expect(
+      composeStageSkill("Do the thing.", "General.", [{ name: "VOICE.md", content: "Write tersely." }]).fingerprint,
+    ).not.toBe(base);
+  });
+
+  it("composes the same prompt text the stages used to build inline", () => {
+    const { content } = composeStageSkill("Stage.", null, extras);
+    expect(content).toBe("Stage.\n\n## VOICE.md\n\nWrite plainly.");
+  });
+});
+
 describe("reset-project-view clears the applied marker and nothing else", () => {
   const content = [
     "---",
     "asOfGraphHash: abc123",
     "generatedAt: 2026-08-27T00:00:00.000Z",
+    "skillFingerprint: feedfacefeedface",
     "appliedByProjectView: abc123",
+    "appliedSkillFingerprint: 0123456789abcdef",
     "---",
     "",
     "## A thread",
     "Weight: 3 · Status: active",
   ].join("\n");
 
-  it("drops appliedByProjectView", () => {
+  it("drops appliedByProjectView and its skill fingerprint together", () => {
     const out = withoutProjectViewMarker(content);
     expect(out).not.toBeNull();
     expect(out).not.toContain("appliedByProjectView");
+    expect(out).not.toContain("appliedSkillFingerprint");
   });
 
-  it("leaves asOfGraphHash and generatedAt alone", () => {
+  it("leaves asOfGraphHash, generatedAt and graph-structure's own skillFingerprint alone", () => {
     const out = withoutProjectViewMarker(content)!;
     expect(out).toContain("asOfGraphHash: abc123");
     expect(out).toContain("generatedAt: 2026-08-27T00:00:00.000Z");
+    expect(out).toContain("skillFingerprint: feedfacefeedface");
   });
 
   it("leaves the body untouched", () => {

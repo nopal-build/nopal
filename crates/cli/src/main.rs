@@ -552,6 +552,15 @@ enum GraphlogCommand {
         #[arg(long)]
         project: String,
     },
+    /// Re-threads `Graph/graph-structure.md` and rewrites README.md only
+    /// where they were written under older skill files; makes no model
+    /// call if both are current. Never touches the graph itself (that is
+    /// `reset-graph`). See the `graphlog` skill.
+    RerunOutputs {
+        /// Vault path of the project, e.g. `projects/sunny`, or `personal`.
+        #[arg(long)]
+        project: String,
+    },
     /// Runs all three resets below, in order: reset-project-view ->
     /// reset-graph -> reset-knowledge. DESTRUCTIVE — requires --yes. See
     /// the `graphlog` skill.
@@ -904,6 +913,7 @@ fn main() {
                 GraphlogCommand::GraphProjectView { project } => {
                     graphlog::graph_project_view(&project)
                 }
+                GraphlogCommand::RerunOutputs { project } => graphlog::rerun_outputs(&project),
                 GraphlogCommand::Reset { project, yes } => graphlog::reset(&project, yes),
                 GraphlogCommand::ResetProjectView { project, yes } => {
                     graphlog::reset_project_view(&project, yes)

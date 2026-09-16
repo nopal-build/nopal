@@ -63,9 +63,11 @@ import type { GraphLogEventKind } from "./graphLogMetrics.server";
 import type { PhotoDescriptionResult } from "./llmProvider";
 import {
   classifyStageSkill,
+  composeStageSkill,
   getProjectStageSkill,
   isSkipInstruction,
   listExtraSkillFiles,
+  readSkillFingerprint,
 } from "./projectN02.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
@@ -101,6 +103,11 @@ export type SyncKnowledgeResult =
        * image) — reported so a human can see what's being silently left
        * behind, not just "nothing happened". */
       unsupported: { fileId: string; name: string }[];
+      /** Sidecars that are up to date by content but were written under
+       * an older KNOWLEDGE.md than the current one. Reported, never acted
+       * on by this stage (see `composeStageSkill`). Absent on the
+       * early-return paths. */
+      staleSidecars?: number;
       /** Reasons this stage finished without doing everything it set out
        * to, in the same shape every other stage uses, so the pipeline can
        * aggregate them and the run says so.
@@ -247,9 +254,7 @@ export async function runSyncKnowledge(
   const candidates = await collectSyncCandidates(projectFolder.human_id, syncsFolder._id);
   const generalSkill = await getProjectStageSkill(projectFolder, "SKILL.md");
   const extraSkillFiles = await listExtraSkillFiles(projectFolder);
-  const skillContent = [skill, generalSkill, ...extraSkillFiles.map((f) => `## ${f.name}\n\n${f.content}`)]
-    .filter(Boolean)
-    .join("\n\n");
+  const { content: skillContent, fingerprint: skillFingerprint } = composeStageSkill(skill, generalSkill, extraSkillFiles);
 
   let photoLlm: PhotoDescriber | undefined = opts.photoDescriber;
   let textLlm: LlmProvider | undefined = opts.provider;
@@ -259,6 +264,7 @@ export async function runSyncKnowledge(
 
   const entries: SyncKnowledgeEntry[] = [];
   const unsupported: { fileId: string; name: string }[] = [];
+  let staleSidecars = 0;
 
   for (const candidate of candidates) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
@@ -280,6 +286,10 @@ export async function runSyncKnowledge(
     const existing = existingListing ? await getFileRefById(existingListing._id) : undefined;
 
     if (existing && existingSourceHash(existing.content) === hash) {
+      // Up to date by content; may still be under an older KNOWLEDGE.md.
+      // Counted and reported, never re-run on that basis alone (see
+      // `composeStageSkill`).
+      if (readSkillFingerprint(existing.content) !== skillFingerprint) staleSidecars += 1;
       entries.push({ fileId: source._id, name: source.name, knowledgeFileId: existing._id, generated: false });
       continue;
     }
@@ -463,7 +473,7 @@ export async function runSyncKnowledge(
       continue;
     }
 
-    const content = buildKnowledgeContent({ sourceFileId: source._id, hash, body, extraMeta });
+    const content = buildKnowledgeContent({ sourceFileId: source._id, hash, body, extraMeta: { ...extraMeta, skillFingerprint } });
     const knowledgeFileId = existing
       ? (await updateFileRef(existing._id, { content }))?._id
       : (
@@ -506,5 +516,8 @@ export async function runSyncKnowledge(
             (unsupported.length > 5 ? `, and ${unsupported.length - 5} more` : ""),
         ]
       : [];
-  return { ok: true, skipped: false, entries, unsupported, incomplete };
+  if (staleSidecars > 0) {
+    log(`sync-knowledge: ${staleSidecars} sidecar(s) were written under an older KNOWLEDGE.md and were left as they are (reset-knowledge rewrites them).`);
+  }
+  return { ok: true, skipped: false, entries, unsupported, incomplete, staleSidecars };
 }

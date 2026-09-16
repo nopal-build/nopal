@@ -123,6 +123,10 @@ export interface RunGraphLogPipelineOptions {
    * separate untagged runs. Omit to run with no timeline recorded (e.g. a
    * script/test with no job/run context). */
   perf?: GraphLogPerfRecorder;
+  /** Passed through to the two view stages: re-thread / rewrite where
+   * the stamp says an older skill wrote it. Never set by a normal run;
+   * the `rerun-outputs` job sets it. See `composeStageSkill`. */
+  rebuildStale?: boolean;
 }
 
 export async function runGraphLogPipeline(
@@ -183,6 +187,7 @@ export async function runGraphLogPipeline(
       provider: opts.provider,
       log,
       perf,
+      rebuildStale: opts.rebuildStale,
     }),
   );
   if (!graphStructure.ok) return { ok: false, error: graphStructure.error };
@@ -195,6 +200,7 @@ export async function runGraphLogPipeline(
       provider: opts.provider,
       log,
       perf,
+      rebuildStale: opts.rebuildStale,
     }),
   );
   if (!graphProjectView.ok) return { ok: false, error: graphProjectView.error };
@@ -228,6 +234,17 @@ export async function runGraphLogPipeline(
   log(
     `run: ${stats.nodesWritten} node(s) written across ${stats.daysWritten} day(s); graph now holds ${stats.graphNodeCount ?? "?"} node(s) in ${stats.threadCount ?? "?"} thread(s).`,
   );
+
+  // Skill drift, one line, every run. Each stage already said its own
+  // piece above; this is the summary a reader of the run page looks for.
+  // Nothing here triggers anything (see `composeStageSkill`): the graph
+  // is rebuilt only by reset-graph, the views only by rerun-outputs.
+  const drift: string[] = [];
+  if ((syncKnowledge.staleSidecars ?? 0) > 0) drift.push(`${syncKnowledge.staleSidecars} sidecar(s) under an older KNOWLEDGE.md`);
+  if ((syncGraph.staleDays ?? 0) > 0) drift.push(`${syncGraph.staleDays} day(s) under an older GRAPH.md`);
+  if (graphStructure.staleSkill) drift.push("structure under an older GRAPH_STRUCTURE.md");
+  if (graphProjectView.staleSkill) drift.push("README under an older PROJECT_VIEW.md");
+  log(drift.length > 0 ? `run: skill drift: ${drift.join("; ")}.` : "run: no skill drift; everything was written under the current skills.");
 
   // The run report already said all of this, on a page nobody opens while
   // the README looks fine. This puts it where a reader of the PROJECT sees

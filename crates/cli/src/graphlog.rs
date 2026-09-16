@@ -391,6 +391,44 @@ pub fn run(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct RerunOutputsResult {
+    #[serde(default)]
+    structure_was_stale: bool,
+    #[serde(default)]
+    readme_was_stale: bool,
+}
+
+/// `nopal graphlog rerun-outputs --project <path>`
+///
+/// Runs graph-structure then graph-project-view with the server's
+/// `rebuildStale` set: each re-threads / rewrites only if its own skill
+/// stamp is older than the current skill, and otherwise makes no model
+/// call. The graph is never touched — that is `reset-graph`. See the
+/// `graphlog` skill.
+pub fn rerun_outputs(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let client = Client::new()?;
+    let folder = resolve_project(&client, project_path)?;
+
+    println!("=== GraphLog rerun-outputs: {project_path}/ ===");
+    let body = json!({ "projectFolderId": folder._id });
+    let job_id = enqueue(&client, "/api/graphlog/rerun-outputs", &body)?;
+    let result: RerunOutputsResult = poll_job(&client, &job_id)?;
+
+    if !result.structure_was_stale && !result.readme_was_stale {
+        println!("rerun-outputs: nothing stale; structure and README were already written under the current skills.");
+    } else {
+        println!(
+            "rerun-outputs: {}, {}.",
+            if result.structure_was_stale { "structure re-threaded" } else { "structure current" },
+            if result.readme_was_stale { "README rewritten" } else { "README current" },
+        );
+    }
+
+    Ok(())
+}
+
 // ─── Reset ───────────────────────────────────────────────────
 // `nopal graphlog reset` and its three narrower siblings — see the
 // `graphlog` skill and `graphLogReset.server.ts`'s own module doc for

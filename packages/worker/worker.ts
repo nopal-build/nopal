@@ -126,6 +126,45 @@ async function runGraphLogJob(
       if (changed) onProgress(result.incomplete.length > 0 ? "graph-project-view: marked README.md as incomplete on its own first line." : "graph-project-view: cleared the incomplete notice from README.md.");
       return result;
     }
+    case "rerun-outputs": {
+      // The two view stages only, with `rebuildStale`. Neither extraction
+      // stage runs: the graph is never rebuilt here (that is reset-graph,
+      // and it is expensive on purpose). Each stage decides for itself
+      // whether its stamp is stale; when neither is, this costs no model
+      // call and says so.
+      const structure = await perf.time("graph-structure", "fn", "runGraphStructure", null, () =>
+        runGraphStructure(projectFolder, job.data.actingHumanId, { log: onProgress, perf, rebuildStale: true }),
+      );
+      if (!structure.ok) throw new Error(structure.error);
+      const view = await perf.time("graph-project-view", "fn", "runGraphProjectView", null, () =>
+        runGraphProjectView(projectFolder, job.data.actingHumanId, { log: onProgress, perf, rebuildStale: true }),
+      );
+      if (!view.ok) throw new Error(view.error);
+      // Same banner handling as the lone graph-project-view job above.
+      const bannerChanged = await syncReadmeIncompleteBanner(
+        projectFolder,
+        [...structure.incomplete.map((r) => `graph-structure: ${r}`), ...view.incomplete.map((r) => `graph-project-view: ${r}`)],
+      );
+      if (bannerChanged) onProgress(structure.incomplete.length + view.incomplete.length > 0 ? "rerun-outputs: marked README.md as incomplete on its own first line." : "rerun-outputs: cleared the incomplete notice from README.md.");
+      const structureWas = structure.staleSkill ?? false;
+      const readmeWas = view.staleSkill ?? false;
+      onProgress(
+        !structureWas && !readmeWas
+          ? "rerun-outputs: nothing stale; structure and README were already written under the current skills."
+          : `rerun-outputs: finished (${[structureWas ? "structure re-threaded" : "structure current", readmeWas ? "README rewritten" : "README current"].join(", ")}).`,
+      );
+      // `coverage` / `readmeChanged` at the top level, same as the pipeline
+      // result, so the run row reads them (`coverageFromJobResult`,
+      // `readmeChangedFromJobResult`).
+      return {
+        structure,
+        projectView: view,
+        structureWasStale: structureWas,
+        readmeWasStale: readmeWas,
+        coverage: view.coverage,
+        readmeChanged: view.changed,
+      };
+    }
     case "run": {
       const result = await runGraphLogPipeline(
         job.data.actingHumanId,
