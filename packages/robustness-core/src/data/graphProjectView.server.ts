@@ -1679,6 +1679,7 @@ export async function runGraphProjectView(
       ok: true,
       skipped: false,
       changed: summaries.length > 0,
+      staleSkill,
       summary: summaries,
       coverage: lastCoverage,
       incomplete: [...loadIssues, reason],
@@ -1904,7 +1905,7 @@ export async function runGraphProjectView(
       log(`graph-project-view: ${coverage.missingFiles.length} attached file(s) were dropped this run (PROJECT_VIEW.md says never): ${coverage.missingFiles.join(", ")}.`);
     }
 
-    return { ok: true, skipped: false, changed, summary: summaries, coverage, incomplete: loadIssues };
+    return { ok: true, skipped: false, changed, summary: summaries, coverage, incomplete: loadIssues, staleSkill };
   } catch (err) {
     log(`graph-project-view: couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
     const durationMs = Date.now() - callStart;
