@@ -66,7 +66,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   -> STAGE 2: sync-knowledge     (agentic, skills/KNOWLEDGE.md)
   -> STAGE 3: sync-graph         (agentic, skills/GRAPH.md)
   -> STAGE 4: graph-structure    (agentic, skills/GRAPH_STRUCTURE.md)
-  -> STAGE 5: graph-project-view (agentic, skills/PROJECT_VIEW.md)
+  -> STAGE 5: graph-project-view (agentic, skills/EFFORTS.md + skills/VOICE.md)
 ```
 
 - **daily-log-sync** — the Sorter's counterpart for GraphLog: zero-inference,
@@ -296,7 +296,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     still fits, so downstream churn (README sections, `sync-graph`'s own
     candidate list) doesn't reset just because a heading got reworded.
 - **graph-project-view** — reads `Graph/graph-structure.md` (not
-  graph-log files directly), per `skills/PROJECT_VIEW.md`, and keeps
+  graph-log files directly), per `skills/EFFORTS.md`, and keeps
   `README.md` an accurate, organized synthesis. **NOT per-day anymore** —
   a real architecture change from this stage's original shape: since
   `graph-structure` already did the expensive whole-graph read, this
@@ -318,13 +318,81 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     get created over a project's life. A deterministic reorder pass runs
     after every clean finish (whether or not the model made any edits
     this run), re-sorting the known headings into the shape the
-    project's own `PROJECT_VIEW.md` declares -- READ OFF THE SKILL by
+    project's own `EFFORTS.md` declares -- READ OFF THE SKILL by
     `parseSectionShape` (the fenced block under `# The shape`, and only
     that block) since 2026-09-09, so changing the README's shape is
     editing one file and a project may carry its own. A skill whose
     shape cannot be read falls back to the built-in list and reports it
     through `incomplete`. "Notes on this view" is always last where it
     exists, whatever the skill says; `PROTECTED_HEADING` stays in code.
+  - **The page is Efforts, not a README summary (2026-09-16).** The
+    skill was renamed `PROJECT_VIEW.md` to `EFFORTS.md` (the stage, its
+    CLI command and the defaults-row key `projectView` kept their names;
+    only the file people edit changed) and rewritten around Austin's
+    Efforts guide: one living page of efforts (a thread, or several
+    gathered under one plain name, never a split), each with how it got
+    here, where it stands, where it's heading, what's missing, a
+    momentum read (speed and alignment counted, direction and posture
+    judged), a size XS to XL, and the space around it. The shape is
+    Regroup / On the bench / Ready next / Shelf / Drawer / Look-ahead,
+    declared in the skill's own fence as before. The output file is still
+    `README.md` (ten places key on that name for status, sharing and the
+    website); its body is the page. Three things came with it:
+    - **`effortReadings.server.ts`** hands the model, in the system
+      prompt after the structure body, every number the skill mentions:
+      per thread first/last node dates, days quiet, nodes in the last 14
+      days against the 14 before (a speed label), writers with counts, a
+      single-writer flag (the graph has no owner field, so "one writer"
+      is the countable stand-in for "unowned"), links among the thread's
+      own nodes and how many cross writers, and links to other threads
+      both ways (link direction only; "waiting on" is not recorded
+      anywhere). Graph-wide: who wrote where recently, and highlighted
+      questions no node links back to (the stand-in for "unanswered";
+      which are open is the model's call). Nothing here is a verdict and
+      the block's lead says so.
+    - **An effort's field line is read back by code.** Under each `###`
+      effort the first line is `Threads: a; b · Size: M · Posture:
+      regroup|accelerate · Direction: ...`. `update_section` notes (never
+      refuses) thread names that match nothing in the index, the way
+      `reviewClusterWrite` notes an overflow. On a clean finish the stage
+      writes **`Graph/efforts.md`** (`buildEffortsSidecar`): front matter
+      like the structure file's, one fenced JSON block with each effort's
+      threads, the model's size/posture/direction, and the counted
+      readings merged per effort, plus the threads no effort named. It is
+      the seam for a layout that draws rather than reads; nothing in the
+      UI reads it yet.
+    - **`VOICE.md` is seeded and composed into this stage only.** How the
+      project manager writes to the group. It was a hand-uploaded extra
+      on one project (folded into every stage's prompt) and is now a
+      fifth seeded default (`DEFAULT_VOICE_SKILL`, key `voice`), reserved
+      so `listExtraSkillFiles` never returns it, and handed to
+      `composeStageSkill` first among this stage's extras
+      (`withVoiceFirst`), so the view fingerprint covers it and a voice
+      edit is README drift. Reseed creates a missing seeded file now
+      (`"created"`) and deletes a legacy `PROJECT_VIEW.md` beside its
+      successor (`"removed"`); `project_view.md` stays reserved so an
+      unreseeded project never feeds its old skill into every stage.
+    - **Round 2, same day: the page as a list.** The first four
+      samples held the shape and ran 1,400 to 2,900 words of prose.
+      `EFFORTS.md` now declares a bullet template (Now / Next / Around
+      it / Not logged under each `### <Person> · <Effort>`, a "One ask:"
+      line under the opening, the shelf as past bench work or claimed
+      work only) with reading-time layers. Three code changes hold it:
+      **targeted passes chase only Blocking/Due threads**
+      (`requiredThreads`; every other uncited thread is logged as "off
+      the page", not re-offered, because the coverage loop was the
+      pressure that grew a 41-thread graph into 2,500 words);
+      **per-section word budgets** (`SECTION_WORD_BUDGETS`, summing to
+      `PAGE_WORD_CEILING` 1,000; `update_section` turns a section over
+      budget back once with its count; citations, gallery lines and
+      list markers are not counted); and **change marks** (`markChanges`:
+      the previous `Graph/efforts.md` is read before the run, efforts
+      match on shared threads since names move between runs, `new` /
+      `moved` / `unchanged` plus `changedLines` go into the sidecar, and
+      a `{new}` / `{moved}` tag goes on the heading after the clean
+      finish and is stripped with the banner before the model sees the
+      page again). Chips for the field line and a status badge for the
+      banner are layout, Gerald's. `VOICE.md` was held constant.
   - **A full project reset** now means: reset `graph-structure.md` (its
     `asOfGraphHash` disappears with the file), which naturally makes
     `graph-project-view`'s own `appliedByProjectView` marker meaningless
@@ -356,7 +424,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     as superpower for organizing thoughts`), never the words themselves.
     There was structurally NO path from this stage to a single word
     anyone actually wrote, so "write from the nodes, quote their own
-    words" was a request `PROJECT_VIEW.md` made of a stage that had no
+    words" was a request `EFFORTS.md` made of a stage that had no
     way to comply — paraphrase of paraphrase was the only possible
     output. Fixed with BOTH a floor and a ceiling, deliberately, not just
     one (a tool alone is one skill edit away from silently reverting to
@@ -448,7 +516,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     step is reading this data across a few real runs before anyone writes
     a rule from a guess.
   - **`missingFiles` is checked more strictly than the other two, ON
-    PURPOSE** — unlike thread coverage, `PROJECT_VIEW.md`'s own "A file is
+    PURPOSE** — unlike thread coverage, `EFFORTS.md`'s own "A file is
     never optional" is a hard rule, not a judgment call: for every node in
     a NON-fallen-away thread, `extractGalleryImageLines` (`graphNodeIndex.server.ts`)
     pulls any real attached-image markdown line (an ordinary
@@ -550,7 +618,7 @@ children, everything else (including the `Graph` space) is
   NOT seeded at project-creation time, unlike `skills`.
 - `projectN02.server.ts`:
   - `ensureProjectN02(folder)` — tags `folder` `project-n02` and seeds
-    `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`PROJECT_VIEW.md`
+    `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`EFFORTS.md`
     from `graphLogDefaults.server.ts`. `vault.server.ts`'s
     `createVaultFolder` calls this for every brand new project (and
     `personal`) directly — there's no other container type left to
@@ -561,11 +629,14 @@ children, everything else (including the `Graph` space) is
   - `ensureProjectGraphFolder(projectFolder)` — lazy `Graph` folder
     creation, called by `sync-graph` the first time it has something to
     write.
-- `graphLogDefaults.server.ts` holds the four starter
+- `graphLogDefaults.server.ts` holds the five starter
   `DEFAULT_KNOWLEDGE_SKILL`/`DEFAULT_GRAPH_SKILL`/`DEFAULT_GRAPH_STRUCTURE_SKILL`/
-  `DEFAULT_PROJECT_VIEW_SKILL` constants, plus an admin-editable-override
-  layer reviewable at `/fruits/maker/graphlog/defaults` (see "Maker
-  pages" below).
+  `DEFAULT_PROJECT_VIEW_SKILL` (the `EFFORTS.md` text; constant and key
+  kept their names on the 2026-09-16 rename)/`DEFAULT_VOICE_SKILL`
+  constants, plus an admin-editable-override layer reviewable at
+  `/fruits/maker/graphlog/defaults` (see "Maker pages" below). One
+  table, `SKILL_FILE_NAMES` in `projectN02.server.ts`, maps keys to file
+  names for both seeding and reseeding.
 
 ## The "Daily Logs" symlink
 
@@ -1196,7 +1267,7 @@ skill was born from:
        section covers the model-facing side (read a caption and/or a
        description, apply the same standalone test, never write any
        markup yourself — the model never needs to know or care which of
-       the three shapes above its own citation becomes). `PROJECT_VIEW.md`'s
+       the three shapes above its own citation becomes). `EFFORTS.md`'s
        own "Files travel with their nodes" section tells graph-project-view
        the gallery is for photos/videos ONLY (grouping several from the
        same thread/moment into ONE gallery rather than scattering
@@ -1211,13 +1282,13 @@ skill was born from:
    `graph-structure.md`'s own `asOfGraphHash` versus the
    `appliedByProjectView` marker this stage stamps onto that SAME file
    once an update completes cleanly (`appliedSkillFingerprint` beside it
-   records which `PROJECT_VIEW.md` wrote the README; a mismatch is
+   records which `EFFORTS.md` wrote the README; a mismatch is
    reported as drift and acted on only under `rebuildStale`). **A run is a LOOP OF PASSES** (same
    ADR-013 shape as `sync-graph`'s day loop and `graph-structure`'s
    batches): pass 1 is one bounded tool-calling conversation
    (`update_section`/`remove_section`, `MAX_TURNS` bounds the PASS, never
    the README) that reconciles the whole README against the current
-   graph-structure.md, grounded in `skills/PROJECT_VIEW.md`. Between
+   graph-structure.md, grounded in `skills/EFFORTS.md`. Between
    passes, code runs `computeCoverageReport` on the COMMITTED README, and
    every later pass is TARGETED — handed by code exactly the threads
    still cited nowhere (rank, Blocking/Due, node text) plus the name of
@@ -1255,7 +1326,7 @@ skill was born from:
    - **Section order is enforced by a deterministic `reorderSections`
      pass**, run unconditionally on a clean finish (not just when a
      section was actually edited) — re-sorts the known headings into the
-     shape read off `PROJECT_VIEW.md` (`resolveSectionOrder`); anything else
+     shape read off `EFFORTS.md` (`resolveSectionOrder`); anything else
      (a heading the model invented despite the fixed shape) lands just
      before "Notes on this view" rather than being silently dropped.
    - **A real bug found and fixed by direct testing**: the executors were

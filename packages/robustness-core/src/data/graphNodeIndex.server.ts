@@ -161,7 +161,7 @@ export function stripRefVerbose(text: string): string {
 
 export function formatNodeVerbatim(node: GraphLogNode, today?: string): string {
   // The age is handed over as a NUMBER rather than left as two dates for
-  // the model to subtract. `PROJECT_VIEW.md` asks it to work out each open
+  // the model to subtract. `EFFORTS.md` asks it to work out each open
   // item's age from today against a node's date; the code holds both
   // exactly. Same family as the citation itself, a cluster's weight, and
   // the link counts: arithmetic the code can do exactly is never the

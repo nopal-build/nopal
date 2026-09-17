@@ -355,7 +355,7 @@ pub fn graph_project_view(project_path: &str) -> Result<(), Box<dyn Error + Send
     let result: GraphProjectViewResult = poll_job(&client, &job_id)?;
 
     if result.skipped {
-        println!("graph-project-view: skipped (skills/PROJECT_VIEW.md says skip).");
+        println!("graph-project-view: skipped (skills/EFFORTS.md says skip).");
         return Ok(());
     }
     if !result.changed {

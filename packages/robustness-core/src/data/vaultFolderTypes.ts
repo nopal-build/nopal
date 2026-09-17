@@ -58,7 +58,7 @@
  *        eventual sorting agent's guide, and the project's own equivalent of
  *        this very repo's `.agents/skills/<name>/SKILL.md`). Every
  *        `project-n02` gets one auto-seeded at creation time with default
- *        `KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`PROJECT_VIEW.md`
+ *        `KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`EFFORTS.md`
  *        files (see `projectN02.server.ts`) — the ONE place a human
  *        directly steers the otherwise fully GraphLog-managed tree.
  *      - `syncs` is a data-collection container — see tier 2.
