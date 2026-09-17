@@ -27,7 +27,13 @@ mod vault;
 mod video;
 mod watch;
 
-const DEFAULT_HOST: &str = "https://nopal.build";
+// The product app (login, vault, everything under the old /fruits prefix)
+// is its own service now, o.nopal.build -- see
+// docs/marketing-app-split-plan.md in the main repo. Anyone with an
+// EXISTING saved login pointed at the old nopal.build gets migrated
+// automatically on next use (see nopal_core::auth::migrate_legacy_host) --
+// this constant only affects brand-new `nopal login` runs.
+const DEFAULT_HOST: &str = "https://o.nopal.build";
 
 #[derive(Debug, Subcommand)]
 enum Command {

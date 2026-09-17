@@ -18,6 +18,56 @@ app.use((req, _res, next) => {
 
 const httpServer = createServer(app);
 
+// ── Legacy redirects for routes that moved to the app service ───────────────
+// Everything under the old /fruits/* prefix, every top-level auth-flow
+// route, the public vault-sharing routes, and every /api/* endpoint
+// except /api/health moved to the fruits app (o.nopal.build) -- see
+// docs/marketing-app-split-plan.md. Old bookmarks, emails already sent
+// with these links, and any not-yet-updated CLI install (see Phase 6 of
+// that doc) still point at THIS host for these paths -- a 404 here would
+// be a silent regression for every one of them, so this redirects to the
+// equivalent path on the app instead. Placed before the static/Vite
+// middleware so these never fall through to a real 404 page first.
+//
+// 308 (not 301/302): preserves the HTTP method and body on redirect,
+// which matters here specifically because the CLI's own
+// `POST /api/cli-auth/exchange` call (crates/core/src/auth.rs) is one of
+// the things this list covers -- a 301/302 risks some HTTP clients
+// silently downgrading a POST to a GET, which would break that call
+// instead of transparently forwarding it.
+const APP_BASE_URL_FOR_REDIRECTS = process.env.APP_BASE_URL || "https://o.nopal.build";
+const MOVED_TOP_LEVEL_PATHS = new Set([
+  "/login",
+  "/login-error",
+  "/logout",
+  "/magic-link",
+  "/verify",
+  "/cli-login",
+]);
+const MOVED_PATH_PREFIXES = ["/welcome/", "/card/", "/public/file/", "/public/folder/"];
+
+app.use((req, res, next) => {
+  const path = req.path;
+
+  let newPath = null;
+  if (path === "/fruits" || path.startsWith("/fruits/")) {
+    newPath = path.slice("/fruits".length) || "/";
+  } else if (
+    MOVED_TOP_LEVEL_PATHS.has(path) ||
+    MOVED_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))
+  ) {
+    newPath = path;
+  } else if (path.startsWith("/api/") && path !== "/api/health") {
+    newPath = path;
+  }
+
+  if (newPath === null) return next();
+
+  const queryIndex = req.originalUrl.indexOf("?");
+  const query = queryIndex === -1 ? "" : req.originalUrl.slice(queryIndex);
+  res.redirect(308, `${APP_BASE_URL_FOR_REDIRECTS}${newPath}${query}`);
+});
+
 const viteDevServer =
   process.env.NODE_ENV === "production"
     ? null
@@ -56,39 +106,11 @@ const generalLimiter = rateLimit({
 });
 app.use(generalLimiter);
 
-// Auth-adjacent endpoints: unauthenticated by design, so IP is the only
-// signal available to slow down brute-force/credential-stuffing attempts.
-const authLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 20,
-  ...rateLimitHeaders,
-  message: { error: "Too many attempts. Please wait a minute and try again." },
-});
-app.use(["/api/passkeys", "/api/cli-auth/exchange"], authLimiter);
-
-// Uploads: each call costs S3 storage/transfer.
-const uploadLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 60,
-  ...rateLimitHeaders,
-  message: { error: "Too many uploads. Please wait a bit and try again." },
-});
-app.use(
-  [
-    "/api/upload",
-    "/api/daily-log/upload",
-    "/api/vault/upload",
-    "/api/vault/presign",
-    "/api/vault/multipart-init",
-    "/api/vault/multipart-part",
-    "/api/vault/multipart-complete",
-    "/api/upload/presign",
-  ],
-  uploadLimiter,
-);
-
 // Public, no-session forms: each submission triggers an email send (and, for
 // the WC waiver, a permanent legal record) — worth throttling per IP.
+// (The auth-adjacent/upload limiters that used to live here moved to the
+// fruits app along with the routes they guarded -- see
+// docs/marketing-app-split-plan.md, Phase 3.)
 const publicFormLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   limit: 10,
@@ -103,133 +125,10 @@ const build = viteDevServer
 
 app.all("*", createRequestHandler({ build }));
 
-/**
- * Milliseconds from right now until the next local midnight (00:00:00.000
- * of tomorrow if it's already past midnight today, effectively "tonight
- * at midnight" whenever this is called during the day). Used to anchor
- * GraphLog's scheduled-run cron to an actual wall-clock midnight, unlike
- * the other crons below which just repeat every 24h from server start.
- */
-function msUntilNextMidnight() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(24, 0, 0, 0);
-  return next.getTime() - now.getTime();
-}
-
+// The daily cron jobs (archive/trash cleanup, daily-log sort, GraphLog
+// scheduled runs) that used to live here moved to the fruits app along
+// with the vault/daily-log/graphlog routes they call -- see
+// docs/marketing-app-split-plan.md, Phase 3.
 httpServer.listen(3000, () => {
   console.log("App listening on http://localhost:3000");
-
-  // ── Daily archive cleanup ─────────────────────────────────────────────────
-  // Calls the protected cleanup endpoint once per day. Requires CRON_SECRET
-  // to be set in the environment (fly secrets set CRON_SECRET=<value>).
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const runArchiveCleanup = async () => {
-      try {
-        const res = await fetch(
-          "http://localhost:3000/api/vault/archive-cleanup",
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${cronSecret}` },
-          },
-        );
-        const data = await res.json();
-        console.log("[cron] archive-cleanup:", data);
-      } catch (err) {
-        console.error("[cron] archive-cleanup failed:", err);
-      }
-    };
-    // Wait 30 s for the server to warm up, then run once and repeat every 24 h.
-    setTimeout(() => {
-      runArchiveCleanup();
-      setInterval(runArchiveCleanup, 24 * 60 * 60 * 1000);
-    }, 30_000);
-
-    // ── Trashed-project cleanup ────────────────────────────────────────────
-    // Permanently deletes any project folder that's been sitting in
-    // "Trashed" status for 30+ days (see the vault skill's Projects
-    // section, and projectStatus.server.ts). Same CRON_SECRET, staggered a
-    // little from the archive cleanup above.
-    const runTrashCleanup = async () => {
-      try {
-        const res = await fetch(
-          "http://localhost:3000/api/vault/trash-cleanup",
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${cronSecret}` },
-          },
-        );
-        const data = await res.json();
-        console.log("[cron] trash-cleanup:", data);
-      } catch (err) {
-        console.error("[cron] trash-cleanup failed:", err);
-      }
-    };
-    setTimeout(() => {
-      runTrashCleanup();
-      setInterval(runTrashCleanup, 24 * 60 * 60 * 1000);
-    }, 37_000);
-
-    // ── Daily-log sort ────────────────────────────────────────────────────
-    // Sorts every human's closed, not-yet-sorted daily logs (mentions →
-    // project backlinks, completed Card tasks, Card file attachments —
-    // see sorter.server.ts) into their Release Logs. Same CRON_SECRET,
-    // same once-a-day cadence as the archive cleanup above — just
-    // staggered a little so the two don't fire in the exact same tick.
-    //
-    // Temporary kill switch: only scheduled at all when SORTER_ENABLED is
-    // "true" (see `isSorterEnabled` in `sorter.server.ts`) — the route
-    // itself also checks this, but skipping the schedule entirely avoids
-    // pointless daily log noise while the Sorter's next phase (real
-    // project-folder filing) is being built out.
-    if (process.env.SORTER_ENABLED === "true") {
-      const runDailyLogSort = async () => {
-        try {
-          const res = await fetch(
-            "http://localhost:3000/api/daily-log/sort-all",
-            {
-              method: "POST",
-              headers: { Authorization: `Bearer ${cronSecret}` },
-            },
-          );
-          const data = await res.json();
-          console.log("[cron] daily-log/sort-all:", data);
-        } catch (err) {
-          console.error("[cron] daily-log/sort-all failed:", err);
-        }
-      };
-      setTimeout(() => {
-        runDailyLogSort();
-        setInterval(runDailyLogSort, 24 * 60 * 60 * 1000);
-      }, 45_000);
-    }
-
-    // ── GraphLog scheduled run ─────────────────────────────────────────────
-    // Runs GraphLog's full pipeline for every project/personal space an
-    // Admin/Super has enrolled ("More Actions" → Enable GraphLog Schedule
-    // in the Vault — see `graphLogSchedule.server.ts`). Same CRON_SECRET,
-    // but anchored to actual local midnight rather than "once every 24h
-    // from server start" like the crons above — the whole point of this
-    // one is running overnight.
-    const runGraphLogSchedule = async () => {
-      try {
-        const res = await fetch(
-          "http://localhost:3000/api/graphlog/scheduled-run",
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${cronSecret}` },
-          },
-        );
-        const data = await res.json();
-        console.log("[cron] graphlog/scheduled-run:", data);
-      } catch (err) {
-        console.error("[cron] graphlog/scheduled-run failed:", err);
-      }
-    };
-    setTimeout(() => {
-      runGraphLogSchedule();
-      setInterval(runGraphLogSchedule, 24 * 60 * 60 * 1000);
-    }, msUntilNextMidnight());
-  }
 });

@@ -1,4 +1,14 @@
 /**
+ * DUPLICATED from fruits/app/components/OxRenderer.tsx. Needed here too
+ * because `WebsitePageView.tsx` (the `/v2/*` marketing pages' CMS-driven
+ * renderer) uses it for read-only rendering -- `OxEditor` (real editing)
+ * stayed app-only since marketing pages are never edited in-browser. Its
+ * own `app/oxmarkdown/*` support files are duplicated alongside it,
+ * TRIMMED to the read-only-render subset only (no Lexical editor code --
+ * see fileDirective.ts/OxEditorContext.tsx's own comments in this same
+ * directory). Not shared; keep both copies in sync by hand if you touch
+ * rendering behavior.
+ *
  * OxRenderer — rendering of an OxMarkdown document, static by default.
  *
  * Walks the real mdast tree from `oxmarkdown/document.ts` directly (no
@@ -1276,7 +1286,7 @@ function CardDirectiveStatic({
  * to whatever locale/timezone the RUNTIME is in, which is the server's
  * during SSR and the browser's during hydration; those two disagree
  * (confirmed directly — this shipped as a real hydration-mismatch bug on
- * `/fruits/styles/oxmarkdown` once already), so React throws a hydration
+ * `/styles/oxmarkdown` once already), so React throws a hydration
  * error the moment the client's re-render produces different text than
  * what the server sent down. Same fix `fruits_.profile.tsx`'s
  * `formatSignedAt` already applies for the same reason — see its own

@@ -36,6 +36,7 @@ COPY --link packages/robustness-core/package.json packages/robustness-core/
 COPY --link packages/stamps/package.json packages/stamps/
 COPY --link packages/worker/package.json packages/worker/
 COPY --link webapp/package.json webapp/
+COPY --link fruits/package.json fruits/
 RUN pnpm install --frozen-lockfile
 
 COPY --link packages/oxmarkdown-core packages/oxmarkdown-core

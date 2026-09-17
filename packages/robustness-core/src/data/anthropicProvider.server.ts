@@ -18,7 +18,7 @@
  * content, which happens naturally whenever a skill file is edited.
  * `llmPricing.ts`'s `estimateCostUsd` and `graphLogMetrics.server.ts`'s
  * rollup both account for cache read/write tokens separately from plain
- * input tokens so /fruits/maker's cost estimate stays accurate.
+ * input tokens so /maker's cost estimate stays accurate.
  */
 
 import Anthropic from "@anthropic-ai/sdk";

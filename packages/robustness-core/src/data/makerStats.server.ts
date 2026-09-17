@@ -1,5 +1,5 @@
 // app/data/makerStats.server.ts
-// Stats backing the internal "/fruits/maker" dashboard (Super/Admin only).
+// Stats backing the internal "/maker" dashboard (Super/Admin only).
 import { getHumans, isHumanActive, isHumanInvited, type Human } from "./humans.server";
 import { getDailyLogsSince } from "./dailyLog.server";
 

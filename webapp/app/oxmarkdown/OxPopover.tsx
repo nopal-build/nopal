@@ -1,4 +1,8 @@
 /**
+ * DUPLICATED from fruits/app/oxmarkdown/OxPopover.tsx -- see
+ * webapp/app/components/OxRenderer.tsx's own comment for why. Not shared;
+ * keep both in sync by hand.
+ *
  * A single, standalone positioned-popover component meant to back EVERY
  * OxMarkdown popover/menu that needs to float next to some anchor element —
  * today that's the directive-attribute popover (`OxRenderer.tsx`'s

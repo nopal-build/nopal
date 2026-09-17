@@ -39,7 +39,7 @@ working fallback, so there is no lockout risk anywhere in this system.
     brand-new invitee, authorized by a single-use invite token instead of
     a session. Reuses the exact same `generatePasskeyRegistrationOptions` /
     `verifyPasskeyRegistration` helpers as the logged-in path.
-- `app/routes/fruits_.profile.tsx` — "Passkeys" section: lists existing
+- `fruits/app/routes/profile.tsx` — "Passkeys" section: lists existing
   passkeys, "+ Create a passkey" button (client-side ceremony via
   `@simplewebauthn/browser`'s `startRegistration`), and per-passkey
   "Remove" (scoped so a human can only delete their own).
@@ -76,7 +76,7 @@ anything on its own).
      on `/verify`, no intermediate manual step.
   2. **Signed in as the exact same account being invited** (`existingUser._id
      === invitedHuman._id`) → nothing to decide, redirect straight to
-     `/fruits/profile`.
+     `/profile`.
   3. **Signed in as a *different* account** → shows a 3-choice page
      (`ExistingSessionChoice`): stay signed in as-is (just a link to
      `/fruits`), fold the invite into the current account via alias
@@ -87,16 +87,16 @@ anything on its own).
      account instead (`intent=logout` — destroys session, reloads the
      same `/welcome/:token` URL, which now hits case 1).
   - If the token itself is invalid/expired/already used:
-    **signed-in** users are redirected to `/fruits/profile?inviteExpired=1`
+    **signed-in** users are redirected to `/profile?inviteExpired=1`
     (profile page shows a small explanatory notice) rather than through
     `/login` — a signed-in user hitting `/login` gets bounced straight to
-    `/fruits` with zero explanation, which looks like the whole feature is
+    `/` with zero explanation, which looks like the whole feature is
     silently broken. **Signed-out** users still go to `/login` (harmless;
     they can always request a code).
 
 ## Alias emails & verification-gated email changes
 
-Built on the profile page (`app/routes/fruits_.profile.tsx`) alongside the
+Built on the profile page (`fruits/app/routes/profile.tsx`) alongside the
 above, since the "fold into existing account" flow needed alias emails as a
 first-class concept.
 

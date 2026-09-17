@@ -12,142 +12,7 @@ importers:
 
   .: {}
 
-  packages/oxmarkdown-core:
-    dependencies:
-      mdast-util-directive:
-        specifier: ^3.1.0
-        version: 3.1.0
-      mdast-util-from-markdown:
-        specifier: ^2.0.3
-        version: 2.0.3
-      mdast-util-frontmatter:
-        specifier: ^2.0.1
-        version: 2.0.1
-      mdast-util-gfm:
-        specifier: ^3.1.0
-        version: 3.1.0
-      mdast-util-to-markdown:
-        specifier: ^2.1.2
-        version: 2.1.2
-      micromark-extension-directive:
-        specifier: ^3.0.2
-        version: 3.0.2
-      micromark-extension-frontmatter:
-        specifier: ^2.0.0
-        version: 2.0.0
-      micromark-extension-gfm:
-        specifier: ^3.0.0
-        version: 3.0.0
-      micromark-util-character:
-        specifier: ^2.1.1
-        version: 2.1.1
-      micromark-util-chunked:
-        specifier: ^2.0.1
-        version: 2.0.1
-      micromark-util-classify-character:
-        specifier: ^2.0.1
-        version: 2.0.1
-      micromark-util-resolve-all:
-        specifier: ^2.0.1
-        version: 2.0.1
-      micromark-util-symbol:
-        specifier: ^2.0.1
-        version: 2.0.1
-    devDependencies:
-      '@types/mdast':
-        specifier: ^4.0.4
-        version: 4.0.4
-      micromark-util-types:
-        specifier: ^2.0.2
-        version: 2.0.2
-
-  packages/robustness-core:
-    dependencies:
-      '@anthropic-ai/sdk':
-        specifier: ^0.115.0
-        version: 0.115.0
-      '@aws-sdk/client-s3':
-        specifier: ^3.797.0
-        version: 3.1108.0
-      '@aws-sdk/lib-storage':
-        specifier: ^3.797.0
-        version: 3.1127.0(@aws-sdk/client-s3@3.1108.0)
-      '@aws-sdk/s3-request-presigner':
-        specifier: ^3.1048.0
-        version: 3.1108.0
-      archiver:
-        specifier: ^7.0.1
-        version: 7.0.1
-      bullmq:
-        specifier: ^5.60.0
-        version: 5.81.3
-      ffmpeg-static:
-        specifier: ^5.3.0
-        version: 5.3.0
-      heic-convert:
-        specifier: ^2.1.0
-        version: 2.1.0
-      ioredis:
-        specifier: ^5.9.0
-        version: 5.11.1
-      oxmarkdown-core:
-        specifier: workspace:*
-        version: link:../oxmarkdown-core
-      sharp:
-        specifier: ^0.35.3
-        version: 0.35.4(@types/node@26.2.0)
-      surrealdb:
-        specifier: ^1.3.2
-        version: 1.3.2(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)
-      yaml:
-        specifier: ^2.9.0
-        version: 2.9.0
-    devDependencies:
-      '@types/archiver':
-        specifier: ^6.0.3
-        version: 6.0.4
-      '@types/heic-convert':
-        specifier: ^2.1.1
-        version: 2.1.1
-      '@types/react':
-        specifier: ^18.3.3
-        version: 18.3.31
-
-  packages/stamps:
-    dependencies:
-      '@vanilla-extract/css':
-        specifier: ^1.21.2
-        version: 1.21.2
-      '@vanilla-extract/recipes':
-        specifier: ^0.5.7
-        version: 0.5.7(@vanilla-extract/css@1.21.2)
-      '@vanilla-extract/sprinkles':
-        specifier: ^1.7.1
-        version: 1.7.1(@vanilla-extract/css@1.21.2)
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.3
-        version: 18.3.31
-
-  packages/worker:
-    dependencies:
-      bullmq:
-        specifier: ^5.60.0
-        version: 5.81.3
-      robustness-core:
-        specifier: workspace:*
-        version: link:../robustness-core
-      vite:
-        specifier: ^5.2.12
-        version: 5.4.21(@types/node@26.2.0)
-      vite-node:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@26.2.0)
-
-  webapp:
+  fruits:
     dependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.115.0
@@ -278,6 +143,310 @@ importers:
       sharp:
         specifier: ^0.35.3
         version: 0.35.4(@types/node@26.2.0)
+      stamps:
+        specifier: workspace:*
+        version: link:../packages/stamps
+      surrealdb:
+        specifier: ^1.3.2
+        version: 1.3.2(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)
+      unist-util-visit:
+        specifier: ^5.1.0
+        version: 5.1.0
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
+    devDependencies:
+      '@flydotio/dockerfile':
+        specifier: ^0.5.8
+        version: 0.5.9
+      '@react-router/dev':
+        specifier: ^7.14.0
+        version: 7.18.2(@types/node@26.2.0)(react-router@7.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(typescript@5.9.3)(vite@5.4.21(@types/node@26.2.0))
+      '@react-router/fs-routes':
+        specifier: ^7.14.0
+        version: 7.18.2(@react-router/dev@7.18.2(@types/node@26.2.0)(react-router@7.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(typescript@5.9.3)(vite@5.4.21(@types/node@26.2.0)))(typescript@5.9.3)
+      '@types/mdast':
+        specifier: ^4.0.4
+        version: 4.0.4
+      '@types/nodemailer':
+        specifier: ^8.0.0
+        version: 8.0.1
+      '@types/react':
+        specifier: ^18.3.3
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.7
+        version: 18.3.7(@types/react@18.3.31)
+      '@vanilla-extract/vite-plugin':
+        specifier: ^5.2.6
+        version: 5.2.6(@types/node@26.2.0)(vite@5.4.21(@types/node@26.2.0))
+      '@webgpu/types':
+        specifier: ^0.1.69
+        version: 0.1.71
+      autoprefixer:
+        specifier: ^10.4.19
+        version: 10.5.4(postcss@8.5.26)
+      playwright:
+        specifier: ^1.48.0
+        version: 1.62.1
+      postcss:
+        specifier: ^8.4.47
+        version: 8.5.26
+      postcss-nesting:
+        specifier: ^13.0.0
+        version: 13.0.2(postcss@8.5.26)
+      tailwindcss:
+        specifier: ^3.4.3
+        version: 3.4.19(yaml@2.9.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.2.12
+        version: 5.4.21(@types/node@26.2.0)
+      vite-node:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@26.2.0)
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@26.2.0)
+
+  packages/oxmarkdown-core:
+    dependencies:
+      mdast-util-directive:
+        specifier: ^3.1.0
+        version: 3.1.0
+      mdast-util-from-markdown:
+        specifier: ^2.0.3
+        version: 2.0.3
+      mdast-util-frontmatter:
+        specifier: ^2.0.1
+        version: 2.0.1
+      mdast-util-gfm:
+        specifier: ^3.1.0
+        version: 3.1.0
+      mdast-util-to-markdown:
+        specifier: ^2.1.2
+        version: 2.1.2
+      micromark-extension-directive:
+        specifier: ^3.0.2
+        version: 3.0.2
+      micromark-extension-frontmatter:
+        specifier: ^2.0.0
+        version: 2.0.0
+      micromark-extension-gfm:
+        specifier: ^3.0.0
+        version: 3.0.0
+      micromark-util-character:
+        specifier: ^2.1.1
+        version: 2.1.1
+      micromark-util-chunked:
+        specifier: ^2.0.1
+        version: 2.0.1
+      micromark-util-classify-character:
+        specifier: ^2.0.1
+        version: 2.0.1
+      micromark-util-resolve-all:
+        specifier: ^2.0.1
+        version: 2.0.1
+      micromark-util-symbol:
+        specifier: ^2.0.1
+        version: 2.0.1
+    devDependencies:
+      '@types/mdast':
+        specifier: ^4.0.4
+        version: 4.0.4
+      micromark-util-types:
+        specifier: ^2.0.2
+        version: 2.0.2
+
+  packages/robustness-core:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.115.0
+        version: 0.115.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.797.0
+        version: 3.1108.0
+      '@aws-sdk/lib-storage':
+        specifier: ^3.797.0
+        version: 3.1127.0(@aws-sdk/client-s3@3.1108.0)
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.1048.0
+        version: 3.1108.0
+      '@simplewebauthn/server':
+        specifier: ^13.3.2
+        version: 13.3.2
+      archiver:
+        specifier: ^7.0.1
+        version: 7.0.1
+      bullmq:
+        specifier: ^5.60.0
+        version: 5.81.3
+      ffmpeg-static:
+        specifier: ^5.3.0
+        version: 5.3.0
+      heic-convert:
+        specifier: ^2.1.0
+        version: 2.1.0
+      ioredis:
+        specifier: ^5.9.0
+        version: 5.11.1
+      oxmarkdown-core:
+        specifier: workspace:*
+        version: link:../oxmarkdown-core
+      react-router:
+        specifier: ^7.14.0
+        version: 7.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      remix-auth:
+        specifier: ^4.2.0
+        version: 4.2.0
+      remix-auth-totp:
+        specifier: ^4.0.0
+        version: 4.0.0(remix-auth@4.2.0)
+      sharp:
+        specifier: ^0.35.3
+        version: 0.35.4(@types/node@26.2.0)
+      surrealdb:
+        specifier: ^1.3.2
+        version: 1.3.2(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
+    devDependencies:
+      '@types/archiver':
+        specifier: ^6.0.3
+        version: 6.0.4
+      '@types/heic-convert':
+        specifier: ^2.1.1
+        version: 2.1.1
+      '@types/react':
+        specifier: ^18.3.3
+        version: 18.3.31
+
+  packages/stamps:
+    dependencies:
+      '@vanilla-extract/css':
+        specifier: ^1.21.2
+        version: 1.21.2
+      '@vanilla-extract/recipes':
+        specifier: ^0.5.7
+        version: 0.5.7(@vanilla-extract/css@1.21.2)
+      '@vanilla-extract/sprinkles':
+        specifier: ^1.7.1
+        version: 1.7.1(@vanilla-extract/css@1.21.2)
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+    devDependencies:
+      '@types/react':
+        specifier: ^18.3.3
+        version: 18.3.31
+
+  packages/worker:
+    dependencies:
+      bullmq:
+        specifier: ^5.60.0
+        version: 5.81.3
+      robustness-core:
+        specifier: workspace:*
+        version: file:packages/robustness-core(@types/node@26.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)
+      vite:
+        specifier: ^5.2.12
+        version: 5.4.21(@types/node@26.2.0)
+      vite-node:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@26.2.0)
+
+  webapp:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.115.0
+        version: 0.115.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.797.0
+        version: 3.1108.0
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.1048.0
+        version: 3.1108.0
+      '@floating-ui/react':
+        specifier: ^0.27.19
+        version: 0.27.20(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@react-email/render':
+        specifier: ^2.0.5
+        version: 2.1.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@react-router/express':
+        specifier: ^7.14.0
+        version: 7.18.2(express@4.22.2)(react-router@7.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(typescript@5.9.3)
+      '@react-router/node':
+        specifier: ^7.14.0
+        version: 7.18.2(react-router@7.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(typescript@5.9.3)
+      '@types/pdfkit':
+        specifier: ^0.17.6
+        version: 0.17.6
+      cross-env:
+        specifier: ^7.0.3
+        version: 7.0.3
+      express:
+        specifier: ^4.19.2
+        version: 4.22.2
+      express-rate-limit:
+        specifier: ^8.6.2
+        version: 8.6.2(express@4.22.2)
+      isbot:
+        specifier: ^4.4.0
+        version: 4.4.0
+      mdast-util-directive:
+        specifier: ^3.1.0
+        version: 3.1.0
+      mdast-util-from-markdown:
+        specifier: ^2.0.3
+        version: 2.0.3
+      mdast-util-frontmatter:
+        specifier: ^2.0.1
+        version: 2.0.1
+      mdast-util-gfm:
+        specifier: ^3.1.0
+        version: 3.1.0
+      mdast-util-to-markdown:
+        specifier: ^2.1.2
+        version: 2.1.2
+      micromark-extension-directive:
+        specifier: ^3.0.2
+        version: 3.0.2
+      micromark-extension-frontmatter:
+        specifier: ^2.0.0
+        version: 2.0.0
+      micromark-extension-gfm:
+        specifier: ^3.0.0
+        version: 3.0.0
+      nodemailer:
+        specifier: ^8.0.4
+        version: 8.0.11
+      oxmarkdown-core:
+        specifier: workspace:*
+        version: link:../packages/oxmarkdown-core
+      pdfkit:
+        specifier: ^0.19.1
+        version: 0.19.1
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
+      react-router:
+        specifier: ^7.14.0
+        version: 7.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      resend:
+        specifier: ^6.6.0
+        version: 6.19.0(@react-email/render@2.1.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
+      robustness-core:
+        specifier: workspace:*
+        version: link:../packages/robustness-core
+      sharp:
+        specifier: ^0.35.3
+        version: 0.35.4(@types/node@26.2.0)
       showdown:
         specifier: ^2.1.0
         version: 2.1.0
@@ -330,9 +499,6 @@ importers:
       autoprefixer:
         specifier: ^10.4.19
         version: 10.5.4(postcss@8.5.26)
-      playwright:
-        specifier: ^1.48.0
-        version: 1.62.1
       postcss:
         specifier: ^8.4.47
         version: 8.5.26
@@ -1361,10 +1527,6 @@ packages:
     resolution: {integrity: sha512-KEDhfcGP1PAKRVSDjA3npTQFqS2b/srm+ipoNBNHdkzrHAlaRQUTE+a5f4ywsx6thxAw1NU2rYcLEY1949RGbQ==}
     engines: {node: '>=20.0.0'}
 
-  '@smithy/core@3.32.0':
-    resolution: {integrity: sha512-NAiCSC78fzbNIEWoheoF74Ob5ZorLijCHpMY26Fqvqg/+9LuyIqMfHDg2p8Yk1rqOyowtiL3y7WX0AW+teL6zw==}
-    engines: {node: '>=18.0.0'}
-
   '@smithy/core@3.33.3':
     resolution: {integrity: sha512-CsOeKq/9kA3y6VJHt+/+VTCtBaxJ4OTFpgrjIUhPpDIKxBci1k2bJaQASF2h/ELWrulGp+t97DZ0mevfAD8idg==}
     engines: {node: '>=18.0.0'}
@@ -1383,10 +1545,6 @@ packages:
 
   '@smithy/signature-v4@5.7.0':
     resolution: {integrity: sha512-hCynhm22wMJ8wTF9crcwu8mxggtUrSLLJgDcGUvYFBqpofxycYJCGKOMYg4xtPPFtgNiDJSYmhsWLTrcU/g59Q==}
-    engines: {node: '>=18.0.0'}
-
-  '@smithy/types@4.17.0':
-    resolution: {integrity: sha512-Aw4joiM0ZdErpo39lCj8phT2lxoiKZV+KZzBxnnQhWVtU2Is/WffQSL04uUWRcXUse9Ln8vXZK6V/FwqRVnQpg==}
     engines: {node: '>=18.0.0'}
 
   '@smithy/types@4.18.0':
@@ -2687,6 +2845,9 @@ packages:
     resolution: {integrity: sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==}
     engines: {node: '>= 0.8'}
 
+  oxmarkdown-core@file:packages/oxmarkdown-core:
+    resolution: {directory: packages/oxmarkdown-core, type: directory}
+
   p-limit@3.1.0:
     resolution: {integrity: sha512-TYOanM3wGwNGsZN2cVTYPArw454xnXj5qmWF1bEoAc4+cU/ol7GVh7odevjp1FNHduHc3KZMcFduxU5Xc6uJRQ==}
     engines: {node: '>=10'}
@@ -3005,6 +3166,9 @@ packages:
   reusify@1.1.0:
     resolution: {integrity: sha512-g6QUff04oZpHs0eG5p83rFLhHeV00ug/Yf9nZM6fLeUrPguBTkTQOdpAWWspMh55TZfVQDPaN3NQJfbVRAxdIw==}
     engines: {iojs: '>=1.0.0', node: '>=0.10.0'}
+
+  robustness-core@file:packages/robustness-core:
+    resolution: {directory: packages/robustness-core, type: directory}
 
   rollup@4.62.4:
     resolution: {integrity: sha512-RXOqwaPsBGjMNMa4sQjDjHieHEZDFoj/Rdr46l2MU5DfEs16wHJPC2RPTPHWhNl+M3aI472LLqFkFKut4SblOg==}
@@ -3466,8 +3630,8 @@ snapshots:
     dependencies:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/client-s3@3.1108.0':
@@ -3478,10 +3642,10 @@ snapshots:
       '@aws-sdk/middleware-sdk-s3': 3.972.73
       '@aws-sdk/signature-v4-multi-region': 3.996.44
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
+      '@smithy/core': 3.33.3
       '@smithy/fetch-http-handler': 5.7.0
       '@smithy/node-http-handler': 4.10.0
-      '@smithy/types': 4.17.0
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/core@3.977.7':
@@ -3489,9 +3653,9 @@ snapshots:
       '@aws-sdk/types': 3.974.3
       '@aws-sdk/xml-builder': 3.972.38
       '@aws/lambda-invoke-store': 0.3.0
-      '@smithy/core': 3.32.0
+      '@smithy/core': 3.33.3
       '@smithy/signature-v4': 5.7.0
-      '@smithy/types': 4.17.0
+      '@smithy/types': 4.18.0
       bowser: 2.14.1
       tslib: 2.8.1
 
@@ -3499,18 +3663,18 @@ snapshots:
     dependencies:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/credential-provider-http@3.972.70':
     dependencies:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
+      '@smithy/core': 3.33.3
       '@smithy/fetch-http-handler': 5.7.0
       '@smithy/node-http-handler': 4.10.0
-      '@smithy/types': 4.17.0
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/credential-provider-ini@3.973.13':
@@ -3524,9 +3688,9 @@ snapshots:
       '@aws-sdk/credential-provider-web-identity': 3.972.74
       '@aws-sdk/nested-clients': 3.997.42
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
+      '@smithy/core': 3.33.3
       '@smithy/credential-provider-imds': 4.5.0
-      '@smithy/types': 4.17.0
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/credential-provider-login@3.972.75':
@@ -3534,8 +3698,8 @@ snapshots:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/nested-clients': 3.997.42
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/credential-provider-node@3.972.79':
@@ -3547,17 +3711,17 @@ snapshots:
       '@aws-sdk/credential-provider-sso': 3.973.12
       '@aws-sdk/credential-provider-web-identity': 3.972.74
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
+      '@smithy/core': 3.33.3
       '@smithy/credential-provider-imds': 4.5.0
-      '@smithy/types': 4.17.0
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/credential-provider-process@3.972.68':
     dependencies:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/credential-provider-sso@3.973.12':
@@ -3566,8 +3730,8 @@ snapshots:
       '@aws-sdk/nested-clients': 3.997.42
       '@aws-sdk/token-providers': 3.1108.0
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/credential-provider-web-identity@3.972.74':
@@ -3575,8 +3739,8 @@ snapshots:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/nested-clients': 3.997.42
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/lib-storage@3.1127.0(@aws-sdk/client-s3@3.1108.0)':
@@ -3594,8 +3758,8 @@ snapshots:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/signature-v4-multi-region': 3.996.44
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/nested-clients@3.997.42':
@@ -3603,10 +3767,10 @@ snapshots:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/signature-v4-multi-region': 3.996.44
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
+      '@smithy/core': 3.33.3
       '@smithy/fetch-http-handler': 5.7.0
       '@smithy/node-http-handler': 4.10.0
-      '@smithy/types': 4.17.0
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/s3-request-presigner@3.1108.0':
@@ -3614,15 +3778,15 @@ snapshots:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/signature-v4-multi-region': 3.996.44
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/signature-v4-multi-region@3.996.44':
     dependencies:
       '@aws-sdk/types': 3.974.3
       '@smithy/signature-v4': 5.7.0
-      '@smithy/types': 4.17.0
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/token-providers@3.1108.0':
@@ -3630,18 +3794,18 @@ snapshots:
       '@aws-sdk/core': 3.977.7
       '@aws-sdk/nested-clients': 3.997.42
       '@aws-sdk/types': 3.974.3
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/types@3.974.3':
     dependencies:
-      '@smithy/types': 4.17.0
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws-sdk/xml-builder@3.972.38':
     dependencies:
-      '@smithy/types': 4.17.0
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@aws/lambda-invoke-store@0.3.0': {}
@@ -4572,11 +4736,6 @@ snapshots:
       '@peculiar/asn1-x509': 2.8.0
       '@peculiar/x509': 1.14.3
 
-  '@smithy/core@3.32.0':
-    dependencies:
-      '@smithy/types': 4.17.0
-      tslib: 2.8.1
-
   '@smithy/core@3.33.3':
     dependencies:
       '@smithy/types': 4.18.0
@@ -4584,30 +4743,26 @@ snapshots:
 
   '@smithy/credential-provider-imds@4.5.0':
     dependencies:
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@smithy/fetch-http-handler@5.7.0':
     dependencies:
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@smithy/node-http-handler@4.10.0':
     dependencies:
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@smithy/signature-v4@5.7.0':
     dependencies:
-      '@smithy/core': 3.32.0
-      '@smithy/types': 4.17.0
-      tslib: 2.8.1
-
-  '@smithy/types@4.17.0':
-    dependencies:
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.18.0
       tslib: 2.8.1
 
   '@smithy/types@4.18.0':
@@ -6151,6 +6306,24 @@ snapshots:
     dependencies:
       ee-first: 1.1.1
 
+  oxmarkdown-core@file:packages/oxmarkdown-core:
+    dependencies:
+      mdast-util-directive: 3.1.0
+      mdast-util-from-markdown: 2.0.3
+      mdast-util-frontmatter: 2.0.1
+      mdast-util-gfm: 3.1.0
+      mdast-util-to-markdown: 2.1.2
+      micromark-extension-directive: 3.0.2
+      micromark-extension-frontmatter: 2.0.0
+      micromark-extension-gfm: 3.0.0
+      micromark-util-character: 2.1.1
+      micromark-util-chunked: 2.0.1
+      micromark-util-classify-character: 2.0.1
+      micromark-util-resolve-all: 2.0.1
+      micromark-util-symbol: 2.0.1
+    transitivePeerDependencies:
+      - supports-color
+
   p-limit@3.1.0:
     dependencies:
       yocto-queue: 0.1.0
@@ -6443,6 +6616,39 @@ snapshots:
   restructure@3.0.2: {}
 
   reusify@1.1.0: {}
+
+  robustness-core@file:packages/robustness-core(@types/node@26.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3):
+    dependencies:
+      '@anthropic-ai/sdk': 0.115.0
+      '@aws-sdk/client-s3': 3.1108.0
+      '@aws-sdk/lib-storage': 3.1127.0(@aws-sdk/client-s3@3.1108.0)
+      '@aws-sdk/s3-request-presigner': 3.1108.0
+      '@simplewebauthn/server': 13.3.2
+      archiver: 7.0.1
+      bullmq: 5.81.3
+      ffmpeg-static: 5.3.0
+      heic-convert: 2.1.0
+      ioredis: 5.11.1
+      oxmarkdown-core: file:packages/oxmarkdown-core
+      react-router: 7.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      remix-auth: 4.2.0
+      remix-auth-totp: 4.0.0(remix-auth@4.2.0)
+      sharp: 0.35.4(@types/node@26.2.0)
+      surrealdb: 1.3.2(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)
+      yaml: 2.9.0
+    transitivePeerDependencies:
+      - '@types/node'
+      - bare-abort-controller
+      - bare-buffer
+      - react
+      - react-dom
+      - react-native-b4a
+      - redis
+      - supports-color
+      - tslib
+      - typescript
+      - ws
+      - zod
 
   rollup@4.62.4:
     dependencies:

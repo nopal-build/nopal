@@ -1,5 +1,5 @@
 // Admin Scripts registry — the list of repair/maintenance scripts runnable
-// from /fruits/maker/scripts (Super only), executed by the worker process
+// from /maker/scripts (Super only), executed by the worker process
 // (`packages/worker/worker.ts`) on the "admin-scripts" BullMQ queue
 // (`adminScriptsQueue.server.ts`), with every run's outcome recorded to
 // `admin_script_runs` (`adminScriptRuns.server.ts`).
@@ -24,7 +24,7 @@
 //      script never had a dry-run mode — the Run form always offers the
 //      checkbox, so every registered script must actually respect it.
 //   2. APPEND it to REGISTRY below (don't insert earlier in the list) —
-//      /fruits/maker/scripts/new shows scripts newest-first, and "newest"
+//      /maker/scripts/new shows scripts newest-first, and "newest"
 //      just means "closest to the end of this array". Reordering existing
 //      entries would misrepresent when they were actually added.
 //   3. Give it a stable `name` (also used as the BullMQ job name and the

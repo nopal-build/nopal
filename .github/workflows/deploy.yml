@@ -38,6 +38,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm --filter remix run test --run
+      - run: pnpm --filter fruits run test --run
 
   deploy-staging:
     needs: test
@@ -49,9 +50,13 @@ jobs:
         with:
           version: '0.4.99'
 
-      # webapp only -- staging has no worker/DB of its own, see
-      # webapp/fly.staging.toml.
+      # webapp + fruits only -- staging has no worker/DB of its own, see
+      # webapp/fly.staging.toml + fruits/fly.staging.toml.
       - run: flyctl deploy . --config webapp/fly.staging.toml --dockerfile webapp/Dockerfile --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - run: flyctl deploy . --config fruits/fly.staging.toml --dockerfile fruits/Dockerfile --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
@@ -104,7 +109,7 @@ jobs:
           version: '0.4.99'
 
       # Same order make deploy uses: db (runs migrations via its own
-      # release_command) first, then webapp, then worker.
+      # release_command) first, then webapp, then fruits, then worker.
       #
       # db deploys with `working-directory: db`, NOT `--config db/fly.toml`
       # from the repo root -- db/fly.toml has no explicit [build] context/
@@ -118,6 +123,10 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       - run: flyctl deploy . --config webapp/fly.toml --dockerfile webapp/Dockerfile --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - run: flyctl deploy . --config fruits/fly.toml --dockerfile fruits/Dockerfile --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
