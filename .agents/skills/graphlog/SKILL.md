@@ -357,6 +357,52 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     banner before the model sees the page again; the stripped page is
     persisted even when the model writes nothing). Chips for the field
     line and a status badge for the banner are layout.
+  - **Round 3 (2026-09-17): a leader's read, and rules in code.** The
+    page opens with a read (where we stand, the tension, the blind spot;
+    marked as a read, traceable to the page below it rather than to one
+    node) and the one ask comes out of it; "Around it" became "Why it
+    matters"; benches belong only to people who log and read the page,
+    the worker's bench when the worker logs and the logger's when not.
+    The skill was trimmed to intent and `sectionShapeNotes` took over
+    the counting: one turn-back per section per run naming every count
+    that is off (word budget, more than three quoted phrases in an
+    effort, a label repeated or holding more than three items, a bullet
+    with a semicolon or more than about 20 words outside its quote, a
+    bench heading naming someone outside the writers list or by more
+    than a first name). The readings block hands first names
+    (`firstName`); the sidecar carries `read`, `ask` and `removed`
+    (previous efforts that match nothing on the new page); the log says
+    what left the page. Found on the way: an edited log re-extracts in
+    production because `dailyLogSync` recomputes `content_hash` on the
+    project's copy, while `updateFileRef({content})` alone does not.
+  - **Round 4 (2026-09-17): nothing on the page for code.** The field
+    line, the change tags and the "Our read:" label came off the page
+    (Austin: "All these feel like fallout from me being overly
+    prescriptive"). An effort's threads are now read from the nodes its
+    bullets cite (`assignEffortThreads`: citation, node, home thread);
+    size, posture and direction arrive through a `describe_effort` tool
+    that writes to the sidecar only; change marks live in the sidecar
+    (`stripChangeTags` stays for legacy pages). The readings block adds
+    what arrived since the previous sidecar's date (`arrivedSince`) so
+    the opening can say what moved, and the fallen-away and off-page
+    threads as loose-end candidates for the Drawer, which the page
+    proposes and never files. `VOICE.md` had its one pass: scoped to
+    sentences, the record-keeping stance lines cut, Austin's calm-leader
+    line in, Gerald's half named as missing.
+  - **Round 5 (2026-09-17): size in words, voice pass 2.** Size came
+    back to the page as a third heading segment in words
+    (`### <Person> · <Effort> · a few weeks of one person's time`;
+    `splitHeading` reads it as `sizeWords`, the letter still arrives via
+    `describe_effort`), never as `Size:` or a letter (a shape note). The
+    voice file was sorted by Austin's mechanical test: what a machine can
+    check without meaning (em dash, arrow or curly quote outside a
+    straight-quoted phrase, underline, most bullets opening bold, a size
+    letter) is a `sectionShapeNotes` check now, not a line in a skill;
+    what needs meaning stays in `VOICE.md` as judgment. Production note:
+    both files are reserved names, so on Crouch only the view fingerprint
+    moves; on O.No, removing the hand-uploaded `VOICE.md` extra changes
+    the other three stages' compositions too, so Rerun Outputs there
+    would re-thread the structure.
 
 ## Reset
 

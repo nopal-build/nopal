@@ -17,14 +17,24 @@ import {
   buildEffortsSidecar,
   buildReadingsBlock,
   computeEffortReadings,
+  applyEffortDescriptions,
+  arrivedSince,
+  assignEffortThreads,
   countPageWords,
+  fallenAwayThreads,
+  firstName,
   markChanges,
   PAGE_WORD_CEILING,
   parseEffortBlocks,
+  parseRead,
   questionInOwnWords,
   readEffortsSidecar,
+  readSidecarMeta,
+  removedEfforts,
   SECTION_WORD_BUDGETS,
+  sectionShapeNotes,
   speedLabel,
+  splitHeading,
   stripChangeTags,
   unknownThreadNames,
   withChangeTags,
@@ -196,9 +206,9 @@ describe("efforts on the page: the field line is read back by code", () => {
     "### not an effort",
   ].join("\n");
 
-  it("parses every ### heading, its section, and the fields when the line is there", () => {
+  it("parses every ### heading and its section, reading a legacy field line for its threads only", () => {
     const blocks = parseEffortBlocks(page);
-    expect(blocks.map((b) => [b.name, b.section, b.hasFieldLine])).toEqual([
+    expect(blocks.map((b) => [b.name, b.section, b.threads.length > 0])).toEqual([
       ["Siding", "on the bench", true],
       ["Landscaping", "on the bench", false],
       ["Permits", "shelf", true],
@@ -226,7 +236,7 @@ describe("efforts on the page: the field line is read back by code", () => {
     const json = JSON.parse(content.slice(content.indexOf("```json\n") + 8, content.lastIndexOf("\n```")));
     expect(json.efforts).toHaveLength(1);
     const exterior = json.efforts[0];
-    expect(exterior).toMatchObject({ name: "Exterior", section: "on the bench", size: "M", posture: "regroup", threadsNotInIndex: [] });
+    expect(exterior).toMatchObject({ name: "Exterior", section: "on the bench", size: "M", posture: "regroup" });
     expect(exterior.readings).toMatchObject({
       threads: ["Siding", "Windows"],
       nodeCount: 4,
@@ -253,7 +263,6 @@ describe("efforts on the page: the field line is read back by code", () => {
         return c.slice(c.indexOf("```json\n") + 8, c.lastIndexOf("\n```"));
       })(),
     );
-    expect(partial.efforts[0].threadsNotInIndex).toEqual(["Roofing"]);
     expect(partial.efforts[0].readings.neighbors).toEqual([{ heading: "Windows", outbound: 0, inbound: 1 }]);
     expect(partial.threadsWithoutEffort).toEqual(["Windows"]);
   });
@@ -314,5 +323,171 @@ describe("round 2: the page as a list", () => {
     expect(stripChangeTags(tagged)).toBe("## On the bench\n### Gerald · Cladding\n- Now: x\n### Lucas · Inside\n- Now: y\n");
     expect(readEffortsSidecar("no block here")).toBeNull();
     expect(readEffortsSidecar(null)).toBeNull();
+  });
+});
+
+describe("round 3: rules in code, goals in the skill", () => {
+  it("first names come off display names and emails", () => {
+    expect(firstName("Gerald L")).toBe("Gerald");
+    expect(firstName("austin@nopal.build")).toBe("Austin");
+    expect(firstName("Lucas J")).toBe("Lucas");
+    expect(firstName("  ")).toBe("Unknown");
+  });
+
+  it("shape notes name every count that is off, and are empty for a section in shape", () => {
+    const good = [
+      "### Gerald · Cladding",
+      "",
+      '- Now: "under 8 rows to go" :ref{name="Gerald L" human-id="super_1"}',
+      "  - the crew worked 6 to 2:30",
+      "- Next: eaves, then the birch soffit",
+      "- Why it matters: the metal skirt hangs off the finished rows",
+    ].join("\n");
+    expect(sectionShapeNotes("On the bench", good, ["Gerald", "Lucas"])).toEqual([]);
+
+    const bad = [
+      "### Gerald L · Cladding",
+      "Threads: Siding · Size: L · Posture: accelerate · Direction: closing",
+      '- Now: "one" and "two" and "three" and "four" quoted phrases',
+      "- Now: a second Now line",
+      "- Next: this bullet has one fact; and then a second fact after a semicolon",
+      "- Not logged: " + Array.from({ length: 25 }, (_, i) => `w${i}`).join(" "),
+      "### Beaudy · Interior",
+      "Threads: Windows",
+      "- Now: a",
+      "  - one",
+      "  - two",
+      "  - three",
+      "  - four",
+    ].join("\n");
+    const notes = sectionShapeNotes("On the bench", bad, ["Gerald", "Lucas"]);
+    expect(notes.some((n) => n.includes("4 quoted phrases"))).toBe(true);
+    expect(notes.some((n) => n.includes("repeats the label Now 2 times"))).toBe(true);
+    expect(notes.some((n) => n.includes("semicolon"))).toBe(true);
+    expect(notes.some((n) => n.includes("runs 25 words"))).toBe(true);
+    expect(notes.some((n) => n.includes('"Cladding" names "Gerald L"') && n.includes("first name"))).toBe(true);
+    expect(notes.some((n) => n.includes('"Interior" names "Beaudy"') && n.includes("not one of the people logging"))).toBe(true);
+    expect(notes.some((n) => n.includes("more than 3 items under Now"))).toBe(true);
+    expect(sectionShapeNotes("Shelf", Array.from({ length: 130 }, () => "word").join(" "))[0]).toContain("130 words against a budget of 120");
+    // Bullets outside any effort (Ready next, the shelf) are checked too.
+    expect(sectionShapeNotes("Ready next", "- Metal skirt: hangs off the cladding; the call is not logged")[0]).toContain("semicolon");
+    expect(sectionShapeNotes("Ready next", "- Metal skirt · S: hangs off the cladding").some((n) => n.includes("size as a letter"))).toBe(true);
+  });
+
+  it("removed efforts are last run's efforts that share no thread and no name with the page", () => {
+    const previous = [
+      { name: "HVAC spec", person: "Austin", threads: ["HVAC and ERV specification"], size: "S", posture: "regroup", direction: null, lines: [] },
+      { name: "Cladding", person: "Gerald", threads: ["Siding"], size: "L", posture: "accelerate", direction: null, lines: [] },
+    ];
+    const current = parseEffortBlocks("### Gerald · Black locust cladding\nThreads: Siding\n- Now: x\n");
+    expect(removedEfforts(previous, current)).toEqual(["Austin · HVAC spec"]);
+    expect(removedEfforts(null, current)).toEqual([]);
+  });
+
+  it("the read and the one ask come off the intro", () => {
+    const body = [
+      "# Crouch",
+      "",
+      'A read: the building is closing on both sides and the inspection is the gate :ref{name="x"}.',
+      "The tension is heat against rows.",
+      "",
+      "One ask: has the final inspection been called?",
+      "",
+      "## Regroup",
+      "text",
+    ].join("\n");
+    expect(parseRead(body)).toEqual({
+      read: "A read: the building is closing on both sides and the inspection is the gate . The tension is heat against rows.",
+      ask: "has the final inspection been called?",
+    });
+    expect(parseRead("## Regroup\nx")).toEqual({ read: null, ask: null });
+  });
+});
+
+describe("round 4: nothing on the page for code; the sidecar reads the citations", () => {
+  it("an effort's threads are the home threads of the nodes it cites", () => {
+    const body = [
+      "## On the bench",
+      "### Gerald · Cladding",
+      `- Now: "under 8 rows to go" ${A.refLine}`,
+      `- Next: eaves ${C.refLine}`,
+      "### Lucas · Windows",
+      `- Now: waiting on the order ${D.refLine}`,
+      "### Nothing cited",
+      "- Now: just words",
+    ].join("\n");
+    const blocks = parseEffortBlocks(body);
+    assignEffortThreads(blocks, [A, B, C, D], sections);
+    expect(blocks.map((b) => [b.name, b.threads])).toEqual([
+      ["Cladding", ["Siding"]],
+      ["Windows", ["Windows"]],
+      ["Nothing cited", []],
+    ]);
+    // A citation in view mode (verbose stripped) matches too.
+    const viewMode = parseEffortBlocks(`### X\n- Now: y ${A.refLine.replace(' verbose="true"', "")}`);
+    assignEffortThreads(viewMode, [A], sections);
+    expect(viewMode[0].threads).toEqual(["Siding"]);
+  });
+
+  it("describe_effort reports land on the parsed efforts by name, and a field line on the page is a shape note", () => {
+    const blocks = parseEffortBlocks("### Gerald · Cladding\n- Now: x\n### Lucas · Windows\n- Now: y");
+    applyEffortDescriptions(blocks, new Map([["cladding", { size: "L", posture: "accelerate", direction: "closing" }], ["nobody", { size: "S", posture: null, direction: null }]]));
+    expect(blocks[0]).toMatchObject({ size: "L", posture: "accelerate", direction: "closing" });
+    expect(blocks[1]).toMatchObject({ size: null, posture: null });
+    const notes = sectionShapeNotes("On the bench", "### Gerald · Cladding\n- Now: x\n- Threads: Siding · Size: L\n", ["Gerald"]);
+    expect(notes.some((n) => n.includes("carries no fields"))).toBe(true);
+  });
+
+  it("the readings block says what arrived since the last page and which threads are loose-end candidates", () => {
+    const readings = computeEffortReadings(sections, [A, B, C, D], TODAY);
+    expect(arrivedSince(sections, [A, B, C, D], "2026-09-05")).toEqual([{ heading: "Siding", count: 2 }]);
+    expect(arrivedSince(sections, [A, B, C, D], null)).toEqual([]);
+    const dormant = [...sections, { heading: "Old theft", content: "Weight: no inbound links yet · Status: dormant\n- 2026-08-12 Node 1 (Lucas) — theft" }];
+    expect(fallenAwayThreads(dormant)).toEqual(["Old theft"]);
+    const block = buildReadingsBlock(readings, { sinceDate: "2026-09-05", arrivedSince: [{ heading: "Siding", count: 2 }], fellAway: ["Old theft"], offPage: ["Landscaping"] })!;
+    expect(block).toContain('Since the page was last written (2026-09-05), new entries landed in: "Siding" 2');
+    expect(block).toContain('fell away: "Old theft"; left off the last page: "Landscaping"');
+    expect(buildReadingsBlock(readings, { sinceDate: null, arrivedSince: [], fellAway: [], offPage: [] })).toContain("No previous page to compare");
+  });
+
+  it("the sidecar's date and the threads it left without an effort are read back", () => {
+    const readings = computeEffortReadings(sections, [A, B, C, D], TODAY);
+    const content = buildEffortsSidecar({ asOfGraphHash: "h", generatedAt: "t", skillFingerprint: "f" }, parseEffortBlocks("### Siding\nThreads: Siding\n- Now: x"), readings);
+    expect(readSidecarMeta(content)).toEqual({ today: TODAY, threadsWithoutEffort: ["Windows"] });
+    expect(readSidecarMeta("nope")).toBeNull();
+  });
+});
+
+describe("round 5: size in words on the heading, and the mechanical voice rules in code", () => {
+  it("a third heading segment is the size in words; the name stays clean", () => {
+    expect(splitHeading("Gerald · Black locust cladding · a few weeks of one person's time")).toEqual({
+      person: "Gerald",
+      name: "Black locust cladding",
+      sizeWords: "a few weeks of one person's time",
+    });
+    expect(splitHeading("Gerald · Cladding")).toEqual({ person: "Gerald", name: "Cladding", sizeWords: null });
+    expect(splitHeading("Cladding")).toEqual({ person: null, name: "Cladding", sizeWords: null });
+    const [b] = parseEffortBlocks("### Lucas · Occupancy · an afternoon\n- Now: x");
+    expect(b).toMatchObject({ person: "Lucas", name: "Occupancy", sizeWords: "an afternoon" });
+    const readings = computeEffortReadings(sections, [A, B, C, D], TODAY);
+    const content = buildEffortsSidecar({ asOfGraphHash: "h", generatedAt: "t", skillFingerprint: "f" }, [b], readings);
+    expect(content).toContain('"sizeWords": "an afternoon"');
+  });
+
+  it("a size letter or Size: field on the page is a shape note; words are not", () => {
+    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding · M\n- Now: x", ["Gerald"]).some((n) => n.includes("size as a letter"))).toBe(true);
+    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding\n- Size: L, about a week\n", ["Gerald"]).some((n) => n.includes("size as a letter"))).toBe(true);
+    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding · a few weeks of one person's time\n- Now: rows on the S wall going up", ["Gerald"])).toEqual([]);
+  });
+
+  it("em dashes, arrows, curly quotes, underline and all-bold bullets are turned back; a quoted entry is left alone", () => {
+    expect(sectionShapeNotes("Regroup", "We meet at the inspection — with the walls closed.").some((n) => n.includes("em dash"))).toBe(true);
+    expect(sectionShapeNotes("Regroup", 'Lucas wrote "the wall — finally — is up" :ref{name="x"}.')).toEqual([]);
+    expect(sectionShapeNotes("Regroup", "Inside → outside.").some((n) => n.includes("arrow"))).toBe(true);
+    expect(sectionShapeNotes("Regroup", "He said “done”.").some((n) => n.includes("curly"))).toBe(true);
+    expect(sectionShapeNotes("Regroup", "<u>final</u> inspection").some((n) => n.includes("underline"))).toBe(true);
+    const bold = "- **Now:** a\n- **Next:** b\n- **Why:** c\n- plain d";
+    expect(sectionShapeNotes("Ready next", bold).some((n) => n.includes("open with a bolded phrase"))).toBe(true);
+    expect(sectionShapeNotes("Ready next", "- a\n- **b**\n- c")).toEqual([]);
   });
 });

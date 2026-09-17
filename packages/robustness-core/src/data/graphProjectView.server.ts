@@ -122,19 +122,26 @@ import {
   type GraphLogNode,
 } from "./graphNodeIndex.server";
 import {
+  applyEffortDescriptions,
+  arrivedSince,
+  assignEffortThreads,
   buildEffortsSidecar,
   buildReadingsBlock,
   computeEffortReadings,
   countPageWords,
   EFFORTS_SIDECAR_FILE_NAME,
+  fallenAwayThreads,
+  firstName,
   markChanges,
   PAGE_WORD_CEILING,
   parseEffortBlocks,
+  parseRead,
   readEffortsSidecar,
-  SECTION_WORD_BUDGETS,
+  readSidecarMeta,
+  removedEfforts,
+  sectionShapeNotes,
   stripChangeTags,
-  unknownThreadNames,
-  withChangeTags,
+  type EffortDescription,
 } from "./effortReadings.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
@@ -374,6 +381,21 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "describe_effort",
+    description:
+      "Report one bench effort's size (XS, S, M, L or XL), posture (regroup or accelerate) and direction (a few words) for the layout. Call it once per bench effort after writing it. Nothing you send here appears on the page; the page carries no fields.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        effort: { type: "string", description: "The effort's heading text without the person, exactly as written" },
+        size: { type: "string" },
+        posture: { type: "string" },
+        direction: { type: "string" },
+      },
+      required: ["effort", "size", "posture"],
+    },
+  },
+  {
     name: "get_node",
     description:
       'Fetch one node\'s full verbatim text and exact :ref{...} citation by id (e.g. "2026-07-29#3" -- ids are shown in brackets after every node you\'re already handed, and in every "- <date> Node <N>" line in graph-structure.md). Nodes behind the top threads are already given to you in full; use this for anything else you need to quote or cite before writing about it.',
@@ -436,9 +458,12 @@ function createReadmeExecutors(input: {
   today: string;
   /** The skill's section order -- see `resolveSectionOrder`. */
   sectionOrder: readonly string[];
-  /** graph-structure.md's thread headings, lowercased, so an effort's
-   * `Threads:` line can be checked against the index as it is written. */
-  threadHeadings: Set<string>;
+  /** `describe_effort` reports, keyed by lowercased effort name; the
+   * caller reads them into the sidecar after the clean finish. */
+  descriptions: Map<string, EffortDescription>;
+  /** First names of everyone who has written in the graph: the only
+   * names a bench heading may carry. See `sectionShapeNotes`. */
+  writerFirstNames: readonly string[];
 }): {
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>;
   summaries: string[];
@@ -456,7 +481,7 @@ function createReadmeExecutors(input: {
   refusalReasons: () => readonly string[];
   getCurrent: () => { content: string; fileId: string | undefined };
 } {
-  const { projectFolder, log, allNodesById, validNodeIds, today, sectionOrder, threadHeadings } = input;
+  const { projectFolder, log, allNodesById, validNodeIds, today, sectionOrder, descriptions, writerFirstNames } = input;
   let currentContent = input.initialContent;
   let currentFileId = input.initialFileId;
   let refusals = 0;
@@ -467,8 +492,8 @@ function createReadmeExecutors(input: {
     log(`graph-project-view -- ${reason}.`);
   };
   let introTurnedBack = false;
-  // One budget turn-back per section per run -- see `SECTION_WORD_BUDGETS`.
-  const budgetTurnedBack = new Set<string>();
+  // One shape turn-back per section per run -- see `sectionShapeNotes`.
+  const shapeTurnedBack = new Set<string>();
   const summaries: string[] = [];
 
   async function commit(newFullContent: string): Promise<boolean> {
@@ -555,18 +580,19 @@ function createReadmeExecutors(input: {
         return `Error: refused -- section "${label}" currently has real content; sending empty content would erase it. Use remove_section if you genuinely want to delete it.`;
       }
 
-      // The page is read on a phone. A section over its word budget is
-      // turned back ONCE with the count (the list bounce's shape, not a
-      // refusal): the resend is accepted as written, because the budget
-      // is a reading-time rule and the skill is the judge of what to cut.
-      // Citations and gallery lines cost nothing (`countPageWords`).
-      const budget = SECTION_WORD_BUDGETS[key];
-      const words = countPageWords(content);
-      if (budget !== undefined && words > budget && !budgetTurnedBack.has(key)) {
-        budgetTurnedBack.add(key);
+      // The page is read on a phone, and code holds its shape: the
+      // section's word budget, quotes per effort, labels once, one fact
+      // per bullet, first names on bench headings. A section that is out
+      // of shape is turned back ONCE with every count that is off (the
+      // list bounce's shape, not a refusal): the resend is accepted as
+      // written, because the skill is the judge of what to cut. See
+      // `sectionShapeNotes`.
+      const shapeNotes = sectionShapeNotes(heading, content, writerFirstNames);
+      if (shapeNotes.length > 0 && !shapeTurnedBack.has(key)) {
+        shapeTurnedBack.add(key);
         const label = heading || "(intro)";
-        log(`graph-project-view -- turned back update_section "${label}" once: ${words} words against a budget of ${budget}.`);
-        return `Not written yet. Section "${label}" is ${words} words against a budget of ${budget} (citations and photos not counted). The page is read on a phone: one bullet per fact or move, two or three quoted phrases per effort, the shelf as one line each. Cut it and call update_section again; the resend is accepted as written.`;
+        log(`graph-project-view -- turned back update_section "${label}" once: ${shapeNotes.join("; ")}.`);
+        return `Not written yet. Section "${label}" is out of shape:\n- ${shapeNotes.join("\n- ")}\nCut and call update_section again; the resend is accepted as written.`;
       }
 
       const updatedSections = existing
@@ -577,16 +603,6 @@ function createReadmeExecutors(input: {
       const label = heading || "(intro)";
       summaries.push(existing ? `updated "${label}"` : `added "${label}"`);
       log(`graph-project-view -- ${existing ? "updated" : "added"} README section "${label}".`);
-      // An effort's `Threads:` line is what ties the page back to the
-      // index (and what `Graph/efforts.md` is built from), so a name that
-      // matches nothing is said in the tool result, the way the structure
-      // stage's `reviewClusterWrite` notes an overflow: a note, committed
-      // as written, for the model to fix on its next turn or not.
-      const unknown = unknownThreadNames(content, threadHeadings);
-      if (unknown.length > 0) {
-        log(`graph-project-view -- section "${label}" names ${unknown.length} thread(s) not in graph-structure.md: ${unknown.map((t) => `"${t}"`).join(", ")}.`);
-        return `${existing ? "Updated" : "Added"} section "${label}". Note: ${unknown.length} thread name(s) on an effort's Threads line match nothing in graph-structure.md (${unknown.map((t) => `"${t}"`).join(", ")}). Thread names are copied exactly from the index's headings; fix them if you want the effort to be traceable.`;
-      }
       return `${existing ? "Updated" : "Added"} section "${label}".`;
     },
     remove_section: async (toolInput) => {
@@ -614,6 +630,17 @@ function createReadmeExecutors(input: {
       summaries.push(`removed "${heading}"`);
       log(`graph-project-view -- removed README section "${heading}".`);
       return `Removed section "${heading}".`;
+    },
+    describe_effort: async (toolInput) => {
+      const effort = String(toolInput.effort ?? "").trim();
+      if (!effort) return "Error: describe_effort needs the effort's heading text.";
+      const clean = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+      descriptions.set(effort.toLowerCase(), {
+        size: clean(toolInput.size)?.toUpperCase() ?? null,
+        posture: clean(toolInput.posture)?.toLowerCase() ?? null,
+        direction: clean(toolInput.direction),
+      });
+      return `Noted for "${effort}" (sidecar only; nothing on the page).`;
     },
     get_node: async (toolInput) => {
       const nodeId = String(toolInput.nodeId ?? "").trim();
@@ -1597,25 +1624,36 @@ export async function runGraphProjectView(
     );
   }
   if (applied && !rewrite) {
-    // The README is not rewritten, but it still exists and the graph is
-    // still the graph, so coverage is measurable and gets measured. This
-    // used to return `coverage: null`, which the run page reads (correctly)
-    // as "graph-project-view never reached a clean finish" -- on a run
-    // where nothing was wrong. A warning that fires on the normal state
-    // is training to ignore the warning; the no-op run on production
-    // read that way the first time anyone did one.
-    log("graph-project-view: up to date, nothing changed since last run.");
-    const { allNodes } = await loadGraphNodes(files);
+    // A reader correction is new input even when the graph is not: a
+    // person wrote in "Notes on this view" and the page has not read it.
+    // Found 2026-09-17 by the Coronado test (a correction alone never
+    // reached the model until the next content change). Unread notes
+    // make the run reconcile; otherwise the up-to-date path below.
     const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
-    const coverage = readme
-      ? computeCoverageReport(
-          splitFrontmatter(structureFile.content).body,
-          stripIncompleteBanner(splitFrontmatter(readme.content ?? "").body),
-          new Map(allNodes.map((n) => [n.id, n])),
-        )
-      : null;
-    return { ok: true, skipped: false, changed: false,
-      staleSkill, summary: [], coverage, incomplete: [] };
+    const readmeBody = stripIncompleteBanner(splitFrontmatter(readme?.content ?? "").body);
+    const unread = extractReaderComments(splitReadmeSections(readmeBody)).unstamped.length;
+    if (unread > 0) {
+      log(`graph-project-view: the graph is unchanged, but ${unread} unread reader correction(s) are waiting in "Notes on this view"; reconciling the page against them.`);
+    } else {
+      // The README is not rewritten, but it still exists and the graph is
+      // still the graph, so coverage is measurable and gets measured. This
+      // used to return `coverage: null`, which the run page reads (correctly)
+      // as "graph-project-view never reached a clean finish" -- on a run
+      // where nothing was wrong. A warning that fires on the normal state
+      // is training to ignore the warning; the no-op run on production
+      // read that way the first time anyone did one.
+      log("graph-project-view: up to date, nothing changed since last run.");
+      const { allNodes } = await loadGraphNodes(files);
+      const coverage = readme
+        ? computeCoverageReport(
+            splitFrontmatter(structureFile.content).body,
+            readmeBody,
+            new Map(allNodes.map((n) => [n.id, n])),
+          )
+        : null;
+      return { ok: true, skipped: false, changed: false,
+        staleSkill, summary: [], coverage, incomplete: [] };
+    }
   }
 
   // 1.1's own floor+ceiling (ADR-006): read every graph-log file's real
@@ -1644,16 +1682,21 @@ export async function runGraphProjectView(
   const today = new Date().toISOString().slice(0, 10);
   const nodeTextBlock = buildNodePrefetchBlock(structureSections, allNodesById, today);
   const readings = computeEffortReadings(structureSections, allNodes, today);
-  const readingsBlock = buildReadingsBlock(readings);
-  // Last run's efforts, read BEFORE anything is written this run: the
-  // change marks compare the new page against them. See `markChanges`.
+  // Last run's sidecar, read BEFORE anything is written this run: the
+  // change marks compare the new page against its efforts, and the
+  // readings block says what arrived since it was written and which
+  // threads it left without an effort (loose-end candidates).
   const previousSidecarListing = files.find((f) => f.name === EFFORTS_SIDECAR_FILE_NAME);
-  const previousEfforts = previousSidecarListing
-    ? readEffortsSidecar((await getFileRefById(previousSidecarListing._id))?.content)
-    : null;
-  const threadHeadings = new Set(
-    structureSections.map((s) => s.heading.toLowerCase()).filter((h) => h !== "" && h !== "unclustered"),
-  );
+  const previousSidecar = previousSidecarListing ? (await getFileRefById(previousSidecarListing._id))?.content : null;
+  const previousEfforts = readEffortsSidecar(previousSidecar);
+  const previousMeta = readSidecarMeta(previousSidecar);
+  const readingsBlock = buildReadingsBlock(readings, {
+    sinceDate: previousMeta?.today ?? null,
+    arrivedSince: arrivedSince(structureSections, allNodes, previousMeta?.today ?? null),
+    fellAway: fallenAwayThreads(structureSections),
+    offPage: previousMeta?.threadsWithoutEffort ?? [],
+  });
+  const descriptions = new Map<string, EffortDescription>();
 
   const structureBody = splitFrontmatter(structureFile.content).body;
   const system = buildSystemPrompt(skillContent, {
@@ -1726,7 +1769,8 @@ export async function runGraphProjectView(
     validNodeIds,
     today,
     sectionOrder,
-    threadHeadings,
+    descriptions,
+    writerFirstNames: readings.load.map((p) => firstName(p.name)),
   });
   const { executors, summaries, refusals, refusalReasons, getCurrent } = executors_;
 
@@ -1969,16 +2013,24 @@ export async function runGraphProjectView(
     // next run) and recorded in the sidecar as data. See `markChanges`.
     const reconciledBody = joinReadmeSections(reconciledSections);
     const currentEfforts = parseEffortBlocks(reconciledBody);
+    // An effort is what its citations say it is (round 4: nothing on the
+    // page declares threads); size, posture and direction come from
+    // `describe_effort`. Both go to the sidecar; the page keeps no marks.
+    assignEffortThreads(currentEfforts, allNodes, structureSections);
+    applyEffortDescriptions(currentEfforts, descriptions);
     const marks = markChanges(previousEfforts, currentEfforts);
-    const reconciledContent = withReadmeBody(latestContent, withChangeTags(reconciledBody, marks));
+    const reconciledContent = withReadmeBody(latestContent, reconciledBody);
     if (reconciledContent !== latestContent && fileId) {
       await updateFileRef(fileId, { content: reconciledContent });
     }
     const pageWords = countPageWords(reconciledBody);
     const marked = [...marks.values()].filter((m) => m.change !== "unchanged");
+    const removed = removedEfforts(previousEfforts, currentEfforts);
+    const pageRead = parseRead(reconciledBody);
     log(
       `graph-project-view: page is ${pageWords} words against a ceiling of ${PAGE_WORD_CEILING}; ${currentEfforts.length} effort(s)` +
-        `${previousEfforts ? `, ${marked.filter((m) => m.change === "new").length} new, ${marked.filter((m) => m.change === "moved").length} moved` : ", no previous page to compare"}.`,
+        `${previousEfforts ? `, ${marked.filter((m) => m.change === "new").length} new, ${marked.filter((m) => m.change === "moved").length} moved, ${removed.length} left the page${removed.length ? ` (${removed.join(", ")})` : ""}` : ", no previous page to compare"}` +
+        `${pageRead.ask ? `; the one ask: ${pageRead.ask}` : "; no one-ask line"}.`,
     );
 
     await markGraphStructureApplied(structureListing._id, structureFile.content, meta.asOfGraphHash, skillFingerprint);
@@ -1992,6 +2044,7 @@ export async function runGraphProjectView(
       currentEfforts,
       readings,
       marks,
+      { read: pageRead.read, ask: pageRead.ask, removed },
     );
     const sidecarListing = files.find((f) => f.name === EFFORTS_SIDECAR_FILE_NAME);
     if (sidecarListing) {

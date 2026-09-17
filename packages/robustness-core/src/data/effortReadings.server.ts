@@ -26,7 +26,8 @@
 
 import type { ReadmeSection } from "./project.types";
 import { daysBetween, nodeIdsInSection } from "./graphStructure.server";
-import { computeBacklinkIndex, type GraphLogNode } from "./graphNodeIndex.server";
+import { computeBacklinkIndex, stripRefVerbose, type GraphLogNode } from "./graphNodeIndex.server";
+import { hasFallenAway } from "./graphStructure.server";
 
 /** "Recent" everywhere in these readings: the last N days ending today,
  * compared against the N days before that. One constant so speed and
@@ -92,6 +93,18 @@ function writerId(node: GraphLogNode): string {
 
 function writerName(node: GraphLogNode): string {
   return node.authorName ?? "Unknown";
+}
+
+/** The name a bench heading uses: the first word of a display name, or
+ * the part before `@` of an email, capitalized. The graph's `:ref` names
+ * arrive as whatever the humans row holds ("Gerald L",
+ * "austin@nopal.build"), and a page for people uses first names. */
+export function firstName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "Unknown";
+  const local = trimmed.includes("@") ? trimmed.slice(0, trimmed.indexOf("@")) : trimmed;
+  const first = local.split(/[\s._-]+/).filter(Boolean)[0] ?? local;
+  return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
 function isNamedThread(section: ReadmeSection): boolean {
@@ -263,7 +276,40 @@ function plural(n: number, one: string, many = `${one}s`): string {
 /** The prompt text for one run's readings, or null when the graph has
  * nothing to read. Every line is a number with its unit; the two-line
  * lead says what the model owns. */
-export function buildReadingsBlock(readings: EffortReadings): string | null {
+export type ReadingsContext = {
+  /** The date the previous page was written for, from its sidecar. */
+  sinceDate: string | null;
+  /** Threads that gained nodes after `sinceDate`, with counts. */
+  arrivedSince: { heading: string; count: number }[];
+  /** Threads the index marks dormant with no Due and no Blocking. */
+  fellAway: string[];
+  /** Threads the previous page left without an effort. */
+  offPage: string[];
+};
+
+/** What arrived since a date, per thread: the nodes dated after it,
+ * grouped by home thread. */
+export function arrivedSince(sections: readonly ReadmeSection[], allNodes: readonly GraphLogNode[], sinceDate: string | null): { heading: string; count: number }[] {
+  if (!sinceDate) return [];
+  const homeOf = new Map<string, string>();
+  for (const section of sections) {
+    if (!isNamedThread(section)) continue;
+    for (const id of nodeIdsInSection(section)) if (!homeOf.has(id)) homeOf.set(id, section.heading);
+  }
+  const counts = new Map<string, number>();
+  for (const node of allNodes) {
+    if (node.date <= sinceDate) continue;
+    const home = homeOf.get(node.id);
+    if (home) counts.set(home, (counts.get(home) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([heading, count]) => ({ heading, count })).sort((a, b) => b.count - a.count || a.heading.localeCompare(b.heading));
+}
+
+export function fallenAwayThreads(sections: readonly ReadmeSection[]): string[] {
+  return sections.filter((s) => isNamedThread(s) && hasFallenAway(s)).map((s) => s.heading);
+}
+
+export function buildReadingsBlock(readings: EffortReadings, context?: ReadingsContext): string | null {
   if (readings.threads.length === 0) return null;
   const lines: string[] = [];
   lines.push(
@@ -291,12 +337,14 @@ export function buildReadingsBlock(readings: EffortReadings): string | null {
   }
   if (readings.load.length > 0) {
     lines.push("");
-    lines.push(`Who has written where in the last ${RECENT_WINDOW_DAYS} days (a load picture, never an assignment):`);
+    lines.push(
+      `Who has written where in the last ${RECENT_WINDOW_DAYS} days (a load picture, never an assignment). These are the people who log and read this page, and the only names a bench heading may carry, as first names: ${readings.load.map((p) => firstName(p.name)).join(", ")}.`,
+    );
     for (const p of readings.load) {
       lines.push(
         p.threads.length === 0
-          ? `- ${p.name}: nothing in the last ${RECENT_WINDOW_DAYS} days`
-          : `- ${p.name}: ${p.threads.map((t) => `"${t.heading}" ${t.count}`).join(", ")}`,
+          ? `- ${firstName(p.name)}: nothing in the last ${RECENT_WINDOW_DAYS} days`
+          : `- ${firstName(p.name)}: ${p.threads.map((t) => `"${t.heading}" ${t.count}`).join(", ")}`,
       );
     }
   }
@@ -304,6 +352,24 @@ export function buildReadingsBlock(readings: EffortReadings): string | null {
     lines.push("");
     lines.push("Questions in someone's own words that no node links back to (which of these are open is yours to judge):");
     for (const q of readings.openQuestions) lines.push(`- ${q.id} (${q.author}, ${q.date}): "${q.line}"`);
+  }
+  if (context) {
+    lines.push("");
+    if (context.sinceDate) {
+      lines.push(
+        context.arrivedSince.length === 0
+          ? `Since the page was last written (${context.sinceDate}): nothing new landed in the graph.`
+          : `Since the page was last written (${context.sinceDate}), new entries landed in: ${context.arrivedSince.map((a) => `"${a.heading}" ${a.count}`).join(", ")}. Say what moved in the opening only when it is worth a reader's attention.`,
+      );
+    } else {
+      lines.push("No previous page to compare; nothing to say about what moved.");
+    }
+    const loose = [...new Set([...context.fellAway, ...context.offPage])];
+    if (loose.length > 0) {
+      lines.push(
+        `Threads with no decision recorded, candidates for the drawer as loose ends (fell away: ${context.fellAway.length ? context.fellAway.map((t) => `"${t}"`).join(", ") : "none"}; left off the last page: ${context.offPage.length ? context.offPage.map((t) => `"${t}"`).join(", ") : "none"}). Their text is not handed over; call get_node before proposing a line.`,
+      );
+    }
   }
   return lines.join("\n");
 }
@@ -322,18 +388,26 @@ export type EffortBlock = {
   name: string;
   /** The person on a bench heading (`### <Person> · <Effort>`), or null. */
   person: string | null;
+  /** The size in words from a third heading segment
+   * (`### <Person> · <Effort> · a few weeks of one person's time`), or null. */
+  sizeWords: string | null;
   /** The `## ` section the effort sits in, lowercased; "" for the intro. */
   section: string;
   threads: string[];
   size: string | null;
   posture: string | null;
   direction: string | null;
-  /** False when the heading had no `Threads:` line under it. */
-  hasFieldLine: boolean;
-  /** The effort's own lines after the field line, citations stripped and
-   * whitespace normalized: what the change marks compare. */
+  /** The effort's own lines, citations stripped and whitespace
+   * normalized: what the change marks compare. */
   lines: string[];
+  /** The same lines as written, citations intact, so the threads behind
+   * the effort can be read off what it cites (`assignEffortThreads`). */
+  rawLines: string[];
 };
+
+/** What the model reports about an effort through `describe_effort`:
+ * never on the page, only in the sidecar for a layout. */
+export type EffortDescription = { size: string | null; posture: string | null; direction: string | null };
 
 const H2_RE = /^##\s+(.+?)\s*$/;
 const H3_RE = /^###\s+(.+?)\s*$/;
@@ -343,12 +417,15 @@ const REF_RE = /:ref\{[^}]*\}/g;
 const CHANGE_TAG_RE = /\s*\{(new|moved)\}\s*$/;
 const HEADING_SPLIT = " · ";
 
-/** `Person · Effort` on a heading, or the whole heading as the name. */
-function splitHeading(raw: string): { person: string | null; name: string } {
+/** `Person · Effort · how big, in words` on a heading. One segment is
+ * the name; two are person and name; three add the size in words (the
+ * letter for the layout comes through `describe_effort`). */
+export function splitHeading(raw: string): { person: string | null; name: string; sizeWords: string | null } {
   const text = raw.replace(CHANGE_TAG_RE, "").trim();
-  const dot = text.indexOf(HEADING_SPLIT);
-  if (dot <= 0) return { person: null, name: text };
-  return { person: text.slice(0, dot).trim() || null, name: text.slice(dot + HEADING_SPLIT.length).trim() };
+  const parts = text.split(HEADING_SPLIT).map((p) => p.trim());
+  if (parts.length === 1) return { person: null, name: parts[0], sizeWords: null };
+  if (parts.length === 2) return { person: parts[0] || null, name: parts[1], sizeWords: null };
+  return { person: parts[0] || null, name: parts[1], sizeWords: parts.slice(2).join(HEADING_SPLIT) || null };
 }
 
 export function normalizeLine(line: string): string {
@@ -381,35 +458,78 @@ export function parseEffortBlocks(body: string): EffortBlock[] {
   const blocks: EffortBlock[] = [];
   let section = "";
   let open: EffortBlock | null = null;
-  let awaitingFieldLine = false;
   for (const raw of body.split("\n")) {
     const line = raw.trim();
     const h2 = H2_RE.exec(line);
     if (h2) {
       section = h2[1].toLowerCase();
       open = null;
-      awaitingFieldLine = false;
       continue;
     }
     const h3 = H3_RE.exec(line);
     if (h3) {
-      const { person, name } = splitHeading(h3[1]);
-      open = { name, person, section, threads: [], size: null, posture: null, direction: null, hasFieldLine: false, lines: [] };
+      const { person, name, sizeWords } = splitHeading(h3[1]);
+      open = { name, person, sizeWords, section, threads: [], size: null, posture: null, direction: null, lines: [], rawLines: [] };
       blocks.push(open);
-      awaitingFieldLine = true;
       continue;
     }
     if (!open || line.length === 0) continue;
-    if (awaitingFieldLine) {
-      awaitingFieldLine = false;
-      if (FIELD_LINE_RE.test(line)) {
-        Object.assign(open, parseFieldLine(line), { hasFieldLine: true });
-        continue;
-      }
+    // A field line on a page written before round 4 carries what the
+    // sidecar now gets from citations and `describe_effort`; it is read
+    // for its threads once (so change marks bridge the two) and never
+    // treated as a line of the effort.
+    if (FIELD_LINE_RE.test(line) && open.lines.length === 0 && open.threads.length === 0) {
+      Object.assign(open, parseFieldLine(line));
+      continue;
     }
     open.lines.push(normalizeLine(line));
+    open.rawLines.push(line);
   }
   return blocks;
+}
+
+/** Sets each effort's threads from the nodes its lines cite: a citation
+ * is a node, a node has a home thread in the index, so the effort is
+ * made of the threads its evidence comes from. Nothing on the page
+ * declares it. An effort whose lines cite nothing keeps whatever a
+ * legacy field line gave it, else no threads. */
+export function assignEffortThreads(
+  blocks: EffortBlock[],
+  allNodes: readonly GraphLogNode[],
+  sections: readonly ReadmeSection[],
+): void {
+  const homeOf = new Map<string, string>();
+  for (const section of sections) {
+    if (!isNamedThread(section)) continue;
+    for (const id of nodeIdsInSection(section)) if (!homeOf.has(id)) homeOf.set(id, section.heading);
+  }
+  const homeByRef = new Map<string, string>();
+  for (const node of allNodes) {
+    const home = homeOf.get(node.id);
+    if (node.refLine && home) homeByRef.set(stripRefVerbose(node.refLine).trim(), home);
+  }
+  for (const block of blocks) {
+    const threads: string[] = [];
+    for (const raw of block.rawLines) {
+      for (const ref of stripRefVerbose(raw).match(/:ref\{[^}]*\}/g) ?? []) {
+        const home = homeByRef.get(ref.trim());
+        if (home && !threads.includes(home)) threads.push(home);
+      }
+    }
+    if (threads.length > 0) block.threads = threads;
+  }
+}
+
+/** Applies `describe_effort` reports (keyed by lowercased effort name) to
+ * the parsed efforts. A report for an effort not on the page is dropped. */
+export function applyEffortDescriptions(blocks: EffortBlock[], descriptions: ReadonlyMap<string, EffortDescription>): void {
+  for (const block of blocks) {
+    const d = descriptions.get(block.name.toLowerCase());
+    if (!d) continue;
+    block.size = d.size;
+    block.posture = d.posture;
+    block.direction = d.direction;
+  }
 }
 
 // ─── Length ──────────────────────────────────────────────────────────────
@@ -435,6 +555,133 @@ export const SECTION_WORD_BUDGETS: Record<string, number> = {
 };
 
 const MEDIA_LINE_RE = /^\s*(:::gallery\{[^}]*\}|:::|!?\[[^\]]*\]\([^)]*\))\s*$/;
+
+/** Words in one bullet outside its quoted phrases, above which the
+ * bullet is two facts or too long. A soft line; the note names it. */
+export const BULLET_WORD_LIMIT = 20;
+/** Quoted phrases one effort may carry before it reads as a wall. */
+export const EFFORT_QUOTE_LIMIT = 3;
+/** Items a label (Now, Next, …) may hold under one effort. */
+export const LABEL_ITEM_LIMIT = 3;
+
+const BULLET_RE = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/;
+/** A size written as a field, or as a bare letter where words belong
+ * (a heading's size segment, or a `<Effort> · S:` list item). A lone
+ * letter in prose ("the S wall") is left alone. */
+const SIZE_FIELD_RE = /\bSize:\s*/;
+const SIZE_LETTER_ONLY_RE = /^(?:XS|S|M|L|XL)$/i;
+const SIZE_LETTER_IN_LIST_RE = /·\s*(?:XS|S|M|L|XL)\s*[:·]/;
+const EM_DASH_RE = /—/;
+const ARROW_OR_CURLY_RE = /[→←⇒⇐↔“”‘’]/;
+const UNDERLINE_RE = /<u>/i;
+const LABEL_RE = /^([A-Z][A-Za-z' ]{1,24}):\s/;
+const QUOTED_RE = /"[^"\n]{2,}"|“[^”\n]{2,}”/g;
+
+/** The shape rules code holds for one section as it is written, as
+ * plain notes for the tool result: empty when the section is in shape.
+ * Every number the skill mentions is counted here, never by the model:
+ * the section's word budget, quoted phrases per effort, a label repeated
+ * in one effort or holding too many items, a bullet carrying two facts
+ * (a semicolon) or running long outside its quote, and a bench heading
+ * naming someone who does not log, or by more than a first name. */
+export function sectionShapeNotes(
+  heading: string,
+  content: string,
+  writerFirstNames: readonly string[] = [],
+): string[] {
+  const notes: string[] = [];
+  const key = heading.toLowerCase();
+  const budget = SECTION_WORD_BUDGETS[key];
+  const words = countPageWords(content);
+  if (budget !== undefined && words > budget) notes.push(`${words} words against a budget of ${budget} (citations and photos not counted)`);
+
+  // Per effort: quotes, labels, bullets. Lines before the first `###`
+  // (a section with no efforts, like Ready next or the shelf) are checked
+  // as one unnamed block so a bullet rule holds on every bullet.
+  const efforts: { name: string; person: string | null; lines: string[] }[] = [];
+  let open: { name: string; person: string | null; lines: string[] } | null = null;
+  const loose: { name: string; person: string | null; lines: string[] } = { name: heading || "the intro", person: null, lines: [] };
+  for (const raw of content.split("\n")) {
+    const h3 = H3_RE.exec(raw.trim());
+    if (h3) {
+      const { person, name } = splitHeading(h3[1]);
+      open = { name, person, lines: [] };
+      efforts.push(open);
+      continue;
+    }
+    (open ?? loose).lines.push(raw);
+  }
+  if (loose.lines.some((l) => BULLET_RE.test(l))) efforts.unshift(loose);
+  // Mechanical voice rules, code's by Austin's test (checkable without
+  // meaning): em dashes, arrows and curly quotes outside a quoted phrase
+  // or citation, underline, every bullet opening bold, a size letter.
+  // Straight-quoted phrases are someone's own words and are left as
+  // written; a curly-quoted phrase is the model's own typing and counts.
+  const outsideQuotes = content.replace(REF_RE, " ").replace(/"[^"\n]{2,}"/g, " ");
+  if (EM_DASH_RE.test(outsideQuotes)) notes.push("an em dash; use a comma, a colon, parentheses, or a full stop and a short next sentence");
+  if (ARROW_OR_CURLY_RE.test(outsideQuotes)) notes.push("a unicode arrow or curly quote; type what a person would type");
+  if (UNDERLINE_RE.test(content)) notes.push("underline; use italics for emphasis");
+  const bullets = content.split("\n").map((l) => BULLET_RE.exec(l)?.[1] ?? null).filter((b): b is string => b !== null);
+  const boldOpeners = bullets.filter((b) => /^\*\*/.test(b.trim())).length;
+  if (bullets.length >= 3 && boldOpeners * 2 > bullets.length) notes.push(`${boldOpeners} of ${bullets.length} bullets open with a bolded phrase; bold is for the biggest idea, not every line`);
+  for (const line of content.split("\n")) {
+    const h3 = H3_RE.exec(line.trim());
+    const bullet = BULLET_RE.exec(line)?.[1] ?? null;
+    const probe = h3 ? h3[1] : bullet;
+    if (probe === null) continue;
+    const clean = probe.replace(REF_RE, " ").replace(QUOTED_RE, " ");
+    const letterOnHeading = h3 ? SIZE_LETTER_ONLY_RE.test(splitHeading(h3[1]).sizeWords ?? "") : false;
+    if (SIZE_FIELD_RE.test(clean) || letterOnHeading || (bullet !== null && SIZE_LETTER_IN_LIST_RE.test(clean))) {
+      notes.push(`a size as a letter or a field ("${probe.slice(0, 50)}${probe.length > 50 ? "…" : ""}"); size reads as words on the heading line, the letter goes through describe_effort`);
+      break;
+    }
+  }
+  const allowed = new Set(writerFirstNames.map((n) => n.toLowerCase()));
+  for (const e of efforts) {
+    const text = e.lines.join("\n");
+    const quotes = (text.replace(REF_RE, "").match(QUOTED_RE) ?? []).length;
+    if (e !== loose && quotes > EFFORT_QUOTE_LIMIT) notes.push(`"${e.name}" carries ${quotes} quoted phrases; ${EFFORT_QUOTE_LIMIT} is the most an effort holds`);
+    const labelCounts = new Map<string, number>();
+    let labelItems = 0;
+    let lastLabel: string | null = null;
+    for (const raw of e.lines) {
+      const bullet = BULLET_RE.exec(raw);
+      if (!bullet) continue;
+      const body = bullet[1].replace(REF_RE, "").trim();
+      const indented = /^\s{2,}/.test(raw);
+      const label = LABEL_RE.exec(body)?.[1] ?? null;
+      if (label && !indented) {
+        labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+        lastLabel = label;
+        labelItems = 0;
+      } else if (indented && lastLabel) {
+        labelItems += 1;
+        if (labelItems === LABEL_ITEM_LIMIT + 1) notes.push(`"${e.name}" has more than ${LABEL_ITEM_LIMIT} items under ${lastLabel}`);
+      }
+      const outsideQuotes = body.replace(QUOTED_RE, " ");
+      if (outsideQuotes.includes(";")) notes.push(`a bullet in "${e.name}" carries a semicolon, which is two facts: "${body.slice(0, 60)}${body.length > 60 ? "…" : ""}"`);
+      // The label is not content: "Not logged:" costs nothing.
+      const wordCount = outsideQuotes.replace(LABEL_RE, "").split(/\s+/).filter(Boolean).length;
+      if (wordCount > BULLET_WORD_LIMIT) notes.push(`a bullet in "${e.name}" runs ${wordCount} words outside its quote (about ${BULLET_WORD_LIMIT} is the line): "${body.slice(0, 60)}${body.length > 60 ? "…" : ""}"`);
+    }
+    for (const [label, count] of labelCounts) {
+      if (count > 1) notes.push(`"${e.name}" repeats the label ${label} ${count} times; each label once, with the items under it`);
+    }
+    if (e.lines.some((l) => FIELD_LINE_RE.test(l.trim().replace(/^(?:[-*+]|\d+[.)])\s+/, "")))) {
+      notes.push(`"${e.name}" carries a Threads/Size/Posture line; the page carries no fields (describe_effort takes size, posture and direction; threads are read from the citations)`);
+    }
+    if (e.person) {
+      const bare = e.person.toLowerCase();
+      const asFirst = firstName(e.person).toLowerCase();
+      if (allowed.size > 0 && !allowed.has(bare) && !allowed.has(asFirst)) {
+        notes.push(`"${e.name}" names "${e.person}", who is not one of the people logging here (${writerFirstNames.join(", ")}); a bench heading names only them, by first name`);
+      } else if (bare !== asFirst) {
+        notes.push(`"${e.name}" names "${e.person}"; bench headings use a first name (${firstName(e.person)})`);
+      }
+    }
+  }
+  return notes;
+}
 
 /** Words a reader reads: citations stripped, gallery fences and image or
  * link-only lines dropped, list markers not counted, then
@@ -474,8 +721,12 @@ function effortKey(e: { person: string | null; name: string }): string {
   return `${e.person ?? ""} · ${e.name}`.toLowerCase();
 }
 
-function fieldSignature(e: { threads: string[]; size: string | null; posture: string | null; direction: string | null }): string {
-  return JSON.stringify([e.threads.map((t) => t.toLowerCase()).sort(), e.size, e.posture, e.direction]);
+/** What counts as the effort's fields having moved: size and posture.
+ * Direction is a free phrase the model rewords every run, and threads
+ * are read off citations that shift with a re-extraction, so neither is
+ * a signal that the work moved. */
+function fieldSignature(e: { size: string | null; posture: string | null }): string {
+  return JSON.stringify([e.size, e.posture]);
 }
 
 /** Marks keyed by `effortKey`. A null `previous` (no sidecar yet) marks
@@ -511,6 +762,33 @@ export function markChanges(previous: PreviousEffort[] | null, current: EffortBl
   return marks;
 }
 
+/** Previous efforts that match nothing on the new page (no shared thread
+ * and no shared name): what left the page this run, for the sidecar and
+ * the log. A reader correction that takes an effort off the bench shows
+ * up here, which is how the Coronado case is checked. */
+export function removedEfforts(previous: PreviousEffort[] | null, current: EffortBlock[]): string[] {
+  if (!previous) return [];
+  const threads = new Set(current.flatMap((e) => e.threads.map((t) => t.toLowerCase())));
+  const names = new Set(current.map((e) => e.name.toLowerCase()));
+  return previous
+    .filter((p) => !p.threads.some((t) => threads.has(t.toLowerCase())) && !names.has(p.name.toLowerCase()))
+    .map((p) => (p.person ? `${p.person} · ${p.name}` : p.name));
+}
+
+/** The read (the intro's first paragraph) and the one ask, off the page
+ * body, for the sidecar. Null when the page has no intro yet. */
+export function parseRead(body: string): { read: string | null; ask: string | null } {
+  const intro = body.split(/^## /m)[0] ?? "";
+  const paragraphs = intro
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(REF_RE, "").replace(/\s+/g, " ").trim())
+    .filter((p) => p.length > 0 && !p.startsWith("#") && !p.startsWith("**This README is incomplete.**"));
+  const askIndex = paragraphs.findIndex((p) => /^one ask:/i.test(p));
+  const ask = askIndex === -1 ? null : paragraphs[askIndex].replace(/^one ask:\s*/i, "");
+  const read = paragraphs.find((p, i) => i !== askIndex) ?? null;
+  return { read, ask };
+}
+
 /** The page with a `{new}` / `{moved}` tag on each marked effort heading. */
 export function withChangeTags(body: string, marks: Map<string, EffortChange>): string {
   return body
@@ -531,6 +809,26 @@ export function stripChangeTags(body: string): string {
     .split("\n")
     .map((raw) => (H3_RE.test(raw.trim()) ? raw.trimEnd().replace(CHANGE_TAG_RE, "") : raw))
     .join("\n");
+}
+
+/** The date a previously written `Graph/efforts.md` was written for, and
+ * the threads it left without an effort, or null when unreadable. What
+ * the readings block turns into "since the page was last written" and
+ * the loose-end candidates. */
+export function readSidecarMeta(content: string | null | undefined): { today: string | null; threadsWithoutEffort: string[] } | null {
+  if (!content) return null;
+  const start = content.indexOf("```json\n");
+  const end = content.lastIndexOf("\n```");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    const data = JSON.parse(content.slice(start + 8, end)) as { today?: unknown; threadsWithoutEffort?: unknown };
+    return {
+      today: typeof data.today === "string" ? data.today : null,
+      threadsWithoutEffort: Array.isArray(data.threadsWithoutEffort) ? data.threadsWithoutEffort.filter((t): t is string => typeof t === "string") : [],
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** The efforts a previously written `Graph/efforts.md` recorded, or null
@@ -640,6 +938,7 @@ export function buildEffortsSidecar(
   efforts: EffortBlock[],
   readings: EffortReadings,
   marks: Map<string, EffortChange> = new Map(),
+  page: { read: string | null; ask: string | null; removed: string[] } = { read: null, ask: null, removed: [] },
 ): string {
   const byHeading = new Map(readings.threads.map((t) => [t.heading.toLowerCase(), t]));
   const claimed = new Set<string>();
@@ -653,18 +952,21 @@ export function buildEffortsSidecar(
       section: e.section,
       threads: e.threads,
       size: e.size,
+      sizeWords: e.sizeWords,
       posture: e.posture,
       direction: e.direction,
       change: mark.change,
       changedLines: mark.changedLines,
       lines: e.lines,
-      threadsNotInIndex: e.threads.filter((name) => !byHeading.has(name.toLowerCase())),
       readings: mergeReadings(threads, readings.today),
     };
   });
   const data = {
     today: readings.today,
     recentWindowDays: RECENT_WINDOW_DAYS,
+    read: page.read,
+    ask: page.ask,
+    removed: page.removed,
     efforts: items,
     threadsWithoutEffort: readings.threads.filter((t) => !claimed.has(t.heading.toLowerCase())).map((t) => t.heading),
     load: readings.load,
