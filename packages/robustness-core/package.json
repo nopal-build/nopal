@@ -24,6 +24,7 @@
     "./data/graphLogReset.server": "./src/data/graphLogReset.server.ts",
     "./data/graphLogSchedule.server": "./src/data/graphLogSchedule.server.ts",
     "./data/graphNodeIndex.server": "./src/data/graphNodeIndex.server.ts",
+    "./data/effortReadings.server": "./src/data/effortReadings.server.ts",
     "./data/graphProjectView.server": "./src/data/graphProjectView.server.ts",
     "./data/graphStructure.server": "./src/data/graphStructure.server.ts",
     "./data/humans.server": "./src/data/humans.server.ts",
