@@ -158,7 +158,7 @@ type GraphStructureFrontmatter = {
    * old rules. See `composeStageSkill`. */
   skillFingerprint?: string;
   appliedByProjectView?: string;
-  /** `graph-project-view`'s twin of `skillFingerprint`: the PROJECT_VIEW.md
+  /** `graph-project-view`'s twin of `skillFingerprint`: the EFFORTS.md
    * fingerprint the README was last written under. Stamped and cleared
    * together with `appliedByProjectView`. */
   appliedSkillFingerprint?: string;
@@ -951,7 +951,7 @@ ${skillContent}`;
 /** Whole days between two ISO `YYYY-MM-DD` dates. Deliberately crude (no
  * timezone reasoning) because the inputs are date-only and the consumer is
  * a judgment about "weeks", not an hour-accurate figure. */
-function daysBetween(fromIso: string, toIso: string): number {
+export function daysBetween(fromIso: string, toIso: string): number {
   const from = Date.parse(`${fromIso}T00:00:00Z`);
   const to = Date.parse(`${toIso}T00:00:00Z`);
   if (Number.isNaN(from) || Number.isNaN(to)) return 0;

@@ -60,7 +60,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   -> STAGE 2: sync-knowledge     (agentic, skills/KNOWLEDGE.md)
   -> STAGE 3: sync-graph         (agentic, skills/GRAPH.md)
   -> STAGE 4: graph-structure    (agentic, skills/GRAPH_STRUCTURE.md)
-  -> STAGE 5: graph-project-view (agentic, skills/PROJECT_VIEW.md)
+  -> STAGE 5: graph-project-view (agentic, skills/EFFORTS.md + skills/VOICE.md)
 ```
 
 - **daily-log-sync** (`dailyLogSync.server.ts`: `ensureDailyLogsSyncFolder`,
@@ -253,7 +253,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     <path>`.
 - **graph-project-view** (`graphProjectView.server.ts`:
   `runGraphProjectView`) — reads `Graph/graph-structure.md` (not
-  graph-log files directly), per `skills/PROJECT_VIEW.md`, and keeps
+  graph-log files directly), per `skills/EFFORTS.md`, and keeps
   `README.md` an accurate, organized synthesis. Runs once per invocation
   (not once per day), gated on `graph-structure.md`'s own `asOfGraphHash`
   versus the `appliedByProjectView` marker this stage stamps onto that
@@ -262,7 +262,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     bounded tool-calling conversation (`update_section`/`remove_section`,
     `MAX_TURNS` bounds a pass, never the whole README) that reconciles
     the README against the current `graph-structure.md`, grounded in
-    `skills/PROJECT_VIEW.md`. Between passes, code runs
+    `skills/EFFORTS.md`. Between passes, code runs
     `computeCoverageReport` on the committed README, and every later pass
     is TARGETED — handed exactly the threads still cited nowhere plus the
     name of any section the previous pass was cut off writing. Remaining
@@ -292,7 +292,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     pre/post-processing, never delegated to the model.
   - **Section order** is enforced by a deterministic `reorderSections`
     pass, run unconditionally on every clean finish, re-sorting known
-    headings into the shape read off `PROJECT_VIEW.md`'s own fenced
+    headings into the shape read off `EFFORTS.md`'s own fenced
     `# The shape` block (`parseSectionShape`) — so a project can carry
     its own section order by editing one file. A skill whose shape can't
     be read falls back to the built-in list and reports it through
@@ -306,7 +306,7 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     every node in a non-fallen-away thread, any real attached-image
     markdown line must survive into the finished README somewhere (a
     `:::gallery{}...:::` wrapper is fine; dropping the line is not) —
-    per `PROJECT_VIEW.md`'s hard "a file is never optional" rule. Still
+    per `EFFORTS.md`'s hard "a file is never optional" rule. Still
     report-only, not a forced retry: a dropped file is an editorial
     choice, not a mechanical failure, and auto-retrying risks looping
     forever on the same choice.
@@ -317,6 +317,92 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   - `POST /api/graphlog/graph-project-view` (enqueue) + `GET
     /api/graphlog/jobs/:jobId`. `nopal graphlog graph-project-view
     --project <path>`.
+  - **The page is Efforts, not a README summary (2026-09-16).** The
+    skill was renamed `PROJECT_VIEW.md` to `EFFORTS.md` (the stage, its
+    CLI command and the defaults-row key `projectView` kept their names;
+    only the file people edit changed) and rewritten around Austin's
+    Efforts guide: efforts (a thread, or several gathered under one plain
+    name, never a split), each with a field line (`Threads: … · Size: …
+    · Posture: … · Direction: …`) code reads back, in the shape Regroup /
+    On the bench / Ready next / Shelf / Drawer / Look-ahead, declared in
+    the skill's own fence as before. The output file is still `README.md`.
+    `effortReadings.server.ts` hands the model every number the skill
+    mentions (per-thread dates, days quiet, speed over 14-day windows,
+    writers, cross-writer links, neighbors both ways, the load picture,
+    highlighted questions no node links back to; "one writer" and "a
+    question nothing links back to" are labeled stand-ins for owner and
+    unanswered, which the graph does not store) and writes
+    `Graph/efforts.md` on a clean finish: the page as JSON with counted
+    readings merged per effort, for a layout that draws. `VOICE.md` is a
+    fifth seeded default (`DEFAULT_VOICE_SKILL`, key `voice`), reserved,
+    composed first among this stage's extras (`withVoiceFirst`) and
+    nowhere else. Reseed creates a missing seeded file (`"created"`) and
+    deletes a legacy `PROJECT_VIEW.md` (`"removed"`); `project_view.md`
+    stays reserved.
+  - **Round 2, same day: the page as a list.** The first samples ran
+    1,400 to 2,900 words of prose. `EFFORTS.md` now declares a bullet
+    template with reading-time layers, and three code changes hold it:
+    **targeted passes chase only Blocking/Due threads**
+    (`requiredThreads`; every other uncited thread is logged as "off the
+    page", not re-offered, because the coverage loop was the pressure that
+    grew a 41-thread graph into 2,500 words); **per-section word
+    budgets** (`SECTION_WORD_BUDGETS`, summing to `PAGE_WORD_CEILING`
+    1,000; `update_section` turns a section over budget back once with
+    its count; citations, gallery lines and list markers are not
+    counted); and **change marks** (`markChanges`: the previous
+    `Graph/efforts.md` is read before the run, efforts match on shared
+    threads since names move between runs, `new` / `moved` / `unchanged`
+    plus `changedLines` go into the sidecar, and a `{new}` / `{moved}` tag
+    goes on the heading after the clean finish and is stripped with the
+    banner before the model sees the page again; the stripped page is
+    persisted even when the model writes nothing). Chips for the field
+    line and a status badge for the banner are layout.
+  - **Round 3 (2026-09-17): a leader's read, and rules in code.** The
+    page opens with a read (where we stand, the tension, the blind spot;
+    marked as a read, traceable to the page below it rather than to one
+    node) and the one ask comes out of it; "Around it" became "Why it
+    matters"; benches belong only to people who log and read the page,
+    the worker's bench when the worker logs and the logger's when not.
+    The skill was trimmed to intent and `sectionShapeNotes` took over
+    the counting: one turn-back per section per run naming every count
+    that is off (word budget, more than three quoted phrases in an
+    effort, a label repeated or holding more than three items, a bullet
+    with a semicolon or more than about 20 words outside its quote, a
+    bench heading naming someone outside the writers list or by more
+    than a first name). The readings block hands first names
+    (`firstName`); the sidecar carries `read`, `ask` and `removed`
+    (previous efforts that match nothing on the new page); the log says
+    what left the page. Found on the way: an edited log re-extracts in
+    production because `dailyLogSync` recomputes `content_hash` on the
+    project's copy, while `updateFileRef({content})` alone does not.
+  - **Round 4 (2026-09-17): nothing on the page for code.** The field
+    line, the change tags and the "Our read:" label came off the page
+    (Austin: "All these feel like fallout from me being overly
+    prescriptive"). An effort's threads are now read from the nodes its
+    bullets cite (`assignEffortThreads`: citation, node, home thread);
+    size, posture and direction arrive through a `describe_effort` tool
+    that writes to the sidecar only; change marks live in the sidecar
+    (`stripChangeTags` stays for legacy pages). The readings block adds
+    what arrived since the previous sidecar's date (`arrivedSince`) so
+    the opening can say what moved, and the fallen-away and off-page
+    threads as loose-end candidates for the Drawer, which the page
+    proposes and never files. `VOICE.md` had its one pass: scoped to
+    sentences, the record-keeping stance lines cut, Austin's calm-leader
+    line in, Gerald's half named as missing.
+  - **Round 5 (2026-09-17): size in words, voice pass 2.** Size came
+    back to the page as a third heading segment in words
+    (`### <Person> · <Effort> · a few weeks of one person's time`;
+    `splitHeading` reads it as `sizeWords`, the letter still arrives via
+    `describe_effort`), never as `Size:` or a letter (a shape note). The
+    voice file was sorted by Austin's mechanical test: what a machine can
+    check without meaning (em dash, arrow or curly quote outside a
+    straight-quoted phrase, underline, most bullets opening bold, a size
+    letter) is a `sectionShapeNotes` check now, not a line in a skill;
+    what needs meaning stays in `VOICE.md` as judgment. Production note:
+    both files are reserved names, so on Crouch only the view fingerprint
+    moves; on O.No, removing the hand-uploaded `VOICE.md` extra changes
+    the other three stages' compositions too, so Rerun Outputs there
+    would re-thread the structure.
 
 ## Reset
 
@@ -363,7 +449,7 @@ children, everything else (including the `Graph` space) is
   NOT seeded at project-creation time, unlike `skills`.
 - `projectN02.server.ts`:
   - `ensureProjectN02(folder)` — tags `folder` `project-n02` and seeds
-    `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`PROJECT_VIEW.md`
+    `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`EFFORTS.md`
     from `graphLogDefaults.server.ts`. `vault.server.ts`'s
     `createVaultFolder` calls this for every brand new project (and
     `personal`) directly — there's no other container type to default to.
@@ -375,7 +461,9 @@ children, everything else (including the `Graph` space) is
     write.
 - `graphLogDefaults.server.ts` holds the four starter
   `DEFAULT_KNOWLEDGE_SKILL`/`DEFAULT_GRAPH_SKILL`/`DEFAULT_GRAPH_STRUCTURE_SKILL`/
-  `DEFAULT_PROJECT_VIEW_SKILL` constants, plus an admin-editable-override
+  `DEFAULT_PROJECT_VIEW_SKILL` (the `EFFORTS.md` text; constant and key kept
+  their names on the 2026-09-16 rename)/`DEFAULT_VOICE_SKILL` constants, plus
+  an admin-editable-override
   layer reviewable at `/maker/graphlog/defaults` (see "Maker
   pages" below).
 

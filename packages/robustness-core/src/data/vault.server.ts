@@ -359,7 +359,7 @@ export async function createVaultFolder(data: {
   const folder = record ? formatRecord(record as unknown as VaultFolder) : undefined;
 
   // Seed the new project's default skills/KNOWLEDGE.md, GRAPH.md,
-  // GRAPH_STRUCTURE.md, PROJECT_VIEW.md (`projectN02.server` itself calls
+  // GRAPH_STRUCTURE.md, EFFORTS.md (`projectN02.server` itself calls
   // back into this function to create that Skills folder — see the import
   // comment above). Gated on the folder's ACTUAL resulting type, not just
   // `isNewProject` — and skippable via `deferAutoProvision` (see its own

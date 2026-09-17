@@ -243,7 +243,7 @@ export async function runGraphLogPipeline(
   if ((syncKnowledge.staleSidecars ?? 0) > 0) drift.push(`${syncKnowledge.staleSidecars} sidecar(s) under an older KNOWLEDGE.md`);
   if ((syncGraph.staleDays ?? 0) > 0) drift.push(`${syncGraph.staleDays} day(s) under an older GRAPH.md`);
   if (graphStructure.staleSkill) drift.push("structure under an older GRAPH_STRUCTURE.md");
-  if (graphProjectView.staleSkill) drift.push("README under an older PROJECT_VIEW.md");
+  if (graphProjectView.staleSkill) drift.push("README under an older EFFORTS.md");
   log(drift.length > 0 ? `run: skill drift: ${drift.join("; ")}.` : "run: no skill drift; everything was written under the current skills.");
 
   // The run report already said all of this, on a page nobody opens while

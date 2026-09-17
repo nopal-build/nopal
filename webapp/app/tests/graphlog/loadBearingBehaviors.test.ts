@@ -53,12 +53,21 @@ import {
   introShouldWait,
   parseSectionShape,
   reorderSections,
+  requiredThreads,
   resolveSectionOrder,
   unknownHeadings,
   type UncitedThread,
   readmeChangedFromJobResult,
 } from "robustness-core/data/graphProjectView.server";
-import { classifyStageSkill, composeStageSkill, isSkipInstruction, readSkillFingerprint } from "robustness-core/data/projectN02.server";
+import {
+  classifyStageSkill,
+  composeStageSkill,
+  isSkipInstruction,
+  readSkillFingerprint,
+  RESERVED_SKILL_FILE_NAMES,
+  SKILL_FILE_NAMES,
+  withVoiceFirst,
+} from "robustness-core/data/projectN02.server";
 import { DEFAULT_PROJECT_VIEW_SKILL } from "robustness-core/data/graphLogDefaults.server";
 import {
   README_INCOMPLETE_BANNER_PREFIX,
@@ -397,6 +406,21 @@ describe("a stage's skill is fingerprinted, stamped, and reported, never a cache
   it("composes the same prompt text the stages used to build inline", () => {
     const { content } = composeStageSkill("Stage.", null, extras);
     expect(content).toBe("Stage.\n\n## VOICE.md\n\nWrite plainly.");
+  });
+
+  // VOICE.md reaches one stage (graph-project-view) through
+  // `withVoiceFirst`, and no stage through `listExtraSkillFiles`: every
+  // seeded file name is reserved, and so is the pre-rename PROJECT_VIEW.md,
+  // or a project not yet reseeded would feed its old README skill into
+  // all four stages as an extra.
+  it("the voice file is composed first into the view stage and is never an extra", () => {
+    const { content } = composeStageSkill("Efforts.", "General.", withVoiceFirst("Plainly.", extras));
+    expect(content).toBe("Efforts.\n\nGeneral.\n\n## VOICE.md\n\nPlainly.\n\n## VOICE.md\n\nWrite plainly.");
+    expect(withVoiceFirst(null, extras)).toBe(extras);
+    expect(withVoiceFirst("   ", extras)).toBe(extras);
+    for (const name of Object.values(SKILL_FILE_NAMES)) expect(RESERVED_SKILL_FILE_NAMES.has(name.toLowerCase())).toBe(true);
+    expect(RESERVED_SKILL_FILE_NAMES.has("project_view.md")).toBe(true);
+    expect(RESERVED_SKILL_FILE_NAMES.has("skill.md")).toBe(true);
   });
 });
 
@@ -1575,23 +1599,40 @@ describe("content types that need converting are recognized", () => {
 
 // ── The README's shape comes from the skill ──────────────────────────────
 //
-// PROJECT_VIEW.md declared the sections in a fenced block and the code
+// EFFORTS.md declared the sections in a fenced block and the code
 // held a second copy of the same list. Two sources of truth, already
 // drifted once. The code reads the skill now; the built-in list is a
 // reported fallback. The migration test is the one that matters: the
 // default skill must parse to exactly the shape the code used to hardcode.
 
-describe("the section shape is read from PROJECT_VIEW.md", () => {
-  it("MIGRATION: the default skill parses to exactly the shape the code used to hardcode", () => {
+describe("a targeted pass chases only Blocking and Due threads; the rest are off the page", () => {
+  it("requiredThreads keeps a Blocking or Due thread and drops a plain one", () => {
+    const threads = [
+      { heading: "Occupancy", rank: 1, of: 3, hasBlocking: true, hasDue: false },
+      { heading: "Landscaping", rank: 2, of: 3, hasBlocking: false, hasDue: false },
+      { heading: "Permit", rank: 3, of: 3, hasBlocking: false, hasDue: true },
+    ];
+    expect(requiredThreads(threads).map((t) => t.heading)).toEqual(["Occupancy", "Permit"]);
+    expect(requiredThreads([])).toEqual([]);
+  });
+});
+
+describe("the section shape is read from EFFORTS.md", () => {
+  it("the default EFFORTS.md declares the Efforts page's shape, and the protected heading stays last", () => {
+    // The README's old shape (what's carrying weight, where we pull
+    // apart, get shit done, settled, open questions) became the Efforts
+    // page on 2026-09-16. The fence under `# The shape` is load-bearing:
+    // `reorderSections` enforces whatever it declares on every write.
     expect(parseSectionShape(DEFAULT_PROJECT_VIEW_SKILL)).toEqual([
-      "what's carrying weight",
-      "where we pull apart",
-      "get shit done",
-      "settled",
-      "open questions",
+      "regroup",
+      "on the bench",
+      "ready next",
+      "shelf",
+      "drawer",
+      "look-ahead",
     ]);
     expect(resolveSectionOrder(DEFAULT_PROJECT_VIEW_SKILL)).toEqual({
-      order: ["what's carrying weight", "where we pull apart", "get shit done", "settled", "open questions", "notes on this view"],
+      order: ["regroup", "on the bench", "ready next", "shelf", "drawer", "look-ahead", "notes on this view"],
       reason: null,
     });
   });

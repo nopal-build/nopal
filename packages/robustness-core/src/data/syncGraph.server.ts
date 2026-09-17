@@ -676,7 +676,7 @@ function escapeMarkdownImageAlt(value: string): string {
  *   `:::gallery{}...:::` block.
  * - ANYTHING ELSE (a PDF, a doc, ...) is a plain \`[name](url)\` link, no
  *   marker -- never embedded as media, never gallery-eligible; a reader
- *   just clicks through to it. GRAPH_STRUCTURE.md/PROJECT_VIEW.md both
+ *   just clicks through to it. GRAPH_STRUCTURE.md/EFFORTS.md both
  *   say the same thing from the model's side: a gallery holds photos and
  *   videos only, everything else is an ordinary link.
  *

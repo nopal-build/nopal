@@ -551,7 +551,7 @@ enum GraphlogCommand {
         project: String,
     },
     /// Reconciles README.md against `Graph/graph-structure.md`, per
-    /// `skills/PROJECT_VIEW.md`'s own instructions, whenever the graph has
+    /// `skills/EFFORTS.md`'s own instructions, whenever the graph has
     /// changed since the last run. Agentic (real LLM calls).
     GraphProjectView {
         /// Vault path of the project, e.g. `projects/sunny`, or `personal`.

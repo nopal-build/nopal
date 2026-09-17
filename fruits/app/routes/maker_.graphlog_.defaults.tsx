@@ -52,7 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "graph", "graphStructure", "projectView"]);
+const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "graph", "graphStructure", "projectView", "voice"]);
 
 /**
  * Saves or resets one stage's default-skill override -- see
@@ -145,9 +145,14 @@ const STAGE_META: Record<GraphLogDefaultStage, { title: string; file: string; bl
     blurb: "Seeded into a brand new project's GRAPH_STRUCTURE.md — graph-structure's own real starter instructions, organizing the whole graph into Graph/graph-structure.md.",
   },
   projectView: {
-    title: "Project View",
-    file: "skills/PROJECT_VIEW.md",
-    blurb: "Seeded into a brand new project's PROJECT_VIEW.md — graph-project-view's own real starter instructions, synthesizing graph-structure.md into README.md.",
+    title: "Efforts",
+    file: "skills/EFFORTS.md",
+    blurb: "Seeded into a brand new project's EFFORTS.md — graph-project-view's instructions for the Efforts page it writes into README.md from graph-structure.md and the nodes. Was PROJECT_VIEW.md before 2026-09-16.",
+  },
+  voice: {
+    title: "Voice",
+    file: "skills/VOICE.md",
+    blurb: "Seeded into a brand new project's VOICE.md — how the project manager writes to the group. Read by graph-project-view only, never by the extraction stages. A living document: edit it here, then Reseed on the projects that should pick it up.",
   },
 };
 
@@ -321,6 +326,11 @@ export default function FruitsMakerGraphLogDefaults() {
             stage="projectView"
             initialContent={defaultSkills.projectView.content}
             overridden={defaultSkills.projectView.overridden}
+          />
+          <DefaultSkillEditor
+            stage="voice"
+            initialContent={defaultSkills.voice.content}
+            overridden={defaultSkills.voice.overridden}
           />
         </div>
       </div>

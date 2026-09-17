@@ -9,7 +9,7 @@ import { reseedProjectN02Skills } from "robustness-core/data/projectN02.server";
  * POST /api/graphlog/reseed-skills
  *
  * Overwrites this project's `skills/KNOWLEDGE.md` / `GRAPH.md` /
- * `GRAPH_STRUCTURE.md` / `PROJECT_VIEW.md` with the CURRENT effective
+ * `GRAPH_STRUCTURE.md` / `EFFORTS.md` with the CURRENT effective
  * defaults (`reseedProjectN02Skills`, `projectN02.server.ts`) — the
  * Vault's own "More Actions" → Reseed GraphLog Skills entry
  * (`vault.tsx`), so a default-skill change no longer requires

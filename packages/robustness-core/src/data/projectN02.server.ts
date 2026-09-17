@@ -10,7 +10,7 @@
  * This file owns:
  *
  *   - The DEFAULT `skills/KNOWLEDGE.md` / `GRAPH.md` / `GRAPH_STRUCTURE.md` /
- *     `PROJECT_VIEW.md` content every `project-n02` gets seeded with
+ *     `EFFORTS.md` content every `project-n02` gets seeded with
  *     (`graphLogDefaults.server.ts`),
  *     and the seeding logic itself (`ensureProjectN02`).
  *   - The `Graph` space's own find/ensure helpers (`ensureProjectGraphFolder`)
@@ -23,6 +23,7 @@
 import {
   createFileRef,
   createVaultFolder,
+  deleteFileRef,
   getFileRefById,
   getFolderById,
   listFolderChildren,
@@ -95,22 +96,11 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
     // so a change made on /maker/graphlog/defaults applies to
     // every project created from that point on.
     const effective = await getAllEffectiveGraphLogDefaultSkills();
-    await Promise.all([
-      ensureSkillFile(current.human_id, skillsFolder._id, "KNOWLEDGE.md", effective.knowledge.content),
-      ensureSkillFile(current.human_id, skillsFolder._id, "GRAPH.md", effective.graph.content),
-      ensureSkillFile(
-        current.human_id,
-        skillsFolder._id,
-        "GRAPH_STRUCTURE.md",
-        effective.graphStructure.content,
+    await Promise.all(
+      (Object.keys(SKILL_FILE_NAMES) as GraphLogDefaultStage[]).map((stage) =>
+        ensureSkillFile(current.human_id, skillsFolder._id, SKILL_FILE_NAMES[stage], effective[stage].content),
       ),
-      ensureSkillFile(
-        current.human_id,
-        skillsFolder._id,
-        "PROJECT_VIEW.md",
-        effective.projectView.content,
-      ),
-    ]);
+    );
   }
 
   return current;
@@ -118,19 +108,30 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
 
 // ─── Reseeding (retroactive) ───────────────────────────────────────────
 
-/** The four seeded skill file names, keyed the same way
- * `getAllEffectiveGraphLogDefaultSkills` keys its result — kept next to
- * `ensureSkillFile`'s own identical mapping (`applyProjectN02Shape`
- * above) since `reseedProjectN02Skills` below is that function's
- * overwrite-instead-of-only-if-missing sibling. */
-const SKILL_FILE_NAMES: Record<GraphLogDefaultStage, string> = {
+/** The five seeded skill file names, keyed the same way
+ * `getAllEffectiveGraphLogDefaultSkills` keys its result. One table for
+ * both seeding (`applyProjectN02Shape`, create-if-missing) and
+ * reseeding (`reseedProjectN02Skills`, overwrite), so the two cannot
+ * drift apart. `projectView` maps to `EFFORTS.md`: the stage kept its
+ * name when the file people edit was renamed on 2026-09-16 (see
+ * `LEGACY_SKILL_FILE_NAMES`). */
+export const SKILL_FILE_NAMES: Record<GraphLogDefaultStage, string> = {
   knowledge: "KNOWLEDGE.md",
   graph: "GRAPH.md",
   graphStructure: "GRAPH_STRUCTURE.md",
-  projectView: "PROJECT_VIEW.md",
+  projectView: "EFFORTS.md",
+  voice: "VOICE.md",
 };
 
-export type SkillReseedOutcome = "reseeded" | "unchanged" | "missing";
+/** Former names of seeded files, deleted by `reseedProjectN02Skills` when
+ * the current name exists beside them. Kept reserved (below) too: a
+ * leftover that is neither seeded nor reserved would be folded into
+ * every stage's prompt as an extra, which is worse than either. */
+const LEGACY_SKILL_FILE_NAMES: Record<string, string> = {
+  "PROJECT_VIEW.md": "EFFORTS.md",
+};
+
+export type SkillReseedOutcome = "reseeded" | "unchanged" | "created" | "removed";
 
 export type SkillReseedEntry = {
   file: string;
@@ -158,6 +159,13 @@ export type SkillReseedEntry = {
  * re-clicking this after it already ran is always a no-op. A project
  * with no `skills` folder yet reports nothing (nothing to reseed —
  * the next `ensureProjectN02` call creates it from scratch instead).
+ *
+ * A seeded file that is MISSING is created (`"created"`), not skipped:
+ * a project that predates a new seeded file (VOICE.md, 2026-09-16) or a
+ * rename (PROJECT_VIEW.md to EFFORTS.md, same day) gets the file from
+ * the same click that refreshes the others. A legacy name still sitting
+ * beside its successor is deleted (`"removed"`) so it never rides into
+ * a prompt as an extra file.
  */
 export async function reseedProjectN02Skills(folder: VaultFolder): Promise<SkillReseedEntry[]> {
   const { folders } = await listFolderChildren(folder.human_id, folder._id);
@@ -170,20 +178,33 @@ export async function reseedProjectN02Skills(folder: VaultFolder): Promise<Skill
   const results: SkillReseedEntry[] = [];
   for (const stage of Object.keys(SKILL_FILE_NAMES) as GraphLogDefaultStage[]) {
     const file = SKILL_FILE_NAMES[stage];
+    const nextContent = effective[stage].content;
     const listing = files.find((f) => f.name.toLowerCase() === file.toLowerCase());
     if (!listing) {
-      results.push({ file, outcome: "missing" });
+      await createFileRef({
+        human_id: folder.human_id,
+        name: file,
+        content: nextContent,
+        content_type: "text/markdown",
+        folder_id: skillsFolder._id,
+      });
+      results.push({ file, outcome: "created" });
       continue;
     }
     const current = await getFileRefById(listing._id);
     const currentContent = current?.content ?? "";
-    const nextContent = effective[stage].content;
     if (currentContent === nextContent) {
       results.push({ file, outcome: "unchanged" });
       continue;
     }
     await updateFileRef(listing._id, { content: nextContent });
     results.push({ file, outcome: "reseeded" });
+  }
+  for (const legacy of Object.keys(LEGACY_SKILL_FILE_NAMES)) {
+    const listing = files.find((f) => f.name.toLowerCase() === legacy.toLowerCase());
+    if (!listing) continue;
+    await deleteFileRef(listing._id);
+    results.push({ file: legacy, outcome: "removed" });
   }
   return results;
 }
@@ -306,7 +327,7 @@ export function isSkipInstruction(content: string | null | undefined): boolean {
  * stage runs. `isSkipInstruction` above folds "missing" and "skip"
  * together on purpose — both mean don't run — and that folding is
  * correct for control flow but wrong for reporting: a project whose
- * `PROJECT_VIEW.md` was never seeded looks identical, in the run record,
+ * `EFFORTS.md` was never seeded looks identical, in the run record,
  * to one whose owner deliberately wrote `skip`. The first is a broken
  * project silently producing an empty README; the second is a working
  * one. Callers use `isSkipInstruction` to decide whether to run and this
@@ -344,14 +365,20 @@ export async function getProjectStageSkill(
   return file?.content ?? null;
 }
 
-/** The GraphLog skill file names every stage already fetches by name —
+/** The GraphLog skill file names a stage already fetches by name —
  * excluded from `listExtraSkillFiles` below so a reference file never gets
- * folded into a prompt twice. */
-const RESERVED_SKILL_FILE_NAMES = new Set([
+ * folded into a prompt twice. `voice.md` is fetched by graph-project-view
+ * alone and must stay out of the other stages' prompts; `project_view.md`
+ * is the pre-2026-09-16 name of `efforts.md`, reserved so a project that
+ * has not been reseeded yet does not start feeding its old README skill
+ * into every stage. */
+export const RESERVED_SKILL_FILE_NAMES = new Set([
   "knowledge.md",
   "graph.md",
   "graph_structure.md",
+  "efforts.md",
   "project_view.md",
+  "voice.md",
   "skill.md",
 ]);
 
@@ -405,6 +432,19 @@ export async function listExtraSkillFiles(
  * The model and effort a stage runs on (`STAGE_DEFAULTS`) are not part
  * of this. Changing the model is a cost decision, not a change to what
  * the output should say. */
+/** graph-project-view's extras: `VOICE.md` first, then the project's own
+ * extra files. The voice file is reserved (never an extra on its own), so
+ * this is the one place it enters a prompt, and putting it first keeps
+ * its position stable whatever else a project drops into `skills/`. A
+ * blank or missing voice file adds nothing. */
+export function withVoiceFirst(
+  voice: string | null,
+  extraSkillFiles: { name: string; content: string }[],
+): { name: string; content: string }[] {
+  const trimmed = voice?.trim() ?? "";
+  return trimmed.length > 0 ? [{ name: "VOICE.md", content: trimmed }, ...extraSkillFiles] : extraSkillFiles;
+}
+
 export function composeStageSkill(
   skill: string | null,
   generalSkill: string | null,

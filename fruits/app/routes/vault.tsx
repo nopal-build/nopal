@@ -1562,7 +1562,7 @@ function WebsitePageEditor({
 
 // ─── Skill file editor ───────────────────────────────────────────────────
 // A project's own `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/
-// `PROJECT_VIEW.md` (see the `graphlog`/`vault` skills) are themselves
+// `EFFORTS.md` (see the `graphlog`/`vault` skills) are themselves
 // OxMarkdown documents, so they get the real `OxEditor` (editable) instead
 // of the plain static `OxRenderer` used elsewhere. `key={fileId}` at the
 // call site forces a clean remount on navigation between skill files, so
@@ -2559,19 +2559,20 @@ export default function VaultV2Page() {
       });
       const results = (data?.results ?? []) as { file: string; outcome: string }[];
       const changed = results.filter((r) => r.outcome === "reseeded");
-      // "missing" is the one outcome that matters most and used to be
-      // filtered out of this message entirely: a project whose skill file
-      // was never seeded is a project whose stage is a permanent silent
-      // no-op, and the alert called it "already on the current defaults".
-      // Same for an empty result, which means no Skills folder at all.
-      const missing = results.filter((r) => r.outcome === "missing");
+      // A file that was never seeded (or predates a rename) is CREATED
+      // by the reseed since 2026-09-16 and reported here, because a stage
+      // with no skill file is a permanent silent no-op and the old
+      // "missing" outcome only named the problem. A legacy name deleted
+      // beside its successor is reported too. An empty result means no
+      // Skills folder at all.
+      const created = results.filter((r) => r.outcome === "created");
+      const removed = results.filter((r) => r.outcome === "removed");
       if (data) {
         const lines: string[] = [];
         if (results.length === 0) lines.push("This project has no Skills folder, so there was nothing to reseed.");
         if (changed.length > 0) lines.push(`Reseeded: ${changed.map((r) => r.file).join(", ")}.`);
-        if (missing.length > 0) {
-          lines.push(`Missing and not created: ${missing.map((r) => r.file).join(", ")}. A stage with no skill file does nothing at all.`);
-        }
+        if (created.length > 0) lines.push(`Created: ${created.map((r) => r.file).join(", ")}.`);
+        if (removed.length > 0) lines.push(`Removed (renamed): ${removed.map((r) => r.file).join(", ")}.`);
         if (lines.length === 0) lines.push("Already on the current defaults. Nothing to reseed.");
         window.alert(lines.join("\n"));
       }
@@ -3649,7 +3650,7 @@ export default function VaultV2Page() {
                   </>
                 ) : fileFolderType === "skills" ? (
                   // A project's own skills/KNOWLEDGE.md, GRAPH.md,
-                  // GRAPH_STRUCTURE.md, PROJECT_VIEW.md (see the
+                  // GRAPH_STRUCTURE.md, EFFORTS.md (see the
                   // graphlog/vault skills) are themselves OxMarkdown
                   // documents — give them the real, editable OxEditor
                   // rather than the plain read-only OxRenderer used
