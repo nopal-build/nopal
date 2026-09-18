@@ -56,7 +56,9 @@ append-only, same as the graph it protects.
 | [0014](0014-status-lives-on-the-weight-line.md) | The three judged fields live on the `Weight:` line. The line is never optional. |
 | [0015](0015-a-node-must-name-its-author.md) | A node names its author. Counting people keys on the id, never the name. |
 | [0016](0016-a-measurement-without-a-reader-is-a-bug.md) | A measurement without a named reader is a bug. |
+| [0017](0017-a-skill-is-written-for-the-model-that-reads-it.md) | A skill is written for the model that reads it. |
+| [0018](0018-the-janitor-reports-a-person-decides.md) | The Janitor reports. A person decides. |
 
-All sixteen so far are GraphLog decisions (`graphlog` skill); this
-directory isn't GraphLog-specific and future ADRs from other parts of
-Nopal belong here too, continuing the same numbering.
+0001 to 0017 are GraphLog decisions (`graphlog` skill); 0018 covers the
+whole repo. This directory isn't GraphLog-specific and future ADRs from
+other parts of Nopal belong here too, continuing the same numbering.

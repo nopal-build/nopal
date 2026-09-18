@@ -1,0 +1,71 @@
+name: CI
+
+# Every pull request: the same tests `deploy.yml` runs after a merge, run
+# before it, plus the Janitor's report (docs/adr/0018). Nothing here
+# deploys, and `deploy.yml` is unchanged: main still tests again on push,
+# since a merge can break what each side passed alone.
+on:
+  pull_request:
+
+concurrency:
+  group: nopal-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the Janitor compares against the merge base with the
+      # PR's target branch, which a shallow clone does not have.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: corepack enable pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter remix run test --run
+      - run: pnpm --filter fruits run test --run
+
+      # Prints nothing unless text a model or an agent reads changed in
+      # this PR. When it did, the sizes before and after go on the PR as
+      # ONE comment, edited in place on later pushes, so the person who
+      # did not make the change sees it (a rewrite of a skill file once
+      # merged inside a commit whose message described a URL fix). It
+      # reports and never fails the job: whether the change is right is a
+      # person's call.
+      - name: Janitor
+        working-directory: webapp
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # vite prints its own startup warnings to stdout, so keep only
+          # the report, which opens with its heading.
+          npx vite-node scripts/janitor/run.ts > "$RUNNER_TEMP/janitor.raw"
+          sed -n '/^### Janitor$/,$p' "$RUNNER_TEMP/janitor.raw" > "$RUNNER_TEMP/janitor.md"
+          MARKER='<!-- nopal-janitor -->'
+          EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq "[.[] | select(.body | startswith(\"$MARKER\"))][0].id // empty")
+          if [ -s "$RUNNER_TEMP/janitor.md" ]; then
+            cat "$RUNNER_TEMP/janitor.md" >> "$GITHUB_STEP_SUMMARY"
+            { echo "$MARKER"; cat "$RUNNER_TEMP/janitor.md"; } > "$RUNNER_TEMP/comment.md"
+          elif [ -n "$EXISTING" ]; then
+            printf '%s\n### Janitor\n\nNo skill file in this branch differs from its base any more.\n' "$MARKER" > "$RUNNER_TEMP/comment.md"
+          else
+            exit 0
+          fi
+          if [ -n "$EXISTING" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -F body=@"$RUNNER_TEMP/comment.md" > /dev/null
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file "$RUNNER_TEMP/comment.md"
+          fi
