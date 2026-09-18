@@ -2017,7 +2017,7 @@ export async function runGraphProjectView(
     // page declares threads); size, posture and direction come from
     // `describe_effort`. Both go to the sidecar; the page keeps no marks.
     assignEffortThreads(currentEfforts, allNodes, structureSections);
-    applyEffortDescriptions(currentEfforts, descriptions);
+    applyEffortDescriptions(currentEfforts, descriptions, previousEfforts);
     const marks = markChanges(previousEfforts, currentEfforts);
     const reconciledContent = withReadmeBody(latestContent, reconciledBody);
     if (reconciledContent !== latestContent && fileId) {
