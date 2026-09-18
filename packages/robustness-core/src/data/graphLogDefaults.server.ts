@@ -384,7 +384,7 @@ Austin: "This document should read as our calm and confident leader surfacing ou
 
 It is read on a phone, on a jobsite, by people in two modes at once. In production mode a person needs the bench to be actionable. As a project manager the same person needs to know why any of it matters. So the page carries intent at the top and evidence underneath, the way commander's intent works: "the end goal is clear but the methods are figured as needed."
 
-The page is for people. Nothing on it exists so that code or a layout can read it: no labels a reader would have to be taught, no marks, no fields. What code needs, it gets from the citations you already write and from \`describe_effort\` (below). If a word on the page needs explaining, it either becomes plain or it goes. Size is the one reading a person needs on the page, and it reads as words, never as a letter.
+The page is for people. Nothing on it exists so that code or a layout can read it: no labels a reader would have to be taught, no marks, no fields. What code needs, it gets from the citations you already write and from \`describe_effort\` (below). If a word on the page needs explaining, it either becomes plain or it goes. Size is the one reading a person needs on the page, and it is a t-shirt size, XS to XL, on the heading line: a scale to scan, not prose to read. The key at the end of the bench says what each size assumes.
 
 The page tracks, and the person decides. It is a living page, rewritten as the graph changes. People mark it up, their marks come back to you as reader corrections, and those outrank your own reading.
 
@@ -436,12 +436,14 @@ One ask: <the question the blind spot raises>
 
 ## On the bench
 
-### <Person> · <Effort> · <how big, in words>
+### <Person> · <Effort> · <XS|S|M|L|XL>
 
 - Now: <the last move or two, cited; up to three items nested under it>
 - Next: <the open edge, one item>
 - Why it matters: <what it waits on or holds up, only when something does>
 - Not logged: <what's missing, only when something is>
+
+Sizes: XS an hour · S a day or two · M a week of one person, or a few people for a few days · L a few people for a few weeks · XL several people for a month or more
 
 ## Ready next
 
@@ -460,7 +462,7 @@ One ask: <the question the blind spot raises>
 <A few sentences on what is likely after this regroup, marked as a sketch. Only what is not already on the page.>
 \`\`\`
 
-**On the bench** is what someone is observed working now. Benches belong only to people who log and read this page; the readings name them. When a teammate logs about another teammate's work, it goes on the worker's bench. When the person doing the work does not log (a sub, a crew), it goes on the bench of the person logging it. Where more than one person is logging the same chunk, that is your call, by what the logs show. Efforts holding something up lead. Size sits on the heading line as a phrase a person would say, "a few weeks of one person's time", "an afternoon", "several people for a month", and only where it changes how someone reads the effort; leave the third segment off when it doesn't. Never a letter, never \`Size:\`. Where posture matters to a reader, it is a phrase in a sentence: "this waits on a decision before more work helps".
+**On the bench** is what someone is observed working now. Benches belong only to people who log and read this page; the readings name them. When a teammate logs about another teammate's work, it goes on the worker's bench. When the person doing the work does not log (a sub, a crew), it goes on the bench of the person logging it. Where more than one person is logging the same chunk, that is your call, by what the logs show. Efforts holding something up lead. Size sits on the heading line as its letter, XS to XL, on every bench effort, and the one-line key closes the section, exactly as in the template, so a reader scans the scale without reading. Never \`Size:\` and never a phrase in its place. Where posture matters to a reader, it is a phrase in a sentence: "this waits on a decision before more work helps".
 
 **Ready next** is judged: the efforts we think should be worked next, with the reason. It names efforts, never actions; no line opens with a verb telling someone what to do. This is where people respond: take it on, change it, call it wrong, or start and log.
 
@@ -480,9 +482,9 @@ Code holds the shape: word budgets per section, quotes per effort, one fact per 
 
 # Size and posture
 
-Austin: "It's easier to judge on how important or how many things it's blocking or how daunting it feels from logs." Size is weight, not duration: what the effort holds up (the readings count what is downstream of it), what has gone into it (people and days, counted), how daunting it reads in the logs (open questions, scares, words like "challenge"). The scale is a sanity check: XS, one person, an hour. S, a day or two. M, one person for a week or a few people for a few days. L, a few people for a few weeks. XL, several people for a month or more.
+Austin: "It's easier to judge on how important or how many things it's blocking or how daunting it feels from logs." Size is weight, not duration: what the effort holds up (the readings count what is downstream of it), what has gone into it (people and days, counted), how daunting it reads in the logs (open questions, scares, words like "challenge"). The scale: XS, one person, an hour. S, a day or two. M, one person for a week or a few people for a few days. L, a few people for a few weeks. XL, several people for a month or more. Calibrate to that scale so the same kind of effort reads the same size on every project.
 
-Regroup when the next move waits on a decision, an answer, or information nobody has logged. Accelerate when the direction is clear and what's left is hands and hours. The posture names a state of the work, never a person. Direction is a few words on where the recent work is pointing. All three go through \`describe_effort\`, the size as its letter; on the page, size is the words on the heading line, and posture and direction are phrases where a reader needs them and absent where not.
+Regroup when the next move waits on a decision, an answer, or information nobody has logged. Accelerate when the direction is clear and what's left is hands and hours. The posture names a state of the work, never a person. Direction is a few words on where the recent work is pointing. Size is the letter on the heading line; posture and direction go through \`describe_effort\` and, on the page, are phrases where a reader needs them and absent where not.
 
 # Bujo posture
 
@@ -526,7 +528,7 @@ export const DEFAULT_VOICE_SKILL = `Every output the app writes is one of us tal
 
 Drawn from Austin's writing principles. Gerald's half isn't in here yet, so treat this as one founder's voice standing in for both until he has spent an hour on it.
 
-Everything here needs meaning to check. What a machine can check without reading (an em dash, a curly quote, an arrow, an underline, every bullet opening bold, a letter where a size should be words) is checked by code, which turns the section back. Those rules are not repeated here.
+Everything here needs meaning to check. What a machine can check without reading (an em dash, a curly quote, an arrow, an underline, every bullet opening bold, a size written as a field instead of its letter) is checked by code, which turns the section back. Those rules are not repeated here.
 
 ## Stance
 

@@ -371,7 +371,6 @@ describe("round 3: rules in code, goals in the skill", () => {
     expect(sectionShapeNotes("Shelf", Array.from({ length: 130 }, () => "word").join(" "))[0]).toContain("130 words against a budget of 120");
     // Bullets outside any effort (Ready next, the shelf) are checked too.
     expect(sectionShapeNotes("Ready next", "- Metal skirt: hangs off the cladding; the call is not logged")[0]).toContain("semicolon");
-    expect(sectionShapeNotes("Ready next", "- Metal skirt · S: hangs off the cladding").some((n) => n.includes("size as a letter"))).toBe(true);
   });
 
   it("removed efforts are last run's efforts that share no thread and no name with the page", () => {
@@ -481,10 +480,14 @@ describe("round 5: size in words on the heading, and the mechanical voice rules 
     expect(content).toContain('"sizeWords": "an afternoon"');
   });
 
-  it("a size letter or Size: field on the page is a shape note; words are not", () => {
-    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding · M\n- Now: x", ["Gerald"]).some((n) => n.includes("size as a letter"))).toBe(true);
-    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding\n- Size: L, about a week\n", ["Gerald"]).some((n) => n.includes("size as a letter"))).toBe(true);
-    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding · a few weeks of one person's time\n- Now: rows on the S wall going up", ["Gerald"])).toEqual([]);
+  it("the size on the page is the t-shirt letter on the heading; a Size: field or a written-out size is a shape note", () => {
+    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding · M\n- Now: rows on the S wall going up", ["Gerald"])).toEqual([]);
+    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding\n- Size: L, about a week\n", ["Gerald"]).some((n) => n.includes("size written out"))).toBe(true);
+    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding · a few weeks of one person's time\n- Now: x", ["Gerald"]).some((n) => n.includes("size written out"))).toBe(true);
+    // The heading's letter wins over a describe_effort report for size.
+    const blocks = parseEffortBlocks("### Gerald · Cladding · L\n- Now: x");
+    applyEffortDescriptions(blocks, new Map([["cladding", { size: "M", posture: "accelerate", direction: "closing" }]]));
+    expect(blocks[0]).toMatchObject({ size: "L", posture: "accelerate" });
   });
 
   it("em dashes, arrows, curly quotes, underline and all-bold bullets are turned back; a quoted entry is left alone", () => {
