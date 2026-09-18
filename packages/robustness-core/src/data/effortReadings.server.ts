@@ -521,14 +521,27 @@ export function assignEffortThreads(
 }
 
 /** Applies `describe_effort` reports (keyed by lowercased effort name) to
- * the parsed efforts. A report for an effort not on the page is dropped. */
-export function applyEffortDescriptions(blocks: EffortBlock[], descriptions: ReadonlyMap<string, EffortDescription>): void {
+ * the parsed efforts. An effort the model did not re-describe this run
+ * keeps what the previous sidecar said about it (matched by person and
+ * name, then by name): on a run that changes nothing the model calls
+ * nothing, and an empty description must not read as a move. A report
+ * for an effort not on the page is dropped. */
+export function applyEffortDescriptions(
+  blocks: EffortBlock[],
+  descriptions: ReadonlyMap<string, EffortDescription>,
+  previous: readonly PreviousEffort[] | null = null,
+): void {
   for (const block of blocks) {
-    const d = descriptions.get(block.name.toLowerCase());
-    if (!d) continue;
-    block.size = d.size;
-    block.posture = d.posture;
-    block.direction = d.direction;
+    const fresh = descriptions.get(block.name.toLowerCase());
+    const carried =
+      fresh ??
+      previous?.find((p) => effortKey(p) === effortKey(block)) ??
+      previous?.find((p) => p.name.toLowerCase() === block.name.toLowerCase()) ??
+      null;
+    if (!carried) continue;
+    block.size = carried.size;
+    block.posture = carried.posture;
+    block.direction = carried.direction;
   }
 }
 

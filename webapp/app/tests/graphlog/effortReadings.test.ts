@@ -434,6 +434,13 @@ describe("round 4: nothing on the page for code; the sidecar reads the citations
     applyEffortDescriptions(blocks, new Map([["cladding", { size: "L", posture: "accelerate", direction: "closing" }], ["nobody", { size: "S", posture: null, direction: null }]]));
     expect(blocks[0]).toMatchObject({ size: "L", posture: "accelerate", direction: "closing" });
     expect(blocks[1]).toMatchObject({ size: null, posture: null });
+    // A no-write run describes nothing; the previous sidecar's values carry
+    // forward so an untouched effort does not read as moved.
+    const previous = [{ name: "Windows", person: "Lucas", threads: ["Windows"], size: "S", posture: "regroup", direction: "waiting", lines: [] }];
+    const again = parseEffortBlocks("### Gerald · Cladding\n- Now: x\n### Lucas · Windows\n- Now: y");
+    applyEffortDescriptions(again, new Map(), previous);
+    expect(again[1]).toMatchObject({ size: "S", posture: "regroup", direction: "waiting" });
+    expect(again[0]).toMatchObject({ size: null, posture: null });
     const notes = sectionShapeNotes("On the bench", "### Gerald · Cladding\n- Now: x\n- Threads: Siding · Size: L\n", ["Gerald"]);
     expect(notes.some((n) => n.includes("carries no fields"))).toBe(true);
   });
