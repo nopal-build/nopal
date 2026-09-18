@@ -388,8 +388,8 @@ export type EffortBlock = {
   name: string;
   /** The person on a bench heading (`### <Person> · <Effort>`), or null. */
   person: string | null;
-  /** The size in words from a third heading segment
-   * (`### <Person> · <Effort> · a few weeks of one person's time`), or null. */
+  /** The third heading segment (`### <Person> · <Effort> · M`), the
+   * t-shirt size as written on the page, or null. */
   sizeWords: string | null;
   /** The `## ` section the effort sits in, lowercased; "" for the intro. */
   section: string;
@@ -538,8 +538,12 @@ export function applyEffortDescriptions(
       previous?.find((p) => effortKey(p) === effortKey(block)) ??
       previous?.find((p) => p.name.toLowerCase() === block.name.toLowerCase()) ??
       null;
-    if (!carried) continue;
-    block.size = carried.size;
+    const headingLetter = block.sizeWords && /^(?:XS|S|M|L|XL)$/i.test(block.sizeWords) ? block.sizeWords.toUpperCase() : null;
+    if (!carried) {
+      if (headingLetter) block.size = headingLetter;
+      continue;
+    }
+    block.size = headingLetter ?? carried.size;
     block.posture = carried.posture;
     block.direction = carried.direction;
   }
@@ -578,12 +582,12 @@ export const EFFORT_QUOTE_LIMIT = 3;
 export const LABEL_ITEM_LIMIT = 3;
 
 const BULLET_RE = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/;
-/** A size written as a field, or as a bare letter where words belong
- * (a heading's size segment, or a `<Effort> · S:` list item). A lone
- * letter in prose ("the S wall") is left alone. */
+/** The size on the page is the t-shirt letter on a bench heading's third
+ * segment (Austin, 2026-09-18: a scale to scan, not prose to read). A
+ * `Size:` field, or a heading segment that is prose instead of the
+ * letter, is a note. A lone letter in prose ("the S wall") is left alone. */
 const SIZE_FIELD_RE = /\bSize:\s*/;
 const SIZE_LETTER_ONLY_RE = /^(?:XS|S|M|L|XL)$/i;
-const SIZE_LETTER_IN_LIST_RE = /·\s*(?:XS|S|M|L|XL)\s*[:·]/;
 const EM_DASH_RE = /—/;
 const ARROW_OR_CURLY_RE = /[→←⇒⇐↔“”‘’]/;
 const UNDERLINE_RE = /<u>/i;
@@ -643,9 +647,10 @@ export function sectionShapeNotes(
     const probe = h3 ? h3[1] : bullet;
     if (probe === null) continue;
     const clean = probe.replace(REF_RE, " ").replace(QUOTED_RE, " ");
-    const letterOnHeading = h3 ? SIZE_LETTER_ONLY_RE.test(splitHeading(h3[1]).sizeWords ?? "") : false;
-    if (SIZE_FIELD_RE.test(clean) || letterOnHeading || (bullet !== null && SIZE_LETTER_IN_LIST_RE.test(clean))) {
-      notes.push(`a size as a letter or a field ("${probe.slice(0, 50)}${probe.length > 50 ? "…" : ""}"); size reads as words on the heading line, the letter goes through describe_effort`);
+    const segment = h3 ? splitHeading(h3[1]).sizeWords : null;
+    const proseOnHeading = segment !== null && !SIZE_LETTER_ONLY_RE.test(segment);
+    if (SIZE_FIELD_RE.test(clean) || proseOnHeading) {
+      notes.push(`a size written out ("${probe.slice(0, 50)}${probe.length > 50 ? "…" : ""}"); size is the t-shirt letter, XS to XL, as the heading's third segment, never Size: and never a phrase`);
       break;
     }
   }

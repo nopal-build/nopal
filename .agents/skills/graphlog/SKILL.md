@@ -403,6 +403,11 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     moves; on O.No, removing the hand-uploaded `VOICE.md` extra changes
     the other three stages' compositions too, so Rerun Outputs there
     would re-thread the structure.
+  - **2026-09-18: sizes are t-shirt letters again.** The words on the
+    heading read as prose nobody scans. The third segment is the letter
+    (`### <Person> · <Effort> · M`), a one-line key closes the bench
+    section, `Size:` or a written-out size is the shape note now, and the
+    heading letter wins over a `describe_effort` size for the sidecar.
 
 ## Reset
 
