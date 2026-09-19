@@ -303,6 +303,19 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
     import (`editingTransforms.ts`'s `convertBlockList`) was already
     correct here for free — it only ever inserts `countBlankLines` empty
     paragraphs, which is already 0 in this case.
+  - **Nested (2nd-order+) list indentation was ALSO only ever applied
+    editor-only** (`.ox-editing-surface li > ul`/`ol`) — the static/
+    Interacting renderer relied solely on a bullet-glyph change (`—` vs
+    `–`) to signal nesting, with zero visual indent, a DELIBERATE decision
+    at the time ("ordinary passive prose, no code-editor expectation to
+    match"). REVERSED after a real screenshot (a public page,
+    `public.file.$fileId.tsx`) showed a 2-space-indented sub-item reading
+    as flat, un-nested prose — the glyph change alone wasn't enough signal
+    on its own to a reader. Broadened to a plain `.ox-content li > ul,
+    .ox-content li > ol { margin-left: var(--ox-grid) }` (oxmarkdown.css)
+    instead of the `.ox-editing-surface`-scoped version, since every
+    surface's root already carries `.ox-content` — now indents identically
+    on all three surfaces (static, Interacting, Editing).
 - **TODO — typewriter font.** Explore a monospace body font for precise
   gutter/column alignment. Needs a real visual pass before committing.
 - **Every block element in `.ox-content` must explicitly zero its own

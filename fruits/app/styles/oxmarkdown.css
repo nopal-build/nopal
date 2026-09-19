@@ -761,20 +761,24 @@
   user-select: none;
 }
 
-/* Nested (2nd-order+) lists are indented one full grid cell per level,
-   editor-only (scoped to `.ox-editing-surface`, the contentEditable
-   root) — matches the "one line = one row" code-editor feel Editing
-   mode is meant to have, where the source markdown's own nesting should
-   read visually as indentation, not just a different bullet glyph. The
-   static renderer deliberately keeps nested lists un-indented (the
-   bullet glyph itself changes per level instead, `—` vs `–` above) —
-   that's ordinary passive prose, with no code-editor expectation to
-   match. `li > ul`/`li > ol` only ever matches a NESTED list (the
-   top-level list is a direct child of `.ox-content`, never of an `li`),
-   and each level's own margin stacks on top of its ancestor's, so a
-   3rd-order list ends up two grid cells in without any extra rule. */
-.ox-editing-surface li > ul,
-.ox-editing-surface li > ol {
+/* Nested (2nd-order+) lists are indented one full grid cell per level, on
+   ALL THREE surfaces (static, Interacting, Editing) — `.ox-content`, not
+   `.ox-editing-surface`, scopes this since every surface's root carries
+   `.ox-content` (see `OxRenderer`'s/`OxEditor`'s own wrapper divs). The
+   source markdown's own nesting (an indented `- ` line under a parent
+   item) should read visually as indentation everywhere it's rendered, not
+   just via the bullet-glyph change (`—` vs `–` above) — REVISED from an
+   earlier, editor-only-scoped version of this rule: a real repro (a
+   sub-list with no visual indent at all on a public/static page,
+   `public.file.$fileId.tsx`) showed the bullet-glyph distinction alone
+   read as "this didn't nest," not as "passive prose doesn't need
+   indentation" as originally assumed. `li > ul`/`li > ol` only ever
+   matches a NESTED list (the top-level list is a direct child of
+   `.ox-content`, never of an `li`), and each level's own margin stacks on
+   top of its ancestor's, so a 3rd-order list ends up two grid cells in
+   without any extra rule. */
+.ox-content li > ul,
+.ox-content li > ol {
   margin-left: var(--ox-grid);
 }
 
