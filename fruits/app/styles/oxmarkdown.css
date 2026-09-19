@@ -369,6 +369,19 @@
   margin-top: 0 !important;
 }
 
+/* Tagged by `renderBlockNodes` (OxRenderer.tsx) when a block had ZERO blank
+   lines before it in the source (e.g. a list/heading/blockquote
+   interrupting a paragraph per CommonMark's own interrupt rules, like
+   "Definitions:\n- Dogma: ..."). The rhythm rule above assumes the
+   ordinary "exactly one blank line apart" case; this overrides it back to
+   zero so adjacent-with-no-blank-line source renders with no gap, matching
+   the source exactly. `!important` for the same reason `.ox-blank-line-
+   spacer` needs it above: a plain class selector alone is less specific
+   than the `> *:not(:first-child)` combinators it must win over. */
+.ox-content .ox-no-gap-before {
+  margin-top: 0 !important;
+}
+
 /* One per blank line BEYOND the single one CommonMark already requires to
    separate two blocks — see `renderBlockNodes` in `OxRenderer.tsx`. Exactly
    one grid row tall so extra intentional spacing still lines up with the

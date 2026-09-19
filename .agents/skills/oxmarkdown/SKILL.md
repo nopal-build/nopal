@@ -289,6 +289,20 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
     contributes its own full grid unit of height per extra blank line, so
     it must never ALSO pick up this rule's margin or a 2-blank-line gap
     would render as 3 grid units instead of 2.
+  - **The flip side of the same bug: the static renderer also always added
+    the baseline one-grid-unit gap even when the source had ZERO blank
+    lines between two blocks** — e.g. `"Definitions:\n- Dogma: ..."` (a
+    list interrupting a paragraph with no blank line, legal per
+    CommonMark's own interrupt rules) rendered with a gap the source never
+    had. `renderBlockNodes` (`OxRenderer.tsx`) now checks
+    `countBlankLines(prev, node) === 0` and tags that node
+    `ox-no-gap-before` (`oxmarkdown.css`, `margin-top: 0 !important`, same
+    override pattern as `.ox-blank-line-spacer`) via `cloneElement` —
+    applied to whatever host element `renderNode` returned, since block
+    nodes aren't rendered through one common wrapper. Editing mode's own
+    import (`editingTransforms.ts`'s `convertBlockList`) was already
+    correct here for free — it only ever inserts `countBlankLines` empty
+    paragraphs, which is already 0 in this case.
 - **TODO — typewriter font.** Explore a monospace body font for precise
   gutter/column alignment. Needs a real visual pass before committing.
 - **Every block element in `.ox-content` must explicitly zero its own

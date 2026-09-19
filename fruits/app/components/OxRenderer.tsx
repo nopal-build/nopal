@@ -18,11 +18,12 @@
  * instead, modeled off the same design language.
  */
 
-import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, createContext, Fragment, isValidElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { Definition, RootContent } from "mdast";
 import {
   parseOxDocument,
+  countBlankLines,
   countExtraBlankLines,
   directiveAttrs,
   isDirectiveNode,
@@ -242,6 +243,17 @@ function renderNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode {
  * `OxEditor`'s Editing-mode import so both surfaces agree). Without this,
  * "1 blank line" and "5 blank lines" between two paragraphs render byte-
  * identically — confirmed regression, see the oxmarkdown skill's TODO 10.
+ *
+ * Also handles the ZERO-blank-line case: CommonMark lets several block
+ * types (a list, an ATX heading, a blockquote, a thematic break, ...)
+ * "interrupt" a paragraph with no blank line at all between them in the
+ * source (e.g. `"Definitions:\n- Dogma: ..."` parses as a paragraph
+ * immediately followed by a list, not one merged block). The default
+ * `.ox-content` rhythm CSS assumes the ordinary "exactly one blank line
+ * apart" case and would otherwise draw a gap the source never had — tagged
+ * `ox-no-gap-before` here so the CSS can zero its margin for exactly this
+ * case, keeping the render faithful to the actual source line breaks.
+ *
  * Only meaningful for block content (root children, a blockquote's/
  * container directive's children, ...) — inline phrasing content (a
  * paragraph's own children) doesn't have this concept and should keep
@@ -251,13 +263,29 @@ function renderBlockNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode 
   const out: ReactNode[] = [];
   for (let i = 0; i < list.length; i++) {
     const node = list[i];
+    let rendered = renderNode(node, i, ctx);
     if (i > 0) {
-      const extra = countExtraBlankLines(list[i - 1], node);
-      for (let s = 0; s < extra; s++) {
-        out.push(<div key={`spacer-${i}-${s}`} className="ox-blank-line-spacer" aria-hidden="true" />);
+      const gap = countBlankLines(list[i - 1], node);
+      if (gap === 0) {
+        // No blank line at all separated these two blocks in the source (e.g. a
+        // list/heading/blockquote interrupting a paragraph per CommonMark's own
+        // interrupt rules) — the default `margin-top: var(--ox-grid)` rhythm
+        // rule assumes the ordinary "exactly one blank line apart" case and
+        // would otherwise draw a gap the source never had. See the oxmarkdown
+        // skill: "must render lines as they exist."
+        rendered = isValidElement<{ className?: string }>(rendered)
+          ? cloneElement(rendered, {
+              className: [rendered.props.className, "ox-no-gap-before"].filter(Boolean).join(" "),
+            })
+          : rendered;
+      } else {
+        const extra = countExtraBlankLines(list[i - 1], node);
+        for (let s = 0; s < extra; s++) {
+          out.push(<div key={`spacer-${i}-${s}`} className="ox-blank-line-spacer" aria-hidden="true" />);
+        }
       }
     }
-    out.push(renderNode(node, i, ctx));
+    out.push(rendered);
   }
   return out;
 }
