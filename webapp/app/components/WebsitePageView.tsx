@@ -6,7 +6,8 @@ import { navLink } from "stamps/navLink.css";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
-import type { WebsiteLinkItem } from "robustness-core/data/website.server";
+import type { WebsiteLinkItem, ResolvedWebsiteDailyLogEntry } from "robustness-core/data/website.server";
+import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 
 const navLinkFontClass = `${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`;
 
@@ -66,10 +67,17 @@ export function WebsiteLink({
 export function WebsitePageView({
   body,
   isDraftPreview,
+  dailyLogEntries = {},
 }: {
   body: string;
   isDraftPreview: boolean;
+  /** See `oxmarkdown/websiteDirectives.tsx`'s `::daily-log{...}` entry --
+   * resolved server-side (`loadWebsitePage.server.ts`), since rendering it
+   * needs real vault/DB access `OxRenderer` never has on its own. Optional
+   * only so existing callers that don't pass it (none today) don't break. */
+  dailyLogEntries?: Record<string, ResolvedWebsiteDailyLogEntry>;
 }) {
+  const directives = buildWebsiteDirectiveRegistry({ dailyLogEntries });
   return (
     <>
       {isDraftPreview && (
@@ -89,7 +97,7 @@ export function WebsitePageView({
           </span>
         </Surface>
       )}
-      <OxRenderer markdown={body} />
+      <OxRenderer markdown={body} directives={directives} />
     </>
   );
 }

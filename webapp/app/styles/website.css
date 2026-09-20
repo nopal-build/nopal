@@ -1,0 +1,183 @@
+/**
+ * Visual chrome for `/v2` website-page directives
+ * (`oxmarkdown/websiteDirectives.tsx`). Deliberately SEPARATE from
+ * `oxmarkdown.css` — that stylesheet is the shared dot-grid prose identity
+ * used everywhere else in the app (Daily Log, Vault, Project Newspaper,
+ * Skills) and shouldn't grow one-off marketing-page rules. Reuses the
+ * existing brand palette (`root.css`) rather than inventing new colors —
+ * a couple of paler tints may get added as new rungs on the SAME families
+ * later if a full-bleed band reads too saturated; not needed yet.
+ */
+
+/* ── Section (`:::section{bg="..."}`) ──────────────────────────────────── */
+
+.website-section {
+  padding: 48px 0;
+}
+
+.website-section-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.website-bg-cream {
+  background: var(--surface-day-100);
+}
+.website-bg-peach {
+  background: var(--clay-300);
+}
+.website-bg-mint {
+  background: var(--cactus-300);
+}
+.website-bg-lavender {
+  background: var(--moonlight-500);
+}
+
+/* ── Stamp illustrations (`::stamp{...}`) ──────────────────────────────── */
+/* The stamp graphics themselves (frame, perforated edge, price glyph, and
+   artwork) are complete pre-designed SVGs (`public/guides/stamp-*.svg`) --
+   see `oxmarkdown/websiteStamps.tsx`. Only positioning/rotation/float live
+   here. */
+
+.website-stamp {
+  display: inline-block;
+  max-width: 132px;
+  transform: rotate(var(--stamp-rotate, 0deg));
+}
+
+.website-stamp-img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.website-stamp-missing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 100px;
+  min-height: 130px;
+  padding: 16px;
+  border: 2px dashed var(--text-subtle);
+  border-radius: 4px;
+  color: var(--text-subtle);
+  font-size: 0.8em;
+  transform: rotate(var(--stamp-rotate, 0deg));
+}
+
+.website-stamp-float-left {
+  float: left;
+  margin: 0 16px 8px 0;
+}
+.website-stamp-float-right {
+  float: right;
+  margin: 0 0 8px 16px;
+}
+
+/* ── Icons (`::icon{...}`) ─────────────────────────────────────────────── */
+
+.website-icon {
+  display: inline-flex;
+  color: var(--purple);
+  vertical-align: middle;
+}
+
+.website-icon-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.website-icon-placeholder {
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--text-subtle);
+  border-radius: 50%;
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.website-icon-file {
+  vertical-align: middle;
+}
+
+/* ── Waypoints (`::waypoint{...}`) ─────────────────────────────────────── */
+/* Zero-size on purpose — a pure position marker, never visible layout. The
+   wavy connector overlay (not yet built) reads its own live position via
+   `getBoundingClientRect`, so it must sit inline exactly where the author
+   placed it, contributing no width/height of its own. */
+
+.website-waypoint {
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
+
+/* ── Pricing card (`:::pricing-card{...}`) ─────────────────────────────── */
+
+.website-pricing-card {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+  background: var(--color-surface-card);
+}
+
+.website-pricing-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.website-pricing-card-name {
+  font-weight: bold;
+  color: var(--green);
+}
+
+.website-pricing-card-price {
+  font-weight: bold;
+  color: var(--purple);
+}
+
+.website-pricing-card-body :is(ul, ol) {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.website-pricing-card-cta {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 8px 16px;
+  background: var(--purple);
+  color: var(--white);
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+/* ── Daily-log embed (`::daily-log{...}`) ──────────────────────────────── */
+
+.website-daily-log-embed {
+  border-left: 3px solid var(--green);
+  background: var(--surface-day-100);
+  border-radius: 4px;
+  padding: 16px 20px;
+  margin: 16px 0;
+}
+
+.website-daily-log-embed-header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: 0.85em;
+  color: var(--text-subtle);
+}
+
+.website-daily-log-embed-project {
+  font-weight: bold;
+  color: var(--purple);
+}

@@ -45,28 +45,41 @@ import { isVaultRootFolder } from "./vault.types";
 import type { Role } from "./humans.server";
 // File Referencing & Renaming (`fileReferences.server.ts`), `project-n02`
 // seeding (`projectN02.server.ts`), and `website` seeding/publish/settings
-// (`website.server.ts`) all statically import several read helpers back
-// from THIS file — a real mutual cycle, but a safe one: every name involved
-// is a hoisted `function` declaration, and nothing in any of these modules
-// calls one of these functions at top-level (module-evaluation) time, only
-// later from inside other async functions. `website.server.ts` ALSO
-// imports `canActAsProjectOwner` from `projectSharing.server.ts`, which
-// itself imports back from this file — a third node on the same cycle,
-// same safety argument applies (`canActAsProjectOwner`/`isProjectFolder`/
-// `findOwningProjectFolder` are all hoisted `function` declarations too).
-// A DYNAMIC `import()` here bought nothing beyond exactly the same safety,
-// while adding a real bug of its own — concurrent first-ever dynamic
-// imports of the same not-yet-cached module could race and hand one
-// caller back a not-fully-populated module namespace.
-import {
-  syncFileReferences,
-  dropOutgoingReferences,
-  propagateTargetDeletion,
-  collectFolderAndDescendantTargets,
-  propagateTargetChange,
-} from "./fileReferences.server";
-import { ensureProjectN02 } from "./projectN02.server";
-import { applyWebsiteShape } from "./website.server";
+// (`website.server.ts`) all import several read helpers back from THIS
+// file — a real mutual cycle. `website.server.ts` ALSO imports
+// `canActAsProjectOwner` from `projectSharing.server.ts`, which itself
+// imports back from this file — a third node on the same cycle.
+//
+// Those three modules' imports of THIS file stay static (safe: they only
+// ever run inside this file's own already-fully-loaded module, since
+// THIS file is always the one that pulls each of them in to begin with —
+// see below). The back-edges below — this file reaching into them — are
+// each a LAZY `import()` instead of a static one, and that's load-bearing,
+// not stylistic: Vite's dev SSR module runner tracks static imports in a
+// pending-dependency graph and throws "[vite] The dependency module is
+// not yet fully initialized due to circular dependency" the instant it
+// sees a static edge complete a cycle back to a module still mid-load —
+// it doesn't matter that every name involved is a hoisted `function`
+// declaration only ever CALLED later from inside another async function;
+// the check fires at import-resolution time, before any of that matters.
+// A dynamic `import()` skips that pending-dependency bookkeeping entirely
+// (Vite only records it for static imports) and instead awaits the
+// target module's own load promise, which Vite dedupes per URL — so
+// concurrent first-ever callers of the same lazy import all await the
+// SAME promise and get back the SAME, fully-populated module; there's no
+// race here to worry about.
+let fileReferencesModule: Promise<typeof import("./fileReferences.server")> | undefined;
+function getFileReferencesModule() {
+  return (fileReferencesModule ??= import("./fileReferences.server"));
+}
+let projectN02Module: Promise<typeof import("./projectN02.server")> | undefined;
+function getProjectN02Module() {
+  return (projectN02Module ??= import("./projectN02.server"));
+}
+let websiteModule: Promise<typeof import("./website.server")> | undefined;
+function getWebsiteModule() {
+  return (websiteModule ??= import("./website.server"));
+}
 
 // ─── FileRef CRUD ─────────────────────────────────────────────────────────────
 
@@ -116,6 +129,7 @@ export async function createFileRef(data: {
   const created = record ? formatRecord(record as unknown as FileRef) : undefined;
   if (created) {
     // File Referencing & Renaming — see the import comment above.
+    const { syncFileReferences } = await getFileReferencesModule();
     await syncFileReferences(created);
   }
   return created;
@@ -197,9 +211,11 @@ export async function updateFileRef(
   const updated = result ? formatRecord(result as unknown as FileRef) : undefined;
   if (updated) {
     if ("content" in updates) {
+      const { syncFileReferences } = await getFileReferencesModule();
       await syncFileReferences(updated);
     }
     if ("name" in updates || "folder_id" in updates) {
+      const { propagateTargetChange } = await getFileReferencesModule();
       await propagateTargetChange([{ type: "file", id: updated._id }]);
     }
   }
@@ -262,6 +278,7 @@ export async function deleteFileRef(id: string): Promise<void> {
   if (file) {
     // File Referencing & Renaming: mark any dead mention pointing at this
     // now-gone file, and drop its own outgoing/incoming reference rows.
+    const { propagateTargetDeletion, dropOutgoingReferences } = await getFileReferencesModule();
     await propagateTargetDeletion({ type: "file", id }, file.name);
     await dropOutgoingReferences(id);
   }
@@ -365,11 +382,13 @@ export async function createVaultFolder(data: {
   // `isNewProject` — and skippable via `deferAutoProvision` (see its own
   // doc above) for the one caller that needs to pull the real tree first.
   if (!data.deferAutoProvision && folder && folder.folder_type === "project-n02" && folder.is_folder_type_root) {
+    const { ensureProjectN02 } = await getProjectN02Module();
     await ensureProjectN02(folder);
   }
   // Same idea, for a `website` project's own scaffolding (README.md +
   // _site-settings.json) — see `website.server.ts`.
   if (!data.deferAutoProvision && folder && folder.folder_type === "website" && folder.is_folder_type_root) {
+    const { applyWebsiteShape } = await getWebsiteModule();
     await applyWebsiteShape(folder);
   }
 
@@ -569,6 +588,7 @@ export async function updateVaultFolder(
     // File Referencing & Renaming: a folder rename changes the computed
     // mention path of itself AND every descendant folder/file, not just
     // its own name.
+    const { propagateTargetChange, collectFolderAndDescendantTargets } = await getFileReferencesModule();
     await propagateTargetChange(await collectFolderAndDescendantTargets(id));
   }
   return updated;
@@ -976,6 +996,7 @@ export async function moveVaultFolder(
     // File Referencing & Renaming: a move changes the computed mention
     // path of the folder AND every descendant just as much as a rename
     // does — same propagation call, see `updateVaultFolder` above.
+    const { propagateTargetChange, collectFolderAndDescendantTargets } = await getFileReferencesModule();
     await propagateTargetChange(await collectFolderAndDescendantTargets(folder._id));
   }
   return result;
@@ -1053,6 +1074,7 @@ export async function ensureVaultRootFolders(
   // of `projectN02.server`'s mutual dependency on this file is safe).
   const personalIndex = roots.findIndex((r) => r.vault_root_key === "personal");
   if (personalIndex !== -1) {
+    const { ensureProjectN02 } = await getProjectN02Module();
     roots[personalIndex] = await ensureProjectN02(roots[personalIndex]);
   }
 
@@ -1256,10 +1278,10 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
   // or this would silently clobber it back into a GraphLog-managed
   // project-n02 shape the next time this ran (e.g. every dashboard load).
   return Promise.all(
-    folders.map((f) =>
+    folders.map(async (f) =>
       isContainerFolderTypeKey(f.folder_type) && f.is_folder_type_root
         ? f
-        : ensureProjectN02(f),
+        : (await getProjectN02Module()).ensureProjectN02(f),
     ),
   );
 }
@@ -1566,6 +1588,7 @@ export async function deleteVaultFolderCascade(
     }
   }
 
+  const { propagateTargetDeletion } = await getFileReferencesModule();
   for (const fid of allFolderIds) {
     // A folder is only ever a reference TARGET, never a source (only file
     // content can contain a reference) — no outgoing rows to clean up here.

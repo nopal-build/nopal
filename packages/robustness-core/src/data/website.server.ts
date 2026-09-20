@@ -14,10 +14,13 @@
  * homepage) and an empty `_site-settings.json` (nav + footer config).
  *
  * Mirrors `projectN02.server.ts`'s own shape (`applyProjectN02Shape`) and
- * its safe mutual-import cycle with `vault.server.ts` — every name pulled
- * back from there is a hoisted `function` declaration, and nothing here
- * calls one at module-evaluation time, only later from inside async
- * functions.
+ * its mutual-import cycle with `vault.server.ts` — this file's own import
+ * of `vault.server.ts` below stays a normal static one; the OTHER
+ * direction (`vault.server.ts` reaching into this file, for
+ * `applyWebsiteShape`) is a lazy `import()` instead, which is what
+ * actually keeps this cycle safe under Vite's dev SSR (see the comment
+ * above that lazy import in `vault.server.ts` for why — it's load-bearing,
+ * not stylistic).
  */
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -32,6 +35,8 @@ import {
 } from "./vault.server";
 import { splitFrontmatter } from "./project.types";
 import { canActAsProjectOwner } from "./projectSharing.server";
+import { getDailyLogCards } from "./dailyLog.server";
+import { findLeafDirectiveOccurrences } from "../util/nopalDirectives";
 
 const README_NAME = "README.md";
 const SITE_SETTINGS_NAME = "_site-settings.json";
@@ -269,6 +274,56 @@ export async function resolveWebsitePageByPath(
   if (!readme) return null;
   const full = await getFileRefById(readme._id);
   return full ? toResolvedPage(full) : null;
+}
+
+export type ResolvedWebsiteDailyLogEntry = {
+  projectName: string;
+  date: string;
+  content: string;
+};
+
+/**
+ * Resolves every `::daily-log{date="..." project="..."}` reference found
+ * in a website page's own body against the SITE OWNER's own daily-log
+ * Cards (see the `vault` skill's Cards section) — a curated, static embed
+ * of a specific real day's project update, for pages like `/v2/stories`
+ * that want to show real build-log content without making the whole page
+ * a live daily-log feed. Always resolves against `siteFolder.human_id`,
+ * never an anonymous visitor's own identity — webapp has no session at all
+ * (see `loadWebsitePage.server.ts`'s header comment), so there's no other
+ * human to resolve against, and it matches the intent anyway: a website
+ * page's author is curating THEIR OWN project history.
+ *
+ * Batches by unique `date` (one `getDailyLogCards` call per date, not per
+ * directive occurrence) — mirrors `project.server.ts`'s own
+ * `resolveProjectManifest` deduping repeated `::gallery{folder="..."}`
+ * lookups by folder name.
+ *
+ * Keyed `${date}::${lowercased project name}` — MUST match
+ * `webapp/app/oxmarkdown/websiteDirectives.tsx`'s own `dailyLogEntryKey`,
+ * duplicated by hand there (same webapp/robustness-core split convention
+ * the rest of OxMarkdown's directive rendering already follows).
+ */
+export async function resolveWebsiteDailyLogEntries(
+  siteFolder: VaultFolder,
+  body: string,
+): Promise<Record<string, ResolvedWebsiteDailyLogEntry>> {
+  const dates = new Set<string>();
+  for (const directive of findLeafDirectiveOccurrences(body)) {
+    if (directive.name !== "daily-log") continue;
+    if (directive.attrs.date) dates.add(directive.attrs.date);
+  }
+  if (dates.size === 0) return {};
+
+  const entries: Record<string, ResolvedWebsiteDailyLogEntry> = {};
+  for (const date of dates) {
+    const cards = await getDailyLogCards(siteFolder.human_id, date);
+    for (const card of cards) {
+      const key = `${date}::${card.projectName.trim().toLowerCase()}`;
+      entries[key] = { projectName: card.projectName, date, content: card.content };
+    }
+  }
+  return entries;
 }
 
 export type WebsiteLinkItem = { label: string; to: string };

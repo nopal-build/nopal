@@ -21,6 +21,8 @@ import { data } from "react-router";
 import {
   getPrimaryWebsiteFolder,
   resolveWebsitePageByPath,
+  resolveWebsiteDailyLogEntries,
+  type ResolvedWebsiteDailyLogEntry,
 } from "robustness-core/data/website.server";
 
 export type LoadedWebsitePage = {
@@ -31,6 +33,11 @@ export type LoadedWebsitePage = {
    * the return shape so `WebsitePageView`'s "Draft" banner keeps working
    * unmodified whenever real preview access comes back. */
   isDraftPreview: boolean;
+  /** Resolved `::daily-log{date="..." project="..."}` references found in
+   * this page's own body -- see `website.server.ts`'s
+   * `resolveWebsiteDailyLogEntries` and `oxmarkdown/websiteDirectives.tsx`.
+   * Empty for a page that doesn't use the directive at all. */
+  dailyLogEntries: Record<string, ResolvedWebsiteDailyLogEntry>;
 };
 
 export async function loadWebsitePage(
@@ -47,10 +54,13 @@ export async function loadWebsitePage(
     throw data("Not found", { status: 404 });
   }
 
+  const dailyLogEntries = await resolveWebsiteDailyLogEntries(siteFolder, resolved.body);
+
   return {
     body: resolved.body,
     title: resolved.meta.title,
     description: resolved.meta.description,
     isDraftPreview: false,
+    dailyLogEntries,
   };
 }
