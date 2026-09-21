@@ -81,10 +81,17 @@ function Tile({ children }: { children: React.ReactNode }) {
 function Swatch({
   varName,
   hex,
+  hexDark,
   dark,
 }: {
   varName: string;
   hex: string;
+  /** Pass this for tokens that flip automatically with
+   * `prefers-color-scheme` (semantic tokens) — renders as "light → dark"
+   * below the swatch instead of the plain single hex value. */
+  hexDark?: string;
+  /** Pass this for tokens that are themselves a fixed "dark mode" rung
+   * (e.g. `--dark-midground`, `--text-subtle-dark`) which never flip. */
   dark?: boolean;
 }) {
   return (
@@ -104,12 +111,36 @@ function Swatch({
       >
         {varName}
       </div>
-      <div className="text-xs font-mono subtle-text">{hex}</div>
+      <div className="text-xs font-mono subtle-text">
+        {hexDark ? `${hex} → ${hexDark}` : hex}
+      </div>
       {dark && (
         <div className="text-xs font-mono subtle-text" style={{ opacity: 0.6 }}>
           (dark mode)
         </div>
       )}
+    </div>
+  );
+}
+
+function ColorGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="text-xs font-mono mb-4 font-bold purple-text">
+        {label}
+      </div>
+      {/* good-white-box stays a plain global class — always-white
+          regardless of scheme (needed for accurate color-swatch
+          perception), unlike Surface which flips for dark mode. */}
+      <div className="flex flex-wrap gap-4 good-white-box p-4">
+        {children}
+      </div>
     </div>
   );
 }
@@ -447,61 +478,185 @@ export default function FruitsStyles() {
 
         {/* ── 1. Colors ──────────────────────────────────────────────────── */}
         <Section id="colors" title="01 · Colors">
-          <div className="flex flex-col gap-8">
+          <div className="flex flex-col gap-10">
+            <p className="text-xs font-mono subtle-text">
+              Three tiers, all defined in <Code>:root</Code> inside{" "}
+              <Code>styles/root.css</Code> — reference any of them with{" "}
+              <Code>var(--name)</Code> or{" "}
+              <Code>style={"{{ color: 'var(--name)' }}"}</Code>. Prefer the
+              semantic tokens (tier 3) in new component code — reach for a
+              literal alias or raw palette rung only when a semantic role
+              doesn't exist yet.
+            </p>
+
+            {/* Tier 1 — Palette */}
             <div>
+              <div className="text-sm font-bold mb-1 purple-text">
+                Palette
+              </div>
               <p className="text-xs font-mono mb-4 subtle-text">
-                Brand colors — defined in <Code>:root</Code> inside{" "}
-                <Code>styles/root.css</Code>. Reference with{" "}
-                <Code>var(--name)</Code> or{" "}
-                <Code>style={"{{ color: 'var(--name)' }}"}</Code>.
+                Raw color values, grouped into nature-themed families, on a
+                100–900 scale populated lazily — only the rungs an existing
+                color actually needs exist today.
               </p>
-              <div className="flex flex-wrap gap-4 good-white-box p-4">
-                {/* good-white-box stays a plain global class — always-white
-                    regardless of scheme (needed for accurate color-swatch
-                    perception), unlike Surface which flips for dark mode. */}
-                <Swatch varName="--white" hex="#ffffff" />
-                <Swatch varName="--purple" hex="#3f2b46" />
-                <Swatch varName="--purple-light" hex="#7f5b8b" />
-                <Swatch varName="--pink" hex="#d3a0e5" />
-                <Swatch varName="--yellow" hex="#ffeaa4" />
-                <Swatch varName="--yellow-light" hex="#fcf0c4" />
-                <Swatch varName="--green" hex="#5da06d" />
-                <Swatch varName="--green-light" hex="#86cb97" />
-                <Swatch varName="--red" hex="#a63b31" />
-                <Swatch varName="--red-light" hex="#f6c8c3" />
-                <Swatch varName="--moon" hex="#c4c6fc" />
+              <div className="flex flex-col gap-6">
+                <ColorGroup label="Plum (brand / purple)">
+                  <Swatch varName="--plum-200" hex="#c8b8ce" />
+                  <Swatch varName="--plum-300" hex="#7f5b8b" />
+                  <Swatch varName="--plum-400" hex="#817186" />
+                  <Swatch varName="--plum-700" hex="#3f2b46" />
+                </ColorGroup>
+                <ColorGroup label="Cactus (green)">
+                  <Swatch varName="--cactus-300" hex="#86cb97" />
+                  <Swatch varName="--cactus-500" hex="#5da06d" />
+                </ColorGroup>
+                <ColorGroup label="Clay (red / terracotta)">
+                  <Swatch varName="--clay-300" hex="#f6c8c3" />
+                  <Swatch varName="--clay-500" hex="#a63b31" />
+                </ColorGroup>
+                <ColorGroup label="Dune (yellow)">
+                  <Swatch varName="--dune-300" hex="#fcf0c4" />
+                  <Swatch varName="--dune-500" hex="#ffeaa4" />
+                </ColorGroup>
+                <ColorGroup label="Bloom (pink — cactus flower)">
+                  <Swatch varName="--bloom-500" hex="#d3a0e5" />
+                </ColorGroup>
+                <ColorGroup label="Moonlight (pale accent blue/lavender)">
+                  <Swatch varName="--moonlight-500" hex="#c4c6fc" />
+                </ColorGroup>
+                <ColorGroup label="Surface Day (warm, sunlit scene)">
+                  <Swatch varName="--surface-day-100" hex="#fff9f1" />
+                  <Swatch varName="--surface-day-300" hex="#ede4da" />
+                  <Swatch varName="--surface-day-500" hex="#e5d6c5" />
+                </ColorGroup>
+                <ColorGroup label="Surface Night (same scene after dark)">
+                  <Swatch varName="--surface-night-100" hex="#494a72" dark />
+                  <Swatch varName="--surface-night-300" hex="#6d6e99" dark />
+                  <Swatch varName="--surface-night-500" hex="#8d8eb4" dark />
+                </ColorGroup>
+                <ColorGroup label="Neutral">
+                  <Swatch varName="--white" hex="#ffffff" />
+                </ColorGroup>
               </div>
             </div>
 
+            {/* Tier 1.5 — Literal aliases */}
             <div>
-              <div className="text-xs font-mono mb-4 font-bold purple-text">
-                Surface / Background scale (light mode)
+              <div className="text-sm font-bold mb-1 purple-text">
+                Literal aliases
               </div>
-              <div className="flex flex-wrap gap-4 good-white-box p-4">
-                <Swatch varName="--farground" hex="#fff9f1" />
-                <Swatch varName="--midground" hex="#ede4da" />
-                <Swatch varName="--foreground" hex="#e5d6c5" />
+              <p className="text-xs font-mono mb-4 subtle-text">
+                Same values as specific palette rungs above — kept so
+                "purple" / "green" / etc. keep working everywhere they're
+                already used.
+              </p>
+              <div className="flex flex-col gap-6">
+                <ColorGroup label="Brand colors">
+                  <Swatch varName="--white" hex="#ffffff" />
+                  <Swatch varName="--purple" hex="#3f2b46" />
+                  <Swatch varName="--purple-light" hex="#7f5b8b" />
+                  <Swatch varName="--pink" hex="#d3a0e5" />
+                  <Swatch varName="--yellow" hex="#ffeaa4" />
+                  <Swatch varName="--yellow-light" hex="#fcf0c4" />
+                  <Swatch varName="--green" hex="#5da06d" />
+                  <Swatch varName="--green-light" hex="#86cb97" />
+                  <Swatch varName="--red" hex="#a63b31" />
+                  <Swatch varName="--red-light" hex="#f6c8c3" />
+                  <Swatch varName="--moon" hex="#c4c6fc" />
+                </ColorGroup>
+                <ColorGroup label="Surface / Background scale (light mode)">
+                  <Swatch varName="--farground" hex="#fff9f1" />
+                  <Swatch varName="--midground" hex="#ede4da" />
+                  <Swatch varName="--foreground" hex="#e5d6c5" />
+                </ColorGroup>
+                <ColorGroup label="Surface / Background scale (dark mode)">
+                  <Swatch varName="--dark-farground" hex="#494a72" dark />
+                  <Swatch varName="--dark-midground" hex="#6d6e99" dark />
+                  <Swatch varName="--dark-foreground" hex="#8d8eb4" dark />
+                </ColorGroup>
+                <ColorGroup label="Text">
+                  <Swatch varName="--text-subtle" hex="#817186" />
+                  <Swatch varName="--text-subtle-dark" hex="#c8b8ce" dark />
+                </ColorGroup>
               </div>
             </div>
 
+            {/* Tier 2 — Semantic tokens */}
             <div>
-              <div className="text-xs font-mono mb-4 font-bold purple-text">
-                Surface / Background scale (dark mode)
+              <div className="text-sm font-bold mb-1 purple-text">
+                Semantic tokens
               </div>
-              <div className="flex flex-wrap gap-4 good-white-box p-4">
-                <Swatch varName="--dark-farground" hex="#494a72" dark />
-                <Swatch varName="--dark-midground" hex="#6d6e99" dark />
-                <Swatch varName="--dark-foreground" hex="#8d8eb4" dark />
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-mono mb-4 font-bold purple-text">
-                Text
-              </div>
-              <div className="flex flex-wrap gap-4 good-white-box p-4">
-                <Swatch varName="--text-subtle" hex="#817186" />
-                <Swatch varName="--text-subtle-dark" hex="#c8b8ce" dark />
+              <p className="text-xs font-mono mb-4 subtle-text">
+                The tokens components should reach for first. Most flip
+                automatically with <Code>prefers-color-scheme</Code> — shown
+                below as light → dark (this page renders whichever one
+                matches your current OS setting).
+              </p>
+              <div className="flex flex-col gap-6">
+                <ColorGroup label="Text">
+                  <Swatch
+                    varName="--color-text-primary"
+                    hex="#3f2b46"
+                    hexDark="#ffffff"
+                  />
+                  <Swatch
+                    varName="--color-text-brand"
+                    hex="#7f5b8b"
+                    hexDark="#c4c6fc"
+                  />
+                  <Swatch
+                    varName="--color-text-subtle"
+                    hex="#817186"
+                    hexDark="#c8b8ce"
+                  />
+                  <Swatch
+                    varName="--color-text-danger"
+                    hex="#a63b31"
+                    hexDark="#f6c8c3"
+                  />
+                </ColorGroup>
+                <ColorGroup label="Surface">
+                  <Swatch
+                    varName="--color-surface-page"
+                    hex="#ffffff"
+                    hexDark="#3f2b46"
+                  />
+                  <Swatch
+                    varName="--color-surface-card"
+                    hex="#fff9f1"
+                    hexDark="#494a72"
+                  />
+                  <Swatch
+                    varName="--color-surface-inset"
+                    hex="#ede4da"
+                    hexDark="#6d6e99"
+                  />
+                  <Swatch
+                    varName="--color-surface-border"
+                    hex="#e5d6c5"
+                    hexDark="#8d8eb4"
+                  />
+                </ColorGroup>
+                <ColorGroup label="Form fields (deliberately don't invert)">
+                  <Swatch
+                    varName="--color-field-bg"
+                    hex="#ffffff"
+                    hexDark="#fff9f1"
+                  />
+                  <Swatch
+                    varName="--color-field-border"
+                    hex="#8d8eb4"
+                    hexDark="#e5d6c5"
+                  />
+                  <Swatch varName="--color-field-text" hex="#494a72" />
+                </ColorGroup>
+                <ColorGroup label="Navigation">
+                  <Swatch
+                    varName="--color-nav-active-bg"
+                    hex="#e5d6c5"
+                    hexDark="#ffffff"
+                  />
+                </ColorGroup>
               </div>
             </div>
 
