@@ -875,6 +875,71 @@ mod tests {
         assert_eq!(next.selection().from(), before + 1);
     }
 
+    /// Isolates a REAL bug reported by live browser testing: typing text
+    /// immediately after a Shift+Enter hard break merges the new
+    /// characters into the PRECEDING text run and pushes the `<br>` to the
+    /// very end (`<p>Hellow<br>world</p>` becomes `<p>Hellowworld<br></p>`
+    /// in the live DOM) — a classic, well-documented contenteditable quirk:
+    /// browsers often insert typed characters into the nearest EXISTING
+    /// text node before a trailing void element (`<br>`) rather than after
+    /// it, when the caret was positioned via a "container, child-index"
+    /// DOM Range (there's no text node yet to anchor "after the break" to).
+    ///
+    /// This test PROVES the bug is isolated to `taino-edit-dom`'s LIVE
+    /// incremental DOM patcher (`patch_children`/`try_patch` in its own
+    /// `view.rs`, which only ever runs against an already-mounted DOM) —
+    /// NOT this crate's own model/command logic, and NOT a full static
+    /// render: both are checked here and both are correct. A live-browser
+    /// e2e test (`../../e2e/tests/shift-enter.spec.ts`) reproduces the
+    /// ACTUAL failure; this native test exists to rule out the model as
+    /// the culprit, narrowing the real bug to exactly where it lives.
+    #[test]
+    fn hard_break_followed_by_more_typing_keeps_correct_order() {
+        let schema = test_schema();
+        let state = state_with_paragraph(&schema, "Hellow");
+        let mut cur = dispatch_and_apply(&state, insert_hard_break).expect("dispatched");
+        for ch in "world".chars() {
+            let pos = cur.selection().from();
+            let text = cur
+                .schema()
+                .text(&ch.to_string(), vec![])
+                .expect("text node");
+            let mut tx = cur.tr();
+            tx.transform()
+                .insert(
+                    pos,
+                    Slice::new(Fragment::from_node(text), 0, 0),
+                    cur.schema(),
+                )
+                .expect("insert should succeed");
+            tx.set_selection(Selection::caret(pos + 1));
+            cur = cur.apply(tx);
+        }
+        let json = serde_json::to_string(&cur.doc().to_json()).unwrap();
+        // The hard_break should sit BETWEEN "Hellow" and "world" in
+        // document order — checking the raw JSON's own textual order is a
+        // simple, sufficient proxy for structural (child array) order here.
+        let hellow_idx = json.find("Hellow").expect("Hellow present");
+        let break_idx = json.find("hard_break").expect("hard_break present");
+        let world_idx = json.find("world").expect("world present");
+        assert!(
+            hellow_idx < break_idx && break_idx < world_idx,
+            "expected Hellow, then hard_break, then world in that order: {json}"
+        );
+
+        // A full STATIC render (not an incremental DOM patch) of this SAME
+        // model, via the exact function SSR uses, to isolate whether a real
+        // bug lives in the MODEL (this crate's own code) or specifically in
+        // `taino-edit-dom`'s INCREMENTAL diff/patch reconciliation (which
+        // only runs against an already-mounted, LIVE DOM — never exercised
+        // by a native test at all).
+        let html = taino_edit_leptos::doc_view_html(cur.doc());
+        assert!(
+            html.contains("Hellow<br>world") || html.contains("Hellow<br/>world"),
+            "static render should show the break BETWEEN Hellow and world: {html}"
+        );
+    }
+
     /// Proves Shift+Enter is generic, not paragraph-specific: `insert_
     /// hard_break` only special-cases `code_block` (see its own doc
     /// comment) — anywhere else with `"inline*"` content, like a

@@ -147,6 +147,22 @@ confirmed by reading their source, not assumed) and how it was fixed:
   from-scratch schema extension, since none exists upstream — that works
   generically in every block with inline content (paragraph, heading,
   blockquote, list items), not just paragraphs.
+  **Known real bug, found live, not yet fixed**: typing immediately after
+  a hard break can merge the new text into the PRECEDING run and push
+  the `<br>` to the very end (`Hellow<br>world` becomes
+  `Hellowworld<br>` after typing "world") — a classic contenteditable
+  quirk where browsers insert typed characters into the nearest existing
+  text node before a trailing void element rather than after it, when
+  the caret was set via a container/child-index DOM Range with no text
+  node yet to anchor to. Isolated (via `hard_break_followed_by_more_
+  typing_keeps_correct_order` in `commands.rs`) to `taino-edit-dom`'s
+  LIVE incremental DOM patcher specifically — the document model and a
+  full static render are both proven correct; only the live-DOM diff/
+  patch step gets it wrong. Tracked as expected-failing e2e tests
+  (`test.fail()`) in `../../e2e/tests/shift-enter.spec.ts` in all three
+  contexts (paragraph, heading, blockquote) so a real fix will be
+  visible (they'll start failing the OTHER way, flagging themselves for
+  cleanup) rather than silently regressing further unnoticed.
 - **Undo/redo** — wired up via `taino_edit_extensions::History`
   (`Mod-z`/`Mod-Shift-z`); the core history machinery was already there,
   just never bound to a keymap in this crate. Each transaction is

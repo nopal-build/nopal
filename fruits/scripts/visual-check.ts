@@ -8,7 +8,7 @@
 //
 // Examples:
 //   npx vite-node scripts/visual-check.ts
-//     -> screenshots /styles (the living style guide) in light + dark
+//     -> screenshots /maker/stamps (the Stamps design system guide) in light + dark
 //   npx vite-node scripts/visual-check.ts /profile /
 //     -> screenshots both routes in light + dark
 //
@@ -80,7 +80,7 @@ async function main() {
     if (arg.startsWith("--email=")) email = arg.slice("--email=".length);
     else routePaths.push(arg);
   }
-  if (routePaths.length === 0) routePaths.push("/styles");
+  if (routePaths.length === 0) routePaths.push("/maker/stamps");
 
   try {
     await fetch(BASE_URL);

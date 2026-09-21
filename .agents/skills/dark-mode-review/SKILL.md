@@ -40,9 +40,10 @@ adding here if marketing dark-mode bugs turn out to be a recurring problem.
    ```
    npx vite-node scripts/visual-check.ts [--email=someone@example.com] [path ...]
    ```
-   - With no path arguments, it screenshots `/styles` — the living style
-     guide (`app/routes/styles.tsx`), which exercises the shared component
-     library end-to-end and is the single best default target.
+   - With no path arguments, it screenshots `/maker/stamps` — the Stamps
+     design system guide (`app/routes/maker_.stamps.tsx`), which exercises
+     the shared component library end-to-end and is the single best
+     default target.
    - Pass one or more paths to check specific pages, e.g.:
      ```
      npx vite-node scripts/visual-check.ts /profile /daily-log

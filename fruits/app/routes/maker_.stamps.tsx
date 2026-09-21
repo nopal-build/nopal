@@ -260,7 +260,7 @@ function CategoryNav({ activeId }: { activeId: string | null }) {
         </NavColumn>
       ))}
       <NavColumn label="Related">
-        <a href="/styles/oxmarkdown" className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass}`}>
+        <a href="/maker/stamps/oxmarkdown" className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass}`}>
           OxMarkdown →
         </a>
       </NavColumn>
