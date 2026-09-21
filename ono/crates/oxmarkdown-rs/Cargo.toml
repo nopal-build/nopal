@@ -1,0 +1,11 @@
+[package]
+name = "oxmarkdown-rs"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Phase 0 spike: parsing OxMarkdown's syntax (CommonMark + GFM + frontmatter + generic directives + ==highlight==) in Rust. See README.md."
+
+[dependencies]
+markdown = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

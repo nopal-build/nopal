@@ -1,0 +1,46 @@
+[package]
+name = "oxmarkdown-editor"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Editing-mode spike: evaluating taino-edit (a real ProseMirror-style Rust/Leptos rich-text editor, no JS bridge) as the Lexical replacement. Minimal built-in schema first — no custom OxMarkdown extensions yet. See ono/README.md."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "ssr_server"
+path = "src/bin/ssr_server.rs"
+required-features = ["ssr"]
+
+[dependencies]
+console_error_panic_hook = "0.1"
+serde_json = "1"
+regex = "1"
+# taino-edit-leptos v0.7 requires Leptos 0.8 — deliberately a DIFFERENT
+# major version from oxmarkdown-leptos's own "leptos = \"0.7\"", which
+# is fine (separate crates, cargo resolves each independently) as long
+# as every leptos-typed value THIS crate touches (RwSignal, IntoView,
+# ...) comes from the SAME 0.8 resolution taino-edit-leptos uses —
+# mixing would be a real type mismatch, not just a version bump.
+leptos = "0.8"
+wasm-bindgen = "0.2"
+
+taino-edit-core = "0.7"
+taino-edit-extensions = "0.7"
+taino-edit-leptos = "0.7"
+oxmarkdown-rs = { path = "../oxmarkdown-rs" }
+
+[dependencies.web-sys]
+version = "0.3"
+features = ["Window", "Navigator"]
+
+[dependencies.rouille]
+version = "3"
+optional = true
+
+[features]
+default = ["csr"]
+csr = ["leptos/csr"]
+ssr = ["leptos/ssr", "rouille"]
+hydrate = ["leptos/hydrate"]

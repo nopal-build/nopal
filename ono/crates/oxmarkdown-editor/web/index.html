@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ono — oxmarkdown-editor (taino-edit) spike</title>
+  <style>
+    body {
+      max-width: 720px;
+      margin: 40px auto;
+      padding: 0 20px;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      line-height: 1.5;
+    }
+    .ox-status {
+      background: #fef3e0;
+      border: 1px solid #e0b366;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
+    .ox-status-inline {
+      font-size: 13px;
+      color: #666;
+    }
+    [contenteditable] {
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 120px;
+    }
+  </style>
+</head>
+<body>
+  <div class="ox-status">
+    <strong>ono / oxmarkdown-editor</strong> — Editing-mode spike:
+    <code>taino-edit</code>, a real ProseMirror-style Rust document
+    model + <code>contenteditable</code> DOM bridge for Leptos, with NO
+    JavaScript bridge at runtime (unlike Lexical, which this is meant to
+    eventually replace). Minimal built-in schema only (paragraph, bold,
+    italic) — no OxMarkdown-specific schema yet. Try typing directly in
+    the box below, and Mod-b / Mod-i (Cmd or Ctrl) for bold/italic.
+  </div>
+  <div id="mount-point"></div>
+  <script type="module">
+    import init, { mount } from "./pkg/oxmarkdown_editor.js";
+    async function run() {
+      await init();
+      mount();
+    }
+    run();
+  </script>
+</body>
+</html>

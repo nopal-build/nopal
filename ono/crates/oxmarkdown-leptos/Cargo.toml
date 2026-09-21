@@ -1,0 +1,31 @@
+[package]
+name = "oxmarkdown-leptos"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "ono's chosen rendering path: OxMarkdown via Leptos. CSR (browser, WASM) and SSR (native, this crate's own ssr_server binary) both build from the same shared component code. See ono/README.md."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "ssr_server"
+path = "src/bin/ssr_server.rs"
+required-features = ["ssr"]
+
+[dependencies]
+oxmarkdown-rs = { path = "../oxmarkdown-rs" }
+serde_json = "1"
+console_error_panic_hook = "0.1"
+leptos = "0.7"
+wasm-bindgen = "0.2"
+
+[dependencies.rouille]
+version = "3"
+optional = true
+
+[features]
+default = ["csr"]
+csr = ["leptos/csr"]
+ssr = ["leptos/ssr", "rouille"]
+hydrate = ["leptos/hydrate"]

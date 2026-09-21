@@ -1,0 +1,11 @@
+[workspace]
+members = ["crates/oxmarkdown-rs", "crates/oxmarkdown-leptos", "crates/oxmarkdown-editor"]
+resolver = "2"
+
+# `ono` is a deliberately separate Cargo workspace from `crates/Cargo.toml`
+# (the existing CLI/API/GUI product) — see `ono/README.md`. Nothing in
+# here should depend on anything under `crates/`, and vice versa, unless
+# a piece proves valuable enough to promote into a real shared crate
+# later — that's a decision to make explicitly, not something to fall
+# into by accident.
+[workspace.lints.clippy]
