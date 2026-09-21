@@ -12,7 +12,7 @@
 mod commands;
 mod convert;
 
-use commands::EditingFixups;
+use commands::{EditingFixups, HardBreak};
 use leptos::prelude::*;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use wasm_bindgen::prelude::*;
@@ -156,6 +156,7 @@ fn build_editor() -> (EditorState, Keymap, InputRules) {
         &Blockquote,
         &CodeBlock,
         &Lists,
+        &HardBreak,
     ];
     let schema = build_schema_with(base, &exts, "doc").unwrap();
     let keymap_exts: Vec<&dyn taino_edit_extensions::Extension> = {

@@ -12,13 +12,34 @@
 //!    how an empty list item already lifts out of its list). `Lists`'s
 //!    own "smart Enter" (empty item -> lift, otherwise -> new item)
 //!    already does the right thing for lists — nothing to fix there,
-//!    confirmed by reading `taino-edit-extensions`'s source too. The
-//!    blockquote case reuses `taino-edit-core`'s own generic `lift`
-//!    command (also used internally by that same list logic), which
-//!    only fires when the blockquote has exactly one child block — the
-//!    common "just typed `> `" case; a multi-paragraph blockquote falls
-//!    through to a plain split instead of being blown apart, matching
-//!    `lift`'s own conservative contract.
+//!    confirmed by reading `taino-edit-extensions`'s source too.
+//!
+//!    The blockquote case is hand-rolled (`exit_blockquote_on_empty_
+//!    paragraph`), NOT via `taino-edit-core`'s own generic `lift`
+//!    command, for two REAL, confirmed-by-testing reasons: (a) `lift`
+//!    never calls `tx.set_selection` after its replace, so the caret's
+//!    default position-mapping through its "closed" slice replace lands
+//!    somewhere else entirely (empirically: the FOLLOWING sibling, not
+//!    the just-unwrapped content — confirmed live, reported as "cursor
+//!    is placed on the line below"); and (b) `lift` only ever handles a
+//!    wrapper with EXACTLY one child, declining outright for a
+//!    blockquote with other paragraphs beside the empty one. The
+//!    hand-rolled version instead mirrors `taino-edit-extensions`'s own
+//!    `lift_list_item` (confirmed by reading its source): split the
+//!    blockquote into a "before" piece, the lifted (now-unwrapped) empty
+//!    paragraph, and an "after" piece — omitting whichever piece(s) end
+//!    up empty — so pressing Enter on a trailing (or leading, or
+//!    interior) empty line always exits at exactly that point, matching
+//!    every real editor's own convention, with the caret explicitly
+//!    placed inside the lifted paragraph.
+//!
+//!    A literal in-paragraph line break (Shift+Enter) that stays INSIDE
+//!    the current block — including a blockquote, so you're not forced
+//!    to exit just because a line is empty — is provided via a small
+//!    from-scratch `HardBreak` extension (`taino-edit-core` has no such
+//!    node built in: its own markdown importer treats both soft and hard
+//!    breaks as a plain space, confirmed by reading `taino-edit-core::
+//!    markdown`'s source).
 //! 2. **No input rules are wired into the Leptos adapter at all**, and
 //!    `taino-edit-core`'s own `textblock_type_rule` helper (used for e.g.
 //!    `## ` -> heading) has a REAL bug of its own: it never calls
@@ -54,11 +75,11 @@
 //!    Windows/Linux use Ctrl for word-delete).
 
 use regex::Captures;
-use taino_edit_core::{wrapping_rule, Fragment, InputRule, InputRules};
-use taino_edit_extensions::Extension;
+use taino_edit_core::{wrapping_rule, Fragment, InputRule, InputRules, ParseRule};
+use taino_edit_extensions::{Extension, SchemaAdditions};
 use taino_edit_leptos::{
-    lift, AttrValue, Attrs, Command, Dispatch, EditorState, ResolvedPos, Schema, Selection, Slice,
-    Transaction,
+    AttrValue, Attrs, Command, Dispatch, DomSpec, EditorState, Node, NodeSpec, ResolvedPos, Schema,
+    Selection, Slice, Transaction,
 };
 
 /// Registered as one more `Extension` purely for its `Enter` override —
@@ -84,6 +105,87 @@ impl Extension for EditingFixups {
             ("Ctrl-Delete".to_string(), Box::new(word_delete_forward)),
         ]
     }
+}
+
+/// A single `<br>`-rendered inline atom node, giving Shift+Enter a literal
+/// in-block line break that does NOT split the block — the escape hatch
+/// for staying inside a blockquote (or any other block) instead of being
+/// forced to exit it just because the current line happens to be empty.
+/// Shaped exactly like `taino-edit-extensions`'s own `Image` (a leaf,
+/// atom, inline node with a matching `to_dom`/`parse_dom` pair) since
+/// `taino-edit-core` has no such node built in.
+pub struct HardBreak;
+
+impl Extension for HardBreak {
+    fn name(&self) -> &str {
+        "hard_break"
+    }
+
+    fn schema_additions(&self) -> SchemaAdditions {
+        SchemaAdditions {
+            nodes: vec![(
+                "hard_break".to_string(),
+                NodeSpec {
+                    group: Some("inline".into()),
+                    inline: true,
+                    atom: true,
+                    to_dom: Some(|_: &Node| DomSpec::void("br")),
+                    parse_dom: vec![ParseRule::tag("br")],
+                    ..Default::default()
+                },
+            )],
+            ..Default::default()
+        }
+    }
+
+    fn keymap_entries(&self, _schema: &Schema) -> Vec<(String, Command)> {
+        vec![("Shift-Enter".to_string(), Box::new(insert_hard_break))]
+    }
+}
+
+/// Insert a `hard_break` atom at an empty caret. Declines inside a
+/// `code_block`: its content type is plain `"text*"` (no `inline` group
+/// members allowed — confirmed by reading `CodeBlock`'s own `NodeSpec`),
+/// so a hard break there would fail schema validation anyway; Enter's
+/// OWN existing `code_block_literal_newline` already inserts a literal
+/// newline character there instead, which IS valid.
+fn insert_hard_break(state: &EditorState, dispatch: Option<&mut Dispatch<'_>>) -> bool {
+    let sel = state.selection();
+    if !sel.is_empty() {
+        return false;
+    }
+    let pos = sel.from();
+    if state.schema().node_type("hard_break").is_none() {
+        return false;
+    }
+    let Ok(rp) = ResolvedPos::resolve(state.doc(), pos) else {
+        return false;
+    };
+    if rp.depth() == 0 || rp.parent().node_type().name() == "code_block" {
+        return false;
+    }
+    let Some(d) = dispatch else { return true };
+    let Ok(br) = state
+        .schema()
+        .node("hard_break", Attrs::new(), vec![], vec![])
+    else {
+        return false;
+    };
+    let mut tx = state.tr();
+    if tx
+        .transform()
+        .insert(
+            pos,
+            Slice::new(Fragment::from_node(br), 0, 0),
+            state.schema(),
+        )
+        .is_err()
+    {
+        return false;
+    }
+    tx.set_selection(Selection::caret(pos + 1));
+    d(tx);
+    true
 }
 
 /// Delete from an empty caret backward through any trailing whitespace and
@@ -204,7 +306,9 @@ fn enter_fixups() -> Command {
         match rp.parent().node_type().name() {
             "code_block" => code_block_literal_newline(state, dispatch, pos),
             "heading" => exit_heading_to_paragraph(state, dispatch, pos),
-            "paragraph" if is_empty_paragraph_in_blockquote(&rp) => lift(state, dispatch),
+            "paragraph" if is_empty_paragraph_in_blockquote(&rp) => {
+                exit_blockquote_on_empty_paragraph(state, dispatch, &rp)
+            }
             _ => false,
         }
     })
@@ -222,6 +326,75 @@ fn is_empty_paragraph_in_blockquote(rp: &ResolvedPos) -> bool {
     }
     let depth = rp.depth();
     depth >= 2 && rp.node(depth - 1).node_type().name() == "blockquote"
+}
+
+/// Extract JUST the current empty paragraph out of its enclosing
+/// blockquote, splitting the blockquote into "before"/"after" pieces
+/// around it as needed (omitting whichever piece ends up empty) — the
+/// same generalized technique `taino-edit-extensions`'s own
+/// `lift_list_item` uses for lists, confirmed by reading its source.
+/// Deliberately NOT `taino-edit-core`'s generic `lift` command: see this
+/// module's own doc comment for the two real, confirmed-by-testing
+/// reasons (missing `set_selection`, and only handling a single-child
+/// wrapper).
+fn exit_blockquote_on_empty_paragraph(
+    state: &EditorState,
+    dispatch: Option<&mut Dispatch<'_>>,
+    rp: &ResolvedPos,
+) -> bool {
+    let bq_depth = rp.depth() - 1;
+    let blockquote = rp.node(bq_depth).clone();
+    let item_idx = rp.index(bq_depth);
+    let bq_start = rp.before(bq_depth);
+    let bq_end = rp.after(bq_depth);
+    let lifted = rp.parent().clone();
+
+    let children = blockquote.content().children();
+    let before_items = children[..item_idx].to_vec();
+    let after_items = children[item_idx + 1..].to_vec();
+
+    let mut replacement: Vec<Node> = Vec::new();
+    let mut before_size = 0;
+    if !before_items.is_empty() {
+        let Ok(n) = state.schema().node(
+            "blockquote",
+            blockquote.attrs().clone(),
+            before_items,
+            blockquote.marks().to_vec(),
+        ) else {
+            return false;
+        };
+        before_size = n.node_size();
+        replacement.push(n);
+    }
+    replacement.push(lifted);
+    if !after_items.is_empty() {
+        let Ok(n) = state.schema().node(
+            "blockquote",
+            blockquote.attrs().clone(),
+            after_items,
+            blockquote.marks().to_vec(),
+        ) else {
+            return false;
+        };
+        replacement.push(n);
+    }
+
+    let Some(d) = dispatch else { return true };
+    let mut tx = state.tr();
+    let slice = Slice::new(Fragment::from_nodes(replacement), 0, 0);
+    if tx
+        .transform()
+        .replace(bq_start, bq_end, slice, state.schema())
+        .is_err()
+    {
+        return false;
+    }
+    // Past any "before" blockquote, then the lifted paragraph's own open
+    // token — right where its (empty) content starts.
+    tx.set_selection(Selection::caret(bq_start + before_size + 1));
+    d(tx);
+    true
 }
 
 /// Enter inside a code block inserts a literal newline character
@@ -425,7 +598,7 @@ fn heading_type_on_input(
 mod tests {
     use super::*;
     use taino_edit_extensions::{
-        build_schema_with, Blockquote, Bold, Heading, Italic, Lists, Paragraph,
+        build_schema_with, Blockquote, Bold, CodeBlock, Heading, Italic, Lists, Paragraph,
     };
     use taino_edit_leptos::{EditorState, NodeSpec, SchemaBuilder};
 
@@ -445,8 +618,16 @@ mod tests {
                     ..Default::default()
                 },
             );
-        let exts: Vec<&dyn Extension> =
-            vec![&Paragraph, &Heading, &Bold, &Italic, &Blockquote, &Lists];
+        let exts: Vec<&dyn Extension> = vec![
+            &Paragraph,
+            &Heading,
+            &Bold,
+            &Italic,
+            &Blockquote,
+            &Lists,
+            &CodeBlock,
+            &HardBreak,
+        ];
         build_schema_with(base, &exts, "doc").expect("schema builds")
     }
 
@@ -585,6 +766,66 @@ mod tests {
         let next = dispatch_and_apply(&state, |s, d| enter_fixups()(s, d)).expect("dispatched");
         let json = serde_json::to_string(&next.doc().to_json()).unwrap();
         assert!(!json.contains("blockquote"), "{json}");
+        // Regression check for the reported "cursor is placed on the line
+        // below" symptom: the caret must resolve INSIDE the lifted
+        // paragraph, not merely somewhere valid in the doc.
+        let pos = next.selection().from();
+        let rp = ResolvedPos::resolve(next.doc(), pos).expect("caret should resolve");
+        assert_eq!(
+            rp.depth(),
+            1,
+            "caret should be directly inside the top-level paragraph"
+        );
+        assert_eq!(rp.parent().node_type().name(), "paragraph");
+    }
+
+    /// The generalized case: a blockquote with a non-empty quote line
+    /// AND a trailing empty line. Enter on the trailing empty line should
+    /// exit ONLY that line, leaving the quote text still quoted.
+    #[test]
+    fn enter_on_trailing_empty_paragraph_in_multi_paragraph_blockquote_exits_just_that_line() {
+        let schema = test_schema();
+        let text_node = schema.text("hi", vec![]).expect("text node");
+        let quote_para = schema
+            .node("paragraph", Attrs::new(), vec![text_node], vec![])
+            .expect("paragraph");
+        let quote_para_size = quote_para.node_size();
+        let empty_para = schema
+            .node("paragraph", Attrs::new(), vec![], vec![])
+            .expect("empty paragraph");
+        let blockquote = schema
+            .node(
+                "blockquote",
+                Attrs::new(),
+                vec![quote_para, empty_para],
+                vec![],
+            )
+            .expect("blockquote");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![blockquote], vec![])
+            .expect("doc");
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        // Past the blockquote's own open token, the whole quote paragraph,
+        // and the empty paragraph's own open token.
+        let pos = 1 + quote_para_size + 1;
+        tx.set_selection(Selection::caret(pos));
+        state = state.apply(tx);
+
+        let next = dispatch_and_apply(&state, |s, d| enter_fixups()(s, d)).expect("dispatched");
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
+        assert!(
+            json.contains("blockquote") && json.contains("hi"),
+            "the quote text should still be quoted: {json}"
+        );
+        let caret = next.selection().from();
+        let rp = ResolvedPos::resolve(next.doc(), caret).expect("caret should resolve");
+        assert_eq!(
+            rp.depth(),
+            1,
+            "caret should be directly inside a TOP-LEVEL paragraph, not the blockquote"
+        );
+        assert_eq!(rp.parent().node_type().name(), "paragraph");
     }
 
     /// A non-empty paragraph inside a blockquote should NOT be lifted on
@@ -610,6 +851,38 @@ mod tests {
         assert!(
             !enter_fixups()(&state, None),
             "should decline and fall through to the base split"
+        );
+    }
+
+    #[test]
+    fn shift_enter_inserts_a_hard_break_inside_a_plain_paragraph() {
+        let schema = test_schema();
+        let state = state_with_paragraph(&schema, "hi");
+        let next = dispatch_and_apply(&state, insert_hard_break).expect("dispatched");
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
+        assert!(json.contains("hard_break"), "{json}");
+        // The caret should land right after the inserted atom (size 1).
+        let before = state.selection().from();
+        assert_eq!(next.selection().from(), before + 1);
+    }
+
+    #[test]
+    fn shift_enter_declines_inside_a_code_block() {
+        let schema = test_schema();
+        let text_node = schema.text("code", vec![]).expect("text node");
+        let code_block = schema
+            .node("code_block", Attrs::new(), vec![text_node], vec![])
+            .expect("code_block");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![code_block], vec![])
+            .expect("doc");
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::caret(5)); // end of "code"
+        state = state.apply(tx);
+        assert!(
+            !insert_hard_break(&state, None),
+            "should decline in a code_block, deferring to Enter's own literal-newline handling"
         );
     }
 
