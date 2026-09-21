@@ -14,7 +14,7 @@
 // other type, `CenterContent`, which the main content column below uses)
 // with the category nav living in the drawer instead of a horizontal bar
 // up top.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import {
   Link,
@@ -31,12 +31,18 @@ import { ErrorPanel } from "stamps/ErrorPanel";
 import { CenterContent } from "stamps/CenterContent";
 import { DrawerContent } from "stamps/DrawerContent";
 import { Chip } from "stamps/Chip";
+import { CircleButton } from "stamps/CircleButton";
+import { HamburgerNeqIcon } from "stamps/HamburgerNeqIcon";
+import { SidebarToggleIcon } from "stamps/SidebarToggleIcon";
+import { MoreIcon } from "stamps/MoreMenu";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
 import { Grid } from "stamps/Grid";
 import { useScrollSpy } from "stamps/useScrollSpy";
 import { link } from "stamps/link.css";
 import { navLink } from "stamps/navLink.css";
+import { toggleButton } from "stamps/drawerContent.css";
+import { button, type ButtonVariants } from "stamps/button.css";
 import { textSize, truncate } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { semanticColors } from "stamps/tokens";
@@ -597,6 +603,25 @@ function FamilySpecimen({ label, family }: { label: string; family?: "mono" | "h
   );
 }
 
+function StyleSpecimen({ label, italic }: { label: string; italic?: boolean }) {
+  return (
+    <Surface className={sprinkles({ p: 4 })}>
+      <Stack gap={1}>
+        <div
+          className={`${textSize.lg} ${italic ? sprinkles({ fontStyle: "italic" }) : ""}`}
+          style={{ color: semanticColors.textPrimary }}
+        >
+          The quick brown fox jumps over the lazy dog
+        </div>
+        <SpecimenCaption>
+          {label}
+          {italic ? ' — sprinkles({ fontStyle: "italic" })' : ""}
+        </SpecimenCaption>
+      </Stack>
+    </Surface>
+  );
+}
+
 function TypographySection() {
   return (
     <Section id="typography" title="Typography">
@@ -643,6 +668,26 @@ function TypographySection() {
 
         <Stack gap={4}>
           <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Style — sprinkles({"{ fontStyle }"})
+          </div>
+          <Stack gap={4}>
+            <StyleSpecimen label="normal" />
+            <StyleSpecimen label="italic" italic />
+          </Stack>
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            OT L22 Variable has no real italic — its only variable axis is{" "}
+            <Code>wght</Code>, and neither the <Code>head</Code> nor{" "}
+            <Code>OS/2</Code> table's italic flags are set. What you see
+            above is the browser's synthesized/oblique slant (see{" "}
+            <Code>font-synthesis</Code>), not a drawn italic face — a real
+            one would need its own <Code>@font-face</Code> file or an{" "}
+            <Code>ital</Code>/<Code>slnt</Code> axis, neither of which this
+            font has.
+          </p>
+        </Stack>
+
+        <Stack gap={4}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
             Utilities
           </div>
           <Surface className={sprinkles({ p: 4 })}>
@@ -654,6 +699,193 @@ function TypographySection() {
             </Stack>
           </Surface>
         </Stack>
+      </Stack>
+    </Section>
+  );
+}
+
+// ─── Spacing ───────────────────────────────────────────────────────────────
+
+const SPACE_SCALE: Array<{ token: string; rem: string; px: number }> = [
+  { token: "0", rem: "0", px: 0 },
+  { token: "0.5", rem: "0.125rem", px: 2 },
+  { token: "1", rem: "0.25rem", px: 4 },
+  { token: "1.5", rem: "0.375rem", px: 6 },
+  { token: "2", rem: "0.5rem", px: 8 },
+  { token: "2.5", rem: "0.625rem", px: 10 },
+  { token: "3", rem: "0.75rem", px: 12 },
+  { token: "4", rem: "1rem", px: 16 },
+  { token: "5", rem: "1.25rem", px: 20 },
+  { token: "6", rem: "1.5rem", px: 24 },
+  { token: "8", rem: "2rem", px: 32 },
+  { token: "9", rem: "2.25rem", px: 36 },
+  { token: "10", rem: "2.5rem", px: 40 },
+  { token: "12", rem: "3rem", px: 48 },
+  { token: "16", rem: "4rem", px: 64 },
+  { token: "20", rem: "5rem", px: 80 },
+  { token: "24", rem: "6rem", px: 96 },
+  { token: "40", rem: "10rem", px: 160 },
+];
+
+const SPACE_SHORTHANDS = [
+  "p",
+  "px",
+  "py",
+  "pt",
+  "pb",
+  "pl",
+  "pr",
+  "m",
+  "mx",
+  "my",
+  "mt",
+  "mb",
+  "ml",
+  "mr",
+  "gap",
+  "rowGap",
+  "columnGap",
+];
+
+/** One rung of the scale — a bar whose width IS the actual size (same
+ * swatch philosophy as Colors: show the real thing, caption it small).
+ * `Math.max(px, 2)` keeps the `0` rung visible as a thin mark instead of
+ * disappearing entirely. */
+function SpaceRow({ token, rem, px }: { token: string; rem: string; px: number }) {
+  return (
+    <Cluster gap={4} align="center" wrap={false}>
+      <code
+        className={`${textSize.sm} ${sprinkles({ fontFamily: "mono", fontWeight: "semibold", flexShrink: 0 })}`}
+        style={{ color: semanticColors.textBrand, minWidth: "28px" }}
+      >
+        {token}
+      </code>
+      <div
+        style={{
+          height: "10px",
+          width: `${Math.max(px, 2)}px`,
+          background: semanticColors.textBrand,
+          borderRadius: "2px",
+          flexShrink: 0,
+        }}
+      />
+      <SpecimenCaption>
+        {rem} ({px}px)
+      </SpecimenCaption>
+    </Cluster>
+  );
+}
+
+function SpacingSection() {
+  return (
+    <Section id="spacing" title="Spacing">
+      <Stack gap={8}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          One scale, shared by every padding/margin/gap prop —{" "}
+          <Code>sprinkles()</Code> is a TypeScript error for anything off
+          it, where a Tailwind class like <Code>p-4.5</Code> would just
+          silently render nothing.
+        </p>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Scale
+          </div>
+          <Surface className={sprinkles({ p: 5 })}>
+            <Stack gap={2}>
+              {SPACE_SCALE.map((step) => (
+                <SpaceRow key={step.token} {...step} />
+              ))}
+            </Stack>
+          </Surface>
+        </Stack>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Shorthands — sprinkles({"{ ... }"})
+          </div>
+          <Cluster gap={2}>
+            {SPACE_SHORTHANDS.map((name) => (
+              <Code key={name}>{name}</Code>
+            ))}
+          </Cluster>
+        </Stack>
+      </Stack>
+    </Section>
+  );
+}
+
+// ─── Icons ──────────────────────────────────────────────────────────────
+
+/** Self-contained — owns its own open/closed state so it can drop into
+ * this page without wiring anything up. Mirrors how AppLayout's own
+ * mobile nav toggle pairs `HamburgerNeqIcon` with a click handler. */
+function HamburgerNeqDemo() {
+  const [open, setOpen] = useState(false);
+  return (
+    <CircleButton
+      aria-label={open ? "Collapse" : "Expand"}
+      aria-pressed={open}
+      active={open}
+      onClick={() => setOpen((o) => !o)}
+    >
+      <HamburgerNeqIcon open={open} />
+    </CircleButton>
+  );
+}
+
+function IconsSection() {
+  return (
+    <Section id="icons" title="Icons">
+      <Stack gap={6}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          A handful of small, purpose-built glyphs — none from an icon
+          font/library, each its own tiny component so it can use{" "}
+          <Code>currentColor</Code> and animate on its own terms.
+        </p>
+
+        <Grid gap={4} minColumnWidth={220} style={{ alignItems: "start" }}>
+          <Surface className={sprinkles({ p: 5 })}>
+            <Stack gap={3}>
+              <HamburgerNeqDemo />
+              <LabeledCard label="HamburgerNeqIcon — stamps/HamburgerNeqIcon">
+                Morphs into a "≠"-style mark on click — the top/bottom
+                lines slide together, the middle rotates into the slash.
+                AppLayout's own mobile nav toggle uses this. Click it.
+              </LabeledCard>
+            </Stack>
+          </Surface>
+
+          <Surface className={sprinkles({ p: 5 })}>
+            <Stack gap={3}>
+              <Cluster gap={3}>
+                <div className={toggleButton} aria-hidden="true">
+                  <SidebarToggleIcon open={false} />
+                </div>
+                <div className={toggleButton} aria-hidden="true">
+                  <SidebarToggleIcon open />
+                </div>
+              </Cluster>
+              <LabeledCard label="SidebarToggleIcon — stamps/SidebarToggleIcon">
+                Two fixed states, not animated — closed (left) and open
+                (right). DrawerContent's own mobile open/close toggle uses
+                these two (see the drawer on the left of this page).
+              </LabeledCard>
+            </Stack>
+          </Surface>
+
+          <Surface className={sprinkles({ p: 5 })}>
+            <Stack gap={3}>
+              <CircleButton aria-label="More actions (decorative)">
+                <MoreIcon />
+              </CircleButton>
+              <LabeledCard label="MoreIcon — stamps/MoreMenu">
+                An oversized "•••" — MoreMenu's default trigger glyph,
+                bigger and bolder than a typed ellipsis character.
+              </LabeledCard>
+            </Stack>
+          </Surface>
+        </Grid>
       </Stack>
     </Section>
   );
@@ -738,7 +970,8 @@ const WITHIN_CONTENT_PRIMITIVES: Array<{ name: string; source: string; descripti
     description: (
       <>
         A real CSS grid — <Code>{"<Grid gap={4} minColumnWidth={260}>"}</Code>, auto-fitting as
-        many columns as fit. The Component Guide's cards above use it.
+        many columns as fit. Used throughout this page for card grids
+        (Colors' swatch groups, Icons, the cards right above this one).
       </>
     ),
   },
@@ -790,6 +1023,178 @@ function LayoutSection() {
   );
 }
 
+// ─── Buttons ────────────────────────────────────────────────────────────
+
+type ButtonVariant = NonNullable<ButtonVariants>["variant"];
+
+type ButtonExample = {
+  variant: ButtonVariant;
+  label: string;
+  code: string;
+  note?: string;
+  style?: CSSProperties;
+};
+
+const BUTTON_VARIANTS: ButtonExample[] = [
+  { variant: "primary", label: "Primary Action", code: 'button({ variant: "primary" })' },
+  {
+    variant: "purple",
+    label: "Purple Button",
+    code: 'button({ variant: "purple" })',
+    note: "Same as primary, minus the baked-in padding — bring your own.",
+    style: { padding: "8px 20px" },
+  },
+  { variant: "secondary", label: "Secondary Action", code: 'button({ variant: "secondary" })' },
+  { variant: "yellow", label: "Soft Action", code: 'button({ variant: "yellow" })' },
+  {
+    variant: "outline",
+    label: "Outline",
+    code: 'button({ variant: "outline" })',
+    note: "No padding or display baked in at all — bring both.",
+    style: { padding: "8px 16px", display: "inline-flex" },
+  },
+];
+
+/** One button, rendered for real (not a swatch standing in for it) —
+ * captioned with the exact `button(...)` call that produced it. */
+function ButtonSpecimen({
+  variant,
+  tint,
+  label,
+  code,
+  note,
+  style,
+  disabled,
+}: ButtonExample & { tint?: "danger"; disabled?: boolean }) {
+  return (
+    <Stack gap={2} align="flex-start" style={{ maxWidth: "220px" }}>
+      <button type="button" className={button({ variant, tint })} style={style} disabled={disabled}>
+        {label}
+      </button>
+      <SpecimenCaption>{code}</SpecimenCaption>
+      {note && (
+        <p className={textSize.xs} style={{ color: semanticColors.textSubtle, margin: 0 }}>
+          {note}
+        </p>
+      )}
+    </Stack>
+  );
+}
+
+function ButtonsSection() {
+  return (
+    <Section id="buttons" title="Buttons">
+      <Stack gap={8}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>button({"{ variant, tint }"})</Code> from{" "}
+          <Code>stamps/button.css</Code> — a raw recipe, not a fixed{" "}
+          <Code>{"<Button>"}</Code> component, since call sites apply it to
+          a plain <Code>{"<button>"}</Code>, an <Code>{"<a>"}</Code>, or a{" "}
+          <Code>{"<Link>"}</Code> today.
+        </p>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Variants
+          </div>
+          <Cluster gap={6} align="flex-start">
+            {BUTTON_VARIANTS.map((v) => (
+              <ButtonSpecimen key={v.variant} {...v} />
+            ))}
+          </Cluster>
+        </Stack>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Danger tint
+          </div>
+          <Cluster gap={6} align="flex-start">
+            <ButtonSpecimen
+              variant="secondary"
+              tint="danger"
+              label="Delete Project"
+              code='button({ variant: "secondary", tint: "danger" })'
+              note="Only meaningful on secondary today — the only variant the old --btn-color override was ever used on."
+            />
+          </Cluster>
+        </Stack>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Disabled
+          </div>
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            Baked into the recipe itself now (an <Code>{"&:disabled"}</Code>{" "}
+            selector in <Code>button.css.ts</Code>'s <Code>base</Code>) —
+            just add the real <Code>disabled</Code> attribute, no extra
+            class needed.
+          </p>
+          <Cluster gap={6} align="flex-start">
+            <ButtonSpecimen
+              variant="primary"
+              label="Disabled Primary"
+              code='button({ variant: "primary" })'
+              disabled
+            />
+            <ButtonSpecimen
+              variant="secondary"
+              label="Disabled Secondary"
+              code='button({ variant: "secondary" })'
+              disabled
+            />
+          </Cluster>
+        </Stack>
+      </Stack>
+    </Section>
+  );
+}
+
+// ─── Links ────────────────────────────────────────────────────────
+
+const linkAsButtonStyle: CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  font: "inherit",
+  cursor: "pointer",
+};
+
+function LinksSection() {
+  return (
+    <Section id="links" title="Links">
+      <Stack gap={6}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>link</Code> from <Code>stamps/link.css</Code> — one plain
+          class, no variants — applied to an <Code>{"<a>"}</Code>, a{" "}
+          <Code>{"<Link>"}</Code>, or a plain <Code>{"<button>"}</Code>{" "}
+          styled as an inline "cancel"/"undo" action. For a navigation
+          item (the drawer on the left, AppLayout's own top nav) use{" "}
+          <Code>navLink</Code> instead — that one carries its own
+          active/current-page highlight, which a body-text link never
+          needs.
+        </p>
+
+        <Surface className={sprinkles({ p: 5 })}>
+          <Stack gap={4}>
+            <p className={textSize.sm} style={{ color: semanticColors.textPrimary, maxWidth: "420px", margin: 0 }}>
+              Reads inline, right in a sentence — here's{" "}
+              <a href="#links" className={link}>
+                a real link
+              </a>{" "}
+              sitting inside body text, and here's{" "}
+              <button type="button" className={link} style={linkAsButtonStyle}>
+                a button styled the same way
+              </button>
+              . Hover either to see the underline.
+            </p>
+            <SpecimenCaption>{"<a className={link}> · <button className={link}>"}</SpecimenCaption>
+          </Stack>
+        </Surface>
+      </Stack>
+    </Section>
+  );
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function MakerStamps() {
@@ -820,13 +1225,13 @@ export default function MakerStamps() {
 
             <ColorsSection />
             <TypographySection />
-            <StubSection id="spacing" title="Spacing" />
-            <StubSection id="icons" title="Icons" />
+            <SpacingSection />
+            <IconsSection />
 
             <LayoutSection />
 
-            <StubSection id="buttons" title="Buttons" />
-            <StubSection id="links" title="Links" />
+            <ButtonsSection />
+            <LinksSection />
             <StubSection id="copy" title="Copy Actions" />
             <StubSection id="forms" title="Form Inputs" />
             <StubSection id="boxes" title="Boxes & Cards" />
