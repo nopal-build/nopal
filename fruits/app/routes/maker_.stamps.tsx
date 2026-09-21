@@ -31,6 +31,8 @@ import { ErrorPanel } from "stamps/ErrorPanel";
 import { CenterContent } from "stamps/CenterContent";
 import { DrawerContent } from "stamps/DrawerContent";
 import { Chip } from "stamps/Chip";
+import { Input } from "stamps/Input";
+import { CopyField } from "stamps/CopyField";
 import { CircleButton } from "stamps/CircleButton";
 import { HamburgerNeqIcon } from "stamps/HamburgerNeqIcon";
 import { SidebarToggleIcon } from "stamps/SidebarToggleIcon";
@@ -1195,6 +1197,76 @@ function LinksSection() {
   );
 }
 
+// ─── Copy Actions ───────────────────────────────────────────────────────
+
+function CopyActionsSection() {
+  return (
+    <Section id="copy" title="Copy Actions">
+      <Stack gap={6}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>CopyField</Code> from <Code>stamps/CopyField</Code> — a
+          read-only field + Copy button, for install commands, API keys,
+          and share links. Degrades gracefully: the field is{" "}
+          <Code>readOnly</Code> and auto-selects on focus/click, so
+          copying by hand still works even if{" "}
+          <Code>navigator.clipboard</Code> is unavailable.
+        </p>
+
+        <Surface className={sprinkles({ p: 5 })} style={{ maxWidth: "420px" }}>
+          <Stack gap={3}>
+            <CopyField value="nopal login --device=cli" ariaLabel="Example CLI login command" />
+            <SpecimenCaption>{'<CopyField value="..." ariaLabel="..." />'}</SpecimenCaption>
+          </Stack>
+        </Surface>
+      </Stack>
+    </Section>
+  );
+}
+
+// ─── Form Inputs ───────────────────────────────────────────────────
+
+function FormInputsSection() {
+  return (
+    <Section id="forms" title="Form Inputs">
+      <Stack gap={6}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>Input</Code> from <Code>stamps/Input</Code> — label,
+          border, radius, and padding all baked in. Covers{" "}
+          <Code>text</Code>, <Code>textarea</Code>, <Code>number</Code>,
+          and <Code>date</Code> — pass <Code>type</Code>.
+        </p>
+
+        <Grid gap={4} minColumnWidth={220} style={{ alignItems: "start" }}>
+          <Input label="Project name" name="project-name" placeholder="Ocotillo" />
+          <Input
+            label="Notes"
+            name="notes"
+            type="textarea"
+            placeholder="Anything worth remembering…"
+          />
+          <Input label="Max guests" name="max-guests" type="number" min={0} max={20} step={1} defaultValue="4" />
+          <Input label="Start date" name="start-date" type="date" />
+        </Grid>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            hideLabel
+          </div>
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            Visually hides the label — e.g. for a compact inline-edit row
+            that already shows a heading elsewhere — while keeping it in
+            the DOM for screen readers.
+          </p>
+          <div style={{ maxWidth: "260px" }}>
+            <Input label="Search" name="search-demo" placeholder="Search…" hideLabel />
+          </div>
+          <SpecimenCaption>{'<Input label="Search" hideLabel />'}</SpecimenCaption>
+        </Stack>
+      </Stack>
+    </Section>
+  );
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function MakerStamps() {
@@ -1232,8 +1304,8 @@ export default function MakerStamps() {
 
             <ButtonsSection />
             <LinksSection />
-            <StubSection id="copy" title="Copy Actions" />
-            <StubSection id="forms" title="Form Inputs" />
+            <CopyActionsSection />
+            <FormInputsSection />
             <StubSection id="boxes" title="Boxes & Cards" />
             <StubSection id="badges" title="Badges & Chips" />
             <StubSection id="overlays" title="Overlays" />
