@@ -420,6 +420,69 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     recomputes `content_hash` on the project's copy;
     `updateFileRef({content})` alone does not.
 
+## Annotations: marks, and refiling a misfiled entry
+
+A person reading a project's Efforts page can write on it. The unit they
+write on, what that mark becomes, and how long it shows are all decided by
+code; the model reads marks the way it reads any other input.
+
+- **What can be marked** — `oxmarkdown-core/src/markUnits.ts`. One bullet,
+  one `##`/`###` heading, one sentence of a paragraph, one gallery photo,
+  and nothing smaller: no drag, no character ranges. The same module runs
+  on the server (to validate a mark) and in the renderer (to place it), so
+  both agree on a unit's key; sentence splitting is a fixed regex, never
+  `Intl.Segmenter`, whose ICU data differs between Node and browsers. A
+  key only has to hold within one page body, which is all a mark needs.
+- **A mark is an entry** — `graphLogMarks.server.ts`, table
+  `graphlog_marks`. Verbatim, dated, authored, never rewritten by the
+  system. Its author may rewrite or delete it until a run reads it; after
+  that a page may cite it, so it stands. Code projects the rows into
+  `<project>/Syncs/Marks/<date>-<humanId>.md`, named and synced exactly
+  like a Card's copy beside it, so `sync-graph` extracts marks as ordinary
+  sources. Each mark is written with its own record in words (the passage,
+  the section, whose day that passage cites) because node ids are
+  renumbered on re-extraction and a page is rewritten every run.
+- **ADR-012 for marks.** A marks file mixes a person's words with a
+  code-written context line quoting the page, so `renderQuoteBlocks` takes
+  a per-block predicate there (`isInsideMarkText`) instead of one answer
+  for the whole source. Only the marker's own words get `==`.
+- **Marks are not writers.** Nodes that came from a marks file are left
+  out of the writers line and the bench-name gate in
+  `graph-project-view`: writing in the margin is not working on the
+  project, and only writers get a bench heading.
+- **How long a mark shows.** Until a run reads it (`read_at`), and no
+  longer: it is a node by then and `Syncs/Marks/` is the record. A mark
+  the page has moved past but nothing has read still shows, re-anchored to
+  a line citing the same entry, then its section heading, then the top,
+  and says it is waiting. There is no page archive; `pageBody.server.ts`
+  exists only to say which page a mark was written on.
+- **What the run does with them** — `graph-project-view`. Unread marks
+  open the gate the way an unread note does, and add one prompt block plus
+  two tools (`read_mark`, `propose_move`). With no marks the prompt and
+  the tool array are byte-identical to what they always were; `viewTools`
+  returns `TOOLS` itself. Marks are stamped read only on a clean finish.
+- **Refiling** — `graphLogMoves.server.ts`, table `graphlog_moves`. A
+  misfiled entry is corrected at the source: the `##` section (or the
+  whole Card) is cut from the Card it was filed under and put, unchanged,
+  into a Card for the right project on the same day, which is then mounted
+  on that day's page. There is no routing layer; every stage rebuilds from
+  the Cards. Guards: the entry must be one the marked passage cites, the
+  destination must be a project both people can see, and only the author's
+  own entry moves — anyone else's becomes a request they confirm
+  (`POST /api/graphlog/moves/:id`). `removeChunk` returns the Card
+  unchanged when the section is not found, never empty. Undo restores the
+  words at the end of the Card.
+- **Another project's name never appears on a page.** A mark that asked
+  for a move is held out of the source project's marks file and replaced
+  by a trace in words; a reader who cannot open the destination sees a
+  placeholder instead of the mark's text; and the page run refuses a write
+  naming a project this one has refiled to, treating a page that still
+  says one as a reason to rewrite (`namesAnotherProject`).
+- **A day whose sources are all empty leaves the graph** — `sync-graph`
+  removes it with no model call. That is what makes a refiled day
+  disappear from the project it left, and it also stops a blank entry
+  costing a call on every run.
+
 ## Reset
 
 GraphLog has three independent, narrower resets — `graphLogReset.server.ts`

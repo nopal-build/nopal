@@ -15,3 +15,4 @@ export * from "./cardDirective";
 export * from "./galleryDirective";
 export * from "./mention";
 export * from "./refDirective";
+export * from "./markUnits";

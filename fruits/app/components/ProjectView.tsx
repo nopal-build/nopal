@@ -19,6 +19,7 @@
 
 import type { ResolvedGalleryImage } from "oxmarkdown-core";
 import OxRenderer from "./OxRenderer";
+import type { OxAnnotations } from "../oxmarkdown/marks";
 
 export interface ProjectViewProps {
   /** The README body (front matter already stripped). */
@@ -26,12 +27,16 @@ export interface ProjectViewProps {
   /** Keyed by a `::gallery{folder="..."}` directive's `folder` attribute
    * value. Omit for a plain body with no gallery resolution at all. */
   galleryFolders?: Record<string, ResolvedGalleryImage[]>;
+  /** The pen: marks on this version of the page, and whether a new one
+   * can be written. See `oxmarkdown/marks.tsx`. */
+  annotations?: OxAnnotations;
 }
 
-export function ProjectView({ body, galleryFolders }: ProjectViewProps) {
+export function ProjectView({ body, galleryFolders, annotations }: ProjectViewProps) {
   return (
     <OxRenderer
       markdown={body}
+      annotations={annotations}
       resolveGalleryFolder={
         galleryFolders ? (folderName) => galleryFolders[folderName] : undefined
       }

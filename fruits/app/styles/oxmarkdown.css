@@ -1610,3 +1610,207 @@ img.ox-file-thumb {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── The pen: GraphLog marks ──────────────────────────────────────────────
+   See `oxmarkdown/marks.tsx`. Only present when a caller passes
+   `annotations` to `OxRenderer` (the project page); nothing here matches
+   anything on a page without it. Plain on purpose: the visual is Gerald's
+   to redo. What it owes him is the hover unit, the margin, and the note's
+   fields (who, when, what).
+
+   Red is the pen (`--red`, clay-500, the same red as the marketing site's
+   `.annotation` margin notes in `webapp/app/styles/path.css`); the hand is
+   Indie Flower (`fonts.hand` in stamps). */
+.ox-tokens {
+  --ox-mark-color: var(--red, #a63b31);
+  --ox-mark-font: "Indie Flower", cursive;
+  --ox-mark-hover-bg: color-mix(in srgb, var(--red, #a63b31) 7%, transparent);
+  --ox-mark-margin: 232px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ox-tokens {
+    --ox-mark-color: var(--red-light, #f6c8c3);
+    --ox-mark-hover-bg: color-mix(in srgb, var(--red-light, #f6c8c3) 12%, transparent);
+  }
+}
+
+/* Room for the margin, where there is room at all. Below this width the
+   notes sit under the thought they are about instead. */
+@media (min-width: 1024px) {
+  .ox-annotated {
+    padding-right: var(--ox-mark-margin);
+  }
+}
+
+.ox-mark-host {
+  position: relative;
+}
+
+.ox-markable--pen {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.12s ease;
+}
+.ox-markable--pen:hover,
+.ox-markable--open {
+  background: var(--ox-mark-hover-bg);
+  box-shadow: 0 0 0 3px var(--ox-mark-hover-bg);
+}
+div.ox-markable {
+  display: block;
+}
+
+/* A thought somebody marked: underlined in the pen's red, the way you
+   would underline a line before writing beside it. */
+.ox-markable--marked {
+  text-decoration: underline;
+  text-decoration-color: var(--ox-mark-color);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+}
+
+.ox-mark-notes {
+  display: block;
+  font-family: var(--ox-mark-font);
+  color: var(--ox-mark-color);
+  font-size: 1.05rem;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+}
+.ox-content .ox-mark-notes {
+  margin-top: 0;
+}
+
+@media (min-width: 1024px) {
+  .ox-mark-notes {
+    position: absolute;
+    top: 0;
+    left: calc(100% + 24px);
+    width: calc(var(--ox-mark-margin) - 32px);
+  }
+}
+
+@media (max-width: 1023px) {
+  .ox-mark-notes {
+    margin: 4px 0 8px;
+    padding-left: 12px;
+    border-left: 2px solid var(--ox-mark-color);
+  }
+}
+
+.ox-mark-note {
+  display: block;
+}
+.ox-mark-note + .ox-mark-note {
+  margin-top: 10px;
+}
+.ox-mark-note__text {
+  display: block;
+  white-space: pre-wrap;
+}
+.ox-mark-note__moved {
+  display: block;
+  font-style: italic;
+}
+.ox-mark-note__by {
+  display: block;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.ox-mark-popover {
+  width: 320px;
+}
+.ox-mark-popover.ox-popover--sheet {
+  width: 100%;
+}
+.ox-mark-composer textarea {
+  min-height: 96px;
+}
+.ox-mark-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ox-mark-actions button {
+  padding: 6px 14px;
+}
+.ox-mark-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ox-mark-error {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: var(--ox-mark-color);
+}
+.ox-mark-note__action {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--ox-font-family);
+  font-size: 0.8rem;
+}
+.ox-mark-note__action button {
+  padding: 2px 10px;
+}
+
+/* The refile control under the pen. */
+.ox-mark-move__note {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--ox-color-subtle);
+}
+.ox-mark-move__open {
+  display: block;
+  margin-top: 8px;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--ox-color-link);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.ox-mark-move__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+}
+.ox-mark-move__row select {
+  flex: 1 1 60%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--ox-color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.ox-mark-actions__erase {
+  margin-right: auto;
+}
+.ox-mark-note__waiting {
+  display: block;
+  font-family: var(--ox-font-family);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+}
+
+/* Your own note, so you can tell at a glance which one the pen will open
+   when you click that line. Deliberately slight: Gerald owns the visual. */
+.ox-mark-note--mine .ox-mark-note__text {
+  font-weight: 500;
+}
+.ox-mark-note--mine .ox-mark-note__by {
+  opacity: 1;
+}

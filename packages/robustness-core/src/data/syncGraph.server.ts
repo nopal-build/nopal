@@ -194,6 +194,7 @@ import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { buildRefDirectiveMarkdown } from "oxmarkdown-core";
 import { splitFrontmatter } from "./project.types";
+import { isInsideMarkText, MARKS_SYNC_FOLDER_NAME, parseMarkTexts } from "./graphLogMarks.server";
 import {
   createFileRef,
   deleteFileRef,
@@ -590,9 +591,17 @@ export function listSplitBounce(rawBlocks: unknown): { key: string; items: numbe
   return { key: JSON.stringify(rawBlocks), items };
 }
 
-function renderQuoteBlocks(rawBlocks: unknown, highlight: boolean = true): string | null {
+/** `highlight` is either one answer for every block (a Card's text is all
+ * somebody's words; an uncaptioned photo's description is nobody's), or a
+ * per-block test, for a source that mixes the two (a marks file, where
+ * only the mark itself is the person's words). */
+export function renderQuoteBlocks(
+  rawBlocks: unknown,
+  highlight: boolean | ((text: string) => boolean) = true,
+): string | null {
   if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) return null;
-  const mark = (text: string) => (highlight ? `==${text}==` : text);
+  const shouldMark = typeof highlight === "function" ? highlight : () => highlight;
+  const mark = (text: string) => (shouldMark(text) ? `==${text}==` : text);
   const parts: string[] = [];
   for (const raw of rawBlocks) {
     if (!raw || typeof raw !== "object") continue;
@@ -723,6 +732,10 @@ function createSyncGraphExecutors(input: {
   date: string;
   sourceCitations: string[];
   sourceFiles: (SourceFileInfo | null)[];
+  /** Parallel to `sourceFiles`: for a marks file (`Syncs/Marks/`), the
+   * marker's own words, the only part of it that may be highlighted.
+   * Null for every other source. */
+  sourceMarkTexts?: (string[] | null)[];
   knownBackwardIds: Map<string, string>;
 }): {
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>;
@@ -767,7 +780,13 @@ function createSyncGraphExecutors(input: {
       // The model is never asked to know or remember it.
       const fileInfo = input.sourceFiles[sourceIndex];
       const humanAuthored = isHumanAuthoredSource(fileInfo);
-      const quoteBody = renderQuoteBlocks(toolInput.blocks, humanAuthored);
+      // A marks file quotes the page it was written on (code-written
+      // context) beside the marker's words; only the words are theirs.
+      const markTexts = input.sourceMarkTexts?.[sourceIndex] ?? null;
+      const quoteBody = renderQuoteBlocks(
+        toolInput.blocks,
+        markTexts ? (text: string) => isInsideMarkText(text, markTexts) : humanAuthored,
+      );
       if (!quoteBody) return "Error: blocks must include at least one non-empty paragraph or list block";
       const setup = typeof toolInput.setup === "string" ? toolInput.setup.trim() : "";
       // If this node cites an ATTACHED FILE (a photo, a video, a PDF,
@@ -1267,6 +1286,12 @@ export async function runSyncGraph(
   }
 
   const candidates = await collectDatedCandidates(projectFolder.human_id, syncsFolder._id);
+  // Where marks land (`Syncs/Marks/`), so their files get the per-block
+  // highlight test below. Absent on a project nobody has marked.
+  const marksFolderId =
+    (await listFolderChildren(projectFolder.human_id, syncsFolder._id)).folders.find(
+      (f) => f.name === MARKS_SYNC_FOLDER_NAME,
+    )?._id ?? null;
   if (candidates.length === 0) {
     log("sync-graph: no dated files under syncs/ yet — nothing to do.");
     return { ok: true, skipped: false, days: [], nodesWritten: 0, incomplete: [] };
@@ -1414,7 +1439,12 @@ export async function runSyncGraph(
     // previously had NO path into the graph at all, since it never
     // carried a `date` and was never offered as a source here).
     const sourceFiles: (SourceFileInfo | null)[] = [];
+    const sourceMarkTexts: (string[] | null)[] = [];
     let uncaptionedSkipped = 0;
+    // Whether any source this day holds anything at all. A day whose only
+    // entry was moved to another project keeps an empty synced copy (see
+    // `graphLogMoves.server.ts`), and that day has to leave the graph.
+    let anyContent = false;
     for (const candidate of dayCandidates) {
       const source = await getFileRefById(candidate.fileId);
       if (!source) {
@@ -1449,6 +1479,7 @@ export async function runSyncGraph(
         continue;
       }
 
+      if (attribution.isAttachment || (source.content ?? "").trim()) anyContent = true;
       hashParts.push(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
       if (sidecar) hashParts.push(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
       if (caption) hashParts.push(`caption:${candidate.fileId}:${caption}`);
@@ -1472,6 +1503,9 @@ export async function runSyncGraph(
           location: `/vault?file=${source._id}`,
           verbose: true,
         }),
+      );
+      sourceMarkTexts.push(
+        marksFolderId !== null && candidate.folderId === marksFolderId ? parseMarkTexts(source.content ?? "") : null,
       );
       sourceFiles.push(
         attribution.isAttachment
@@ -1530,6 +1564,20 @@ export async function runSyncGraph(
       continue;
     }
 
+    if (sourceBlocks.length > 0 && !anyContent) {
+      // Every source is empty. The case this exists for is a day whose
+      // words were moved to another project (the empty synced copy a move
+      // leaves, see `graphLogMoves.server.ts`); it also catches an entry
+      // that was always blank, which used to cost a model call on every
+      // run to learn there was nothing in it. Either way the day goes,
+      // the same way a day with nothing worth capturing goes below.
+      log(`sync-graph: ${date} — every source for this day is empty; nothing to extract${existing ? ", removing the day" : ""}.`);
+      if (existing) await deleteFileRef(existing._id);
+      headingsByDate.delete(date);
+      days.push({ date, changed: true, empty: true, nodes: 0 });
+      continue;
+    }
+
     // The existing day file is NOT deleted here. It used to be, before
     // the model was ever called, so a day whose re-extraction then failed
     // (a rate limit, a Stop, an outage) had its previous nodes erased and
@@ -1562,6 +1610,7 @@ export async function runSyncGraph(
       date,
       sourceCitations,
       sourceFiles,
+      sourceMarkTexts,
       knownBackwardIds,
     });
 
