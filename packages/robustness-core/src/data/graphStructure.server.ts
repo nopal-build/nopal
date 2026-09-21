@@ -307,24 +307,44 @@ export function nodeIdsInSection(section: ReadmeSection): string[] {
 export function pruneStaleMembership(
   sections: ReadmeSection[],
   allNodesById: Map<string, GraphLogNode>,
-): { sections: ReadmeSection[]; dropped: string[] } {
+): { sections: ReadmeSection[]; dropped: string[]; droppedThreads: string[] } {
   const dropped: string[] = [];
-  const pruned = sections.map((section) => {
+  const droppedThreads: string[] = [];
+  const pruned: ReadmeSection[] = [];
+  for (const section of sections) {
+    const lines = section.content.split("\n");
     const kept: string[] = [];
-    for (const line of section.content.split("\n")) {
+    let members = 0;
+    let keptMembers = 0;
+    for (const line of lines) {
       const match = NODE_LINE_RE.exec(line.trim());
       if (match) {
+        members++;
         const id = `${match[1]}#${Number(match[2])}`;
         if (!allNodesById.has(id)) {
           dropped.push(id);
           continue;
         }
+        keptMembers++;
       }
       kept.push(line);
     }
-    return kept.length === section.content.split("\n").length ? section : { heading: section.heading, content: kept.join("\n") };
-  });
-  return { sections: pruned, dropped };
+    // A THREAD THAT LOST ITS LAST NODE IS NOT A THREAD. Until now only the
+    // node lines went and the heading stayed, with its gloss and its
+    // Blocking line, so the index still carried a thread nothing in the
+    // graph supports. graph-project-view then reads it as a Blocking
+    // thread with no citation and writes an honest line about it, which
+    // is how a refiled entry (`graphLogMoves.server.ts`) went on haunting
+    // the project it left. Only a thread that HAD members and now has
+    // none is dropped: a heading the model wrote for another reason is
+    // left alone.
+    if (members > 0 && keptMembers === 0) {
+      droppedThreads.push(section.heading);
+      continue;
+    }
+    pruned.push(kept.length === lines.length ? section : { heading: section.heading, content: kept.join("\n") });
+  }
+  return { sections: pruned, dropped, droppedThreads };
 }
 
 export function buildMembershipIndex(sections: ReadmeSection[]): Set<string> {
@@ -1262,7 +1282,19 @@ export async function runGraphStructure(
   // place nothing and the old threads would stand forever.
   const rawExistingSections =
     existing && !rethread ? splitReadmeSections(splitFrontmatter(existing.content ?? "").body) : [];
-  const { sections: existingSections, dropped: staleIds } = pruneStaleMembership(rawExistingSections, allNodesById);
+  const {
+    sections: existingSections,
+    dropped: staleIds,
+    droppedThreads,
+  } = pruneStaleMembership(rawExistingSections, allNodesById);
+  if (droppedThreads.length > 0) {
+    // Not a stage issue: a thread whose nodes all left (refiled to
+    // another project, or a re-extraction that kept none of them) is the
+    // index catching up, not a failure.
+    log(
+      `graph-structure: ${droppedThreads.length} thread(s) left the index with no nodes behind them: ${droppedThreads.map((t) => `"${t}"`).join(", ")}.`,
+    );
+  }
   if (staleIds.length > 0) {
     const issue =
       `${staleIds.length} node(s) listed in graph-structure.md no longer exist in the graph and were dropped from it: ` +
