@@ -21,7 +21,16 @@
     "./appLayoutShell.css": "./src/appLayoutShell.css.ts",
     "./HamburgerNeqIcon": "./src/HamburgerNeqIcon.tsx",
     "./button.css": "./src/button.css.ts",
-    "./link.css": "./src/link.css.ts"
+    "./link.css": "./src/link.css.ts",
+    "./ErrorPanel": "./src/ErrorPanel.tsx",
+    "./CenterContent": "./src/CenterContent.tsx",
+    "./centerContent.css": "./src/centerContent.css.ts",
+    "./DrawerContent": "./src/DrawerContent.tsx",
+    "./drawerContent.css": "./src/drawerContent.css.ts",
+    "./SidebarToggleIcon": "./src/SidebarToggleIcon.tsx",
+    "./Stack": "./src/Stack.tsx",
+    "./Cluster": "./src/Cluster.tsx",
+    "./Grid": "./src/Grid.tsx"
   },
   "peerDependencies": {
     "react": "^18.3.1"

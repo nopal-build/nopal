@@ -16,7 +16,7 @@ importers:
     dependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.115.0
-        version: 0.115.0
+        version: 0.115.0(zod@3.25.76)
       '@aws-sdk/client-s3':
         specifier: ^3.797.0
         version: 3.1108.0
@@ -211,6 +211,25 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@26.2.0)
 
+  packages/oxmarkdown-cli:
+    dependencies:
+      oxmarkdown-core:
+        specifier: workspace:*
+        version: link:../oxmarkdown-core
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.2.12
+        version: 5.4.21(@types/node@26.2.0)
+      vite-node:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@26.2.0)
+
   packages/oxmarkdown-core:
     dependencies:
       mdast-util-directive:
@@ -264,7 +283,7 @@ importers:
     dependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.115.0
-        version: 0.115.0
+        version: 0.115.0(zod@3.25.76)
       '@aws-sdk/client-s3':
         specifier: ^3.797.0
         version: 3.1108.0
@@ -350,7 +369,7 @@ importers:
         version: 5.81.3
       robustness-core:
         specifier: workspace:*
-        version: file:packages/robustness-core(@types/node@26.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)
+        version: file:packages/robustness-core(@types/node@26.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       vite:
         specifier: ^5.2.12
         version: 5.4.21(@types/node@26.2.0)
@@ -362,7 +381,7 @@ importers:
     dependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.115.0
-        version: 0.115.0
+        version: 0.115.0(zod@3.25.76)
       '@aws-sdk/client-s3':
         specifier: ^3.797.0
         version: 3.1108.0
@@ -3614,6 +3633,9 @@ packages:
     resolution: {integrity: sha512-zK7YHHz4ZXpW89AHXUPbQVGKI7uvkd3hzusTdotCg1UxyaVtg0zFJSTfW/Dq5f7OBBVnq6cZIaC8Ti4hb6dtCA==}
     engines: {node: '>= 14'}
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
@@ -3621,10 +3643,12 @@ snapshots:
 
   '@alloc/quick-lru@5.2.0': {}
 
-  '@anthropic-ai/sdk@0.115.0':
+  '@anthropic-ai/sdk@0.115.0(zod@3.25.76)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
+    optionalDependencies:
+      zod: 3.25.76
 
   '@aws-sdk/checksums@3.1000.27':
     dependencies:
@@ -6617,9 +6641,9 @@ snapshots:
 
   reusify@1.1.0: {}
 
-  robustness-core@file:packages/robustness-core(@types/node@26.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3):
+  robustness-core@file:packages/robustness-core(@types/node@26.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76):
     dependencies:
-      '@anthropic-ai/sdk': 0.115.0
+      '@anthropic-ai/sdk': 0.115.0(zod@3.25.76)
       '@aws-sdk/client-s3': 3.1108.0
       '@aws-sdk/lib-storage': 3.1127.0(@aws-sdk/client-s3@3.1108.0)
       '@aws-sdk/s3-request-presigner': 3.1108.0
@@ -7197,5 +7221,8 @@ snapshots:
       archiver-utils: 5.0.2
       compress-commons: 6.0.2
       readable-stream: 4.7.0
+
+  zod@3.25.76:
+    optional: true
 
   zwitch@2.0.4: {}
