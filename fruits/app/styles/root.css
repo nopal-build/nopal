@@ -92,11 +92,12 @@ html {
   --color-surface-inset: var(--surface-day-300);
   --color-surface-border: var(--surface-day-500);
 
-  /* Form fields deliberately don't follow the day/night surface swap
-     above — inputs keep an "ink on paper" look (dark text/border on a
-     pale background) in BOTH schemes rather than inverting to a dark
-     field on a dark page, which is why `field-text` doesn't change
-     between the two blocks below. */
+  /* Form fields — same day/night inversion as `--color-surface-card`/
+     `--color-surface-border` (an input reads as just another card-like
+     surface, only text color flips extra to stay readable against it).
+     Previously these deliberately did NOT invert (an "ink on paper"
+     look, pale in both schemes) — changed because it stood out as the
+     one thing that didn't look dark-mode-aware next to everything else. */
   --color-field-bg: var(--white);
   --color-field-border: var(--surface-night-500);
   --color-field-text: var(--surface-night-100);
@@ -119,8 +120,9 @@ html {
     --color-surface-card: var(--surface-night-100);
     --color-surface-inset: var(--surface-night-300);
     --color-surface-border: var(--surface-night-500);
-    --color-field-bg: var(--surface-day-100);
-    --color-field-border: var(--surface-day-500);
+    --color-field-bg: var(--surface-night-100);
+    --color-field-border: var(--surface-night-500);
+    --color-field-text: var(--white);
     --color-nav-active-bg: var(--white);
   }
 }

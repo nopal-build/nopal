@@ -107,8 +107,8 @@ export const semanticColors = {
   surfaceInset: "var(--color-surface-inset)",
   surfaceBorder: "var(--color-surface-border)",
 
-  // Form fields deliberately don't follow the day/night surface swap —
-  // see the comment above `--color-field-bg` in root.css.
+  // Same day/night inversion as `surfaceCard`/`surfaceBorder` — see the
+  // comment above `--color-field-bg` in root.css.
   fieldBg: "var(--color-field-bg)",
   fieldBorder: "var(--color-field-border)",
   fieldText: "var(--color-field-text)",
