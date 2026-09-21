@@ -92,18 +92,19 @@ marks-on-text-leaf model, the same conceptual step Lexical's own
 conversion needs (Lexical is ALSO a flat-marks-on-leaves model, unlike
 mdast).
 
-Loads the real `DEFAULT_SAMPLE`, including `:::gallery{...}`.
-Confirmed via the SSR binary that the ENTIRE pipeline round-trips
-correctly on real content: the heading, bold/italic/link paragraph, and—
-the important case—the `:::note{...}` container directive (unsupported
-as a real node) degrades to a VISIBLE placeholder paragraph wrapped in a
-plain `blockquote`, with its two real inner paragraphs preserved
-correctly across the blank line between them, not truncated or merged.
-Task-list checkboxes show as a plain `[ ]`/`[x]` text prefix (no real
-checkbox attribute on this minimal schema yet). Nothing is silently
-dropped — every currently-unsupported construct (directives,
-strikethrough, `==highlight==`, hard line breaks) degrades to plain
-visible text instead.
+Loads the real `DEFAULT_SAMPLE`, including `:::gallery{...}`. **As of
+the real OxMarkdown schema work below, directives/checkboxes/highlight/
+strikethrough are no longer placeholder fallbacks** — confirmed via the
+SSR binary that the ENTIRE pipeline round-trips onto REAL node/mark
+types: the `:::note{...}` container directive is a real
+`container_directive` node (`<div class="ox-directive-container"
+data-directive-name="note">`) with its two real inner paragraphs as
+genuinely separate, individually-editable children (not text swallowed
+into a placeholder), preserved correctly across the blank line between
+them; task-list checkboxes are real (if not yet interactive) `<input
+type="checkbox">` atoms, not a `"[ ] "` text prefix. The one remaining
+placeholder-degradation is a hard line break (`break` → a plain space
+stand-in) — see "What's real follow-up work" below.
 
 **Images: confirmed working, no fix actually needed.** A first pass of
 this README claimed a real gap here ("`convert_block` has no `\"image\"`
@@ -143,26 +144,24 @@ confirmed by reading their source, not assumed) and how it was fixed:
   keydown handler unconditionally calls `preventDefault()` on any
   Backspace/Delete regardless of modifiers, silently swallowing the
   browser's native word-delete with nothing to replace it.
-- **Shift+Enter** inserts a real `hard_break` atom (`<br>`) — a small
-  from-scratch schema extension, since none exists upstream — that works
-  generically in every block with inline content (paragraph, heading,
-  blockquote, list items), not just paragraphs.
-  **Known real bug, found live, not yet fixed**: typing immediately after
-  a hard break can merge the new text into the PRECEDING run and push
-  the `<br>` to the very end (`Hellow<br>world` becomes
-  `Hellowworld<br>` after typing "world") — a classic contenteditable
-  quirk where browsers insert typed characters into the nearest existing
-  text node before a trailing void element rather than after it, when
-  the caret was set via a container/child-index DOM Range with no text
-  node yet to anchor to. Isolated (via `hard_break_followed_by_more_
-  typing_keeps_correct_order` in `commands.rs`) to `taino-edit-dom`'s
-  LIVE incremental DOM patcher specifically — the document model and a
-  full static render are both proven correct; only the live-DOM diff/
-  patch step gets it wrong. Tracked as expected-failing e2e tests
-  (`test.fail()`) in `../../e2e/tests/shift-enter.spec.ts` in all three
-  contexts (paragraph, heading, blockquote) so a real fix will be
-  visible (they'll start failing the OTHER way, flagging themselves for
-  cleanup) rather than silently regressing further unnoticed.
+- **Shift+Enter has no soft/hard-break distinction at all** — a
+  deliberate product call: this editor is closer to a code editor than a
+  document editor, so in a plain paragraph or heading Shift+Enter is
+  IDENTICAL to plain Enter (same underlying functions, not just matching
+  behavior). The only real difference: inside a blockquote or list item,
+  Shift+Enter never exits/lifts on an empty line the way plain Enter
+  does — it always just splits, staying in the same container. This
+  needed zero container-specific code: a single-level `split_block` (the
+  same base command plain `"Enter"` itself falls back to) inherently
+  only ever splits the immediate textblock, never lifts or joins.
+  **An earlier design briefly used a real `hard_break` atom (`<br>`)
+  instead**, to give Shift+Enter an actual in-line soft break — removed
+  after hitting a genuine, confirmed `taino-edit-dom` bug: typing
+  immediately after a trailing `<br>` in the LIVE DOM merges the new text
+  into the preceding run instead of following the break (isolated to the
+  live incremental DOM patcher specifically; the document model and a
+  full static render were both proven correct). Moot now — there's no
+  atom left to trigger it.
 - **Undo/redo** — wired up via `taino_edit_extensions::History`
   (`Mod-z`/`Mod-Shift-z`); the core history machinery was already there,
   just never bound to a keymap in this crate. Each transaction is
@@ -182,22 +181,78 @@ a REAL browser catches those. `?doc=<url-encoded markdown>` (read by
 `initial_markdown()` in `lib.rs`) lets those tests load a small, hermetic
 fixture instead of fighting with `DEFAULT_SAMPLE`.
 
+## The real OxMarkdown schema: built, not yet interactive
+
+`src/oxmarkdown_schema.rs` adds the real node/mark types the sections
+above describe using: `Highlight`/`Strikethrough` marks, and three
+directive node kinds (`leaf_directive`/`container_directive`/
+`text_directive`) plus a `Checkbox` inline atom, wired into `convert.rs`.
+That module's own doc comment is the authoritative record of two real
+constraints found (not assumed) while building it:
+
+- **`DomSpec` has no way to render arbitrary computed markup** the way a
+  Lexical decorator node can render a whole React component — confirmed
+  by reading its source (`tag` + HTML `attr`s + whether children render
+  inside, nothing else). A leaf/text directive's human-readable
+  `::name{...}` label is therefore stored as the node's own literal
+  (synthetic, not user-typed) text content, generated once at parse
+  time — still `atom: true` regardless (matching `Image`'s own
+  precedent). The REAL source of truth for eventual round-tripping is
+  the separate `name`/`attributes` attrs (`attributes` holds the ENTIRE
+  `{key="value" ...}` set as one JSON object — possible at all because
+  `AttrValue` is genuinely just `serde_json::Value`, confirmed by
+  reading `taino-edit-core::attrs`'s source), not this display text.
+- **Checkboxes deliberately do NOT follow the real product's own
+  "attribute on the list item" convention.** `taino-edit-extensions`'s
+  `Lists` extension already registers a `"list_item"` node type, and
+  `SchemaBuilder::build` hard-errors on any duplicate type name
+  (confirmed by reading its source) — a second, competing schema
+  addition for `"list_item"` can't coexist with using `Lists` at all,
+  and forking `Lists` entirely was disproportionate to what a checkbox
+  needs. Used a `Checkbox` INLINE ATOM instead (the first inline child
+  of a task item's first paragraph) — achieves the same practical goal
+  (a real, losslessly round-trippable, individually-selectable state)
+  without forking anything.
+
+**Confirmed via the SSR binary against the real `DEFAULT_SAMPLE`**: the
+`:::note{...}` container directive, `::badge{...}` leaf directive,
+`:ref{...}` inline directive, both task checkboxes, and the GFM
+strikethrough in the sample's own intro paragraph all render as their
+real new node/mark types, not placeholders — see this crate's own
+`convert.rs` test module for the equivalent native-test proof (leaf/
+container/text directive attr preservation, checkbox state, highlight/
+strikethrough marks, and confirming an `@`-mention-style link needs no
+special handling at all).
+
+**Deliberately NOT done in this pass** (real follow-up work, not
+oversights):
+
+- **No interactivity yet** — no click-to-toggle a checkbox, no directive
+  attribute popover, no per-directive-kind (`::file`, `::card`, ...)
+  rich rendering. The checkbox's `<input>` is real but `disabled`: real
+  click-to-toggle needs a `taino-edit-dom` "change"/"click" listener
+  wired to a model-updating command, which doesn't exist for ANY node in
+  this schema yet (not a checkbox-specific gap) — shipping a checkbox
+  that LOOKS clickable but silently does nothing would be a worse
+  interim state than an honestly inert one.
+- **No markdown serialization back out yet** — `convert.rs` is still
+  one-way (markdown → taino tree only). Round-tripping edits back to
+  markdown text needs a taino-tree → mdast-JSON → markdown pass (the
+  reverse of today's pipeline, likely reusing `oxmarkdown_rs::
+  serialize_document`'s own mdast-JSON → markdown half), not attempted
+  here.
+- **No HTML `parse_dom` for the new node/mark types** — pasting
+  externally-formatted content shaped like a directive/checkbox won't
+  reconstruct one; out of scope until paste itself is a real feature
+  for this crate.
+
 ## What's real follow-up work (not started)
 
 The entire point of this spike was answering "does taino-edit work at
-all in our stack," not building the real editor. Still ahead, once this
-proves out for real (a browser check, not just curl/compiler
-confirmation):
+all in our stack," not building the real editor. Still ahead:
 
-- **An actual OxMarkdown schema** — directives (leaf/container/text) as
-  real node types via `taino-edit`'s `Extension` trait, task checkboxes
-  as a real list-item attribute (matching the JS implementation's own
-  deliberate convention — see the `oxmarkdown` skill: "Checklists never
-  use `@lexical/list`'s native `\"check\"` list type... a field on a
-  custom node" — same shape, different framework), `@`-mentions, and
-  `==highlight==`/GFM strikethrough as real mark types. The conversion
-  layer's current placeholder-text fallbacks (see above) are exactly
-  the call sites that would switch over to real node/mark construction.
+- The directive/checkbox interactivity and serialization gaps just
+  above.
 - Reconsidering the hard line-break fallback (a literal `\n` character
   ends up embedded in an HTML text run rather than a real line break —
   a cosmetic issue spotted in the SSR output, not chased down yet).

@@ -1,19 +1,24 @@
 //! Editing-mode spike: does `taino-edit` (a real ProseMirror-style
 //! rich-text editor for Leptos, no JS bridge at runtime) work in our
-//! stack at all? Now loading REAL OxMarkdown content (parsed via
-//! `oxmarkdown-rs`, converted via `convert.rs`) rather than a hand-
-//! built one-paragraph fixture — using taino-edit's own built-in
-//! extensions (paragraph, heading, bold, italic, code, link, image,
-//! blockquote, code_block, lists), still no CUSTOM OxMarkdown schema
-//! (directives/checkboxes/mentions/highlight as real node/mark types).
-//! That's real, separate follow-up work once this proves out. See
-//! `ono/README.md` and this crate's own README.
+//! stack at all? Loads REAL OxMarkdown content (parsed via
+//! `oxmarkdown-rs`, converted via `convert.rs`) using taino-edit's own
+//! built-in extensions (paragraph, heading, bold, italic, code, link,
+//! image, blockquote, code_block, lists) PLUS the real OxMarkdown-
+//! specific schema additions in `oxmarkdown_schema` (directives,
+//! checkboxes, highlight, strikethrough) — see that module's own doc
+//! comment for what each is and the real constraints found building
+//! them. `@`-mentions need no schema addition at all: the real product's
+//! own convention (see the `oxmarkdown` skill) saves a mention as a
+//! plain `[@Name](path)` link, already covered by the built-in `Link`
+//! extension. See `ono/README.md` and this crate's own README.
 
 mod commands;
 mod convert;
+mod oxmarkdown_schema;
 
-use commands::{EditingFixups, HardBreak};
+use commands::EditingFixups;
 use leptos::prelude::*;
+use oxmarkdown_schema::{Checkbox, Directives, Highlight, Strikethrough};
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use wasm_bindgen::prelude::*;
 
@@ -177,8 +182,11 @@ fn build_editor(markdown: &str) -> (EditorState, Keymap, InputRules) {
         &Blockquote,
         &CodeBlock,
         &Lists,
-        &HardBreak,
         &History,
+        &Highlight,
+        &Strikethrough,
+        &Directives,
+        &Checkbox,
     ];
     let schema = build_schema_with(base, &exts, "doc").unwrap();
     let keymap_exts: Vec<&dyn taino_edit_extensions::Extension> = {
@@ -239,7 +247,7 @@ fn App() -> impl IntoView {
     view! {
         <div id="app">
             <p class="ox-status-inline">
-                "oxmarkdown-editor spike - taino-edit, minimal built-in schema (no OxMarkdown extensions yet)."
+                "oxmarkdown-editor - taino-edit, with real OxMarkdown directives/checkboxes/highlight/strikethrough."
             </p>
             <div on:input=on_input>
                 <TainoEditor state=state keymap=keymap />

@@ -9,16 +9,13 @@
 //! nodes) — same idea, different framework, same reason: two AST
 //! shapes need a real bridge, not a second parser.
 //!
-//! Scope: this crate's minimal schema only (paragraph, heading, bold,
-//! italic, code (inline mark), link, image, blockquote, code_block,
-//! bullet/ordered lists). Anything the schema has no real node/mark for
-//! yet (directives, `==highlight==`, GFM strikethrough, task-list
-//! checkboxes as a REAL interactive state) degrades to plain, visible
-//! text — see each `match` arm below for exactly how — rather than
-//! silently dropping content. Building the actual OxMarkdown schema
-//! (directives as real node types via `Extension`, checkboxes as a
-//! real attribute, mentions, highlight as a real mark) is the next,
-//! separate step once this conversion shape itself is proven.
+//! Directives, checkboxes, `==highlight==`, and GFM strikethrough now
+//! convert to the real node/mark types in `oxmarkdown_schema` — see that
+//! module's own doc comment for what each is and the real constraints
+//! found building them. A hard line break (`break`) is still a plain
+//! space stand-in (no real line-break equivalent in this schema — see
+//! `ono/README.md`'s follow-up list), and `@`-mentions need no special
+//! handling at all: they're already just `link` nodes.
 
 use serde_json::Value;
 use taino_edit_leptos::{AttrValue, Attrs, Mark, Node, Schema};
@@ -66,6 +63,42 @@ fn text_node(schema: &Schema, value: &str, marks: Vec<Mark>) -> Option<Node> {
         return None;
     }
     schema.text(value, marks).ok()
+}
+
+/// The two attrs every directive node shares (see `oxmarkdown_schema`'s
+/// own doc comment for why a single JSON-object `attributes` attr,
+/// rather than one attr per key).
+fn directive_attrs(name: &str, attributes: &Value) -> Attrs {
+    let mut attrs = Attrs::new();
+    attrs.insert("name".to_string(), AttrValue::from(name.to_string()));
+    attrs.insert("attributes".to_string(), attributes.clone());
+    attrs
+}
+
+/// Reconstructs a human-readable `fence + name + {key="value" ...}`
+/// label from a directive's name/attributes, for the synthetic display
+/// text `oxmarkdown_schema`'s leaf/text directive nodes need (see that
+/// module's own doc comment on the real `DomSpec` limitation this works
+/// around). Attribute ORDER is not preserved (`attributes` came from a
+/// `HashMap`, which has none) — sorted here purely for a deterministic
+/// display string; the actual source of truth for round-tripping is the
+/// `attributes` JSON value stored as a real node attr, which is
+/// order-independent.
+fn format_directive_label(fence: &str, name: &str, attributes: &Value) -> String {
+    let mut label = format!("{fence}{name}");
+    if let Some(map) = attributes.as_object() {
+        if !map.is_empty() {
+            let mut pairs: Vec<String> = map
+                .iter()
+                .map(|(k, v)| format!("{k}=\"{}\"", v.as_str().unwrap_or("")))
+                .collect();
+            pairs.sort();
+            label.push('{');
+            label.push_str(&pairs.join(" "));
+            label.push('}');
+        }
+    }
+    label
 }
 
 fn convert_blocks(schema: &Schema, node: &Value) -> Vec<Node> {
@@ -128,66 +161,89 @@ fn convert_block(schema: &Schema, node: &Value) -> Option<Node> {
         // yet — dropped, not shown as a placeholder, since neither
         // carries meaningful content of its own to preserve.
         "thematicBreak" | "yaml" => None,
-        // Directives (leaf/container) have no real node type yet — a
-        // plain, visible placeholder paragraph, so content is never
-        // silently lost even though it isn't really editable as a
-        // directive. Real per-directive node types are the actual
-        // follow-up work (see this crate's README).
+        // A leaf directive is a real, atomic `leaf_directive` node now
+        // (see `oxmarkdown_schema`) — `name`/`attributes` are preserved
+        // losslessly as real node attrs; the text child is only a
+        // synthetic display label.
         "leafDirective" => {
-            let name = node["name"].as_str().unwrap_or("?");
-            let label = format!("[::{name}{{...}} \u{2014} directive not yet supported here]");
+            let name = node["name"].as_str().unwrap_or("");
+            let attributes = &node["attributes"];
+            let label = format_directive_label("::", name, attributes);
             let text = text_node(schema, &label, vec![])?;
             schema
-                .node("paragraph", Attrs::new(), vec![text], vec![])
+                .node(
+                    "leaf_directive",
+                    directive_attrs(name, attributes),
+                    vec![text],
+                    vec![],
+                )
                 .ok()
         }
+        // A container directive is a real `container_directive` node
+        // whose children convert NORMALLY (genuinely, individually
+        // editable content — not a placeholder wrapping degraded text
+        // the way this used to fall back to a `blockquote`).
         "containerDirective" => {
-            let name = node["name"].as_str().unwrap_or("?");
-            let label = format!("[:::{name}{{...}} \u{2014} directive not yet supported here]");
-            let text = text_node(schema, &label, vec![])?;
-            let placeholder = schema
-                .node("paragraph", Attrs::new(), vec![text], vec![])
-                .ok()?;
-            let mut children = vec![placeholder];
-            children.extend(convert_blocks(schema, node));
+            let name = node["name"].as_str().unwrap_or("");
+            let attributes = &node["attributes"];
+            let mut children = convert_blocks(schema, node);
+            if children.is_empty() {
+                // `container_directive`'s content model is `block+` (at
+                // least one child) — an empty `:::name\n:::` still needs
+                // something to satisfy it.
+                children.push(empty_paragraph(schema));
+            }
             schema
-                .node("blockquote", Attrs::new(), children, vec![])
+                .node(
+                    "container_directive",
+                    directive_attrs(name, attributes),
+                    children,
+                    vec![],
+                )
                 .ok()
         }
         _ => None,
     }
 }
 
-/// A GFM task-list item's `checked` state has no real attribute on
-/// this minimal schema's `list_item` yet (`taino-edit-extensions`'s
-/// built-in `Lists` has no checkbox support at all — confirmed by
-/// reading its source, not assumed) — represented as a plain, visible
-/// `[ ]`/`[x]` text marker spliced onto the item's first paragraph
-/// rather than silently dropped. NOT a real interactive checkbox; that
-/// needs a real schema addition, matching the JS implementation's own
-/// approach of a custom attribute rather than a separate node type
-/// (see the `oxmarkdown` skill's Checklists section).
+/// A GFM task-list item's checkbox is now a real (if not yet
+/// interactive) `checkbox` inline atom — see `oxmarkdown_schema`'s own
+/// doc comment for why this diverges from the real product's own
+/// "attribute on the list item" convention (a real, confirmed
+/// constraint of `taino-edit-extensions`'s `Lists` already owning the
+/// `"list_item"` node type, not an oversight). Prepended as the first
+/// inline child of the item's first paragraph after that paragraph
+/// converts normally, rather than mutating the pre-conversion JSON the
+/// way the old text-marker version did.
 fn convert_list_item(schema: &Schema, node: &Value) -> Option<Node> {
     let checked = node["checked"].as_bool();
-    let mut blocks: Vec<Value> = node["children"].as_array().cloned().unwrap_or_default();
+    let mut converted: Vec<Node> = node["children"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|c| convert_block(schema, c))
+                .collect()
+        })
+        .unwrap_or_default();
     if let Some(is_checked) = checked {
-        if let Some(first) = blocks.first_mut() {
-            if first["type"] == "paragraph" {
-                let marker = if is_checked { "[x] " } else { "[ ] " };
-                if let Some(children) = first["children"].as_array_mut() {
-                    children.insert(0, serde_json::json!({"type": "text", "value": marker}));
-                } else {
-                    first["children"] = serde_json::json!([{"type": "text", "value": marker}]);
+        if let Some(first) = converted.first() {
+            if first.node_type().name() == "paragraph" {
+                let mut attrs = Attrs::new();
+                attrs.insert("checked".to_string(), AttrValue::from(is_checked));
+                if let Ok(checkbox) = schema.node("checkbox", attrs, vec![], vec![]) {
+                    let mut children = first.content().children().to_vec();
+                    children.insert(0, checkbox);
+                    if let Ok(rebuilt) =
+                        schema.node("paragraph", Attrs::new(), children, first.marks().to_vec())
+                    {
+                        converted[0] = rebuilt;
+                    }
                 }
             }
         }
     }
-    let children: Vec<Node> = blocks
-        .iter()
-        .filter_map(|c| convert_block(schema, c))
-        .collect();
     schema
-        .node("list_item", Attrs::new(), children, vec![])
+        .node("list_item", Attrs::new(), converted, vec![])
         .ok()
 }
 
@@ -229,6 +285,9 @@ fn convert_inline(schema: &Schema, node: &Value, marks: &[Mark]) -> Vec<Node> {
                 .into_iter()
                 .collect()
         }
+        // `@`-mentions need no special case at all: the real product's
+        // own convention (see the `oxmarkdown` skill) saves a mention as
+        // a plain `[@Name](path)` link — already just this.
         "link" => {
             let mut attrs = Attrs::new();
             attrs.insert(
@@ -258,18 +317,195 @@ fn convert_inline(schema: &Schema, node: &Value, marks: &[Mark]) -> Vec<Node> {
         // a plain space is the closest lossless-enough stand-in
         // (loses the line-break itself, keeps the word boundary).
         "break" => text_node(schema, " ", marks.to_vec()).into_iter().collect(),
-        // GFM strikethrough and the custom `==highlight==` mark have no
-        // real mark type on this minimal schema yet — render the text
-        // plainly (marks dropped) rather than lose the words themselves.
-        "delete" | "mark" => convert_inline_children(schema, node, marks),
-        // An inline text directive (`:ref{...}`) has no real node/mark
-        // yet — a plain, visible placeholder run.
+        // GFM strikethrough and `==highlight==` are now real marks
+        // (`oxmarkdown_schema::Strikethrough`/`Highlight`).
+        "delete" => {
+            let next = with_mark(schema, marks, "strikethrough", Attrs::new());
+            convert_inline_children(schema, node, &next)
+        }
+        "mark" => {
+            let next = with_mark(schema, marks, "highlight", Attrs::new());
+            convert_inline_children(schema, node, &next)
+        }
+        // An inline text directive (`:ref{...}`) is now a real, atomic
+        // `text_directive` node (see the block-level directives above
+        // for the same reasoning).
         "textDirective" => {
-            let name = node["name"].as_str().unwrap_or("?");
-            text_node(schema, &format!(":{name}{{...}}"), marks.to_vec())
+            let name = node["name"].as_str().unwrap_or("");
+            let attributes = &node["attributes"];
+            let label = format_directive_label(":", name, attributes);
+            let Some(text) = text_node(schema, &label, vec![]) else {
+                return Vec::new();
+            };
+            schema
+                .node(
+                    "text_directive",
+                    directive_attrs(name, attributes),
+                    vec![text],
+                    marks.to_vec(),
+                )
+                .ok()
                 .into_iter()
                 .collect()
         }
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::oxmarkdown_schema::{Checkbox, Directives, Highlight, Strikethrough};
+    use taino_edit_extensions::{
+        build_schema_with, Blockquote, Bold, Code, CodeBlock, Extension, Heading, Image, Italic,
+        Link, Lists, Paragraph,
+    };
+    use taino_edit_leptos::{NodeSpec, SchemaBuilder};
+
+    fn test_schema() -> Schema {
+        let base = SchemaBuilder::new()
+            .node(
+                "doc",
+                NodeSpec {
+                    content: Some("block+".into()),
+                    ..Default::default()
+                },
+            )
+            .node(
+                "text",
+                NodeSpec {
+                    group: Some("inline".into()),
+                    ..Default::default()
+                },
+            );
+        let exts: Vec<&dyn Extension> = vec![
+            &Paragraph,
+            &Heading,
+            &Bold,
+            &Italic,
+            &Code,
+            &Link,
+            &Image,
+            &Blockquote,
+            &CodeBlock,
+            &Lists,
+            &Highlight,
+            &Strikethrough,
+            &Directives,
+            &Checkbox,
+        ];
+        build_schema_with(base, &exts, "doc").expect("schema builds")
+    }
+
+    fn find_all<'a>(node: &'a Node, type_name: &str, out: &mut Vec<&'a Node>) {
+        if node.node_type().name() == type_name {
+            out.push(node);
+        }
+        for child in node.content().children() {
+            find_all(child, type_name, out);
+        }
+    }
+
+    #[test]
+    fn leaf_directive_becomes_a_real_atomic_node_with_preserved_attrs() {
+        let schema = test_schema();
+        let doc = markdown_to_doc(&schema, "::badge{label=\"hi\"}\n");
+        let mut found = Vec::new();
+        find_all(&doc, "leaf_directive", &mut found);
+        assert_eq!(found.len(), 1);
+        let node = found[0];
+        assert_eq!(
+            node.attrs().get("name").and_then(|v| v.as_str()),
+            Some("badge")
+        );
+        assert_eq!(
+            node.attrs()
+                .get("attributes")
+                .and_then(|v| v.get("label"))
+                .and_then(|v| v.as_str()),
+            Some("hi")
+        );
+        // Synthetic display label child, for visibility, not the source
+        // of truth for round-tripping.
+        assert_eq!(node.text_content(), "::badge{label=\"hi\"}");
+    }
+
+    #[test]
+    fn container_directive_preserves_multiple_real_child_paragraphs() {
+        let schema = test_schema();
+        let doc = markdown_to_doc(&schema, ":::note{title=\"x\"}\nfirst\n\nsecond\n:::\n");
+        let mut found = Vec::new();
+        find_all(&doc, "container_directive", &mut found);
+        assert_eq!(found.len(), 1);
+        let node = found[0];
+        assert_eq!(
+            node.attrs().get("name").and_then(|v| v.as_str()),
+            Some("note")
+        );
+        assert_eq!(node.child_count(), 2, "both paragraphs, not truncated");
+        assert_eq!(node.text_content(), "firstsecond");
+    }
+
+    #[test]
+    fn text_directive_becomes_a_real_inline_atomic_node() {
+        let schema = test_schema();
+        let doc = markdown_to_doc(&schema, "See :ref{name=\"Jane\"} for details.\n");
+        let mut found = Vec::new();
+        find_all(&doc, "text_directive", &mut found);
+        assert_eq!(found.len(), 1);
+        let node = found[0];
+        assert_eq!(
+            node.attrs().get("name").and_then(|v| v.as_str()),
+            Some("ref")
+        );
+        assert_eq!(
+            node.attrs()
+                .get("attributes")
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.as_str()),
+            Some("Jane")
+        );
+    }
+
+    #[test]
+    fn task_list_checkboxes_become_real_checkbox_atoms() {
+        let schema = test_schema();
+        let doc = markdown_to_doc(&schema, "- [ ] todo\n- [x] done\n- plain\n");
+        let mut found = Vec::new();
+        find_all(&doc, "checkbox", &mut found);
+        assert_eq!(found.len(), 2, "only the two task items get a checkbox");
+        assert_eq!(
+            found[0].attrs().get("checked").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            found[1].attrs().get("checked").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        // The checkbox is a real inline atom, prepended before the text --
+        // NOT a "[ ] "/"[x] " text marker anymore.
+        assert!(!doc.text_content().contains('['));
+    }
+
+    #[test]
+    fn highlight_and_strikethrough_become_real_marks() {
+        let schema = test_schema();
+        let doc = markdown_to_doc(&schema, "==important== and ~~gone~~ text.\n");
+        assert!(schema.mark_type("highlight").is_some());
+        assert!(schema.mark_type("strikethrough").is_some());
+        let json = serde_json::to_string(&doc.to_json()).unwrap();
+        assert!(json.contains("highlight"), "{json}");
+        assert!(json.contains("strikethrough"), "{json}");
+        assert_eq!(doc.text_content(), "important and gone text.");
+    }
+
+    #[test]
+    fn a_mention_style_link_needs_no_special_handling() {
+        let schema = test_schema();
+        let doc = markdown_to_doc(&schema, "[@Jane Doe](/alice:root/Jane)\n");
+        let json = serde_json::to_string(&doc.to_json()).unwrap();
+        assert!(json.contains("link"), "{json}");
+        assert!(json.contains("/alice:root/Jane"), "{json}");
+        assert_eq!(doc.text_content(), "@Jane Doe");
     }
 }

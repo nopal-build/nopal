@@ -33,13 +33,20 @@
 //!    every real editor's own convention, with the caret explicitly
 //!    placed inside the lifted paragraph.
 //!
-//!    A literal in-paragraph line break (Shift+Enter) that stays INSIDE
-//!    the current block — including a blockquote, so you're not forced
-//!    to exit just because a line is empty — is provided via a small
-//!    from-scratch `HardBreak` extension (`taino-edit-core` has no such
-//!    node built in: its own markdown importer treats both soft and hard
-//!    breaks as a plain space, confirmed by reading `taino-edit-core::
-//!    markdown`'s source).
+//!    **Shift+Enter has no soft/hard-break distinction at all** — a
+//!    deliberate design call (this editor is closer to a code editor than
+//!    a document editor): no `hard_break` node, no `<br>`, ever. In a
+//!    plain paragraph or heading it's IDENTICAL to plain Enter (literally
+//!    the same underlying functions); the only real difference is that
+//!    inside a blockquote or list item, Shift+Enter never exits/lifts on
+//!    an empty line the way plain Enter does — it always just splits,
+//!    staying in the same container. See `shift_enter_fixups`'s own doc
+//!    comment. (An earlier `hard_break`/`<br>`-atom-based version of this
+//!    existed briefly and was removed: it hit a REAL, confirmed-by-
+//!    testing `taino-edit-dom` bug where typing immediately after a
+//!    trailing `<br>` in the live DOM merges into the preceding text run
+//!    instead of following the break — moot now that there's no atom to
+//!    trigger it at all.)
 //! 2. **No input rules are wired into the Leptos adapter at all**, and
 //!    `taino-edit-core`'s own `textblock_type_rule` helper (used for e.g.
 //!    `## ` -> heading) has a REAL bug of its own: it never calls
@@ -75,10 +82,10 @@
 //!    Windows/Linux use Ctrl for word-delete).
 
 use regex::Captures;
-use taino_edit_core::{wrapping_rule, Fragment, InputRule, InputRules, ParseRule};
-use taino_edit_extensions::{Extension, SchemaAdditions};
+use taino_edit_core::{wrapping_rule, Fragment, InputRule, InputRules};
+use taino_edit_extensions::Extension;
 use taino_edit_leptos::{
-    AttrValue, Attrs, Command, Dispatch, DomSpec, EditorState, Node, NodeSpec, ResolvedPos, Schema,
+    split_block, AttrValue, Attrs, Command, Dispatch, EditorState, Node, ResolvedPos, Schema,
     Selection, Slice, Transaction,
 };
 
@@ -99,6 +106,7 @@ impl Extension for EditingFixups {
     fn keymap_entries(&self, _schema: &Schema) -> Vec<(String, Command)> {
         vec![
             ("Enter".to_string(), enter_fixups()),
+            ("Shift-Enter".to_string(), shift_enter_fixups()),
             ("Alt-Backspace".to_string(), Box::new(word_delete_backward)),
             ("Ctrl-Backspace".to_string(), Box::new(word_delete_backward)),
             ("Alt-Delete".to_string(), Box::new(word_delete_forward)),
@@ -107,93 +115,45 @@ impl Extension for EditingFixups {
     }
 }
 
-/// A single `<br>`-rendered inline atom node, giving Shift+Enter a literal
-/// in-block line break that does NOT split the block — the escape hatch
-/// for staying inside a blockquote (or any other block) instead of being
-/// forced to exit it just because the current line happens to be empty.
-/// Shaped exactly like `taino-edit-extensions`'s own `Image` (a leaf,
-/// atom, inline node with a matching `to_dom`/`parse_dom` pair) since
-/// `taino-edit-core` has no such node built in.
-pub struct HardBreak;
-
-impl Extension for HardBreak {
-    fn name(&self) -> &str {
-        "hard_break"
-    }
-
-    fn schema_additions(&self) -> SchemaAdditions {
-        SchemaAdditions {
-            nodes: vec![(
-                "hard_break".to_string(),
-                NodeSpec {
-                    group: Some("inline".into()),
-                    inline: true,
-                    atom: true,
-                    to_dom: Some(|_: &Node| DomSpec::void("br")),
-                    parse_dom: vec![ParseRule::tag("br")],
-                    ..Default::default()
-                },
-            )],
-            ..Default::default()
+/// Shift+Enter: on a philosophy call (this editor is closer to a code
+/// editor than a document editor), there is deliberately NO soft/hard
+/// line-break distinction at all — no `hard_break` node, no `<br>`. In a
+/// plain paragraph or heading, Shift+Enter does EXACTLY what plain Enter
+/// does (reusing the very same `code_block_literal_newline`/`exit_
+/// heading_to_paragraph` functions `enter_fixups` uses — not just
+/// matching behavior, but the identical code path). The one real
+/// difference from plain Enter: inside a blockquote or list item,
+/// Shift+Enter NEVER exits/lifts, even on an empty line — it always just
+/// splits the current textblock into a sibling, staying in the same
+/// container. That turns out to need no container-specific code at all:
+/// a single-level `split_block` (the same base command a bare `"Enter"`
+/// falls back to when nothing else claims it) inherently only ever splits
+/// the immediate textblock, never lifts or joins anything — confirmed by
+/// reading its source (see `enter_fixups`'s own doc comment on `lift`
+/// elsewhere in this file for the contrast). The blockquote-exit-on-empty
+/// and list-lift-on-empty behaviors are each an EXTRA layer bolted on top
+/// of plain Enter (by `enter_fixups` and `Lists` respectively) that a
+/// fresh `"Shift-Enter"` keymap entry simply never triggers by calling
+/// `split_block` directly instead of going through either of them.
+fn shift_enter_fixups() -> Command {
+    Box::new(|state, dispatch| {
+        let sel = state.selection();
+        if !sel.is_empty() {
+            return false;
         }
-    }
-
-    fn keymap_entries(&self, _schema: &Schema) -> Vec<(String, Command)> {
-        vec![("Shift-Enter".to_string(), Box::new(insert_hard_break))]
-    }
-}
-
-/// Insert a `hard_break` atom at an empty caret. Deliberately generic —
-/// NOT paragraph-specific — so Shift+Enter means the same thing in every
-/// block that accepts inline content (heading, blockquote's paragraphs,
-/// list items, ...): stay right here, don't split or exit. Only
-/// `code_block` is special-cased: its content type is plain `"text*"`
-/// (no `inline` group members allowed — confirmed by reading
-/// `CodeBlock`'s own `NodeSpec`), so a hard break there would fail
-/// schema validation anyway; Enter's OWN existing
-/// `code_block_literal_newline` already inserts a literal newline
-/// character there instead, which IS valid. Every other block type is
-/// handled by nothing more than ordinary schema validation — confirmed
-/// with a heading-specific test alongside this function's own tests,
-/// deliberately proving this rather than assuming it from the code shape
-/// alone.
-fn insert_hard_break(state: &EditorState, dispatch: Option<&mut Dispatch<'_>>) -> bool {
-    let sel = state.selection();
-    if !sel.is_empty() {
-        return false;
-    }
-    let pos = sel.from();
-    if state.schema().node_type("hard_break").is_none() {
-        return false;
-    }
-    let Ok(rp) = ResolvedPos::resolve(state.doc(), pos) else {
-        return false;
-    };
-    if rp.depth() == 0 || rp.parent().node_type().name() == "code_block" {
-        return false;
-    }
-    let Some(d) = dispatch else { return true };
-    let Ok(br) = state
-        .schema()
-        .node("hard_break", Attrs::new(), vec![], vec![])
-    else {
-        return false;
-    };
-    let mut tx = state.tr();
-    if tx
-        .transform()
-        .insert(
-            pos,
-            Slice::new(Fragment::from_node(br), 0, 0),
-            state.schema(),
-        )
-        .is_err()
-    {
-        return false;
-    }
-    tx.set_selection(Selection::caret(pos + 1));
-    d(tx);
-    true
+        let pos = sel.from();
+        let Ok(rp) = ResolvedPos::resolve(state.doc(), pos) else {
+            return false;
+        };
+        if rp.depth() == 0 {
+            return false;
+        }
+        match rp.parent().node_type().name() {
+            "code_block" => code_block_literal_newline(state, dispatch, pos),
+            "heading" => exit_heading_to_paragraph(state, dispatch, pos),
+            _ => split_block(state, dispatch),
+        }
+    })
 }
 
 /// Delete from an empty caret backward through any trailing whitespace and
@@ -635,7 +595,6 @@ mod tests {
             &Blockquote,
             &Lists,
             &CodeBlock,
-            &HardBreak,
         ];
         build_schema_with(base, &exts, "doc").expect("schema builds")
     }
@@ -863,90 +822,28 @@ mod tests {
         );
     }
 
+    /// For a plain top-level paragraph, the FULL "Enter" keymap chain
+    /// (`enter_fixups` declines -> `Lists` declines -> base `split_block`)
+    /// bottoms out at plain `split_block` — `enter_fixups()` ALONE declines
+    /// for this case (it only knows about its own special cases; the
+    /// "fall through to split_block" part only happens via the outer
+    /// keymap's chaining, not by calling it directly), so `split_block` is
+    /// the correct thing to compare `shift_enter_fixups()` against here.
     #[test]
-    fn shift_enter_inserts_a_hard_break_inside_a_plain_paragraph() {
+    fn shift_enter_in_a_plain_paragraph_matches_plain_enter() {
         let schema = test_schema();
         let state = state_with_paragraph(&schema, "hi");
-        let next = dispatch_and_apply(&state, insert_hard_break).expect("dispatched");
-        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
-        assert!(json.contains("hard_break"), "{json}");
-        // The caret should land right after the inserted atom (size 1).
-        let before = state.selection().from();
-        assert_eq!(next.selection().from(), before + 1);
-    }
-
-    /// Isolates a REAL bug reported by live browser testing: typing text
-    /// immediately after a Shift+Enter hard break merges the new
-    /// characters into the PRECEDING text run and pushes the `<br>` to the
-    /// very end (`<p>Hellow<br>world</p>` becomes `<p>Hellowworld<br></p>`
-    /// in the live DOM) — a classic, well-documented contenteditable quirk:
-    /// browsers often insert typed characters into the nearest EXISTING
-    /// text node before a trailing void element (`<br>`) rather than after
-    /// it, when the caret was positioned via a "container, child-index"
-    /// DOM Range (there's no text node yet to anchor "after the break" to).
-    ///
-    /// This test PROVES the bug is isolated to `taino-edit-dom`'s LIVE
-    /// incremental DOM patcher (`patch_children`/`try_patch` in its own
-    /// `view.rs`, which only ever runs against an already-mounted DOM) —
-    /// NOT this crate's own model/command logic, and NOT a full static
-    /// render: both are checked here and both are correct. A live-browser
-    /// e2e test (`../../e2e/tests/shift-enter.spec.ts`) reproduces the
-    /// ACTUAL failure; this native test exists to rule out the model as
-    /// the culprit, narrowing the real bug to exactly where it lives.
-    #[test]
-    fn hard_break_followed_by_more_typing_keeps_correct_order() {
-        let schema = test_schema();
-        let state = state_with_paragraph(&schema, "Hellow");
-        let mut cur = dispatch_and_apply(&state, insert_hard_break).expect("dispatched");
-        for ch in "world".chars() {
-            let pos = cur.selection().from();
-            let text = cur
-                .schema()
-                .text(&ch.to_string(), vec![])
-                .expect("text node");
-            let mut tx = cur.tr();
-            tx.transform()
-                .insert(
-                    pos,
-                    Slice::new(Fragment::from_node(text), 0, 0),
-                    cur.schema(),
-                )
-                .expect("insert should succeed");
-            tx.set_selection(Selection::caret(pos + 1));
-            cur = cur.apply(tx);
-        }
-        let json = serde_json::to_string(&cur.doc().to_json()).unwrap();
-        // The hard_break should sit BETWEEN "Hellow" and "world" in
-        // document order — checking the raw JSON's own textual order is a
-        // simple, sufficient proxy for structural (child array) order here.
-        let hellow_idx = json.find("Hellow").expect("Hellow present");
-        let break_idx = json.find("hard_break").expect("hard_break present");
-        let world_idx = json.find("world").expect("world present");
-        assert!(
-            hellow_idx < break_idx && break_idx < world_idx,
-            "expected Hellow, then hard_break, then world in that order: {json}"
-        );
-
-        // A full STATIC render (not an incremental DOM patch) of this SAME
-        // model, via the exact function SSR uses, to isolate whether a real
-        // bug lives in the MODEL (this crate's own code) or specifically in
-        // `taino-edit-dom`'s INCREMENTAL diff/patch reconciliation (which
-        // only runs against an already-mounted, LIVE DOM — never exercised
-        // by a native test at all).
-        let html = taino_edit_leptos::doc_view_html(cur.doc());
-        assert!(
-            html.contains("Hellow<br>world") || html.contains("Hellow<br/>world"),
-            "static render should show the break BETWEEN Hellow and world: {html}"
+        let via_shift_enter =
+            dispatch_and_apply(&state, |s, d| shift_enter_fixups()(s, d)).expect("dispatched");
+        let via_enter = dispatch_and_apply(&state, split_block).expect("dispatched");
+        assert_eq!(
+            serde_json::to_string(&via_shift_enter.doc().to_json()).unwrap(),
+            serde_json::to_string(&via_enter.doc().to_json()).unwrap(),
         );
     }
 
-    /// Proves Shift+Enter is generic, not paragraph-specific: `insert_
-    /// hard_break` only special-cases `code_block` (see its own doc
-    /// comment) — anywhere else with `"inline*"` content, like a
-    /// heading, should already accept the atom via ordinary schema
-    /// validation, with no extra per-block-type code needed.
     #[test]
-    fn shift_enter_inserts_a_hard_break_inside_a_heading() {
+    fn shift_enter_in_a_heading_matches_plain_enter_exit_to_paragraph() {
         let schema = test_schema();
         let text_node = schema.text("Title", vec![]).expect("text node");
         let mut attrs = Attrs::new();
@@ -962,22 +859,28 @@ mod tests {
         tx.set_selection(Selection::caret(6)); // end of "Title"
         state = state.apply(tx);
 
-        let next = dispatch_and_apply(&state, insert_hard_break).expect("dispatched");
+        let next =
+            dispatch_and_apply(&state, |s, d| shift_enter_fixups()(s, d)).expect("dispatched");
         let json = serde_json::to_string(&next.doc().to_json()).unwrap();
         assert!(
-            json.contains("hard_break") && json.contains("heading"),
+            json.contains("heading") && json.contains("paragraph"),
             "{json}"
         );
-        // Still one single heading block, not split into two.
-        assert_eq!(next.doc().child_count(), 1);
+        // Two blocks now: the original heading, then a plain paragraph --
+        // same shape plain Enter produces (see `exit_heading_to_paragraph`).
+        assert_eq!(next.doc().child_count(), 2);
         assert_eq!(
             next.doc().content().children()[0].node_type().name(),
             "heading"
         );
+        assert_eq!(
+            next.doc().content().children()[1].node_type().name(),
+            "paragraph"
+        );
     }
 
     #[test]
-    fn shift_enter_declines_inside_a_code_block() {
+    fn shift_enter_in_a_code_block_matches_plain_enter_literal_newline() {
         let schema = test_schema();
         let text_node = schema.text("code", vec![]).expect("text node");
         let code_block = schema
@@ -990,10 +893,73 @@ mod tests {
         let mut tx = state.tr();
         tx.set_selection(Selection::caret(5)); // end of "code"
         state = state.apply(tx);
+
+        let next =
+            dispatch_and_apply(&state, |s, d| shift_enter_fixups()(s, d)).expect("dispatched");
+        // Still ONE code_block (no split), now containing a literal newline.
+        assert_eq!(next.doc().child_count(), 1);
+        assert_eq!(next.doc().text_content(), "code\n");
+    }
+
+    /// The one REAL difference from plain Enter: on an EMPTY line directly
+    /// inside a blockquote, Shift+Enter must NOT exit (unlike plain Enter,
+    /// see `enter_on_empty_paragraph_in_blockquote_lifts_out` above) — it
+    /// should just split, staying in the same blockquote.
+    #[test]
+    fn shift_enter_on_empty_line_in_blockquote_does_not_exit() {
+        let schema = test_schema();
+        let state = state_with_empty_paragraph_in_blockquote(&schema);
+        let next =
+            dispatch_and_apply(&state, |s, d| shift_enter_fixups()(s, d)).expect("dispatched");
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
         assert!(
-            !insert_hard_break(&state, None),
-            "should decline in a code_block, deferring to Enter's own literal-newline handling"
+            json.contains("blockquote"),
+            "should stay in the blockquote: {json}"
         );
+        // Two paragraphs now, both still inside ONE blockquote.
+        assert_eq!(next.doc().child_count(), 1);
+        let bq = &next.doc().content().children()[0];
+        assert_eq!(bq.node_type().name(), "blockquote");
+        assert_eq!(bq.child_count(), 2);
+    }
+
+    /// The list-item analogue of the blockquote test above: Shift+Enter on
+    /// an empty (or any) list item must split WITHIN the same item, never
+    /// lifting out of the list the way plain Enter's `smart_enter_in_list`
+    /// does for an empty item.
+    #[test]
+    fn shift_enter_in_a_list_item_splits_within_the_same_item() {
+        let schema = test_schema();
+        let para = schema
+            .node("paragraph", Attrs::new(), vec![], vec![])
+            .expect("empty paragraph");
+        let item = schema
+            .node("list_item", Attrs::new(), vec![para], vec![])
+            .expect("list_item");
+        let list = schema
+            .node("bullet_list", Attrs::new(), vec![item], vec![])
+            .expect("bullet_list");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![list], vec![])
+            .expect("doc");
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::caret(3)); // inside the empty paragraph
+        state = state.apply(tx);
+
+        let next =
+            dispatch_and_apply(&state, |s, d| shift_enter_fixups()(s, d)).expect("dispatched");
+        assert_eq!(next.doc().child_count(), 1, "still a single list");
+        let list = &next.doc().content().children()[0];
+        assert_eq!(list.node_type().name(), "bullet_list");
+        assert_eq!(
+            list.child_count(),
+            1,
+            "still a single item, not a new bullet"
+        );
+        let item = &list.content().children()[0];
+        assert_eq!(item.node_type().name(), "list_item");
+        assert_eq!(item.child_count(), 2, "two paragraphs within that one item");
     }
 
     #[test]

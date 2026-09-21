@@ -29,17 +29,61 @@
       padding: 12px;
       min-height: 120px;
     }
+    .ox-directive {
+      border: 1px dashed #9ca3af;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin: 8px 0;
+      background: #f8fafc;
+    }
+    .ox-directive::before {
+      content: attr(data-directive-name);
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #6b7280;
+      margin-bottom: 4px;
+    }
+    .ox-directive-leaf {
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      color: #374151;
+    }
+    .ox-directive-container {
+      border-style: solid;
+    }
+    .ox-directive-text {
+      display: inline-block;
+      border: 1px dashed #9ca3af;
+      border-radius: 4px;
+      padding: 0 4px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      color: #374151;
+      background: #f8fafc;
+    }
+    .ox-directive-text::before {
+      content: none;
+    }
+    .ox-checkbox {
+      margin-right: 6px;
+    }
   </style>
 </head>
 <body>
   <div class="ox-status">
-    <strong>ono / oxmarkdown-editor</strong> — Editing-mode spike:
+    <strong>ono / oxmarkdown-editor</strong> —
     <code>taino-edit</code>, a real ProseMirror-style Rust document
     model + <code>contenteditable</code> DOM bridge for Leptos, with NO
     JavaScript bridge at runtime (unlike Lexical, which this is meant to
-    eventually replace). Minimal built-in schema only (paragraph, bold,
-    italic) — no OxMarkdown-specific schema yet. Try typing directly in
-    the box below, and Mod-b / Mod-i (Cmd or Ctrl) for bold/italic.
+    eventually replace). Now with real OxMarkdown directives (leaf/
+    container/text), checkboxes, <code>==highlight==</code>, and GFM
+    strikethrough as real node/mark types — not yet interactive (no
+    click-to-toggle, no directive popovers), but structurally real and
+    losslessly preserved. Try typing directly in the box below, and
+    Mod-b / Mod-i (Cmd or Ctrl) for bold/italic.
   </div>
   <div id="mount-point"></div>
   <script type="module">
