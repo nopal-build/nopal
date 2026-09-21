@@ -12,6 +12,22 @@
  * `WebsitePageEditor` doesn't register these), which is an accepted,
  * explicitly deferred follow-up, not an oversight.
  *
+ * GOTCHA when hand-authoring pages: a container directive's closing fence
+ * must be AT LEAST as long as its own opening fence, and (confirmed by a
+ * real parse test against `parseOxDocument`, not just spec-reading) a
+ * `:::section{...}` that nests MORE THAN ONE sibling container directive
+ * at the same 3-colon length (two `:::pricing-card{...}` blocks, or a
+ * `:::toggle{...}` alongside anything else) breaks: the FIRST nested
+ * container's own closing `:::` also incorrectly closes the outer section,
+ * silently popping every later "nested" block up to the top level instead.
+ * A single nested container is fine at matching length, but the safe,
+ * ALWAYS-correct rule is: `:::section{...}` should open with FOUR colons
+ * (`::::section{...}`) whenever its body contains any `:::pricing-card`/
+ * `:::toggle`/other container directive, so its own closing fence can
+ * never be ambiguous with a 3-colon one nested inside it. Leaf directives
+ * (`::stamp`, `::icon`, `::button`, `::badge`, `::waypoint`,
+ * `::daily-log`) never open a fence at all, so they never trigger this.
+ *
  * Directive vocabulary (first functional pass):
  *   :::section{bg="cream|peach|mint|lavender" accent="..."}  — full-bleed
  *     colored band; body renders through the ordinary pipeline.
@@ -24,6 +40,12 @@
  *     connector overlay to measure; renders nothing visible on its own.
  *   :::pricing-card{name="..." price="..." cta="..." cta-href="..."} —
  *     body is an ordinary bullet list of features.
+ *   ::button{text="..." href="..."} — a standalone CTA pill link (the
+ *     pricing card's own `cta`/`cta-href` render through the same
+ *     `.website-button` style).
+ *   ::badge{text="..." variant="neutral|success|warning|danger"} — a
+ *     status pill, reusing `stamps/Badge` (same component the "Draft"
+ *     preview banner already uses) rather than a bespoke style.
  *   ::daily-log{date="YYYY-MM-DD" project="..."} — a curated, static embed
  *     of one real daily-log Card, resolved server-side (see
  *     `robustness-core/data/website.server.ts`'s
@@ -34,7 +56,14 @@ import type { DirectiveRegistry } from "./directiveRegistry";
 import { WebsiteIcon } from "./websiteIcons";
 import { WebsiteStamp } from "./websiteStamps";
 import OxRenderer from "../components/OxRenderer";
+import { Badge } from "stamps/Badge";
 import "../styles/website.css";
+
+const BADGE_VARIANTS = ["neutral", "success", "warning", "danger"] as const;
+type BadgeVariant = (typeof BADGE_VARIANTS)[number];
+function toBadgeVariant(v: string | undefined): BadgeVariant {
+  return (BADGE_VARIANTS as readonly string[]).includes(v ?? "") ? (v as BadgeVariant) : "neutral";
+}
 
 export type WebsiteDailyLogEntry = {
   projectName: string;
@@ -111,12 +140,26 @@ export function buildWebsiteDirectiveRegistry(opts: {
           </div>
           <div className="website-pricing-card-body">{children}</div>
           {attrs.cta && attrs["cta-href"] && (
-            <a className="website-pricing-card-cta" href={attrs["cta-href"]}>
+            <a className="website-button website-pricing-card-cta" href={attrs["cta-href"]}>
               {attrs.cta}
             </a>
           )}
         </div>
       );
+    },
+
+    button({ attrs }) {
+      if (!attrs.text || !attrs.href) return null;
+      return (
+        <a className="website-button" href={attrs.href}>
+          {attrs.text}
+        </a>
+      );
+    },
+
+    badge({ attrs }) {
+      if (!attrs.text) return null;
+      return <Badge variant={toBadgeVariant(attrs.variant)}>{attrs.text}</Badge>;
     },
 
     "daily-log"({ attrs }) {

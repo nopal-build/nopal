@@ -9,6 +9,32 @@
  * later if a full-bleed band reads too saturated; not needed yet.
  */
 
+/* ── Page-level default background ─────────────────────────────────────── */
+/* The `/v2` site's own resting background -- deliberately the literal
+   `surface-day-100`/`surface-night-100` pair (a website-specific choice),
+   NOT the semantic `--color-surface-page` token root.css already defines
+   for the rest of the app (which resolves dark mode to `--purple`
+   instead) -- these are two different design decisions that happen to
+   share a light-mode value. Neither `--surface-day-100` nor
+   `--surface-night-100` auto-swaps with `prefers-color-scheme` on its own
+   (only the semantic tier does that in root.css); this variable is what
+   actually does the swapping here. Applied to `V2Layout`'s outer wrapper
+   (`routes/v2.tsx`) so it shows through anywhere a `:::section{...}` band
+   doesn't cover (header, footer, gaps) -- and reused by `.website-bg-cream`
+   below, so a `bg="cream"` section is just an explicit way of asking for
+   this same default, not a second, independently-maintained color. */
+:root {
+  --website-bg-page: var(--surface-day-100);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --website-bg-page: var(--surface-night-100);
+  }
+}
+.website-page-bg {
+  background: var(--website-bg-page);
+}
+
 /* ── Section (`:::section{bg="..."}`) ──────────────────────────────────── */
 
 .website-section {
@@ -22,7 +48,7 @@
 }
 
 .website-bg-cream {
-  background: var(--surface-day-100);
+  background: var(--website-bg-page);
 }
 .website-bg-peach {
   background: var(--clay-300);
@@ -32,6 +58,19 @@
 }
 .website-bg-lavender {
   background: var(--moonlight-500);
+}
+
+/* Optional heading-color override (`accent="red"|"green"|"purple"`) for a
+   section whose body text should read as an emphasized color, independent
+   of its background — e.g. a closing CTA's red heading on a peach band. */
+.website-section[data-website-accent="red"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--red);
+}
+.website-section[data-website-accent="green"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--green);
+}
+.website-section[data-website-accent="purple"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--purple);
 }
 
 /* ── Stamp illustrations (`::stamp{...}`) ──────────────────────────────── */
@@ -147,15 +186,20 @@
   padding-left: 20px;
 }
 
-.website-pricing-card-cta {
+/* ── Buttons (`::button{...}`, pricing card's own cta) ─────────────────── */
+
+.website-button {
   display: inline-block;
-  margin-top: 12px;
-  padding: 8px 16px;
+  padding: 10px 20px;
   background: var(--purple);
   color: var(--white);
-  border-radius: 4px;
+  border-radius: 999px;
   text-decoration: none;
   font-weight: bold;
+}
+
+.website-pricing-card-cta {
+  margin-top: 12px;
 }
 
 /* ── Daily-log embed (`::daily-log{...}`) ──────────────────────────────── */

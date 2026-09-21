@@ -16,6 +16,7 @@ import { WebsiteLink } from "../components/WebsitePageView";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { colors, semanticColors } from "stamps/tokens";
+import "../styles/website.css";
 
 const EMPTY_SETTINGS: WebsiteSettings = {
   nav: [],
@@ -32,7 +33,10 @@ export default function V2Layout() {
   const { settings } = useLoaderData<typeof loader>();
 
   return (
-    <div className={sprinkles({ display: "flex", flexDirection: "column" })} style={{ minHeight: "100vh" }}>
+    <div
+      className={`website-page-bg ${sprinkles({ display: "flex", flexDirection: "column" })}`}
+      style={{ minHeight: "100vh" }}
+    >
       <header
         className={sprinkles({
           display: "flex",
