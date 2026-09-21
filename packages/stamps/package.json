@@ -6,6 +6,7 @@
   "exports": {
     "./tokens": "./src/tokens.ts",
     "./Badge": "./src/Badge.tsx",
+    "./badge.css": "./src/badge.css.ts",
     "./Chip": "./src/Chip.tsx",
     "./Input": "./src/Input.tsx",
     "./Surface": "./src/Surface.tsx",

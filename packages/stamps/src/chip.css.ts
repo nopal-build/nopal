@@ -24,15 +24,18 @@ export const chip = recipe({
   },
   variants: {
     active: {
-      // Intentionally literal (not semantic) here: solid purple-on-cream
-      // reads fine in both schemes as-is (it's the same combination
-      // `--color-surface-page`'s night value already uses for the whole
-      // page), unlike `inactive` below, which really did need real
-      // semantic/night colors.
+      // Intentionally literal `colors.purple` + `colors.white` (not
+      // semantic tokens) here — same pairing `button.css`'s `primary`
+      // variant uses, and it reads fine in both schemes as-is (dark mode
+      // just inverts the whole page to this exact combination already).
+      // `semanticColors.surfaceCard` would be wrong here despite the
+      // name looking plausible: it flips to a muted dark purple-blue at
+      // night, not white, which would’ve left this low-contrast against
+      // the equally-purple background.
       true: {
         background: colors.purple,
         border: `1px solid ${colors.purple}`,
-        color: semanticColors.surfaceCard,
+        color: colors.white,
       },
       false: {
         background: semanticColors.surfaceCard,
@@ -44,6 +47,20 @@ export const chip = recipe({
       true: { cursor: "pointer" },
     },
   },
+  compoundVariants: [
+    // A read-only tag and an interactive-but-unselected chip used to be
+    // pixel-identical — `cursor` was the only difference, which is
+    // invisible until you hover (and doesn't exist at all on touch).
+    // Dropping the fill here gives interactive chips their own "this is
+    // choosable" look at rest: outline while unselected, solid once
+    // `active` (which already looks different and is unaffected, since
+    // this only matches `active: false`). A plain read-only `<Chip>`
+    // (no `onClick`) is untouched — it keeps the filled look.
+    {
+      variants: { active: false, interactive: true },
+      style: { background: "transparent" },
+    },
+  ],
   defaultVariants: {
     active: false,
   },

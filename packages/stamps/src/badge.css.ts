@@ -23,8 +23,8 @@ export const badge = recipe({
     variant: {
       // Built from light-scheme surface tokens, so it needs an explicit
       // dark-mode pair or it vanishes against a dark card (see the
-      // `stamps` component guide once it exists for more on this
-      // convention).
+      // Colors category in the Stamps guide, /maker/stamps#colors, for
+      // more on this convention).
       neutral: {
         background: colors.farground,
         border: `1px solid ${colors.midground}`,

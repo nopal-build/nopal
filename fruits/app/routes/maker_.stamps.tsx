@@ -1,13 +1,13 @@
 // app/routes/maker_.stamps.tsx
 // Stamps design-system guide, take two — lives under /maker (Admin/Super
 // only, same gate as the rest of the Maker section) as a clean-slate
-// rebuild of styles.tsx's Component Decision Guide. Built entirely with
-// `stamps` primitives (sprinkles/textSize/tokens/CenterContent/
+// rebuild of the classic guide (`/styles`, styles.tsx). Built entirely
+// with `stamps` primitives (sprinkles/textSize/tokens/CenterContent/
 // DrawerContent/Stack/Cluster/Grid/…), no Tailwind — see AGENTS.md's "UI
-// conventions" section for why. `/styles` remains the source of truth for
-// everything not yet migrated here; sections below that haven't been
-// rebuilt yet just link back to their matching anchor there (see
-// `StubSection`).
+// conventions" section for why. Every category has now been migrated
+// here (`/styles` is no longer linked from this page) — `/styles` itself
+// hasn't been deleted yet in case anything still deep-links to it, but
+// this page is the one to keep updated going forward.
 //
 // Also doubles as the live reference for the two `AppLayout` content-area
 // types: this whole page is a `DrawerContent` (see `#layout` for the
@@ -27,6 +27,9 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { Surface } from "stamps/Surface";
+import { surfaceBorderOnly } from "stamps/surface.css";
+import { Badge } from "stamps/Badge";
+import type { BadgeVariants } from "stamps/badge.css";
 import { ErrorPanel } from "stamps/ErrorPanel";
 import { CenterContent } from "stamps/CenterContent";
 import { DrawerContent } from "stamps/DrawerContent";
@@ -36,7 +39,9 @@ import { CopyField } from "stamps/CopyField";
 import { CircleButton } from "stamps/CircleButton";
 import { HamburgerNeqIcon } from "stamps/HamburgerNeqIcon";
 import { SidebarToggleIcon } from "stamps/SidebarToggleIcon";
-import { MoreIcon } from "stamps/MoreMenu";
+import { Modal } from "stamps/Modal";
+import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
+import { SearchCollection } from "stamps/SearchCollection";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
 import { Grid } from "stamps/Grid";
@@ -178,22 +183,6 @@ function Section({
   );
 }
 
-/** Placeholder for a category that hasn't been rebuilt on this page yet —
- * links back to the matching anchor on the classic `/styles` guide, which
- * stays the source of truth until each section gets its own migration
- * pass. */
-function StubSection({ id, title }: { id: string; title: string }) {
-  return (
-    <Section id={id} title={title}>
-      <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-        Not migrated to this page yet —{" "}
-        <a href={`/styles#${id}`} className={link}>
-          see the classic guide →
-        </a>
-      </p>
-    </Section>
-  );
-}
 
 // ─── Category nav (lives in the drawer) ──────────────────────────────────────
 
@@ -271,9 +260,6 @@ function CategoryNav({ activeId }: { activeId: string | null }) {
         </NavColumn>
       ))}
       <NavColumn label="Related">
-        <a href="/styles" className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass}`}>
-          Classic guide →
-        </a>
         <a href="/styles/oxmarkdown" className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass}`}>
           OxMarkdown →
         </a>
@@ -1267,6 +1253,256 @@ function FormInputsSection() {
   );
 }
 
+// ─── Boxes & Cards ───────────────────────────────────────────────────────
+
+function BoxesSection() {
+  return (
+    <Section id="boxes" title="Boxes & Cards">
+      <Stack gap={6}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>Surface</Code> from <Code>stamps/Surface</Code> — the base
+          card/panel primitive most "boxed" UI should sit inside
+          (dialogs, dropdown panels, menus, list rows). Border +{" "}
+          <Code>surfaceCard</Code> background + 8px radius, baked in.
+        </p>
+
+        <Grid gap={4} minColumnWidth={220} style={{ alignItems: "start" }}>
+          <Surface className={sprinkles({ p: 5 })}>
+            <Stack gap={2}>
+              <p className={textSize.sm} style={{ color: semanticColors.textPrimary, margin: 0 }}>
+                A plain, static panel.
+              </p>
+              <SpecimenCaption>{"<Surface>"}</SpecimenCaption>
+            </Stack>
+          </Surface>
+
+          <Surface hoverable className={sprinkles({ p: 5 })}>
+            <Stack gap={2}>
+              <p className={textSize.sm} style={{ color: semanticColors.textPrimary, margin: 0 }}>
+                Hover me — border + shadow. Wrap in a <Code>{"<Link>"}</Code>{" "}
+                or give it an <Code>onClick</Code>.
+              </p>
+              <SpecimenCaption>{"<Surface hoverable>"}</SpecimenCaption>
+            </Stack>
+          </Surface>
+
+          <Surface className={sprinkles({ p: 5 })}>
+            <Stack gap={3}>
+              <p className={textSize.sm} style={{ color: semanticColors.textPrimary, margin: 0 }}>
+                A nested section, border-only — no second background
+                stacked on top of this Surface's own.
+              </p>
+              <div className={`${surfaceBorderOnly} ${sprinkles({ p: 3 })}`}>
+                <SpecimenCaption>surfaceBorderOnly</SpecimenCaption>
+              </div>
+            </Stack>
+          </Surface>
+        </Grid>
+      </Stack>
+    </Section>
+  );
+}
+
+// ─── Badges & Chips ───────────────────────────────────────────────────
+
+const BADGE_VARIANTS: Array<{ variant: NonNullable<BadgeVariants>["variant"]; label: string }> = [
+  { variant: "neutral", label: "Neutral" },
+  { variant: "success", label: "Complete" },
+  { variant: "warning", label: "Pending" },
+  { variant: "danger", label: "Overdue" },
+  { variant: "accent", label: "Featured" },
+];
+
+/** Self-contained — owns its own active state so it can drop into this
+ * page without wiring anything up, same idea as `HamburgerNeqDemo`. */
+function ChipDemo() {
+  const [active, setActive] = useState(false);
+  return (
+    <Chip active={active} onClick={() => setActive((a) => !a)}>
+      {active ? "Active filter" : "Click to activate"}
+    </Chip>
+  );
+}
+
+function BadgesSection() {
+  return (
+    <Section id="badges" title="Badges & Chips">
+      <Stack gap={8}>
+        <Stack gap={3}>
+          <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            <Code>Badge</Code> from <Code>stamps/Badge</Code> — a semantic
+            status pill. Pass <Code>variant</Code>; don't hand-roll a
+            pill with inline colors (they won't flip for dark mode).
+          </p>
+          <Cluster gap={4}>
+            {BADGE_VARIANTS.map((b) => (
+              <Stack key={b.variant} gap={1} align="flex-start">
+                <Badge variant={b.variant}>{b.label}</Badge>
+                <SpecimenCaption>{b.variant}</SpecimenCaption>
+              </Stack>
+            ))}
+          </Cluster>
+        </Stack>
+
+        <Stack gap={3}>
+          <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            <Code>Chip</Code> from <Code>stamps/Chip</Code> — a filter or
+            category tag. Read-only by default; pass <Code>onClick</Code>{" "}
+            to make it an interactive single-select toggle (adds the
+            pointer cursor + keyboard support for free). An interactive
+            chip is outlined — not filled — while unselected, so it never
+            gets mistaken for the plain read-only tag at rest (cursor
+            alone isn't enough: it's invisible without a mouse, and
+            doesn't exist at all on touch).
+          </p>
+          <Cluster gap={3} align="center">
+            <Chip>Read-only tag</Chip>
+            <ChipDemo />
+          </Cluster>
+        </Stack>
+      </Stack>
+    </Section>
+  );
+}
+
+// ─── Overlays ────────────────────────────────────────────────────────
+
+/** Self-contained — owns the open state a real call site would wire up
+ * itself, same idea as `HamburgerNeqDemo`/`ChipDemo`. */
+function ModalDemo() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Stack gap={2} align="flex-start">
+      <button
+        type="button"
+        className={button({ variant: "outline" })}
+        style={{ padding: "8px 16px", display: "inline-flex" }}
+        onClick={() => setOpen(true)}
+      >
+        Open modal
+      </button>
+      <SpecimenCaption>{'<Modal open={open} onClose={...} title="...">'}</SpecimenCaption>
+      <Modal open={open} onClose={() => setOpen(false)} title="Example Modal">
+        <p className={textSize.sm} style={{ color: semanticColors.textPrimary }}>
+          Closes on a backdrop click, Escape, or the Close button below —
+          nothing else to wire up.
+        </p>
+      </Modal>
+    </Stack>
+  );
+}
+
+function OverlaysSection() {
+  return (
+    <Section id="overlays" title="Overlays">
+      <Stack gap={4}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>Modal</Code> from <Code>stamps/Modal</Code> — a
+          dependency-free centered dialog: full-screen backdrop + a
+          centered <Code>Surface</Code> panel. You own the{" "}
+          <Code>open</Code> state and the trigger; the modal handles
+          closing itself.
+        </p>
+        <ModalDemo />
+      </Stack>
+    </Section>
+  );
+}
+
+// ─── Menus ───────────────────────────────────────────────────────────
+
+function MoreMenuDemo() {
+  return (
+    <MoreMenu
+      items={[
+        { label: "Rename", onClick: () => {} },
+        { label: "Duplicate", onClick: () => {} },
+        { label: "Delete", onClick: () => {}, danger: true },
+      ]}
+    />
+  );
+}
+
+function MenusSection() {
+  return (
+    <Section id="menus" title="Menus">
+      <Stack gap={4}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>MoreMenu</Code> from <Code>stamps/MoreMenu</Code> — a
+          small <Code>Surface</Code> action menu. Defaults to a{" "}
+          <Code>CircleButton</Code> + oversized "•••" (<Code>MoreIcon</Code>)
+          trigger — pass your own <Code>trigger</Code> render prop instead
+          if you need a different one. Open state, outside-click,
+          Escape, and flip/shift positioning near the viewport edge are
+          all handled for you; you only supply <Code>items</Code>.
+        </p>
+        <MoreMenuDemo />
+      </Stack>
+    </Section>
+  );
+}
+
+// ─── Collections ─────────────────────────────────────────────────────────
+
+const DEMO_FRUITS = ["Apple", "Banana", "Cherry", "Date", "Elderberry"];
+
+/** Self-contained — owns its own query state, same idea as the other
+ * `*Demo` components on this page. A real call site would drive
+ * `searchInputProps`' `value`/`onChange` from wherever the actual list
+ * lives instead. */
+function SearchCollectionDemo() {
+  const [query, setQuery] = useState("");
+  const filtered = query
+    ? DEMO_FRUITS.filter((f) => f.toLowerCase().includes(query.trim().toLowerCase()))
+    : DEMO_FRUITS;
+
+  return (
+    <div style={{ maxWidth: "320px" }}>
+      <SearchCollection
+        items={filtered}
+        getKey={(item) => item}
+        renderItem={(item) => (
+          <div className={`${textSize.sm} ${sprinkles({ p: 2 })}`} style={{ color: semanticColors.textPrimary }}>
+            {item}
+          </div>
+        )}
+        emptyState={
+          <p className={textSize.sm} style={{ color: semanticColors.textSubtle, margin: 0 }}>
+            No matches.
+          </p>
+        }
+        searchInputProps={{
+          label: "Search fruits",
+          hideLabel: true,
+          name: "fruit-search",
+          value: query,
+          onChange: (e) => setQuery(e.target.value),
+          placeholder: "Search…",
+        }}
+        height={180}
+      />
+    </div>
+  );
+}
+
+function CollectionsSection() {
+  return (
+    <Section id="collections" title="Collections">
+      <Stack gap={4}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>SearchCollection</Code> from{" "}
+          <Code>stamps/SearchCollection</Code> — a <Code>Surface</Code>{" "}
+          shell for "search/filter a list, optionally add a new entry":
+          a fixed-height scrollable list on top, a search field below.
+          It owns layout only, not data — wire your own filtering (like
+          the demo below) or submit-to-create.
+        </p>
+        <SearchCollectionDemo />
+      </Stack>
+    </Section>
+  );
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function MakerStamps() {
@@ -1286,12 +1522,9 @@ export default function MakerStamps() {
               </h1>
               <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
                 Our design system — tokens, components, and patterns for
-                the Fruits app. This page is a clean-slate rebuild of{" "}
-                <a href="/styles" className={link}>
-                  /styles
-                </a>{" "}
-                using <Code>stamps</Code> primitives only — sections not
-                migrated here yet link back to the classic guide.
+                the Fruits app. Built entirely with <Code>stamps</Code>{" "}
+                primitives, no Tailwind — a clean-slate rebuild of the
+                classic guide, which this page fully replaces.
               </p>
             </div>
 
@@ -1306,11 +1539,11 @@ export default function MakerStamps() {
             <LinksSection />
             <CopyActionsSection />
             <FormInputsSection />
-            <StubSection id="boxes" title="Boxes & Cards" />
-            <StubSection id="badges" title="Badges & Chips" />
-            <StubSection id="overlays" title="Overlays" />
-            <StubSection id="menus" title="Menus" />
-            <StubSection id="collections" title="Collections" />
+            <BoxesSection />
+            <BadgesSection />
+            <OverlaysSection />
+            <MenusSection />
+            <CollectionsSection />
           </Stack>
         </CenterContent>
       </DrawerContent>

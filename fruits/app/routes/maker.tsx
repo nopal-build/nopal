@@ -146,7 +146,7 @@ function StampsPromoCard() {
 
   return (
     <Link
-      to="/styles"
+      to="/maker/stamps"
       prefetch="intent"
       className="flex items-center gap-5 hover:opacity-80 transition-opacity"
       style={{
