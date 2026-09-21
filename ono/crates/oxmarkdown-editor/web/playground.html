@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ono — OxMarkdown playground</title>
+  <link rel="stylesheet" href="./shared.css" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+    .ox-status {
+      margin: 16px 16px 0 16px;
+    }
+    #playground {
+      flex: 1;
+      display: flex;
+      gap: 16px;
+      padding: 16px;
+      min-height: 0;
+    }
+    .playground-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .playground-col h2 {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #6b7280;
+    }
+    .playground-source {
+      flex: 1;
+      resize: none;
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      min-height: 0;
+    }
+    .playground-rendered {
+      flex: 1;
+      overflow: auto;
+      min-height: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="ox-status">
+    <strong>ono / OxMarkdown playground</strong> — type OxMarkdown source
+    on the left (directives, checkboxes, <code>==highlight==</code>, GFM
+    strikethrough, ...) and see exactly what it converts + renders to on
+    the right, via the SAME <code>convert.rs</code>/<code>doc_view_html</code>
+    pipeline the main editor and SSR both use. The right column is a
+    deterministic, read-only render — not a second live editor — so it
+    can never drift out of sync with the source on the left.
+  </div>
+  <div id="mount-point"></div>
+  <script type="module">
+    import init, { mount_playground } from "./pkg/oxmarkdown_editor.js";
+    async function run() {
+      await init();
+      mount_playground();
+    }
+    run();
+  </script>
+</body>
+</html>

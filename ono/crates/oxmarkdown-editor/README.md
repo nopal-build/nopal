@@ -275,7 +275,15 @@ wasm-bindgen target/wasm32-unknown-unknown/debug/oxmarkdown_editor.wasm \
 python3 -m http.server 4176 --directory crates/oxmarkdown-editor/web
 ```
 
-Then open `http://127.0.0.1:4176/`.
+Then open `http://127.0.0.1:4176/`, or
+`http://127.0.0.1:4176/playground.html` for the markdown-source /
+rendered-output split view (`web/playground.html`, mounted via the
+separate `mount_playground()` CSR entry point) — a live, isolated way to
+test one directive/syntax construct at a time (type on the left, see
+the exact `convert.rs`/`doc_view_html` output on the right, no need to
+edit `DEFAULT_SAMPLE` or reload the page) without needing to rebuild
+anything between edits. The right column is a deterministic, read-only
+render, not a second live editor, so it can never drift from the source.
 
 **SSR** (real content, zero JS, not yet hydrated/interactive):
 

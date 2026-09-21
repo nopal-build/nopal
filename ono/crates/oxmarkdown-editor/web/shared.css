@@ -1,0 +1,77 @@
+/* Shared between index.html (the main editor page) and playground.html
+   (the markdown-source / rendered-output split view) — styling for
+   OxMarkdown-specific node types, so both pages show them identically. */
+
+body {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+.ox-status {
+  background: #fef3e0;
+  border: 1px solid #e0b366;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 24px;
+  font-size: 14px;
+}
+
+.ox-status-inline {
+  font-size: 13px;
+  color: #666;
+}
+
+[contenteditable] {
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 12px;
+  min-height: 120px;
+}
+
+.ox-directive {
+  border: 1px dashed #9ca3af;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  background: #f8fafc;
+}
+
+.ox-directive::before {
+  content: attr(data-directive-name);
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.ox-directive-leaf {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  color: #374151;
+}
+
+.ox-directive-container {
+  border-style: solid;
+}
+
+.ox-directive-text {
+  display: inline-block;
+  border: 1px dashed #9ca3af;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: #374151;
+  background: #f8fafc;
+}
+
+.ox-directive-text::before {
+  content: none;
+}
+
+.ox-checkbox {
+  margin-right: 6px;
+}

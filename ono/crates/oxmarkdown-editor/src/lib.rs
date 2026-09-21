@@ -124,6 +124,18 @@ pub fn mount() {
     leptos::mount::mount_to_body(App);
 }
 
+/// A second, separate CSR entry point, mounted by `web/playground.html`
+/// (NOT `index.html`) — a live markdown-source-to-rendered-HTML split
+/// view for isolating one directive/syntax construct at a time, rather
+/// than always testing against the full `DEFAULT_SAMPLE`. CSR-only,
+/// deliberately: it's a dev tool, not part of the editor surface itself,
+/// so there's no SSR/hydrate variant.
+#[cfg(feature = "csr")]
+#[wasm_bindgen]
+pub fn mount_playground() {
+    leptos::mount::mount_to_body(PlaygroundApp);
+}
+
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen(start)]
 pub fn hydrate() {
@@ -142,36 +154,13 @@ pub fn render_app_to_html() -> String {
     leptos::prelude::RenderHtml::to_html(App())
 }
 
-fn build_editor(markdown: &str) -> (EditorState, Keymap, InputRules) {
-    // taino-edit's own built-in extensions — enough to cover ordinary
-    // CommonMark/GFM content. A real OxMarkdown schema (directives/
-    // checkboxes/mentions/highlight as real node/mark types, via the
-    // `Extension` trait) is the actual follow-up work; the point of
-    // this pass is proving the markdown -> taino-edit-tree conversion
-    // itself works on REAL content first — see `convert.rs`.
-    let base = SchemaBuilder::new()
-        .node(
-            "doc",
-            NodeSpec {
-                content: Some("block+".into()),
-                ..Default::default()
-            },
-        )
-        .node(
-            "text",
-            NodeSpec {
-                group: Some("inline".into()),
-                ..Default::default()
-            },
-        );
-    // `EditingFixups` (see `commands.rs`) contributes no schema of its
-    // own — only Enter overrides — so it's fine that it's absent from
-    // `build_schema_with`'s own extension list below; it only needs to
-    // be present for the KEYMAP build. Placed AFTER `Lists` so its
-    // "Enter" binding is tried FIRST (chaining tries the LATEST-added
-    // entry first, falling back to earlier ones), then falls through to
-    // `Lists`'s own smart Enter, then the base keymap's plain split.
-    let exts: Vec<&dyn taino_edit_extensions::Extension> = vec![
+/// Every extension THIS schema is built from, excluding `EditingFixups`
+/// (which contributes no schema of its own, only keymap overrides — see
+/// `build_editor` below). Shared between `build_schema` (used alone by
+/// the playground page, which needs no keymap) and `build_editor` (the
+/// main app, which needs the SAME list again to build the keymap).
+fn base_extensions() -> Vec<&'static dyn taino_edit_extensions::Extension> {
+    vec![
         &Paragraph,
         &Heading,
         &Bold,
@@ -187,10 +176,36 @@ fn build_editor(markdown: &str) -> (EditorState, Keymap, InputRules) {
         &Strikethrough,
         &Directives,
         &Checkbox,
-    ];
-    let schema = build_schema_with(base, &exts, "doc").unwrap();
+    ]
+}
+
+fn build_schema() -> taino_edit_leptos::Schema {
+    let base = SchemaBuilder::new()
+        .node(
+            "doc",
+            NodeSpec {
+                content: Some("block+".into()),
+                ..Default::default()
+            },
+        )
+        .node(
+            "text",
+            NodeSpec {
+                group: Some("inline".into()),
+                ..Default::default()
+            },
+        );
+    build_schema_with(base, &base_extensions(), "doc").unwrap()
+}
+
+fn build_editor(markdown: &str) -> (EditorState, Keymap, InputRules) {
+    let schema = build_schema();
+    // Placed AFTER everything else so its "Enter" binding is tried FIRST
+    // (chaining tries the LATEST-added entry first, falling back to
+    // earlier ones), then falls through to `Lists`'s own smart Enter,
+    // then the base keymap's plain split.
     let keymap_exts: Vec<&dyn taino_edit_extensions::Extension> = {
-        let mut all = exts.clone();
+        let mut all = base_extensions();
         all.push(&EditingFixups);
         all
     };
@@ -251,6 +266,80 @@ fn App() -> impl IntoView {
             </p>
             <div on:input=on_input>
                 <TainoEditor state=state keymap=keymap />
+            </div>
+        </div>
+    }
+}
+
+/// A short starting sample exercising every currently-supported
+/// OxMarkdown-specific construct at once (the three directive kinds,
+/// checkboxes, highlight, strikethrough) — small enough to read in one
+/// glance, unlike `DEFAULT_SAMPLE`, which the main editor page keeps
+/// deliberately large/varied instead.
+#[cfg(feature = "csr")]
+const PLAYGROUND_SAMPLE: &str = r#"::badge{label="Leaf directive"}
+
+:::note{title="Container directive"}
+A container directive holds real, separately editable blocks.
+
+Even across a blank line like this one.
+:::
+
+See :ref{name="Jane" location="/x"} for the inline (text) directive.
+
+- [ ] Unchecked task
+- [x] Checked task
+
+==Highlighted== and ~~struck through~~ text.
+"#;
+
+/// The right column's own render, via the exact function `render_app_to_
+/// html`/SSR uses (`doc_view_html`) — a plain, deterministic, read-only
+/// HTML string. Deliberately NOT a second live `<TainoEditor>` instance:
+/// this is meant to isolate what a given markdown source converts+
+/// renders to, not to be independently editable (which would let the
+/// two columns drift out of sync with each other).
+#[cfg(feature = "csr")]
+fn render_markdown_html(schema: &taino_edit_leptos::Schema, markdown: &str) -> String {
+    let doc = convert::markdown_to_doc(schema, markdown);
+    taino_edit_leptos::doc_view_html(&doc)
+}
+
+#[cfg(feature = "csr")]
+fn textarea_value(ev: &leptos::ev::Event) -> String {
+    use wasm_bindgen::JsCast;
+    ev.target()
+        .and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+        .map(|el| el.value())
+        .unwrap_or_default()
+}
+
+#[cfg(feature = "csr")]
+#[component]
+fn PlaygroundApp() -> impl IntoView {
+    let schema = build_schema();
+    let markdown = RwSignal::new(PLAYGROUND_SAMPLE.to_string());
+    let rendered_html = RwSignal::new(render_markdown_html(&schema, &markdown.get_untracked()));
+
+    let on_input = move |ev: leptos::ev::Event| {
+        let text = textarea_value(&ev);
+        rendered_html.set(render_markdown_html(&schema, &text));
+        markdown.set(text);
+    };
+
+    view! {
+        <div id="playground">
+            <div class="playground-col">
+                <h2>"Markdown source"</h2>
+                <textarea
+                    class="playground-source"
+                    on:input=on_input
+                    prop:value=move || markdown.get()
+                ></textarea>
+            </div>
+            <div class="playground-col">
+                <h2>"Rendered"</h2>
+                <div class="taino-editor playground-rendered" inner_html=move || rendered_html.get()></div>
             </div>
         </div>
     }
