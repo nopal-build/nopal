@@ -224,6 +224,38 @@ container/text directive attr preservation, checkbox state, highlight/
 strikethrough marks, and confirming an `@`-mention-style link needs no
 special handling at all).
 
+## The markdown/rendered playground (`web/playground.html`)
+
+A live, two-column split view — markdown source on the left, the SAME
+`convert.rs`/`doc_view_html` render on the right, updating on every
+keystroke — for isolating one directive/syntax construct at a time
+instead of always testing against the full `DEFAULT_SAMPLE`. Mounted via
+a separate `mount_playground()` CSR entry point (`index.html`/`App` are
+untouched). The right column is deliberately a deterministic, read-only
+render, not a second live editor, so it can never drift from the source.
+See `../../e2e/tests/playground.spec.ts` for the e2e coverage. This is
+what surfaced the real GFM parsing nuance documented in the next section.
+
+## Live task-list input rule: typing `"- [ ] "` creates a real checkbox
+
+`commands.rs`'s `checkbox_on_input` closes a real gap the schema work
+above left open: checkboxes only ever came from the STATIC markdown→doc
+conversion; typing task-list syntax directly into the live editor didn't
+do anything special at all. Deliberately a SEPARATE input rule from the
+bullet-list one, not one combined `"- [ ] "` pattern — `InputRules`
+fires on every keystroke, so `"- "` alone ALREADY converts to a bullet
+list two keystrokes in, well before `"[ ] "` exists to match against.
+The new rule instead fires on `"[ ] "`/`"[x] "`/`"[X] "` at the very
+start of a paragraph that is ITSELF a list item's own child — which also
+correctly declines for a bare `"[ ] hello"` with no list marker at all,
+matching a REAL GFM parsing nuance confirmed directly (not assumed) via
+a throwaway `oxmarkdown-rs` example: `markdown-rs`'s own GFM task-list
+parser only recognizes `"- [ ] "`/`"- [x] "` as a checked/unchecked item
+when there's TEXT after the checkbox marker — `"- [ ] "` with nothing
+following parses as a plain list item containing the literal text
+`"[ ]"`, no `checked` field at all. Confirmed live in a real browser via
+`e2e/tests/checkbox-input-rule.spec.ts`, not just natively.
+
 **Deliberately NOT done in this pass** (real follow-up work, not
 oversights):
 

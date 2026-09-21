@@ -518,6 +518,65 @@ fn wrap_in_list_on_input(
     }
 }
 
+/// `"[ ] "`/`"[x] "` (or `"[X] "`) -> a real `checkbox` atom, but ONLY
+/// when typed at the very start of a paragraph that is itself a list
+/// item's own child — never in a plain top-level paragraph. This is
+/// deliberately a SEPARATE rule from `wrap_in_list_on_input` above, not
+/// one combined `"- [ ] "` pattern: `InputRules::apply` fires on EVERY
+/// keystroke, so by the time a user has typed `"- "` the bullet-list
+/// rule has ALREADY fired (2 keystrokes in) and converted the paragraph
+/// into a list item, well before `"[ ] "` exists to match against at
+/// all — confirmed by reasoning through the actual keystroke-by-keystroke
+/// sequence, not assumed. Splitting it into two independent rules (one
+/// for entering a list, one for turning the START of a list item's own
+/// content into a checkbox) matches how the keystrokes actually arrive.
+///
+/// The `rp.node(rp.depth() - 1).node_type().name() == "list_item"` check
+/// is what keeps a bare `"[ ] hello"` (no list marker) from ever
+/// matching — correct per both the GFm task-list spec (a checkbox only
+/// exists inside a list item) and the real product's own convention (see
+/// the `oxmarkdown` skill). The `^`-anchored regex (via `InputRules`'s
+/// own `text_before_caret`, computed from the block's own start) already
+/// guarantees `"[ ] "` is the ENTIRE text so far in this paragraph — no
+/// separate "nothing before it" check needed.
+fn checkbox_on_input(
+    state: &taino_edit_leptos::EditorState,
+    caps: &Captures<'_>,
+    from: usize,
+    to: usize,
+) -> Option<taino_edit_leptos::Transaction> {
+    let rp = ResolvedPos::resolve(state.doc(), from).ok()?;
+    if rp.depth() < 2 {
+        return None;
+    }
+    if rp.parent().node_type().name() != "paragraph" {
+        return None;
+    }
+    if rp.node(rp.depth() - 1).node_type().name() != "list_item" {
+        return None;
+    }
+    let checked = matches!(caps.get(1).map(|m| m.as_str()), Some("x") | Some("X"));
+    let mut tx = state.tr();
+    tx.transform().delete(from, to, state.schema()).ok()?;
+    let mut attrs = Attrs::new();
+    attrs.insert("checked".to_string(), AttrValue::from(checked));
+    let checkbox = state
+        .schema()
+        .node("checkbox", attrs, vec![], vec![])
+        .ok()?;
+    tx.transform()
+        .insert(
+            from,
+            Slice::new(Fragment::from_node(checkbox), 0, 0),
+            state.schema(),
+        )
+        .ok()?;
+    // Past the checkbox atom itself (atom size 1) — right where the
+    // original content (now minus the trigger text) starts.
+    tx.set_selection(Selection::caret(from + 1));
+    Some(tx)
+}
+
 /// `"## "` -> heading, retyping the current block in place. A hand-rolled
 /// replacement for `taino-edit-core`'s own `textblock_type_rule` helper —
 /// see this module's own doc comment for the real bug being worked around
@@ -565,6 +624,7 @@ fn heading_type_on_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oxmarkdown_schema::Checkbox;
     use taino_edit_extensions::{
         build_schema_with, redo_command, undo_command, Blockquote, Bold, CodeBlock, Heading,
         Italic, Lists, Paragraph,
@@ -595,8 +655,35 @@ mod tests {
             &Blockquote,
             &Lists,
             &CodeBlock,
+            &Checkbox,
         ];
         build_schema_with(base, &exts, "doc").expect("schema builds")
+    }
+
+    /// A doc with `bullet_list > list_item > paragraph(text)`, caret at
+    /// the paragraph's own end.
+    fn state_with_list_item_paragraph(schema: &Schema, text: &str) -> EditorState {
+        let text_node = schema.text(text, vec![]).expect("text node");
+        let para = schema
+            .node("paragraph", Attrs::new(), vec![text_node], vec![])
+            .expect("paragraph");
+        let item = schema
+            .node("list_item", Attrs::new(), vec![para], vec![])
+            .expect("list_item");
+        let list = schema
+            .node("bullet_list", Attrs::new(), vec![item], vec![])
+            .expect("bullet_list");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![list], vec![])
+            .expect("doc");
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        // Position 3: past bullet_list's, list_item's, and paragraph's own
+        // open tokens.
+        let pos = 3 + text.chars().count();
+        tx.set_selection(Selection::caret(pos));
+        state = state.apply(tx);
+        state
     }
 
     /// A doc with one paragraph containing `text`, caret at its end.
@@ -642,6 +729,72 @@ mod tests {
         let next = state.apply(tx);
         let json = serde_json::to_string(&next.doc().to_json()).unwrap();
         assert!(json.contains("ordered_list"), "{json}");
+    }
+
+    #[test]
+    fn checkbox_input_rule_fires_on_bracket_space_bracket_space_in_a_list_item() {
+        let schema = test_schema();
+        let state = state_with_list_item_paragraph(&schema, "[ ] ");
+        let rules = build_input_rules(&schema);
+        let tx = rules.apply(&state).expect("rule should match '[ ] '");
+        let next = state.apply(tx);
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
+        assert!(json.contains("checkbox"), "{json}");
+        assert!(json.contains("\"checked\":false"), "{json}");
+        // The bracket text itself is consumed, not left behind.
+        assert!(
+            !next.doc().text_content().contains('['),
+            "{}",
+            next.doc().text_content()
+        );
+    }
+
+    #[test]
+    fn checkbox_input_rule_recognizes_x_as_checked() {
+        let schema = test_schema();
+        let state = state_with_list_item_paragraph(&schema, "[x] ");
+        let rules = build_input_rules(&schema);
+        let tx = rules.apply(&state).expect("rule should match '[x] '");
+        let next = state.apply(tx);
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
+        assert!(json.contains("\"checked\":true"), "{json}");
+    }
+
+    #[test]
+    fn checkbox_input_rule_recognizes_uppercase_x_as_checked() {
+        let schema = test_schema();
+        let state = state_with_list_item_paragraph(&schema, "[X] ");
+        let rules = build_input_rules(&schema);
+        let tx = rules.apply(&state).expect("rule should match '[X] '");
+        let next = state.apply(tx);
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
+        assert!(json.contains("\"checked\":true"), "{json}");
+    }
+
+    /// Regression check for the exact behavior confirmed against a real
+    /// GFM parser: a bare `"[ ] hello"` (no list marker at all) must NEVER
+    /// become a checkbox — matching both the GFM task-list spec (a
+    /// checkbox only exists inside a list item) and the real product's
+    /// own convention.
+    #[test]
+    fn checkbox_input_rule_declines_in_a_plain_paragraph_not_in_a_list() {
+        let schema = test_schema();
+        let state = state_with_paragraph(&schema, "[ ] ");
+        let rules = build_input_rules(&schema);
+        assert!(rules.apply(&state).is_none());
+    }
+
+    #[test]
+    fn checkbox_input_rule_leaves_caret_right_after_the_checkbox() {
+        let schema = test_schema();
+        let state = state_with_list_item_paragraph(&schema, "[ ] ");
+        let rules = build_input_rules(&schema);
+        let tx = rules.apply(&state).expect("rule should match");
+        let next = state.apply(tx);
+        let pos = next.selection().from();
+        let rp = ResolvedPos::resolve(next.doc(), pos).expect("caret should resolve");
+        assert_eq!(rp.parent().node_type().name(), "paragraph");
+        assert_eq!(rp.node(rp.depth() - 1).node_type().name(), "list_item");
     }
 
     #[test]
@@ -1200,6 +1353,12 @@ pub fn build_input_rules(schema: &Schema) -> InputRules {
     if schema.node_type("ordered_list").is_some() && schema.node_type("list_item").is_some() {
         let pattern = format!(r"^\d+\.{TRIGGER_SPACE}$");
         if let Ok(rule) = InputRule::new(&pattern, wrap_in_list_on_input("ordered_list")) {
+            rules.push(rule);
+        }
+    }
+    if schema.node_type("checkbox").is_some() && schema.node_type("list_item").is_some() {
+        let pattern = format!(r"^\[([ xX])\]{TRIGGER_SPACE}$");
+        if let Ok(rule) = InputRule::new(&pattern, checkbox_on_input) {
             rules.push(rule);
         }
     }
