@@ -176,29 +176,51 @@ fn App() -> impl IntoView {
     let state = RwSignal::new(initial_state);
 
     // `taino-edit-dom`/`taino-edit-leptos` never call `InputRules::apply`
-    // anywhere (confirmed by reading both crates' source — see
-    // `commands.rs`'s own doc comment) — this Effect is the ENTIRE
-    // integration. Runs after every state change (typing, clicks,
-    // keymap commands alike); harmless on a change that doesn't match
-    // any rule (`apply` just returns `None`), and self-terminating on a
-    // change that does (the matched trigger text is consumed as part of
-    // applying the rule, so applying it a second time finds nothing left
-    // to match). A no-op under SSR — Leptos never runs `Effect`s during
-    // server rendering.
+    // anywhere (confirmed by reading both crates' source; see
+    // `commands.rs`'s own doc comment) - this listener is the ENTIRE
+    // integration.
+    //
+    // A generic Leptos `Effect::new` was tried first and rejected: its
+    // ordering relative to `TainoEditor`'s OWN internal state->DOM/caret
+    // reconciliation effect (also a Leptos effect) is not guaranteed,
+    // since both run on Leptos's shared async reactive schedule.
+    // `taino-edit-leptos`'s own keydown handler explicitly avoids
+    // `Effect` for exactly this reason (applies its own results
+    // synchronously so the DOM/caret can't fall out of step), and its
+    // CHANGELOG documents a previously-fixed bug in exactly this class
+    // (a race between the selectionchange mirror and a reactive effect's
+    // DOM-selection re-sync).
+    //
+    // Fix: a plain `on:input` DOM listener on a wrapping `<div>` around
+    // `<TainoEditor>`, relying on well-defined DOM event bubbling order
+    // instead of Leptos's effect scheduling. `TainoEditor` attaches its
+    // own "input" listener to its INNER contenteditable element and
+    // updates `state` SYNCHRONOUSLY from it (confirmed by reading
+    // `taino-edit-leptos`'s source); a listener on an ANCESTOR div fires
+    // AFTER it during the bubble phase, by which point `state` already
+    // reflects the just-typed character. `get_untracked`/`with_value` are
+    // used (not `get`/reactive tracking) since this is a plain event
+    // callback, not a reactive computation. Harmless on input that
+    // doesn't match any rule (`apply` just returns `None`), and
+    // self-terminating on input that does (the matched trigger text is
+    // consumed as part of applying the rule). Never fires under SSR (no
+    // DOM events during server rendering).
     let input_rules = StoredValue::new_local(input_rules);
-    Effect::new(move |_| {
-        let current = state.get();
+    let on_input = move |_: leptos::ev::Event| {
+        let current = state.get_untracked();
         if let Some(tx) = input_rules.with_value(|rules| rules.apply(&current)) {
             state.set(current.apply(tx));
         }
-    });
+    };
 
     view! {
         <div id="app">
             <p class="ox-status-inline">
-                "oxmarkdown-editor spike \u{2014} taino-edit, minimal built-in schema (no OxMarkdown extensions yet)."
+                "oxmarkdown-editor spike - taino-edit, minimal built-in schema (no OxMarkdown extensions yet)."
             </p>
-            <TainoEditor state=state keymap=keymap />
+            <div on:input=on_input>
+                <TainoEditor state=state keymap=keymap />
+            </div>
         </div>
     }
 }
