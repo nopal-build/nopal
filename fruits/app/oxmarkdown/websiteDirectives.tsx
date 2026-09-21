@@ -1,4 +1,10 @@
 /**
+ * DUPLICATED from webapp/app/oxmarkdown/websiteDirectives.tsx -- see
+ * `websiteIcons.tsx`'s own header comment here for why this whole
+ * directory is duplicated. Not shared; keep both copies in sync by hand.
+ * First real consumer here: the Stamps guide's `scratch` playground
+ * (`/maker/stamps/scratch`, `routes/maker_.stamps_.scratch.tsx`).
+ *
  * `/v2` website-page-only directives, registered via `OxRenderer`'s
  * existing caller-supplied `DirectiveRegistry` mechanism
  * (`directiveRegistry.ts`) — none of these need raw mdast children (unlike

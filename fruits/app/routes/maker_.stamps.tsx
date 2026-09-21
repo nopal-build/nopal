@@ -263,6 +263,9 @@ function CategoryNav({ activeId }: { activeId: string | null }) {
         <a href="/maker/stamps/oxmarkdown" className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass}`}>
           OxMarkdown →
         </a>
+        <a href="/maker/stamps/scratch" className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass}`}>
+          Scratch →
+        </a>
       </NavColumn>
     </Stack>
   );

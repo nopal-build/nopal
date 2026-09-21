@@ -1,4 +1,8 @@
 /**
+ * DUPLICATED from webapp/app/styles/website.css -- see
+ * `oxmarkdown/websiteIcons.tsx`'s own header comment for why this whole
+ * directory is duplicated. Not shared; keep both copies in sync by hand.
+ *
  * Visual chrome for `/v2` website-page directives
  * (`oxmarkdown/websiteDirectives.tsx`). Deliberately SEPARATE from
  * `oxmarkdown.css` — that stylesheet is the shared dot-grid prose identity

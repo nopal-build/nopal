@@ -1,4 +1,12 @@
 /**
+ * DUPLICATED from webapp/app/oxmarkdown/websiteIcons.tsx -- needed here too
+ * so the Stamps guide's `scratch` playground (`/maker/stamps/scratch`) can
+ * render the real `/v2` website directives against fruits' own (full)
+ * `OxRenderer`. Not shared; keep both copies in sync by hand -- same
+ * webapp/fruits duplication convention `OxRenderer.tsx`/`oxmarkdown.css`
+ * already use, just in the other direction (this one originated in
+ * webapp, not fruits).
+ *
  * A small, named registry of illustrations used by the `/v2` website
  * templates' `::icon{name="..."}` directive — small inline glyphs or
  * standalone decorative marks, as opposed to `::stamp{name="..."}`'s
