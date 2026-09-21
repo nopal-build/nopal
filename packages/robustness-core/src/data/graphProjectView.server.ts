@@ -146,6 +146,20 @@ import {
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
+import { pageHash } from "./pageBody.server";
+import {
+  authorNames,
+  describeRef,
+  listMarksSourceFileIds,
+  listUnreadMarks,
+  refLineFileId,
+  MARK_KINDS,
+  stampMarksRead,
+  type GraphLogMark,
+  type MarkKind,
+} from "./graphLogMarks.server";
+import { cardChunks, checkMoveProposal, listDestinationNames, recordMove, type MovePlan } from "./graphLogMoves.server";
+import { parseSyncedCardFileName } from "./dailyLogSync.server";
 import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
 import { completedToolCalls, cutOffHeading, headingText, planTurnToolCalls } from "./llmProvider";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolCall, ToolDefinition } from "./llmProvider";
@@ -407,6 +421,129 @@ const TOOLS: ToolDefinition[] = [
   },
 ];
 
+/** Only offered on a run that has marks to read, so a run without any
+ * sees exactly the tools it always did. See `viewTools`. */
+const READ_MARK_TOOL: ToolDefinition = {
+  name: "read_mark",
+  description:
+    'Say what one mark is doing. Call it once for every mark listed under "Marks people wrote on the page". kind is one of: correction (something on the page is wrong or out of date), addition (something true that nobody logged), thought (a reaction, a question or an idea, which may change nothing on the page), structural (about how things are organized rather than the work, for example an entry filed under the wrong project). Nothing you send here appears on the page.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      markId: { type: "string" },
+      kind: { type: "string", enum: [...MARK_KINDS] },
+    },
+    required: ["markId", "kind"],
+  },
+};
+
+const PROPOSE_MOVE_TOOL: ToolDefinition = {
+  name: "propose_move",
+  description:
+    "For a structural mark saying a daily-log entry was filed under the wrong project. entryFileId is one of the entries the marked passage cites (the file id shown with it). section is the ## section of that entry that moves, exactly as listed; leave it out to move the whole entry. destination is the project the mark says it belongs to, in the mark's own words. Code checks it and tells you whether it moves (the entry leaves this project on the next sync, so write this page without it) or waits for the entry's author to confirm (leave it on the page). Never name the other project anywhere on this page.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      markId: { type: "string" },
+      entryFileId: { type: "string" },
+      section: { type: "string" },
+      destination: { type: "string" },
+    },
+    required: ["markId", "entryFileId", "destination"],
+  },
+};
+
+/** The tools a pass is offered. With no marks, `TOOLS` itself, the same
+ * array every run has always had: Efforts is live, and a run nobody has
+ * marked must not see a single new word. */
+export function viewTools(withMarks: boolean): ToolDefinition[] {
+  return withMarks ? [...TOOLS, READ_MARK_TOOL, PROPOSE_MOVE_TOOL] : TOOLS;
+}
+
+/** A mark as the page run is shown it. */
+export type PromptMark = {
+  id: string;
+  authorName: string;
+  date: string;
+  unitKind: string;
+  unitText: string;
+  section: string;
+  effort: string;
+  cites: { label: string; fileId: string | null; sections: string[] }[];
+  earlierVersion: boolean;
+  text: string;
+};
+
+/** The marks block of the user prompt. Only built when there are marks. */
+export function buildMarksBlock(marks: readonly PromptMark[]): string {
+  const lines = marks.map((m) => {
+    const where = [m.section || "the opening", m.effort].filter(Boolean).join(" · ");
+    const cites = m.cites.length
+      ? m.cites
+          .map((c) => `${c.label}${c.fileId ? ` [file ${c.fileId}${c.sections.length ? `; its sections: ${c.sections.map((h) => `"${h}"`).join(", ")}` : ""}]` : ""}`)
+          .join("; ")
+      : "nothing (the passage carries no citation)";
+    return [
+      `- mark:${m.id} · ${m.authorName} · ${m.date} · on the ${m.unitKind} "${m.unitText}" (${where})${m.earlierVersion ? " · written on an earlier version of the page" : ""}`,
+      `  The passage cites: ${cites}`,
+      `  Their words: ${m.text.replace(/\s*\n\s*/g, " / ")}`,
+    ].join("\n");
+  });
+  return [
+    "Marks people wrote on the page since it was last read. A mark is a person's own words written beside one thought on the page, and it outranks your own reading, the same as a reader correction. Each is also in the graph as that person's entry, dated the day they wrote it, so the page can cite it.",
+    "Reflect a mark where it changes what the page should say, citing the entries that back the change (the mark's own entry among them). A thought (a reaction, a question, an idea) already shows in the margin beside the passage it was written on: leave it there. Do not add a line, a quotation or a sentence to the page to carry a thought; the page changes for one only when it says something new about the work itself. Never present a mark's words as the entry it comments on. Call read_mark once for every mark below. For a structural mark saying a daily-log entry belongs to a different project, also call propose_move. This page never names another project.",
+    ...lines,
+  ].join("\n\n");
+}
+
+/** The first forbidden project name this content says, or null. Whole
+ * words, so a project called "Garage" is caught in "the Garage" and not
+ * in "garages". */
+export function namesAnotherProject(content: string, names: readonly string[]): string | null {
+  const haystack = content.toLowerCase();
+  const isWordChar = (c: string | undefined) => !!c && /[\p{L}\p{N}]/u.test(c);
+  for (const name of names) {
+    const needle = name.trim().toLowerCase();
+    if (!needle) continue;
+    // EVERY occurrence, not the first: a page that says "casitas nearby"
+    // before it says "the Casita" would otherwise pass the guard on the
+    // strength of the word that was not the project.
+    for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+      if (!isWordChar(haystack[at - 1]) && !isWordChar(haystack[at + needle.length])) return name;
+    }
+  }
+  return null;
+}
+
+/** Everything the model is shown about each mark: who, when, the passage
+ * and where it sat, and, for each entry the passage cites, its `##`
+ * sections (what `propose_move` can name). */
+async function buildPromptMarks(marks: readonly GraphLogMark[], currentPageHash: string): Promise<PromptMark[]> {
+  const names = await authorNames(marks.map((m) => m.author_human_id));
+  const sectionsByFile = new Map<string, string[]>();
+  for (const ref of marks.flatMap((m) => m.unit.refs)) {
+    if (!ref.fileId || sectionsByFile.has(ref.fileId)) continue;
+    const file = await getFileRefById(ref.fileId);
+    sectionsByFile.set(ref.fileId, file?.content ? cardChunks(file.content).map((c) => c.heading).filter(Boolean) : []);
+  }
+  return marks.map((m) => ({
+    id: m._id,
+    authorName: names.get(m.author_human_id) ?? m.author_human_id,
+    date: m.date,
+    unitKind: m.unit.kind === "bullet" ? "line" : m.unit.kind,
+    unitText: m.unit.text,
+    section: m.unit.section,
+    effort: m.unit.effort,
+    cites: m.unit.refs.map((r) => ({
+      label: describeRef(r),
+      fileId: r.fileId,
+      sections: r.fileId ? sectionsByFile.get(r.fileId) ?? [] : [],
+    })),
+    earlierVersion: m.page_hash !== currentPageHash,
+    text: m.text,
+  }));
+}
+
 /** A real bug, found in real production output: the tool description's
  * \`heading: ""\` example for the intro was sometimes misread by the
  * model as "pass the literal two-character string of two quote marks"
@@ -464,6 +601,12 @@ function createReadmeExecutors(input: {
   /** First names of everyone who has written in the graph: the only
    * names a bench heading may carry. See `sectionShapeNotes`. */
   writerFirstNames: readonly string[];
+  /** Project names this page may not say: the destination of a move a
+   * mark asked for this run. A reader here may not be allowed to know
+   * that project exists (Austin, 2026-09-21), and the instruction not to
+   * name it is only in the prompt while the mark is unread, so the rule
+   * lives in code too. */
+  forbiddenNames?: () => readonly string[];
 }): {
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>;
   summaries: string[];
@@ -492,6 +635,10 @@ function createReadmeExecutors(input: {
     log(`graph-project-view -- ${reason}.`);
   };
   let introTurnedBack = false;
+  // One name turn-back per section per run, same shape as the shape
+  // turn-backs below: a rule worth stating once, never a loop that stalls
+  // a run on a name that is also an ordinary word.
+  const nameTurnedBack = new Set<string>();
   // One shape turn-back per section per run -- see `sectionShapeNotes`.
   const shapeTurnedBack = new Set<string>();
   const summaries: string[] = [];
@@ -526,6 +673,12 @@ function createReadmeExecutors(input: {
       // a different thing and still goes through: `heading: ""` is how
       // the intro is addressed, and `content: ""` is a real instruction
       // the erase guard handles on its own terms.
+      const named = namesAnotherProject(String(toolInput.content ?? ""), input.forbiddenNames?.() ?? []);
+      if (named && !nameTurnedBack.has(String(toolInput.heading ?? ""))) {
+        nameTurnedBack.add(String(toolInput.heading ?? ""));
+        log(`graph-project-view -- turned back update_section "${String(toolInput.heading ?? "")}" once: it named another project ("${named}").`);
+        return `Not written. This page named another project ("${named}"). A reader here may not be able to see that project, so the page never names it: say the material was logged here by mistake and belongs to another project, and send the same section again.`;
+      }
       if (typeof toolInput.heading !== "string" || typeof toolInput.content !== "string") {
         refuse("refused a malformed update_section (heading/content missing; likely a cut-off call)");
         return 'Error: update_section needs both "heading" and "content" as strings. Nothing was written.';
@@ -708,6 +861,7 @@ async function runReadmeAgentLoop(
   projectFolderId: string,
   pass: number,
   callCounter: { count: number },
+  tools: ToolDefinition[] = TOOLS,
 ): Promise<{
   usage: LlmUsage;
   model: string | null;
@@ -743,7 +897,7 @@ async function runReadmeAgentLoop(
     // later pass reads it. Same reason `graph-structure` drives the flag
     // from its own shared `callCounter`, kept here for the same
     // "one counter per run, shared across passes" shape.
-    const response = await provider.complete({ system, messages, tools: TOOLS, cacheSystemPrompt: true });
+    const response = await provider.complete({ system, messages, tools, cacheSystemPrompt: true });
     callCounter.count++;
     usage.inputTokens += response.usage.inputTokens;
     usage.outputTokens += response.usage.outputTokens;
@@ -1209,7 +1363,12 @@ function describeWriters(allNodes: GraphLogNode[]): string {
  * second pass would be shown a README its first pass already rewrote)
  * and the unread reader comments. The graph itself is in the system
  * prompt -- see `ViewRunContext`. */
-function readmeAndComments(input: { readmeContent: string; unstampedComments: string[] }): string[] {
+function readmeAndComments(input: {
+  readmeContent: string;
+  unstampedComments: string[];
+  marks?: readonly PromptMark[];
+  namedProject?: string | null;
+}): string[] {
   const currentBody = splitFrontmatter(input.readmeContent).body.trim();
   return [
     currentBody
@@ -1218,11 +1377,20 @@ function readmeAndComments(input: { readmeContent: string; unstampedComments: st
     input.unstampedComments.length > 0
       ? `Unread reader corrections in "Notes on this view" (treat these as ground truth overriding your own reading; you do not need to and should not edit that section yourself):\n${input.unstampedComments.map((c) => `- ${c}`).join("\n")}`
       : "",
+    input.marks && input.marks.length > 0 ? buildMarksBlock(input.marks) : "",
+    input.namedProject
+      ? `This page names another project ("${input.namedProject}"). Some people who read this page cannot see that project, and its existence is not theirs to learn, so this page never names it. Rewrite the section that says it: the material was logged here by mistake and belongs to another project, and that is all the page says about it.`
+      : "",
   ].filter(Boolean);
 }
 
 /** Pass 1: reconcile the README with the graph. */
-export function buildUserPrompt(input: { readmeContent: string; unstampedComments: string[] }): string {
+export function buildUserPrompt(input: {
+  readmeContent: string;
+  unstampedComments: string[];
+  marks?: readonly PromptMark[];
+  namedProject?: string | null;
+}): string {
   return readmeAndComments(input).join("\n\n---\n\n");
 }
 
@@ -1247,6 +1415,8 @@ export function buildUserPrompt(input: { readmeContent: string; unstampedComment
 export function buildTargetedUserPrompt(input: {
   readmeContent: string;
   unstampedComments: string[];
+  marks?: readonly PromptMark[];
+  namedProject?: string | null;
   uncited: UncitedThread[];
   uncitedNodeText: string | null;
   cutOff: { heading: string | null } | null;
@@ -1623,6 +1793,13 @@ export async function runGraphProjectView(
         : "graph-project-view: README.md has no skill stamp; reconciling it under the current EFFORTS.md.",
     );
   }
+  // Marks nobody's page run has read yet (see `graphLogMarks.server.ts`).
+  // Like an unread note, they are new input even when the graph is not.
+  const readerMarks = await listUnreadMarks(projectFolder._id);
+  // Projects this page's material has moved to. Their names may never
+  // appear on this page: a reader here may not be able to see them, and
+  // may not be allowed to learn they exist (Austin, 2026-09-21).
+  const moveDestNames = await listDestinationNames(projectFolder._id);
   if (applied && !rewrite) {
     // A reader correction is new input even when the graph is not: a
     // person wrote in "Notes on this view" and the page has not read it.
@@ -1632,8 +1809,15 @@ export async function runGraphProjectView(
     const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
     const readmeBody = stripIncompleteBanner(splitFrontmatter(readme?.content ?? "").body);
     const unread = extractReaderComments(splitReadmeSections(readmeBody)).unstamped.length;
-    if (unread > 0) {
+    const named = namesAnotherProject(readmeBody, moveDestNames);
+    if (named) {
+      // Not a report this time: the page can fix itself, and a check that
+      // only ever says the same thing every run is a check nobody reads.
+      log(`graph-project-view: the graph is unchanged, but the page names another project ("${named}"); reconciling to take the name out.`);
+    } else if (unread > 0) {
       log(`graph-project-view: the graph is unchanged, but ${unread} unread reader correction(s) are waiting in "Notes on this view"; reconciling the page against them.`);
+    } else if (readerMarks.length > 0) {
+      log(`graph-project-view: the graph is unchanged, but ${readerMarks.length} unread mark(s) are waiting; reconciling the page against them.`);
     } else {
       // The README is not rewritten, but it still exists and the graph is
       // still the graph, so coverage is measurable and gets measured. This
@@ -1690,7 +1874,24 @@ export async function runGraphProjectView(
   const previousSidecar = previousSidecarListing ? (await getFileRefById(previousSidecarListing._id))?.content : null;
   const previousEfforts = readEffortsSidecar(previousSidecar);
   const previousMeta = readSidecarMeta(previousSidecar);
-  const readingsBlock = buildReadingsBlock(readings, {
+  // A mark is somebody's words in the graph, but writing in the margin is
+  // not working on the project: it must not make a client a writer, and
+  // only writers get a bench heading. Nodes that came from a marks file
+  // are left out of both. On a project nobody has marked this is every
+  // node, as before.
+  const markFileIds = await listMarksSourceFileIds(projectFolder);
+  const workNodes =
+    markFileIds.size > 0 ? allNodes.filter((n) => !markFileIds.has(refLineFileId(n.refLine) ?? "")) : allNodes;
+  const workWriters = new Set(workNodes.map((n) => n.authorName).filter((n): n is string => !!n));
+  const writerFirstNames = (markFileIds.size > 0 ? readings.load.filter((p) => workWriters.has(p.name)) : readings.load).map(
+    (p) => firstName(p.name),
+  );
+  // The readings name "the only names a bench heading may carry", and the
+  // executor refuses anything else, so the block has to be built from the
+  // same filtered list or the prompt invites a turn-back it caused.
+  const shownReadings =
+    markFileIds.size > 0 ? { ...readings, load: readings.load.filter((p) => workWriters.has(p.name)) } : readings;
+  const readingsBlock = buildReadingsBlock(shownReadings, {
     sinceDate: previousMeta?.today ?? null,
     arrivedSince: arrivedSince(structureSections, allNodes, previousMeta?.today ?? null),
     fellAway: fallenAwayThreads(structureSections),
@@ -1701,7 +1902,7 @@ export async function runGraphProjectView(
   const structureBody = splitFrontmatter(structureFile.content).body;
   const system = buildSystemPrompt(skillContent, {
     today,
-    writersFact: describeWriters(allNodes),
+    writersFact: describeWriters(workNodes),
     graphStructureBody: structureBody.trim(),
     nodeTextBlock,
     readingsBlock,
@@ -1770,9 +1971,58 @@ export async function runGraphProjectView(
     today,
     sectionOrder,
     descriptions,
-    writerFirstNames: readings.load.map((p) => firstName(p.name)),
+    writerFirstNames,
+    forbiddenNames: () => [...moveDestNames, ...movePlans.map((p) => p.destName)],
   });
-  const { executors, summaries, refusals, refusalReasons, getCurrent } = executors_;
+  const { executors: viewExecutors, summaries, refusals, refusalReasons, getCurrent } = executors_;
+
+  // The marks this run reads, as the model is shown them, plus the two
+  // tools that exist only when there are marks. With none, the prompt,
+  // the tools and the executors are exactly what they always were.
+  const promptMarks = readerMarks.length > 0 ? await buildPromptMarks(readerMarks, pageHash(rawReadmeContent)) : [];
+  const offeredMarks = new Map(readerMarks.map((m) => [m._id, m]));
+  const markKinds = new Map<string, MarkKind>();
+  const movePlans: MovePlan[] = [];
+  const executors =
+    readerMarks.length === 0
+      ? viewExecutors
+      : {
+          ...viewExecutors,
+          read_mark: async (toolInput: Record<string, unknown>) => {
+            const id = String(toolInput.markId ?? "").replace(/^mark:/, "");
+            const kind = String(toolInput.kind ?? "") as MarkKind;
+            if (!offeredMarks.has(id)) return `Error: no mark ${id} was offered this run.`;
+            if (!MARK_KINDS.includes(kind)) return `Error: kind must be one of ${MARK_KINDS.join(", ")}.`;
+            markKinds.set(id, kind);
+            return "Noted.";
+          },
+          propose_move: async (toolInput: Record<string, unknown>) => {
+            const id = String(toolInput.markId ?? "").replace(/^mark:/, "");
+            const mark = offeredMarks.get(id);
+            if (!mark) return `Error: no mark ${id} was offered this run.`;
+            const section = typeof toolInput.section === "string" ? toolInput.section.replace(/^#+\s*/, "").trim() : null;
+            const check = await checkMoveProposal({
+              proposal: {
+                markId: id,
+                entryFileId: String(toolInput.entryFileId ?? ""),
+                section,
+                destination: String(toolInput.destination ?? ""),
+              },
+              mark,
+              sourceProject: projectFolder,
+              parseSyncedName: parseSyncedCardFileName,
+            });
+            if (!check.ok) {
+              log(`graph-project-view: mark ${id} asked for a move that was not made: ${check.reason}.`);
+              return `Not moved: ${check.reason}. Leave the material on the page, and do not name another project.`;
+            }
+            movePlans.push(check.plan);
+            return check.plan.status === "applied"
+              ? "It moves: the entry's author made the mark, so this material is refiled under the project it belongs to and leaves this one. Write this page without it, and never name where it went."
+              : "Recorded as a request for the entry's author to confirm. Until they do it stays here, so leave it on the page.";
+          },
+        };
+  const tools = viewTools(readerMarks.length > 0);
 
   // Coverage off the COMMITTED README, computed by code between passes and
   // again at the end. Both the loop's own progress measure and the
@@ -1857,6 +2107,10 @@ export async function runGraphProjectView(
       const targeted = passes > 0;
       const before = { writes: summaries.length, refusals: refusals(), uncited: uncited.length };
       const current = getCurrent().content;
+      const namedProject = namesAnotherProject(splitFrontmatter(current).body, [
+        ...moveDestNames,
+        ...movePlans.map((p) => p.destName),
+      ]);
       const userPrompt = targeted
         ? buildTargetedUserPrompt({
             readmeContent: current,
@@ -1869,11 +2123,18 @@ export async function runGraphProjectView(
               "The actual node text behind the uncited threads above, in graph-structure.md's own order (call get_node for any node not shown):",
             ),
             cutOff,
+            ...(promptMarks.length > 0 ? { marks: promptMarks } : {}),
+            ...(namedProject ? { namedProject } : {}),
           })
-        : buildUserPrompt({ readmeContent: current, unstampedComments: unstamped });
+        : buildUserPrompt({
+            readmeContent: current,
+            unstampedComments: unstamped,
+            ...(promptMarks.length > 0 ? { marks: promptMarks } : {}),
+            ...(namedProject ? { namedProject } : {}),
+          });
 
       const passStart = Date.now();
-      const result = await runReadmeAgentLoop(llm, system, userPrompt, executors, perf, projectFolder._id, passes, callCounter);
+      const result = await runReadmeAgentLoop(llm, system, userPrompt, executors, perf, projectFolder._id, passes, callCounter, tools);
       passes++;
       runUsage.inputTokens += result.usage.inputTokens;
       runUsage.outputTokens += result.usage.outputTokens;
@@ -2035,6 +2296,38 @@ export async function runGraphProjectView(
 
     await markGraphStructureApplied(structureListing._id, structureFile.content, meta.asOfGraphHash, skillFingerprint);
 
+    // Marks this run was offered are read now, and any move one of them
+    // asked for is saved. Only here, on a clean finish: a run that stops
+    // short leaves its marks unread for the next one, same as the notes.
+    if (readerMarks.length > 0) {
+      // One move per chunk, however many times the model proposed it: the
+      // clash check in `checkMove` reads the table, and nothing is in the
+      // table until this loop runs.
+      const movedChunks = new Set<string>();
+      for (const plan of movePlans) {
+        const chunkKey = `${plan.authorHumanId}|${plan.date}|${plan.chunk.kind}|${plan.chunk.heading.toLowerCase()}`;
+        if (movedChunks.has(chunkKey)) continue;
+        movedChunks.add(chunkKey);
+        // The Cards are corrected here, on a clean finish and nowhere
+        // else: a run that stopped short leaves the mark unread and the
+        // daily log untouched. See `graphLogMoves.server.ts`.
+        const what = plan.chunk.kind === "whole" ? "entry" : `section "${plan.chunk.heading}"`;
+        const done = await recordMove(plan);
+        log(
+          `graph-project-view: mark ${plan.markId} ${done.status === "applied" ? "refiled" : "asked to refile"} ` +
+            `${plan.authorHumanId}'s ${plan.date} ${what} under another project (${done.id})` +
+            `${done.reason ? `; it did not move: ${done.reason}` : ""}.`,
+        );
+      }
+      const unclassified = readerMarks.filter((m) => !markKinds.has(m._id)).length;
+      await stampMarksRead(readerMarks.map((m) => m._id), markKinds, today);
+      log(
+        `graph-project-view: read ${readerMarks.length} mark(s)` +
+          `${[...MARK_KINDS].map((k) => ({ k, n: [...markKinds.values()].filter((v) => v === k).length })).filter(({ n }) => n > 0).map(({ k, n }) => `, ${n} ${k}`).join("")}` +
+          `${unclassified > 0 ? `, ${unclassified} the run never classified` : ""}.`,
+      );
+    }
+
     // The page as data, beside it in Graph/ (system-written like the
     // structure file). Written on every clean finish, rewrite or not,
     // because the readings move with today's date even when the words
@@ -2057,6 +2350,17 @@ export async function runGraphProjectView(
         content_type: "text/markdown",
         folder_id: graphFolder._id,
       });
+    }
+    // Last line of defence on the rule a page can never break: if the
+    // words still name another project, the run says so rather than
+    // leaving a quiet leak (the turn-back above only sees writes this run
+    // made, and a name written by an earlier run outlives the mark that
+    // put it there).
+    const leaked = namesAnotherProject(reconciledBody, [...moveDestNames, ...movePlans.map((p) => p.destName)]);
+    if (leaked) {
+      const reason = `the page names another project ("${leaked}"), which a reader here may not be able to see; it needs an edit that takes the name out`;
+      loadIssues.push(reason);
+      log(`graph-project-view: ${reason}.`);
     }
     const changed = summaries.length > 0;
     log(

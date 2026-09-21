@@ -27,6 +27,7 @@ import {
   directiveAttrs,
   isDirectiveNode,
   parseRefAttrs,
+  splitSentences,
   type OxDocument,
   type DirectiveNode,
 } from "oxmarkdown-core";
@@ -37,6 +38,13 @@ import OxPopover from "../oxmarkdown/OxPopover";
 import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
+import {
+  buildAnnotationCtx,
+  MarkableUnit,
+  MarkNotes,
+  type AnnotationCtx,
+  type OxAnnotations,
+} from "../oxmarkdown/marks";
 import { CircleButton } from "stamps/CircleButton";
 import { surfaceBase } from "stamps/surface.css";
 import "../styles/oxmarkdown.css";
@@ -63,6 +71,11 @@ export interface OxRendererProps {
    * no vault-backed folder resolution at all (e.g. the styles/demo page);
    * the directive then renders nothing rather than an empty box. */
   resolveGalleryFolder?: GalleryFolderResolver;
+  /** Turns on the pen: every markable thought (see
+   * `oxmarkdown-core/src/markUnits.ts`) can be marked, and its marks show
+   * in the margin. See `oxmarkdown/marks.tsx`. Omitted, nothing about the
+   * output changes. */
+  annotations?: OxAnnotations;
   className?: string;
 }
 
@@ -73,6 +86,7 @@ export default function OxRenderer({
   interactive,
   resolveCard,
   resolveGalleryFolder,
+  annotations,
   className,
 }: OxRendererProps) {
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
@@ -80,7 +94,7 @@ export default function OxRenderer({
 
   return (
     <div
-      className={`ox-content ox-tokens${className ? ` ${className}` : ""}`}
+      className={`ox-content ox-tokens${annotations ? " ox-annotated" : ""}${className ? ` ${className}` : ""}`}
       style={style}
     >
       <div className="ox-dot-grid">
@@ -90,6 +104,7 @@ export default function OxRenderer({
           interactive={interactive}
           resolveCard={resolveCard}
           resolveGalleryFolder={resolveGalleryFolder}
+          annotations={annotations}
         />
       </div>
     </div>
@@ -145,13 +160,18 @@ export interface OxTreeRendererProps {
   interactive?: OxInteractive;
   resolveCard?: CardResolver;
   resolveGalleryFolder?: GalleryFolderResolver;
+  annotations?: OxAnnotations;
 }
 
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
-export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder }: OxTreeRendererProps) {
+export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, annotations }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
   const ambiguousRefFirstNames = useMemo(() => collectAmbiguousRefFirstNames(doc), [doc]);
+  const annotationCtx = useMemo(
+    () => (annotations ? buildAnnotationCtx(doc, annotations) : undefined),
+    [doc, annotations],
+  );
   return (
     <>
       {renderBlockNodes(doc.children, {
@@ -161,6 +181,7 @@ export function OxTreeRenderer({ doc, directives, interactive, resolveCard, reso
         resolveCard,
         resolveGalleryFolder,
         ambiguousRefFirstNames,
+        annotations: annotationCtx,
       })}
     </>
   );
@@ -178,6 +199,8 @@ interface RenderCtx {
    * `collectAmbiguousRefFirstNames`), because a single `:ref` can't know
    * on its own whether its first name is unique. */
   ambiguousRefFirstNames?: Set<string>;
+  /** The pen, when the caller turned it on. See `oxmarkdown/marks.tsx`. */
+  annotations?: AnnotationCtx;
 }
 
 /** Which first names are shared by two or more cited people in this
@@ -295,10 +318,22 @@ function renderNode(node: any, key: number, ctx: RenderCtx): ReactNode {
       return null;
 
     case "paragraph":
+      if (ctx.annotations?.unitAt(node, 0)) return renderMarkableParagraph(node, key, ctx, ctx.annotations);
       return <p key={key}>{renderNodes(node.children, ctx)}</p>;
 
     case "heading": {
       const Tag = HEADING_TAGS[Math.min(node.depth, 6) - 1];
+      const unit = ctx.annotations?.unitAt(node, null);
+      if (unit && ctx.annotations) {
+        return (
+          <Tag key={key} className="ox-mark-host">
+            <MarkableUnit unit={unit} ctx={ctx.annotations}>
+              {renderNodes(node.children, ctx)}
+            </MarkableUnit>
+            <MarkNotes ctx={ctx.annotations} unitKeys={[unit.key]} />
+          </Tag>
+        );
+      }
       return <Tag key={key}>{renderNodes(node.children, ctx)}</Tag>;
     }
 
@@ -398,6 +433,29 @@ function renderNode(node: any, key: number, ctx: RenderCtx): ReactNode {
   }
 }
 
+/** A paragraph with the pen on: each sentence is its own markable
+ * thought (split exactly the way `computeMarkUnits` splits it, so the
+ * keys agree), and the marks on any of them share one margin note block
+ * beside the paragraph. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderMarkableParagraph(node: any, key: number, ctx: RenderCtx, annotations: AnnotationCtx): ReactNode {
+  const sentences = splitSentences(node.children).map((pieces, i) => ({ pieces, unit: annotations.unitAt(node, i) }));
+  return (
+    <p key={key} className="ox-mark-host">
+      {sentences.map(({ pieces, unit }, i) =>
+        unit ? (
+          <MarkableUnit key={i} unit={unit} ctx={annotations}>
+            {renderNodes(pieces, ctx)}
+          </MarkableUnit>
+        ) : (
+          <Fragment key={i}>{renderNodes(pieces, ctx)}</Fragment>
+        ),
+      )}
+      <MarkNotes ctx={annotations} unitKeys={sentences.flatMap(({ unit }) => (unit ? [unit.key] : []))} />
+    </p>
+  );
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderList(node: any, key: number, ctx: RenderCtx): ReactNode {
   const isTaskList = node.children.some((c: { checked?: boolean | null }) => c.checked != null);
@@ -414,6 +472,22 @@ function renderList(node: any, key: number, ctx: RenderCtx): ReactNode {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderListItem(node: any, key: number, ctx: RenderCtx): ReactNode {
+  const unit = node.checked == null ? ctx.annotations?.unitAt(node, null) : undefined;
+  if (unit && ctx.annotations) {
+    // The bullet's own words are the thought; a nested list under it is
+    // its own set of thoughts, so it sits outside the markable wrapper.
+    const own = node.children.filter((c: { type: string }) => c.type !== "list");
+    const nested = node.children.filter((c: { type: string }) => c.type === "list");
+    return (
+      <li key={key} className="ox-mark-host">
+        <MarkableUnit unit={unit} ctx={ctx.annotations} as="div">
+          {renderBlockNodes(own, ctx)}
+        </MarkableUnit>
+        <MarkNotes ctx={ctx.annotations} unitKeys={[unit.key]} />
+        {nested.length > 0 && renderBlockNodes(nested, ctx)}
+      </li>
+    );
+  }
   if (node.checked == null) {
     return <li key={key}>{renderBlockNodes(node.children, ctx)}</li>;
   }
@@ -545,6 +619,9 @@ interface GalleryImage {
   alt: string | null;
   title: string | null;
   kind: "image" | "video";
+  /** Source offset of the image/link node, which is how the pen finds the
+   * photo's markable unit. Absent for a folder-resolved gallery. */
+  offset?: number;
 }
 
 // A video URL carries this marker as its own query parameter so a plain
@@ -596,11 +673,11 @@ function collectGalleryMedia(nodes: readonly unknown[]): GalleryImage[] {
   const visit = (node: any) => {
     if (!node || typeof node !== "object") return;
     if (node.type === "image") {
-      media.push({ url: node.url, alt: node.alt ?? null, title: node.title ?? null, kind: "image" });
+      media.push({ url: node.url, alt: node.alt ?? null, title: node.title ?? null, kind: "image", offset: node.position?.start?.offset });
       return;
     }
     if (node.type === "link" && typeof node.url === "string" && node.url.includes(VIDEO_MARKER)) {
-      media.push({ url: stripVideoMarker(node.url), alt: linkText(node), title: node.title ?? null, kind: "video" });
+      media.push({ url: stripVideoMarker(node.url), alt: linkText(node), title: node.title ?? null, kind: "video", offset: node.position?.start?.offset });
       return;
     }
     if (Array.isArray(node.children)) node.children.forEach(visit);
@@ -635,6 +712,7 @@ function renderGalleryGrid(
   maxColumnsAttr: string | undefined,
   key: number,
   title: string | null,
+  annotations?: AnnotationCtx,
 ): ReactNode {
   const columns = computeGalleryColumns(images.length, maxColumnsAttr);
   const grid = (
@@ -642,16 +720,35 @@ function renderGalleryGrid(
       className="ox-gallery-directive"
       style={{ "--ox-gallery-columns": columns } as CSSProperties}
     >
-      {images.map((img, i) => (
-        <figure key={i} className="ox-gallery-item">
-          {img.kind === "video" ? (
-            <video src={img.url} title={img.title ?? undefined} controls preload="metadata" />
-          ) : (
-            <img src={img.url} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
-          )}
-          {img.alt && <figcaption>{img.alt}</figcaption>}
-        </figure>
-      ))}
+      {images.map((img, i) => {
+        const media = (
+          <>
+            {img.kind === "video" ? (
+              <video src={img.url} title={img.title ?? undefined} controls preload="metadata" />
+            ) : (
+              <img src={img.url} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
+            )}
+            {img.alt && <figcaption>{img.alt}</figcaption>}
+          </>
+        );
+        const unit =
+          annotations && img.offset != null ? annotations.unitAt({ position: { start: { offset: img.offset } } }, null) : undefined;
+        if (unit && annotations) {
+          return (
+            <figure key={i} className="ox-gallery-item ox-mark-host">
+              <MarkableUnit unit={unit} ctx={annotations} as="div">
+                {media}
+              </MarkableUnit>
+              <MarkNotes ctx={annotations} unitKeys={[unit.key]} />
+            </figure>
+          );
+        }
+        return (
+          <figure key={i} className="ox-gallery-item">
+            {media}
+          </figure>
+        );
+      })}
     </div>
   );
   if (!title) return <Fragment key={key}>{grid}</Fragment>;
@@ -776,7 +873,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     if (media.length === 0) {
       return <Fragment key={key}>{renderBlockNodes(node.children, ctx)}</Fragment>;
     }
-    return renderGalleryGrid(media, directiveAttrs(node)["max-columns"], key, null);
+    return renderGalleryGrid(media, directiveAttrs(node)["max-columns"], key, null, ctx.annotations);
   }
 
   // `::gallery{folder="..."}` — the LEAF-directive sibling of the
