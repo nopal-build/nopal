@@ -30,7 +30,8 @@
     "./SidebarToggleIcon": "./src/SidebarToggleIcon.tsx",
     "./Stack": "./src/Stack.tsx",
     "./Cluster": "./src/Cluster.tsx",
-    "./Grid": "./src/Grid.tsx"
+    "./Grid": "./src/Grid.tsx",
+    "./useScrollSpy": "./src/useScrollSpy.ts"
   },
   "peerDependencies": {
     "react": "^18.3.1"

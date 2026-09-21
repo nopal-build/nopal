@@ -28,6 +28,13 @@ export const navLink = recipe({
         paddingTop: "8px",
         paddingBottom: "8px",
       },
+      // A `DrawerContent` nav list item (see the Stamps guide's own
+      // category nav) — same idea as `mobile`, just tighter vertical
+      // padding since a drawer stacks many more links in less height.
+      drawer: {
+        display: "block",
+        padding: "3px 8px",
+      },
     },
     active: {
       true: {

@@ -34,7 +34,9 @@ import { Chip } from "stamps/Chip";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
 import { Grid } from "stamps/Grid";
+import { useScrollSpy } from "stamps/useScrollSpy";
 import { link } from "stamps/link.css";
+import { navLink } from "stamps/navLink.css";
 import { textSize, truncate } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { semanticColors } from "stamps/tokens";
@@ -191,7 +193,6 @@ type NavSection = { id: string; label: string };
 type NavCategory = { label: string; sections: NavSection[] };
 
 const NAV: NavCategory[] = [
-  { label: "Guide", sections: [{ id: "component-guide", label: "Component Guide" }] },
   {
     label: "Foundations",
     sections: [
@@ -228,6 +229,12 @@ const NAV: NavCategory[] = [
   { label: "Patterns", sections: [{ id: "collections", label: "Collections" }] },
 ];
 
+// Stable (module-level, never re-created) so `useScrollSpy` doesn't tear
+// down and rebuild its `IntersectionObserver` on every render.
+const ALL_SECTION_IDS: string[] = NAV.flatMap((category) => category.sections.map((s) => s.id));
+
+const drawerNavLinkClass = `${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`;
+
 function NavColumn({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Stack gap={1}>
@@ -239,7 +246,7 @@ function NavColumn({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
-function CategoryNav() {
+function CategoryNav({ activeId }: { activeId: string | null }) {
   return (
     <Stack gap={5}>
       {NAV.map((category) => (
@@ -248,7 +255,7 @@ function CategoryNav() {
             <a
               key={section.id}
               href={`#${section.id}`}
-              className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
+              className={`${navLink({ context: "drawer", active: section.id === activeId })} ${drawerNavLinkClass}`}
             >
               {section.label}
             </a>
@@ -256,134 +263,14 @@ function CategoryNav() {
         </NavColumn>
       ))}
       <NavColumn label="Related">
-        <a href="/styles" className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}>
+        <a href="/styles" className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass}`}>
           Classic guide →
         </a>
-        <a
-          href="/styles/oxmarkdown"
-          className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
-        >
+        <a href="/styles/oxmarkdown" className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass}`}>
           OxMarkdown →
         </a>
       </NavColumn>
     </Stack>
-  );
-}
-
-// ─── Component Guide (simple list) ───────────────────────────────────────────
-
-type GuideItem = { name: string; description: string };
-type GuideGroup = { label: string; items: GuideItem[] };
-
-const GUIDE_GROUPS: GuideGroup[] = [
-  {
-    label: "Layout & navigation",
-    items: [
-      {
-        name: "AppLayout",
-        description:
-          "The app shell — top nav, mobile menu, page container. Every page wraps its content in this.",
-      },
-      {
-        name: "CenterContent / DrawerContent",
-        description: "AppLayout's two content-area types — see the Layout category.",
-      },
-    ],
-  },
-  {
-    label: "Form & input",
-    items: [
-      {
-        name: "Input",
-        description: "A text or textarea field, with its label, border, and padding already built in.",
-      },
-      {
-        name: "NumberInput",
-        description: "A numeric field with +/− steppers, free typing, and inline math (+ − × ÷ ^).",
-      },
-    ],
-  },
-  {
-    label: "Status & tags",
-    items: [
-      { name: "Badge", description: "A status pill — Complete, Overdue, Invited, and friends." },
-      { name: "Chip", description: "A filter or category tag, with an active state and click handler." },
-    ],
-  },
-  {
-    label: "Collections & actions",
-    items: [
-      {
-        name: "SearchCollection",
-        description: 'A searchable, scrollable list — with room for an "add new" row.',
-      },
-      {
-        name: "CopyField",
-        description: "A read-only field with a Copy button, for commands, tokens, and share links.",
-      },
-    ],
-  },
-  {
-    label: "Overlays & menus",
-    items: [
-      { name: "Modal", description: "A centered dialog — closes on a backdrop click or Escape." },
-      { name: "CircleButton", description: "A round, icon-only button — bring your own icon." },
-      {
-        name: "MoreMenu",
-        description: 'A "•••" action menu that handles its own open/close state for you.',
-      },
-      {
-        name: "ErrorPanel",
-        description: "An access-denied / something-went-wrong card for a route's ErrorBoundary.",
-      },
-    ],
-  },
-];
-
-function GuideList() {
-  return (
-    <Grid gap={5} minColumnWidth={260} style={{ alignItems: "start" }}>
-      {GUIDE_GROUPS.map((group) => (
-        <Surface key={group.label} className={sprinkles({ p: 5 })}>
-          <Stack gap={3}>
-            <div className={groupLabelClass} style={{ color: semanticColors.textSubtle }}>
-              {group.label}
-            </div>
-            <Stack gap={3}>
-              {group.items.map((item) => (
-                <Cluster key={item.name} gap={3} align="baseline">
-                  <code
-                    className={`${textSize.sm} ${sprinkles({ fontFamily: "mono", fontWeight: "semibold", flexShrink: 0 })}`}
-                    style={{ color: semanticColors.textBrand }}
-                  >
-                    {item.name}
-                  </code>
-                  <span className={textSize.sm} style={{ color: semanticColors.textPrimary }}>
-                    {item.description}
-                  </span>
-                </Cluster>
-              ))}
-            </Stack>
-          </Stack>
-        </Surface>
-      ))}
-    </Grid>
-  );
-}
-
-function ComponentGuideSection() {
-  return (
-    <Section id="component-guide" title="Component Guide">
-      <Stack gap={6}>
-        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "640px" }}>
-          Most UI needs in this app are already solved by something below —
-          check here first. Need something that isn't listed, or thinking
-          about adding a new shared component? See <Code>AGENTS.md</Code>{" "}
-          for the rules on when to extract one.
-        </p>
-        <GuideList />
-      </Stack>
-    </Section>
   );
 }
 
@@ -906,9 +793,11 @@ function LayoutSection() {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function MakerStamps() {
+  const activeId = useScrollSpy(ALL_SECTION_IDS);
+
   return (
     <AppLayout>
-      <DrawerContent drawer={<CategoryNav />} title="Sections">
+      <DrawerContent drawer={<CategoryNav activeId={activeId} />} title="Sections">
         <CenterContent>
           <Stack gap={16}>
             <div>
@@ -928,8 +817,6 @@ export default function MakerStamps() {
                 migrated here yet link back to the classic guide.
               </p>
             </div>
-
-            <ComponentGuideSection />
 
             <ColorsSection />
             <TypographySection />
