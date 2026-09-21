@@ -143,12 +143,20 @@ impl Extension for HardBreak {
     }
 }
 
-/// Insert a `hard_break` atom at an empty caret. Declines inside a
-/// `code_block`: its content type is plain `"text*"` (no `inline` group
-/// members allowed — confirmed by reading `CodeBlock`'s own `NodeSpec`),
-/// so a hard break there would fail schema validation anyway; Enter's
-/// OWN existing `code_block_literal_newline` already inserts a literal
-/// newline character there instead, which IS valid.
+/// Insert a `hard_break` atom at an empty caret. Deliberately generic —
+/// NOT paragraph-specific — so Shift+Enter means the same thing in every
+/// block that accepts inline content (heading, blockquote's paragraphs,
+/// list items, ...): stay right here, don't split or exit. Only
+/// `code_block` is special-cased: its content type is plain `"text*"`
+/// (no `inline` group members allowed — confirmed by reading
+/// `CodeBlock`'s own `NodeSpec`), so a hard break there would fail
+/// schema validation anyway; Enter's OWN existing
+/// `code_block_literal_newline` already inserts a literal newline
+/// character there instead, which IS valid. Every other block type is
+/// handled by nothing more than ordinary schema validation — confirmed
+/// with a heading-specific test alongside this function's own tests,
+/// deliberately proving this rather than assuming it from the code shape
+/// alone.
 fn insert_hard_break(state: &EditorState, dispatch: Option<&mut Dispatch<'_>>) -> bool {
     let sel = state.selection();
     if !sel.is_empty() {
@@ -598,7 +606,8 @@ fn heading_type_on_input(
 mod tests {
     use super::*;
     use taino_edit_extensions::{
-        build_schema_with, Blockquote, Bold, CodeBlock, Heading, Italic, Lists, Paragraph,
+        build_schema_with, redo_command, undo_command, Blockquote, Bold, CodeBlock, Heading,
+        Italic, Lists, Paragraph,
     };
     use taino_edit_leptos::{EditorState, NodeSpec, SchemaBuilder};
 
@@ -866,6 +875,42 @@ mod tests {
         assert_eq!(next.selection().from(), before + 1);
     }
 
+    /// Proves Shift+Enter is generic, not paragraph-specific: `insert_
+    /// hard_break` only special-cases `code_block` (see its own doc
+    /// comment) — anywhere else with `"inline*"` content, like a
+    /// heading, should already accept the atom via ordinary schema
+    /// validation, with no extra per-block-type code needed.
+    #[test]
+    fn shift_enter_inserts_a_hard_break_inside_a_heading() {
+        let schema = test_schema();
+        let text_node = schema.text("Title", vec![]).expect("text node");
+        let mut attrs = Attrs::new();
+        attrs.insert("level".to_string(), AttrValue::from(1u64));
+        let heading = schema
+            .node("heading", attrs, vec![text_node], vec![])
+            .expect("heading");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![heading], vec![])
+            .expect("doc");
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::caret(6)); // end of "Title"
+        state = state.apply(tx);
+
+        let next = dispatch_and_apply(&state, insert_hard_break).expect("dispatched");
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
+        assert!(
+            json.contains("hard_break") && json.contains("heading"),
+            "{json}"
+        );
+        // Still one single heading block, not split into two.
+        assert_eq!(next.doc().child_count(), 1);
+        assert_eq!(
+            next.doc().content().children()[0].node_type().name(),
+            "heading"
+        );
+    }
+
     #[test]
     fn shift_enter_declines_inside_a_code_block() {
         let schema = test_schema();
@@ -892,6 +937,91 @@ mod tests {
         let state = state_with_paragraph(&schema, "just prose");
         let rules = build_input_rules(&schema);
         assert!(rules.apply(&state).is_none());
+    }
+
+    #[test]
+    fn undo_reverts_the_last_edit_and_redo_reapplies_it() {
+        let schema = test_schema();
+        let state = state_with_paragraph(&schema, "hi");
+        let after_edit = dispatch_and_apply(&state, word_delete_backward).expect("dispatched");
+        assert_eq!(after_edit.doc().text_content(), "");
+
+        assert!(
+            undo_command()(&after_edit, None),
+            "undo should be applicable right after an edit"
+        );
+        let after_undo =
+            dispatch_and_apply(&after_edit, |s, d| undo_command()(s, d)).expect("dispatched");
+        assert_eq!(after_undo.doc().text_content(), "hi");
+
+        assert!(
+            redo_command()(&after_undo, None),
+            "redo should be applicable right after an undo"
+        );
+        let after_redo =
+            dispatch_and_apply(&after_undo, |s, d| redo_command()(s, d)).expect("dispatched");
+        assert_eq!(after_redo.doc().text_content(), "");
+    }
+
+    #[test]
+    fn undo_and_redo_are_not_applicable_with_nothing_to_undo_or_redo() {
+        let schema = test_schema();
+        let state = state_with_paragraph(&schema, "hi");
+        assert!(
+            !undo_command()(&state, None),
+            "nothing to undo on a fresh state"
+        );
+        assert!(
+            !redo_command()(&state, None),
+            "nothing to redo before any undo has happened"
+        );
+    }
+
+    /// Documents (rather than fixes) a real characteristic of the
+    /// underlying library: neither `taino-edit-dom` nor
+    /// `taino-edit-leptos` ever calls `Transaction::join_history`
+    /// (confirmed by searching both crates' source for it — zero
+    /// matches), so every dispatched transaction becomes its OWN undo
+    /// group by default. Two separate character insertions -- mimicking
+    /// two separate keystrokes, the way real typing actually arrives --
+    /// therefore take TWO separate undos to fully revert, not one "word"
+    /// at a time the way most real editors coalesce fast, uninterrupted
+    /// typing. Flagged as a follow-up in this crate's README rather than
+    /// fixed here: doing it well needs each keystroke's OWN transaction
+    /// to opt into `join_history()` based on adjacency/recency, which
+    /// isn't something `EditingFixups`-style command overrides can reach
+    /// (ordinary typed characters never go through OUR code at all --
+    /// only Enter/Backspace/Delete/Shift+Enter do; plain character input
+    /// is handled entirely inside `taino-edit-leptos`'s own keydown/input
+    /// listener).
+    #[test]
+    fn each_keystroke_is_its_own_undo_group_by_default() {
+        let schema = test_schema();
+        let state = state_with_paragraph(&schema, "");
+
+        let insert_char = |state: &EditorState, ch: &str| -> EditorState {
+            let pos = state.selection().from();
+            let text = state.schema().text(ch, vec![]).expect("text node");
+            let mut tx = state.tr();
+            tx.transform()
+                .insert(
+                    pos,
+                    Slice::new(Fragment::from_node(text), 0, 0),
+                    state.schema(),
+                )
+                .expect("insert should succeed");
+            tx.set_selection(Selection::caret(pos + 1));
+            state.apply(tx)
+        };
+        let after_h = insert_char(&state, "h");
+        let after_hi = insert_char(&after_h, "i");
+
+        assert_eq!(after_hi.doc().text_content(), "hi");
+        assert_eq!(
+            after_hi.history().undo_depth(),
+            2,
+            "two separate keystrokes should currently produce two undo groups"
+        );
     }
 
     /// Regression test for the real browser quirk documented on

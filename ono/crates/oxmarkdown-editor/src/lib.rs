@@ -19,8 +19,8 @@ use wasm_bindgen::prelude::*;
 
 use taino_edit_core::InputRules;
 use taino_edit_extensions::{
-    build_keymap_with, build_schema_with, Blockquote, Bold, Code, CodeBlock, Heading, Image,
-    Italic, Link, Lists, Paragraph,
+    build_keymap_with, build_schema_with, Blockquote, Bold, Code, CodeBlock, Heading, History,
+    Image, Italic, Link, Lists, Paragraph,
 };
 use taino_edit_leptos::{EditorState, Keymap, NodeSpec, SchemaBuilder, TainoEditor};
 
@@ -86,6 +86,27 @@ fn is_mac() -> bool {
     false
 }
 
+/// The starting document: `?doc=<url-encoded markdown>` if present in the
+/// page's own URL, else `DEFAULT_SAMPLE`. This exists purely so headless
+/// e2e tests (see `ono/e2e/`) can load a small, hermetic, per-test fixture
+/// instead of fighting with `DEFAULT_SAMPLE`'s large, evolving content —
+/// there's no other consumer of this today. `UrlSearchParams::get` handles
+/// percent-decoding itself, so no separate decode step is needed.
+#[cfg(any(feature = "csr", feature = "hydrate"))]
+fn initial_markdown() -> String {
+    web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .and_then(|search| web_sys::UrlSearchParams::new_with_str(&search).ok())
+        .and_then(|params| params.get("doc"))
+        .filter(|doc| !doc.is_empty())
+        .unwrap_or_else(|| DEFAULT_SAMPLE.to_string())
+}
+
+#[cfg(not(any(feature = "csr", feature = "hydrate")))]
+fn initial_markdown() -> String {
+    DEFAULT_SAMPLE.to_string()
+}
+
 #[cfg(feature = "csr")]
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -116,7 +137,7 @@ pub fn render_app_to_html() -> String {
     leptos::prelude::RenderHtml::to_html(App())
 }
 
-fn build_editor() -> (EditorState, Keymap, InputRules) {
+fn build_editor(markdown: &str) -> (EditorState, Keymap, InputRules) {
     // taino-edit's own built-in extensions — enough to cover ordinary
     // CommonMark/GFM content. A real OxMarkdown schema (directives/
     // checkboxes/mentions/highlight as real node/mark types, via the
@@ -157,6 +178,7 @@ fn build_editor() -> (EditorState, Keymap, InputRules) {
         &CodeBlock,
         &Lists,
         &HardBreak,
+        &History,
     ];
     let schema = build_schema_with(base, &exts, "doc").unwrap();
     let keymap_exts: Vec<&dyn taino_edit_extensions::Extension> = {
@@ -167,13 +189,13 @@ fn build_editor() -> (EditorState, Keymap, InputRules) {
     let keymap = build_keymap_with(&keymap_exts, &schema, is_mac());
     let input_rules = commands::build_input_rules(&schema);
 
-    let doc = convert::markdown_to_doc(&schema, DEFAULT_SAMPLE);
+    let doc = convert::markdown_to_doc(&schema, markdown);
     (EditorState::new(doc, schema), keymap, input_rules)
 }
 
 #[component]
 fn App() -> impl IntoView {
-    let (initial_state, keymap, input_rules) = build_editor();
+    let (initial_state, keymap, input_rules) = build_editor(&initial_markdown());
     let state = RwSignal::new(initial_state);
 
     // `taino-edit-dom`/`taino-edit-leptos` never call `InputRules::apply`

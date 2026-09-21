@@ -33,7 +33,7 @@ oxmarkdown-rs = { path = "../oxmarkdown-rs" }
 
 [dependencies.web-sys]
 version = "0.3"
-features = ["Window", "Navigator"]
+features = ["Window", "Navigator", "Location", "UrlSearchParams"]
 
 [dependencies.rouille]
 version = "3"

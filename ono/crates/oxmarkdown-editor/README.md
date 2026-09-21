@@ -120,6 +120,52 @@ the SSR output. The gallery CONTAINER itself still falls back to the
 generic directive placeholder (no real `gallery` node/layout yet) —
 only the images inside it were ever in question, and they work.
 
+## Editing behavior fixups, input rules, undo/redo, e2e tests
+
+Since the sections above were written, this crate grew well past "does
+typing and Mod-b work" into a real set of editing-behavior fixes on top
+of `taino-edit`'s own defaults — all in `src/commands.rs`, whose own
+module doc comment is the authoritative, detailed record of each real
+bug found (several genuine `taino-edit-core`/`taino-edit-leptos` gaps,
+confirmed by reading their source, not assumed) and how it was fixed:
+
+- **Enter** demotes a heading's continuation to a paragraph, inserts a
+  literal newline in a code block instead of splitting it, and exits an
+  empty line out of its enclosing blockquote (generalized to multi-
+  paragraph blockquotes — only the empty line exits, not the whole
+  quote).
+- **Input rules** (`"- "`/`"* "` → bullet list, `"1. "` → ordered list,
+  `"## "` → heading, `"> "` → blockquote) — a gap `taino-edit-leptos`
+  never wires up at all, plus a real browser quirk (trailing spaces
+  arrive as `\u00A0`, not a plain space) only caught by actual browser
+  testing, not native unit tests.
+- **Option/Ctrl+Backspace/Delete** (word delete) — `taino-edit-leptos`'s
+  keydown handler unconditionally calls `preventDefault()` on any
+  Backspace/Delete regardless of modifiers, silently swallowing the
+  browser's native word-delete with nothing to replace it.
+- **Shift+Enter** inserts a real `hard_break` atom (`<br>`) — a small
+  from-scratch schema extension, since none exists upstream — that works
+  generically in every block with inline content (paragraph, heading,
+  blockquote, list items), not just paragraphs.
+- **Undo/redo** — wired up via `taino_edit_extensions::History`
+  (`Mod-z`/`Mod-Shift-z`); the core history machinery was already there,
+  just never bound to a keymap in this crate. Each transaction is
+  currently its own undo group (confirmed both by a native test and by
+  the e2e suite below) — real, fast, uninterrupted typing does NOT yet
+  coalesce into per-word undo groups the way most real editors do, since
+  neither `taino-edit-dom` nor `taino-edit-leptos` ever calls
+  `Transaction::join_history`. Flagged as a known, deliberately-deferred
+  follow-up, not fixed here.
+
+**A real e2e suite** now lives in `../../e2e/` (Playwright, headless
+Chromium) — see its own README for the full rationale, but in short:
+native Rust unit tests structurally can't see genuine
+browser/`contenteditable` quirks like the `\u00A0` one above, or a caret
+landing in the wrong DOM node. Only driving REAL keyboard input through
+a REAL browser catches those. `?doc=<url-encoded markdown>` (read by
+`initial_markdown()` in `lib.rs`) lets those tests load a small, hermetic
+fixture instead of fighting with `DEFAULT_SAMPLE`.
+
 ## What's real follow-up work (not started)
 
 The entire point of this spike was answering "does taino-edit work at

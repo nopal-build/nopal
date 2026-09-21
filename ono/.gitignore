@@ -9,3 +9,10 @@
 # that go stale the moment the source they were built from changes.
 **/web/pkg/
 crates/oxmarkdown-leptos/ssr-pkg/
+
+# e2e (Playwright) — installed packages and throwaway run artifacts, not
+# source. `e2e/package.json`/`playwright.config.ts`/`tests/*.spec.ts` ARE
+# tracked.
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
