@@ -395,24 +395,44 @@ path (confirmed live: produced literal `<font>`/`<span style>`/`<b>`
 garbage neither this schema nor `read_dom_changes` has any tracked
 meaning for).
 
-- **One shared primitive, `exit_directive`** (`directive_at_selection`
-  finds either case needing it), layered into `enter_fixups`/
-  `shift_enter_fixups`, plus new `"ArrowLeft"`/`"ArrowRight"` entries
-  chained ahead of the base `caret_left`/`caret_right`, brand new
-  `"ArrowUp"`/`"ArrowDown"` entries (unbound before now), and a brand
-  new `" "` (Space) entry — the ONLY way to intercept a keystroke
-  BEFORE Chrome's own native contenteditable handling ever sees it and
-  corrupts something (confirmed by reading `taino-edit-leptos`'s
-  keydown handler: `prevent_default()` fires whenever a bound command
-  actually handles the key, the same mechanism `Enter`/`Backspace`/
-  `Delete` already lean on).
-- **Escaping always lands in a real textblock**: an adjacent sibling
-  directive is selected as a `Node` in turn (individually navigable,
-  matching the `oxmarkdown` skill's own convention), an adjacent plain
-  block is landed inside directly, and — the part making "always able
-  to arrow out, even with nothing next to it" true — a fresh empty
-  paragraph is inserted and landed in when there's genuinely nothing
-  there at all.
+- **`directive_at_selection`** finds either trap case (a real
+  `Selection::Node`/its degraded live-DOM shape, or a caret stuck
+  inside a leaf/text directive's own content), backing new `"ArrowLeft"`/
+  `"ArrowRight"` entries chained ahead of the base `caret_left`/
+  `caret_right`, brand new `"ArrowUp"`/`"ArrowDown"` entries (unbound
+  before now), and a brand new `" "` (Space) entry — the ONLY way to
+  intercept a keystroke BEFORE Chrome's own native contenteditable
+  handling ever sees it and corrupts something (confirmed by reading
+  `taino-edit-leptos`'s keydown handler: `prevent_default()` fires
+  whenever a bound command actually handles the key, the same
+  mechanism `Enter`/`Backspace`/`Delete` already lean on).
+- **Arrow keys escape via `exit_directive`, always landing in a real
+  textblock**: an adjacent sibling directive is selected as a `Node` in
+  turn (individually navigable, matching the `oxmarkdown` skill's own
+  convention), an adjacent plain block is landed inside directly, and
+  — the part making "always able to arrow out, even with nothing next
+  to it" true — a fresh empty paragraph is inserted and landed in when
+  there's genuinely nothing there at all.
+- **Enter and Space each needed their OWN escape shape after a second
+  round of live feedback — reusing the arrow-key one was wrong, not
+  just imperfect**: reported live, pressing Enter right after a badge
+  that happened to sit next to a totally unrelated directive (e.g. a
+  `:::gallery` immediately following) jumped straight to SELECTING
+  that gallery — surprising, since Enter means "give me a new line,"
+  never "jump to something else." `exit_directive_with_new_line` always
+  inserts a fresh paragraph, unconditionally, ignoring whatever already
+  follows. Space is different again, also by live feedback: exiting
+  immediately on the FIRST press fought the obvious expectation that
+  Space would just keep typing. The real, confirmed-right shape:
+  the FIRST Space appends a literal space to the directive's own
+  visible content (landing a caret right after it); a SECOND Space
+  (now `caret_trapped_in_directive`'s own case) exits, same as
+  Enter/Arrow. `space_in_directive` edits the rendered CONTENT directly,
+  not the underlying `attributes` attr (e.g. `"badge"`'s own `label`)
+  — a deliberate, documented tradeoff: it stays generic across every
+  directive kind, but reopening the attrs popover (`directive_popover.
+  rs`) and hitting Save regenerates content FROM `attributes` again,
+  discarding a quick Space-edit that was never written back into it.
 - **A second real, confirmed-live `taino-edit-dom` gap found WHILE
   fixing this, not by reasoning alone**: `EditorView::read_selection`
   ALWAYS reconstructs `Selection::Text`, never `Selection::Node` —
@@ -429,14 +449,61 @@ meaning for).
   round-trip without confirming it against the ACTUAL live browser
   path, not just a native unit test). `directive_at_selection` now
   detects both shapes explicitly.
-- Confirmed live via 6 new e2e tests
+- Confirmed live via 8 e2e tests
   (`../../e2e/tests/directive-escape.spec.ts`), reproducing the exact
-  reported symptoms before asserting the fix: Enter never duplicates,
-  Enter/Space/ArrowRight/ArrowDown always escape even with nothing
-  after the directive, ArrowLeft/ArrowUp escape backward into the
-  preceding paragraph, Space never corrupts the DOM, and a caret that
-  reaches the trap via ordinary keyboard navigation (never clicking at
-  all) still escapes cleanly.
+  reported symptoms before asserting each fix: Enter never duplicates
+  and always inserts a genuinely NEW paragraph (never reusing or
+  jumping to whatever's already next, including an unrelated adjacent
+  directive); Arrow keys always escape even with nothing after the
+  directive, backward landing at the end of the preceding paragraph;
+  the first Space appends to the directive's own content without
+  corrupting the DOM, and a second Space right after it exits into
+  whatever already follows; and a caret that reaches the trap via
+  ordinary keyboard navigation (never clicking at all) still escapes
+  cleanly on Enter.
+
+## The caret could land right before a checkbox — fixed
+
+Reported live: a checkbox is always its list item's own leading glyph
+(GFM's own `[ ]`/`[x]` is always the line's first thing — there's no
+syntax for text before it at all), yet ArrowLeft/Home could still land
+the caret in the one position right before it. Same root shape as the
+directive fixes above, a different symptom: `taino-edit-core`'s base
+`caret_left`/`caret_line_start` have no atom-awareness either.
+
+- **`skip_before_checkbox`** peeks at where the base command would
+  land (running it against a throwaway capture, then inspecting the
+  result via `state.apply` — `taino-edit-core` keeps its own walking
+  logic private, so there's no way to ask it directly) and, when
+  that's immediately before a leading checkbox, walks further back to
+  the END of whatever textblock precedes the checkbox's own list item
+  — always a meaningful position, regardless of what THAT block itself
+  starts with — looping outward again if even THAT turns out to be
+  `before_leading_checkbox` too (the list's own first item).
+- **A real bug found live, not by arithmetic alone**: the first version
+  computed the "skip back" landing spot by hand (`before(outer_depth)
+  - 1`), which can resolve one level SHALLOWER than intended right at a
+  block boundary — landing on the enclosing `list_item`'s own
+  content-end instead of the preceding paragraph's, failing a
+  "is this a real textblock" check for no real reason. Fixed by
+  delegating that sub-problem back to the base `caret_left` itself
+  (which already resolves this ambiguity correctly) instead of
+  reimplementing its own position arithmetic.
+- **Home and ArrowLeft deliberately behave differently when there's
+  truly nothing to skip back to**: ArrowLeft (a pure navigation
+  gesture) declines outright, matching how it already behaves at the
+  very start of a document. Home always lands somewhere — falling back
+  to right after the checkbox itself, the most sensible "start of
+  line" a checkbox-led paragraph actually has.
+- Deliberately scoped to `"ArrowLeft"`/`"Home"` only, both real keymap
+  entries this crate controls. Native vertical `"ArrowUp"` movement has
+  no keymap hook to peek at all (confirmed: nothing binds plain
+  `"ArrowUp"` for ordinary vertical movement, only this crate's OWN
+  directive-escape entry, which declines whenever no directive is
+  involved), so it can still land there — a known, narrower-than-ideal
+  residual gap, not attempted here.
+- Confirmed live via 4 new e2e tests
+  (`../../e2e/tests/checkbox-navigation.spec.ts`).
 
 ## Markdown serialization back out: `serialize.rs`, real now
 

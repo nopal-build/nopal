@@ -107,32 +107,78 @@
 //!    `read_dom_changes` has any tracked meaning for — genuinely
 //!    corrupted, unrecoverable markup.
 //!
-//!    Fixed with one shared primitive, `exit_directive` (`directive_at_
-//!    selection` finds either case — a real `Selection::Node` on any of
-//!    the three directive types, or a `Text` caret trapped inside a
-//!    leaf/text directive's own content specifically; `container_
-//!    directive` is deliberately excluded from the SECOND case, since
-//!    its content is genuinely, normally editable and a caret one level
-//!    inside a real child paragraph is exactly where it belongs) —
-//!    layered into `enter_fixups`/`shift_enter_fixups`, and three new
-//!    keymap entries (`"ArrowLeft"`/`"ArrowRight"` chained ahead of the
-//!    base `caret_left`/`caret_right`; `"ArrowUp"`/`"ArrowDown"`, unbound
-//!    before now; and `" "`, also unbound before now — the ONLY way to
-//!    intercept a keystroke BEFORE Chrome's own native contenteditable
-//!    handling ever sees it and corrupts something, confirmed by
-//!    reading `taino-edit-leptos`'s keydown handler: it calls
-//!    `prevent_default()` whenever a bound command actually handles the
-//!    key, same mechanism `Enter`/`Backspace`/`Delete` already lean on).
-//!    Escaping always lands in a REAL textblock: an adjacent sibling
-//!    directive is selected as a `Node` in turn (individually navigable,
-//!    matching the `oxmarkdown` skill's own convention), an adjacent
-//!    plain block is landed inside directly, and — the part making
-//!    "always able to arrow out, even with nothing next to it" true —
-//!    a fresh empty paragraph is inserted and landed in when there's
-//!    genuinely nothing there at all.
+//!    Fixed with `directive_at_selection` (finds either case — a real
+//!    `Selection::Node` on any of the three directive types, or a
+//!    `Text` caret trapped inside a leaf/text directive's own content
+//!    specifically; `container_directive` is deliberately excluded from
+//!    the SECOND case, since its content is genuinely, normally
+//!    editable and a caret one level inside a real child paragraph is
+//!    exactly where it belongs), plus new keymap entries: `"ArrowLeft"`/
+//!    `"ArrowRight"` chained ahead of the base `caret_left`/
+//!    `caret_right`; `"ArrowUp"`/`"ArrowDown"`, unbound before now; and
+//!    `" "`, also unbound before now — the ONLY way to intercept a
+//!    keystroke BEFORE Chrome's own native contenteditable handling ever
+//!    sees it and corrupts something, confirmed by reading `taino-edit-
+//!    leptos`'s keydown handler: it calls `prevent_default()` whenever a
+//!    bound command actually handles the key, same mechanism `Enter`/
+//!    `Backspace`/`Delete` already lean on. Arrow keys escape via
+//!    `exit_directive`, always landing in a REAL textblock: an adjacent
+//!    sibling directive is selected as a `Node` in turn (individually
+//!    navigable, matching the `oxmarkdown` skill's own convention), an
+//!    adjacent plain block is landed inside directly, and — the part
+//!    making "always able to arrow out, even with nothing next to it"
+//!    true — a fresh empty paragraph is inserted and landed in when
+//!    there's genuinely nothing there at all.
+//!
+//!    **Enter and Space each needed their OWN escape shape, not
+//!    `exit_directive`'s — confirmed live, not assumed**: reported live,
+//!    reusing the arrow-key escape for Enter meant pressing Enter right
+//!    after a directive that HAPPENED to have another directive sitting
+//!    next to it (e.g. a `::badge` immediately before a `:::gallery`)
+//!    jumped straight to selecting that unrelated gallery — surprising,
+//!    since Enter means "give me a new line," never "jump to select
+//!    something else." `exit_directive_with_new_line` always inserts a
+//!    fresh paragraph, unconditionally, ignoring whatever already
+//!    follows. Space is different again: exiting immediately on the
+//!    FIRST press felt like fighting the user — the real, confirmed-
+//!    right call is for the first Space to append a literal space to
+//!    the directive's own visible content (landing a caret right after
+//!    it, `caret_trapped_in_directive`'s own case now), so a SECOND
+//!    Space (typed right after, at that same trapped position) is what
+//!    actually exits — see `space_in_directive`'s own doc comment for
+//!    the known, accepted tradeoff (this edits visible content, not the
+//!    underlying `attributes` attr).
+//! 5. **The caret could land immediately BEFORE a `checkbox` atom** —
+//!    reported live: a checkbox is always its list item's own leading
+//!    glyph (`convert::convert_list_item`/`checkbox_on_input` both only
+//!    ever prepend it as the paragraph's FIRST inline child), so "the
+//!    position right before it" is never a meaningful place to type —
+//!    it's the paragraph's own content-start, and typing there inserts
+//!    text to the LEFT of the checkbox, which no real task-list syntax
+//!    can even represent (GFM's own `[ ]`/`[x]` is always the line's
+//!    first thing). `taino-edit-core`'s base `caret_left`/`caret_line_
+//!    start` have no atom-awareness here either — same root shape as
+//!    item 4, a DIFFERENT symptom. Fixed by peeking at what the base
+//!    command would land on (running it against a throwaway capture,
+//!    then inspecting the result via `state.apply`) and, if that's
+//!    immediately before a leading checkbox, walking further back via
+//!    `skip_before_checkbox` — to the END of whatever textblock precedes
+//!    the checkbox's own list item (always a meaningful position,
+//!    regardless of what THAT block itself starts with), recursing
+//!    outward again if even THAT turns out to be `before_leading_
+//!    checkbox` too (the list's own first item). Deliberately scoped to
+//!    `"ArrowLeft"`/`"Home"` only — both real keymap entries we control;
+//!    native vertical `"ArrowUp"` movement has no keymap hook to peek at
+//!    all (confirmed: nothing binds plain `"ArrowUp"` for ordinary
+//!    vertical movement, only this crate's OWN directive-escape entry,
+//!    which declines whenever no directive is involved), so it can still
+//!    land there — a known, narrower-than-ideal residual gap, not
+//!    attempted here.
 
 use regex::Captures;
-use taino_edit_core::{wrapping_rule, Fragment, InputRule, InputRules};
+use taino_edit_core::{
+    caret_left, caret_line_start, wrapping_rule, Fragment, InputRule, InputRules,
+};
 use taino_edit_extensions::Extension;
 use taino_edit_leptos::{
     split_block, AttrValue, Attrs, Command, Dispatch, EditorState, Node, ResolvedPos, Schema,
@@ -161,11 +207,12 @@ impl Extension for EditingFixups {
             ("Ctrl-Backspace".to_string(), Box::new(word_delete_backward)),
             ("Alt-Delete".to_string(), Box::new(word_delete_forward)),
             ("Ctrl-Delete".to_string(), Box::new(word_delete_forward)),
-            ("ArrowLeft".to_string(), exit_directive_backward()),
+            ("ArrowLeft".to_string(), arrow_left_fixups()),
             ("ArrowRight".to_string(), exit_directive_forward()),
             ("ArrowUp".to_string(), exit_directive_backward()),
             ("ArrowDown".to_string(), exit_directive_forward()),
-            (" ".to_string(), exit_directive_forward()),
+            (" ".to_string(), space_in_directive()),
+            ("Home".to_string(), caret_line_start_fixups()),
         ]
     }
 }
@@ -195,11 +242,19 @@ const CARET_TRAP_DIRECTIVE_TYPES: [&str; 2] = ["leaf_directive", "text_directive
 
 /// Finds the directive an Enter/Arrow/Space press should ESCAPE rather
 /// than edit — see this module's own doc comment (item 4) for the two
-/// real cases this covers and why `container_directive` is excluded
-/// from the second one. `None` means the current selection has nothing
-/// to do with a directive at all, so callers should fall through to
-/// their ordinary behavior. Side-effect-free (only reads `state`), so
-/// callers can check it BEFORE deciding whether to consume `dispatch`.
+/// real cases this covers (`directive_selected_as_unit`/`caret_trapped_
+/// in_directive`) and why `container_directive` is excluded from the
+/// second one. `None` means the current selection has nothing to do
+/// with a directive at all, so callers should fall through to their
+/// ordinary behavior. Side-effect-free (only reads `state`), so callers
+/// can check it BEFORE deciding whether to consume `dispatch`.
+fn directive_at_selection(state: &EditorState) -> Option<(usize, Node)> {
+    directive_selected_as_unit(state).or_else(|| caret_trapped_in_directive(state))
+}
+
+/// Case (a): the directive is genuinely selected as a whole unit —
+/// either a real `Selection::Node`, or the degraded live-DOM shape a
+/// `Selection::Node` decays into.
 ///
 /// **A real, confirmed-live gap in `taino-edit-dom` itself, worked
 /// around here, not upstream**: `EditorView::read_selection` ALWAYS
@@ -214,7 +269,7 @@ const CARET_TRAP_DIRECTIVE_TYPES: [&str; 2] = ["leaf_directive", "text_directive
 /// (the plain `Selection::Node` branch stays for direct model-level
 /// callers, e.g. this module's own native tests, which never round-trip
 /// through a live DOM read at all).
-fn directive_at_selection(state: &EditorState) -> Option<(usize, Node)> {
+fn directive_selected_as_unit(state: &EditorState) -> Option<(usize, Node)> {
     let sel = state.selection();
     if let Selection::Node { pos } = sel {
         let node = state.doc().node_at(pos)?;
@@ -231,6 +286,16 @@ fn directive_at_selection(state: &EditorState) -> Option<(usize, Node)> {
                 .then_some((from, node));
         }
     }
+    None
+}
+
+/// Case (b): a plain, empty `Text` caret ended up INSIDE a leaf/text
+/// directive's own synthetic content (reachable via ordinary keyboard
+/// navigation — see this module's own doc comment, item 4).
+/// `container_directive` is deliberately excluded: its content is
+/// genuinely, normally editable.
+fn caret_trapped_in_directive(state: &EditorState) -> Option<(usize, Node)> {
+    let sel = state.selection();
     if !sel.is_empty() {
         return None;
     }
@@ -316,6 +381,23 @@ fn landing_selection(
     }
     // Nothing there at all — insert a fresh empty paragraph and land
     // inside it, so escaping is ALWAYS possible regardless of context.
+    insert_landing_paragraph(tx, state, boundary)
+}
+
+/// Inserts a brand-new empty paragraph at `boundary` and returns a caret
+/// landing inside it — UNCONDITIONALLY, regardless of whatever already
+/// follows. Used by Enter specifically (see `exit_directive_with_new_
+/// line`): reported live, and confirmed correct as a real UX call, not
+/// just a bug — `landing_selection`'s "select an adjacent directive
+/// instead of drilling in" is the right call for ARROW-key navigation
+/// (moving onto the next thing), but Enter means "give me a new line,"
+/// full stop — it should never jump to selecting some unrelated
+/// directive that merely happens to already sit right after this one.
+fn insert_landing_paragraph(
+    tx: &mut Transaction,
+    state: &EditorState,
+    boundary: usize,
+) -> Option<Selection> {
     let schema = state.schema();
     let para = schema
         .node("paragraph", Attrs::new(), vec![], vec![])
@@ -331,10 +413,224 @@ fn landing_selection(
     Some(Selection::caret(boundary + 1))
 }
 
+/// Enter's own directive-escape: ALWAYS inserts a fresh paragraph right
+/// after the directive and lands there — see `insert_landing_paragraph`
+/// for why this is deliberately NOT `exit_directive`'s own "select an
+/// adjacent directive/land inside an adjacent block" logic.
+fn exit_directive_with_new_line(state: &EditorState, dispatch: Option<&mut Dispatch<'_>>) -> bool {
+    let Some((start, node)) = directive_at_selection(state) else {
+        return false;
+    };
+    let Some(d) = dispatch else {
+        return true;
+    };
+    let mut tx = state.tr();
+    let boundary = start + node.node_size();
+    let Some(sel) = insert_landing_paragraph(&mut tx, state, boundary) else {
+        return false;
+    };
+    tx.set_selection(sel);
+    d(tx);
+    true
+}
+
+/// Space's own directive handling — NOT the same as Enter/Arrow's exit
+/// (see this module's own doc comment, item 4, for the corruption this
+/// replaces): reported live, and confirmed correct as a real UX call:
+/// while the directive is genuinely still SELECTED AS A UNIT, Space
+/// appends a literal space to its own visible content instead of
+/// exiting outright — landing a real caret right after it, so a
+/// SECOND Space (now `caret_trapped_in_directive`'s own case) exits
+/// forward exactly like Enter/Arrow already do. A single Space thus
+/// reads naturally as "start typing here"; a second reads as "okay,
+/// move on."
+///
+/// Deliberately edits the directive's rendered CONTENT directly, not
+/// its `attributes` attr (e.g. `"badge"`'s own `label`) — keeps this
+/// generic across every directive kind (a generic fallback directive's
+/// own raw-syntax label has no single "the text" attribute to update at
+/// all), at the cost of a known, accepted tradeoff: reopening the
+/// attrs-editing popover (`directive_popover.rs`) and hitting Save
+/// regenerates content FROM `attributes` again, discarding a quick
+/// Space-edit that was never written back into it.
+fn space_in_directive() -> Command {
+    Box::new(|state, dispatch| {
+        if let Some((start, node)) = directive_selected_as_unit(state) {
+            let Some(d) = dispatch else {
+                return true;
+            };
+            let Ok(space) = state.schema().text(" ", vec![]) else {
+                return false;
+            };
+            let content_end = start + node.node_size() - 1;
+            let mut tx = state.tr();
+            if tx
+                .transform()
+                .replace(
+                    content_end,
+                    content_end,
+                    Slice::new(Fragment::from_node(space), 0, 0),
+                    state.schema(),
+                )
+                .is_err()
+            {
+                return false;
+            }
+            tx.set_selection(Selection::caret(content_end + 1));
+            d(tx);
+            return true;
+        }
+        if caret_trapped_in_directive(state).is_some() {
+            return exit_directive(state, dispatch, true);
+        }
+        false
+    })
+}
+
+/// Whether `pos` sits immediately before a `checkbox` that is the very
+/// FIRST inline child of its paragraph — see this module's own doc
+/// comment (item 5) for why that's never a meaningful place for a
+/// caret: a checkbox is always its list item's own leading glyph,
+/// never preceded by real text within the same paragraph.
+fn is_before_leading_checkbox(doc: &Node, pos: usize) -> bool {
+    let Ok(rp) = ResolvedPos::resolve(doc, pos) else {
+        return false;
+    };
+    rp.parent_offset() == 0
+        && rp
+            .node_after()
+            .is_some_and(|n| n.node_type().name() == "checkbox")
+}
+
+/// The next position further back worth landing on, when `pos` would
+/// otherwise sit right before a leading checkbox: the END of whatever
+/// textblock precedes the checkbox's own list item, if anything —
+/// always a meaningful position, regardless of what THAT block itself
+/// happens to start with. Loops (not just one hop) since the list's own
+/// FIRST item's checkbox has the exact same problem one level further
+/// out. Returns the ORIGINAL `pos` unchanged when it was already fine
+/// (the common case), so callers never need a separate "did this even
+/// apply" check. `None` means there's genuinely nothing meaningful
+/// further back either (the very start of the document) — callers
+/// should decline entirely, same as the base command would there.
+fn skip_before_checkbox(state: &EditorState, pos: usize) -> Option<usize> {
+    let mut pos = pos;
+    while is_before_leading_checkbox(state.doc(), pos) {
+        let rp = ResolvedPos::resolve(state.doc(), pos).ok()?;
+        if rp.depth() < 2 {
+            return None;
+        }
+        let outer_depth = rp.depth() - 1;
+        let before_outer = rp.before(outer_depth);
+        if before_outer == 0 {
+            return None;
+        }
+        // Jump to just before the ENCLOSING list_item, then let the
+        // BASE `caret_left` find where that actually lands — it
+        // already knows how to walk backward to the nearest valid text
+        // position, correctly handling the depth ambiguity right at a
+        // block boundary (confirmed live: hand-computing `before_outer
+        // - 1` directly can resolve one level SHALLOWER than intended,
+        // landing on the enclosing `list_item`'s own content-end rather
+        // than the preceding paragraph's, which then fails the "is this
+        // a real textblock" check below for no real reason). Naturally
+        // recurses into this SAME loop if the list's own first item has
+        // the identical problem one level further out.
+        let mut probe = state.clone();
+        let mut seek = probe.tr();
+        seek.set_selection(Selection::caret(before_outer));
+        probe = probe.apply(seek);
+        let mut found = None;
+        {
+            let mut capture = |t: Transaction| found = Some(t);
+            if !caret_left(&probe, Some(&mut capture)) {
+                return None;
+            }
+        }
+        let landed = probe.apply(found?);
+        pos = landed.selection().from();
+    }
+    Some(pos)
+}
+
+/// ArrowLeft: directive-escape takes priority (see `exit_directive`),
+/// then the checkbox fixup (item 5) — peeks at where the BASE `caret_
+/// left` would land (by running it against a throwaway capture and
+/// inspecting the result via `state.apply`, since `taino-edit-core`
+/// keeps its own walking logic private) and corrects it via `skip_
+/// before_checkbox` when needed.
+fn arrow_left_fixups() -> Command {
+    Box::new(|state, dispatch| {
+        if directive_at_selection(state).is_some() {
+            return exit_directive(state, dispatch, false);
+        }
+        let sel = state.selection();
+        if !sel.is_empty() {
+            return false;
+        }
+        let mut peeked_tx = None;
+        {
+            let mut capture = |tx: Transaction| peeked_tx = Some(tx);
+            if !caret_left(state, Some(&mut capture)) {
+                return false;
+            }
+        }
+        let Some(tx) = peeked_tx else {
+            return true;
+        };
+        let peeked = state.apply(tx);
+        let Some(landing) = skip_before_checkbox(&peeked, peeked.selection().from()) else {
+            return false;
+        };
+        let Some(d) = dispatch else {
+            return true;
+        };
+        let mut fixed = state.tr();
+        fixed.set_selection(Selection::caret(landing));
+        d(fixed);
+        true
+    })
+}
+
+/// Home: same checkbox fixup as `arrow_left_fixups`, layered onto the
+/// base `caret_line_start` — landing at "the start of this line" is
+/// exactly the OTHER real way to reach the position right before a
+/// leading checkbox. Unlike ArrowLeft (a pure navigation gesture, fine
+/// declining outright at a true boundary — matching how it already
+/// behaves at the very start of a document), Home should always land
+/// SOMEWHERE: when `skip_before_checkbox` finds nothing meaningful
+/// further back either, this falls back to right after the checkbox
+/// itself — the most sensible "start of line" a checkbox-led paragraph
+/// actually has.
+fn caret_line_start_fixups() -> Command {
+    Box::new(|state, dispatch| {
+        let mut peeked_tx = None;
+        {
+            let mut capture = |tx: Transaction| peeked_tx = Some(tx);
+            if !caret_line_start(state, Some(&mut capture)) {
+                return false;
+            }
+        }
+        let Some(tx) = peeked_tx else {
+            return true;
+        };
+        let peeked = state.apply(tx);
+        let landing = peeked.selection().from();
+        let fixed_landing = skip_before_checkbox(&peeked, landing).unwrap_or(landing + 1);
+        let Some(d) = dispatch else {
+            return true;
+        };
+        let mut fixed = state.tr();
+        fixed.set_selection(Selection::caret(fixed_landing));
+        d(fixed);
+        true
+    })
+}
+
 fn shift_enter_fixups() -> Command {
     Box::new(|state, dispatch| {
         if directive_at_selection(state).is_some() {
-            return exit_directive(state, dispatch, true);
+            return exit_directive_with_new_line(state, dispatch);
         }
         let sel = state.selection();
         if !sel.is_empty() {
@@ -460,7 +756,7 @@ fn word_delete_forward(state: &EditorState, dispatch: Option<&mut Dispatch<'_>>)
 fn enter_fixups() -> Command {
     Box::new(|state, dispatch| {
         if directive_at_selection(state).is_some() {
-            return exit_directive(state, dispatch, true);
+            return exit_directive_with_new_line(state, dispatch);
         }
         let sel = state.selection();
         if !sel.is_empty() {
@@ -1534,8 +1830,12 @@ mod tests {
                     ..Default::default()
                 },
             );
-        let exts: Vec<&dyn Extension> =
-            vec![&Paragraph, &crate::oxmarkdown_schema::Directives, &Checkbox];
+        let exts: Vec<&dyn Extension> = vec![
+            &Paragraph,
+            &Lists,
+            &crate::oxmarkdown_schema::Directives,
+            &Checkbox,
+        ];
         build_schema_with(base, &exts, "doc").expect("schema builds")
     }
 
@@ -1698,6 +1998,200 @@ mod tests {
         let state = state_with_paragraph(&schema, "hello");
         assert!(!exit_directive(&state, None, true));
         assert!(!exit_directive(&state, None, false));
+    }
+
+    #[test]
+    fn enter_always_inserts_a_new_paragraph_even_next_to_an_unrelated_directive() {
+        // Real bug found live: reusing `exit_directive`'s own "land on an
+        // adjacent directive" logic for Enter meant pressing Enter right
+        // after a badge that happened to sit next to a totally unrelated
+        // directive (e.g. a gallery) jumped straight to SELECTING that
+        // gallery instead of giving the user a new line.
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let gallery = leaf_directive(&schema, "gallery");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![badge, gallery], vec![])
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::Node { pos: 0 });
+        state = state.apply(tx);
+
+        let next = dispatch_and_apply(&state, exit_directive_with_new_line).expect("dispatched");
+        assert_eq!(
+            next.doc().child_count(),
+            3,
+            "a real new paragraph was inserted between them"
+        );
+        assert_eq!(next.doc().child(1).node_type().name(), "paragraph");
+        assert_eq!(next.doc().child(2).node_type().name(), "leaf_directive");
+        assert!(
+            next.selection().is_empty(),
+            "a real caret in the new paragraph"
+        );
+    }
+
+    #[test]
+    fn enter_still_inserts_a_new_paragraph_when_one_already_follows() {
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node(
+                "doc",
+                Attrs::new(),
+                vec![badge, paragraph(&schema, "hello")],
+                vec![],
+            )
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::Node { pos: 0 });
+        state = state.apply(tx);
+
+        let next = dispatch_and_apply(&state, exit_directive_with_new_line).expect("dispatched");
+        assert_eq!(
+            next.doc().child_count(),
+            3,
+            "a BRAND NEW paragraph, not reusing the old one"
+        );
+        assert_eq!(next.doc().text_content(), "badgehello", "nothing lost");
+    }
+
+    #[test]
+    fn first_space_appends_to_the_directive_content_second_space_exits() {
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![badge], vec![])
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::Node { pos: 0 });
+        state = state.apply(tx);
+
+        let space_cmd = space_in_directive();
+        let after_first =
+            dispatch_and_apply(&state, |s, d| space_cmd(s, d)).expect("first space dispatched");
+        assert_eq!(
+            after_first.doc().child_count(),
+            1,
+            "still just the one directive"
+        );
+        assert_eq!(
+            after_first.doc().text_content(),
+            "badge ",
+            "space appended to its content"
+        );
+        assert!(
+            caret_trapped_in_directive(&after_first).is_some(),
+            "caret now sits right after the appended space, inside the directive's own content"
+        );
+
+        let after_second = dispatch_and_apply(&after_first, |s, d| space_cmd(s, d))
+            .expect("second space dispatched");
+        assert_eq!(
+            after_second.doc().child_count(),
+            2,
+            "the second space exits, landing in a fresh paragraph"
+        );
+        assert_eq!(after_second.doc().child(1).node_type().name(), "paragraph");
+    }
+
+    fn checkbox_node(schema: &Schema, checked: bool) -> Node {
+        let mut attrs = Attrs::new();
+        attrs.insert("checked".to_string(), AttrValue::from(checked));
+        schema
+            .node("checkbox", attrs, vec![], vec![])
+            .expect("checkbox")
+    }
+
+    fn checkbox_list_item(schema: &Schema, text: &str) -> Node {
+        let checkbox = checkbox_node(schema, false);
+        let text_node = schema.text(text, vec![]).expect("text");
+        let para = schema
+            .node("paragraph", Attrs::new(), vec![checkbox, text_node], vec![])
+            .expect("paragraph");
+        schema
+            .node("list_item", Attrs::new(), vec![para], vec![])
+            .expect("list_item")
+    }
+
+    #[test]
+    fn arrow_left_never_lands_right_before_a_checkbox() {
+        let schema = test_schema_with_directives();
+        let item = checkbox_list_item(&schema, "hello");
+        let list = schema
+            .node("bullet_list", Attrs::new(), vec![item], vec![])
+            .unwrap();
+        let doc = schema
+            .node("doc", Attrs::new(), vec![list], vec![])
+            .unwrap();
+        // Position 4: doc(0) > bullet_list(1) > list_item(2) > paragraph(3)
+        // > right after the checkbox atom (content start + 1).
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::caret(4));
+        state = state.apply(tx);
+
+        // Nothing meaningful precedes the list at all — base `caret_
+        // left` would have nowhere else to go either, so this declines
+        // entirely rather than landing before the checkbox.
+        let cmd = arrow_left_fixups();
+        assert!(!cmd(&state, None));
+    }
+
+    #[test]
+    fn arrow_left_lands_at_the_end_of_the_preceding_item_skipping_the_checkbox() {
+        let schema = test_schema_with_directives();
+        let first = checkbox_list_item(&schema, "first");
+        let second = checkbox_list_item(&schema, "second");
+        let list = schema
+            .node("bullet_list", Attrs::new(), vec![first, second], vec![])
+            .unwrap();
+        let doc = schema
+            .node("doc", Attrs::new(), vec![list], vec![])
+            .unwrap();
+        // Position right after the SECOND item's own checkbox.
+        let second_item_start = doc.child(0).child(0).node_size();
+        let pos = second_item_start + 4; // past bullet_list/list_item/paragraph opens + checkbox
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::caret(pos));
+        state = state.apply(tx);
+
+        let cmd = arrow_left_fixups();
+        let next = dispatch_and_apply(&state, |s, d| cmd(s, d)).expect("dispatched");
+        assert!(!is_before_leading_checkbox(
+            next.doc(),
+            next.selection().from()
+        ));
+        // Lands at the END of the first item's own text, not its start.
+        let rp_after = ResolvedPos::resolve(next.doc(), next.selection().from()).unwrap();
+        assert_eq!(rp_after.parent().text_content(), "first");
+    }
+
+    #[test]
+    fn home_never_lands_right_before_a_checkbox() {
+        let schema = test_schema_with_directives();
+        let item = checkbox_list_item(&schema, "hello");
+        let list = schema
+            .node("bullet_list", Attrs::new(), vec![item], vec![])
+            .unwrap();
+        let doc = schema
+            .node("doc", Attrs::new(), vec![list], vec![])
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::caret(6)); // somewhere inside "hello"
+        state = state.apply(tx);
+
+        let cmd = caret_line_start_fixups();
+        let next = dispatch_and_apply(&state, |s, d| cmd(s, d)).expect("dispatched");
+        assert!(!is_before_leading_checkbox(
+            next.doc(),
+            next.selection().from()
+        ));
     }
 }
 

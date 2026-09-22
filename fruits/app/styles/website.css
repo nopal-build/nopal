@@ -188,7 +188,12 @@
 .website-section-title :is(h1, h2, h3, h4, h5, h6) {
   position: relative;
   z-index: 1;
-  margin: 0 0 0 auto;
+  /* `8px` bottom, not `0` -- `.website-section-title`'s own `align-items:
+     flex-end` means this heading otherwise sits flush against the box's
+     bottom edge, the exact same spot the `::line{...}` (below it,
+     `z-index: 0`) usually curves through -- leaving zero breathing room
+     between the text's own descenders and the line under it. */
+  margin: 0 0 8px auto;
   text-align: right;
   /* A crisp, hard-edged offset -- zero blur radius reads as a graphic-
      design drop shadow, not a soft CSS glow. `--purple` (not a semantic

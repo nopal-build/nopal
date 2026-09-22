@@ -19,7 +19,7 @@
 // implementation changes — keep this in sync with the real
 // `buildWebsiteDirectiveRegistry` vocabulary, don't let it drift into its
 // own separate list.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { Link, data, redirect, useRouteError, isRouteErrorResponse } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
@@ -256,7 +256,7 @@ const ENTRIES: ScratchEntry[] = [
     ),
     fullBleed: true,
     markdown: `:::section-title{icon="mountaineer-coffee" color="green"}
-::line{points="3,42 58,35 100,42" curve="smooth" tension="0.4" color="green"}
+::line{points="L1,B0 R16,B4 R0,B0" curve="smooth" tension="0.4" color="green"}
 ## At a Cost
 :::`,
   },
@@ -538,6 +538,28 @@ function FocusedEntryView({ entry }: { entry: ScratchEntry }) {
   // whatever was focused before.
   const [markdown, setMarkdown] = useState(entry.markdown);
   const isDirty = markdown !== entry.markdown;
+
+  // Auto-grows the textarea to EXACTLY fit its own content -- including
+  // wrapped lines, which a naive `rows={markdown.split("\n").length}`
+  // undercounts the moment any single line wraps in this narrow sidebar
+  // column (a real bug: a long `:::section-title{...}` attribute line
+  // was getting cut off with an internal scrollbar). Re-measuring the
+  // browser's own `scrollHeight` (not a guessed chars-per-row heuristic)
+  // is exact regardless of font/width, and re-runs on every edit AND on
+  // this component's initial mount alike, so a freshly-focused entry
+  // always starts already sized to fit its own starting content, no
+  // scrollbar needed. Reset height to "auto" first so shrinking (fewer
+  // lines after an edit, or hitting "Reset") is measured correctly too --
+  // `scrollHeight` alone never shrinks below whatever height was already
+  // set.
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [markdown]);
+
   return (
     <div className={sprinkles({ display: "flex", gap: 5, flexWrap: "wrap" })} style={{ alignItems: "flex-start" }}>
       <div style={{ flex: "1 1 480px", minWidth: 0 }}>
@@ -559,10 +581,11 @@ function FocusedEntryView({ entry }: { entry: ScratchEntry }) {
           )}
         </div>
         <textarea
+          ref={textareaRef}
           value={markdown}
           onChange={(e) => setMarkdown(e.target.value)}
           spellCheck={false}
-          rows={Math.max(3, markdown.split("\n").length)}
+          rows={3}
           className={`${textSize.sm} ${sprinkles({ p: 3, fontFamily: "mono" })}`}
           style={{
             display: "block",
@@ -574,6 +597,12 @@ function FocusedEntryView({ entry }: { entry: ScratchEntry }) {
             whiteSpace: "pre-wrap",
             margin: 0,
             resize: "vertical",
+            // The `useEffect` above keeps `height` exactly matched to
+            // `scrollHeight` on every render, so there's normally nothing
+            // TO scroll -- `auto` (not `hidden`) is still the right
+            // fallback for the one brief pre-hydration paint (`rows={3}`,
+            // above) and for a user manually dragging the `resize`
+            // handle smaller than the content needs.
             overflow: "auto",
           }}
         />
