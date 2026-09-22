@@ -10,4 +10,4 @@
 
 **How you'd know.** A 502 on a page full of photos, with the deploy green and the health check answering. The app's memory graph climbing on page views rather than on runs. A `sharp`, `heic-convert` or `ffmpeg-static` import reaching `fruits/app`.
 
-**Test.** `fruits/app/tests/noMediaProcessingInApp.test.ts`: no file under `fruits/app` imports a decoder or calls a decoding function. The one allow-listed file is `api.vault.public-thumb.$fileId.tsx`, the older public-folder thumbnail route that predates this decision and is to be moved onto the same worker path; the allow-list shrinks to nothing when it is.
+**Test.** `fruits/app/tests/noMediaProcessingInApp.test.ts`: no file under `fruits/app` imports a decoder or calls a decoding function. `api.vault.public-thumb.$fileId.tsx`, the older public-folder thumbnail route that predated this decision, was moved onto the same worker path on 2026-09-22 (upload routes now enqueue a `renditions` job too, not just the daily-log route; the thumb route streams the worker-made `thumb` rendition's bytes straight from S3 instead of decoding); the allow-list is empty.

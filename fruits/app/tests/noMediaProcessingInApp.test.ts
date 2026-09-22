@@ -1,10 +1,10 @@
 /**
  * ADR-021: the web server never processes media (Austin, 2026-09-22). Renditions,
  * posters and frames are made in the worker and stored in S3; the app
- * checks for them and redirects. This pins it: no route or component in
- * this app may call a decoder or a resizer. The one allow-listed file is
- * the older public-folder thumbnail route, which predates the rule and is
- * to be moved onto the same worker path.
+ * checks for them and streams/redirects. This pins it: no route or
+ * component in this app may call a decoder or a resizer. The former
+ * exception, the public-folder thumbnail route, was moved onto the same
+ * worker path (2026-09-22) and no longer needs an allow-list entry.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const ALLOWED = new Set(["routes/api.vault.public-thumb.$fileId.tsx"]);
+const ALLOWED = new Set<string>([]);
 const FORBIDDEN = [
   /from "sharp"/,
   /from "heic-convert"/,

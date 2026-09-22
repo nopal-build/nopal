@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
+import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { uploadFileToS3 } from "robustness-core/data/file.server";
 import {
   createFileRef,
@@ -56,6 +57,13 @@ export async function action({ request }: ActionFunctionArgs) {
       folder_id: folderId,
       ...(source === "daily_log" ? { source: "daily_log" as const } : {}),
     });
+
+    // The worker makes the photo's thumbnail and display rendition (or a
+    // video's poster) within seconds; this process never decodes media —
+    // see `api.daily-log.upload.tsx` for the same call.
+    if (fileRef && (fileRef.content_type.startsWith("image/") || fileRef.content_type.startsWith("video/"))) {
+      await enqueueRenditionsJob(fileRef._id).catch((err) => console.error("Could not enqueue renditions:", err));
+    }
 
     // The upload is now stored privately — callers should link to
     // `/api/vault/view/:fileId` (which redirects to a fresh presigned URL
