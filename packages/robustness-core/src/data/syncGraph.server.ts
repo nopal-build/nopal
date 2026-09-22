@@ -713,6 +713,39 @@ function buildAttachedMediaMarkdown(info: SourceFileInfo): string {
 // whatever got mentioned most).
 export const MAX_LINKS_PER_NODE = 3;
 
+/**
+ * The marks this day's extraction left out.
+ *
+ * A MARK ALWAYS BECOMES A NODE (Austin, 2026-09-21). Every other source
+ * is a day's writing, and the model deciding what is worth capturing from
+ * it is the whole job. A mark is not that: it is one deliberate act,
+ * about one named passage, by somebody who chose to write it. The first
+ * mark in production ("This is a test annotation.") was judged not worth
+ * capturing, which is a fair reading of those words and the wrong answer
+ * for what they are. So the model still reads marks and still links them
+ * to the entries they cite, and whatever it passed over is written
+ * afterwards, verbatim, by code.
+ *
+ * Compared on collapsed whitespace with `==` stripped, so a mark the
+ * model did capture (highlighted, perhaps with a setup line around it)
+ * counts as captured.
+ */
+export function marksNotCaptured(
+  sourceMarkTexts: readonly (readonly string[] | null)[],
+  nodeBlocks: readonly string[],
+): { text: string; sourceIndex: number }[] {
+  const flat = (v: string) => v.replace(/==/g, "").replace(/\s+/g, " ").trim();
+  const captured = nodeBlocks.map(flat);
+  const missed: { text: string; sourceIndex: number }[] = [];
+  sourceMarkTexts.forEach((texts, sourceIndex) => {
+    for (const text of texts ?? []) {
+      const needle = flat(text);
+      if (needle && !captured.some((block) => block.includes(needle))) missed.push({ text, sourceIndex });
+    }
+  });
+  return missed;
+}
+
 /** Pure cap logic, split out from the \`add_node\` executor purely so
  * ADR-002's own "no node ends up with four links" test can exercise it
  * directly. Same-day links are kept first (see the caller's own comment
@@ -740,6 +773,9 @@ function createSyncGraphExecutors(input: {
 }): {
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>;
   getNodeBlocks: () => string[];
+  /** Writes one node from words code already knows are a person's own,
+   * with no model call and no links. See `marksNotCaptured`. */
+  appendVerbatimNode: (input: { text: string; sourceIndex: number }) => number;
   /** One short line per node captured for this day SO FAR, across every
    * pass. Fed back into the next pass's own prompt so it can see what
    * today already holds and not re-capture it -- the mechanism that makes
@@ -865,6 +901,13 @@ function createSyncGraphExecutors(input: {
 
   return {
     executors,
+    appendVerbatimNode: ({ text, sourceIndex }) => {
+      const number = nextNumber;
+      nodeBlocks.push([`### Node ${number}`, `==${text.trim()}==`, input.sourceCitations[sourceIndex]].join("\n"));
+      capturedSummaries.push(`Node ${number} (from Source ${sourceIndex}): "${text.replace(/\s+/g, " ").trim().slice(0, 160)}"`);
+      nextNumber++;
+      return number;
+    },
     getNodeBlocks: () => nodeBlocks,
     getCapturedSummaries: () => capturedSummaries,
     getDroppedLinks: () => ({ ...droppedLinks }),
@@ -1606,7 +1649,7 @@ export async function runSyncGraph(
     // that closure, so pass 2 continues from Node 18 rather than
     // restarting at Node 1, and `sameDayLinks` validation still holds
     // across a pass boundary.
-    const { executors, getNodeBlocks, getCapturedSummaries, getDroppedLinks } = createSyncGraphExecutors({
+    const { executors, appendVerbatimNode, getNodeBlocks, getCapturedSummaries, getDroppedLinks } = createSyncGraphExecutors({
       date,
       sourceCitations,
       sourceFiles,
@@ -1714,6 +1757,17 @@ export async function runSyncGraph(
         durationMs,
         outcome: shortfall ? "error" : "ok",
       });
+
+      // A mark always becomes a node, whatever the model made of it: see
+      // `marksNotCaptured`. Written after the passes so anything the
+      // model DID capture keeps its links and its setup line.
+      const missedMarks = marksNotCaptured(sourceMarkTexts, getNodeBlocks());
+      for (const missed of missedMarks) appendVerbatimNode(missed);
+      if (missedMarks.length > 0) {
+        log(
+          `sync-graph: ${date} — ${missedMarks.length} mark(s) the extraction passed over were written as nodes verbatim.`,
+        );
+      }
 
       const nodeBlocks = getNodeBlocks();
       if (nodeBlocks.length === 0) {

@@ -442,6 +442,12 @@ code; the model reads marks the way it reads any other input.
   sources. Each mark is written with its own record in words (the passage,
   the section, whose day that passage cites) because node ids are
   renumbered on re-extraction and a page is rewritten every run.
+- **A mark always becomes a node.** The model reads a marks file like any
+  source and links what it captures, and `marksNotCaptured` writes
+  anything it passed over verbatim afterwards, with no links. Every other
+  source is a day's writing, where judging what is worth capturing is the
+  job; a mark is one deliberate act about one named passage, and the
+  first one in production was judged not worth capturing.
 - **ADR-012 for marks.** A marks file mixes a person's words with a
   code-written context line quoting the page, so `renderQuoteBlocks` takes
   a per-block predicate there (`isInsideMarkText`) instead of one answer
