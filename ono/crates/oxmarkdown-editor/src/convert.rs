@@ -58,7 +58,7 @@ fn empty_paragraph(schema: &Schema) -> Node {
         .expect("empty paragraph always valid")
 }
 
-fn text_node(schema: &Schema, value: &str, marks: Vec<Mark>) -> Option<Node> {
+pub(crate) fn text_node(schema: &Schema, value: &str, marks: Vec<Mark>) -> Option<Node> {
     if value.is_empty() {
         return None;
     }
@@ -68,7 +68,7 @@ fn text_node(schema: &Schema, value: &str, marks: Vec<Mark>) -> Option<Node> {
 /// The two attrs every directive node shares (see `oxmarkdown_schema`'s
 /// own doc comment for why a single JSON-object `attributes` attr,
 /// rather than one attr per key).
-fn directive_attrs(name: &str, attributes: &Value) -> Attrs {
+pub(crate) fn directive_attrs(name: &str, attributes: &Value) -> Attrs {
     let mut attrs = Attrs::new();
     attrs.insert("name".to_string(), AttrValue::from(name.to_string()));
     attrs.insert("attributes".to_string(), attributes.clone());
@@ -84,7 +84,7 @@ fn directive_attrs(name: &str, attributes: &Value) -> Attrs {
 /// display string; the actual source of truth for round-tripping is the
 /// `attributes` JSON value stored as a real node attr, which is
 /// order-independent.
-fn format_directive_label(fence: &str, name: &str, attributes: &Value) -> String {
+pub(crate) fn format_directive_label(fence: &str, name: &str, attributes: &Value) -> String {
     let mut label = format!("{fence}{name}");
     if let Some(map) = attributes.as_object() {
         if !map.is_empty() {
@@ -111,7 +111,11 @@ fn format_directive_label(fence: &str, name: &str, attributes: &Value) -> String
 /// Still a synthetic text-child list either way (see `oxmarkdown_schema`'s
 /// own doc comment on the `DomSpec` limitation this works around) — the
 /// `name`/`attributes` node attrs stay the real source of truth.
-fn directive_content(schema: &Schema, name: &str, attributes: &Value) -> Option<Vec<Node>> {
+pub(crate) fn directive_content(
+    schema: &Schema,
+    name: &str,
+    attributes: &Value,
+) -> Option<Vec<Node>> {
     match name {
         "ref" => Some(ref_directive_content(schema, attributes)),
         "badge" => {

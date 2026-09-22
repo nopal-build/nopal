@@ -314,15 +314,66 @@ keystroke after the first. Confirmed fixed live via
 **Deliberately NOT done in this pass** (real follow-up work, not
 oversights):
 
-- **Directive attribute-editing popover still not built** — clicking a
-  directive (or the `:ref{...}` glyph) doesn't yet select it or open
-  anything; see the next section for what IS done (real per-kind
-  rendering for `"badge"`/`"ref"`, still via the generic fallback for
-  every other directive name).
 - **No HTML `parse_dom` for the new node/mark types** — pasting
   externally-formatted content shaped like a directive/checkbox won't
   reconstruct one; out of scope until paste itself is a real feature
   for this crate.
+
+## Directive click-to-select + attrs-editing popover: `directive_popover.rs`, real now
+
+Clicking a directive (or the `:ref{...}` glyph) used to do nothing at
+all. Now it selects the directive and, for every directive except
+`:ref{...}` (see below), opens a real popover for editing its attrs —
+matching the real product's own "Interactables" convention (see the
+`oxmarkdown` skill).
+
+- **Bridges a `ViewPlugin` (no Leptos knowledge, lives in
+  `taino-edit-dom`) to the surrounding Leptos component tree via a
+  plain `Rc<dyn Fn(Option<PopoverTarget>)>` callback** — the ONE place a
+  `ViewPlugin` genuinely holds a live `&EditorView` is inside
+  `handle_event` itself, so popover POSITIONING (`node_dom_at` +
+  `get_bounding_client_rect()`) is computed right there, at click time,
+  not by the Leptos side reaching back into the view later (it can't —
+  `EditorView` isn't a reactive value it can hold onto).
+- **Finding the clicked directive needed no separate DOM-class check,
+  only `pos_at_point`** — confirmed by reading its source: leaf/text
+  directive nodes here are NOT true zero-content atoms (`content:
+  Some("text*")` for the synthetic label — see `oxmarkdown_schema`'s
+  own doc comment), so a click on a directive's own wrapping element
+  already resolves to that node's exact position; a click inside a
+  CONTAINER directive's nested child paragraph resolves to that
+  paragraph's position instead (a different `ViewDesc`, matched
+  first), correctly declining to open the popover for ordinary editing.
+- **A real bug found and fixed live, not by reasoning alone**:
+  `checkbox_at_or_before`'s own `pos - 1` fallback (for imprecise pixel
+  coordinates landing just past a true zero-content atom) does NOT
+  transfer here — a live browser test caught it directly. Clicking a
+  container's FIRST child paragraph's own content wrongly opened the
+  popover, because `pos - 1` from that click legitimately resolves to
+  the ENCLOSING container's own boundary (a real, different, OUTER
+  node), not "the same atom, slightly off" the way it does for a true
+  atom like `checkbox`. Fixed by dropping the fallback entirely for
+  directives — `pos_at_point`'s own primary resolution is already
+  exact enough for these (larger, non-atom) elements.
+- **Save regenerates the synthetic display content, never just patches
+  attrs in place** — reuses `convert.rs`'s own `directive_content`/
+  `format_directive_label` (now `pub(crate)`) so an edited `"badge"`'s
+  pill or a `:ref{...}`'s spelled-out text never goes stale relative to
+  its new attrs. A `container_directive`'s real child content is left
+  completely untouched — only its `attributes` attr changes.
+- **`:ref{...}` is excluded from the popover entirely** (`is_editable_
+  directive`), per the `graphlog` skill's own "The `:ref{...}` directive"
+  section: GraphLog is the only writer, so it never gets the generic
+  attrs-editing popover every other directive gets. Confirmed live.
+- Attrs are edited as plain key/value string rows (add/remove freely),
+  matching the real `{key="value" ...}` syntax model — no nested/
+  non-string JSON values in this UI, since the parser itself never
+  produces any. A "Remove directive" action deletes the whole node.
+- Confirmed live via 7 new e2e tests
+  (`../../e2e/tests/directive-popover.spec.ts`): open pre-filled, edit +
+  save updates the render, add-then-reopen persists, cancel is a true
+  no-op, remove deletes it, `:ref{...}` never opens it, and clicking a
+  container's nested content edits normally instead of opening it.
 
 ## Markdown serialization back out: `serialize.rs`, real now
 

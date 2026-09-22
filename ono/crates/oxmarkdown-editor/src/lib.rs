@@ -14,6 +14,7 @@
 
 mod commands;
 mod convert;
+mod directive_popover;
 mod oxmarkdown_schema;
 mod serialize;
 
@@ -29,7 +30,10 @@ mod serialize;
 pub use convert::markdown_to_doc;
 pub use serialize::doc_to_markdown;
 
+use std::rc::Rc;
+
 use commands::EditingFixups;
+use directive_popover::{DirectiveAttrsPopover, DirectivePopoverPlugin, PopoverTarget};
 use leptos::prelude::*;
 use oxmarkdown_schema::{Checkbox, CheckboxTogglePlugin, Directives, Highlight, Strikethrough};
 #[cfg(any(feature = "csr", feature = "hydrate"))]
@@ -272,6 +276,14 @@ fn App() -> impl IntoView {
         }
     };
 
+    // Real click-to-select + attrs-editing popover for directives (see
+    // `directive_popover.rs`'s own doc comment for the full design,
+    // including why `on_select` — a plain `Rc<dyn Fn>` — is how a
+    // `ViewPlugin` (no Leptos knowledge at all) talks back to a signal
+    // out here in the surrounding component tree).
+    let popover_target = RwSignal::new(None::<PopoverTarget>);
+    let on_select: Rc<dyn Fn(Option<PopoverTarget>)> = Rc::new(move |t| popover_target.set(t));
+
     view! {
         <div id="app">
             <p class="ox-status-inline">
@@ -281,9 +293,13 @@ fn App() -> impl IntoView {
                 <TainoEditor
                     state=state
                     keymap=keymap
-                    plugins=vec![Box::new(CheckboxTogglePlugin)]
+                    plugins=vec![
+                        Box::new(CheckboxTogglePlugin),
+                        Box::new(DirectivePopoverPlugin::new(on_select)),
+                    ]
                 />
             </div>
+            <DirectiveAttrsPopover state=state target=popover_target />
         </div>
     }
 }

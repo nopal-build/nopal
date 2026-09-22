@@ -121,3 +121,101 @@ body {
   color: inherit;
   text-decoration: underline;
 }
+
+/* Real click-to-select + attrs-editing popover (see
+   `directive_popover.rs`) — every directive except `:ref{...}` (which
+   keeps its own `cursor: help` from the rule above) hints that clicking
+   does something. */
+.ox-directive {
+  cursor: pointer;
+}
+
+.ox-directive-popover {
+  position: fixed;
+  z-index: 1000;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 10px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.ox-directive-popover-title {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #374151;
+}
+
+.ox-directive-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.ox-directive-popover-key,
+.ox-directive-popover-value {
+  width: 90px;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  padding: 3px 5px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.ox-directive-popover-row-remove {
+  border: none;
+  background: none;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.ox-directive-popover-add {
+  font-size: 12px;
+  color: #4b5563;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.ox-directive-popover-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+}
+
+.ox-directive-popover-save,
+.ox-directive-popover-cancel,
+.ox-directive-popover-remove {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+}
+
+.ox-directive-popover-save {
+  background: #4f46e5;
+  color: #fff;
+  border-color: #4f46e5;
+}
+
+.ox-directive-popover-remove {
+  background: #fff;
+  color: #dc2626;
+  border-color: #fca5a5;
+  margin-left: auto;
+}

@@ -131,7 +131,7 @@ fn directive_attrs() -> HashMap<String, AttrSpec> {
     attrs
 }
 
-fn directive_name(n: &Node) -> String {
+pub(crate) fn directive_name(n: &Node) -> String {
     n.attrs()
         .get("name")
         .and_then(|v| v.as_str())
@@ -142,7 +142,7 @@ fn directive_name(n: &Node) -> String {
 /// Reads one key out of a directive's own `attributes` JSON-object attr
 /// (see this module's own doc comment for why the whole `{key="value"
 /// ...}` set is stored as one attr, not one per key).
-fn directive_attribute<'a>(n: &'a Node, key: &str) -> Option<&'a str> {
+pub(crate) fn directive_attribute<'a>(n: &'a Node, key: &str) -> Option<&'a str> {
     n.attrs().get("attributes")?.get(key)?.as_str()
 }
 
