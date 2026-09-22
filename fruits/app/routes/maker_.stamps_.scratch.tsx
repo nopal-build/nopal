@@ -19,21 +19,24 @@
 // implementation changes — keep this in sync with the real
 // `buildWebsiteDirectiveRegistry` vocabulary, don't let it drift into its
 // own separate list.
-import { type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { Link, data, redirect, useRouteError, isRouteErrorResponse } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { CenterContent } from "stamps/CenterContent";
+import { DrawerContent } from "stamps/DrawerContent";
 import { Grid } from "stamps/Grid";
 import { Stack } from "stamps/Stack";
 import { ErrorPanel } from "stamps/ErrorPanel";
 import { link } from "stamps/link.css";
+import { navLink } from "stamps/navLink.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { semanticColors } from "stamps/tokens";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
+import "../styles/scratch.css";
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -201,7 +204,7 @@ const ENTRIES: ScratchEntry[] = [
   },
   {
     id: "line",
-    directive: '::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1"}',
+    directive: '::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
     note: (
       <>
         Leaf. The shared wavy-line primitive (<code>WavyLine.tsx</code> +{" "}
@@ -210,30 +213,38 @@ const ENTRIES: ScratchEntry[] = [
         <code>0-100</code> (x) / <code>0-40</code> (y) box local to whatever
         it's nested inside, recomputed to real pixels on every real resize
         (<code>ResizeObserver</code>, not a passive{" "}
-        <code>preserveAspectRatio</code> stretch). Needs a positioned
-        ancestor with real height to draw into -- this row's own preview box
-        supplies that; <code>:::section-title{'{'}...{'}'}</code> supplies
-        it for the case below.
+        <code>preserveAspectRatio</code> stretch). <code>color</code> sets
+        the stroke directly via <code>WavyLine</code>'s own <code>color</code>{" "}
+        prop; omit it and the line inherits <code>currentColor</code> instead.
+        Needs a positioned ancestor with real height to draw into -- this
+        row's own preview box supplies that;{" "}
+        <code>:::section-title{'{'}...{'}'}</code> supplies it for the case
+        below.
       </>
     ),
     previewMinHeight: 100,
-    markdown: '::line{points="0,32 22,6 58,18 100,12" curve="smooth" tension="0.4"}',
+    markdown: '::line{points="0,32 22,6 58,18 100,12" curve="smooth" tension="0.4" color="green"}',
   },
   {
     id: "section-title",
-    directive: ':::section-title{icon="..."}',
+    directive: ':::section-title{icon="..." color="red|green|purple"}',
     note: (
       <>
         Container. An icon + a real heading + (usually) a <code>::line{'{'}...{'}'}</code>{" "}
         composed as one titled-header unit -- see <code>website.css</code>'s{" "}
         <code>.website-section-title</code>. The heading stays real markdown
         inside it, so an unaware renderer just shows a plain heading, no
-        visible artifact. First real case: Terrain's "At a Cost" heading.
+        visible artifact. <code>color</code> recolors JUST the heading text
+        (same named-color vocabulary as <code>:::section</code>'s{" "}
+        <code>accent</code>) -- it does NOT also recolor a nested{" "}
+        <code>::line{'{'}...{'}'}</code>, which needs its own, independent{" "}
+        <code>color</code> attribute since it has to work standalone too.
+        First real case: Terrain's "At a Cost" heading.
       </>
     ),
     fullBleed: true,
-    markdown: `:::section-title{icon="mountaineer-coffee"}
-::line{points="0,32 22,6 58,18 100,12" curve="smooth" tension="0.4"}
+    markdown: `:::section-title{icon="mountaineer-coffee" color="green"}
+::line{points="0,32 22,6 58,18 100,12" curve="smooth" tension="0.4" color="green"}
 ## At a Cost
 :::`,
   },
@@ -306,6 +317,63 @@ Yes, at the end of each contract.
 
 // ─── Layout ─────────────────────────────────────────────────────────────────
 
+/** `"section-title"` -> `"Section title"` -- just for the drawer nav label;
+ * the full `entry.directive` signature is still shown in the main content. */
+function formatEntryLabel(id: string): string {
+  const words = id.split("-");
+  return words[0].charAt(0).toUpperCase() + words[0].slice(1) + (words.length > 1 ? " " + words.slice(1).join(" ") : "");
+}
+
+const drawerNavLinkClass = `${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`;
+
+function ScratchNav({
+  focusedId,
+  onFocus,
+}: {
+  focusedId: string;
+  onFocus: (id: string) => void;
+}) {
+  return (
+    <Stack gap={1}>
+      <div
+        className={`${textSize.xs} ${sprinkles({ fontWeight: "bold", fontFamily: "mono" })}`}
+        style={{ color: semanticColors.textSubtle }}
+      >
+        Examples
+      </div>
+      {ENTRIES.map((entry) => {
+        const isFocused = entry.id === focusedId;
+        return (
+          <button
+            key={entry.id}
+            type="button"
+            onClick={() => onFocus(entry.id)}
+            // Deliberately NOT `navLink`'s own `active` variant -- that
+            // one hardcodes dark purple text on the assumption of a light
+            // pill background (`navActiveBg`), which these buttons don't
+            // have (`background: none` below). `scratch-focus-accent`
+            // (scratch.css) gives the SAME purple-in-light/white-in-dark
+            // treatment the focused entry's own border/label use, so both
+            // stay consistent and legible in dark mode.
+            className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass} ${isFocused ? "scratch-focus-accent" : ""}`}
+            style={{
+              display: "block",
+              width: "100%",
+              textAlign: "left",
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              fontWeight: isFocused ? 700 : undefined,
+            }}
+          >
+            {formatEntryLabel(entry.id)}
+          </button>
+        );
+      })}
+    </Stack>
+  );
+}
+
 function ColumnLabel({ children }: { children: ReactNode }) {
   return (
     <div
@@ -317,14 +385,33 @@ function ColumnLabel({ children }: { children: ReactNode }) {
   );
 }
 
-function Entry({ entry }: { entry: ScratchEntry }) {
+function Entry({ entry, focused }: { entry: ScratchEntry; focused: boolean }) {
   const registry = buildWebsiteDirectiveRegistry({ dailyLogEntries: {} });
   return (
     <div
-      className={sprinkles({ p: 5 })}
-      style={{ border: `1px solid ${semanticColors.surfaceBorder}`, borderRadius: 8 }}
+      id={`entry-${entry.id}`}
+      // `scratch-focus-accent` (scratch.css) sets `color` per color scheme
+      // (dark plum in light mode, plain white in dark mode -- `--purple`
+      // alone reads as still-purple, not white, against this app's dark
+      // surface). The border then just inherits it via `currentColor`
+      // instead of duplicating the same light/dark logic a second time.
+      className={`${sprinkles({ p: 5 })} ${focused ? "scratch-focus-accent" : ""}`}
+      style={{
+        borderWidth: 1,
+        borderStyle: "solid",
+        borderColor: focused ? "currentColor" : semanticColors.surfaceBorder,
+        borderRadius: 8,
+      }}
     >
       <div className={sprinkles({ mb: 3 })}>
+        {focused && (
+          <div
+            className={`${textSize.xs} ${sprinkles({ fontWeight: "bold", fontFamily: "mono", mb: 1 })}`}
+            style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}
+          >
+            ↑ Focused
+          </div>
+        )}
         <code className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`} style={{ color: semanticColors.textBrand }}>
           {entry.directive}
         </code>
@@ -375,40 +462,112 @@ function Entry({ entry }: { entry: ScratchEntry }) {
   );
 }
 
+type ViewMode = "focus" | "all";
+
+function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewMode) => void }) {
+  const options: { value: ViewMode; label: string }[] = [
+    { value: "focus", label: "Focus" },
+    { value: "all", label: "See all" },
+  ];
+  return (
+    <div
+      className={sprinkles({ display: "inline-flex" })}
+      style={{ border: `1px solid ${semanticColors.surfaceBorder}`, borderRadius: 6, overflow: "hidden" }}
+    >
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`${textSize.xs} ${sprinkles({ fontWeight: "bold", fontFamily: "mono", px: 3, py: 2 })}`}
+          style={{
+            border: "none",
+            cursor: "pointer",
+            background: mode === opt.value ? semanticColors.textBrand : "transparent",
+            color: mode === opt.value ? "white" : semanticColors.textSubtle,
+          }}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Pin whichever entry is actively being iterated on here -- set to `null`
+// to fall back to the "newest entry is focused by default" convention
+// (the last item in `ENTRIES`) instead.
+const DEFAULT_FOCUS_ID: string | null = "section-title";
+
 export default function StampsScratch() {
+  const [focusedId, setFocusedId] = useState(DEFAULT_FOCUS_ID ?? ENTRIES[ENTRIES.length - 1].id);
+  // "focus": the content area shows ONLY the focused entry -- the default,
+  // since a full list is exactly what this option exists to get away from.
+  // "all": the old behavior, full list with the focused one pulled to top.
+  const [viewMode, setViewMode] = useState<ViewMode>("focus");
+
+  // In "all" mode the focused entry moves to the TOP of the list, with
+  // everything else keeping its original relative order behind it. In
+  // "focus" mode it's the ONLY entry shown at all.
+  const visibleEntries = useMemo(() => {
+    const focused = ENTRIES.find((e) => e.id === focusedId);
+    if (viewMode === "focus") return focused ? [focused] : [];
+    const rest = ENTRIES.filter((e) => e.id !== focusedId);
+    return focused ? [focused, ...rest] : ENTRIES;
+  }, [focusedId, viewMode]);
+
+  // Reordering/switching modes alone doesn't guarantee the newly-topmost
+  // entry is actually in view if the page was scrolled elsewhere --
+  // `AppLayout`'s own `<main>` scrolls independently (see
+  // `visual-check.ts`'s own note on this), so `scrollIntoView` on the
+  // entry itself (not `window`) is what actually works here.
+  useEffect(() => {
+    document.getElementById(`entry-${focusedId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [focusedId, viewMode]);
+
   return (
     <AppLayout>
-      <CenterContent maxWidth={1100}>
-        <div className={sprinkles({ mb: 8 })}>
-          <Link
-            to="/maker/stamps"
-            className={`${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
-            style={{ color: semanticColors.textSubtle, textDecoration: "none" }}
-          >
-            ← Stamps
-          </Link>
-          <h1
-            className={`${textSize.xl} ${sprinkles({ fontWeight: "bold", mt: 2, mb: 2 })}`}
-            style={{ color: semanticColors.textPrimary }}
-          >
-            Scratch
-          </h1>
-          <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: 640, lineHeight: 1.5 }}>
-            One row per <code>/v2</code> website directive (see{" "}
-            <code>oxmarkdown/websiteDirectives.tsx</code>) — plain markdown source
-            on the left, a real static rendering on the right, so the gap between
-            "what this currently produces" and "what the design actually wants"
-            is easy to see side by side while that design gets worked out. Static
-            only, no editor — none of these have an Editing-mode rendering yet.
-          </p>
-        </div>
+      <DrawerContent drawer={<ScratchNav focusedId={focusedId} onFocus={setFocusedId} />} title="Examples">
+        <CenterContent maxWidth={1100}>
+          <div className={sprinkles({ mb: 8 })}>
+            <Link
+              to="/maker/stamps"
+              className={`${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
+              style={{ color: semanticColors.textSubtle, textDecoration: "none" }}
+            >
+              ← Stamps
+            </Link>
+            <div
+              className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 3, mt: 2, mb: 2 })}
+            >
+              <h1
+                className={`${textSize.xl} ${sprinkles({ fontWeight: "bold" })}`}
+                style={{ color: semanticColors.textPrimary }}
+              >
+                Scratch
+              </h1>
+              <ViewModeToggle mode={viewMode} onChange={setViewMode} />
+            </div>
+            <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: 640, lineHeight: 1.5 }}>
+              One row per <code>/v2</code> website directive (see{" "}
+              <code>oxmarkdown/websiteDirectives.tsx</code>) — plain markdown source
+              on the left, a real static rendering on the right, so the gap between
+              "what this currently produces" and "what the design actually wants"
+              is easy to see side by side while that design gets worked out. Static
+              only, no editor — none of these have an Editing-mode rendering yet.
+              Pick an example from the drawer to focus it — <code>Focus</code> shows
+              just that one, <code>See all</code> shows the full list with it pulled
+              to the top.
+            </p>
+          </div>
 
-        <Stack gap={6}>
-          {ENTRIES.map((entry) => (
-            <Entry key={entry.id} entry={entry} />
-          ))}
-        </Stack>
-      </CenterContent>
+          <Stack gap={6}>
+            {visibleEntries.map((entry) => (
+              <Entry key={entry.id} entry={entry} focused={viewMode === "all" && entry.id === focusedId} />
+            ))}
+          </Stack>
+        </CenterContent>
+      </DrawerContent>
     </AppLayout>
   );
 }

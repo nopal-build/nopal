@@ -46,21 +46,30 @@
  *     illustration, for inline glyphs or standalone floating shapes.
  *   ::waypoint{id="..."} — an invisible anchor for the (future) wavy
  *     connector overlay to measure; renders nothing visible on its own.
- *   :::section-title{icon="..."} — an icon + a real heading + (usually) a
- *     `::line{...}` composed together as one titled-header unit; see
- *     `website.css`'s `.website-section-title` for the layout. The heading
- *     stays real markdown inside it, so an unaware renderer just shows a
- *     plain heading with no visible artifact.
- *   ::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1"}
+ *   :::section-title{icon="..." color="red|green|purple"} — an icon + a
+ *     real heading + (usually) a `::line{...}` composed together as one
+ *     titled-header unit; see `website.css`'s `.website-section-title` for
+ *     the layout. The heading stays real markdown inside it, so an
+ *     unaware renderer just shows a plain heading, no visible artifact.
+ *     `color` recolors JUST the heading text (same named-color vocabulary
+ *     as `:::section{accent="..."}`, via the same
+ *     `data-website-color`-attribute-selector technique) — it does NOT
+ *     also recolor a `::line{...}` nested alongside it; that's `::line`'s
+ *     own, independent `color` attribute (below), since a bare `::line`
+ *     needs to work with no `:::section-title` around it at all.
+ *   ::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
  *     — the shared wavy-line primitive (`WavyLine.tsx` +
  *     `oxmarkdown-core`'s `buildSplinePath`), fixed-points mode: `points`
  *     are normalized to a `0-100` (x) / `0-40` (y) box local to whatever
  *     it's nested inside, recomputed to real pixels on every resize (not
- *     just stretched via `preserveAspectRatio`). The SAME primitive's
- *     `waypoints` mode (measuring live `data-waypoint-id` positions
- *     instead of fixed points) is built in `WavyLine.tsx` but not wired to
- *     a directive yet — reserved for the Home template's page-spanning
- *     connector.
+ *     just stretched via `preserveAspectRatio`). `color` (same named
+ *     vocabulary as `accent`/`section-title`'s `color`) sets the stroke
+ *     directly via `WavyLine`'s own `color` prop — omit it and the line
+ *     just inherits whatever `currentColor` resolves to (`WavyLine`'s
+ *     default). The SAME primitive's `waypoints` mode (measuring live
+ *     `data-waypoint-id` positions instead of fixed points) is built in
+ *     `WavyLine.tsx` but not wired to a directive yet — reserved for the
+ *     Home template's page-spanning connector.
  *   :::pricing-card{name="..." price="..." cta="..." cta-href="..."} —
  *     body is an ordinary bullet list of features.
  *   ::button{text="..." href="..."} — a standalone CTA pill link (the
@@ -87,6 +96,21 @@ import "../styles/website.css";
 const LINE_CURVE_KINDS = ["smooth", "straight", "bezier"] as const;
 function toLineCurveKind(v: string | undefined): LineCurveKind {
   return (LINE_CURVE_KINDS as readonly string[]).includes(v ?? "") ? (v as LineCurveKind) : "smooth";
+}
+
+/** Same named-color vocabulary `:::section{accent="..."}` already uses --
+ * shared here so `::line{color="..."}` resolves to the exact same CSS
+ * variable a `color="..."` on `:::section-title{...}` would (that one
+ * goes through CSS attribute selectors instead -- see `website.css` --
+ * since it targets a heading already rendered as `children`, not a prop
+ * this registry can pass directly). */
+const ACCENT_COLOR_VARS: Record<string, string> = {
+  red: "var(--red)",
+  green: "var(--green)",
+  purple: "var(--purple)",
+};
+function toAccentColorVar(name: string | undefined): string | undefined {
+  return name ? ACCENT_COLOR_VARS[name] : undefined;
 }
 
 const BADGE_VARIANTS = ["neutral", "success", "warning", "danger"] as const;
@@ -161,8 +185,13 @@ export function buildWebsiteDirectiveRegistry(opts: {
       return <span className="website-waypoint" aria-hidden="true" data-waypoint-id={attrs.id || undefined} />;
     },
 
-    "section-title"({ children }) {
-      return <div className="website-section-title">{children}</div>;
+    "section-title"({ attrs, children }) {
+      return (
+        <div className="website-section-title" data-website-color={attrs.color || undefined}>
+          {attrs.icon && <WebsiteIcon name={attrs.icon} size="md" />}
+          {children}
+        </div>
+      );
     },
 
     line({ attrs }) {
@@ -175,6 +204,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
           points={points}
           curve={toLineCurveKind(attrs.curve)}
           tension={Number.isFinite(tension) ? tension : undefined}
+          color={toAccentColorVar(attrs.color)}
           className="website-line"
         />
       );

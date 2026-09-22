@@ -15,6 +15,19 @@
 mod commands;
 mod convert;
 mod oxmarkdown_schema;
+mod serialize;
+
+// The two conversion entry points, re-exported as real public API — not
+// just a playground implementation detail. Anything embedding this
+// crate (a future save/persist feature, or `oxmarkdown-leptos` per this
+// crate's own README "real follow-up work" list) needs BOTH directions
+// callable from outside. This also keeps `doc_to_markdown` genuinely
+// reachable under every feature combination for `cargo clippy`'s
+// dead-code analysis — its only INTERNAL caller today
+// (`render_roundtrip_markdown`) is CSR-only, so under `--features ssr
+// --no-default-features` alone it would otherwise look unused.
+pub use convert::markdown_to_doc;
+pub use serialize::doc_to_markdown;
 
 use commands::EditingFixups;
 use leptos::prelude::*;
@@ -309,6 +322,23 @@ fn render_markdown_html(schema: &taino_edit_leptos::Schema, markdown: &str) -> S
     taino_edit_leptos::doc_view_html(&doc)
 }
 
+/// The third column's own render: parses `markdown` into a real `doc`
+/// (the SAME conversion the middle column's render and the main editor
+/// both use) then serializes it straight back out via
+/// `serialize::doc_to_markdown` — the parse→doc half and the
+/// doc→markdown half are proven independently by `convert.rs`'s and
+/// `serialize.rs`'s own native tests; this is what proves them chained
+/// together, live, against arbitrary typed input, matching the
+/// `oxmarkdown` skill's own "verify three things together" testing
+/// convention (input markdown / rendered editor / output markdown) —
+/// exactly the one this playground was missing until `serialize.rs`
+/// existed at all.
+#[cfg(feature = "csr")]
+fn render_roundtrip_markdown(schema: &taino_edit_leptos::Schema, markdown: &str) -> String {
+    let doc = convert::markdown_to_doc(schema, markdown);
+    serialize::doc_to_markdown(&doc)
+}
+
 #[cfg(feature = "csr")]
 fn textarea_value(ev: &leptos::ev::Event) -> String {
     use wasm_bindgen::JsCast;
@@ -324,10 +354,15 @@ fn PlaygroundApp() -> impl IntoView {
     let schema = build_schema();
     let markdown = RwSignal::new(PLAYGROUND_SAMPLE.to_string());
     let rendered_html = RwSignal::new(render_markdown_html(&schema, &markdown.get_untracked()));
+    let roundtrip = RwSignal::new(render_roundtrip_markdown(
+        &schema,
+        &markdown.get_untracked(),
+    ));
 
     let on_input = move |ev: leptos::ev::Event| {
         let text = textarea_value(&ev);
         rendered_html.set(render_markdown_html(&schema, &text));
+        roundtrip.set(render_roundtrip_markdown(&schema, &text));
         markdown.set(text);
     };
 
@@ -344,6 +379,14 @@ fn PlaygroundApp() -> impl IntoView {
             <div class="playground-col">
                 <h2>"Rendered"</h2>
                 <div class="taino-editor playground-rendered" inner_html=move || rendered_html.get()></div>
+            </div>
+            <div class="playground-col">
+                <h2>"Round-tripped markdown"</h2>
+                <textarea
+                    class="playground-roundtrip"
+                    readonly
+                    prop:value=move || roundtrip.get()
+                ></textarea>
             </div>
         </div>
     }

@@ -116,6 +116,25 @@ async function main() {
       const page = await context.newPage();
       await page.emulateMedia({ colorScheme });
       await page.goto(`${BASE_URL}${routePath}`, { waitUntil: "networkidle" });
+      // `AppLayout` (`app/components/AppLayout.tsx`) renders an
+      // independently-scrolling `<main>` (fixed height, `overflow: scroll`)
+      // rather than letting the whole document scroll -- confirmed directly
+      // (a real repro, not just CSS-reading): `document.documentElement`/
+      // `body` both report a fixed `100vh`-ish computed height regardless of
+      // content, so `fullPage: true` alone silently truncates every route
+      // whose content is taller than one viewport to just that one
+      // viewport's worth of `<main>`, with no error or warning of any kind.
+      // Forcing `<main>` to lay out at its full content height first (never
+      // touches real app CSS -- this is a per-page, in-memory style
+      // override for the screenshot only) makes `fullPage: true` correctly
+      // measure/capture everything below the fold too.
+      await page.evaluate(() => {
+        const main = document.querySelector("main");
+        if (main instanceof HTMLElement) {
+          main.style.overflow = "visible";
+          main.style.height = "auto";
+        }
+      });
       const filePath = path.join(OUT_DIR, `${slug}--${colorScheme}.png`);
       await page.screenshot({ path: filePath, fullPage: true });
       saved.push(filePath);

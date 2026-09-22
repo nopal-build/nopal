@@ -191,8 +191,37 @@
   margin: 0 0 0 auto;
   text-align: right;
   /* A crisp, hard-edged offset -- zero blur radius reads as a graphic-
-     design drop shadow, not a soft CSS glow. */
-  text-shadow: 3px 3px 0 rgba(0, 0, 0, 0.18);
+     design drop shadow, not a soft CSS glow. `--purple` (not a semantic
+     token -- a fixed `--plum-700` alias, never redefined for dark mode)
+     deliberately stays the SAME literal dark plum in both color schemes:
+     the heading's own text color already swaps per scheme via
+     oxmarkdown's `--ox-color-accent` (a medium purple in light mode,
+     pale `--moon` in dark mode), and a fixed dark shadow reads as a
+     legible drop shadow against EITHER of those on its own, with no
+     dark-mode override needed here at all. */
+  text-shadow: 1px 1px 0 var(--purple);
+}
+
+/* Suppress oxmarkdown's own `#`/`##`/`###` gutter-marker glyph here --
+   this heading is meant to read as a bespoke graphic title, not as
+   embedded prose echoing its raw markdown syntax next to it. */
+.website-section-title :is(h1, h2, h3)::before {
+  content: none;
+}
+
+/* Optional heading-color override (`color="red"|"green"|"purple"`) --
+   same named-color vocabulary and technique as `:::section{accent="..."}`
+   above. Deliberately a SEPARATE attribute/rule from that one (not
+   reused) -- `:::section-title{...}` and `:::section{...}` are two
+   different directives that happen to both want a named accent color. */
+.website-section-title[data-website-color="red"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--red);
+}
+.website-section-title[data-website-color="green"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--green);
+}
+.website-section-title[data-website-color="purple"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--purple);
 }
 
 /* ── Pricing card (`:::pricing-card{...}`) ─────────────────────────────── */

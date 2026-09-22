@@ -9,9 +9,13 @@
 // `breakpoints.navMax`, same as Vault's.
 //
 // Desktop uses `position: sticky` (tracking whatever ancestor actually
-// scrolls — normally `AppLayout`'s own `main`) rather than `height: 100%`
-// + its own internal scroll region, so this doesn't need to assume
-// anything about the height of whatever renders it.
+// scrolls — normally `AppLayout`'s own `main`) rather than its own
+// internal scroll region. `shell` DOES now assume its rendering ancestor
+// has a definite height (`min-height: 100%` — see that rule's own comment
+// for why) so the drawer/content always fill the available space even
+// when `children` is short, instead of shrinking to content height —
+// true of `AppLayout`'s own `<main>` (`flex: 1` in a full-height column),
+// the only real caller today.
 import { style } from "@vanilla-extract/css";
 import { breakpoints, semanticColors } from "./tokens";
 
@@ -25,6 +29,23 @@ export const shell = style({
   // wouldn't reach the bottom of a taller screen and `sticky` would have
   // no room to hold it in place while `main` scrolls.
   alignItems: "stretch",
+  // `alignItems: stretch` only stretches `panel`/`main` to match EACH
+  // OTHER's height -- it does nothing when BOTH are shorter than the
+  // available space (e.g. a content view showing just one short item),
+  // since the row itself still only grows as tall as its tallest child's
+  // own natural content height. `min-height: 100%` gives the row a FLOOR
+  // equal to its actual rendering ancestor's height instead (normally
+  // `AppLayout`'s own `<main>`, which already has a definite computed
+  // height via `flex: 1` in a full-height column -- see
+  // `appLayoutShell.css.ts` -- so this resolves correctly, it doesn't fall
+  // back to `auto`/0 the way a percentage height against an indefinite
+  // ancestor would). Deliberately `min-height`, not `height`: a `height`
+  // would clip/need its own `overflow: auto` the moment content genuinely
+  // exceeds one viewport, adding a SECOND scrollbar nested inside
+  // `<main>`'s own -- `min-height` only ever raises the floor, so taller
+  // content keeps growing the row naturally and still relies on that one
+  // existing scrollbar, exactly as before this change.
+  minHeight: "100%",
 });
 
 export const panel = style({

@@ -78,3 +78,19 @@ test("a verbose :ref{...} renders fully spelled out with a real source link", as
   await expect(link).toHaveText("source");
   await expect(link).toHaveAttribute("href", "/x");
 });
+
+test("the round-trip column re-serializes the same parsed document back to markdown", async ({
+  page,
+}) => {
+  const textarea = page.locator(".playground-source");
+  const roundtrip = page.locator(".playground-roundtrip");
+
+  const source = "- [ ] todo\n- [x] done\n\n::badge{label=\"Ready\"}\n";
+  await textarea.fill(source);
+  await expect(roundtrip).toHaveValue(source);
+
+  // Editing the source live-updates the round-trip column too, not just
+  // once on load.
+  await textarea.fill("# A heading\n\nSome **bold** text.\n");
+  await expect(roundtrip).toHaveValue("# A heading\n\nSome **bold** text.\n");
+});

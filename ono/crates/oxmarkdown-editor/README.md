@@ -319,16 +319,58 @@ oversights):
   anything; see the next section for what IS done (real per-kind
   rendering for `"badge"`/`"ref"`, still via the generic fallback for
   every other directive name).
-- **No markdown serialization back out yet** — `convert.rs` is still
-  one-way (markdown → taino tree only). Round-tripping edits back to
-  markdown text needs a taino-tree → mdast-JSON → markdown pass (the
-  reverse of today's pipeline, likely reusing `oxmarkdown_rs::
-  serialize_document`'s own mdast-JSON → markdown half), not attempted
-  here.
 - **No HTML `parse_dom` for the new node/mark types** — pasting
   externally-formatted content shaped like a directive/checkbox won't
   reconstruct one; out of scope until paste itself is a real feature
   for this crate.
+
+## Markdown serialization back out: `serialize.rs`, real now
+
+`convert.rs` was one-way (markdown → taino tree only) until now — nothing
+typed or toggled could actually be saved. `serialize.rs` is the reverse
+direction: taino `Node` → mdast-shaped JSON → real OxMarkdown text, the
+last step reusing `oxmarkdown_rs::serialize_document` (the SAME
+mdast-JSON → markdown half `oxmarkdown-rs`'s own round-trip tests
+already prove), not a second hand-rolled writer.
+
+- **Directive attrs are the source of truth on the way out, too** —
+  `directive_to_mdast`/the `text_directive` case rebuild straight from a
+  node's real `name`/`attributes` attrs, never from `convert.rs`'s own
+  synthetic display content (the `"badge"`/`"ref"` label, the `*`
+  glyph, ...). Confirmed round-tripping cleanly by dedicated tests for
+  both.
+- **The checkbox atom is un-done, not re-serialized as itself** —
+  `list_item_to_mdast` pulls a leading `checkbox` atom off a list item's
+  first paragraph and sets mdast `listItem.checked` from it, the exact
+  reverse of `convert::convert_list_item`'s own extraction (see
+  `oxmarkdown_schema`'s doc comment for why a checkbox is an inline atom
+  here at all, not a `list_item` attribute).
+- **Mark nesting order is a deliberate, fixed choice** — `taino-edit-
+  core`'s `Node::marks()` is an unordered set on a text run, not a
+  nested tree the way mdast's own wrapper nodes are. `code` always wins
+  outright (drops every other mark — a real code span's content is
+  literal, no nested markup); otherwise link wraps outermost, since a
+  "linked run of styled text" reads as a link wrapping styled content,
+  not the reverse.
+- **Proven by the strongest test this bridge can get**: parse →
+  serialize → parse again must produce the identical tree (the same
+  convention `oxmarkdown-rs`'s own `serialize.rs` tests already hold
+  the JS-side half to) — 14 round-trip tests covering every construct
+  this schema has: marks, headings, blockquotes, code blocks, both list
+  kinds, mixed-checked task lists, highlight/strikethrough, images, and
+  all three directive kinds (generic, `"badge"`, both `:ref{...}`
+  renderings).
+- **`doc_to_markdown`/`markdown_to_doc` are now real public API** of
+  this crate (re-exported from `lib.rs`), not playground-only internals
+  — needed by any future embedder (a save feature, or merging with
+  `oxmarkdown-leptos`), and incidentally what keeps `doc_to_markdown`
+  genuinely reachable under the `ssr` feature alone, whose only
+  INTERNAL caller (the playground) is CSR-only.
+- **Live, hands-on proof**: the playground (`web/playground.html`) grew
+  a third column, "Round-tripped markdown" — the SAME parsed document
+  re-serialized back, live on every keystroke, so comparing column 1
+  against column 3 is the interactive version of the round-trip tests
+  above. Confirmed via `../../e2e/tests/playground.spec.ts`.
 
 ## Per-directive-kind rendering: `"badge"`/`"ref"` are the first two, real interactivity still deferred
 

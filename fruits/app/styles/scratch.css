@@ -1,0 +1,21 @@
+/**
+ * app/styles/scratch.css — the Stamps guide's scratch pad
+ * (`routes/maker_.stamps_.scratch.tsx`)'s own "this entry is focused"
+ * accent color. Needs a real CSS rule with its own dark-mode block, not
+ * an inline JS-computed color read from `stamps/tokens` — `--purple`
+ * reads as still-purple (not literally purple, but not white either) in
+ * dark mode, low contrast for what's meant to be a strong "this one is
+ * focused" emphasis; plain white reads better against this app's dark
+ * surface. Applied to the focused entry's own wrapper (`color`, which the
+ * entry's border then inherits via `currentColor`, and the "↑ Focused"
+ * label inherits by not setting its own color at all).
+ */
+.scratch-focus-accent {
+  color: var(--purple);
+}
+
+@media (prefers-color-scheme: dark) {
+  .scratch-focus-accent {
+    color: white;
+  }
+}

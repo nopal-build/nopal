@@ -53,17 +53,33 @@
       overflow: auto;
       min-height: 0;
     }
+    .playground-roundtrip {
+      flex: 1;
+      resize: none;
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      min-height: 0;
+      background: #f8fafc;
+      color: #374151;
+    }
   </style>
 </head>
 <body>
   <div class="ox-status">
     <strong>ono / OxMarkdown playground</strong> — type OxMarkdown source
-    on the left (directives, checkboxes, <code>==highlight==</code>, GFM
-    strikethrough, ...) and see exactly what it converts + renders to on
-    the right, via the SAME <code>convert.rs</code>/<code>doc_view_html</code>
-    pipeline the main editor and SSR both use. The right column is a
-    deterministic, read-only render — not a second live editor — so it
-    can never drift out of sync with the source on the left.
+    in the first column (directives, checkboxes, <code>==highlight==</code>,
+    GFM strikethrough, ...) and see exactly what it converts + renders to
+    in the second, via the SAME <code>convert.rs</code>/<code>doc_view_html</code>
+    pipeline the main editor and SSR both use. The third column re-serializes
+    that SAME parsed document straight back to markdown
+    (<code>serialize.rs</code>) — both read-only, deterministic renders, not
+    second live editors, so nothing here can drift out of sync with the
+    source in the first column. Comparing columns 1 and 3 is the live,
+    hands-on version of this crate's own round-trip tests.
   </div>
   <div id="mount-point"></div>
   <script type="module">
