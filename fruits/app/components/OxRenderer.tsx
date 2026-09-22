@@ -464,8 +464,13 @@ function renderNode(node: any, key: number, ctx: RenderCtx): ReactNode {
 
 /** A paragraph with the pen on: each sentence is its own markable
  * thought (split exactly the way `computeMarkUnits` splits it, so the
- * keys agree), and the marks on any of them share one margin note block
- * beside the paragraph. */
+ * keys agree), and each sentence's marks are written into the flow right
+ * after it.
+ *
+ * They used to be pooled into one block at the end of the paragraph,
+ * which put a note about the fourth sentence level with the first. The
+ * notes float into the margin (see `.ox-mark-notes`), so where they sit
+ * in the flow is where they land on the page. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderMarkableParagraph(node: any, key: number, ctx: RenderCtx, annotations: AnnotationCtx): ReactNode {
   const sentences = splitSentences(node.children).map((pieces, i) => ({ pieces, unit: annotations.unitAt(node, i) }));
@@ -473,14 +478,16 @@ function renderMarkableParagraph(node: any, key: number, ctx: RenderCtx, annotat
     <p key={key} className="ox-mark-host">
       {sentences.map(({ pieces, unit }, i) =>
         unit ? (
-          <MarkableUnit key={i} unit={unit} ctx={annotations}>
-            {renderNodes(pieces, ctx)}
-          </MarkableUnit>
+          <Fragment key={i}>
+            <MarkableUnit unit={unit} ctx={annotations}>
+              {renderNodes(pieces, ctx)}
+            </MarkableUnit>
+            <MarkNotes ctx={annotations} unitKeys={[unit.key]} />
+          </Fragment>
         ) : (
           <Fragment key={i}>{renderNodes(pieces, ctx)}</Fragment>
         ),
       )}
-      <MarkNotes ctx={annotations} unitKeys={sentences.flatMap(({ unit }) => (unit ? [unit.key] : []))} />
     </p>
   );
 }

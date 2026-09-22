@@ -1643,8 +1643,14 @@ img.ox-file-thumb {
   }
 }
 
+/* The block a mark hangs off. `flow-root` is the load-bearing word: the
+   notes are floats (see `.ox-mark-notes`), and a float only makes its
+   container taller when that container establishes a block formatting
+   context. Without it, three notes on a one-line bullet drew straight
+   over whatever came next. */
 .ox-mark-host {
   position: relative;
+  display: flow-root;
 }
 
 .ox-markable--pen {
@@ -1670,13 +1676,25 @@ div.ox-markable {
   text-underline-offset: 5px;
 }
 
+/* ON THE GRID, EVERYWHERE, because a note is in the flow now. Floated
+   (desktop) it makes its host taller through `flow-root`; static
+   (mobile) it sits in the column directly. Either way a height that is
+   not a whole number of cells pushes every block below it off the dot
+   grid permanently, since the dots are a fixed background — see the
+   oxmarkdown skill, "Vertical rhythm locked to the grid", where every
+   block element carries `line-height: var(--ox-grid)`.
+
+   As a length it inherits, so the byline, the waiting line and the move
+   action all land on the grid too, and any stack of notes is always a
+   whole number of cells tall. The generous leading is what the rule
+   costs; for handwriting in a margin it reads like ruled paper. */
 .ox-mark-notes {
   display: block;
   font-family: var(--ox-mark-font);
   color: var(--ox-mark-color);
   font-size: 1.05rem;
   font-weight: 400;
-  line-height: 1.35;
+  line-height: var(--ox-grid);
   letter-spacing: 0;
   text-transform: none;
   text-align: left;
@@ -1685,18 +1703,36 @@ div.ox-markable {
   margin-top: 0;
 }
 
+/* IN THE MARGIN, BUT IN THE FLOW. A right float with a negative right
+   margin sits outside the text column entirely (the margin box ends up
+   narrower than nothing, so no line box is shortened and the prose does
+   not wrap around it), while still counting toward its container's
+   height and still landing beside the line it was written on. Absolute
+   positioning could do neither: every note drew at the top of its block
+   whichever sentence it belonged to, and several notes on a short block
+   simply overlapped the next one.
+
+   `clear: right` is what stacks a second note under the first instead of
+   beside it. The offset is the note's own width plus the 24px gutter, so
+   the band's left edge sits 24px past the text column. */
 @media (min-width: 1024px) {
   .ox-mark-notes {
-    position: absolute;
-    top: 0;
-    left: calc(100% + 24px);
+    float: right;
+    clear: right;
     width: calc(var(--ox-mark-margin) - 32px);
+    margin-right: calc(-1 * (var(--ox-mark-margin) - 8px));
   }
 }
 
+/* No room for a margin here, so the note sits under the line it is
+   about, as a quoted block.
+
+   Spacing in whole cells for the same reason as the line-height above:
+   4px and 8px margins here were what knocked every block below a note
+   off the grid. */
 @media (max-width: 1023px) {
   .ox-mark-notes {
-    margin: 4px 0 8px;
+    margin: 0 0 var(--ox-grid);
     padding-left: 12px;
     border-left: 2px solid var(--ox-mark-color);
   }
@@ -1705,8 +1741,10 @@ div.ox-markable {
 .ox-mark-note {
   display: block;
 }
+/* No margin between notes: at one cell per line they already read as
+   separate hands, and 10px here would undo the rhythm above. */
 .ox-mark-note + .ox-mark-note {
-  margin-top: 10px;
+  margin-top: 0;
 }
 .ox-mark-note__text {
   display: block;
@@ -1751,7 +1789,6 @@ div.ox-markable {
 }
 .ox-mark-note__action {
   display: block;
-  margin-top: 4px;
   font-family: var(--ox-font-family);
   font-size: 0.8rem;
 }

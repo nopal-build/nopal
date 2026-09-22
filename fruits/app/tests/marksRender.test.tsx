@@ -52,6 +52,30 @@ describe("the pen", () => {
     expect(html).not.toContain("ox-mark-notes");
   });
 
+  it("writes each sentence's notes right after that sentence, not at the end of the paragraph", () => {
+    // The notes float into the margin, so where they sit in the flow is
+    // where they land beside the prose. Pooling them at the end put a
+    // note about the last sentence level with the first.
+    const two = computeMarkUnitsFromMarkdown(PAGE).filter((u) => u.kind === "sentence").slice(0, 2);
+    const annotations: OxAnnotations = {
+      canMark: false,
+      viewerId: "admin_1",
+      marks: [
+        { id: "a", unitKey: two[0].key, authorHumanId: "admin_2", authorName: "Lucas J", date: "2026-09-18", text: "FIRST NOTE" },
+        { id: "b", unitKey: two[1].key, authorHumanId: "admin_2", authorName: "Lucas J", date: "2026-09-18", text: "SECOND NOTE" },
+      ],
+    };
+    const html = renderToStaticMarkup(<OxRenderer markdown={PAGE} annotations={annotations} />);
+    // Each note follows the words it is about, so the first note lands
+    // before the second sentence's own text begins.
+    const firstNote = html.indexOf("FIRST NOTE");
+    const secondSentence = html.indexOf("Nobody is logging");
+    const secondNote = html.indexOf("SECOND NOTE");
+    expect(firstNote).toBeGreaterThan(-1);
+    expect(firstNote).toBeLessThan(secondSentence);
+    expect(secondSentence).toBeLessThan(secondNote);
+  });
+
   it("puts marks in the margin beside their unit, stacked", () => {
     const annotations: OxAnnotations = {
       canMark: false,
