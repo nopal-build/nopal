@@ -314,12 +314,10 @@ export function pruneStaleMembership(
   for (const section of sections) {
     const lines = section.content.split("\n");
     const kept: string[] = [];
-    let members = 0;
     let keptMembers = 0;
     for (const line of lines) {
       const match = NODE_LINE_RE.exec(line.trim());
       if (match) {
-        members++;
         const id = `${match[1]}#${Number(match[2])}`;
         if (!allNodesById.has(id)) {
           dropped.push(id);
@@ -329,16 +327,21 @@ export function pruneStaleMembership(
       }
       kept.push(line);
     }
-    // A THREAD THAT LOST ITS LAST NODE IS NOT A THREAD. Until now only the
-    // node lines went and the heading stayed, with its gloss and its
-    // Blocking line, so the index still carried a thread nothing in the
-    // graph supports. graph-project-view then reads it as a Blocking
-    // thread with no citation and writes an honest line about it, which
-    // is how a refiled entry (`graphLogMoves.server.ts`) went on haunting
-    // the project it left. Only a thread that HAD members and now has
-    // none is dropped: a heading the model wrote for another reason is
-    // left alone.
-    if (members > 0 && keptMembers === 0) {
+    // A THREAD WITH NO NODES IS NOT A THREAD. The heading used to stay
+    // when its node lines went, with its gloss and its Blocking line, so
+    // the index carried a thread nothing in the graph supports;
+    // graph-project-view read that as a Blocking thread with no citation
+    // and wrote a line about it on the page, every run. That is how an
+    // entry refiled to another project (`graphLogMoves.server.ts`) went
+    // on haunting the project it left.
+    //
+    // Whether it lost its nodes in THIS sweep or in one weeks ago: the
+    // first version of this rule only dropped a thread that still had
+    // member lines to lose, which left every thread already emptied
+    // exactly where it was (production, 2026-09-22). Every `##` section
+    // of this file is a thread; the intro, which holds the front matter,
+    // is the one section that is not and the one that stays.
+    if (section.heading !== "" && keptMembers === 0) {
       droppedThreads.push(section.heading);
       continue;
     }
