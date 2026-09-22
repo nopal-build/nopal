@@ -101,6 +101,107 @@ fn format_directive_label(fence: &str, name: &str, attributes: &Value) -> String
     label
 }
 
+/// Real, per-directive-kind content for the two directives given a
+/// specific rendering so far (see this crate's README — "badge"/"ref"
+/// were the first two called out as still showing only the generic
+/// fallback). Returns `None` for any other directive name, so the
+/// caller falls back to the raw `::name{attrs}`/`:name{attrs}` syntax
+/// label — the same "unknown directive" convention the real product's
+/// own `OxRenderer` uses for anything without a registered renderer.
+/// Still a synthetic text-child list either way (see `oxmarkdown_schema`'s
+/// own doc comment on the `DomSpec` limitation this works around) — the
+/// `name`/`attributes` node attrs stay the real source of truth.
+fn directive_content(schema: &Schema, name: &str, attributes: &Value) -> Option<Vec<Node>> {
+    match name {
+        "ref" => Some(ref_directive_content(schema, attributes)),
+        "badge" => {
+            let label = attributes["label"]
+                .as_str()
+                .or_else(|| attributes["text"].as_str())
+                .unwrap_or(name);
+            Some(text_node(schema, label, vec![]).into_iter().collect())
+        }
+        _ => None,
+    }
+}
+
+/// `:ref{...}` — a read-only GraphLog citation (see the `graphlog` skill's
+/// own "The `:ref{...}` directive" section, mirrored exactly here). Two
+/// renderings, chosen purely by the static `verbose` attribute (decided
+/// by the WRITER, never by rendering context): `verbose="true"` is
+/// fully spelled-out plain text (`name · date · source`, `source` a real
+/// link to `location`); omitted/anything else is a single `*` glyph —
+/// the real product's own small popover trigger, though the popover
+/// itself is still deferred here (see this crate's README's
+/// "Deliberately NOT done" list — rendering the two shapes correctly is
+/// this step; making the glyph open a popover is a later one).
+fn ref_directive_content(schema: &Schema, attributes: &Value) -> Vec<Node> {
+    let is_verbose = attributes["verbose"].as_str() == Some("true");
+    if !is_verbose {
+        return text_node(schema, "*", vec![]).into_iter().collect();
+    }
+
+    let name = attributes["name"].as_str().unwrap_or("Unknown");
+    let datetime = attributes["datetime"].as_str().map(format_ref_datetime);
+    let location = attributes["location"].as_str().unwrap_or("");
+
+    let mut prefix = name.to_string();
+    if let Some(datetime) = datetime {
+        prefix.push_str(" · ");
+        prefix.push_str(&datetime);
+    }
+    prefix.push_str(" · ");
+
+    let mut nodes = Vec::new();
+    nodes.extend(text_node(schema, &prefix, vec![]));
+    let source_marks = if location.is_empty() {
+        vec![]
+    } else {
+        let mut href = Attrs::new();
+        href.insert("href".to_string(), AttrValue::from(location.to_string()));
+        with_mark(schema, &[], "link", href)
+    };
+    nodes.extend(text_node(schema, "source", source_marks));
+    nodes
+}
+
+const MONTH_ABBR: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// Formats a `:ref{datetime="..."}` ISO 8601 UTC timestamp (e.g.
+/// `"2026-08-17T14:30:00Z"`) as `"Aug 17, 2026, 2:30 PM"` — mirrors the
+/// real product's own `formatRefDatetime` (`OxRenderer.tsx`), pinned to
+/// UTC for the same reason that function is (never the viewer's own
+/// timezone — SSR/hydration disagree on that, a real hydration-mismatch
+/// bug there once). Falls back to the raw string on anything that
+/// doesn't parse the expected shape, rather than fabricating a bogus
+/// date.
+fn format_ref_datetime(raw: &str) -> String {
+    fn parse(raw: &str) -> Option<String> {
+        let (date, time) = raw.split_once('T')?;
+        let mut d = date.split('-');
+        let year: i32 = d.next()?.parse().ok()?;
+        let month: usize = d.next()?.parse().ok()?;
+        let day: u32 = d.next()?.parse().ok()?;
+        let time = time.strip_suffix('Z').unwrap_or(time);
+        let mut t = time.split(':');
+        let hour: u32 = t.next()?.parse().ok()?;
+        let minute: u32 = t.next()?.parse().ok()?;
+        let month_name = MONTH_ABBR.get(month.checked_sub(1)?)?;
+        let (hour12, period) = match hour {
+            0 => (12, "AM"),
+            1..=11 => (hour, "AM"),
+            12 => (12, "PM"),
+            _ => (hour.saturating_sub(12), "PM"),
+        };
+        Some(format!(
+            "{month_name} {day}, {year}, {hour12}:{minute:02} {period}"
+        ))
+    }
+    parse(raw).unwrap_or_else(|| raw.to_string())
+}
+
 fn convert_blocks(schema: &Schema, node: &Value) -> Vec<Node> {
     node["children"]
         .as_array()
@@ -168,13 +269,15 @@ fn convert_block(schema: &Schema, node: &Value) -> Option<Node> {
         "leafDirective" => {
             let name = node["name"].as_str().unwrap_or("");
             let attributes = &node["attributes"];
-            let label = format_directive_label("::", name, attributes);
-            let text = text_node(schema, &label, vec![])?;
+            let content = directive_content(schema, name, attributes).unwrap_or_else(|| {
+                let label = format_directive_label("::", name, attributes);
+                text_node(schema, &label, vec![]).into_iter().collect()
+            });
             schema
                 .node(
                     "leaf_directive",
                     directive_attrs(name, attributes),
-                    vec![text],
+                    content,
                     vec![],
                 )
                 .ok()
@@ -333,15 +436,15 @@ fn convert_inline(schema: &Schema, node: &Value, marks: &[Mark]) -> Vec<Node> {
         "textDirective" => {
             let name = node["name"].as_str().unwrap_or("");
             let attributes = &node["attributes"];
-            let label = format_directive_label(":", name, attributes);
-            let Some(text) = text_node(schema, &label, vec![]) else {
-                return Vec::new();
-            };
+            let content = directive_content(schema, name, attributes).unwrap_or_else(|| {
+                let label = format_directive_label(":", name, attributes);
+                text_node(schema, &label, vec![]).into_iter().collect()
+            });
             schema
                 .node(
                     "text_directive",
                     directive_attrs(name, attributes),
-                    vec![text],
+                    content,
                     marks.to_vec(),
                 )
                 .ok()
@@ -425,9 +528,25 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("hi")
         );
-        // Synthetic display label child, for visibility, not the source
-        // of truth for round-tripping.
-        assert_eq!(node.text_content(), "::badge{label=\"hi\"}");
+        // A directive with a specific rendering (see `directive_content`)
+        // shows its real label attribute alone now, not the raw
+        // `::name{attrs}` syntax — still just a synthetic display child,
+        // not the source of truth for round-tripping (that's the
+        // `name`/`attributes` attrs asserted above).
+        assert_eq!(node.text_content(), "hi");
+    }
+
+    #[test]
+    fn unknown_directive_falls_back_to_the_raw_syntax_label() {
+        let schema = test_schema();
+        let doc = markdown_to_doc(&schema, "::mystery{x=\"1\"}\n");
+        let mut found = Vec::new();
+        find_all(&doc, "leaf_directive", &mut found);
+        assert_eq!(found.len(), 1);
+        // No specific rendering for "mystery" — same generic fallback as
+        // before, so an as-yet-unhandled directive still shows something
+        // legible rather than going blank.
+        assert_eq!(found[0].text_content(), "::mystery{x=\"1\"}");
     }
 
     #[test]
@@ -465,6 +584,40 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("Jane")
         );
+        // Non-verbose (the default, no `verbose` attr at all here) is a
+        // single `*` glyph — the real product's own popover trigger (see
+        // the `graphlog` skill's "The `:ref{...}` directive" section).
+        assert_eq!(node.text_content(), "*");
+    }
+
+    #[test]
+    fn verbose_ref_directive_renders_fully_spelled_out_with_a_source_link() {
+        let schema = test_schema();
+        let doc = markdown_to_doc(
+            &schema,
+            "Decided on cedar :ref{name=\"Jane Doe\" datetime=\"2026-08-17T14:30:00Z\" location=\"/x\" verbose=\"true\"} today.\n",
+        );
+        let mut found = Vec::new();
+        find_all(&doc, "text_directive", &mut found);
+        assert_eq!(found.len(), 1);
+        let node = found[0];
+        assert_eq!(
+            node.text_content(),
+            "Jane Doe \u{b7} Aug 17, 2026, 2:30 PM \u{b7} source"
+        );
+        // "source" is a real link to `location`, not plain text.
+        let json = serde_json::to_string(&doc.to_json()).unwrap();
+        assert!(json.contains("\"href\":\"/x\""), "{json}");
+    }
+
+    #[test]
+    fn badge_directive_renders_its_label_attribute_alone() {
+        let schema = test_schema();
+        let doc = markdown_to_doc(&schema, "::badge{label=\"Ready\"}\n");
+        let mut found = Vec::new();
+        find_all(&doc, "leaf_directive", &mut found);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].text_content(), "Ready");
     }
 
     #[test]

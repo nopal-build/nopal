@@ -277,35 +277,48 @@ Two real, confirmed-by-reading-source constraints, not assumed:
 
 **A real, SEPARATE, and more serious bug was found live-testing this**
 (not by the click feature causing it — the click just exposed it): typing
-text immediately after `checkbox_on_input` inserts the checkbox is a
-REAL, correctly-placed new DOM text node, but it never syncs into the
+text immediately after `checkbox_on_input` inserts the checkbox used to
+be a REAL, correctly-placed new DOM text node that never synced into the
 model at all — confirmed by reading `taino-edit-dom`'s own
-`read_dom_changes` source directly, not guessed. It has exactly two
+`read_dom_changes` source directly, not guessed. It had exactly two
 detection paths: diff an EXISTING tracked text run, or detect text in a
 block with ZERO tracked children (`find_empty_block_text`). Neither
-covers "a brand-new text node appeared next to an existing non-text atom
-in an otherwise non-empty block" — the checkbox is the block's ONE
-tracked child, so newly-typed text stays a pure DOM/visual illusion,
-invisible to the model, until something else forces a re-render built on
-the stale (checkbox-only) doc — which then leaves the untracked text
-orphaned in the DOM, and any FURTHER typing lands wherever the
-(also-stale) tracked tree thinks the block ends, not visually where you
-just typed. Tracked as an expected-failing e2e test (`test.fail()`) in
-`../../e2e/tests/checkbox-interactivity.spec.ts` rather than fixed here
-— the fix isn't obvious (a candidate workaround, inserting a trailing
-empty text node alongside the checkbox so `read_dom_changes` has an
-existing run to diff against, has its own unverified risk: `doc_pos_to_
-dom`'s own zero-size-node handling means the caret might not even
-resolve INTO that empty text node the way it would need to) and this
-affects only the LIVE, input-rule-driven checkbox creation path —
-checkboxes loaded from existing markdown (the playground, initial doc
-load) are completely unaffected.
+covered "a brand-new text node appeared next to an existing non-text atom
+in an otherwise non-empty block" — the checkbox was the block's ONE
+tracked child, so newly-typed text stayed a pure DOM/visual illusion,
+invisible to the model, until something else forced a re-render built on
+the stale (checkbox-only) doc — which then left the untracked text
+orphaned in the DOM, and any FURTHER typing landed wherever the
+(also-stale) tracked tree thought the block ended, not visually where you
+just typed.
+
+**Fixed, not deferred** — decided against the two other options
+considered (an unverified empty-text-node workaround, or documenting it
+as a narrow-scope limitation and moving on) in favor of forking
+`taino-edit-dom` and patching the real root cause: see `../../vendor/
+taino-edit` (a git submodule, patched fork, branch
+`fix/checkbox-atom-text-sync`, pushed to `gwing33/taino-edit` for an
+eventual upstream PR) and the `[patch.crates-io]` entries in the
+workspace `Cargo.toml`. Two gaps fixed there, mirror images of each
+other: `find_empty_block_text`'s detection-side gap above, widened from
+"block has zero tracked children" to "block has no tracked *text*
+children" (empty OR atom-only), plus a second gap found FIXING the
+first live: `try_patch`'s DOM-cleanup step only stripped foreign/orphaned
+nodes when the OLD children list was fully empty, so an atom-only block
+never got that cleanup and grew a duplicate stray character on every
+keystroke after the first. Confirmed fixed live via
+`../../e2e/tests/checkbox-interactivity.spec.ts` (no longer
+`test.fail()`-marked) and a new regression test in the fork itself
+(`taino-edit-dom`'s own `tests/atom_text_sync.rs`).
 
 **Deliberately NOT done in this pass** (real follow-up work, not
 oversights):
 
-- **No interactivity yet for directives** — no attribute popover, no
-  per-directive-kind (`::file`, `::card`, ...) rich rendering.
+- **Directive attribute-editing popover still not built** — clicking a
+  directive (or the `:ref{...}` glyph) doesn't yet select it or open
+  anything; see the next section for what IS done (real per-kind
+  rendering for `"badge"`/`"ref"`, still via the generic fallback for
+  every other directive name).
 - **No markdown serialization back out yet** — `convert.rs` is still
   one-way (markdown → taino tree only). Round-tripping edits back to
   markdown text needs a taino-tree → mdast-JSON → markdown pass (the
@@ -316,6 +329,51 @@ oversights):
   externally-formatted content shaped like a directive/checkbox won't
   reconstruct one; out of scope until paste itself is a real feature
   for this crate.
+
+## Per-directive-kind rendering: `"badge"`/`"ref"` are the first two, real interactivity still deferred
+
+Every directive used to render as the same generic, raw-syntax
+`::name{attrs}`/`:name{attrs}` label regardless of its name — honest,
+but clearly not the final look for anything. `convert.rs`'s
+`directive_content` now dispatches on the directive's own `name` to
+build real, specific content for the two names called out first:
+
+- **`"ref"`** (a `:ref{...}` text directive) mirrors the `graphlog`
+  skill's own "The `:ref{...}` directive" section exactly: `verbose=
+  "true"` renders fully spelled out (`name · date · source`, `source` a
+  REAL link mark pointing at `location`, via the same `with_mark`
+  helper `[text](url)` links already use — not a second link
+  mechanism); omitted/anything else renders as a single `*` glyph. A
+  hand-rolled `format_ref_datetime` (no date crate needed — the
+  `datetime` attr's shape is fixed enough to parse by hand) mirrors the
+  real product's own `formatRefDatetime`, pinned to UTC for the same
+  reason that one is (SSR/hydration would otherwise disagree on the
+  viewer's own timezone).
+- **`"badge"`** (a `::badge{label="..."}` leaf directive, the generic
+  example directive both this crate's own `PLAYGROUND_SAMPLE`/
+  `DEFAULT_SAMPLE` and the real product's own `/maker/stamps/oxmarkdown`
+  demo use) renders its `label` (falling back to `text`, then the
+  directive name itself) alone, styled as a real pill
+  (`.ox-directive-badge`, `web/shared.css`) — not the website-specific
+  `::badge{text=... variant=...}` directive `fruits/app/oxmarkdown/
+  websiteDirectives.tsx` registers for website pages specifically; there
+  is no "website" domain concept in this crate yet.
+- Any OTHER directive name still falls through to the original generic
+  raw-syntax label — the same "unknown directive" convention the real
+  product's own `OxRenderer` uses, confirmed still working by
+  `convert.rs`'s own `unknown_directive_falls_back_to_the_raw_syntax_
+  label` test.
+
+`oxmarkdown_schema.rs`'s `directive_kind_class` adds the matching CSS
+hook (`ox-directive-badge`/`ox-directive-ref-verbose`/
+`ox-directive-ref-glyph`) onto the SAME three node types every directive
+already used (no new node type per name) — reading the `verbose` attr
+back out of the `attributes` JSON blob via a small `directive_attribute`
+helper. Confirmed live via `../../e2e/tests/playground.spec.ts` and a
+fresh SSR build of the real `DEFAULT_SAMPLE`, not just native tests.
+**Still explicitly NOT interactivity** — the `*` glyph doesn't open a
+popover yet (see "Deliberately NOT done" above); this is presentation
+only.
 
 ## What's real follow-up work (not started)
 

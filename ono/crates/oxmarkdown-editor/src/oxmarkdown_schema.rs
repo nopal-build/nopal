@@ -139,14 +139,43 @@ fn directive_name(n: &Node) -> String {
         .to_string()
 }
 
+/// Reads one key out of a directive's own `attributes` JSON-object attr
+/// (see this module's own doc comment for why the whole `{key="value"
+/// ...}` set is stored as one attr, not one per key).
+fn directive_attribute<'a>(n: &'a Node, key: &str) -> Option<&'a str> {
+    n.attrs().get("attributes")?.get(key)?.as_str()
+}
+
+/// Real per-directive-kind CSS hooks, layered on top of the shared
+/// `ox-directive*` classes every directive gets regardless — see
+/// `convert.rs`'s own `directive_content` for the matching per-kind
+/// synthetic-label content this styles. Falls through to nothing extra
+/// for any other directive name, same "unknown directive" fallback
+/// convention as that function.
+fn directive_kind_class(n: &Node) -> &'static str {
+    match directive_name(n).as_str() {
+        "badge" => " ox-directive-badge",
+        "ref" if directive_attribute(n, "verbose") == Some("true") => {
+            " ox-directive-ref ox-directive-ref-verbose"
+        }
+        "ref" => " ox-directive-ref ox-directive-ref-glyph",
+        _ => "",
+    }
+}
+
 /// The three generic directive kinds (`:name{}` text / `::name{}` leaf /
 /// `:::name{}` container) as real node types — see the `oxmarkdown`
 /// skill's own "Generic directives" section for the source syntax these
-/// mirror. No per-directive-kind (`::file`, `::card`, ...) rendering or
-/// interactivity yet, deliberately: this proves the STRUCTURE (real
-/// nodes, losslessly preserved attrs, container content genuinely
-/// editable) before any specific directive gets a rich UI, matching how
-/// `oxmarkdown-editor` proved taino-edit's own integration before this.
+/// mirror. Every directive still shares these three node TYPES
+/// (structure, losslessly preserved attrs, container content genuinely
+/// editable) regardless of its name — there's no per-name node type.
+/// `"badge"` and `"ref"` (see `convert.rs`'s own `directive_content`/
+/// `directive_kind_class` below) are the first two names given a real,
+/// specific RENDER (content + CSS), since a generic `::name{attrs}`
+/// raw-syntax label was never meant to be the final look for every
+/// directive, just the honest placeholder until each one earns its own.
+/// Still no ATTRIBUTE-EDITING interactivity for any directive yet
+/// (popover, click-to-select, ...) — that remains real follow-up work.
 pub struct Directives;
 
 impl Extension for Directives {
@@ -169,8 +198,12 @@ impl Extension for Directives {
                         atom: true,
                         attrs: directive_attrs(),
                         to_dom: Some(|n: &Node| {
+                            let class = format!(
+                                "ox-directive ox-directive-leaf{}",
+                                directive_kind_class(n)
+                            );
                             DomSpec::element("div")
-                                .attr("class", "ox-directive ox-directive-leaf")
+                                .attr("class", class)
                                 .attr("data-directive-name", directive_name(n))
                         }),
                         ..Default::default()
@@ -199,8 +232,12 @@ impl Extension for Directives {
                         atom: true,
                         attrs: directive_attrs(),
                         to_dom: Some(|n: &Node| {
+                            let class = format!(
+                                "ox-directive ox-directive-text{}",
+                                directive_kind_class(n)
+                            );
                             DomSpec::element("span")
-                                .attr("class", "ox-directive ox-directive-text")
+                                .attr("class", class)
                                 .attr("data-directive-name", directive_name(n))
                         }),
                         ..Default::default()

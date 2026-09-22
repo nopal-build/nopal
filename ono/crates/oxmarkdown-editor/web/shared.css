@@ -75,3 +75,49 @@ body {
 .ox-checkbox {
   margin-right: 6px;
 }
+
+/* Per-directive-kind rendering: "badge"/"ref" (see `convert.rs`'s
+   `directive_content` and `oxmarkdown_schema.rs`'s `directive_kind_class`)
+   are the first two directive NAMES given a real look, layered on top of
+   the generic `.ox-directive*` rules above via an extra class — override
+   order matters here, so these come after the generic rules in the file. */
+.ox-directive-badge {
+  display: inline-block;
+  border: none;
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ox-directive-badge::before {
+  content: none;
+}
+
+.ox-directive-ref {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.ox-directive-ref-glyph {
+  font-weight: 700;
+  font-size: 14px;
+  color: #9333ea;
+  padding: 0 2px;
+  cursor: help;
+}
+
+.ox-directive-ref-verbose {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.ox-directive-ref-verbose a {
+  color: inherit;
+  text-decoration: underline;
+}

@@ -15,6 +15,14 @@ test("the starting sample renders every OxMarkdown-specific construct", async ({
   await expect(rendered.locator("input.ox-checkbox")).toHaveCount(2);
   await expect(rendered.locator("mark")).toHaveCount(1);
   await expect(rendered.locator("s")).toHaveCount(1);
+  // The starting sample's `::badge{label="Leaf directive"}` and
+  // non-verbose `:ref{...}` get their real, specific renderings now
+  // (see `convert.rs`'s `directive_content`), not the generic raw-
+  // syntax fallback.
+  await expect(rendered.locator(".ox-directive-badge")).toHaveText(
+    "Leaf directive",
+  );
+  await expect(rendered.locator(".ox-directive-ref-glyph")).toHaveText("*");
 });
 
 test("editing the source live-updates the rendered output, isolated from the starting sample", async ({
@@ -24,9 +32,7 @@ test("editing the source live-updates the rendered output, isolated from the sta
   const rendered = page.locator(".playground-rendered");
 
   await textarea.fill('::badge{label="hello"}\n');
-  await expect(rendered.locator(".ox-directive-leaf")).toHaveText(
-    '::badge{label="hello"}',
-  );
+  await expect(rendered.locator(".ox-directive-leaf")).toHaveText("hello");
   // Nothing left over from the starting sample.
   await expect(rendered.locator(".ox-directive-container")).toHaveCount(0);
   await expect(rendered.locator("input.ox-checkbox")).toHaveCount(0);
@@ -55,4 +61,20 @@ test("the rendered column reflects the SAME conversion pipeline as SSR/the main 
   await expect(container.locator("p")).toHaveCount(2);
   await expect(container.locator("p").nth(0)).toHaveText("first");
   await expect(container.locator("p").nth(1)).toHaveText("second");
+});
+
+test("a verbose :ref{...} renders fully spelled out with a real source link", async ({
+  page,
+}) => {
+  const textarea = page.locator(".playground-source");
+  const rendered = page.locator(".playground-rendered");
+
+  await textarea.fill(
+    'Decided on cedar :ref{name="Jane Doe" datetime="2026-08-17T14:30:00Z" location="/x" verbose="true"} today.\n',
+  );
+  const ref = rendered.locator(".ox-directive-ref-verbose");
+  await expect(ref).toHaveText("Jane Doe \u00b7 Aug 17, 2026, 2:30 PM \u00b7 source");
+  const link = ref.locator("a");
+  await expect(link).toHaveText("source");
+  await expect(link).toHaveAttribute("href", "/x");
 });
