@@ -14,10 +14,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_FILING_SKILL,
   DEFAULT_GRAPH_SKILL,
   DEFAULT_GRAPH_STRUCTURE_SKILL,
   DEFAULT_PROJECT_VIEW_SKILL,
 } from "robustness-core/data/graphLogDefaults.server";
+import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import { MAX_LINKS_PER_NODE } from "robustness-core/data/syncGraph.server";
 import { MAX_NODES_PER_THREAD } from "robustness-core/data/graphStructure.server";
 import { EFFORT_QUOTE_LIMIT, LABEL_ITEM_LIMIT } from "robustness-core/data/effortReadings.server";
@@ -87,6 +89,15 @@ describe("agreement: a number a skill states is the number code enforces", () =>
       expect(says, `${pair.skill} states ${says}, ${pair.code} holds ${pair.holds}`).toBe(pair.holds);
     });
   }
+
+  it("FILING.md's list of kinds is the list code accepts, less the one code assigns itself", () => {
+    // `video` is filed by code from the content type and the skill says
+    // so in prose; every other kind is a line the model reads.
+    const costFields = ["vendor", "amount", "currency", "date", "readFrom"];
+    const stated = [...DEFAULT_FILING_SKILL.matchAll(/^- `([A-Za-z-]+)`:/gm)].map((m) => m[1]).filter((k) => !costFields.includes(k));
+    const accepted = FILING_KINDS.filter((k) => k !== "video");
+    expect(stated.sort()).toEqual([...accepted].sort());
+  });
 
   it("EFFORTS.md's size scale is the letters code accepts on a heading", () => {
     const template = DEFAULT_PROJECT_VIEW_SKILL.match(/### <Person> · <Effort> · <([A-Z|]+)>/)?.[1];
@@ -199,7 +210,7 @@ describe("the report: a watched file that changed, and nothing else", () => {
 
   it("reads each seeded skill out of the defaults file, under the name people know it by", () => {
     const skills = extractRuntimeSkills(source("graphLogDefaults.server.ts"));
-    expect([...skills.keys()].sort()).toEqual(["EFFORTS.md", "GRAPH.md", "GRAPH_STRUCTURE.md", "KNOWLEDGE.md", "VOICE.md"]);
+    expect([...skills.keys()].sort()).toEqual(["EFFORTS.md", "FILING.md", "GRAPH.md", "GRAPH_STRUCTURE.md", "KNOWLEDGE.md", "VOICE.md"]);
     expect(skills.get("GRAPH.md")?.startsWith("Your job is to read this project's synced content")).toBe(true);
   });
 });

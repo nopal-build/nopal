@@ -38,6 +38,7 @@ import type { OxInteractive } from "../oxmarkdown/interactive";
 import OxPopover from "../oxmarkdown/OxPopover";
 import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
+import { posterUrl, renditionUrl } from "../oxmarkdown/mediaUrls";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import {
   buildAnnotationCtx,
@@ -749,12 +750,23 @@ function renderGalleryGrid(
       style={{ "--ox-gallery-columns": columns } as CSSProperties}
     >
       {images.map((img, i) => {
+        // The cell loads a browser-sized rendition, never the original:
+        // a phone photo is several MB and a grid of them on cell data was
+        // a grid of empty boxes. The markdown URL is untouched (the pen
+        // keys a photo off it). No link to the original here, because a
+        // click on a photo is already the pen's; the files view links.
         const media = (
           <>
             {img.kind === "video" ? (
-              <video src={img.url} title={img.title ?? undefined} controls preload="metadata" />
+              <video
+                src={img.url}
+                poster={posterUrl(img.url)}
+                title={img.title ?? undefined}
+                controls
+                preload="metadata"
+              />
             ) : (
-              <img src={img.url} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
+              <img src={renditionUrl(img.url, "display")} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
             )}
             {img.alt && <figcaption>{img.alt}</figcaption>}
           </>
@@ -1054,7 +1066,7 @@ export function FileDirectiveLayout({
       {isImage ? (
         <img
           className="ox-file-thumb"
-          src={`/api/vault/view/${fileId}`}
+          src={renditionUrl(`/api/vault/view/${fileId}`, "thumb")}
           alt={name}
           title={name}
           draggable={false}

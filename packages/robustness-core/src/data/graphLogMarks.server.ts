@@ -19,6 +19,7 @@
  * onto the mark so it keeps its record in words after the page moves on.
  */
 
+import type { FilingKind } from "./syncFiling.server";
 import { RecordId } from "surrealdb";
 import { computeMarkUnitsFromMarkdown, type MarkUnit, type MarkUnitRef } from "oxmarkdown-core";
 import { pageHash } from "./pageBody.server";
@@ -46,6 +47,29 @@ export const MARK_TEXT_LIMIT = 2000;
  * stored page. Never taken from the client. */
 export type MarkUnitSnapshot = Pick<MarkUnit, "key" | "kind" | "section" | "effort" | "text" | "refs" | "attachmentId">;
 
+/**
+ * A person's act on a file, recorded as a mark whose sentence code wrote
+ * for them ("Filed as receipt.", "Confirmed correct: Home Depot, 412.18
+ * USD, 2026-09-09."). The person chose it with one tap, so it is their
+ * entry (Austin, 2026-09-22): it goes into `Syncs/Marks/` and the graph
+ * like any mark. State is derived from the latest act, never stored on
+ * the file.
+ */
+export type FileAct =
+  | { kind: "file-as"; fileKind: FilingKind }
+  | {
+      kind: "confirm-cost";
+      verdict: "correct" | "accepted";
+      /** `filingValuesHash` of the reading confirmed. A later re-read that
+       * changes any value no longer matches, and the cost is unconfirmed
+       * again. */
+      of: string;
+      vendor: string;
+      amount: string;
+      currency: string;
+      date: string | null;
+    };
+
 export type GraphLogMark = Data & {
   project_folder_id: string;
   author_human_id: string;
@@ -54,9 +78,14 @@ export type GraphLogMark = Data & {
   created_at: string;
   /** Verbatim. Never edited. */
   text: string;
-  /** Which version of the page it was written on (`pageHash`). */
-  page_hash: string;
+  /** Which version of the page it was written on (`pageHash`). Null for
+   * a mark on a file, which sits on no page: those never reach the page
+   * run or the margin (see `pageOnly` below). */
+  page_hash: string | null;
   unit: MarkUnitSnapshot;
+  /** The tap this mark records, when it records one. Null for a person's
+   * own words. Absent on rows written before 2026-09-22. */
+  act?: FileAct | null;
   /** What the page run decided the mark was doing. Recorded to count
    * later, never shown. Null until a run reads it. */
   kind: MarkKind | null;
@@ -135,13 +164,23 @@ function newId(): string {
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
 }
 
+/** The writer's own day when it is plausible (an evening mark in the
+ * Pacific is already tomorrow in UTC), otherwise UTC today. */
+export function markDate(requested: string | undefined): string {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!requested || !/^\d{4}-\d{2}-\d{2}$/.test(requested)) return today;
+  const diff = Math.abs(Date.parse(`${requested}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`));
+  return diff <= 86_400_000 ? requested : today;
+}
+
 export async function createMark(input: {
   projectFolderId: string;
   authorHumanId: string;
   date: string;
   text: string;
-  pageHash: string;
+  pageHash: string | null;
   unit: MarkUnitSnapshot;
+  act?: FileAct | null;
 }): Promise<GraphLogMark | null> {
   await ensureTable();
   const id = newId();
@@ -153,6 +192,7 @@ export async function createMark(input: {
     text: input.text,
     page_hash: input.pageHash,
     unit: input.unit,
+    act: input.act ?? null,
     kind: null,
     read_at: null,
     read_date: null,
@@ -175,9 +215,30 @@ export function listMarksForProject(projectFolderId: string): Promise<GraphLogMa
   return selectMarks("project_folder_id = $projectFolderId", { projectFolderId });
 }
 
-/** Marks no clean page run has read yet, oldest first. */
+/** A mark written on the page, as opposed to on a file. The page run and
+ * the margin read these; a file mark would otherwise be "unread" forever
+ * (nothing on the page answers it), make every no-op run reconcile the
+ * README, and re-anchor to the top of the Efforts page as "waiting". */
+const PAGE_ONLY = "page_hash != NONE AND page_hash != NULL";
+
+/** Marks no clean page run has read yet, oldest first. Page marks only. */
 export function listUnreadMarks(projectFolderId: string): Promise<GraphLogMark[]> {
-  return selectMarks("project_folder_id = $projectFolderId AND (read_at = NONE OR read_at = NULL)", { projectFolderId });
+  return selectMarks(`project_folder_id = $projectFolderId AND ${PAGE_ONLY} AND (read_at = NONE OR read_at = NULL)`, {
+    projectFolderId,
+  });
+}
+
+/** Every mark on a file of this project, oldest first: a person's acts
+ * (`act`) and their own words on a file. The files view derives a file's
+ * kind and a cost's status from the latest act; nothing is ever set on
+ * the file. */
+export function listFileMarks(projectFolderId: string): Promise<GraphLogMark[]> {
+  return selectMarks("project_folder_id = $projectFolderId AND unit.kind = 'file'", { projectFolderId });
+}
+
+/** Whether a mark is a page mark (a file mark has no page hash). */
+export function isPageMark(mark: Pick<GraphLogMark, "page_hash">): boolean {
+  return typeof mark.page_hash === "string";
 }
 
 export async function getMark(id: string): Promise<GraphLogMark | null> {
@@ -381,6 +442,12 @@ export async function rewriteMark(
   const mark = await getMark(id);
   if (!mark) return { ok: false, reason: "that mark is gone" };
   if (mark.author_human_id !== authorHumanId) return { ok: false, reason: "a mark belongs to whoever wrote it" };
+  // A file mark is never offered to the page run, so nothing ever stamps
+  // it read, and "until a run reads it" would mean forever: the next sync
+  // would rewrite the marks file and re-extract the day. A mark on a file
+  // stands as written; the answer to it is another mark.
+  if (mark.act) return { ok: false, reason: "a tap is answered by another tap, not rewritten" };
+  if (!isPageMark(mark)) return { ok: false, reason: "a mark on a file stands as written; add another instead" };
   if (mark.read_at) return { ok: false, reason: "the page has read this one, so it stays as it was written" };
   await merge(TABLE, id, { text });
   return { ok: true };
@@ -393,6 +460,8 @@ export async function eraseMark(
   const mark = await getMark(id);
   if (!mark) return { ok: true };
   if (mark.author_human_id !== authorHumanId) return { ok: false, reason: "a mark belongs to whoever wrote it" };
+  if (mark.act) return { ok: false, reason: "a tap is answered by another tap, not taken back" };
+  if (!isPageMark(mark)) return { ok: false, reason: "a mark on a file stands; add another instead" };
   if (mark.read_at) return { ok: false, reason: "the page has read this one, so it stays" };
   // A mark that refiled an entry is the only handle anyone has on that
   // move: delete it and the words stay moved with nothing left to undo
@@ -433,6 +502,11 @@ export function describeRef(ref: MarkUnitRef): string {
 export const MARKS_SYNC_FOLDER_NAME = "Marks";
 
 const MARK_CONTEXT_PREFIX = "On the Efforts page, at";
+/** A file mark's context line names the file, not a passage. Both
+ * prefixes are the marker's context, never their words (`parseMarkTexts`
+ * accepts either, or a file mark's sentence would never be highlighted
+ * and `marksNotCaptured` could not guarantee it a node). */
+const FILE_MARK_CONTEXT_PREFIX = "On the file";
 const MARK_SEPARATOR = "\n\n---\n\n";
 const MOVE_TRACE_PREFIX = "Moved off this project:";
 
@@ -441,14 +515,29 @@ const UNIT_KIND_WORDS: Record<MarkUnitSnapshot["kind"], string> = {
   bullet: "the line",
   sentence: "the sentence",
   photo: "the photo",
+  file: "the file",
 };
 
 function clip(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
 }
 
+/** The sentence a tap writes in the person's name. Code-written, chosen
+ * by the person (Austin, 2026-09-22): "Filed as receipt." or "Confirmed
+ * correct: Home Depot, 412.18 USD, 2026-09-09." */
+export function fileActText(act: FileAct): string {
+  if (act.kind === "file-as") return `Filed as ${act.fileKind}.`;
+  const verdict = act.verdict === "correct" ? "Confirmed correct" : "Accepted";
+  const values = [act.vendor, `${act.amount} ${act.currency}`, act.date ?? "no date"].join(", ");
+  return `${verdict}: ${values}.`;
+}
+
 /** The code-written line that says where a mark was written. */
 export function markContextLine(unit: MarkUnitSnapshot): string {
+  if (unit.kind === "file") {
+    const cites = unit.refs.length > 0 ? ` (attached to ${unit.refs.map(describeRef).join(", ")})` : "";
+    return `${FILE_MARK_CONTEXT_PREFIX} "${clip(unit.text, 200)}"${cites}:`;
+  }
   const where = [unit.section || "the opening", unit.effort].filter(Boolean).join(" · ");
   const quoted = unit.text ? ` "${clip(unit.text, 200)}"` : "";
   const cites = unit.refs.length > 0 ? `; it cites ${unit.refs.map(describeRef).join(", ")}` : "";
@@ -516,7 +605,7 @@ export function parseMarkTexts(content: string): string[] {
   return content
     .split(MARK_SEPARATOR)
     .map((chunk) => chunk.trim())
-    .filter((chunk) => chunk.startsWith(MARK_CONTEXT_PREFIX))
+    .filter((chunk) => chunk.startsWith(MARK_CONTEXT_PREFIX) || chunk.startsWith(FILE_MARK_CONTEXT_PREFIX))
     .map((chunk) => {
       const blank = chunk.indexOf("\n\n");
       return blank === -1 ? "" : chunk.slice(blank + 2).trim();

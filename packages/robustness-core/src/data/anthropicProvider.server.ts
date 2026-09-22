@@ -410,7 +410,8 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
   /** Several images, one description. Each image is preceded by its label
    * as a text block, so the model can refer to "the frame at 0:17". */
   async describeImages(input: ImagesDescriptionInput): Promise<PhotoDescriptionResult> {
-    if (input.images.length === 0) throw new Error("describeImages needs at least one image");
+    const documents = input.documents ?? [];
+    if (input.images.length === 0 && documents.length === 0) throw new Error("describeImages needs at least one image or document");
     for (const image of input.images) {
       if (!ANTHROPIC_IMAGE_MEDIA_TYPES.has(image.mediaType)) {
         throw new Error(`Unsupported image media type for description: ${image.mediaType}`);
@@ -428,8 +429,16 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
         },
       });
     }
+    for (const document of documents) {
+      if (document.label) content.push({ type: "text", text: document.label });
+      content.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: document.base64 },
+      });
+    }
     content.push({ type: "text", text: input.context || "(no additional context provided)" });
 
+    const baseMaxTokens = input.maxTokens ?? PHOTO_DESCRIPTION_MAX_TOKENS;
     // 512 tokens is a paragraph, and on this model family thinking is on
     // by default and counts against it -- the same latent cut as the
     // tool-calling path, which happened not to bite here only because the
@@ -440,7 +449,7 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     const disable = canDisableThinking(this.model);
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: disable || this.model.startsWith("claude-haiku") ? PHOTO_DESCRIPTION_MAX_TOKENS : PHOTO_DESCRIPTION_MAX_TOKENS * 8,
+      max_tokens: disable || this.model.startsWith("claude-haiku") ? baseMaxTokens : baseMaxTokens * 8,
       system: input.framing,
       messages: [{ role: "user", content }],
       ...(disable ? { thinking: { type: "disabled" } as Anthropic.MessageCreateParams["thinking"] } : {}),

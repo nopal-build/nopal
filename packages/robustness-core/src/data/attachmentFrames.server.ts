@@ -98,13 +98,21 @@ export function parseFfmpegDuration(stderr: string): number | null {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
 }
 
+/** Whether this process can run ffmpeg at all. The worker image has it;
+ * an app process may not, and a caller that would download a whole
+ * video first should ask this before it does. */
+export function hasFfmpeg(): boolean {
+  return !!ffmpegPath;
+}
+
 function ffmpeg(): string {
   if (!ffmpegPath) throw new Error("ffmpeg binary is not available on this platform (ffmpeg-static returned null)");
   return ffmpegPath;
 }
 
 /**
- * `VIDEO_FRAME_COUNT` stills from a video, with the clip's duration.
+ * `frameCount` stills (default `VIDEO_FRAME_COUNT`) from a video, with the
+ * clip's duration. One frame is the midpoint, which is what a poster wants.
  * Writes the bytes to a temp file (ffmpeg wants a seekable input for
  * `-ss`), extracts one frame per timestamp, and cleans up whatever
  * happens.
@@ -112,6 +120,7 @@ function ffmpeg(): string {
 export async function videoToStills(
   bytes: Buffer,
   extension: string,
+  frameCount = VIDEO_FRAME_COUNT,
 ): Promise<{ stills: Still[]; durationSeconds: number }> {
   const dir = await mkdtemp(join(tmpdir(), "graphlog-video-"));
   try {
@@ -126,7 +135,7 @@ export async function videoToStills(
     if (!durationSeconds) throw new Error("could not read the video's duration");
 
     const stills: Still[] = [];
-    for (const t of frameTimestamps(durationSeconds, VIDEO_FRAME_COUNT)) {
+    for (const t of frameTimestamps(durationSeconds, frameCount)) {
       const out = join(dir, `frame-${t}.jpg`);
       await run(ffmpeg(), [
         "-hide_banner",

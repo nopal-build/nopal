@@ -291,13 +291,25 @@ export type PhotoDescriptionResult = {
  * clip"), so the description can say what changes between them. */
 export type LabeledImage = { imageBase64: string; mediaType: string; label: string };
 
+/** A document the model reads whole: a PDF, as base64. Sent as a
+ * `document` content block, which the API takes with no beta flag up to
+ * 32 MB per request. */
+export type LabeledDocument = { base64: string; mediaType: "application/pdf"; label: string };
+
 export type ImagesDescriptionInput = {
   images: LabeledImage[];
+  /** Documents read alongside (or instead of) the images. A call needs
+   * at least one image or one document. */
+  documents?: LabeledDocument[];
   /** Same role as `PhotoDescriptionInput.context`. */
   context: string;
   /** Replaces the single-photo system prompt: what these images are as a
    * set and how to describe them. Assembled by the caller. */
   framing: string;
+  /** Output ceiling for this call, when a paragraph is not the shape of
+   * the answer (a PDF's bullet list, a filing's YAML block). The provider
+   * keeps its own default otherwise. */
+  maxTokens?: number;
 };
 
 export interface PhotoDescriber {

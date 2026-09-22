@@ -55,7 +55,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   try {
-    const url = await getPresignedViewUrl(file.s3_key);
+    // The row's own type rides on the signed URL (`ResponseContentType`),
+    // so a video stored as octet-stream by an older upload path still
+    // plays. See `getPresignedViewUrl`.
+    const url = await getPresignedViewUrl(file.s3_key, 900, file.content_type);
     return redirect(url);
   } catch (err) {
     console.error("Presign view error:", err);

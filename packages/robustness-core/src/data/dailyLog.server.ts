@@ -341,6 +341,27 @@ export async function getDailyLogCards(
 }
 
 /**
+ * Every Card written for `projectFolderId`, by anyone, with its content:
+ * one query, the record itself. The files view and the file-marks route
+ * read attachments out of these (`extractFileAttachments`), because a
+ * Card's `::file{...}` directive is the only place a file is tied to the
+ * entry it came with. Sorted by date then writer, same as
+ * `listCardEntriesForProject`.
+ */
+export async function listCardsForProject(
+  projectFolderId: string,
+): Promise<{ fileId: string; humanId: string; date: string; content: string }[]> {
+  const result = await query<[FileRef[]]>(
+    `SELECT * FROM file_refs WHERE source = 'daily_log_card' AND project_folder_id = $projectFolderId ORDER BY date ASC, human_id ASC`,
+    { projectFolderId },
+  );
+  return (result?.[0] ?? [])
+    .map((r) => formatRecord(r as unknown as FileRef))
+    .filter((f) => !!f.date && !!f.human_id)
+    .map((f) => ({ fileId: f._id, humanId: f.human_id, date: f.date!, content: f.content ?? "" }));
+}
+
+/**
  * Every (humanId, date) pair that already has a Card for `projectFolderId`
  * — across EVERY human who's ever written one for this project, not just
  * a single acting human. `dailyLogSync.server.ts` walks this so
