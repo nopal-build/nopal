@@ -448,6 +448,12 @@ function PreviewBox({
         border: `1px solid ${semanticColors.surfaceBorder}`,
         borderRadius: 6,
         padding: entry.fullBleed ? 0 : 16,
+        // The `/v2` site's own resting background (`website.css`) --
+        // without this, the box just showed the SCRATCH PAD's own card
+        // background through (transparent here), which never changed
+        // with `previewScheme` at all even though the token driving it
+        // already did (nothing was actually painting with it).
+        background: "var(--website-bg-page)",
         // `visible`, NOT `hidden` -- a `::line{points="..."}` whose
         // cumulative deltas add up to more than one `viewBoxHeight` (or
         // `width` for x) will render TALLER/WIDER than this box, by
