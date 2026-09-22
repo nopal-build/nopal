@@ -1,6 +1,12 @@
 [workspace]
 members = ["crates/oxmarkdown-rs", "crates/oxmarkdown-leptos", "crates/oxmarkdown-editor"]
 resolver = "2"
+# `vendor/taino-edit` is its own, separate Cargo workspace (a git
+# submodule tracking a patched fork — see the `[patch.crates-io]` note
+# below). It must be excluded here so its crates inherit fields from
+# *its own* `[workspace.package]`, not this one's (which doesn't define
+# those keys at all).
+exclude = ["vendor/taino-edit"]
 
 # `ono` is a deliberately separate Cargo workspace from `crates/Cargo.toml`
 # (the existing CLI/API/GUI product) — see `ono/README.md`. Nothing in
@@ -8,4 +14,18 @@ resolver = "2"
 # a piece proves valuable enough to promote into a real shared crate
 # later — that's a decision to make explicitly, not something to fall
 # into by accident.
+# Patched fork of `taino-edit-dom` (see `vendor/taino-edit/`, a git
+# submodule): fixes `read_dom_changes` never detecting text typed next to
+# an inline atom (e.g. our `checkbox` node) in an otherwise-empty block.
+# Tracked upstream at https://github.com/juanma-dev/taino-edit on branch
+# `fix/checkbox-atom-text-sync`, intended as a future PR. Remove this
+# patch once/if upstream merges an equivalent fix and we bump versions.
+[patch.crates-io]
+taino-edit-dom = { path = "vendor/taino-edit/crates/taino-edit-dom" }
+# `taino-edit-dom` depends on `taino-edit-core` via its own workspace's
+# `path` dependency (resolving inside the submodule), so `taino-edit-core`
+# must be patched too, or the build ends up with two incompatible copies
+# of the same types (registry vs. vendored). This copy is unmodified.
+taino-edit-core = { path = "vendor/taino-edit/crates/taino-edit-core" }
+
 [workspace.lints.clippy]

@@ -27,19 +27,19 @@ test("clicking a checked checkbox unchecks it", async ({ page }) => {
 test("clicking the checkbox does not move the text caret or disturb the label", async ({
   page,
 }) => {
-  // KNOWN, ROOT-CAUSED, real `taino-edit-dom` bug, not yet fixed: typing
-  // "buy milk" right after `checkbox_on_input` inserts the checkbox atom
-  // is a REAL, correctly-placed new DOM text node, but `read_dom_changes`
-  // (confirmed by reading its source) has exactly two detection paths --
-  // "an EXISTING tracked text run changed" and "text appeared in a
-  // block with ZERO tracked children" -- and neither covers "a NEW text
-  // node appeared next to an existing non-text atom in an otherwise
-  // non-empty block". So the typed text is a pure DOM/visual illusion,
-  // invisible to the model, until something else (here: our own click)
-  // forces a re-render built on the stale, checkbox-only model, leaving
-  // the untracked text orphaned in the DOM and any FURTHER typing to
-  // land wherever the (also-stale) tracked tree thinks the block ends.
-  test.fail();
+  // Regression test for a real, root-caused `taino-edit-dom` bug (now
+  // patched -- see `vendor/taino-edit`, `[patch.crates-io]` in the
+  // workspace `Cargo.toml`, and `find_empty_block_text` in
+  // `vendor/taino-edit/crates/taino-edit-dom/src/view.rs`): typing "buy
+  // milk" right after `checkbox_on_input` inserts the checkbox atom used
+  // to be a REAL, correctly-placed new DOM text node that `read_dom_changes`
+  // never detected -- it only diffed an EXISTING tracked text run, or
+  // text appearing in a block with ZERO tracked children, and neither
+  // covered "a NEW text node appeared next to an existing non-text atom
+  // in an otherwise non-empty block". The typed text was a pure
+  // DOM/visual illusion, invisible to the model, until something else
+  // (here: our own click) forced a re-render built on the stale,
+  // checkbox-only model, orphaning the untracked text in the DOM.
   const checkbox = page.locator(".taino-editor input[type=checkbox]");
   await checkbox.click();
   await expect(page.locator(".taino-editor li p")).toHaveText("buy milk");

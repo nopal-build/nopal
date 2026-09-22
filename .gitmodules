@@ -1,0 +1,8 @@
+[submodule "ono/vendor/taino-edit"]
+	path = ono/vendor/taino-edit
+	# Pinned to a commit on our fork's fix/checkbox-atom-text-sync branch
+	# (not upstream juanma-dev/taino-edit) so `git submodule update --init`
+	# can actually resolve it. Upstream tracked via the `upstream` remote
+	# inside the submodule itself; switch this back to upstream's url once
+	# (if) our fix is merged there and we bump to a released version.
+	url = https://github.com/gwing33/taino-edit
