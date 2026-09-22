@@ -41,6 +41,8 @@
     "./data/llmPricing": "./src/data/llmPricing.ts",
     "./data/llmProvider": "./src/data/llmProvider.ts",
     "./data/makerStats.server": "./src/data/makerStats.server.ts",
+    "./data/mediaKeys": "./src/data/mediaKeys.ts",
+    "./data/mediaQueue.server": "./src/data/mediaQueue.server.ts",
     "./data/mediaRenditions.server": "./src/data/mediaRenditions.server.ts",
     "./data/mentionHistory.server": "./src/data/mentionHistory.server.ts",
     "./data/mentionSearch.server": "./src/data/mentionSearch.server.ts",
