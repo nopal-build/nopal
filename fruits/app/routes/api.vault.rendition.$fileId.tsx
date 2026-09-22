@@ -3,26 +3,23 @@ import { redirect } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFileRefById, canViewFileRef } from "robustness-core/data/vault.server";
 import { getPresignedViewUrl, objectExists } from "robustness-core/data/file.server";
-import { isVideoContentType } from "robustness-core/data/attachmentFrames.server";
-import {
-  ensureImageRendition,
-  isImageRenditionSize,
-  renditionKey,
-} from "robustness-core/data/mediaRenditions.server";
+import { isImageRenditionSize, renditionContentType, renditionKey } from "robustness-core/data/mediaKeys";
 
 /**
  * GET /api/vault/rendition/:fileId?size=thumb|display|poster
  *
- * A browser-sized version of a vault image, or a video's poster frame.
- * Same access check as `/api/vault/view/:fileId`; that route still serves
- * the original, this one exists so a gallery of phone photos is a few
- * hundred KB rather than a hundred MB. See `mediaRenditions.server.ts`.
+ * A browser-sized version of a vault image, or a video's poster frame,
+ * IF THE WORKER HAS MADE IT; otherwise the original, exactly what
+ * `/api/vault/view/:fileId` serves. Same access check as that route.
  *
- * Images stream back as WebP with a year-long private cache: a file id's
- * bytes never change (a new upload is a new row and a new key), so the
- * URL is stable for as long as the row exists. A video's poster is a
- * stored JPEG the worker wrote; it redirects like `view` does, and 404s
- * until the next pipeline run has made one.
+ * This route never decodes or resizes anything. The web server never
+ * processes media (Austin, 2026-09-22): renditions are made in the
+ * worker (`mediaRenditions.server.ts`, fed by `mediaQueue.server.ts` at
+ * upload and by sync-knowledge's backfill) and stored in S3, and this
+ * route only checks for one and redirects. The gap between an upload
+ * and its rendition is seconds; during it a HEIC photo shows as the
+ * original, which Safari renders and Chrome does not, the same as
+ * before renditions existed.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -47,36 +44,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const size = new URL(request.url).searchParams.get("size");
-
-  if (isVideoContentType(file.content_type)) {
-    if (size !== "poster") {
-      return Response.json({ error: "A video has only a poster rendition" }, { status: 400 });
-    }
-    const key = renditionKey(file.s3_key, "poster");
-    if (!(await objectExists(key))) {
-      return Response.json({ error: "No poster yet" }, { status: 404 });
-    }
-    return redirect(await getPresignedViewUrl(key, 900, "image/jpeg"));
+  const isVideo = file.content_type.startsWith("video/");
+  const wanted = isVideo ? (size === "poster" ? "poster" : null) : isImageRenditionSize(size) ? size : null;
+  if (!wanted) {
+    return Response.json({ error: isVideo ? "A video has only a poster rendition" : "size must be thumb or display" }, { status: 400 });
   }
 
-  if (!file.content_type.startsWith("image/")) {
-    return Response.json({ error: "Not an image or video" }, { status: 400 });
+  const key = renditionKey(file.s3_key, wanted);
+  if (await objectExists(key)) {
+    return redirect(await getPresignedViewUrl(key, 900, renditionContentType(wanted)));
   }
-  if (!isImageRenditionSize(size)) {
-    return Response.json({ error: "size must be thumb or display" }, { status: 400 });
+  if (isVideo) {
+    // No poster yet: nothing to show before play.
+    return Response.json({ error: "No poster yet" }, { status: 404 });
   }
-
-  try {
-    const rendition = await ensureImageRendition({ s3_key: file.s3_key, content_type: file.content_type }, size);
-    return new Response(new Uint8Array(rendition.bytes), {
-      headers: {
-        "Content-Type": rendition.contentType,
-        "Content-Length": String(rendition.bytes.length),
-        "Cache-Control": "private, max-age=31536000, immutable",
-      },
-    });
-  } catch (err) {
-    console.error("Rendition error:", err);
-    return Response.json({ error: "Failed to make the rendition" }, { status: 500 });
-  }
+  return redirect(await getPresignedViewUrl(file.s3_key, 900, file.content_type));
 }

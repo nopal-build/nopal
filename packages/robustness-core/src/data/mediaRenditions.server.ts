@@ -1,91 +1,140 @@
 /**
  * Derived images for the browser: a thumb and a display-size WebP for any
- * image, a poster JPEG for a video.
+ * image, a poster JPEG for a video. Made in the WORKER, stored in S3
+ * under `renditions/<hash of the source's s3_key>/` (`mediaKeys.ts`),
+ * served by the app with a redirect and never made there.
  *
  * Why this exists. The README gallery served each 4 MB original into a
  * three-column grid, which on a phone is a grid of empty boxes, and a
- * `<video>` had no poster. Link expiry was never the cause: `/api/vault/
- * view/:id` signs a fresh URL on every request and nothing stores one.
+ * `<video>` had no poster.
  *
- * Made once, then stored under `renditions/<hash of the source's s3_key>/`.
- * Keyed by the STORAGE key rather than the file id because an original
- * and every synced copy of it share one `s3_key` (`copyFileIntoFolder`
- * copies the pointer, not the bytes), so one rendition serves the daily
- * log, the project's Syncs copy, and whatever a refile makes next.
- *
- * Images are made at request time in the app: `sharp` and `heic-convert`
- * are both available there and a 4 MB JPEG resizes in well under a second,
- * once. A poster needs ffmpeg, which only the worker image is guaranteed
- * to have, so sync-knowledge writes it (it already has the frames) and the
- * app only names the key and serves what is there.
+ * Why the worker. The first version made renditions on the request path
+ * in the app. A HEIC is decoded in WebAssembly and each decode holds
+ * about 130 MB the module never gives back; five phone photos requested
+ * together took the 1 GB app process to 900 MB and Fly answered 502
+ * while it restarted (2026-09-22). Austin's rule since: the web server
+ * never processes media. The worker already decodes every attachment to
+ * describe it, and has ffmpeg, so it does this too: once at upload
+ * (`mediaQueue.server.ts`), and as a backfill from sync-knowledge's own
+ * decode. Decodes are bounded here because a burst of uploads can do to
+ * the worker what a page did to the app.
  */
 
-import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { heicToJpeg, isHeicContentType } from "./attachmentFrames.server";
+import { heicToJpeg, hasFfmpeg, isHeicContentType, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
 import { downloadFileBytes, objectExists, uploadPrivateFileToS3 } from "./file.server";
+import { renditionKey, RENDITION_SIZES, type ImageRenditionSize } from "./mediaKeys";
+import { getFileRefById } from "./vault.server";
+import { isImageContentType } from "./sorter.server";
 
-/** Longest edge, in pixels. `thumb` is a list row; `display` is a gallery
- * cell on any screen we ship to, and a 1600px WebP of a site photo is a
- * few hundred KB where the original is several MB. */
-export const RENDITION_SIZES = { thumb: 480, display: 1600 } as const;
-export type ImageRenditionSize = keyof typeof RENDITION_SIZES;
-export type RenditionSize = ImageRenditionSize | "poster";
-
-export function isImageRenditionSize(value: string | null): value is ImageRenditionSize {
-  return value === "thumb" || value === "display";
-}
-
-/** Pure. Where a rendition lives, from the source's storage key. */
-export function renditionKey(s3Key: string, size: RenditionSize): string {
-  const hash = createHash("sha256").update(s3Key).digest("hex").slice(0, 32);
-  return `renditions/${hash}/${size}.${size === "poster" ? "jpg" : "webp"}`;
-}
-
-export type Rendition = { bytes: Buffer; contentType: string };
+export { renditionKey, RENDITION_SIZES, isImageRenditionSize, type ImageRenditionSize, type RenditionSize } from "./mediaKeys";
 
 /**
- * The stored rendition if it exists, else made from the original, stored,
- * and returned. Two concurrent first requests both make it and both store
- * the same bytes under the same key; that is idempotent and cheaper than
- * a lock.
- *
- * A HEIC/HEIF original is decoded first (`sharp`'s libvips cannot). An
- * animated GIF/WebP is passed through at full size rather than flattened
- * to one frame, the same rule `getImageThumbnail` follows, and is never
- * stored since it is not a rendition of anything.
+ * A gate that lets `limit` callers through at a time and queues the rest
+ * in order. Per process, which is the unit that runs out of memory.
  */
-export async function ensureImageRendition(
-  file: { s3_key: string; content_type: string },
-  size: ImageRenditionSize,
-): Promise<Rendition> {
-  const key = renditionKey(file.s3_key, size);
-  if (await objectExists(key)) {
-    return { bytes: await downloadFileBytes(key), contentType: "image/webp" };
+export function createLimiter(limit: number): <T>(work: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  const release = () => {
+    active -= 1;
+    waiting.shift()?.();
+  };
+  return async <T,>(work: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    active += 1;
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  };
+}
+
+/** One HEIC decode at a time: the WebAssembly decoder's memory is the
+ * whole reason this module is bounded. */
+const heicLimiter = createLimiter(1);
+/** A few resizes at a time: libvips is fast and frugal, but a decoded
+ * 12-megapixel JPEG is still tens of MB while it is being resized. */
+const resizeLimiter = createLimiter(3);
+
+/** One size from decodable bytes, or null for an animated image (left as
+ * the original rather than flattened to one frame). */
+async function renderRendition(decodable: Buffer, size: ImageRenditionSize): Promise<Buffer | null> {
+  return resizeLimiter(async () => {
+    const image = sharp(decodable);
+    const metadata = await image.metadata();
+    if ((metadata.pages ?? 1) > 1) return null;
+    const edge = RENDITION_SIZES[size];
+    return image
+      .rotate()
+      .resize({ width: edge, height: edge, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer();
+  });
+}
+
+/**
+ * Both image renditions from bytes a caller has already decoded, written
+ * only where missing. sync-knowledge calls this with the JPEG it made to
+ * describe a photo, so the decode that costs the most happens once.
+ * Returns how many it wrote.
+ */
+export async function writeImageRenditions(s3Key: string, decodable: Buffer): Promise<number> {
+  let written = 0;
+  for (const size of ["thumb", "display"] as const) {
+    const key = renditionKey(s3Key, size);
+    if (await objectExists(key)) continue;
+    const rendered = await renderRendition(decodable, size);
+    if (!rendered) continue;
+    await uploadPrivateFileToS3(rendered, key);
+    written += 1;
   }
-  const original = await downloadFileBytes(file.s3_key);
-  const decodable = isHeicContentType(file.content_type) ? await heicToJpeg(original) : original;
-  const image = sharp(decodable);
-  const metadata = await image.metadata();
-  if ((metadata.pages ?? 1) > 1) {
-    return { bytes: original, contentType: file.content_type };
-  }
-  const edge = RENDITION_SIZES[size];
-  const bytes = await image
-    .rotate()
-    .resize({ width: edge, height: edge, fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 80 })
-    .toBuffer();
-  await uploadPrivateFileToS3(bytes, key);
-  return { bytes, contentType: "image/webp" };
+  return written;
+}
+
+/** Whether both image renditions already exist. */
+export async function imageRenditionsExist(s3Key: string): Promise<boolean> {
+  return (await objectExists(renditionKey(s3Key, "thumb"))) && (await objectExists(renditionKey(s3Key, "display")));
 }
 
 /** Writes a video's poster frame (a JPEG still) unless one is already
- * there. Returns whether it wrote. The caller supplies the still; this
- * module never runs ffmpeg. */
+ * there. Returns whether it wrote. */
 export async function writeVideoPoster(s3Key: string, jpegBase64: string): Promise<boolean> {
   const key = renditionKey(s3Key, "poster");
   if (await objectExists(key)) return false;
   await uploadPrivateFileToS3(Buffer.from(jpegBase64, "base64"), key);
   return true;
+}
+
+export type RenditionsOutcome = { written: number; skipped: string | null };
+
+/**
+ * The media queue's job: every rendition one file can have, made from a
+ * single download and a single decode, written only where missing. A
+ * file that is neither image nor video is skipped and says so; a video
+ * in a process without ffmpeg is skipped too, and sync-knowledge in the
+ * worker will write its poster on the next run.
+ */
+export async function makeRenditionsForFile(fileId: string): Promise<RenditionsOutcome> {
+  const file = await getFileRefById(fileId);
+  if (!file || !file.s3_key) return { written: 0, skipped: "no such file, or no stored bytes" };
+  if (isImageContentType(file.content_type)) {
+    if (await imageRenditionsExist(file.s3_key)) return { written: 0, skipped: "already made" };
+    const bytes = await downloadFileBytes(file.s3_key);
+    const decoded = isHeicContentType(file.content_type)
+      ? await heicLimiter(() => heicToJpeg(bytes))
+      : Buffer.from((await normalizeImageForVision(bytes, file.content_type)).base64, "base64");
+    return { written: await writeImageRenditions(file.s3_key, decoded), skipped: null };
+  }
+  if (isVideoContentType(file.content_type)) {
+    if (!hasFfmpeg()) return { written: 0, skipped: "no ffmpeg in this process" };
+    if (await objectExists(renditionKey(file.s3_key, "poster"))) return { written: 0, skipped: "already made" };
+    const bytes = await downloadFileBytes(file.s3_key);
+    const { stills } = await videoToStills(bytes, file.name.split(".").pop() ?? "bin", 1);
+    const still = stills[0];
+    if (!still) return { written: 0, skipped: "no frame could be read" };
+    return { written: (await writeVideoPoster(file.s3_key, still.jpegBase64)) ? 1 : 0, skipped: null };
+  }
+  return { written: 0, skipped: `${file.content_type} has no rendition` };
 }

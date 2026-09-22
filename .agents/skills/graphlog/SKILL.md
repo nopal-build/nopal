@@ -175,11 +175,17 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     hash; anything else is unconfirmed). `confirmedCosts` is the only
     exported list of costs. A tap cannot be rewritten or erased; it is
     answered by another tap.
-  - Renditions (`mediaRenditions.server.ts`, `/api/vault/rendition/:id`):
-    thumb and display WebPs made at request time, a poster JPEG written
-    by sync-knowledge, all keyed by the storage key so an original and
-    its copies share one. The markdown keeps `/api/vault/view/<id>`;
-    only what an `<img>` loads changes.
+  - Renditions (`mediaKeys.ts`, `mediaRenditions.server.ts`,
+    `mediaQueue.server.ts`, `/api/vault/rendition/:id`): thumb and
+    display WebPs and a video's poster JPEG, keyed by the storage key so
+    an original and its copies share one, MADE IN THE WORKER ONLY: a
+    `renditions` job the upload route enqueues, plus sync-knowledge's
+    backfill from its own decode. The app's route checks S3 and
+    redirects, to the rendition or to the original; it never decodes
+    (Austin, 2026-09-22, after a 502: a HEIC decode holds ~130 MB in
+    WebAssembly and five at once killed the 1 GB app). Pinned by
+    `fruits/app/tests/noMediaProcessingInApp.test.ts`. The markdown
+    keeps `/api/vault/view/<id>`; only what an `<img>` loads changes.
 - **sync-graph** (`syncGraph.server.ts`: `runSyncGraph`) — reads a
   project's `syncs/` tree (including `_knowledge/*.knowledge.md`) and,
   per `skills/GRAPH.md`, extracts citable nodes — verbatim or

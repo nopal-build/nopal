@@ -57,7 +57,7 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import { downloadFileBytes } from "./file.server";
-import { renditionKey, writeVideoPoster } from "./mediaRenditions.server";
+import { imageRenditionsExist, renditionKey, writeImageRenditions, writeVideoPoster } from "./mediaRenditions.server";
 import { objectExists } from "./file.server";
 import { parseSyncedCardFileName } from "./dailyLogSync.server";
 import { formatSeconds, hasFfmpeg, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
@@ -137,6 +137,43 @@ export type SyncKnowledgeResult =
       filings?: { written: number; upToDate: number; rejected: number };
     }
   | { ok: false; error: string };
+
+/** Writes an image's renditions from bytes already decoded for the
+ * model, logging and swallowing any failure. */
+async function writeRenditionsQuietly(
+  source: { name: string; s3_key: string | null },
+  decodable: Buffer,
+  log: (line: string) => void,
+): Promise<void> {
+  if (!source.s3_key) return;
+  try {
+    const written = await writeImageRenditions(source.s3_key, decodable);
+    if (written > 0) log(`sync-knowledge: wrote ${written} rendition(s) for "${source.name}".`);
+  } catch (err) {
+    log(`sync-knowledge: no renditions for "${source.name}" (${err instanceof Error ? err.message : "unknown error"}); the app makes them on first view.`);
+  }
+}
+
+/**
+ * An image with an up-to-date sidecar was described before renditions
+ * existed (2026-09-22): decode it once here, in the worker, so the app
+ * never has to. Skipped when both renditions are already there, which is
+ * every run after the first.
+ */
+async function ensureRenditionsForDescribedImage(
+  source: { name: string; content_type: string; s3_key: string | null },
+  getBytes: () => Promise<Buffer>,
+  log: (line: string) => void,
+): Promise<void> {
+  if (!isImageContentType(source.content_type) || !source.s3_key) return;
+  try {
+    if (await imageRenditionsExist(source.s3_key)) return;
+    const image = await normalizeImageForVision(await getBytes(), source.content_type);
+    await writeRenditionsQuietly(source, Buffer.from(image.base64, "base64"), log);
+  } catch (err) {
+    log(`sync-knowledge: no renditions for "${source.name}" (${err instanceof Error ? err.message : "unknown error"}); the app makes them on first view.`);
+  }
+}
 
 /**
  * A video that already has an up-to-date sidecar was described before
@@ -375,8 +412,11 @@ export async function runSyncKnowledge(
       if (readSkillFingerprint(existing!.content) !== skillFingerprint) staleSidecars += 1;
       entries.push({ fileId: source._id, name: source.name, knowledgeFileId: existing!._id, generated: false });
       // A video described before posters existed gets one now: one frame,
-      // no model, no sidecar change, so nothing downstream re-runs.
+      // no model, no sidecar change, so nothing downstream re-runs. An
+      // image described before renditions existed gets its two the same
+      // way, so the app never decodes a photo a run has already seen.
       await ensurePosterForDescribedVideo(source, log);
+      await ensureRenditionsForDescribedImage(source, getBytes, log);
       if (filingUpToDate) continue;
       descriptionForFiling = splitFrontmatter(existing!.content ?? "").body?.trim() || null;
     } else {
@@ -457,6 +497,10 @@ export async function runSyncKnowledge(
             // HEIC, and any other image format the model does not take, is
             // turned into a JPEG first; a plain JPEG/PNG goes through as-is.
             const image = await normalizeImageForVision(bytes, source.content_type);
+            // The decode the app would otherwise do on first view, done
+            // here once; see `mediaRenditions.server.ts`. Never fails the
+            // description: a rendition is only what a browser shows.
+            await writeRenditionsQuietly(source, Buffer.from(image.base64, "base64"), log);
             result = await photoLlm.describePhoto({ imageBase64: image.base64, mediaType: image.mediaType, context });
             body = result.description;
           }

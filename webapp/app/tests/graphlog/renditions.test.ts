@@ -5,7 +5,8 @@
  * stored as octet-stream again.
  */
 import { describe, expect, it } from "vitest";
-import { isImageRenditionSize, renditionKey } from "robustness-core/data/mediaRenditions.server";
+import { createLimiter } from "robustness-core/data/mediaRenditions.server";
+import { isImageRenditionSize, renditionKey } from "robustness-core/data/mediaKeys";
 import { getFileContentType } from "robustness-core/data/file.server";
 
 describe("renditions", () => {
@@ -28,6 +29,34 @@ describe("renditions", () => {
     expect(isImageRenditionSize("display")).toBe(true);
     expect(isImageRenditionSize("poster")).toBe(false);
     expect(isImageRenditionSize(null)).toBe(false);
+  });
+});
+
+describe("the limiter: a page asks for every thumbnail at once", () => {
+  it("lets `limit` through at a time and the rest wait their turn, in order", async () => {
+    const limit = createLimiter(2);
+    let active = 0;
+    let peak = 0;
+    const order: number[] = [];
+    const job = (n: number) =>
+      limit(async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        order.push(n);
+        await new Promise((r) => setTimeout(r, 5));
+        active -= 1;
+        return n;
+      });
+    const results = await Promise.all([1, 2, 3, 4, 5].map(job));
+    expect(results).toEqual([1, 2, 3, 4, 5]);
+    expect(peak).toBe(2);
+    expect(order).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("frees its slot when the work throws", async () => {
+    const limit = createLimiter(1);
+    await expect(limit(async () => { throw new Error("boom"); })).rejects.toThrow("boom");
+    expect(await limit(async () => "next")).toBe("next");
   });
 });
 

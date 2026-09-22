@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
+import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { uploadFileToS3 } from "robustness-core/data/file.server";
 import {
   createFileRef,
@@ -81,6 +82,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!fileRef) {
       return Response.json({ error: "Failed to create file record" }, { status: 500 });
+    }
+
+    // The worker makes the photo's thumbnail and display rendition (or a
+    // video's poster) within seconds; this process never decodes media.
+    // Best effort: a queue that is down loses nothing, since the next
+    // GraphLog run backfills renditions from its own decode.
+    if (fileRef.content_type.startsWith("image/") || fileRef.content_type.startsWith("video/")) {
+      await enqueueRenditionsJob(fileRef._id).catch((err) => console.error("Could not enqueue renditions:", err));
     }
 
     return Response.json(
