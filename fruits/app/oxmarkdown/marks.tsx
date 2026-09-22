@@ -224,8 +224,13 @@ function MarkPen({ unit, ctx, onDone }: { unit: MarkUnit; ctx: AnnotationCtx; on
  * ask of a sentence, and it puts the other project's name in words that
  * live on this project's page. Here the reader picks the entry, the part
  * of it that moves, and the project, and the words they wrote stay an
- * ordinary mark. Only offered on a passage that cites a daily-log entry,
- * because only an entry can be filed anywhere.
+ * ordinary mark.
+ *
+ * Offered on every thought, including one that cites nothing. Hiding it
+ * there looked like the feature had gone (Austin, 2026-09-21): only a
+ * daily-log entry can be filed anywhere, but which lines carry one is not
+ * something a reader should have to work out from whether an option
+ * appeared. A passage with nothing behind it says so when asked.
  */
 function MoveControl({
   unit,
@@ -255,7 +260,7 @@ function MoveControl({
   const [sectionAt, setSectionAt] = useState("");
   const [destId, setDestId] = useState("");
 
-  if (!ctx.loadMoveOptions || !ctx.onMove || unit.refs.every((r) => !r.fileId)) return null;
+  if (!ctx.loadMoveOptions || !ctx.onMove) return null;
 
   const start = async () => {
     setOpen(true);
@@ -314,7 +319,10 @@ function MoveControl({
     <div className="ox-mark-move">
       {busy && !options && <div className="ox-mark-move__row">Looking…</div>}
       {options && options.entries.length === 0 && (
-        <div className="ox-mark-move__row">Nothing on this line came from a daily-log entry.</div>
+        <div className="ox-mark-move__note">
+          Nothing on this line came from a daily-log entry, so there is nothing here to file elsewhere. Mark a line
+          that carries a citation to move what it came from.
+        </div>
       )}
       {options && options.entries.length > 0 && (
         <>

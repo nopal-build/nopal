@@ -264,6 +264,49 @@ export function anchorMark(units: readonly MarkUnit[], snapshot: MarkUnitSnapsho
   return units[0]?.key ?? null;
 }
 
+/** Every move off this project that still stands, whether or not a mark
+ * carries it. A refile done from the margin without typing anything
+ * leaves no mark, and the trace is what says an entry left. */
+export async function movesOffProject(projectFolderId: string): Promise<
+  {
+    markId: string | null;
+    authorHumanId: string;
+    date: string;
+    section: string;
+    decidedBy: string;
+    decidedOn: string;
+    status: MarkMoveStatus;
+  }[]
+> {
+  await ensureTable();
+  const result = await query<
+    [
+      {
+        mark_id: string | null;
+        author_human_id: string;
+        date: string;
+        chunk: { kind: "section" | "whole"; heading: string };
+        decided_by: string;
+        decided_at: string;
+        status: MarkMoveStatus;
+      }[],
+    ]
+  >(
+    `SELECT mark_id, author_human_id, date, chunk, decided_by, decided_at, status FROM ${MOVES_TABLE}
+     WHERE source_project_folder_id = $projectFolderId AND status != "undone"`,
+    { projectFolderId },
+  );
+  return (result?.[0] ?? []).map((m) => ({
+    markId: m.mark_id,
+    authorHumanId: m.author_human_id,
+    date: m.date,
+    section: m.chunk?.kind === "whole" ? "" : m.chunk?.heading ?? "",
+    decidedBy: m.decided_by,
+    decidedOn: (m.decided_at ?? "").slice(0, 10),
+    status: m.status,
+  }));
+}
+
 /** Marks whose move is still a request nobody has confirmed or refused. */
 async function marksWithPendingMoves(projectFolderId: string): Promise<GraphLogMark[]> {
   await ensureTable();
@@ -509,43 +552,3 @@ export function refLineFileId(refLine: string): string | null {
   return /[?&]file=([A-Za-z0-9]+)/.exec(refLine)?.[1] ?? null;
 }
 
-/** What the marks file needs to say about a move, read straight from the
- * moves table for the same one-direction reason as `movesById`. Undone
- * moves are left out: there is nothing to say about them. */
-export async function movesByMark(
-  projectFolderId: string,
-  markIds: string[],
-): Promise<Map<string, { authorHumanId: string; date: string; section: string; decidedBy: string; status: MarkMoveStatus }>> {
-  if (markIds.length === 0) return new Map();
-  await ensureTable();
-  const result = await query<
-    [
-      {
-        mark_id: string;
-        author_human_id: string;
-        date: string;
-        chunk: { kind: "section" | "whole"; heading: string };
-        decided_by: string;
-        status: MarkMoveStatus;
-      }[],
-    ]
-  >(
-    `SELECT mark_id, author_human_id, date, chunk, decided_by, status FROM ${MOVES_TABLE}
-     WHERE source_project_folder_id = $projectFolderId AND status != "undone" AND mark_id IN $markIds`,
-    { projectFolderId, markIds },
-  );
-  return new Map(
-    (result?.[0] ?? [])
-      .filter((m) => !!m.mark_id)
-      .map((m) => [
-        m.mark_id,
-        {
-          authorHumanId: m.author_human_id,
-          date: m.date,
-          section: m.chunk?.kind === "whole" ? "" : m.chunk?.heading ?? "",
-          decidedBy: m.decided_by,
-          status: m.status,
-        },
-      ]),
-  );
-}

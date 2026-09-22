@@ -1209,6 +1209,47 @@ export async function runGraphStructure(
   }
 
   if (existing && existingMeta.asOfGraphHash === newHash && !rethread) {
+    // AN INDEX CAN BE WRONG WITHOUT THE GRAPH MOVING. The hash says
+    // nothing arrived or left since the last run; it says nothing about
+    // whether the index still describes what is there. A thread whose
+    // nodes were pruned on an earlier run (an entry refiled to another
+    // project, a day re-extracted to nothing) would otherwise sit in the
+    // index forever, because every later run stops right here -- and
+    // graph-project-view reads it as a Blocking thread with no citation
+    // and writes a line about it on the page, every run. Found in
+    // production, 2026-09-21. The sweep is pure string work over one
+    // file, and it writes only when it changed something.
+    const swept = pruneStaleMembership(
+      splitReadmeSections(splitFrontmatter(existing.content ?? "").body),
+      new Map(allNodes.map((n) => [n.id, n])),
+    );
+    if (swept.dropped.length > 0 || swept.droppedThreads.length > 0) {
+      const content = buildGraphStructureContent(
+        { ...existingMeta, generatedAt: new Date().toISOString() },
+        joinReadmeSections(swept.sections),
+      );
+      // The page is written from this index, so it has to reconcile
+      // against what the sweep left, and the applied marker is what tells
+      // graph-project-view to look again.
+      await updateFileRef(existing._id, { content: withoutProjectViewMarker(content) ?? content });
+      if (swept.droppedThreads.length > 0) {
+        log(
+          `graph-structure: ${swept.droppedThreads.length} thread(s) left the index with no nodes behind them: ${swept.droppedThreads.map((t) => `"${t}"`).join(", ")}.`,
+        );
+      }
+      if (swept.dropped.length > 0) {
+        log(`graph-structure: ${swept.dropped.length} membership line(s) pointed at nodes that are gone and were dropped.`);
+      }
+      return {
+        ok: true,
+        skipped: false,
+        changed: true,
+        staleSkill,
+        graphNodeCount: allNodes.length,
+        threadCount: countNamedClusters(swept.sections),
+        incomplete: loadIssues,
+      };
+    }
     log("graph-structure: up to date, nothing changed since last run.");
     // Both counts are already in hand here (every node was just parsed
     // to compute the hash, and the index is the file being compared), so

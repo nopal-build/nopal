@@ -36,7 +36,7 @@ import {
   viewTools,
   type PromptMark,
 } from "robustness-core/data/graphProjectView.server";
-import { renderQuoteBlocks } from "robustness-core/data/syncGraph.server";
+import { marksNotCaptured, renderQuoteBlocks } from "robustness-core/data/syncGraph.server";
 
 // The local Crouch Card for 2026-09-11, as synced: the HVAC spec that
 // belongs to the Coronado ADU. One `##` section with a `###` inside it.
@@ -96,6 +96,19 @@ describe("the marks file sync-graph reads", () => {
     expect(file).not.toMatch(/Coronado/);
   });
 
+  it("is the whole file when a refile carried no words at all", () => {
+    // Refiling your own entry from the margin needs no mark, so the trace
+    // is the only thing that says the entry left. It has to stand on its
+    // own in the file sync-graph reads.
+    const trace = moveTraceLine({
+      authorName: "Austin T", date: "2026-09-11", section: "hvac",
+      markerName: "Austin T", markedOn: "2026-09-21", status: "applied",
+    });
+    const file = buildMarksFileContent([], [trace]);
+    expect(file.trim()).toBe(trace);
+    expect(parseMarkTexts(file)).toEqual([]);
+  });
+
   it("says a request is a request, and still names nobody", () => {
     const asked = moveTraceLine({
       authorName: "Gerald L", date: "2026-09-11", section: "hvac",
@@ -131,6 +144,34 @@ describe("ADR-012 for marks: only the marker's words are highlighted", () => {
 
   it("reads a node's cited file", () => {
     expect(refLineFileId(':ref{name="A" datetime="2026-09-11T12:00:00Z" location="/vault?file=abc123" verbose="true"}')).toBe("abc123");
+  });
+});
+
+describe("a mark always becomes a node", () => {
+  const marks = ["The wall unit was approved on Friday.", "Do we have the birch plywood on site yet?"];
+
+  it("names the marks the extraction passed over", () => {
+    const captured = ['### Node 1\n==The wall unit was approved on Friday.==\n:ref{name="Lucas J"}'];
+    expect(marksNotCaptured([marks], captured)).toEqual([
+      { text: "Do we have the birch plywood on site yet?", sourceIndex: 0 },
+    ]);
+  });
+
+  it("counts a mark as captured through highlighting, a setup line and rewrapping", () => {
+    const captured = [
+      '### Node 1\nAustin, on the page:\n\n==Do we have the birch\nplywood on site yet?==\n:ref{name="James W"}',
+    ];
+    expect(marksNotCaptured([["Do we have the birch plywood on site yet?"]], captured)).toEqual([]);
+  });
+
+  it("says nothing about a source that is not a marks file", () => {
+    expect(marksNotCaptured([null, null], [])).toEqual([]);
+  });
+
+  it("carries the source index, so the node cites the right file", () => {
+    expect(marksNotCaptured([null, ["Eaves started Monday."]], [])).toEqual([
+      { text: "Eaves started Monday.", sourceIndex: 1 },
+    ]);
   });
 });
 

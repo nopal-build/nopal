@@ -32,7 +32,7 @@ import {
   buildMarksFileContent,
   listMarksForProject,
   MARKS_SYNC_FOLDER_NAME,
-  movesByMark,
+  movesOffProject,
   moveTraceLine,
 } from "./graphLogMarks.server";
 import { createHash } from "node:crypto";
@@ -202,29 +202,50 @@ export async function syncMarksProjection(projectFolder: VaultFolder): Promise<{
   // nobody can see any more keeps feeding its node into the graph.
   if (marks.length === 0 && !(await findMarksSyncFolder(projectFolder))) return { written: 0 };
 
-  // A mark that asked for a move is REPLACED here by a trace in words:
-  // what left, whose entry it was, who said so, never where it went. The
-  // mark's own words usually name the destination ("this belongs to
-  // Coronado"), and this project's graph feeds this project's page, which
-  // a client of the other project may not be allowed to know exists
-  // (Austin, 2026-09-21). The words are not lost: they stay on the mark
-  // itself, and a reader who can see both projects still sees them in the
-  // margin.
-  const moves = await movesByMark(
-    projectFolder._id,
-    marks.map((m) => m._id),
-  );
+  // A move off this project is REPLACED here by a trace in words: what
+  // left, whose entry it was, who recorded it, never where it went. A
+  // mark that asked for one is held out entirely, because the marker's
+  // own words usually name the destination ("this belongs to Coronado")
+  // and this project's graph feeds this project's page, which a client of
+  // the other project may not be allowed to know exists (Austin,
+  // 2026-09-21). Their words are not lost: they stay on the mark, and a
+  // reader who can see both projects reads them in the margin.
+  //
+  // Traces are collected from the MOVES, not from the marks, because a
+  // refile made from the margin without typing anything has no mark at
+  // all, and something still has to say the entry left.
+  const moves = await movesOffProject(projectFolder._id);
+  const movedMarkIds = new Set(moves.flatMap((m) => (m.markId ? [m.markId] : [])));
   const names =
-    moves.size > 0
-      ? await authorNames([...moves.values()].flatMap((m) => [m.authorHumanId, m.decidedBy]))
+    moves.length > 0
+      ? await authorNames(moves.flatMap((m) => [m.authorHumanId, m.decidedBy]))
       : new Map<string, string>();
 
   const byPersonDay = new Map<string, typeof marks>();
   for (const mark of marks) {
+    if (movedMarkIds.has(mark._id)) continue;
     const key = syncedCardFileName(mark.date, mark.author_human_id);
     const list = byPersonDay.get(key) ?? [];
     list.push(mark);
     byPersonDay.set(key, list);
+  }
+
+  // Each trace lands in the file for the day whoever recorded it did so,
+  // which is the same shape a mark's own file has.
+  const tracesByPersonDay = new Map<string, string[]>();
+  for (const move of moves) {
+    const markedOn = move.markId ? marks.find((m) => m._id === move.markId)?.date ?? move.decidedOn : move.decidedOn;
+    const key = syncedCardFileName(markedOn, move.decidedBy);
+    const line = moveTraceLine({
+      authorName: names.get(move.authorHumanId) ?? move.authorHumanId,
+      date: move.date,
+      section: move.section,
+      markerName: names.get(move.decidedBy) ?? move.decidedBy,
+      markedOn,
+      status: move.status,
+    });
+    tracesByPersonDay.set(key, [...(tracesByPersonDay.get(key) ?? []), line]);
+    if (!byPersonDay.has(key)) byPersonDay.set(key, []);
   }
 
   const marksFolder = await ensureMarksSyncFolder(projectFolder);
@@ -239,24 +260,7 @@ export async function syncMarksProjection(projectFolder: VaultFolder): Promise<{
   }
   let written = 0;
   for (const [name, dayMarks] of byPersonDay) {
-    const traces = dayMarks.flatMap((m) => {
-      const move = moves.get(m._id);
-      if (!move) return [];
-      return [
-        moveTraceLine({
-          authorName: names.get(move.authorHumanId) ?? move.authorHumanId,
-          date: move.date,
-          section: move.section,
-          markerName: names.get(move.decidedBy) ?? move.decidedBy,
-          markedOn: m.date,
-          status: move.status,
-        }),
-      ];
-    });
-    const content = buildMarksFileContent(
-      dayMarks.filter((m) => !moves.has(m._id)),
-      traces,
-    );
+    const content = buildMarksFileContent(dayMarks, tracesByPersonDay.get(name) ?? []);
     const hash = contentHash(content);
     const existing = existingByName.get(name);
     if (existing?.content_hash === hash) continue;
