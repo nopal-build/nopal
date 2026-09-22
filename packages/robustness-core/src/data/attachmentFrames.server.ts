@@ -104,7 +104,8 @@ function ffmpeg(): string {
 }
 
 /**
- * `VIDEO_FRAME_COUNT` stills from a video, with the clip's duration.
+ * `frameCount` stills (default `VIDEO_FRAME_COUNT`) from a video, with the
+ * clip's duration. One frame is the midpoint, which is what a poster wants.
  * Writes the bytes to a temp file (ffmpeg wants a seekable input for
  * `-ss`), extracts one frame per timestamp, and cleans up whatever
  * happens.
@@ -112,6 +113,7 @@ function ffmpeg(): string {
 export async function videoToStills(
   bytes: Buffer,
   extension: string,
+  frameCount = VIDEO_FRAME_COUNT,
 ): Promise<{ stills: Still[]; durationSeconds: number }> {
   const dir = await mkdtemp(join(tmpdir(), "graphlog-video-"));
   try {
@@ -126,7 +128,7 @@ export async function videoToStills(
     if (!durationSeconds) throw new Error("could not read the video's duration");
 
     const stills: Still[] = [];
-    for (const t of frameTimestamps(durationSeconds, VIDEO_FRAME_COUNT)) {
+    for (const t of frameTimestamps(durationSeconds, frameCount)) {
       const out = join(dir, `frame-${t}.jpg`);
       await run(ffmpeg(), [
         "-hide_banner",

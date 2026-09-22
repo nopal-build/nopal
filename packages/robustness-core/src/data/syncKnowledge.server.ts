@@ -57,6 +57,8 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import { downloadFileBytes } from "./file.server";
+import { renditionKey, writeVideoPoster } from "./mediaRenditions.server";
+import { objectExists } from "./file.server";
 import { parseSyncedCardFileName } from "./dailyLogSync.server";
 import { formatSeconds, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
 import type { GraphLogEventKind } from "./graphLogMetrics.server";
@@ -121,6 +123,31 @@ export type SyncKnowledgeResult =
       incomplete: string[];
     }
   | { ok: false; error: string };
+
+/**
+ * A video that already has an up-to-date sidecar was described before
+ * posters existed (2026-09-22). One midpoint frame, written under the
+ * video's storage key, so the gallery has something to show before play.
+ * A failure is logged and never fails the run: the description is what
+ * reaches the graph, the poster is only what the browser shows first.
+ */
+async function ensurePosterForDescribedVideo(
+  source: { _id: string; name: string; content_type: string; s3_key: string | null },
+  log: (line: string) => void,
+): Promise<void> {
+  if (!isVideoContentType(source.content_type) || !source.s3_key) return;
+  try {
+    if (await objectExists(renditionKey(source.s3_key, "poster"))) return;
+    const bytes = await downloadFileBytes(source.s3_key);
+    const extension = source.name.split(".").pop() ?? "bin";
+    const { stills } = await videoToStills(bytes, extension, 1);
+    if (stills[0] && (await writeVideoPoster(source.s3_key, stills[0].jpegBase64))) {
+      log(`sync-knowledge: wrote a poster for "${source.name}".`);
+    }
+  } catch (err) {
+    log(`sync-knowledge: no poster for "${source.name}" (${err instanceof Error ? err.message : "unknown error"}).`);
+  }
+}
 
 function sourceHash(basis: string): string {
   return createHash("sha256").update(basis).digest("hex").slice(0, 16);
@@ -291,6 +318,9 @@ export async function runSyncKnowledge(
       // `composeStageSkill`).
       if (readSkillFingerprint(existing.content) !== skillFingerprint) staleSidecars += 1;
       entries.push({ fileId: source._id, name: source.name, knowledgeFileId: existing._id, generated: false });
+      // A video described before posters existed gets one now: one frame,
+      // no model, no sidecar change, so nothing downstream re-runs.
+      await ensurePosterForDescribedVideo(source, log);
       continue;
     }
 
@@ -338,6 +368,13 @@ export async function runSyncKnowledge(
           });
           extraMeta = { describedFrom: "video-frames", frames: stills.length, frameTimes: at, durationSeconds: Math.round(durationSeconds) };
           body = `*Described from ${stills.length} still frames of a ${formatSeconds(durationSeconds)} video (at ${at.join(", ")}); no audio was heard.*\n\n${result.description}`;
+          // The poster is the second of the four frames (the first sits at
+          // 5% and often shows the ground). Stored once beside nothing,
+          // under the source's storage key; see `mediaRenditions.server.ts`.
+          const posterStill = stills[Math.min(1, stills.length - 1)];
+          if (posterStill && (await writeVideoPoster(source.s3_key!, posterStill.jpegBase64))) {
+            log(`sync-knowledge: wrote a poster for "${source.name}".`);
+          }
         } else {
           // HEIC, and any other image format the model does not take, is
           // turned into a JPEG first; a plain JPEG/PNG goes through as-is.

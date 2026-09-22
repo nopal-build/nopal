@@ -4,6 +4,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   ObjectCannedACL,
   CreateMultipartUploadCommand,
   UploadPartCommand,
@@ -174,17 +175,29 @@ export async function getPresignedDownloadUrl(
  * in an ownership check and a redirect so the rest of the app can just link
  * to a stable, same-origin URL instead of handling S3 URLs directly.
  *
- * @param s3Key     The S3 key of the object to view
- * @param expiresIn Seconds until the URL expires (default: 900 = 15 minutes)
+ * `contentType`, when given, is what the browser is told the bytes are
+ * (`ResponseContentType`, a GetObject response override S3 signs into the
+ * URL). The object's own stored Content-Type is whatever the upload path
+ * guessed at the time, and `getFileContentType` below did not know `.mov`
+ * until 2026-09-22, so a video could sit in the bucket as
+ * `application/octet-stream`: a `<video>` given that plus `nosniff` shows
+ * 0:00 and never plays. The `file_refs` row knows the real type, so the
+ * caller passes it and the bytes in the bucket are left alone.
+ *
+ * @param s3Key       The S3 key of the object to view
+ * @param expiresIn   Seconds until the URL expires (default: 900 = 15 minutes)
+ * @param contentType The Content-Type the response should carry, if known
  */
 export async function getPresignedViewUrl(
   s3Key: string,
   expiresIn = 900,
+  contentType?: string,
 ): Promise<string> {
   const client = createPresignS3Client();
   const cmd = new GetObjectCommand({
     Bucket: process.env.BUCKET_NAME,
     Key: s3Key,
+    ...(contentType ? { ResponseContentType: contentType } : {}),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return getSignedUrl(client as any, cmd, { expiresIn });
@@ -198,6 +211,22 @@ export async function getPresignedViewUrl(
  * actual bytes to a vision-capable LLM call happening server-side, where
  * a redirect makes no sense.
  */
+/** Whether an object is in the bucket. A 404 is `false`; anything else
+ * (no credentials, a network fault) is thrown, so a caller never mistakes
+ * an outage for "not made yet" and regenerates on every request. */
+export async function objectExists(s3Key: string): Promise<boolean> {
+  const client = createS3Client();
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: process.env.BUCKET_NAME, Key: s3Key }));
+    return true;
+  } catch (err) {
+    const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+    const name = (err as { name?: string })?.name;
+    if (status === 404 || name === "NotFound" || name === "NoSuchKey") return false;
+    throw err;
+  }
+}
+
 export async function downloadFileBytes(s3Key: string): Promise<Buffer> {
   const client = createS3Client();
   const cmd = new GetObjectCommand({
@@ -578,10 +607,34 @@ export function getFileContentType(filename: string): string {
       return "image/x-icon";
     case "tiff":
       return "image/tiff";
+    case "heic":
+      return "image/heic";
+    case "heif":
+      return "image/heif";
     case "pdf":
       return "application/pdf";
     case "h264":
       return "video/h264";
+    // A phone's own video formats. Absent until 2026-09-22, so a `.mov`
+    // that reached S3 through a path with no browser-supplied type was
+    // stored as octet-stream and would not play.
+    case "mov":
+      return "video/quicktime";
+    case "mp4":
+    case "m4v":
+      return "video/mp4";
+    case "webm":
+      return "video/webm";
+    case "txt":
+      return "text/plain";
+    case "csv":
+      return "text/csv";
+    case "json":
+      return "application/json";
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     case "zip":
       return "application/zip";
     default:

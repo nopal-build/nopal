@@ -36,6 +36,14 @@ describe("the pen", () => {
     expect(off).not.toContain("ox-mark");
   });
 
+  it("loads a browser-sized rendition in the gallery while the markdown still names the original", () => {
+    const html = renderToStaticMarkup(<OxRenderer markdown={PAGE} />);
+    expect(html).toContain('src="/api/vault/rendition/ntfc5km0612jeex7fjiv?size=display"');
+    expect(html).not.toContain('src="/api/vault/view/ntfc5km0612jeex7fjiv"');
+    // The pen keys the photo off the markdown URL, which did not change.
+    expect(units.find((u) => u.kind === "photo")?.attachmentId).toBe("ntfc5km0612jeex7fjiv");
+  });
+
   it("wraps every unit the server can mark, with the server's key", () => {
     const annotations: OxAnnotations = { marks: [], viewerId: "admin_1", canMark: true, onSend: async () => null };
     const html = renderToStaticMarkup(<OxRenderer markdown={PAGE} annotations={annotations} />);
