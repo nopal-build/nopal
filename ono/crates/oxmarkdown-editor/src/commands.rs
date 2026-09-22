@@ -80,6 +80,56 @@
 //!    `"Ctrl-Backspace"`/`"Alt-Delete"`/`"Ctrl-Delete"` keymap entries
 //!    (both modifier conventions, since Mac uses Option/Alt and
 //!    Windows/Linux use Ctrl for word-delete).
+//! 4. **A directive atom is not actually atomic against ordinary
+//!    commands** — a REAL, confirmed-live bug, root-caused (not
+//!    papered over): `leaf_directive`/`text_directive` declare
+//!    `content: Some("text*")` for their synthetic display label (see
+//!    `oxmarkdown_schema`'s own doc comment on why), so `atom: true`
+//!    only ever affects THIS crate's own click handling
+//!    (`directive_popover.rs`) — it does nothing to stop plain keyboard
+//!    ArrowLeft/Right navigation from an adjacent block landing a REAL
+//!    `Text` caret one level inside a directive's own synthetic
+//!    content, same as any ordinary textblock. Confirmed exactly how
+//!    this manifested: with a caret trapped there, `split_block`'s own
+//!    guard (`sel.is_empty()`, `rp.parent().node_type().is_block()`)
+//!    has no atom-awareness at all and happily calls `Transform::split`
+//!    on it — reported as "pressing Enter adds a new Badge", and it's
+//!    exactly that: the ONE directive splits into TWO, each keeping the
+//!    same name/attrs, because `split` doesn't know or care that this
+//!    child's content isn't supposed to be human-edited text at all.
+//!    Typing a plain character (confirmed live via Playwright, not
+//!    guessed) is worse: Chrome's own native contenteditable
+//!    "replace selected element" path fires (our `Selection::Node`,
+//!    from clicking a directive — see `directive_popover.rs` — is a
+//!    genuine DOM Range around the whole element), which deletes the
+//!    element and inserts the typed text wrapped in copied-inline-style
+//!    `<font>`/`<span style>`/`<b>` tags neither this schema nor
+//!    `read_dom_changes` has any tracked meaning for — genuinely
+//!    corrupted, unrecoverable markup.
+//!
+//!    Fixed with one shared primitive, `exit_directive` (`directive_at_
+//!    selection` finds either case — a real `Selection::Node` on any of
+//!    the three directive types, or a `Text` caret trapped inside a
+//!    leaf/text directive's own content specifically; `container_
+//!    directive` is deliberately excluded from the SECOND case, since
+//!    its content is genuinely, normally editable and a caret one level
+//!    inside a real child paragraph is exactly where it belongs) —
+//!    layered into `enter_fixups`/`shift_enter_fixups`, and three new
+//!    keymap entries (`"ArrowLeft"`/`"ArrowRight"` chained ahead of the
+//!    base `caret_left`/`caret_right`; `"ArrowUp"`/`"ArrowDown"`, unbound
+//!    before now; and `" "`, also unbound before now — the ONLY way to
+//!    intercept a keystroke BEFORE Chrome's own native contenteditable
+//!    handling ever sees it and corrupts something, confirmed by
+//!    reading `taino-edit-leptos`'s keydown handler: it calls
+//!    `prevent_default()` whenever a bound command actually handles the
+//!    key, same mechanism `Enter`/`Backspace`/`Delete` already lean on).
+//!    Escaping always lands in a REAL textblock: an adjacent sibling
+//!    directive is selected as a `Node` in turn (individually navigable,
+//!    matching the `oxmarkdown` skill's own convention), an adjacent
+//!    plain block is landed inside directly, and — the part making
+//!    "always able to arrow out, even with nothing next to it" true —
+//!    a fresh empty paragraph is inserted and landed in when there's
+//!    genuinely nothing there at all.
 
 use regex::Captures;
 use taino_edit_core::{wrapping_rule, Fragment, InputRule, InputRules};
@@ -111,6 +161,11 @@ impl Extension for EditingFixups {
             ("Ctrl-Backspace".to_string(), Box::new(word_delete_backward)),
             ("Alt-Delete".to_string(), Box::new(word_delete_forward)),
             ("Ctrl-Delete".to_string(), Box::new(word_delete_forward)),
+            ("ArrowLeft".to_string(), exit_directive_backward()),
+            ("ArrowRight".to_string(), exit_directive_forward()),
+            ("ArrowUp".to_string(), exit_directive_backward()),
+            ("ArrowDown".to_string(), exit_directive_forward()),
+            (" ".to_string(), exit_directive_forward()),
         ]
     }
 }
@@ -135,8 +190,152 @@ impl Extension for EditingFixups {
 /// of plain Enter (by `enter_fixups` and `Lists` respectively) that a
 /// fresh `"Shift-Enter"` keymap entry simply never triggers by calling
 /// `split_block` directly instead of going through either of them.
+const DIRECTIVE_NODE_TYPES: [&str; 3] = ["leaf_directive", "container_directive", "text_directive"];
+const CARET_TRAP_DIRECTIVE_TYPES: [&str; 2] = ["leaf_directive", "text_directive"];
+
+/// Finds the directive an Enter/Arrow/Space press should ESCAPE rather
+/// than edit — see this module's own doc comment (item 4) for the two
+/// real cases this covers and why `container_directive` is excluded
+/// from the second one. `None` means the current selection has nothing
+/// to do with a directive at all, so callers should fall through to
+/// their ordinary behavior. Side-effect-free (only reads `state`), so
+/// callers can check it BEFORE deciding whether to consume `dispatch`.
+///
+/// **A real, confirmed-live gap in `taino-edit-dom` itself, worked
+/// around here, not upstream**: `EditorView::read_selection` ALWAYS
+/// reconstructs `Selection::Text`, never `Selection::Node` — confirmed
+/// by reading its source directly — and `taino-edit-leptos`'s keydown
+/// handler re-reads the LIVE DOM selection at the top of every single
+/// keydown, unconditionally overwriting whatever `Selection::Node` a
+/// previous click (`directive_popover.rs`) had set. So by the time this
+/// runs, a directive that's genuinely still selected on screen shows up
+/// as a `Text` RANGE whose `anchor`/`head` happen to exactly bracket the
+/// node, not as `Selection::Node` at all — checked for explicitly below
+/// (the plain `Selection::Node` branch stays for direct model-level
+/// callers, e.g. this module's own native tests, which never round-trip
+/// through a live DOM read at all).
+fn directive_at_selection(state: &EditorState) -> Option<(usize, Node)> {
+    let sel = state.selection();
+    if let Selection::Node { pos } = sel {
+        let node = state.doc().node_at(pos)?;
+        return DIRECTIVE_NODE_TYPES
+            .contains(&node.node_type().name())
+            .then_some((pos, node));
+    }
+    if let Selection::Text { anchor, head } = sel {
+        if anchor != head {
+            let (from, to) = (anchor.min(head), anchor.max(head));
+            let node = state.doc().node_at(from)?;
+            return (DIRECTIVE_NODE_TYPES.contains(&node.node_type().name())
+                && from + node.node_size() == to)
+                .then_some((from, node));
+        }
+    }
+    if !sel.is_empty() {
+        return None;
+    }
+    let rp = ResolvedPos::resolve(state.doc(), sel.from()).ok()?;
+    if rp.depth() == 0 {
+        return None;
+    }
+    let parent = rp.parent();
+    if CARET_TRAP_DIRECTIVE_TYPES.contains(&parent.node_type().name()) {
+        return Some((rp.before(rp.depth()), parent.clone()));
+    }
+    None
+}
+
+/// Escapes `state`'s current directive selection/trap (see `directive_
+/// at_selection`) in `forward`/backward direction, ALWAYS landing in a
+/// real textblock — selecting an adjacent directive in turn (matching
+/// the `oxmarkdown` skill's own "individually navigable" convention),
+/// landing inside an adjacent plain block directly, or inserting a
+/// fresh empty paragraph when there's genuinely nothing there. Declines
+/// (`false`) when the selection isn't actually at/inside a directive.
+fn exit_directive(state: &EditorState, dispatch: Option<&mut Dispatch<'_>>, forward: bool) -> bool {
+    let Some((start, node)) = directive_at_selection(state) else {
+        return false;
+    };
+    let Some(d) = dispatch else {
+        return true;
+    };
+    let mut tx = state.tr();
+    let boundary = if forward {
+        start + node.node_size()
+    } else {
+        start
+    };
+    let Some(sel) = landing_selection(&mut tx, state, boundary, forward) else {
+        return false;
+    };
+    tx.set_selection(sel);
+    d(tx);
+    true
+}
+
+fn exit_directive_forward() -> Command {
+    Box::new(|state, dispatch| exit_directive(state, dispatch, true))
+}
+
+fn exit_directive_backward() -> Command {
+    Box::new(|state, dispatch| exit_directive(state, dispatch, false))
+}
+
+/// The actual landing spot for `exit_directive`, at `boundary` (the
+/// directive's own start position when escaping backward, or the
+/// position right after it when escaping forward).
+fn landing_selection(
+    tx: &mut Transaction,
+    state: &EditorState,
+    boundary: usize,
+    forward: bool,
+) -> Option<Selection> {
+    let doc = state.doc();
+    let sibling = if forward {
+        doc.node_at(boundary)
+    } else if boundary == 0 {
+        None
+    } else {
+        ResolvedPos::resolve(doc, boundary).ok()?.node_before()
+    };
+    if let Some(sib) = sibling {
+        if DIRECTIVE_NODE_TYPES.contains(&sib.node_type().name()) {
+            let sel_pos = if forward {
+                boundary
+            } else {
+                boundary - sib.node_size()
+            };
+            return Some(Selection::Node { pos: sel_pos });
+        }
+        // A real block — land just inside it, at its own content start
+        // (forward) or content end (backward) — the same ±1 offset
+        // `split_block` itself uses for a freshly split block's landing
+        // caret.
+        let caret = if forward { boundary + 1 } else { boundary - 1 };
+        return Some(Selection::caret(caret));
+    }
+    // Nothing there at all — insert a fresh empty paragraph and land
+    // inside it, so escaping is ALWAYS possible regardless of context.
+    let schema = state.schema();
+    let para = schema
+        .node("paragraph", Attrs::new(), vec![], vec![])
+        .ok()?;
+    tx.transform()
+        .replace(
+            boundary,
+            boundary,
+            Slice::new(Fragment::from_node(para), 0, 0),
+            schema,
+        )
+        .ok()?;
+    Some(Selection::caret(boundary + 1))
+}
+
 fn shift_enter_fixups() -> Command {
     Box::new(|state, dispatch| {
+        if directive_at_selection(state).is_some() {
+            return exit_directive(state, dispatch, true);
+        }
         let sel = state.selection();
         if !sel.is_empty() {
             return false;
@@ -260,6 +459,9 @@ fn word_delete_forward(state: &EditorState, dispatch: Option<&mut Dispatch<'_>>)
 
 fn enter_fixups() -> Command {
     Box::new(|state, dispatch| {
+        if directive_at_selection(state).is_some() {
+            return exit_directive(state, dispatch, true);
+        }
         let sel = state.selection();
         if !sel.is_empty() {
             return false;
@@ -1314,6 +1516,188 @@ mod tests {
         let schema = test_schema();
         let state = state_with_paragraph(&schema, "hello");
         assert!(!word_delete_forward(&state, None));
+    }
+
+    fn test_schema_with_directives() -> Schema {
+        let base = SchemaBuilder::new()
+            .node(
+                "doc",
+                NodeSpec {
+                    content: Some("block+".into()),
+                    ..Default::default()
+                },
+            )
+            .node(
+                "text",
+                NodeSpec {
+                    group: Some("inline".into()),
+                    ..Default::default()
+                },
+            );
+        let exts: Vec<&dyn Extension> =
+            vec![&Paragraph, &crate::oxmarkdown_schema::Directives, &Checkbox];
+        build_schema_with(base, &exts, "doc").expect("schema builds")
+    }
+
+    fn leaf_directive(schema: &Schema, name: &str) -> Node {
+        let mut attrs = Attrs::new();
+        attrs.insert("name".to_string(), AttrValue::from(name.to_string()));
+        attrs.insert(
+            "attributes".to_string(),
+            AttrValue::Object(Default::default()),
+        );
+        let label = schema.text(name, vec![]).expect("label");
+        schema
+            .node("leaf_directive", attrs, vec![label], vec![])
+            .expect("leaf_directive")
+    }
+
+    fn paragraph(schema: &Schema, text: &str) -> Node {
+        let kids = if text.is_empty() {
+            vec![]
+        } else {
+            vec![schema.text(text, vec![]).expect("text")]
+        };
+        schema
+            .node("paragraph", Attrs::new(), kids, vec![])
+            .expect("paragraph")
+    }
+
+    #[test]
+    fn enter_after_selecting_a_leaf_directive_lands_in_the_following_paragraph() {
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node(
+                "doc",
+                Attrs::new(),
+                vec![badge, paragraph(&schema, "hello")],
+                vec![],
+            )
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::Node { pos: 0 });
+        state = state.apply(tx);
+
+        let next =
+            dispatch_and_apply(&state, |s, d| exit_directive(s, d, true)).expect("dispatched");
+        assert_eq!(next.doc().text_content(), "badgehello", "nothing lost");
+        assert_eq!(
+            next.selection(),
+            Selection::caret(next.doc().node_at(0).unwrap().node_size() + 1)
+        );
+    }
+
+    #[test]
+    fn enter_after_selecting_a_leaf_directive_with_nothing_after_inserts_a_paragraph() {
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![badge], vec![])
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::Node { pos: 0 });
+        state = state.apply(tx);
+
+        let next =
+            dispatch_and_apply(&state, |s, d| exit_directive(s, d, true)).expect("dispatched");
+        assert_eq!(
+            next.doc().child_count(),
+            2,
+            "a landing paragraph was created"
+        );
+        assert_eq!(next.doc().child(1).node_type().name(), "paragraph");
+        assert!(
+            next.selection().is_empty(),
+            "a real caret, not stuck selected"
+        );
+    }
+
+    #[test]
+    fn exit_directive_backward_lands_at_the_end_of_the_preceding_paragraph() {
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node(
+                "doc",
+                Attrs::new(),
+                vec![paragraph(&schema, "hi"), badge],
+                vec![],
+            )
+            .unwrap();
+        let badge_pos = doc.child(0).node_size();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::Node { pos: badge_pos });
+        state = state.apply(tx);
+
+        let next =
+            dispatch_and_apply(&state, |s, d| exit_directive(s, d, false)).expect("dispatched");
+        // Position 3: past the paragraph's own open token and "hi".
+        assert_eq!(next.selection(), Selection::caret(3));
+    }
+
+    #[test]
+    fn a_text_caret_trapped_inside_a_leaf_directive_exits_on_enter_instead_of_splitting_it() {
+        // The real bug this whole mechanism fixes: a plain caret ending up
+        // inside a leaf_directive's own synthetic content (reachable via
+        // ordinary ArrowLeft/Right navigation, since it's not a true
+        // zero-content atom — ONLY `atom: true` for click handling, not for
+        // any generic command). Before this fix, `split_block` would split
+        // the directive itself in two.
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![badge], vec![])
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        // Position 1: one character into "badge"'s own synthetic text —
+        // exactly where native ArrowRight navigation would land a caret.
+        tx.set_selection(Selection::caret(1));
+        state = state.apply(tx);
+
+        assert!(
+            directive_at_selection(&state).is_some(),
+            "the trap is detected"
+        );
+        let next =
+            dispatch_and_apply(&state, |s, d| exit_directive(s, d, true)).expect("dispatched");
+        assert_eq!(
+            next.doc().child_count(),
+            2,
+            "still ONE badge, plus a fresh landing paragraph — never split into two"
+        );
+        assert_eq!(next.doc().text_content(), "badge");
+    }
+
+    #[test]
+    fn exit_directive_forward_onto_an_adjacent_directive_selects_it_instead_of_drilling_in() {
+        let schema = test_schema_with_directives();
+        let first = leaf_directive(&schema, "badge");
+        let second = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![first, second], vec![])
+            .unwrap();
+        let second_pos = doc.child(0).node_size();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::Node { pos: 0 });
+        state = state.apply(tx);
+
+        let next =
+            dispatch_and_apply(&state, |s, d| exit_directive(s, d, true)).expect("dispatched");
+        assert_eq!(next.selection(), Selection::Node { pos: second_pos });
+    }
+
+    #[test]
+    fn exit_directive_declines_for_an_ordinary_selection() {
+        let schema = test_schema_with_directives();
+        let state = state_with_paragraph(&schema, "hello");
+        assert!(!exit_directive(&state, None, true));
+        assert!(!exit_directive(&state, None, false));
     }
 }
 

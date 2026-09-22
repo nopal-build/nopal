@@ -375,6 +375,69 @@ matching the real product's own "Interactables" convention (see the
   no-op, remove deletes it, `:ref{...}` never opens it, and clicking a
   container's nested content edits normally instead of opening it.
 
+## A directive atom wasn't actually atomic against Enter/Arrow/Space — fixed
+
+Reported live: pressing Enter after selecting a `::badge{...}` duplicated
+it into two; arrowing away from one with nothing adjacent had nowhere to
+land; typing a character (even just Space) could corrupt the document
+outright. All three were the SAME root cause, in `commands.rs`'s own
+module doc comment (item 4) in full — short version: `leaf_directive`/
+`text_directive` declare `content: Some("text*")` for their synthetic
+display label (see `oxmarkdown_schema`'s doc comment on why), so
+`atom: true` only ever governed THIS crate's own click handling
+(`directive_popover.rs`) — nothing stopped a plain keyboard ArrowLeft/
+Right from an adjacent block landing a real `Text` caret one level
+inside a directive's own content, same as any ordinary textblock. Once
+there, `split_block` (Enter's base command) has no atom-awareness at
+all and happily split the directive in two; typing a character hit a
+genuinely corrupting native-Chrome "replace selected element" code
+path (confirmed live: produced literal `<font>`/`<span style>`/`<b>`
+garbage neither this schema nor `read_dom_changes` has any tracked
+meaning for).
+
+- **One shared primitive, `exit_directive`** (`directive_at_selection`
+  finds either case needing it), layered into `enter_fixups`/
+  `shift_enter_fixups`, plus new `"ArrowLeft"`/`"ArrowRight"` entries
+  chained ahead of the base `caret_left`/`caret_right`, brand new
+  `"ArrowUp"`/`"ArrowDown"` entries (unbound before now), and a brand
+  new `" "` (Space) entry — the ONLY way to intercept a keystroke
+  BEFORE Chrome's own native contenteditable handling ever sees it and
+  corrupts something (confirmed by reading `taino-edit-leptos`'s
+  keydown handler: `prevent_default()` fires whenever a bound command
+  actually handles the key, the same mechanism `Enter`/`Backspace`/
+  `Delete` already lean on).
+- **Escaping always lands in a real textblock**: an adjacent sibling
+  directive is selected as a `Node` in turn (individually navigable,
+  matching the `oxmarkdown` skill's own convention), an adjacent plain
+  block is landed inside directly, and — the part making "always able
+  to arrow out, even with nothing next to it" true — a fresh empty
+  paragraph is inserted and landed in when there's genuinely nothing
+  there at all.
+- **A second real, confirmed-live `taino-edit-dom` gap found WHILE
+  fixing this, not by reasoning alone**: `EditorView::read_selection`
+  ALWAYS reconstructs `Selection::Text`, never `Selection::Node` —
+  confirmed by reading its source — and `taino-edit-leptos`'s keydown
+  handler re-reads the live DOM selection at the top of EVERY keydown,
+  unconditionally overwriting whatever `Selection::Node` a previous
+  click had set. A directive that's genuinely still selected on screen
+  therefore shows up, by the time any keymap command runs, as a `Text`
+  RANGE whose `anchor`/`head` happen to exactly bracket the node — not
+  as `Selection::Node` at all. First version of this fix checked only
+  for literal `Selection::Node` and silently did nothing on every real
+  keypress; caught immediately by live testing (never trust that a
+  model-level `Selection::Node` "just stays set" across a keydown
+  round-trip without confirming it against the ACTUAL live browser
+  path, not just a native unit test). `directive_at_selection` now
+  detects both shapes explicitly.
+- Confirmed live via 6 new e2e tests
+  (`../../e2e/tests/directive-escape.spec.ts`), reproducing the exact
+  reported symptoms before asserting the fix: Enter never duplicates,
+  Enter/Space/ArrowRight/ArrowDown always escape even with nothing
+  after the directive, ArrowLeft/ArrowUp escape backward into the
+  preceding paragraph, Space never corrupts the DOM, and a caret that
+  reaches the trap via ordinary keyboard navigation (never clicking at
+  all) still escapes cleanly.
+
 ## Markdown serialization back out: `serialize.rs`, real now
 
 `convert.rs` was one-way (markdown → taino tree only) until now — nothing
