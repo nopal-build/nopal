@@ -48,6 +48,16 @@ COPY --link fruits fruits
 # JUST the `fruits` package + its real dependency graph — this is what
 # actually ships, not the whole monorepo's node_modules.
 RUN pnpm --filter fruits run build
+
+# The built server bundle must at least LOAD under the same Node that will
+# run it. Vite's SSR build can inline a CommonJS dependency into an ES
+# module (it did with `ffmpeg-static` on 2026-09-22: `__dirname` in ESM,
+# ERR_AMBIGUOUS_MODULE_SYNTAX at boot, a Fly machine that never passed its
+# health check, and nothing before the deploy to say so). Importing the
+# bundle here evaluates every module's top level and nothing else: the
+# database connection and the S3 client are lazy, so no service is needed.
+RUN cd fruits && node --input-type=module -e "await import('./build/server/index.js'); console.log('server bundle loads');"
+
 RUN pnpm --filter fruits deploy --prod /app/deploy
 
 # Final stage for app image
