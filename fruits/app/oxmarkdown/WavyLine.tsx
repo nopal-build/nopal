@@ -131,7 +131,7 @@ function WavyLinePoints({
   tension = 0.5,
   className,
   color = "currentColor",
-  strokeWidth = 2,
+  strokeWidth = 1,
 }: WavyLinePointsProps) {
   // This outer, `inset: 0` div exists ONLY to measure the container's
   // real pixel size (needed to convert normalized units to px) -- it's
@@ -207,7 +207,7 @@ function WavyLineWaypoints({
   tension = 0.5,
   className,
   color = "currentColor",
-  strokeWidth = 2,
+  strokeWidth = 1,
 }: WavyLineWaypointsProps) {
   const { ref, size } = useElementSize<HTMLDivElement>();
   const [path, setPath] = useState("");
