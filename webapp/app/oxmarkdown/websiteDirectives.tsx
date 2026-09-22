@@ -53,15 +53,41 @@
  *     needs to work with no `:::section-title` around it at all.
  *   ::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
  *     — the shared wavy-line primitive (`WavyLine.tsx` +
- *     `oxmarkdown-core`'s `buildSplinePath`), fixed-points mode: `points`
- *     are normalized to a `0-100` (x) / `0-40` (y) box local to whatever
- *     it's nested inside, recomputed to real pixels on every resize (not
- *     just stretched via `preserveAspectRatio`). `color` (same named
- *     vocabulary as `accent`/`section-title`'s `color`) sets the stroke
- *     directly via `WavyLine`'s own `color` prop — omit it and the line
- *     just inherits whatever `currentColor` resolves to (`WavyLine`'s
- *     default). The SAME primitive's `waypoints` mode (measuring live
- *     `data-waypoint-id` positions instead of fixed points) is built in
+ *     `oxmarkdown-core`'s `buildSplinePath`/`resolveLinePoints`),
+ *     fixed-points mode: "a line is drawn from one end to the other" — a
+ *     cursor starts at the box's own top-left corner (normalized to a
+ *     `0-100` (x) / `0-40` (y) box local to whatever `::line` is nested
+ *     inside) and walks forward, per-axis, per point. EACH half of a
+ *     pair is independently either:
+ *       - a plain number — a DELTA: moves the cursor BY that amount from
+ *         wherever it already was (cumulative), same as before.
+ *       - a reference letter + optional number (default offset `0`) —
+ *         an ANCHOR, pixel-referenceable to the box's own known geometry
+ *         instead of the previous point: `L`/`C`/`R` (left/center/right)
+ *         for x, `T`/`C`/`B` (top/center/bottom) for y. Case-insensitive.
+ *         Same "inset" convention as CSS's own `top`/`right`/`bottom`/
+ *         `left`: `T`/`L` add AWAY from that edge, `B`/`R` subtract
+ *         INWARD from that edge, `C` adds in the ordinary positive-axis
+ *         direction. E.g. `R0` = exactly the right edge, `B1` = 1 unit
+ *         up from the bottom, `C5` = 5 past center.
+ *     Anchors and deltas mix freely, per-axis, at any point (including
+ *     the first) — e.g. `points="L0,B1 C5,B4 R0,B0"` is three fully-
+ *     anchored points (bottom-left, up near center, exactly bottom-
+ *     right); `points="0,41 c,38"` anchors point 2's x to dead-center
+ *     while its y still continues normally as a delta (`41 + 38`). Pure-
+ *     delta strings like `points="3,42 58,35 100,42"` behave exactly as
+ *     before — the cursor simply starts at `(0,0)`, so point 1's plain
+ *     numbers already come out absolute with no special-casing needed.
+ *     The line's own element is sized to exactly fit the resulting
+ *     path's bounding box (not the whole containing box), recomputed to
+ *     real pixels on every resize (not just stretched via
+ *     `preserveAspectRatio`). `color` (same named vocabulary as
+ *     `accent`/`section-title`'s `color`) sets the stroke directly via
+ *     `WavyLine`'s own `color` prop — omit it and the line just inherits
+ *     whatever `currentColor` resolves to (`WavyLine`'s default). The
+ *     SAME primitive's `waypoints` mode (measuring live
+ *     `data-waypoint-id` positions instead of fixed points, all
+ *     absolute — anchor/delta semantics don't apply there) is built in
  *     `WavyLine.tsx` but not wired to a directive yet — reserved for the
  *     Home template's page-spanning connector.
  *   :::pricing-card{name="..." price="..." cta="..." cta-href="..."} —

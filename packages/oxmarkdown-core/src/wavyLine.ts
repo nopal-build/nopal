@@ -23,20 +23,122 @@ export type LinePoint = { x: number; y: number };
 
 export type LineCurveKind = "smooth" | "straight" | "bezier";
 
+/** One coordinate (X or Y) of a `points="..."` pair, as parsed from the
+ * directive's own text, BEFORE resolving it to an actual number:
+ *   - `{kind: "delta", value}` — a plain number, e.g. `"58"` or `"-12"`.
+ *     Means "relative to whatever the previous point resolved to on this
+ *     axis," cumulative (see `resolveLinePoints`, below).
+ *   - `{kind: "anchor", ref, offset}` — a reference letter (optionally
+ *     followed by a number, default `0`), e.g. `"B1"`, `"c5"`, `"R"`.
+ *     Means "pixel-referenceable, relative to the box's own known
+ *     geometry" instead of relative to the previous point: `L`/`C`/`R`
+ *     (left/center/right) for X, `T`/`C`/`B` (top/center/bottom) for Y —
+ *     `C` is shared between axes, disambiguated by which slot (X or Y) it
+ *     appears in. Case-insensitive. */
+export type LineCoordinateToken =
+  | { kind: "delta"; value: number }
+  | { kind: "anchor"; ref: "L" | "C" | "R" | "T" | "B"; offset: number };
+
+export type LinePointTokens = { x: LineCoordinateToken; y: LineCoordinateToken };
+
+const X_REFS = new Set(["L", "C", "R"]);
+const Y_REFS = new Set(["T", "C", "B"]);
+
+/** Matches an optional single reference letter followed by an optional
+ * signed (decimal) number -- at least one of the two must be present.
+ * `"58"` -> letter absent, number `"58"`. `"B1"` -> letter `"B"`, number
+ * `"1"`. `"c"` -> letter `"c"`, number absent (defaults to offset `0`). */
+const COORDINATE_PATTERN = /^([A-Za-z])?(-?\d*\.?\d+)?$/;
+
+function parseCoordinateToken(raw: string, axis: "x" | "y"): LineCoordinateToken | null {
+  const match = COORDINATE_PATTERN.exec(raw.trim());
+  if (!match) return null;
+  const [, letterRaw, numberRaw] = match;
+  if (letterRaw) {
+    const ref = letterRaw.toUpperCase();
+    const validRefs = axis === "x" ? X_REFS : Y_REFS;
+    if (!validRefs.has(ref)) return null;
+    const offset = numberRaw !== undefined ? Number(numberRaw) : 0;
+    if (!Number.isFinite(offset)) return null;
+    return { kind: "anchor", ref: ref as "L" | "C" | "R" | "T" | "B", offset };
+  }
+  if (numberRaw === undefined) return null;
+  const value = Number(numberRaw);
+  if (!Number.isFinite(value)) return null;
+  return { kind: "delta", value };
+}
+
 /** Parses the directive's own `points="x,y x,y ..."` attribute string —
- * space-separated pairs, each pair comma-joined. Silently drops any pair
- * that doesn't parse to two finite numbers, rather than throwing on a
- * hand-typo'd attribute. */
-export function parseLinePoints(raw: string | undefined): LinePoint[] {
+ * space-separated pairs, each pair comma-joined, each half of the pair
+ * either a plain number (a delta) or a reference-letter + optional
+ * number (an anchor) -- see `LineCoordinateToken`. Silently drops any
+ * pair that doesn't parse cleanly, rather than throwing on a hand-typo'd
+ * attribute. Returns raw TOKENS, not resolved numbers -- resolving an
+ * anchor to an actual position needs to know the box's own height
+ * (`viewBoxHeight`), which is `resolveLinePoints`'s job, below. */
+export function parseLinePoints(raw: string | undefined): LinePointTokens[] {
   if (!raw) return [];
-  return raw
-    .trim()
-    .split(/\s+/)
-    .map((pair) => {
-      const [x, y] = pair.split(",").map(Number);
-      return { x, y };
-    })
-    .filter((p): p is LinePoint => Number.isFinite(p.x) && Number.isFinite(p.y));
+  const out: LinePointTokens[] = [];
+  for (const pair of raw.trim().split(/\s+/)) {
+    const [xRaw, yRaw] = pair.split(",");
+    if (xRaw === undefined || yRaw === undefined) continue;
+    const x = parseCoordinateToken(xRaw, "x");
+    const y = parseCoordinateToken(yRaw, "y");
+    if (!x || !y) continue;
+    out.push({ x, y });
+  }
+  return out;
+}
+
+/** Resolves one anchor letter + offset to an absolute position along an
+ * axis spanning `0..span` -- the SAME "inset" convention CSS's own
+ * `top`/`right`/`bottom`/`left` properties use: `T`/`L` add AWAY from
+ * that edge (offset grows downward/rightward), `B`/`R` subtract INWARD
+ * from that edge (offset grows upward/leftward), and `C` (center) adds
+ * in the ordinary positive-axis direction (rightward for X, downward
+ * for Y). E.g. on a `0..100` X axis: `L0` -> 0, `R0` -> 100, `C5` -> 55. */
+function resolveAnchor(ref: "L" | "C" | "R" | "T" | "B", offset: number, span: number): number {
+  switch (ref) {
+    case "L":
+    case "T":
+      return offset;
+    case "R":
+    case "B":
+      return span - offset;
+    case "C":
+      return span / 2 + offset;
+  }
+}
+
+/**
+ * Resolves a parsed `points="..."` token list to actual `{x, y}` values,
+ * normalized to a `0..100` (x) / `0..viewBoxHeight` (y) box -- "a line is
+ * drawn from one end to the other": a cursor starts at `(0, 0)` (the
+ * box's own top-left corner) and walks forward one point at a time. On
+ * each axis, independently:
+ *   - a `delta` token moves the cursor BY that amount from wherever it
+ *     already was (cumulative) -- this is why point 1's plain numbers
+ *     end up absolute with no special-casing needed: the cursor simply
+ *     starts at 0, so "delta from 0" already equals "absolute position."
+ *   - an `anchor` token instead SETS the cursor to that reference
+ *     position (see `resolveAnchor`), ignoring wherever the cursor
+ *     already was -- e.g. `"0,41 c,38"` resolves X for point 2 to the
+ *     box's exact horizontal center regardless of point 1's X, while Y
+ *     for point 2 still continues normally as `41 + 38`.
+ * Anchors and deltas can mix freely, per-axis, at any point in the list
+ * (including the first) -- letters make a coordinate "pixel-
+ * referenceable, relative to the box's own known geometry" instead of
+ * relative to whatever the previous point happened to be. */
+export function resolveLinePoints(tokens: LinePointTokens[], viewBoxHeight: number): LinePoint[] {
+  let cursorX = 0;
+  let cursorY = 0;
+  const resolved: LinePoint[] = [];
+  for (const { x, y } of tokens) {
+    cursorX = x.kind === "delta" ? cursorX + x.value : resolveAnchor(x.ref, x.offset, 100);
+    cursorY = y.kind === "delta" ? cursorY + y.value : resolveAnchor(y.ref, y.offset, viewBoxHeight);
+    resolved.push({ x: cursorX, y: cursorY });
+  }
+  return resolved;
 }
 
 /** Trims float noise to a couple of decimal places -- keeps the emitted
@@ -120,4 +222,30 @@ export function mapNormalizedPoint(
     x: (point.x / 100) * width,
     y: (point.y / viewBoxHeight) * height,
   };
+}
+
+/** The axis-aligned bounding box of a point list, as `{minX, minY, maxX,
+ * maxY}` -- used to size the line's wrapper element to exactly fit its
+ * (possibly negative-dipping) path rather than the whole containing box.
+ * Returns all-zero for an empty list rather than `Infinity`/`-Infinity`,
+ * so a caller can use it directly without a special empty-list check
+ * first. */
+export function boundingBox(points: LinePoint[]): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+} {
+  if (points.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  let minX = points[0].x;
+  let minY = points[0].y;
+  let maxX = points[0].x;
+  let maxY = points[0].y;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, minY, maxX, maxY };
 }

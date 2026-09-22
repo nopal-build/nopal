@@ -19,14 +19,13 @@
 // implementation changes — keep this in sync with the real
 // `buildWebsiteDirectiveRegistry` vocabulary, don't let it drift into its
 // own separate list.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { Link, data, redirect, useRouteError, isRouteErrorResponse } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { CenterContent } from "stamps/CenterContent";
 import { DrawerContent } from "stamps/DrawerContent";
-import { Grid } from "stamps/Grid";
 import { Stack } from "stamps/Stack";
 import { ErrorPanel } from "stamps/ErrorPanel";
 import { link } from "stamps/link.css";
@@ -209,10 +208,23 @@ const ENTRIES: ScratchEntry[] = [
       <>
         Leaf. The shared wavy-line primitive (<code>WavyLine.tsx</code> +{" "}
         <code>oxmarkdown-core</code>'s <code>buildSplinePath</code>) in its
-        fixed-points mode. <code>points</code> are normalized to a{" "}
-        <code>0-100</code> (x) / <code>0-40</code> (y) box local to whatever
-        it's nested inside, recomputed to real pixels on every real resize
-        (<code>ResizeObserver</code>, not a passive{" "}
+        fixed-points mode. "A line is drawn from one end to the other": a
+        cursor starts at the box's own top-left corner (normalized to a{" "}
+        <code>0-100</code> (x) / <code>0-40</code> (y) box) and walks
+        forward, per-axis, per point. Each half of a pair is either a plain
+        number (a DELTA -- moves the cursor by that amount, cumulative) or a
+        reference letter plus optional offset (an ANCHOR, pixel-
+        referenceable to the box's own geometry instead of the previous
+        point): <code>L</code>/<code>C</code>/<code>R</code> for x,{" "}
+        <code>T</code>/<code>C</code>/<code>B</code> for y (same CSS-inset
+        convention as <code>top</code>/<code>right</code>/<code>bottom</code>/
+        <code>left</code> -- <code>T</code>/<code>L</code> add away from that
+        edge, <code>B</code>/<code>R</code> subtract inward from it,{" "}
+        <code>C</code> adds past center). Anchors and deltas mix freely, per
+        axis, at any point -- pure-delta strings behave exactly as before
+        since the cursor simply starts at (0,0). Sized to exactly fit the
+        resulting path's own bounding box, recomputed to real pixels on
+        every real resize (<code>ResizeObserver</code>, not a passive{" "}
         <code>preserveAspectRatio</code> stretch). <code>color</code> sets
         the stroke directly via <code>WavyLine</code>'s own <code>color</code>{" "}
         prop; omit it and the line inherits <code>currentColor</code> instead.
@@ -223,7 +235,7 @@ const ENTRIES: ScratchEntry[] = [
       </>
     ),
     previewMinHeight: 100,
-    markdown: '::line{points="0,32 22,6 58,18 100,12" curve="smooth" tension="0.4" color="green"}',
+    markdown: '::line{points="L0,B1 C5,B4 R0,B0" curve="smooth" tension="0.4" color="green"}',
   },
   {
     id: "section-title",
@@ -244,7 +256,7 @@ const ENTRIES: ScratchEntry[] = [
     ),
     fullBleed: true,
     markdown: `:::section-title{icon="mountaineer-coffee" color="green"}
-::line{points="0,32 22,6 58,18 100,12" curve="smooth" tension="0.4" color="green"}
+::line{points="3,42 58,35 100,42" curve="smooth" tension="0.4" color="green"}
 ## At a Cost
 :::`,
   },
@@ -385,89 +397,206 @@ function ColumnLabel({ children }: { children: ReactNode }) {
   );
 }
 
-function Entry({ entry, focused }: { entry: ScratchEntry; focused: boolean }) {
+/** Shared "jump into Focus mode on this entry" control -- used by each
+ * `EntryListRow` (List mode); the drawer's own nav buttons
+ * (`ScratchNav`) call the exact same `onFocus` callback from
+ * `StampsScratch`, just via a different control. */
+function FocusButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`${textSize.xs} ${sprinkles({ fontWeight: "bold", fontFamily: "mono", px: 3, py: 2 })}`}
+      style={{
+        border: `1px solid ${semanticColors.textBrand}`,
+        borderRadius: 6,
+        background: "none",
+        cursor: "pointer",
+        color: semanticColors.textBrand,
+      }}
+    >
+      Focus →
+    </button>
+  );
+}
+
+/** One `Rendered (static)` preview box, shared by both `FocusedEntryView`
+ * and `EntryListRow` -- only the surrounding layout (dominant vs. a small
+ * fixed-size thumbnail) differs between the two, not this box's own
+ * styling rules. */
+function PreviewBox({
+  entry,
+  markdown,
+  minHeight,
+}: {
+  entry: ScratchEntry;
+  markdown: string;
+  minHeight: number;
+}) {
   const registry = buildWebsiteDirectiveRegistry({ dailyLogEntries: {} });
   return (
     <div
-      id={`entry-${entry.id}`}
-      // `scratch-focus-accent` (scratch.css) sets `color` per color scheme
-      // (dark plum in light mode, plain white in dark mode -- `--purple`
-      // alone reads as still-purple, not white, against this app's dark
-      // surface). The border then just inherits it via `currentColor`
-      // instead of duplicating the same light/dark logic a second time.
-      className={`${sprinkles({ p: 5 })} ${focused ? "scratch-focus-accent" : ""}`}
       style={{
-        borderWidth: 1,
-        borderStyle: "solid",
-        borderColor: focused ? "currentColor" : semanticColors.surfaceBorder,
-        borderRadius: 8,
+        border: `1px solid ${semanticColors.surfaceBorder}`,
+        borderRadius: 6,
+        padding: entry.fullBleed ? 0 : 16,
+        // `visible`, NOT `hidden` -- a `::line{points="..."}` whose
+        // cumulative deltas add up to more than one `viewBoxHeight` (or
+        // `width` for x) will render TALLER/WIDER than this box, by
+        // design (that's the caller's own `viewBoxHeight` tuning to do,
+        // not a bug here) -- clipping it away silently would make the
+        // mechanism look broken instead of just untuned, defeating the
+        // whole point of a scratchpad meant to make that gap visible.
+        overflow: "visible",
+        // `position: relative` -- required as the positioned ancestor for
+        // any directive whose own layout is `position: absolute` (e.g. a
+        // bare `::line{...}` with no `:::section-title{...}` around it
+        // to supply one itself). `minHeight` -- an absolutely-positioned
+        // child contributes zero to this box's own auto height, so that
+        // same bare `::line{...}` case needs the box to reserve height
+        // by hand; it also doubles here as "how dominant should this
+        // preview look" (large in Focus mode, a small thumbnail in List
+        // mode) -- see each caller's own `minHeight` value.
+        position: "relative",
+        minHeight,
       }}
     >
-      <div className={sprinkles({ mb: 3 })}>
-        {focused && (
-          <div
-            className={`${textSize.xs} ${sprinkles({ fontWeight: "bold", fontFamily: "mono", mb: 1 })}`}
-            style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}
-          >
-            ↑ Focused
-          </div>
-        )}
+      <OxRenderer markdown={markdown} directives={registry} className="ox-no-dots" />
+    </div>
+  );
+}
+
+/** List mode's compact row -- a small, read-only preview thumbnail next
+ * to this entry's directive signature, its OWN pristine markdown (never
+ * edited; that only happens in Focus mode's separate copy), its note,
+ * and a button to jump into Focus mode on it. No local edit state at all
+ * here, unlike `FocusedEntryView` -- nothing in this row is editable. */
+function EntryListRow({ entry, onFocus }: { entry: ScratchEntry; onFocus: () => void }) {
+  return (
+    <div
+      className={sprinkles({ display: "flex", gap: 4 })}
+      style={{
+        border: `1px solid ${semanticColors.surfaceBorder}`,
+        borderRadius: 8,
+        padding: 16,
+        alignItems: "flex-start",
+      }}
+    >
+      <div style={{ flex: "0 0 260px", minWidth: 0 }}>
+        <ColumnLabel>Render</ColumnLabel>
+        {/* `maxHeight` + `overflow: auto`, NOT `alignItems: stretch` on the
+            row -- a wide/tall real example (e.g. `:::section{...}`'s own
+            mint box, full of wrapped paragraph/list text) would otherwise
+            balloon this thumbnail's natural content height, which (via
+            `stretch`) would then balloon the WHOLE row to match, including
+            its sibling text column. Capping height here keeps every row a
+            predictable, scannable size regardless of how tall any one
+            example's real render happens to be. */}
+        <div style={{ maxHeight: 220, overflow: "auto" }}>
+          <PreviewBox entry={entry} markdown={entry.markdown} minHeight={entry.previewMinHeight ?? 120} />
+        </div>
+      </div>
+      <div style={{ flex: "1 1 auto", minWidth: 0 }}>
         <code className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`} style={{ color: semanticColors.textBrand }}>
           {entry.directive}
         </code>
-        <p className={`${textSize.sm} ${sprinkles({ mt: 1 })}`} style={{ color: semanticColors.textSubtle, lineHeight: 1.5 }}>
-          {entry.note}
-        </p>
-      </div>
-      <Grid gap={4} minColumnWidth={320}>
-        <div>
-          <ColumnLabel>Markdown source</ColumnLabel>
+        <div className={sprinkles({ mt: 2, mb: 2 })}>
+          <ColumnLabel>Markdown example (not editable)</ColumnLabel>
           <pre
-            className={`${textSize.sm} ${sprinkles({ p: 3, fontFamily: "mono" })}`}
+            className={`${textSize.xs} ${sprinkles({ p: 2, fontFamily: "mono" })}`}
             style={{
               background: semanticColors.surfaceInset,
               borderRadius: 6,
-              whiteSpace: "pre-wrap",
               margin: 0,
-              overflowX: "auto",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
             }}
           >
             {entry.markdown}
           </pre>
         </div>
-        <div>
-          <ColumnLabel>Rendered (static)</ColumnLabel>
-          <div
-            style={{
-              border: `1px solid ${semanticColors.surfaceBorder}`,
-              borderRadius: 6,
-              padding: entry.fullBleed ? 0 : 16,
-              overflow: "hidden",
-              // `position: relative` -- required as the positioned
-              // ancestor for any directive whose own layout is
-              // `position: absolute` (e.g. a bare `::line{...}` with no
-              // `:::section-title{...}` around it to supply one itself).
-              // `minHeight` -- an absolutely-positioned child contributes
-              // zero to this box's own auto height, so that same bare
-              // `::line{...}` case needs the box to reserve height by hand.
-              position: "relative",
-              minHeight: entry.previewMinHeight,
-            }}
-          >
-            <OxRenderer markdown={entry.markdown} directives={registry} />
-          </div>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, lineHeight: 1.5 }}>
+          {entry.note}
+        </p>
+        <div className={sprinkles({ mt: 3 })}>
+          <FocusButton onClick={onFocus} />
         </div>
-      </Grid>
+      </div>
     </div>
   );
 }
 
-type ViewMode = "focus" | "all";
+/** Focus mode's single, dominant view of one entry -- the whole reason
+ * "Focus" exists: the rendered static output gets as much width AND
+ * height as possible, with the editable markdown source + this entry's
+ * own directive signature/note demoted to a narrow sidebar underneath
+ * each other, not competing for space with the render. */
+function FocusedEntryView({ entry }: { entry: ScratchEntry }) {
+  // Local edit state -- `StampsScratch` mounts this with `key={entry.id}`,
+  // so switching to a DIFFERENT focused entry always starts a fresh
+  // `useState(entry.markdown)` instead of carrying over stale edits from
+  // whatever was focused before.
+  const [markdown, setMarkdown] = useState(entry.markdown);
+  const isDirty = markdown !== entry.markdown;
+  return (
+    <div className={sprinkles({ display: "flex", gap: 5, flexWrap: "wrap" })} style={{ alignItems: "flex-start" }}>
+      <div style={{ flex: "1 1 480px", minWidth: 0 }}>
+        <ColumnLabel>Rendered (static)</ColumnLabel>
+        <PreviewBox entry={entry} markdown={markdown} minHeight={Math.max(entry.previewMinHeight ?? 0, 480)} />
+      </div>
+      <div style={{ flex: "0 1 340px", minWidth: 280 }}>
+        <div className={sprinkles({ display: "flex", alignItems: "center", justifyContent: "space-between" })}>
+          <ColumnLabel>Markdown source</ColumnLabel>
+          {isDirty && (
+            <button
+              type="button"
+              onClick={() => setMarkdown(entry.markdown)}
+              className={`${textSize.xs} ${sprinkles({ fontFamily: "mono", mb: 2 })}`}
+              style={{ background: "none", border: "none", cursor: "pointer", color: semanticColors.textBrand, textDecoration: "underline" }}
+            >
+              Reset
+            </button>
+          )}
+        </div>
+        <textarea
+          value={markdown}
+          onChange={(e) => setMarkdown(e.target.value)}
+          spellCheck={false}
+          rows={Math.max(3, markdown.split("\n").length)}
+          className={`${textSize.sm} ${sprinkles({ p: 3, fontFamily: "mono" })}`}
+          style={{
+            display: "block",
+            width: "100%",
+            background: semanticColors.surfaceInset,
+            color: "inherit",
+            border: `1px solid ${isDirty ? semanticColors.textBrand : "transparent"}`,
+            borderRadius: 6,
+            whiteSpace: "pre-wrap",
+            margin: 0,
+            resize: "vertical",
+            overflow: "auto",
+          }}
+        />
+        <div className={sprinkles({ mt: 4 })}>
+          <ColumnLabel>Example info</ColumnLabel>
+          <code className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`} style={{ color: semanticColors.textBrand }}>
+            {entry.directive}
+          </code>
+          <p className={`${textSize.sm} ${sprinkles({ mt: 1 })}`} style={{ color: semanticColors.textSubtle, lineHeight: 1.5 }}>
+            {entry.note}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type ViewMode = "focus" | "list";
 
 function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewMode) => void }) {
   const options: { value: ViewMode; label: string }[] = [
     { value: "focus", label: "Focus" },
-    { value: "all", label: "See all" },
+    { value: "list", label: "List" },
   ];
   return (
     <div
@@ -501,35 +630,35 @@ const DEFAULT_FOCUS_ID: string | null = "section-title";
 
 export default function StampsScratch() {
   const [focusedId, setFocusedId] = useState(DEFAULT_FOCUS_ID ?? ENTRIES[ENTRIES.length - 1].id);
-  // "focus": the content area shows ONLY the focused entry -- the default,
-  // since a full list is exactly what this option exists to get away from.
-  // "all": the old behavior, full list with the focused one pulled to top.
+  // "focus": the content area shows ONLY the focused entry, dominant --
+  // the default. "list": a compact, read-only row per entry, for browsing
+  // the whole vocabulary at a glance.
   const [viewMode, setViewMode] = useState<ViewMode>("focus");
 
-  // In "all" mode the focused entry moves to the TOP of the list, with
-  // everything else keeping its original relative order behind it. In
-  // "focus" mode it's the ONLY entry shown at all.
-  const visibleEntries = useMemo(() => {
-    const focused = ENTRIES.find((e) => e.id === focusedId);
-    if (viewMode === "focus") return focused ? [focused] : [];
-    const rest = ENTRIES.filter((e) => e.id !== focusedId);
-    return focused ? [focused, ...rest] : ENTRIES;
-  }, [focusedId, viewMode]);
+  const focusedEntry = ENTRIES.find((e) => e.id === focusedId) ?? ENTRIES[0];
 
-  // Reordering/switching modes alone doesn't guarantee the newly-topmost
-  // entry is actually in view if the page was scrolled elsewhere --
-  // `AppLayout`'s own `<main>` scrolls independently (see
-  // `visual-check.ts`'s own note on this), so `scrollIntoView` on the
-  // entry itself (not `window`) is what actually works here.
+  // Jumping to a specific entry -- via the drawer, or a List row's own
+  // "Focus" button -- always means "show me THIS one, dominant," so both
+  // paths set the mode along with the id rather than leaving `viewMode`
+  // wherever it happened to be.
+  function focusOn(id: string) {
+    setFocusedId(id);
+    setViewMode("focus");
+  }
+
+  // Switching the focused entry (or back into Focus mode) should land at
+  // the top of the content area -- `AppLayout`'s own `<main>` scrolls
+  // independently (see `visual-check.ts`'s own note on this same quirk),
+  // so plain `window.scrollTo` doesn't reach it.
   useEffect(() => {
-    document.getElementById(`entry-${focusedId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
   }, [focusedId, viewMode]);
 
   return (
     <AppLayout>
-      <DrawerContent drawer={<ScratchNav focusedId={focusedId} onFocus={setFocusedId} />} title="Examples">
-        <CenterContent maxWidth={1100}>
-          <div className={sprinkles({ mb: 8 })}>
+      <DrawerContent drawer={<ScratchNav focusedId={focusedId} onFocus={focusOn} />} title="Examples">
+        <CenterContent maxWidth={viewMode === "focus" ? 1400 : 1100}>
+          <div className={sprinkles({ mb: 6 })}>
             <Link
               to="/maker/stamps"
               className={`${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
@@ -544,28 +673,33 @@ export default function StampsScratch() {
                 className={`${textSize.xl} ${sprinkles({ fontWeight: "bold" })}`}
                 style={{ color: semanticColors.textPrimary }}
               >
-                Scratch
+                {viewMode === "focus" ? formatEntryLabel(focusedEntry.id) : "Examples"}
               </h1>
               <ViewModeToggle mode={viewMode} onChange={setViewMode} />
             </div>
-            <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: 640, lineHeight: 1.5 }}>
-              One row per <code>/v2</code> website directive (see{" "}
-              <code>oxmarkdown/websiteDirectives.tsx</code>) — plain markdown source
-              on the left, a real static rendering on the right, so the gap between
-              "what this currently produces" and "what the design actually wants"
-              is easy to see side by side while that design gets worked out. Static
-              only, no editor — none of these have an Editing-mode rendering yet.
-              Pick an example from the drawer to focus it — <code>Focus</code> shows
-              just that one, <code>See all</code> shows the full list with it pulled
-              to the top.
-            </p>
+            {viewMode === "list" && (
+              <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: 640, lineHeight: 1.5 }}>
+                One row per <code>/v2</code> website directive (see{" "}
+                <code>oxmarkdown/websiteDirectives.tsx</code>) — a compact,
+                read-only preview of each, so the gap between "what this
+                currently produces" and "what the design actually wants" is
+                easy to scan at a glance. Static only, no editor — none of
+                these have an Editing-mode rendering yet. Pick one to open it
+                in <code>Focus</code>, where its markdown source is actually
+                editable.
+              </p>
+            )}
           </div>
 
-          <Stack gap={6}>
-            {visibleEntries.map((entry) => (
-              <Entry key={entry.id} entry={entry} focused={viewMode === "all" && entry.id === focusedId} />
-            ))}
-          </Stack>
+          {viewMode === "focus" ? (
+            <FocusedEntryView key={focusedEntry.id} entry={focusedEntry} />
+          ) : (
+            <Stack gap={4}>
+              {ENTRIES.map((entry) => (
+                <EntryListRow key={entry.id} entry={entry} onFocus={() => focusOn(entry.id)} />
+              ))}
+            </Stack>
+          )}
         </CenterContent>
       </DrawerContent>
     </AppLayout>

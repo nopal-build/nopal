@@ -861,6 +861,15 @@
   padding-bottom: 0;
 }
 
+/* General-purpose version of the above, without the caption editor's
+   other side effects (no margin/padding changes) -- for any caller that
+   just wants a plain dot-free surface, e.g. a static preview rendering
+   next to an editable markdown source (see the `/maker/stamps/scratch`
+   guide). Same `.ox-dot-grid` child-selector gotcha applies. */
+.ox-content.ox-no-dots > .ox-dot-grid {
+  background-image: none;
+}
+
 /* ── File image zoom modal (`components/OxRenderer.tsx`'s
    `FileImageModal`) — clicking a `::file{...}` image thumbnail opens
    this, on a dimmed backdrop, same z-index tier as `Modal.tsx`'s own

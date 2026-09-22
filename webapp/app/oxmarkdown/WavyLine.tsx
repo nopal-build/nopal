@@ -27,10 +27,13 @@
  */
 import { useEffect, useRef, useState } from "react";
 import {
+  boundingBox,
   buildSplinePath,
   mapNormalizedPoint,
+  resolveLinePoints,
   type LineCurveKind,
   type LinePoint,
+  type LinePointTokens,
 } from "oxmarkdown-core";
 
 type WavyLineBaseProps = {
@@ -45,9 +48,17 @@ type WavyLineBaseProps = {
 
 export type WavyLinePointsProps = WavyLineBaseProps & {
   mode?: "points";
-  /** Normalized to a `0-100` (x) / `0-viewBoxHeight` (y) box — see
-   * `oxmarkdown-core`'s `mapNormalizedPoint`. */
-  points: LinePoint[];
+  /** Parsed `points="..."` tokens (`oxmarkdown-core`'s `parseLinePoints`)
+   * — "a line is drawn from one end to the other": a cursor starts at the
+   * box's own top-left corner and walks forward, per-axis, per point.
+   * A plain-number coordinate moves the cursor BY that amount from
+   * wherever it already was (cumulative). A reference-letter coordinate
+   * (`L`/`C`/`R` for x, `T`/`C`/`B` for y, e.g. `"B1"`) instead SETS the
+   * cursor to that pixel-referenceable position within the box,
+   * regardless of the running cursor — see `oxmarkdown-core`'s
+   * `resolveLinePoints`. Normalized to a `0-100` (x) / `0-viewBoxHeight`
+   * (y) box. */
+  points: LinePointTokens[];
   viewBoxHeight?: number;
 };
 
@@ -78,25 +89,33 @@ function useElementSize<T extends HTMLElement>() {
 }
 
 function LinePathSvg({
-  size,
+  width,
+  height,
   path,
   color,
   strokeWidth,
 }: {
-  size: { width: number; height: number } | null;
+  width: number;
+  height: number;
   path: string;
   color: string;
   strokeWidth: number;
 }) {
-  if (!size || !path) return null;
+  if (!path) return null;
   return (
-    <svg width={size.width} height={size.height} style={{ display: "block" }}>
+    // `overflow: visible` -- a stroke's own width pokes strokeWidth/2
+    // beyond the path's bounding box on every side, and that box IS this
+    // svg's exact width/height (see `layout` below), so clipping would
+    // shave off the outer edge of the line otherwise.
+    <svg width={width} height={height} style={{ display: "block", overflow: "visible" }}>
       <path d={path} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
     </svg>
   );
 }
 
-const WRAPPER_STYLE = { position: "absolute", inset: 0, pointerEvents: "none" } as const;
+const SIZER_STYLE = { position: "absolute", inset: 0, pointerEvents: "none" } as const;
+
+type PointsLayout = { path: string; left: number; top: number; width: number; height: number };
 
 function WavyLinePoints({
   points,
@@ -107,8 +126,14 @@ function WavyLinePoints({
   color = "currentColor",
   strokeWidth = 2,
 }: WavyLinePointsProps) {
+  // This outer, `inset: 0` div exists ONLY to measure the container's
+  // real pixel size (needed to convert normalized units to px) -- it's
+  // not the visible line element anymore. The visible svg lives in a
+  // separately positioned+sized child (`layout`, below), sized to
+  // exactly fit the resolved path's own bounding box, not the whole
+  // container.
   const { ref, size } = useElementSize<HTMLDivElement>();
-  const [path, setPath] = useState("");
+  const [layout, setLayout] = useState<PointsLayout | null>(null);
 
   // Re-keyed on the points/viewBoxHeight's own SERIALIZED value, not the
   // array reference -- a directive's attrs are re-parsed fresh on every
@@ -119,14 +144,52 @@ function WavyLinePoints({
 
   useEffect(() => {
     if (!size || size.width === 0 || size.height === 0) return;
-    const pixelPoints = points.map((p) => mapNormalizedPoint(p, viewBoxHeight, size.width, size.height));
-    setPath(buildSplinePath(pixelPoints, curve, tension));
+    const resolved = resolveLinePoints(points, viewBoxHeight);
+    if (resolved.length < 2) {
+      setLayout(null);
+      return;
+    }
+    // Resolved points are already absolute within the box's own `0-100`/
+    // `0-viewBoxHeight` normalized space (anchors resolve directly to a
+    // position in that space; deltas resolve relative to a cursor that
+    // itself starts at that space's own `(0,0)`) -- no separate "origin"
+    // to fold in anymore, unlike the plain-delta-only version of this.
+    const pixelPoints = resolved.map((p) => mapNormalizedPoint(p, viewBoxHeight, size.width, size.height));
+    const box = boundingBox(pixelPoints);
+    // The path can dip outside its own first point (negative deltas, or
+    // an anchor placed "before" an earlier point) -- shift everything by
+    // (-minX, -minY) so every coordinate fed to the SVG is >= 0, and
+    // compensate by positioning the wrapper at that same (minX, minY)
+    // (already absolute pixels within the container, so no extra origin
+    // offset is needed here).
+    const shifted = pixelPoints.map((p) => ({ x: p.x - box.minX, y: p.y - box.minY }));
+    setLayout({
+      path: buildSplinePath(shifted, curve, tension),
+      left: box.minX,
+      top: box.minY,
+      width: Math.max(1, box.maxX - box.minX),
+      height: Math.max(1, box.maxY - box.minY),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size, pointsKey, viewBoxHeight, curve, tension]);
 
   return (
-    <div ref={ref} className={className} style={WRAPPER_STYLE} aria-hidden="true">
-      <LinePathSvg size={size} path={path} color={color} strokeWidth={strokeWidth} />
+    <div ref={ref} style={SIZER_STYLE} aria-hidden="true">
+      {layout && (
+        <div
+          className={className}
+          style={{
+            position: "absolute",
+            left: layout.left,
+            top: layout.top,
+            width: layout.width,
+            height: layout.height,
+            pointerEvents: "none",
+          }}
+        >
+          <LinePathSvg width={layout.width} height={layout.height} path={layout.path} color={color} strokeWidth={strokeWidth} />
+        </div>
+      )}
     </div>
   );
 }
@@ -162,8 +225,8 @@ function WavyLineWaypoints({
   }, [size, idsKey, curve, tension]);
 
   return (
-    <div ref={ref} className={className} style={WRAPPER_STYLE} aria-hidden="true">
-      <LinePathSvg size={size} path={path} color={color} strokeWidth={strokeWidth} />
+    <div ref={ref} className={className} style={SIZER_STYLE} aria-hidden="true">
+      {size && <LinePathSvg width={size.width} height={size.height} path={path} color={color} strokeWidth={strokeWidth} />}
     </div>
   );
 }
