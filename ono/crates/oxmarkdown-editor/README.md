@@ -256,17 +256,56 @@ following parses as a plain list item containing the literal text
 `"[ ]"`, no `checked` field at all. Confirmed live in a real browser via
 `e2e/tests/checkbox-input-rule.spec.ts`, not just natively.
 
+## Checkbox click-to-toggle: real, via a `ViewPlugin` — and a real bug found doing it
+
+The checkbox's `<input>` is no longer `disabled` — clicking it genuinely
+toggles `checked` in the model, via `oxmarkdown_schema::
+CheckboxTogglePlugin`, a `taino-edit-dom` `ViewPlugin` ("extensions ...
+needing real pointer interaction", per that trait's own doc comment).
+Two real, confirmed-by-reading-source constraints, not assumed:
+
+- `TainoEditor` only ever pipes `"mousedown"`/`"mousemove"`/`"mouseup"`
+  through `ViewPlugin::handle_event` — never `"click"` — so the plugin
+  reacts to `"mousedown"` and calls `event.prevent_default()` itself, to
+  stop the browser's OWN native checkbox toggle from ALSO firing now
+  that the `<input>` can receive pointer events at all.
+- `EditorView::pos_at_point` (`document.elementFromPoint` + walking up
+  to the clicked element's own tracked position) reliably resolves a
+  click squarely on the checkbox to its own atom position, confirmed via
+  5 native tests covering flip-both-directions, the position-after
+  fallback, decline-with-no-checkbox-there, and selection preservation.
+
+**A real, SEPARATE, and more serious bug was found live-testing this**
+(not by the click feature causing it — the click just exposed it): typing
+text immediately after `checkbox_on_input` inserts the checkbox is a
+REAL, correctly-placed new DOM text node, but it never syncs into the
+model at all — confirmed by reading `taino-edit-dom`'s own
+`read_dom_changes` source directly, not guessed. It has exactly two
+detection paths: diff an EXISTING tracked text run, or detect text in a
+block with ZERO tracked children (`find_empty_block_text`). Neither
+covers "a brand-new text node appeared next to an existing non-text atom
+in an otherwise non-empty block" — the checkbox is the block's ONE
+tracked child, so newly-typed text stays a pure DOM/visual illusion,
+invisible to the model, until something else forces a re-render built on
+the stale (checkbox-only) doc — which then leaves the untracked text
+orphaned in the DOM, and any FURTHER typing lands wherever the
+(also-stale) tracked tree thinks the block ends, not visually where you
+just typed. Tracked as an expected-failing e2e test (`test.fail()`) in
+`../../e2e/tests/checkbox-interactivity.spec.ts` rather than fixed here
+— the fix isn't obvious (a candidate workaround, inserting a trailing
+empty text node alongside the checkbox so `read_dom_changes` has an
+existing run to diff against, has its own unverified risk: `doc_pos_to_
+dom`'s own zero-size-node handling means the caret might not even
+resolve INTO that empty text node the way it would need to) and this
+affects only the LIVE, input-rule-driven checkbox creation path —
+checkboxes loaded from existing markdown (the playground, initial doc
+load) are completely unaffected.
+
 **Deliberately NOT done in this pass** (real follow-up work, not
 oversights):
 
-- **No interactivity yet** — no click-to-toggle a checkbox, no directive
-  attribute popover, no per-directive-kind (`::file`, `::card`, ...)
-  rich rendering. The checkbox's `<input>` is real but `disabled`: real
-  click-to-toggle needs a `taino-edit-dom` "change"/"click" listener
-  wired to a model-updating command, which doesn't exist for ANY node in
-  this schema yet (not a checkbox-specific gap) — shipping a checkbox
-  that LOOKS clickable but silently does nothing would be a worse
-  interim state than an honestly inert one.
+- **No interactivity yet for directives** — no attribute popover, no
+  per-directive-kind (`::file`, `::card`, ...) rich rendering.
 - **No markdown serialization back out yet** — `convert.rs` is still
   one-way (markdown → taino tree only). Round-tripping edits back to
   markdown text needs a taino-tree → mdast-JSON → markdown pass (the

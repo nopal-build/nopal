@@ -49,9 +49,13 @@
 
 use std::collections::HashMap;
 
-use taino_edit_core::ParseRule;
+use taino_edit_core::{Fragment, ParseRule};
 use taino_edit_extensions::{Extension, SchemaAdditions};
-use taino_edit_leptos::{AttrSpec, AttrValue, DomSpec, MarkSpec, Node, NodeSpec};
+use taino_edit_leptos::{
+    AttrSpec, AttrValue, Attrs, Dispatch, DomSpec, EditorState, EditorView, MarkSpec, Node,
+    NodeSpec, ResolvedPos, Slice, ViewAction, ViewPlugin,
+};
+use wasm_bindgen::JsCast;
 
 /// `==highlighted text==` -> `<mark>`. Mirrors the real product's own
 /// choice (see the `oxmarkdown` skill, item 16: Lexical's built-in
@@ -208,16 +212,10 @@ impl Extension for Directives {
     }
 }
 
-/// A GFM task-list item's checkbox, as a real (if not yet interactive —
-/// see this module's own doc comment) inline atom, placed as the first
-/// inline child of a task list item's first paragraph. Renders a real,
-/// but currently `disabled`, `<input type="checkbox">`: genuinely
-/// interactive click-to-toggle needs a `taino-edit-dom` "change"/"click"
-/// listener wired to a model-updating command, which doesn't exist yet
-/// for ANY node in this schema (not a checkbox-specific gap) — left
-/// disabled rather than shipping a checkbox that looks clickable but
-/// silently does nothing, which would be a worse, more confusing
-/// interim state than an honestly-inert one.
+/// A GFM task-list item's checkbox, as a real, genuinely interactive
+/// inline atom (click-to-toggle — see `CheckboxTogglePlugin` below),
+/// placed as the first inline child of a task list item's first
+/// paragraph.
 pub struct Checkbox;
 
 impl Extension for Checkbox {
@@ -249,7 +247,6 @@ impl Extension for Checkbox {
                             .unwrap_or(false);
                         let mut spec = DomSpec::void("input")
                             .attr("type", "checkbox")
-                            .attr("disabled", "disabled")
                             .attr("class", "ox-checkbox");
                         if checked {
                             spec = spec.attr("checked", "checked");
@@ -261,5 +258,238 @@ impl Extension for Checkbox {
             )],
             ..Default::default()
         }
+    }
+}
+
+/// Real click-to-toggle for the `checkbox` atom above, via
+/// `taino-edit-dom`'s own `ViewPlugin` mechanism ("extensions ... needing
+/// real pointer interaction", per that trait's own doc comment — exactly
+/// this case). A REAL constraint confirmed by reading `taino-edit-
+/// leptos`'s own wiring, not assumed: `TainoEditor` only ever pipes
+/// `"mousedown"`/`"mousemove"`/`"mouseup"` events through
+/// `ViewPlugin::handle_event` — never `"click"` — so this reacts to
+/// `"mousedown"` and calls `event.prevent_default()` itself, stopping
+/// the browser's OWN native checkbox toggle from ALSO firing (the
+/// `<input>` is no longer `disabled`, so it can now receive pointer
+/// events at all — a disabled form control is normally excluded from
+/// receiving them, including by our own listener).
+///
+/// `EditorView::pos_at_point`'s own documented behavior (confirmed by
+/// reading its source: `document.elementFromPoint` then walking up to
+/// find the clicked element's own position via `pos_before_element`)
+/// already returns the position immediately BEFORE the clicked element
+/// when a click lands squarely on it — exactly a checkbox atom's own
+/// position — so `checkbox_at_or_before`'s primary check should always
+/// hit; the `pos - 1` fallback only guards against imprecise edge
+/// coordinates.
+///
+/// **A real focus-loss bug found and fixed while testing this live**:
+/// toggling `checked` gives the checkbox DIFFERENT attrs, so `taino-
+/// edit-dom`'s own `try_patch` (confirmed by reading its source: it
+/// declines an in-place patch whenever `node.attrs() != new.attrs()`)
+/// REPLACES the `<input>` DOM element outright rather than patching it
+/// in place — and replacing a focused-or-recently-interacted-with
+/// element can silently drop focus off the editor root entirely.
+/// `taino-edit-leptos`'s own reactive DOM-selection-resync effect
+/// (confirmed by reading its source) only ever re-syncs the caret
+/// `if r.view.has_focus()` — skipped entirely otherwise — so losing
+/// focus here left the LIVE DOM caret stale (still wherever it was
+/// before the click) even though the MODEL's own selection was
+/// correctly preserved, reproducing exactly as "click a checkbox, then
+/// End+type lands text at the wrong spot" in real browser testing.
+/// Fixed by explicitly calling `view.focus()` before returning the
+/// action, so the editor root already has focus back by the time that
+/// effect runs.
+pub struct CheckboxTogglePlugin;
+
+impl ViewPlugin for CheckboxTogglePlugin {
+    fn handle_event(&self, view: &EditorView, event: &web_sys::Event) -> Option<ViewAction> {
+        if event.type_() != "mousedown" {
+            return None;
+        }
+        let mouse = event.dyn_ref::<web_sys::MouseEvent>()?;
+        let target = event.target()?.dyn_into::<web_sys::Element>().ok()?;
+        if target.tag_name().to_lowercase() != "input"
+            || !target.class_list().contains("ox-checkbox")
+        {
+            return None;
+        }
+        let pos = view.pos_at_point(mouse.client_x() as f32, mouse.client_y() as f32)?;
+        event.prevent_default();
+        let _ = view.focus();
+        Some(ViewAction::Command(Box::new(move |state, dispatch| {
+            toggle_checkbox_at(state, dispatch, pos)
+        })))
+    }
+}
+
+fn checkbox_at_or_before(state: &EditorState, pos: usize) -> Option<(usize, Node)> {
+    let rp = ResolvedPos::resolve(state.doc(), pos).ok()?;
+    if let Some(n) = rp.node_after() {
+        if n.node_type().name() == "checkbox" {
+            return Some((pos, n));
+        }
+    }
+    if pos > 0 {
+        let rp2 = ResolvedPos::resolve(state.doc(), pos - 1).ok()?;
+        if let Some(n) = rp2.node_after() {
+            if n.node_type().name() == "checkbox" {
+                return Some((pos - 1, n));
+            }
+        }
+    }
+    None
+}
+
+fn toggle_checkbox_at(
+    state: &EditorState,
+    dispatch: Option<&mut Dispatch<'_>>,
+    pos: usize,
+) -> bool {
+    let Some((start, node)) = checkbox_at_or_before(state, pos) else {
+        return false;
+    };
+    let checked = node
+        .attrs()
+        .get("checked")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let Some(d) = dispatch else { return true };
+    let mut attrs = Attrs::new();
+    attrs.insert("checked".to_string(), AttrValue::from(!checked));
+    let Ok(new_checkbox) = state.schema().node("checkbox", attrs, vec![], vec![]) else {
+        return false;
+    };
+    let mut tx = state.tr();
+    if tx
+        .transform()
+        .replace(
+            start,
+            start + 1,
+            Slice::new(Fragment::from_node(new_checkbox), 0, 0),
+            state.schema(),
+        )
+        .is_err()
+    {
+        return false;
+    }
+    // The replaced content is the SAME shape (one atom for another, same
+    // size) at a FIXED position — unlike the `lift`/`textblock_type_rule`
+    // bugs documented in `commands.rs`, default selection-mapping through
+    // this kind of replace is well-defined. Still explicitly preserved
+    // (not left to the default mapping) so a click on a checkbox can
+    // never move the caret, regardless of where it currently is.
+    tx.set_selection(state.selection());
+    d(tx);
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use taino_edit_extensions::{build_schema_with, Lists, Paragraph};
+    use taino_edit_leptos::{EditorState, NodeSpec, Schema, SchemaBuilder, Selection};
+
+    fn test_schema() -> Schema {
+        let base = SchemaBuilder::new()
+            .node(
+                "doc",
+                NodeSpec {
+                    content: Some("block+".into()),
+                    ..Default::default()
+                },
+            )
+            .node(
+                "text",
+                NodeSpec {
+                    group: Some("inline".into()),
+                    ..Default::default()
+                },
+            );
+        let exts: Vec<&dyn Extension> = vec![&Paragraph, &Lists, &Checkbox];
+        build_schema_with(base, &exts, "doc").expect("schema builds")
+    }
+
+    /// `bullet_list > list_item > paragraph(checkbox, "todo")`. Returns
+    /// the state and the checkbox's own document position (3: past the
+    /// list's, item's, and paragraph's own open tokens).
+    fn state_with_checkbox(schema: &Schema, checked: bool) -> (EditorState, usize) {
+        let mut attrs = Attrs::new();
+        attrs.insert("checked".to_string(), AttrValue::from(checked));
+        let checkbox = schema
+            .node("checkbox", attrs, vec![], vec![])
+            .expect("checkbox");
+        let text = schema.text("todo", vec![]).expect("text");
+        let para = schema
+            .node("paragraph", Attrs::new(), vec![checkbox, text], vec![])
+            .expect("paragraph");
+        let item = schema
+            .node("list_item", Attrs::new(), vec![para], vec![])
+            .expect("list_item");
+        let list = schema
+            .node("bullet_list", Attrs::new(), vec![item], vec![])
+            .expect("bullet_list");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![list], vec![])
+            .expect("doc");
+        (EditorState::new(doc, schema.clone()), 3)
+    }
+
+    fn dispatch_and_apply(state: &EditorState, pos: usize) -> Option<EditorState> {
+        let mut result = None;
+        let mut dispatch = |tx| result = Some(tx);
+        assert!(toggle_checkbox_at(state, Some(&mut dispatch), pos));
+        result.map(|tx| state.clone().apply(tx))
+    }
+
+    #[test]
+    fn toggle_flips_unchecked_to_checked() {
+        let schema = test_schema();
+        let (state, pos) = state_with_checkbox(&schema, false);
+        let next = dispatch_and_apply(&state, pos).expect("dispatched");
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
+        assert!(json.contains("\"checked\":true"), "{json}");
+    }
+
+    #[test]
+    fn toggle_flips_checked_to_unchecked() {
+        let schema = test_schema();
+        let (state, pos) = state_with_checkbox(&schema, true);
+        let next = dispatch_and_apply(&state, pos).expect("dispatched");
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
+        assert!(json.contains("\"checked\":false"), "{json}");
+    }
+
+    /// `pos + 1` (right AFTER the checkbox, the position matching
+    /// `node_before()` rather than `node_after()`) should ALSO resolve
+    /// correctly, via `checkbox_at_or_before`'s own `pos - 1` fallback.
+    #[test]
+    fn toggle_works_via_the_position_after_fallback() {
+        let schema = test_schema();
+        let (state, pos) = state_with_checkbox(&schema, false);
+        let next = dispatch_and_apply(&state, pos + 1).expect("dispatched");
+        let json = serde_json::to_string(&next.doc().to_json()).unwrap();
+        assert!(json.contains("\"checked\":true"), "{json}");
+    }
+
+    #[test]
+    fn toggle_declines_when_there_is_no_checkbox_at_that_position() {
+        let schema = test_schema();
+        let (state, _pos) = state_with_checkbox(&schema, false);
+        assert!(!toggle_checkbox_at(&state, None, 0));
+    }
+
+    #[test]
+    fn toggle_preserves_the_current_selection_even_when_elsewhere() {
+        let schema = test_schema();
+        let (mut state, pos) = state_with_checkbox(&schema, false);
+        let mut tx = state.tr();
+        // Move the caret to the end of "todo", far from the checkbox.
+        tx.set_selection(Selection::caret(pos + 1 + 4));
+        state = state.apply(tx);
+        let before = state.selection();
+
+        let next = dispatch_and_apply(&state, pos).expect("dispatched");
+        assert_eq!(next.selection(), before);
     }
 }

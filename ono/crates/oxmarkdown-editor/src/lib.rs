@@ -18,7 +18,7 @@ mod oxmarkdown_schema;
 
 use commands::EditingFixups;
 use leptos::prelude::*;
-use oxmarkdown_schema::{Checkbox, Directives, Highlight, Strikethrough};
+use oxmarkdown_schema::{Checkbox, CheckboxTogglePlugin, Directives, Highlight, Strikethrough};
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use wasm_bindgen::prelude::*;
 
@@ -265,7 +265,11 @@ fn App() -> impl IntoView {
                 "oxmarkdown-editor - taino-edit, with real OxMarkdown directives/checkboxes/highlight/strikethrough."
             </p>
             <div on:input=on_input>
-                <TainoEditor state=state keymap=keymap />
+                <TainoEditor
+                    state=state
+                    keymap=keymap
+                    plugins=vec![Box::new(CheckboxTogglePlugin)]
+                />
             </div>
         </div>
     }
