@@ -52,7 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "graph", "graphStructure", "projectView", "voice"]);
+const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice"]);
 
 /**
  * Saves or resets one stage's default-skill override -- see
@@ -132,7 +132,12 @@ const STAGE_META: Record<GraphLogDefaultStage, { title: string; file: string; bl
   knowledge: {
     title: "Knowledge",
     file: "skills/KNOWLEDGE.md",
-    blurb: "Seeded into a brand new project's KNOWLEDGE.md. Defaults to \"skip\" (sync-knowledge writes no sidecars until a project owner replaces it).",
+    blurb: "Seeded into a brand new project's KNOWLEDGE.md: sync-knowledge's instructions for describing one attached file (a photo, a video's frames, a PDF, a text file) into its _knowledge/ sidecar, the only path a file has into the graph.",
+  },
+  filing: {
+    title: "Filing",
+    file: "skills/FILING.md",
+    blurb: "Seeded into a brand new project's FILING.md: sync-knowledge's second question about a file, what kind of document it is (photo, drawing, permit, receipt, invoice, ...) and, for a cost document, the vendor, amount and date read off it. Written to its own _knowledge/*.filing.md so the graph never re-extracts; read by the project's Files view. A project seeded before 2026-09-22 has no FILING.md until it is reseeded.",
   },
   graph: {
     title: "Graph",
@@ -311,6 +316,11 @@ export default function FruitsMakerGraphLogDefaults() {
             stage="knowledge"
             initialContent={defaultSkills.knowledge.content}
             overridden={defaultSkills.knowledge.overridden}
+          />
+          <DefaultSkillEditor
+            stage="filing"
+            initialContent={defaultSkills.filing.content}
+            overridden={defaultSkills.filing.overridden}
           />
           <DefaultSkillEditor
             stage="graph"

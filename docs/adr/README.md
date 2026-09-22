@@ -58,7 +58,9 @@ append-only, same as the graph it protects.
 | [0016](0016-a-measurement-without-a-reader-is-a-bug.md) | A measurement without a named reader is a bug. |
 | [0017](0017-a-skill-is-written-for-the-model-that-reads-it.md) | A skill is written for the model that reads it. |
 | [0018](0018-the-janitor-reports-a-person-decides.md) | The Janitor reports. A person decides. |
+| [0019](0019-a-folder-is-a-projection-a-file-never-moves.md) | A folder is a projection. A file never moves. |
+| [0020](0020-nothing-reaches-a-budget-unconfirmed.md) | Nothing reaches a budget unconfirmed. |
 
-0001 to 0017 are GraphLog decisions (`graphlog` skill); 0018 covers the
-whole repo. This directory isn't GraphLog-specific and future ADRs from
+0001 to 0017, 0019 and 0020 are GraphLog decisions (`graphlog` skill);
+0018 covers the whole repo. This directory isn't GraphLog-specific and future ADRs from
 other parts of Nopal belong here too, continuing the same numbering.

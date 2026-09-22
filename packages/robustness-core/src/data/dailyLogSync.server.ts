@@ -104,7 +104,7 @@ export async function ensureDailyLogsSyncFolder(projectFolder: VaultFolder): Pro
  * `humanId` (not just `date`) because a project can have Cards from
  * several different contributors on the same day — see the `vault` skill's
  * Sharing Roles section. */
-function syncedCardFileName(date: string, humanId: string): string {
+export function syncedCardFileName(date: string, humanId: string): string {
   return `${date}-${humanId}.md`;
 }
 

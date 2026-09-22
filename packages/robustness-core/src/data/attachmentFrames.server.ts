@@ -98,6 +98,13 @@ export function parseFfmpegDuration(stderr: string): number | null {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
 }
 
+/** Whether this process can run ffmpeg at all. The worker image has it;
+ * an app process may not, and a caller that would download a whole
+ * video first should ask this before it does. */
+export function hasFfmpeg(): boolean {
+  return !!ffmpegPath;
+}
+
 function ffmpeg(): string {
   if (!ffmpegPath) throw new Error("ffmpeg binary is not available on this platform (ffmpeg-static returned null)");
   return ffmpegPath;

@@ -117,6 +117,7 @@ export async function applyProjectN02Shape(folder: VaultFolder): Promise<VaultFo
  * `LEGACY_SKILL_FILE_NAMES`). */
 export const SKILL_FILE_NAMES: Record<GraphLogDefaultStage, string> = {
   knowledge: "KNOWLEDGE.md",
+  filing: "FILING.md",
   graph: "GRAPH.md",
   graphStructure: "GRAPH_STRUCTURE.md",
   projectView: "EFFORTS.md",
@@ -374,6 +375,10 @@ export async function getProjectStageSkill(
  * into every stage. */
 export const RESERVED_SKILL_FILE_NAMES = new Set([
   "knowledge.md",
+  // Read by sync-knowledge's filing call alone. Without this line the
+  // filing skill would be folded into every other stage's prompt as an
+  // extra, and every fingerprint would move.
+  "filing.md",
   "graph.md",
   "graph_structure.md",
   "efforts.md",

@@ -122,6 +122,64 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   against the `"graphlog"` queue); `POST /api/graphlog/sync-knowledge`
   (enqueue) + `GET /api/graphlog/jobs/:jobId` (poll), `nopal graphlog
   sync-knowledge --project <path>`.
+  - A PDF is read whole, as a `document` content block (since
+    2026-09-22; before that every PDF was "unsupported" and had no path
+    into the graph). Up to 20 MB of bytes. A PDF attached before then
+    gets its first sidecar on the next run, and because a day's graph
+    hashes its sidecars, that day re-extracts once; the stage logs it.
+  - **Filing** (`syncFiling.server.ts`): the stage's second question
+    about a file, under its own skill `skills/FILING.md`, into its own
+    file `_knowledge/<base>.filing.md`. The model says the kind (photo,
+    problem-photo, drawing, spec, permit, contract, receipt, invoice,
+    estimate, bid, other; `video` is assigned by code) with a one-line
+    reason, and for a cost kind reads out vendor, amount, currency, date
+    and the lines each came from. Code validates the answer
+    (`validateFiling`: kind in the list, amount two decimals, a real
+    date, cost fields only on cost kinds) and leaves a failing file
+    unfiled, asked again next run. The filing file is read by the Files
+    view and by nothing in the pipeline: it is deliberately not in the
+    description sidecar so no day hash moves and no page changes when a
+    project's existing files are filed. `filing.md` is a reserved skill
+    name; a project seeded before 2026-09-22 has no `FILING.md` until
+    reseeded, which the stage logs (not `incomplete`, on purpose: an
+    INCOMPLETE banner on every old project on a run with nothing new is
+    the page change filing promised not to make).
+  - A video's poster frame (`mediaRenditions.server.ts`) is written
+    here too, by code, from the second of its stills; a video described
+    before posters existed gets one on the next run.
+- **Files: folders, acts, renditions** (2026-09-22; ADR-019, ADR-020).
+  Not a stage. `/newspaper/:folderId/files` (`fruits/app/routes/
+  newspaper.$folderId_.files.tsx`) shows every attachment in four
+  folders that are views rebuilt on each request (`fileFolders.server.ts`,
+  `projectFileRows`): Gallery (image/video by content type), Documents
+  (drawing, spec, permit, contract, or `other` filed by a person), Costs
+  (receipt, invoice, estimate, bid) and Unsorted (unfiled, or `other` from
+  the model). A receipt photo is one row in two folders. A row is keyed
+  by the file's ORIGINAL id (the one the Card names; survives a refile)
+  and served by its synced copy's id (the one the graph cites and a
+  collaborator can open; `canViewFileRef` refuses the original to anyone
+  but its writer). Search is a code substring over name, caption, the
+  log block above the directive, the description, the reason, the vendor
+  and the read-from lines. Nothing in that module writes.
+  - A person's act on a file is a mark with `unit.kind = "file"`,
+    `page_hash: null` and an `act` (`FileAct`: `file-as` with a kind, or
+    `confirm-cost` with a verdict and the `filingValuesHash` it confirms),
+    written by `POST /api/graphlog/file-marks`, its sentence code-written
+    in the person's name (`fileActText`). It is projected into
+    `Syncs/Marks/` and extracted like any mark (its context line starts
+    "On the file", and `parseMarkTexts` accepts both prefixes). The page
+    run and the margin never see it: `listUnreadMarks` and
+    `listMarksOnPage` are page-only (`page_hash` set). The files view
+    derives the kind (latest `file-as`, else the filing record) and the
+    cost status (a `confirm-cost` whose `of` equals the current values
+    hash; anything else is unconfirmed). `confirmedCosts` is the only
+    exported list of costs. A tap cannot be rewritten or erased; it is
+    answered by another tap.
+  - Renditions (`mediaRenditions.server.ts`, `/api/vault/rendition/:id`):
+    thumb and display WebPs made at request time, a poster JPEG written
+    by sync-knowledge, all keyed by the storage key so an original and
+    its copies share one. The markdown keeps `/api/vault/view/<id>`;
+    only what an `<img>` loads changes.
 - **sync-graph** (`syncGraph.server.ts`: `runSyncGraph`) — reads a
   project's `syncs/` tree (including `_knowledge/*.knowledge.md`) and,
   per `skills/GRAPH.md`, extracts citable nodes — verbatim or
@@ -534,8 +592,8 @@ children, everything else (including the `Graph` space) is
   NOT seeded at project-creation time, unlike `skills`.
 - `projectN02.server.ts`:
   - `ensureProjectN02(folder)` — tags `folder` `project-n02` and seeds
-    `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`EFFORTS.md`/
-    `VOICE.md` from `graphLogDefaults.server.ts` (one table,
+    `skills/KNOWLEDGE.md`/`FILING.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/
+    `EFFORTS.md`/`VOICE.md` from `graphLogDefaults.server.ts` (one table,
     `SKILL_FILE_NAMES`, maps keys to file names for seeding and reseeding). `vault.server.ts`'s
     `createVaultFolder` calls this for every brand new project (and
     `personal`) directly — there's no other container type to default to.

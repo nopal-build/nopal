@@ -38,7 +38,7 @@ import type { OxInteractive } from "../oxmarkdown/interactive";
 import OxPopover from "../oxmarkdown/OxPopover";
 import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
-import { renditionUrl } from "../oxmarkdown/mediaUrls";
+import { posterUrl, renditionUrl } from "../oxmarkdown/mediaUrls";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import {
   buildAnnotationCtx,
@@ -760,7 +760,7 @@ function renderGalleryGrid(
             {img.kind === "video" ? (
               <video
                 src={img.url}
-                poster={renditionUrl(img.url, "poster")}
+                poster={posterUrl(img.url)}
                 title={img.title ?? undefined}
                 controls
                 preload="metadata"

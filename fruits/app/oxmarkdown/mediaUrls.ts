@@ -17,3 +17,10 @@ export function renditionUrl(url: string, size: MediaRenditionSize): string {
   if (!m) return url;
   return `/api/vault/rendition/${m[1]}?size=${size}`;
 }
+
+/** A video's poster, or nothing: an external video has no rendition, and
+ * handing `<video poster>` the video's own URL makes the browser fetch
+ * the whole clip as an image. */
+export function posterUrl(url: string): string | undefined {
+  return VIEW_URL.test(url) ? renditionUrl(url, "poster") : undefined;
+}

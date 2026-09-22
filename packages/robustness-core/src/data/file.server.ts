@@ -211,9 +211,13 @@ export async function getPresignedViewUrl(
  * actual bytes to a vision-capable LLM call happening server-side, where
  * a redirect makes no sense.
  */
-/** Whether an object is in the bucket. A 404 is `false`; anything else
- * (no credentials, a network fault) is thrown, so a caller never mistakes
- * an outage for "not made yet" and regenerates on every request. */
+/** Whether an object is in the bucket. A 404 is `false`, and so is a
+ * 403: S3 answers HEAD on a key that does not exist with 403 when the
+ * caller may Get and Put but not ListBucket, which is how an app role is
+ * often scoped, and a rendition that "exists" would be a 500 on every
+ * image on day one. A real permission fault then surfaces on the Put
+ * that follows. Anything else (no credentials, a network fault) is
+ * thrown, so an outage is never mistaken for "not made yet". */
 export async function objectExists(s3Key: string): Promise<boolean> {
   const client = createS3Client();
   try {
@@ -222,7 +226,7 @@ export async function objectExists(s3Key: string): Promise<boolean> {
   } catch (err) {
     const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
     const name = (err as { name?: string })?.name;
-    if (status === 404 || name === "NotFound" || name === "NoSuchKey") return false;
+    if (status === 404 || status === 403 || name === "NotFound" || name === "NoSuchKey" || name === "Forbidden") return false;
     throw err;
   }
 }

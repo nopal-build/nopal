@@ -13,7 +13,9 @@ import {
   MOVED_MARK_PLACEHOLDER,
   readableMark,
   buildMarksFileContent,
+  fileActText,
   isInsideMarkText,
+  isPageMark,
   markContextLine,
   moveTraceLine,
   parseMarkTexts,
@@ -119,6 +121,48 @@ describe("the marks file sync-graph reads", () => {
 
   it("says what kind of thought a mark sat on", () => {
     expect(markContextLine({ ...unit, kind: "photo", text: "" })).toMatch(/^On the Efforts page, at the photo \(/);
+  });
+});
+
+describe("a mark on a file (2026-09-22): a person's act, recorded like any mark", () => {
+  const fileUnit: MarkUnitSnapshot = {
+    key: "file:airp11soh9796uf13xp8",
+    kind: "file",
+    section: "",
+    effort: "",
+    text: "IMG_6959.jpeg",
+    refs: [{ name: "Lucas J", humanId: "admin_2", date: "2026-08-19", fileId: "7hth9b3eezqacscvt2ju" }],
+    attachmentId: "airp11soh9796uf13xp8",
+  };
+
+  it("has a context line that names the file and the entry it came with", () => {
+    expect(markContextLine(fileUnit)).toBe('On the file "IMG_6959.jpeg" (attached to Lucas J\'s 2026-08-19 entry):');
+  });
+
+  it("writes the tapped sentence in the person's name", () => {
+    expect(fileActText({ kind: "file-as", fileKind: "receipt" })).toBe("Filed as receipt.");
+    expect(
+      fileActText({ kind: "confirm-cost", verdict: "correct", of: "h", vendor: "Ace Hardware", amount: "25.16", currency: "USD", date: "2026-06-19" }),
+    ).toBe("Confirmed correct: Ace Hardware, 25.16 USD, 2026-06-19.");
+    expect(fileActText({ kind: "confirm-cost", verdict: "accepted", of: "h", vendor: "ACME", amount: "10.00", currency: "USD", date: null })).toBe(
+      "Accepted: ACME, 10.00 USD, no date.",
+    );
+  });
+
+  it("is highlighted and guaranteed a node the way a page mark is", () => {
+    const file = buildMarksFileContent([
+      { unit, text: "The wall unit was approved on Friday." },
+      { unit: fileUnit, text: "Confirmed correct: Ace Hardware, 25.16 USD, 2026-06-19." },
+    ]);
+    expect(parseMarkTexts(file)).toEqual(["The wall unit was approved on Friday.", "Confirmed correct: Ace Hardware, 25.16 USD, 2026-06-19."]);
+    expect(marksNotCaptured([parseMarkTexts(file)], ["The wall unit was approved on Friday."])).toEqual([
+      { text: "Confirmed correct: Ace Hardware, 25.16 USD, 2026-06-19.", sourceIndex: 0 },
+    ]);
+  });
+
+  it("is a file mark by its missing page hash, and never a page mark", () => {
+    expect(isPageMark({ page_hash: "abc" })).toBe(true);
+    expect(isPageMark({ page_hash: null })).toBe(false);
   });
 });
 

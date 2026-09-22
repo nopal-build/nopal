@@ -31,7 +31,11 @@ import type { PhrasingContent, RootContent } from "mdast";
 import { parseOxDocument, type OxDocument, type DirectiveNode } from "./document";
 import { isRefDirective, parseRefAttrs } from "./refDirective";
 
-export type MarkUnitKind = "heading" | "bullet" | "sentence" | "photo";
+/** `file` is a unit that is not on any page: an attached file itself, by
+ * its original id, so a person's act on a file ("file this as a receipt",
+ * "confirmed correct") is a mark like any other. Never produced by
+ * `computeMarkUnits`; built server-side by the file-marks route. */
+export type MarkUnitKind = "heading" | "bullet" | "sentence" | "photo" | "file";
 
 /** A citation carried by a unit: one person's synced day, never a node.
  * `fileId` is the synced copy's id, read from the ref's `location`. */

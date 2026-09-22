@@ -5,6 +5,7 @@ import { canViewFolder } from "robustness-core/data/vault.types";
 import { pageHash } from "robustness-core/data/pageBody.server";
 import {
   createMark,
+  markDate,
   MARK_TEXT_LIMIT,
   pageMarkUnits,
   snapshotUnit,
@@ -77,13 +78,4 @@ export async function action({ request }: ActionFunctionArgs) {
   });
   if (!mark) return Response.json({ error: "The mark didn't save. Try again." }, { status: 500 });
   return Response.json({ id: mark._id }, { status: 201 });
-}
-
-/** The writer's own day when it is plausible (an evening mark in the
- * Pacific is already tomorrow in UTC), otherwise UTC today. */
-function markDate(requested: string | undefined): string {
-  const today = new Date().toISOString().slice(0, 10);
-  if (!requested || !/^\d{4}-\d{2}-\d{2}$/.test(requested)) return today;
-  const diff = Math.abs(Date.parse(`${requested}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`));
-  return diff <= 86_400_000 ? requested : today;
 }

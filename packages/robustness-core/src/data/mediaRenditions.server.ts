@@ -65,12 +65,13 @@ export async function ensureImageRendition(
   }
   const original = await downloadFileBytes(file.s3_key);
   const decodable = isHeicContentType(file.content_type) ? await heicToJpeg(original) : original;
-  const metadata = await sharp(decodable).metadata();
+  const image = sharp(decodable);
+  const metadata = await image.metadata();
   if ((metadata.pages ?? 1) > 1) {
     return { bytes: original, contentType: file.content_type };
   }
   const edge = RENDITION_SIZES[size];
-  const bytes = await sharp(decodable)
+  const bytes = await image
     .rotate()
     .resize({ width: edge, height: edge, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 80 })

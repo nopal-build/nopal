@@ -14,6 +14,7 @@ export interface WatchedFile {
 /** The constant each seeded GraphLog skill lives in, and the file people know it as. */
 export const RUNTIME_SKILL_FILE_NAMES: Record<string, string> = {
   DEFAULT_KNOWLEDGE_SKILL: "KNOWLEDGE.md",
+  DEFAULT_FILING_SKILL: "FILING.md",
   DEFAULT_GRAPH_SKILL: "GRAPH.md",
   DEFAULT_GRAPH_STRUCTURE_SKILL: "GRAPH_STRUCTURE.md",
   DEFAULT_PROJECT_VIEW_SKILL: "EFFORTS.md",
