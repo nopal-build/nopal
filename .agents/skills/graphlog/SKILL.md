@@ -464,9 +464,17 @@ code; the model reads marks the way it reads any other input.
   exists only to say which page a mark was written on.
 - **What the run does with them** — `graph-project-view`. Unread marks
   open the gate the way an unread note does, and add one prompt block plus
-  two tools (`read_mark`, `propose_move`). With no marks the prompt and
+  one tool (`read_mark`). With no marks the prompt and
   the tool array are byte-identical to what they always were; `viewTools`
   returns `TOOLS` itself. Marks are stamped read only on a clean finish.
+- **Refiling is a person's act, never the model's.** The page run
+  classifies a structural mark (`read_mark`, kind `structural`) and stops
+  there; the margin's own control (`GET /api/graphlog/move-options`, then
+  `POST /api/graphlog/moves`) is what moves anything, with the
+  destination picked by id. A `propose_move` tool existed and was removed
+  (Austin, 2026-09-22): reading what a sentence means and editing
+  somebody's daily log are different things, and only one of them should
+  follow from a model's reading. Do not reintroduce it.
 - **Refiling** — `graphLogMoves.server.ts`, table `graphlog_moves`. A
   misfiled entry is corrected at the source: the `##` section (or the
   whole Card) is cut from the Card it was filed under and put, unchanged,

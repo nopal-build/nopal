@@ -217,41 +217,6 @@ export async function getMove(id: string): Promise<GraphLogMove | null> {
   return row ? formatRecord(row) : null;
 }
 
-/** The names of the projects this project's material has been refiled to,
- * for a page run to refuse to write. A reader here may not be able to see
- * them, and may not be allowed to learn they exist. */
-export async function listDestinationNames(sourceProjectFolderId: string): Promise<string[]> {
-  const moves = await selectMoves("source_project_folder_id = $source AND status != 'undone'", {
-    source: sourceProjectFolderId,
-  });
-  const names: string[] = [];
-  for (const id of new Set(moves.map((m) => m.dest_project_folder_id).filter((d): d is string => !!d))) {
-    const folder = await getFolderById(id);
-    if (folder?.name) names.push(folder.name);
-  }
-  return names;
-}
-
-function newId(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = crypto.getRandomValues(new Uint8Array(20));
-  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
-}
-
-// ── A mark asking for a move ─────────────────────────────────────────────────
-
-export type MoveProposal = {
-  markId: string;
-  /** The synced day the chunk lives in: one of the mark's cited files. */
-  entryFileId: string;
-  /** A `##` heading in that Card, "" for its intro, or null for the whole
-   * Card. */
-  section: string | null;
-  /** Which section of that heading, when a Card repeats one. */
-  occurrence?: number;
-  /** The project it belongs to, by name, as the mark says it. */
-  destination: string;
-};
 
 /** A proposal that passed every guard, ready to carry out or to record as
  * a request. */
@@ -297,13 +262,40 @@ export function matchProject<T extends { _id: string; name: string }>(
   return partial.length === 1 ? partial[0] : null;
 }
 
+/** The names of the projects this project's material has been refiled to,
+ * for a page run to refuse to write. A reader here may not be able to see
+ * them, and may not be allowed to learn they exist. */
+export async function listDestinationNames(sourceProjectFolderId: string): Promise<string[]> {
+  const moves = await selectMoves("source_project_folder_id = $source AND status != 'undone'", {
+    source: sourceProjectFolderId,
+  });
+  const names: string[] = [];
+  for (const id of new Set(moves.map((m) => m.dest_project_folder_id).filter((d): d is string => !!d))) {
+    const folder = await getFolderById(id);
+    if (folder?.name) names.push(folder.name);
+  }
+  return names;
+}
+
+function newId(): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
+}
+
+// ── A person asking for a move ───────────────────────────────────────────────
+
 /**
- * Every guard a move has to pass, reading only. Two callers: a mark the
- * page run read and decided was structural, and a person choosing the
- * project themselves in the margin. The second names the destination by
- * id, so there is nothing to match and nothing for a model to get wrong;
- * the first names it in the mark's own words. Otherwise the rules are the
- * same, which is why they live in one function.
+ * Every guard a move has to pass, reading only.
+ *
+ * One caller: a person choosing the entry and the project in the margin,
+ * who names the destination by id, so there is nothing to match. A page
+ * run used to be the other, moving words from a sentence like "this is
+ * Coronado's" once it had classified the mark as structural; that was
+ * dropped (Austin, 2026-09-22) because the reading and the act are
+ * different things, and only one of them should edit somebody's daily
+ * log. `destName` stays supported for a future caller that has a name
+ * rather than an id.
  *
  * Never throws; a refusal comes back as a reason.
  */
@@ -411,27 +403,6 @@ export async function checkMove(input: {
   } catch (err) {
     return { ok: false, reason: `checking it failed (${err instanceof Error ? err.message : String(err)})` };
   }
-}
-
-/** What the page run's `propose_move` hands in: the destination in the
- * mark's own words, and the entry among the ones its passage cites. */
-export async function checkMoveProposal(input: {
-  proposal: MoveProposal;
-  mark: GraphLogMark;
-  sourceProject: VaultFolder;
-  parseSyncedName: (name: string) => { date: string; humanId: string } | null;
-}): Promise<MoveCheck> {
-  return checkMove({
-    markId: input.mark._id,
-    markerHumanId: input.mark.author_human_id,
-    sourceProject: input.sourceProject,
-    entryFileId: input.proposal.entryFileId,
-    section: input.proposal.section,
-    occurrence: input.proposal.occurrence,
-    destName: input.proposal.destination,
-    citedFileIds: input.mark.unit.refs.map((r) => r.fileId),
-    parseSyncedName: input.parseSyncedName,
-  });
 }
 
 /** Records the move and, unless it is somebody else's entry to move,

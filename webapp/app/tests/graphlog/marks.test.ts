@@ -262,13 +262,16 @@ describe("a page run with no marks sees exactly what it always did", () => {
   it("offers the same tools, the same array", () => {
     expect(viewTools(false)).toBe(viewTools(false));
     expect(viewTools(false).map((t) => t.name)).toEqual(["update_section", "remove_section", "describe_effort", "get_node"]);
+    // Reading a mark is the only thing marks add. Refiling used to be a
+    // tool here as well; a person does that from the margin now (Austin,
+    // 2026-09-22), so the model classifies and never moves anybody's
+    // words.
     expect(viewTools(true).map((t) => t.name)).toEqual([
       "update_section",
       "remove_section",
       "describe_effort",
       "get_node",
       "read_mark",
-      "propose_move",
     ]);
   });
 
@@ -303,6 +306,11 @@ describe("a page run with no marks sees exactly what it always did", () => {
     };
     const prompt = buildUserPrompt({ readmeContent: "# Crouch", unstampedComments: [], marks: [mark] });
     expect(prompt).toContain(buildMarksBlock([mark]));
+    // It asks the model to say what each mark is doing, and never to act
+    // on one: a structural mark is recorded, and a person refiles it.
+    expect(prompt).toContain("Call read_mark once for every mark below");
+    expect(prompt).not.toMatch(/propose_move/);
+    expect(prompt).toContain("This page never names another project");
     expect(prompt).toContain("mark:m1 · Lucas J · 2026-09-18");
     expect(prompt).toContain('[file 7hth9b3eezqacscvt2ju; its sections: "hvac"]');
     expect(prompt).toContain("Their words: The wall unit was approved. / Rob said yes.");
