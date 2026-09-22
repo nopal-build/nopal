@@ -94,3 +94,33 @@ test("the round-trip column re-serializes the same parsed document back to markd
   await textarea.fill("# A heading\n\nSome **bold** text.\n");
   await expect(roundtrip).toHaveValue("# A heading\n\nSome **bold** text.\n");
 });
+
+test("a container directive that isn't closed yet doesn't blow up the whole render", async ({
+  page,
+}) => {
+  // Regression test for a real bug: typing ":::badge" (a container
+  // directive fence, whether by an actual `:::name` container or a typo
+  // reaching for `::badge`) is the ORDINARY, transient mid-typing state
+  // every container directive passes through before its author has
+  // typed the closing `:::` yet — this must never wipe out the whole
+  // rendered document with a parse-error placeholder. Mirrors the real
+  // reference implementation (`micromark-extension-directive`/`mdast-
+  // util-directive`, confirmed directly): an unclosed container
+  // implicitly closes at EOF.
+  const textarea = page.locator(".playground-source");
+  const rendered = page.locator(".playground-rendered");
+
+  await textarea.fill(":::badge\n");
+  await expect(rendered).not.toContainText("Parse error");
+  await expect(rendered.locator(".ox-directive-container")).toHaveCount(1);
+  await expect(rendered.locator(".ox-directive-container")).toHaveAttribute(
+    "data-directive-name",
+    "badge",
+  );
+
+  await textarea.fill(":::badge\nsome text\n");
+  await expect(rendered).not.toContainText("Parse error");
+  await expect(rendered.locator(".ox-directive-container p")).toHaveText(
+    "some text",
+  );
+});

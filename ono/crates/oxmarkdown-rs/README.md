@@ -67,6 +67,18 @@ maintaining it forever.
   directive written *inside* a blockquote or list item isn't specifically
   handled. Real OxMarkdown content writes directives as their own
   top-level blocks in practice; revisit if that stops being true.
+- **Real bug found and fixed**: an unclosed `:::name` container
+  directive used to be a hard `Err` (`"unclosed container directive"`),
+  not a deliberate choice — confirmed directly against the real
+  reference implementation (`micromark-extension-directive`/`mdast-
+  util-directive`, the exact packages `oxmarkdown-core` depends on) that
+  it instead implicitly closes at EOF, no error at all. Mattered far
+  more here than a typical batch parse: `ono`'s live playground
+  re-parses on every keystroke, and a container directive is ALWAYS
+  transiently "unclosed" for the entire time its author is still typing
+  it. Fixed in `split_chunks`; see `directives.rs`'s own
+  `unclosed_container_implicitly_closes_at_eof` and its two sibling
+  tests.
 - **Done**: serializing back to markdown (`serialize_document`),
   mirroring the JS `serializeOxDocument`'s default (non-Editing-mode)
   behavior — one blank line between top-level blocks, not preserving

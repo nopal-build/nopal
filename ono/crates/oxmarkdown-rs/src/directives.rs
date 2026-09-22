@@ -260,7 +260,6 @@ fn split_chunks(markdown: &str) -> Result<Vec<Chunk>, String> {
                 let mut depth = 1;
                 let mut inner_lines: Vec<&str> = Vec::new();
                 i += 1;
-                let mut closed = false;
                 while i < lines.len() {
                     match classify_line(lines[i]) {
                         FenceLine::ContainerOpen { .. } => {
@@ -271,7 +270,6 @@ fn split_chunks(markdown: &str) -> Result<Vec<Chunk>, String> {
                             depth -= 1;
                             if depth == 0 {
                                 i += 1;
-                                closed = true;
                                 break;
                             }
                             inner_lines.push(lines[i]);
@@ -280,9 +278,21 @@ fn split_chunks(markdown: &str) -> Result<Vec<Chunk>, String> {
                     }
                     i += 1;
                 }
-                if !closed {
-                    return Err(format!("unclosed container directive `:::{name}`"));
-                }
+                // An unclosed container directive implicitly closes at
+                // EOF, exactly like the real reference implementation
+                // it mirrors — confirmed directly, not assumed: a
+                // `:::name` with no closing `:::` still parses as a
+                // real `containerDirective` via `micromark-extension-
+                // directive`/`mdast-util-directive` (the exact packages
+                // `oxmarkdown-core`, the JS sibling, depends on), whose
+                // children are everything through EOF. This used to be
+                // a hard `Err` here — a real, confirmed divergence from
+                // that reference, not a deliberate choice, and a much
+                // worse one for `ono`'s live playground than for a
+                // batch parse: a container directive is ALWAYS
+                // transiently "unclosed" for the entire time its author
+                // is still typing it, before the closing fence exists
+                // at all.
                 chunks.push(Chunk::Container {
                     name,
                     attrs,
@@ -423,9 +433,40 @@ mod tests {
     }
 
     #[test]
-    fn unclosed_container_is_an_error() {
-        let err = parse_document(":::toggle\nnever closed\n").unwrap_err();
-        assert!(err.contains("unclosed"), "{err}");
+    fn unclosed_container_implicitly_closes_at_eof() {
+        // Matches the real reference implementation exactly (confirmed
+        // directly against `micromark-extension-directive`/`mdast-
+        // util-directive`, not assumed) — no error, and everything
+        // after the fence becomes the directive's own content.
+        let doc = parse_document(":::toggle\nnever closed\n").unwrap();
+        let children = doc["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1, "{children:#?}");
+        assert_eq!(children[0]["type"], "containerDirective");
+        assert_eq!(children[0]["name"], "toggle");
+        let inner = children[0]["children"].as_array().unwrap();
+        assert_eq!(inner.len(), 1, "{inner:#?}");
+        assert_eq!(inner[0]["type"], "paragraph");
+    }
+
+    #[test]
+    fn unclosed_container_with_no_content_at_all_still_closes_at_eof() {
+        let doc = parse_document(":::badge\n").unwrap();
+        let children = doc["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1, "{children:#?}");
+        assert_eq!(children[0]["type"], "containerDirective");
+        assert_eq!(children[0]["name"], "badge");
+        assert_eq!(children[0]["children"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn unclosed_nested_container_closes_both_levels_at_eof() {
+        let doc = parse_document(":::grid\n:::toggle\ninner\n").unwrap();
+        let children = doc["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1, "{children:#?}");
+        assert_eq!(children[0]["name"], "grid");
+        let inner = children[0]["children"].as_array().unwrap();
+        assert_eq!(inner.len(), 1, "{inner:#?}");
+        assert_eq!(inner[0]["name"], "toggle");
     }
 
     #[test]
