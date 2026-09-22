@@ -123,10 +123,15 @@ function toLineCurveKind(v: string | undefined): LineCurveKind {
  * variable a `color="..."` on `:::section-title{...}` would (that one
  * goes through CSS attribute selectors instead -- see `website.css` --
  * since it targets a heading already rendered as `children`, not a prop
- * this registry can pass directly). */
+ * this registry can pass directly). `red`/`green` read the SAME scheme-
+ * aware `--website-accent-*` tokens `:::section-title{color="..."}`
+ * reads (website.css) -- a line drawn alongside a green/red heading
+ * should recolor right along with it in dark mode, not go stale.
+ * `purple` stays a literal, scheme-invariant token (no dark-mode
+ * counterpart exists for it, by design -- see website.css). */
 const ACCENT_COLOR_VARS: Record<string, string> = {
-  red: "var(--red)",
-  green: "var(--green)",
+  red: "var(--website-accent-red)",
+  green: "var(--website-accent-green)",
   purple: "var(--purple)",
 };
 function toAccentColorVar(name: string | undefined): string | undefined {

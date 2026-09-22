@@ -423,16 +423,17 @@ meaning for).
   inserts a fresh paragraph, unconditionally, ignoring whatever already
   follows. Space is different again, also by live feedback: exiting
   immediately on the FIRST press fought the obvious expectation that
-  Space would just keep typing. The real, confirmed-right shape:
-  the FIRST Space appends a literal space to the directive's own
-  visible content (landing a caret right after it); a SECOND Space
-  (now `caret_trapped_in_directive`'s own case) exits, same as
-  Enter/Arrow. `space_in_directive` edits the rendered CONTENT directly,
-  not the underlying `attributes` attr (e.g. `"badge"`'s own `label`)
-  — a deliberate, documented tradeoff: it stays generic across every
-  directive kind, but reopening the attrs popover (`directive_popover.
-  rs`) and hitting Save regenerates content FROM `attributes` again,
-  discarding a quick Space-edit that was never written back into it.
+  Space would just keep typing, so the first Space instead appends a
+  literal space to the directive's own visible content and lands a
+  caret right after it. `space_in_directive` edits the rendered CONTENT
+  directly, not the underlying `attributes` attr (e.g. `"badge"`'s own
+  `label`) — a deliberate, documented tradeoff: it stays generic across
+  every directive kind, but reopening the attrs popover (`directive_
+  popover.rs`) and hitting Save regenerates content FROM `attributes`
+  again, discarding a quick Space-edit that was never written back into
+  it. (The FIRST version of this fix also made a SECOND Space exit,
+  same as Enter/Arrow — that turned out to be wrong too; see the next
+  section.)
 - **A second real, confirmed-live `taino-edit-dom` gap found WHILE
   fixing this, not by reasoning alone**: `EditorView::read_selection`
   ALWAYS reconstructs `Selection::Text`, never `Selection::Node` —
@@ -449,7 +450,7 @@ meaning for).
   round-trip without confirming it against the ACTUAL live browser
   path, not just a native unit test). `directive_at_selection` now
   detects both shapes explicitly.
-- Confirmed live via 8 e2e tests
+- Confirmed live via e2e tests
   (`../../e2e/tests/directive-escape.spec.ts`), reproducing the exact
   reported symptoms before asserting each fix: Enter never duplicates
   and always inserts a genuinely NEW paragraph (never reusing or
@@ -457,10 +458,51 @@ meaning for).
   directive); Arrow keys always escape even with nothing after the
   directive, backward landing at the end of the preceding paragraph;
   the first Space appends to the directive's own content without
-  corrupting the DOM, and a second Space right after it exits into
-  whatever already follows; and a caret that reaches the trap via
-  ordinary keyboard navigation (never clicking at all) still escapes
-  cleanly on Enter.
+  corrupting the DOM; and a caret that reaches the trap via ordinary
+  keyboard navigation (never clicking at all) still escapes cleanly on
+  Enter.
+
+## Once inside a directive's content, arrow keys and a second Space still misbehaved — fixed
+
+A THIRD round of live feedback on the same directive-editing feature
+found this design was still wrong once combined with "I should be able
+to arrow around inside a directive to edit its contents": after the
+first Space above landed a real caret inside the content, pressing
+ArrowLeft/ArrowRight to move within that text immediately exited the
+directive instead of moving the caret — there was no concept of "moving
+within the content" versus "moving past its true edge." Combined with
+the "second Space exits" design from the previous section, a second
+Space press (meant as "add another space to the label") instead
+silently jumped forward, landing on/selecting whatever directive
+happened to sit next — reported live as "space never adds a space to
+the label ... goes to the next line."
+
+- **`at_directive_content_edge`** checks whether a position sits at the
+  content's true start/end edge. **`arrow_left_fixups`/`arrow_right_
+  fixups`** (the actual `"ArrowLeft"`/`"ArrowRight"` keymap entries)
+  now only call `exit_directive` when the caret is already AT that edge
+  and moving further in that direction — otherwise they defer to the
+  base `caret_left`/`caret_right`, so the caret just moves within the
+  label like ordinary text. The whole-unit-selection case is unchanged:
+  right after clicking a directive, arrow keys still exit
+  unconditionally (standard selection-collapse convention).
+- **`space_in_directive`'s "second Space exits" branch was removed
+  entirely.** Once a real caret is already inside the content
+  (`caret_trapped_in_directive`'s case), Space is no longer special at
+  all: it declines (`false`) and native contenteditable typing handles
+  it exactly like any other character — already proven correct
+  elsewhere via `read_dom_changes`. Only the first Space, while the
+  directive is still selected as a whole unit, keeps its special
+  "append and land inside" behavior.
+- `"ArrowUp"`/`"ArrowDown"` are deliberately left exiting
+  unconditionally, unchanged — vertical movement has no clean
+  single-line "within the label" meaning.
+- Confirmed live via e2e tests (`../../e2e/tests/directive-escape.
+  spec.ts`): a second Space now just extends the label like ordinary
+  typing instead of exiting; ArrowLeft/ArrowRight move the caret within
+  a directive's content once already inside; and ArrowLeft/ArrowRight
+  AT the content's true edge still exit correctly (regression coverage
+  for the case that legitimately should still exit).
 
 ## The caret could land right before a checkbox — fixed
 

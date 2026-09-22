@@ -19,7 +19,17 @@ import { gotoWithDoc } from "./helpers";
 // "land on whatever's already next" logic (which surprisingly jumped
 // straight to selecting an unrelated adjacent directive), and Space's
 // FIRST press appends to the directive's own visible content instead
-// of exiting immediately \u2014 only a SECOND press actually exits.
+// of exiting immediately.
+//
+// A third round of live feedback (item 6) found the design above was
+// STILL wrong once combined with "I should be able to arrow around to
+// edit the contents": a second Space used to force-exit the directive,
+// and arrow keys used to exit unconditionally the moment the caret was
+// already inside the content, rather than moving within it. Now, once
+// a real caret is inside a directive's content, it behaves like any
+// other text caret: Space/typing just extends the label, and arrow
+// keys move normally within the content, only exiting once they'd
+// cross the content's true start/end edge.
 
 test("pressing Enter after selecting a badge always inserts a fresh new line, never reuses or jumps to what's already next", async ({
   page,
@@ -116,7 +126,7 @@ test("the first Space after selecting a badge appends to its own label instead o
   await expect(page.locator(".taino-editor p")).toHaveText("plain paragraph");
 });
 
-test("a second Space (right after the first) exits, landing in whatever already follows", async ({
+test("a second Space (right after the first) no longer exits — it just extends the label like ordinary typing", async ({
   page,
 }) => {
   await gotoWithDoc(page, '::badge{label="Ready"}\n\nplain paragraph\n');
@@ -125,8 +135,45 @@ test("a second Space (right after the first) exits, landing in whatever already 
   await page.keyboard.press("Space");
   await page.keyboard.type("!");
 
-  await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready ");
-  await expect(page.locator(".taino-editor p")).toHaveText("!plain paragraph");
+  // Still exactly one badge, its label now extended with two spaces and
+  // the typed "!" — nothing exited, nothing duplicated.
+  await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
+  await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready  !");
+  // The existing paragraph is completely untouched.
+  await expect(page.locator(".taino-editor p")).toHaveText("plain paragraph");
+});
+
+test("once inside a directive's content, ArrowLeft/ArrowRight move the caret within it instead of exiting", async ({
+  page,
+}) => {
+  await gotoWithDoc(page, '::badge{label="Ready"}\n\nplain paragraph\n');
+  await page.locator(".ox-directive-leaf").click();
+  await page.keyboard.press("Space");
+  // Caret now sits right after "Ready " (inside the content, not at the
+  // very start edge). Move left twice, then type — this should land in
+  // the MIDDLE of the label, not exit the directive.
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.type("!");
+
+  await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
+  await expect(page.locator(".ox-directive-leaf")).toHaveText("Read!y ");
+  await expect(page.locator(".taino-editor p")).toHaveText("plain paragraph");
+});
+
+test("ArrowLeft at the true start edge of a directive's content still exits backward", async ({
+  page,
+}) => {
+  await gotoWithDoc(page, 'before\n\n::badge{label="Ready"}\n');
+  await page.locator(".ox-directive-leaf").click();
+  await page.keyboard.press("ArrowLeft"); // exit backward, landing at the end of "before"
+  await page.keyboard.press("ArrowRight"); // re-enter forward, landing right at the content start edge
+  await page.keyboard.press("ArrowLeft"); // at the start edge already — this should exit again
+  await page.keyboard.type("!");
+
+  await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
+  await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready");
+  await expect(page.locator(".taino-editor p").first()).toHaveText("before!");
 });
 
 test("a caret that lands inside a directive's own content via keyboard navigation still escapes cleanly on Enter", async ({

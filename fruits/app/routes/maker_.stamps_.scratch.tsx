@@ -428,14 +428,22 @@ function PreviewBox({
   entry,
   markdown,
   minHeight,
+  previewScheme,
 }: {
   entry: ScratchEntry;
   markdown: string;
   minHeight: number;
+  /** Forces this box's own `--website-accent-*`/`--website-bg-page`
+   * tokens (website.css) to a specific scheme via a plain descendant
+   * custom-property override (`.website-preview-force-{light,dark}`),
+   * regardless of the browser's actual `prefers-color-scheme` -- lets
+   * the guide's own toggle preview either one on demand. */
+  previewScheme: "light" | "dark";
 }) {
   const registry = buildWebsiteDirectiveRegistry({ dailyLogEntries: {} });
   return (
     <div
+      className={previewScheme === "dark" ? "website-preview-force-dark" : "website-preview-force-light"}
       style={{
         border: `1px solid ${semanticColors.surfaceBorder}`,
         borderRadius: 6,
@@ -471,7 +479,15 @@ function PreviewBox({
  * edited; that only happens in Focus mode's separate copy), its note,
  * and a button to jump into Focus mode on it. No local edit state at all
  * here, unlike `FocusedEntryView` -- nothing in this row is editable. */
-function EntryListRow({ entry, onFocus }: { entry: ScratchEntry; onFocus: () => void }) {
+function EntryListRow({
+  entry,
+  onFocus,
+  previewScheme,
+}: {
+  entry: ScratchEntry;
+  onFocus: () => void;
+  previewScheme: "light" | "dark";
+}) {
   return (
     <div
       className={sprinkles({ display: "flex", gap: 4 })}
@@ -493,7 +509,7 @@ function EntryListRow({ entry, onFocus }: { entry: ScratchEntry; onFocus: () => 
             predictable, scannable size regardless of how tall any one
             example's real render happens to be. */}
         <div style={{ maxHeight: 220, overflow: "auto" }}>
-          <PreviewBox entry={entry} markdown={entry.markdown} minHeight={entry.previewMinHeight ?? 120} />
+          <PreviewBox entry={entry} markdown={entry.markdown} minHeight={entry.previewMinHeight ?? 120} previewScheme={previewScheme} />
         </div>
       </div>
       <div style={{ flex: "1 1 auto", minWidth: 0 }}>
@@ -531,7 +547,7 @@ function EntryListRow({ entry, onFocus }: { entry: ScratchEntry; onFocus: () => 
  * height as possible, with the editable markdown source + this entry's
  * own directive signature/note demoted to a narrow sidebar underneath
  * each other, not competing for space with the render. */
-function FocusedEntryView({ entry }: { entry: ScratchEntry }) {
+function FocusedEntryView({ entry, previewScheme }: { entry: ScratchEntry; previewScheme: "light" | "dark" }) {
   // Local edit state -- `StampsScratch` mounts this with `key={entry.id}`,
   // so switching to a DIFFERENT focused entry always starts a fresh
   // `useState(entry.markdown)` instead of carrying over stale edits from
@@ -564,7 +580,7 @@ function FocusedEntryView({ entry }: { entry: ScratchEntry }) {
     <div className={sprinkles({ display: "flex", gap: 5, flexWrap: "wrap" })} style={{ alignItems: "flex-start" }}>
       <div style={{ flex: "1 1 480px", minWidth: 0 }}>
         <ColumnLabel>Rendered (static)</ColumnLabel>
-        <PreviewBox entry={entry} markdown={markdown} minHeight={Math.max(entry.previewMinHeight ?? 0, 480)} />
+        <PreviewBox entry={entry} markdown={markdown} minHeight={Math.max(entry.previewMinHeight ?? 0, 480)} previewScheme={previewScheme} />
       </div>
       <div style={{ flex: "0 1 340px", minWidth: 280 }}>
         <div className={sprinkles({ display: "flex", alignItems: "center", justifyContent: "space-between" })}>
@@ -621,12 +637,23 @@ function FocusedEntryView({ entry }: { entry: ScratchEntry }) {
 }
 
 type ViewMode = "focus" | "list";
+/** Which scheme the "Rendered (static)" preview boxes should show,
+ * regardless of the browser's own OS-level `prefers-color-scheme` --
+ * see `PreviewBox`/`website.css`'s `.website-preview-force-{light,dark}`. */
+type PreviewScheme = "light" | "dark";
 
-function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewMode) => void }) {
-  const options: { value: ViewMode; label: string }[] = [
-    { value: "focus", label: "Focus" },
-    { value: "list", label: "List" },
-  ];
+/** A generic two-(or-more)-option pill toggle -- shared by the Focus/List
+ * mode switch and the Light/Dark preview-scheme switch, so both read as
+ * the exact same control instead of two subtly-different-looking ones. */
+function SegmentedToggle<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+}) {
   return (
     <div
       className={sprinkles({ display: "inline-flex" })}
@@ -641,8 +668,8 @@ function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (mode: V
           style={{
             border: "none",
             cursor: "pointer",
-            background: mode === opt.value ? semanticColors.textBrand : "transparent",
-            color: mode === opt.value ? "white" : semanticColors.textSubtle,
+            background: value === opt.value ? semanticColors.textBrand : "transparent",
+            color: value === opt.value ? "white" : semanticColors.textSubtle,
           }}
         >
           {opt.label}
@@ -651,6 +678,15 @@ function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (mode: V
     </div>
   );
 }
+
+const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
+  { value: "focus", label: "Focus" },
+  { value: "list", label: "List" },
+];
+const PREVIEW_SCHEME_OPTIONS: { value: PreviewScheme; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
 
 // Pin whichever entry is actively being iterated on here -- set to `null`
 // to fall back to the "newest entry is focused by default" convention
@@ -663,6 +699,12 @@ export default function StampsScratch() {
   // the default. "list": a compact, read-only row per entry, for browsing
   // the whole vocabulary at a glance.
   const [viewMode, setViewMode] = useState<ViewMode>("focus");
+  // Independent of `viewMode` -- which scheme every "Rendered (static)"
+  // preview box shows, regardless of the browser's own OS-level
+  // `prefers-color-scheme`. Fixed at "light" by default (deterministic,
+  // not environment-dependent) rather than trying to detect/mirror
+  // whatever the browser already happens to be in.
+  const [previewScheme, setPreviewScheme] = useState<PreviewScheme>("light");
 
   const focusedEntry = ENTRIES.find((e) => e.id === focusedId) ?? ENTRIES[0];
 
@@ -704,7 +746,10 @@ export default function StampsScratch() {
               >
                 {viewMode === "focus" ? formatEntryLabel(focusedEntry.id) : "Examples"}
               </h1>
-              <ViewModeToggle mode={viewMode} onChange={setViewMode} />
+              <div className={sprinkles({ display: "flex", gap: 2 })}>
+                <SegmentedToggle value={previewScheme} onChange={setPreviewScheme} options={PREVIEW_SCHEME_OPTIONS} />
+                <SegmentedToggle value={viewMode} onChange={setViewMode} options={VIEW_MODE_OPTIONS} />
+              </div>
             </div>
             {viewMode === "list" && (
               <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: 640, lineHeight: 1.5 }}>
@@ -721,11 +766,11 @@ export default function StampsScratch() {
           </div>
 
           {viewMode === "focus" ? (
-            <FocusedEntryView key={focusedEntry.id} entry={focusedEntry} />
+            <FocusedEntryView key={focusedEntry.id} entry={focusedEntry} previewScheme={previewScheme} />
           ) : (
             <Stack gap={4}>
               {ENTRIES.map((entry) => (
-                <EntryListRow key={entry.id} entry={entry} onFocus={() => focusOn(entry.id)} />
+                <EntryListRow key={entry.id} entry={entry} onFocus={() => focusOn(entry.id)} previewScheme={previewScheme} />
               ))}
             </Stack>
           )}

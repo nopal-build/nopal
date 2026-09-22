@@ -147,7 +147,8 @@
 //!    Space (typed right after, at that same trapped position) is what
 //!    actually exits — see `space_in_directive`'s own doc comment for
 //!    the known, accepted tradeoff (this edits visible content, not the
-//!    underlying `attributes` attr).
+//!    underlying `attributes` attr). (This "second Space exits" half
+//!    was itself later found to be wrong too — see item 6.)
 //! 5. **The caret could land immediately BEFORE a `checkbox` atom** —
 //!    reported live: a checkbox is always its list item's own leading
 //!    glyph (`convert::convert_list_item`/`checkbox_on_input` both only
@@ -174,10 +175,47 @@
 //!    which declines whenever no directive is involved), so it can still
 //!    land there — a known, narrower-than-ideal residual gap, not
 //!    attempted here.
+//! 6. **Once already inside a directive's content, arrow keys exited
+//!    unconditionally and a second Space also force-exited** — two
+//!    REAL bugs reported live in the SAME session as item 4's Space/
+//!    Enter split, confirmed via Playwright before touching any code
+//!    (not guessed): after the first Space appended a space and landed
+//!    a real caret inside the content (`caret_trapped_in_directive`'s
+//!    own case), pressing ArrowLeft/ArrowRight to move within that text
+//!    immediately exited instead of moving the caret — there was no
+//!    concept of "moving within the content" versus "moving past its
+//!    edge." Combined with item 4's "second Space exits" design, this
+//!    made simple label editing feel broken: arrowing in to fix a typo
+//!    always bounced you straight back out, and a second Space (meant
+//!    as "okay, add another space to the label") instead silently
+//!    jumped forward, landing on/selecting whatever directive happened
+//!    to sit next in the document.
+//!
+//!    Fixed by making a caret already inside a directive's content
+//!    behave like ORDINARY text in every way except at the content's
+//!    true start/end edge: `at_directive_content_edge` checks whether a
+//!    position is at that edge, and `arrow_left_fixups`/`arrow_right_
+//!    fixups` (the `"ArrowLeft"`/`"ArrowRight"` keymap entries) only
+//!    call `exit_directive` when already AT the edge and moving further
+//!    that direction — otherwise they defer to the base `caret_left`/
+//!    `caret_right` so the caret just moves within the label normally.
+//!    `space_in_directive`'s "second Space exits" branch was removed
+//!    entirely: once a real caret is inside the content, Space is no
+//!    longer special at all — it declines (`false`) and native
+//!    contenteditable typing handles it exactly like any other
+//!    character (already proven correct elsewhere via `read_dom_
+//!    changes`). The whole-unit-selection case (`directive_selected_
+//!    as_unit`, e.g. right after clicking a directive) is unchanged:
+//!    arrow keys still exit unconditionally there, and Space still
+//!    enters-and-appends on its first press — only the ALREADY-INSIDE
+//!    case needed this fix. `"ArrowUp"`/`"ArrowDown"` are deliberately
+//!    left exiting unconditionally too (via the original `exit_
+//!    directive_forward`/`exit_directive_backward`), since vertical
+//!    movement has no clean single-line "within the label" meaning.
 
 use regex::Captures;
 use taino_edit_core::{
-    caret_left, caret_line_start, wrapping_rule, Fragment, InputRule, InputRules,
+    caret_left, caret_line_start, caret_right, wrapping_rule, Fragment, InputRule, InputRules,
 };
 use taino_edit_extensions::Extension;
 use taino_edit_leptos::{
@@ -208,7 +246,7 @@ impl Extension for EditingFixups {
             ("Alt-Delete".to_string(), Box::new(word_delete_forward)),
             ("Ctrl-Delete".to_string(), Box::new(word_delete_forward)),
             ("ArrowLeft".to_string(), arrow_left_fixups()),
-            ("ArrowRight".to_string(), exit_directive_forward()),
+            ("ArrowRight".to_string(), arrow_right_fixups()),
             ("ArrowUp".to_string(), exit_directive_backward()),
             ("ArrowDown".to_string(), exit_directive_forward()),
             (" ".to_string(), space_in_directive()),
@@ -436,14 +474,18 @@ fn exit_directive_with_new_line(state: &EditorState, dispatch: Option<&mut Dispa
 
 /// Space's own directive handling — NOT the same as Enter/Arrow's exit
 /// (see this module's own doc comment, item 4, for the corruption this
-/// replaces): reported live, and confirmed correct as a real UX call:
-/// while the directive is genuinely still SELECTED AS A UNIT, Space
-/// appends a literal space to its own visible content instead of
-/// exiting outright — landing a real caret right after it, so a
-/// SECOND Space (now `caret_trapped_in_directive`'s own case) exits
-/// forward exactly like Enter/Arrow already do. A single Space thus
-/// reads naturally as "start typing here"; a second reads as "okay,
-/// move on."
+/// replaces, and item 6 for why the "second Space exits" half of that
+/// design was ALSO wrong and has been removed here): while the
+/// directive is genuinely still SELECTED AS A UNIT, Space appends a
+/// literal space to its own visible content and lands a real caret
+/// right after it — a single Space thus reads naturally as "start
+/// typing here." Once a real caret is already inside the content
+/// (`caret_trapped_in_directive`'s own case), Space is no longer
+/// special at all: this returns `false` and defers to native
+/// contenteditable typing, which already lands the character in the
+/// right place (proven elsewhere this session via `read_dom_changes`).
+/// Arrow keys, not Space, are what exit the directive now — see
+/// `arrow_left_fixups`/`arrow_right_fixups`.
 ///
 /// Deliberately edits the directive's rendered CONTENT directly, not
 /// its `attributes` attr (e.g. `"badge"`'s own `label`) — keeps this
@@ -479,9 +521,6 @@ fn space_in_directive() -> Command {
             tx.set_selection(Selection::caret(content_end + 1));
             d(tx);
             return true;
-        }
-        if caret_trapped_in_directive(state).is_some() {
-            return exit_directive(state, dispatch, true);
         }
         false
     })
@@ -553,16 +592,45 @@ fn skip_before_checkbox(state: &EditorState, pos: usize) -> Option<usize> {
     Some(pos)
 }
 
-/// ArrowLeft: directive-escape takes priority (see `exit_directive`),
-/// then the checkbox fixup (item 5) — peeks at where the BASE `caret_
-/// left` would land (by running it against a throwaway capture and
-/// inspecting the result via `state.apply`, since `taino-edit-core`
-/// keeps its own walking logic private) and corrects it via `skip_
-/// before_checkbox` when needed.
+/// Whether an empty caret at `pos`, already confirmed by the caller to
+/// sit inside `node`'s (a leaf/text directive starting at `start`) own
+/// content, is AT the edge of that content in `forward`'s direction —
+/// i.e. whether moving further that way should ESCAPE (see `exit_
+/// directive`) rather than just move the caret within the content,
+/// exactly like ordinary text. This is what makes it possible to
+/// actually arrow around and edit a directive's own label once inside
+/// it (e.g. after `space_in_directive` enters it) — reported live as
+/// broken: every arrow press used to exit unconditionally the moment
+/// the caret was ANYWHERE inside, never just moving within the text.
+fn at_directive_content_edge(node: &Node, start: usize, pos: usize, forward: bool) -> bool {
+    if forward {
+        pos >= start + node.node_size() - 1
+    } else {
+        pos <= start + 1
+    }
+}
+
+/// ArrowLeft: directive-escape takes priority for a whole-unit
+/// selection (see `exit_directive`); for a caret already INSIDE a
+/// directive's own content, only escapes at the content's own start
+/// edge (`at_directive_content_edge`) — otherwise defers to the base
+/// `caret_left` so the caret just moves within the text normally. Away
+/// from any directive at all, the checkbox fixup (item 5) peeks at
+/// where the BASE `caret_left` would land (by running it against a
+/// throwaway capture and inspecting the result via `state.apply`,
+/// since `taino-edit-core` keeps its own walking logic private) and
+/// corrects it via `skip_before_checkbox` when needed.
 fn arrow_left_fixups() -> Command {
     Box::new(|state, dispatch| {
-        if directive_at_selection(state).is_some() {
+        if directive_selected_as_unit(state).is_some() {
             return exit_directive(state, dispatch, false);
+        }
+        if let Some((start, node)) = caret_trapped_in_directive(state) {
+            let pos = state.selection().from();
+            if at_directive_content_edge(&node, start, pos, false) {
+                return exit_directive(state, dispatch, false);
+            }
+            return caret_left(state, dispatch);
         }
         let sel = state.selection();
         if !sel.is_empty() {
@@ -589,6 +657,28 @@ fn arrow_left_fixups() -> Command {
         fixed.set_selection(Selection::caret(landing));
         d(fixed);
         true
+    })
+}
+
+/// ArrowRight: the mirror of `arrow_left_fixups` — a whole-unit
+/// selection always escapes forward; a caret already inside a
+/// directive's own content only escapes at the content's own END edge,
+/// otherwise just moves within the text via the base `caret_right`.
+/// No checkbox concern here (that's specifically about landing right
+/// BEFORE one, an ArrowLeft/Home-only direction).
+fn arrow_right_fixups() -> Command {
+    Box::new(|state, dispatch| {
+        if directive_selected_as_unit(state).is_some() {
+            return exit_directive(state, dispatch, true);
+        }
+        if let Some((start, node)) = caret_trapped_in_directive(state) {
+            let pos = state.selection().from();
+            if at_directive_content_edge(&node, start, pos, true) {
+                return exit_directive(state, dispatch, true);
+            }
+            return caret_right(state, dispatch);
+        }
+        false
     })
 }
 
@@ -2059,7 +2149,7 @@ mod tests {
     }
 
     #[test]
-    fn first_space_appends_to_the_directive_content_second_space_exits() {
+    fn first_space_appends_to_the_directive_content_and_lands_a_caret_inside() {
         let schema = test_schema_with_directives();
         let badge = leaf_directive(&schema, "badge");
         let doc = schema
@@ -2087,15 +2177,117 @@ mod tests {
             caret_trapped_in_directive(&after_first).is_some(),
             "caret now sits right after the appended space, inside the directive's own content"
         );
+    }
 
-        let after_second = dispatch_and_apply(&after_first, |s, d| space_cmd(s, d))
-            .expect("second space dispatched");
-        assert_eq!(
-            after_second.doc().child_count(),
-            2,
-            "the second space exits, landing in a fresh paragraph"
+    #[test]
+    fn once_the_caret_is_already_inside_space_declines_and_defers_to_native_typing() {
+        // The bug this fixes: a SECOND Space (or any Space once the caret is
+        // already a real caret inside the directive's own content, e.g.
+        // after ArrowLeft/Right movement) used to force-exit the directive,
+        // which read live as "space does nothing" or "jumps to the next
+        // line" instead of just typing another space into the label. Now
+        // it simply declines (`false`), the same as it would for a caret in
+        // any ordinary paragraph, and native contenteditable typing (proven
+        // elsewhere via `read_dom_changes`) does the rest.
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![badge], vec![])
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        tx.set_selection(Selection::Node { pos: 0 });
+        state = state.apply(tx);
+
+        let space_cmd = space_in_directive();
+        let after_first =
+            dispatch_and_apply(&state, |s, d| space_cmd(s, d)).expect("first space dispatched");
+
+        assert!(
+            !space_cmd(&after_first, None),
+            "once a real caret is already inside the content, Space declines outright"
         );
-        assert_eq!(after_second.doc().child(1).node_type().name(), "paragraph");
+    }
+
+    #[test]
+    fn arrow_right_moves_the_caret_within_a_directives_content_once_already_inside() {
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node("doc", Attrs::new(), vec![badge], vec![])
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        // Position 1: right at the content's own start edge ("badge" is a
+        // 5-character synthetic text run occupying positions 1..6).
+        tx.set_selection(Selection::caret(1));
+        state = state.apply(tx);
+
+        let after = dispatch_and_apply(&state, arrow_right_fixups()).expect("dispatched");
+        assert_eq!(
+            after.doc().child_count(),
+            1,
+            "still just the one directive: this was ordinary within-content movement, not an exit"
+        );
+        assert_eq!(
+            after.selection().from(),
+            2,
+            "caret moved one step to the right within the content"
+        );
+        assert!(
+            caret_trapped_in_directive(&after).is_some(),
+            "still inside the directive's own content"
+        );
+    }
+
+    #[test]
+    fn arrow_left_at_the_true_start_edge_of_a_directives_content_still_exits() {
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node(
+                "doc",
+                Attrs::new(),
+                vec![badge, paragraph(&schema, "hi")],
+                vec![],
+            )
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        // Position 1 is the true start edge of "badge"'s content.
+        tx.set_selection(Selection::caret(1));
+        state = state.apply(tx);
+
+        let after = dispatch_and_apply(&state, arrow_left_fixups()).expect("dispatched");
+        assert!(
+            caret_trapped_in_directive(&after).is_none(),
+            "exited the directive rather than moving further left"
+        );
+    }
+
+    #[test]
+    fn arrow_right_at_the_true_end_edge_of_a_directives_content_still_exits() {
+        let schema = test_schema_with_directives();
+        let badge = leaf_directive(&schema, "badge");
+        let doc = schema
+            .node(
+                "doc",
+                Attrs::new(),
+                vec![badge, paragraph(&schema, "hi")],
+                vec![],
+            )
+            .unwrap();
+        let mut state = EditorState::new(doc, schema.clone());
+        let mut tx = state.tr();
+        // "badge" occupies positions 1..6, so 6 is the true end edge.
+        tx.set_selection(Selection::caret(6));
+        state = state.apply(tx);
+
+        let after = dispatch_and_apply(&state, arrow_right_fixups()).expect("dispatched");
+        assert!(
+            caret_trapped_in_directive(&after).is_none(),
+            "exited the directive rather than moving further right"
+        );
     }
 
     fn checkbox_node(schema: &Schema, checked: bool) -> Node {

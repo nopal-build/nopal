@@ -35,6 +35,51 @@
   background: var(--website-bg-page);
 }
 
+/* ── Accent colors that DO swap by scheme (green/red only) ─────────────── */
+/* `red`/`green` read as noticeably duller/lower-contrast against a dark
+   background than they do against a light one, so both get a lighter
+   dark-mode counterpart -- `--green-light`/`--red-light` (root.css)
+   already exist for exactly this. `purple` deliberately does NOT get an
+   entry here -- see `:::section-title{...}`'s own text-shadow comment
+   in this file for why a fixed literal purple was already chosen to
+   work in both schemes. Consumers (`:::section-title{color="..."}`,
+   `::line{color="..."}` via `toAccentColorVar` in `websiteDirectives.tsx`)
+   read ONLY these two tokens, never the raw `--green`/`--red` aliases
+   directly, so both stay in sync automatically. */
+:root {
+  --website-accent-green: var(--green);
+  --website-accent-red: var(--red);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --website-accent-green: var(--green-light);
+    --website-accent-red: var(--red-light);
+  }
+}
+
+/* Manual override for the `/maker/stamps/scratch` guide's own light/dark
+   PREVIEW toggle (`maker_.stamps_.scratch.tsx`) -- lets it show either
+   scheme's colors regardless of the browser's actual OS-level
+   `prefers-color-scheme`. Plain descendant custom-property declarations
+   like these always win over whatever an ancestor's `@media` block
+   resolved to (ordinary CSS inheritance: the nearest declared value
+   wins, regardless of specificity) -- no exotic `light-dark()`/
+   `color-scheme` mechanism needed. Deliberately narrow: only the tokens
+   THIS file actually makes scheme-aware today (the two accents above,
+   plus the page background) -- NOT a general reproduction of
+   `.ox-tokens`'s own (much larger) dark-mode block, which is a separate,
+   unrelated concern from today's ask. */
+.website-preview-force-light {
+  --website-accent-green: var(--green);
+  --website-accent-red: var(--red);
+  --website-bg-page: var(--surface-day-100);
+}
+.website-preview-force-dark {
+  --website-accent-green: var(--green-light);
+  --website-accent-red: var(--red-light);
+  --website-bg-page: var(--surface-night-100);
+}
+
 /* ── Section (`:::section{bg="..."}`) ──────────────────────────────────── */
 
 .website-section {
@@ -214,12 +259,16 @@
    same named-color vocabulary and technique as `:::section{accent="..."}`
    above. Deliberately a SEPARATE attribute/rule from that one (not
    reused) -- `:::section-title{...}` and `:::section{...}` are two
-   different directives that happen to both want a named accent color. */
+   different directives that happen to both want a named accent color.
+   `red`/`green` read the SCHEME-AWARE `--website-accent-*` tokens
+   (above), not the raw `--red`/`--green` aliases directly -- `purple`
+   stays literal, see this rule block's own text-shadow comment below
+   for why. */
 .website-section-title[data-website-color="red"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--red);
+  color: var(--website-accent-red);
 }
 .website-section-title[data-website-color="green"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--green);
+  color: var(--website-accent-green);
 }
 .website-section-title[data-website-color="purple"] :is(h1, h2, h3, h4, h5, h6) {
   color: var(--purple);
