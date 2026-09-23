@@ -36,7 +36,7 @@ import { parseGraphLogNodes, type GraphLogNode } from "./graphNodeIndex.server";
 import { nodeIdsInSection } from "./graphStructure.server";
 import { splitFrontmatter, splitReadmeSections } from "./project.types";
 import { findProjectGraphFolder } from "./projectN02.server";
-import { filingFileName, filingValuesHash, isCostKind, readFilingRecord, type Filing, type FilingKind } from "./syncFiling.server";
+import { filingFileName, filingValuesHash, isCostKind, readFilingRecord, type Filing, type FilingKind, type FilingSource } from "./syncFiling.server";
 import { KNOWLEDGE_FOLDER_NAME, knowledgeFileName } from "./syncKnowledge.server";
 import { getFileRefListingsByIds, getFileRefsByFolderIds, listFolderChildren, type VaultFolder } from "./vault.server";
 
@@ -155,9 +155,11 @@ export type ProjectFileRow = {
   copyFileId: string | null;
   description: string | null;
   filing: Filing | null;
+  /** What the filing was made from; `code` means kept as a file, not read. */
+  filingSource: FilingSource | null;
   /** The kind the row is filed under, and who said so. */
   kind: FilingKind | "unfiled";
-  kindSource: "person" | "model" | "none";
+  kindSource: "person" | "model" | "code" | "none";
   reason: string | null;
   cost: null | {
     vendor: string | null;
@@ -201,6 +203,8 @@ function isVideo(contentType: string): boolean {
  * receipt is in Gallery and in Costs. `other` from the model is Unsorted
  * (it could not place it); `other` from a person is a document. */
 export function foldersOf(row: Pick<ProjectFileRow, "contentType" | "kind" | "kindSource">): FileFolder[] {
+  // `other` is a document when a PERSON said so, and Unsorted when the
+  // model could not place it or code kept it as a file.
   const out: FileFolder[] = [];
   if (isImage(row.contentType) || isVideo(row.contentType)) out.push("gallery");
   if (isCostKind(row.kind)) out.push("costs");
@@ -299,7 +303,9 @@ export function projectFileRows(input: FileFoldersInput): ProjectFileRow[] {
 
     const knowledge = knowledgeByName.get(knowledgeFileName(copyName)) ?? null;
     const description = knowledge ? splitFrontmatter(knowledge).body.trim() || null : null;
-    const filing = readFilingRecord(knowledgeByName.get(filingFileName(copyName)))?.filing ?? null;
+    const filingRecord = readFilingRecord(knowledgeByName.get(filingFileName(copyName)));
+    const filing = filingRecord?.filing ?? null;
+    const filingSource = filingRecord?.describedFrom ?? null;
 
     const acts: FileActRecord[] = (marksByFile.get(a.fileId) ?? [])
       .map((m) => ({
@@ -315,7 +321,7 @@ export function projectFileRows(input: FileFoldersInput): ProjectFileRow[] {
 
     const filedAs = acts.find((r) => r.act?.kind === "file-as");
     const kind: ProjectFileRow["kind"] = filedAs?.act?.kind === "file-as" ? filedAs.act.fileKind : (filing?.kind ?? "unfiled");
-    const kindSource: ProjectFileRow["kindSource"] = filedAs ? "person" : filing ? "model" : "none";
+    const kindSource: ProjectFileRow["kindSource"] = filedAs ? "person" : filing ? (filingSource === "code" ? "code" : "model") : "none";
 
     let cost: ProjectFileRow["cost"] = null;
     if (isCostKind(kind)) {
@@ -355,6 +361,7 @@ export function projectFileRows(input: FileFoldersInput): ProjectFileRow[] {
       copyFileId: copy?._id ?? null,
       description,
       filing,
+      filingSource,
       kind,
       kindSource,
       reason: filing?.reason ?? null,

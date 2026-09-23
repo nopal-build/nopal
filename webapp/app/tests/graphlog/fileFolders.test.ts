@@ -41,9 +41,9 @@ const receiptFiling: Filing = {
 };
 const planFiling: Filing = { kind: "drawing", reason: "A reflected ceiling plan with fixture symbols.", cost: null };
 
-const filingFile = (name: string, filing: Filing) => ({
+const filingFile = (name: string, filing: Filing, describedFrom: "image" | "code" = "image") => ({
   name,
-  content: buildFilingContent({ sourceFileId: "x", hash: "h", skillFingerprint: "fp", describedFrom: "image", filing }),
+  content: buildFilingContent({ sourceFileId: "x", hash: "h", skillFingerprint: "fp", describedFrom, filing }),
 });
 
 const mark = (over: Partial<GraphLogMark> & { unit: GraphLogMark["unit"] }): GraphLogMark =>
@@ -197,6 +197,23 @@ describe("a person's acts override and confirm", () => {
     const fresh = rows.find((r) => r.fileId === "orignew")!;
     expect(fresh.folders).toEqual(["gallery", "costs"]);
     expect(fresh.cost).toMatchObject({ vendor: null, amount: null, status: "unconfirmed" });
+  });
+});
+
+describe("a file kept as a file", () => {
+  it("is other by code, in Unsorted, and says it was not read", () => {
+    const zipCard = `Fonts for the site.\n\n::file{name="OT L22 Type.zip" caption="The Nopal font" fileId="origzip" contentType="application/zip"}\n`;
+    const rows = projectFileRows(
+      input({
+        attachments: extractAttachmentsWithContext(zipCard).map((a) => ({ ...a, cardFileId: "card2", authorHumanId: "admin_2", date: "2026-08-24" })),
+        originals: new Map([["origzip", { content_type: "application/zip", size: 1458367 }]]),
+        dailyFiles: [{ _id: "copyzip", name: "2026-08-24-admin_2-OT L22 Type.zip", content_type: "application/zip", size: 1458367 }],
+        knowledgeFiles: [filingFile("2026-08-24-admin_2-OT L22 Type.filing.md", { kind: "other", reason: "A .zip file (application/zip), kept as a file; not read.", cost: null }, "code")],
+        graphFiles: [],
+      }),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "other", kindSource: "code", filingSource: "code", folders: ["unsorted"], caption: "The Nopal font" });
   });
 });
 

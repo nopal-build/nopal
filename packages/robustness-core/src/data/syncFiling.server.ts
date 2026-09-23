@@ -74,7 +74,12 @@ export type Filing = {
   cost: FilingCost | null;
 };
 
-export type FilingSource = "image" | "pdf" | "text" | "video-code";
+/** What the filing was made from. `video-code` and `code` are code's own
+ * filings, with no model call: a video by its content type, and a file
+ * nothing here can read (an archive, a font, a binary), kept as a file
+ * and filed `other` so it lands in Unsorted, the pile that says what the
+ * next folder is. */
+export type FilingSource = "image" | "pdf" | "text" | "video-code" | "code";
 
 /** The stage's own framing, in front of the project's `FILING.md`. Code
  * owns this part: it says what the answer's shape is, so a project
@@ -260,7 +265,7 @@ export function readFilingRecord(content: string | null | undefined): FilingReco
     sourceHash: data.sourceHash,
     skillFingerprint: typeof data.skillFingerprint === "string" ? data.skillFingerprint : null,
     describedFrom:
-      describedFrom === "image" || describedFrom === "pdf" || describedFrom === "text" || describedFrom === "video-code"
+      describedFrom === "image" || describedFrom === "pdf" || describedFrom === "text" || describedFrom === "video-code" || describedFrom === "code"
         ? describedFrom
         : null,
     filing: validated.filing,

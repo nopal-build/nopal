@@ -103,6 +103,12 @@ describe("the filing file", () => {
     expect(record).toEqual({ sourceHash: "h1", skillFingerprint: "fp", describedFrom: "image", filing });
   });
 
+  it("keeps a file code filed as other, with its source saying so", () => {
+    const kept: Filing = { kind: "other", reason: "A .zip file (application/zip), kept as a file; not read.", cost: null };
+    const content = buildFilingContent({ sourceFileId: "abc", hash: "h1", skillFingerprint: "fp", describedFrom: "code", filing: kept });
+    expect(readFilingRecord(content)).toMatchObject({ describedFrom: "code", filing: kept });
+  });
+
   it("treats a record that no longer validates as absent", () => {
     expect(readFilingRecord("---\nsourceHash: h1\nkind: memo\nreason: x\n---\n")).toBeNull();
     expect(readFilingRecord("no front matter")).toBeNull();

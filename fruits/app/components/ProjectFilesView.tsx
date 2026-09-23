@@ -1,30 +1,13 @@
-// app/routes/newspaper.$folderId_.files.tsx
-// The project's files as four folders (Gallery, Documents, Costs,
-// Unsorted), which are views over the daily logs' attachments, never
-// places a file is moved to. See `fileFolders.server.ts` for what a row
-// is and who decided each part of it. Text first: the layout is Gerald's.
-//
-// `newspaper.$folderId_.files` (trailing underscore) so this is its own
-// page beside `/newspaper/:folderId` rather than nested inside it, which
-// has no <Outlet>. Same pattern as `maker_.graphlog_.defaults.tsx`.
-import type { LoaderFunctionArgs } from "react-router";
-import { Form, Link, redirect, useLoaderData, useRevalidator } from "react-router";
+// The project's files as four folders that are views, not places: see
+// `fileFolders.server.ts` for what a row is and who decided each part of
+// it. Rendered inside the Vault's project folder (`routes/vault.tsx`),
+// which is where people look for files (Austin, 2026-09-22). Gallery
+// uses the Vault's own gallery grid; a video is a real player with its
+// poster, never a link that downloads.
+import { Link, useSearchParams } from "react-router";
 import { useState } from "react";
-import { getUser } from "../modules/auth/auth.server";
-import { canViewFolder } from "robustness-core/data/vault.types";
-import { getFolderById } from "robustness-core/data/vault.server";
-import {
-  FILE_FOLDERS,
-  loadProjectFiles,
-  matchesQuery,
-  type FileFolder,
-  type ProjectFileRow,
-} from "robustness-core/data/fileFolders.server";
-import { FILING_KINDS, type FilingKind } from "robustness-core/data/syncFiling.server";
-// Everything the component needs from the `.server` modules above comes
-// through the loader as data; a `.server` value referenced in the
-// component would be pulled into the client bundle and refused.
-import { AppLayout } from "../components/AppLayout";
+import type { FileFolder, ProjectFileRow } from "robustness-core/data/fileFolders.server";
+import type { FilingKind } from "robustness-core/data/syncFiling.server";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
 import { Input } from "stamps/Input";
@@ -41,82 +24,130 @@ const FOLDER_TITLES: Record<FileFolder, string> = {
   unsorted: "Unsorted",
 };
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = await getUser(request);
-  if (!user) return redirect("/login");
-  const folderId = params.folderId;
-  if (!folderId) throw new Response("Not found", { status: 404 });
-  const folder = await getFolderById(folderId);
-  if (!folder || !canViewFolder(user._id, folder)) throw new Response("Not found", { status: 404 });
+/** URL state: `files=<folder>` and `q=<search>`, kept beside whatever
+ * else is in the query (the Vault's own `folder=`). */
+export const FILES_PARAM = "files";
+export const QUERY_PARAM = "q";
 
-  const url = new URL(request.url);
-  const requested = url.searchParams.get("folder");
-  const active: FileFolder = (FILE_FOLDERS as readonly string[]).includes(requested ?? "") ? (requested as FileFolder) : "gallery";
-  const q = url.searchParams.get("q") ?? "";
+export function ProjectFilesView({
+  projectFolderId,
+  rows,
+  folders,
+  kinds,
+  onOpen,
+  onChanged,
+}: {
+  projectFolderId: string;
+  rows: ProjectFileRow[];
+  folders: readonly FileFolder[];
+  kinds: readonly FilingKind[];
+  /** Open one file in the viewer (the Vault's `?file=`). */
+  onOpen: (row: ProjectFileRow) => void;
+  /** Reload after a tap wrote a mark. */
+  onChanged: () => void;
+}) {
+  const [params, setParams] = useSearchParams();
+  const requested = params.get(FILES_PARAM);
+  const active: FileFolder = folders.includes(requested as FileFolder) ? (requested as FileFolder) : "gallery";
+  const q = params.get(QUERY_PARAM) ?? "";
+  const counts = Object.fromEntries(folders.map((f) => [f, rows.filter((r) => r.folders.includes(f)).length])) as Record<FileFolder, number>;
+  const shown = rows.filter((r) => r.folders.includes(active) && matches(r, q)).sort((a, b) => b.date.localeCompare(a.date));
 
-  /** The kinds a person can file a thing as. `video` is code's. */
-  const PERSON_KINDS = FILING_KINDS.filter((k) => k !== "video");
+  const hrefFor = (folder: FileFolder) => {
+    const next = new URLSearchParams(params);
+    next.set(FILES_PARAM, folder);
+    if (!q) next.delete(QUERY_PARAM);
+    return `?${next.toString()}`;
+  };
 
-  const t0 = Date.now();
-  const all = await loadProjectFiles(folder);
-  const counts = Object.fromEntries(FILE_FOLDERS.map((f) => [f, all.filter((r) => r.folders.includes(f)).length])) as Record<FileFolder, number>;
-  const rows = all.filter((r) => r.folders.includes(active) && matchesQuery(r, q)).sort((a, b) => b.date.localeCompare(a.date));
-  if (process.env.NODE_ENV !== "production") console.log(`files view: ${all.length} file(s) in ${Date.now() - t0}ms`);
-
-  return { user, folder, active, q, counts, rows, total: all.length, viewerId: user._id, folders: FILE_FOLDERS, kinds: PERSON_KINDS };
-}
-
-export default function ProjectFilesPage() {
-  const { folder, active, q, counts, rows, total, folders, kinds } = useLoaderData<typeof loader>();
   return (
-    <AppLayout>
-      <div className="container mx-auto px-4 py-12">
-        <div className={sprinkles({ marginBottom: 6 })}>
-          <Link to={`/newspaper/${folder._id}`} className="text-xs subtle-text hover:opacity-80" style={{ textDecoration: "none" }}>
-            ← {folder.name}
+    <section className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 })} aria-label="Files by kind">
+      <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 })}>
+        {folders.map((f) => (
+          <Link key={f} to={hrefFor(f)} style={{ textDecoration: "none" }}>
+            <Chip active={f === active}>
+              {FOLDER_TITLES[f]} · {counts[f]}
+            </Chip>
           </Link>
-          <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold", marginTop: 2 })}`}>Files</h1>
-          <p className={`${textSize.sm} ${sprinkles({ marginTop: 1 })}`} style={{ color: semanticColors.textSubtle }}>
-            Every file attached to a daily log, by kind. A file stays with the entry it came with; these are views, and one file can sit in two.
-          </p>
-        </div>
-
-        <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2, marginBottom: 4 })}>
-          {folders.map((f) => (
-            <Link key={f} to={`?folder=${f}${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none" }}>
-              <Chip active={f === active}>
-                {FOLDER_TITLES[f]} · {counts[f]}
-              </Chip>
-            </Link>
-          ))}
-        </div>
-
-        <Form method="get" className={sprinkles({ display: "flex", alignItems: "flex-end", gap: 2, marginBottom: 6 })}>
-          <input type="hidden" name="folder" value={active} />
-          <Input name="q" label="Search" hideLabel placeholder="Find a file by what it is about…" defaultValue={q} />
+        ))}
+        <form
+          method="get"
+          className={sprinkles({ display: "flex", alignItems: "flex-end", gap: 2 })}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const value = String(new FormData(e.currentTarget).get(QUERY_PARAM) ?? "").trim();
+            setParams((prev) => {
+              const next = new URLSearchParams(prev);
+              if (value) next.set(QUERY_PARAM, value);
+              else next.delete(QUERY_PARAM);
+              next.set(FILES_PARAM, active);
+              return next;
+            });
+          }}
+        >
+          <Input name={QUERY_PARAM} label="Search files" hideLabel placeholder="Find a file by what it is about…" defaultValue={q} />
           <button type="submit" className={button({ variant: "outline" })}>
             Search
           </button>
-        </Form>
-
-        {rows.length === 0 ? (
-          <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-            {total === 0 ? "No files have been attached to this project's daily logs yet." : q ? `Nothing in ${FOLDER_TITLES[active]} matches “${q}”.` : `Nothing in ${FOLDER_TITLES[active]} yet.`}
-          </p>
-        ) : (
-          <ul className={sprinkles({ display: "flex", flexDirection: "column", gap: 6 })} style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {rows.map((row) => (
-              <FileRow key={row.fileId} row={row} projectFolderId={folder._id} kinds={kinds} />
-            ))}
-          </ul>
-        )}
+        </form>
       </div>
-    </AppLayout>
+
+      {shown.length === 0 ? (
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+          {rows.length === 0
+            ? "No files have been attached to this project's daily logs yet."
+            : q
+              ? `Nothing in ${FOLDER_TITLES[active]} matches “${q}”.`
+              : `Nothing in ${FOLDER_TITLES[active]} yet.`}
+        </p>
+      ) : active === "gallery" ? (
+        <GalleryGrid rows={shown} onOpen={onOpen} />
+      ) : (
+        <ul className={sprinkles({ display: "flex", flexDirection: "column", gap: 6 })} style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {shown.map((row) => (
+            <FileRow key={row.fileId} row={row} projectFolderId={projectFolderId} kinds={kinds} onOpen={onOpen} onChanged={onChanged} />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
-function FileRow({ row, projectFolderId, kinds }: { row: ProjectFileRow; projectFolderId: string; kinds: readonly FilingKind[] }) {
-  const revalidator = useRevalidator();
+/** The Vault's own gallery grid (`vault.css`, `.vault-gallery-grid`). A
+ * photo opens in the viewer; a video plays here, with its poster. */
+function GalleryGrid({ rows, onOpen }: { rows: ProjectFileRow[]; onOpen: (row: ProjectFileRow) => void }) {
+  return (
+    <div className="vault-gallery-grid">
+      {rows.map((row) =>
+        row.contentType.startsWith("video/") ? (
+          <figure key={row.fileId} className="vault-gallery-item" style={{ margin: 0 }}>
+            <video controls preload="metadata" poster={row.urls.poster ?? undefined} src={row.urls.original} style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", borderRadius: 4, background: "var(--farground)" }} />
+            <span className="vault-gallery-item-name">{row.caption || row.name}</span>
+          </figure>
+        ) : (
+          <button key={row.fileId} type="button" className="vault-gallery-item" onClick={() => onOpen(row)} style={{ background: "none", border: 0, padding: 0, textAlign: "left", cursor: "pointer" }}>
+            <img src={row.urls.thumb} alt={row.caption || row.name} loading="lazy" />
+            <span className="vault-gallery-item-name">{row.caption || row.name}</span>
+          </button>
+        ),
+      )}
+    </div>
+  );
+}
+
+function FileRow({
+  row,
+  projectFolderId,
+  kinds,
+  onOpen,
+  onChanged,
+}: {
+  row: ProjectFileRow;
+  projectFolderId: string;
+  kinds: readonly FilingKind[];
+  onOpen: (row: ProjectFileRow) => void;
+  onChanged: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -134,7 +165,7 @@ function FileRow({ row, projectFolderId, kinds }: { row: ProjectFileRow; project
         setError(data.error ?? "That didn't go through. Try again.");
         return;
       }
-      revalidator.revalidate();
+      onChanged();
     } catch {
       setError("That didn't go through. Check your connection and try again.");
     } finally {
@@ -144,12 +175,18 @@ function FileRow({ row, projectFolderId, kinds }: { row: ProjectFileRow; project
 
   const isImage = row.contentType.startsWith("image/");
   const isVideo = row.contentType.startsWith("video/");
-  const kindLabel = row.kind === "unfiled" ? "unfiled" : row.kind;
-  const kindBy = row.kindSource === "person" ? "filed by a person" : row.kindSource === "model" ? "the model's reading" : "not filed yet";
+  const kindBy =
+    row.kindSource === "person"
+      ? "filed by a person"
+      : row.kindSource === "model"
+        ? "the model's reading"
+        : row.kindSource === "code"
+          ? "kept as a file, not read"
+          : "not filed yet";
 
   return (
     <li className={sprinkles({ display: "flex", gap: 4, alignItems: "flex-start" })}>
-      <a href={row.urls.original} target="_blank" rel="noreferrer" style={{ flexShrink: 0 }}>
+      <button type="button" onClick={() => onOpen(row)} style={{ flexShrink: 0, background: "none", border: 0, padding: 0, cursor: "pointer" }} aria-label={`Open ${row.name}`}>
         {isImage ? (
           <img src={row.urls.thumb} alt={row.caption || row.name} loading="lazy" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, display: "block" }} />
         ) : isVideo ? (
@@ -162,17 +199,17 @@ function FileRow({ row, projectFolderId, kinds }: { row: ProjectFileRow; project
             {extensionOf(row.name)}
           </div>
         )}
-      </a>
+      </button>
 
       <div className={sprinkles({ display: "flex", flexDirection: "column", gap: 1.5 })} style={{ minWidth: 0, flex: 1 }}>
         <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 2 })}>
-          <a href={row.urls.original} target="_blank" rel="noreferrer" className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`}>
+          <button type="button" onClick={() => onOpen(row)} className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "inherit" }}>
             {row.name}
-          </a>
+          </button>
           <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
             {row.authorName} · {row.date}
           </span>
-          <Badge variant={row.kindSource === "person" ? "accent" : row.kindSource === "model" ? "neutral" : "warning"}>{kindLabel}</Badge>
+          <Badge variant={row.kindSource === "person" ? "accent" : row.kindSource === "none" ? "warning" : "neutral"}>{row.kind}</Badge>
           <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
             {kindBy}
           </span>
@@ -258,6 +295,18 @@ function FileRow({ row, projectFolderId, kinds }: { row: ProjectFileRow; project
       </div>
     </li>
   );
+}
+
+/** Case-insensitive substring over what a person might remember a file
+ * by. Mirrors `matchesQuery` in `fileFolders.server.ts`, kept here so
+ * the component needs no server import. */
+function matches(row: ProjectFileRow, q: string): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  return [row.name, row.caption, row.context, row.description ?? "", row.reason ?? "", row.cost?.vendor ?? "", ...(row.cost?.readFrom ?? []), row.authorName, row.kind, ...row.threads, ...row.efforts]
+    .join("\n")
+    .toLowerCase()
+    .includes(needle);
 }
 
 function extensionOf(name: string): string {
