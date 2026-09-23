@@ -148,10 +148,15 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     here too, by code, from the second of its stills; a video described
     before posters existed gets one on the next run.
 - **Files: folders, acts, renditions** (2026-09-22; ADR-019, ADR-020).
-  Not a stage. `/newspaper/:folderId/files` (`fruits/app/routes/
-  newspaper.$folderId_.files.tsx`) shows every attachment in four
-  folders that are views rebuilt on each request (`fileFolders.server.ts`,
-  `projectFileRows`): Gallery (image/video by content type), Documents
+  Not a stage. A project's folder in the Vault (`fruits/app/routes/
+  vault.tsx`, `components/ProjectFilesView.tsx`; the project page's
+  "Files" link goes there) shows every attachment in four folders that
+  are views rebuilt on each request (`fileFolders.server.ts`,
+  `projectFileRows`); Gallery is the Vault's own gallery grid and a video
+  is a real player with its poster. A file nothing can read (an archive,
+  a font) is kept as a file: no description, no INCOMPLETE, filed `other`
+  by code (`describedFrom: code`) into Unsorted, the pile that says what
+  the next folder is: Gallery (image/video by content type), Documents
   (drawing, spec, permit, contract, or `other` filed by a person), Costs
   (receipt, invoice, estimate, bid) and Unsorted (unfiled, or `other` from
   the model). A receipt photo is one row in two folders. A row is keyed

@@ -365,6 +365,12 @@ export async function runSyncKnowledge(
     );
   }
   const filings = { written: 0, upToDate: 0, rejected: 0 };
+  /** Files nothing here can read (an archive, a font, a binary), kept as
+   * files: no description, no model call, no INCOMPLETE. Their caption
+   * still grounds a node; code files them `other` so they sit in
+   * Unsorted, the pile that says what the next folder is (Austin,
+   * 2026-09-22: the O.No font zip was the first). */
+  const kept: string[] = [];
 
   for (const candidate of candidates) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
@@ -427,6 +433,9 @@ export async function runSyncKnowledge(
       /** A video's poster still, written only AFTER its sidecar is safely
        * stored: a poster failure must never discard a paid description. */
       let posterStill: string | null = null;
+      /** Set when the file is kept as a file: nothing to describe, and
+       * not a failure. */
+      let keptAsFile = false;
       const isImage = isImageContentType(source.content_type) && !!source.s3_key;
       const isVideo = isVideoContentType(source.content_type) && !!source.s3_key;
       const isPdf = isReadablePdf(source);
@@ -595,14 +604,15 @@ export async function runSyncKnowledge(
             params: { fileId: source._id, name: source.name, text: body ? body.slice(0, 8000) : null },
             durationMs,
           });
-        } else {
+        } else if (source.content_type === "application/pdf") {
+          // Readable in principle, too big for one request: a real gap.
           unsupported.push({ fileId: source._id, name: source.name });
-          log(
-            source.content_type === "application/pdf"
-              ? `sync-knowledge: "${source.name}" is a PDF larger than ${Math.round(PDF_MAX_BYTES / (1024 * 1024))} MB — skipped (no knowledge file written).`
-              : `sync-knowledge: "${source.name}" has no readable content — skipped (no knowledge file written).`,
-          );
+          log(`sync-knowledge: "${source.name}" is a PDF larger than ${Math.round(PDF_MAX_BYTES / (1024 * 1024))} MB — skipped (no knowledge file written).`);
           continue;
+        } else {
+          keptAsFile = true;
+          kept.push(source.name);
+          log(`sync-knowledge: "${source.name}" (${source.content_type}) is kept as a file, not read.`);
         }
       } catch (err) {
         // One bad/oversized file must never abort the rest of the batch.
@@ -631,45 +641,48 @@ export async function runSyncKnowledge(
         continue;
       }
 
-      if (!body) {
+      if (!body && !keptAsFile) {
         unsupported.push({ fileId: source._id, name: source.name });
         continue;
       }
 
-      const content = buildKnowledgeContent({ sourceFileId: source._id, hash, body, extraMeta: { ...extraMeta, skillFingerprint } });
-      const knowledgeFileId = existing
-        ? (await updateFileRef(existing._id, { content }))?._id
-        : (
-            await createFileRef({
-              human_id: source.human_id,
-              name,
-              content,
-              content_type: "text/markdown",
-              folder_id: knowledgeFolder._id,
-            })
-          )?._id;
-      if (!knowledgeFileId) {
-        // The vision/extraction call was already made and already recorded
-        // as a success in usage metrics; the write is what failed. This was
-        // a bare `continue`: no log, not in `unsupported`, not in
-        // `incomplete`, so the dashboard showed a paid, successful
-        // description that produced no file. It is exactly what
-        // `unsupported` is for -- a file that reached this stage and has no
-        // path into the graph -- so it goes there and rides the existing
-        // `incomplete` line below.
-        log(`sync-knowledge: could not write "${name}" for "${source.name}" after describing it; will retry next run.`);
-        unsupported.push({ fileId: source._id, name: source.name });
-        continue;
-      }
+      // A kept file has no sidecar to write; it goes straight to filing.
+      if (body) {
+        const content = buildKnowledgeContent({ sourceFileId: source._id, hash, body, extraMeta: { ...extraMeta, skillFingerprint } });
+        const knowledgeFileId = existing
+          ? (await updateFileRef(existing._id, { content }))?._id
+          : (
+              await createFileRef({
+                human_id: source.human_id,
+                name,
+                content,
+                content_type: "text/markdown",
+                folder_id: knowledgeFolder._id,
+              })
+            )?._id;
+        if (!knowledgeFileId) {
+          // The vision/extraction call was already made and already recorded
+          // as a success in usage metrics; the write is what failed. This was
+          // a bare `continue`: no log, not in `unsupported`, not in
+          // `incomplete`, so the dashboard showed a paid, successful
+          // description that produced no file. It is exactly what
+          // `unsupported` is for -- a file that reached this stage and has no
+          // path into the graph -- so it goes there and rides the existing
+          // `incomplete` line below.
+          log(`sync-knowledge: could not write "${name}" for "${source.name}" after describing it; will retry next run.`);
+          unsupported.push({ fileId: source._id, name: source.name });
+          continue;
+        }
 
-      log(`sync-knowledge: wrote "${name}" for "${source.name}".`);
-      entries.push({ fileId: source._id, name: source.name, knowledgeFileId, generated: true });
-      descriptionForFiling = body;
-      if (posterStill) {
-        try {
-          if (await writeVideoPoster(source.s3_key!, posterStill)) log(`sync-knowledge: wrote a poster for "${source.name}".`);
-        } catch (err) {
-          log(`sync-knowledge: no poster for "${source.name}" (${err instanceof Error ? err.message : "unknown error"}); the next run tries again.`);
+        log(`sync-knowledge: wrote "${name}" for "${source.name}".`);
+        entries.push({ fileId: source._id, name: source.name, knowledgeFileId, generated: true });
+        descriptionForFiling = body;
+        if (posterStill) {
+          try {
+            if (await writeVideoPoster(source.s3_key!, posterStill)) log(`sync-knowledge: wrote a poster for "${source.name}".`);
+          } catch (err) {
+            log(`sync-knowledge: no poster for "${source.name}" (${err instanceof Error ? err.message : "unknown error"}); the next run tries again.`);
+          }
         }
       }
     }
@@ -715,6 +728,9 @@ export async function runSyncKnowledge(
       : [];
   if (staleSidecars > 0) {
     log(`sync-knowledge: ${staleSidecars} sidecar(s) were written under an older KNOWLEDGE.md and were left as they are (reset-knowledge rewrites them).`);
+  }
+  if (kept.length > 0) {
+    log(`sync-knowledge: ${kept.length} file(s) kept as files, not read: ${kept.slice(0, 5).join(", ")}${kept.length > 5 ? `, and ${kept.length - 5} more` : ""}.`);
   }
   if (filingComposed && (filings.written > 0 || filings.rejected > 0)) {
     log(
@@ -772,6 +788,16 @@ async function fileAttachment(args: {
   if (isVideoContentType(source.content_type)) {
     filing = { kind: "video", reason: "A video, by its content type; filed by code.", cost: null };
     describedFrom = "video-code";
+  } else if (!isImageContentType(source.content_type) && !isReadablePdf(source) && !source.content) {
+    // Kept as a file: nothing here can read it, so code files it, and it
+    // sits in Unsorted until a person files it or a folder exists for it.
+    const extension = source.name.includes(".") ? source.name.slice(source.name.lastIndexOf(".") + 1).toLowerCase() : "";
+    filing = {
+      kind: "other",
+      reason: `A ${extension ? `.${extension} ` : ""}file (${source.content_type}), kept as a file; not read.`,
+      cost: null,
+    };
+    describedFrom = "code";
   } else {
     const context =
       `File name: ${source.name}` +

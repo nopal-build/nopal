@@ -318,18 +318,11 @@ export default function NewspaperRoute() {
                 <span className="text-xs subtle-text capitalize">{status}</span>
               )}
               <Link
-                to={`/newspaper/${folder._id}/files`}
-                className="text-xs subtle-text hover:opacity-80 whitespace-nowrap"
-                style={{ textDecoration: "none" }}
-              >
-                Files →
-              </Link>
-              <Link
                 to={`/vault?folder=${folder._id}`}
                 className="text-xs subtle-text hover:opacity-80 whitespace-nowrap"
                 style={{ textDecoration: "none" }}
               >
-                View as files →
+                Files →
               </Link>
             </div>
           </div>
