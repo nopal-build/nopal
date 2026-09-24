@@ -58,6 +58,16 @@ const WEBSITE_ICON_PLACEHOLDERS: Record<string, IconComponent> = {
   blob: PlaceholderBlob,
 };
 
+/** Every registered `::icon{name="..."}` name, grouped by tier -- also
+ * drives the Icon Tracing Paper's own `name` dropdown
+ * (`/maker/stamps/scratch`, fruits-only), so that list can never drift out
+ * of sync with what's actually registered here. Add a new icon by adding
+ * one entry to `WEBSITE_ICON_FILES` (a real asset) or
+ * `WEBSITE_ICON_PLACEHOLDERS` (an inline-drawn stand-in) above -- both
+ * lists below pick it up automatically, nothing else needs to change. */
+export const WEBSITE_ICON_FILE_NAMES = Object.keys(WEBSITE_ICON_FILES);
+export const WEBSITE_ICON_PLACEHOLDER_NAMES = Object.keys(WEBSITE_ICON_PLACEHOLDERS);
+
 const SIZE_PX: Record<"sm" | "md" | "lg", number> = { sm: 20, md: 32, lg: 64 };
 
 export function WebsiteIcon({

@@ -24,6 +24,12 @@ const WEBSITE_STAMPS: Record<string, { light: string; dark: string }> = {
   quail: { light: "/guides/stamp-quail.svg", dark: "/guides/stamp-quail-dark.svg" },
 };
 
+/** Every registered `::stamp{name="..."}` name -- also drives the Stamp
+ * Tracing Paper's own `name` dropdown (`/maker/stamps/scratch`,
+ * fruits-only). Add a new stamp by adding one entry to `WEBSITE_STAMPS`
+ * above; this picks it up automatically. */
+export const WEBSITE_STAMP_NAMES = Object.keys(WEBSITE_STAMPS);
+
 export function WebsiteStamp({
   name,
   rotate = 0,

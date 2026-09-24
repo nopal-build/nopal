@@ -64,8 +64,8 @@ async function requireMakerAccess(request: Request) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireMakerAccess(request);
-  return null;
+  const user = await requireMakerAccess(request);
+  return { user };
 }
 
 export function ErrorBoundary() {
@@ -264,7 +264,7 @@ function CategoryNav({ activeId }: { activeId: string | null }) {
           OxMarkdown →
         </a>
         <a href="/maker/stamps/scratch" className={`${navLink({ context: "drawer" })} ${drawerNavLinkClass}`}>
-          Scratch →
+          Scratchpad →
         </a>
       </NavColumn>
     </Stack>

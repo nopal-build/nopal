@@ -242,6 +242,136 @@
 //!
 //!    See also `taino-edit-leptos`'s own doc comment on
 //!    `selection_touches_an_atom` for the fork-side half of this fix.
+//! 8. **A THIRD entry point into item 4's own "bare caret trapped inside
+//!    a directive's content" trap, found live after item 7 shipped: a
+//!    plain mouse CLICK, not just keyboard arrow navigation.** Reported
+//!    live: clicking in the empty space just past a leaf/text
+//!    directive's own rendered pill (still the same row, but not
+//!    actually on the pill) never reached `directive_popover.rs`'s
+//!    existing `mousedown` check at all (`pos_at_point`/`directive_at`
+//!    only ever matches a click resolving to the position immediately
+//!    BEFORE the directive starts) — the browser's own native
+//!    caret-from-point placement ran completely unopposed, and since
+//!    the directive's own text is the nearest actual content past its
+//!    right edge, that native placement landed a bare caret INSIDE it
+//!    (confirmed live via Playwright: `window.getSelection()` resolved
+//!    into the pill's own text node, at its last character) — which
+//!    item 7's `selection_touches_an_atom` guard then correctly blocked
+//!    every further keystroke against, read live as "I can no longer
+//!    add a new line or write anything."
+//!
+//!    Fixed on `mouseup`, not `mousedown` — the browser's own native
+//!    placement for this click needs to be allowed to happen FIRST, so
+//!    it can be read back and corrected, rather than guessed at in
+//!    advance. `caret_trapped_in_directive` was split into a doc+pos
+//!    helper, `caret_trapped_in_directive_at`, so `directive_popover.
+//!    rs`'s new `handle_mouseup` can run the exact same check against a
+//!    plain `usize` read straight from `EditorView::read_selection`,
+//!    with no `EditorState` available at that point. `exit_directive`
+//!    was similarly split into `exit_directive_from`, taking the
+//!    already-resolved `(start, node)` directly rather than re-deriving
+//!    them from `state.selection()` — the ONLY safe option here, since
+//!    a `ViewAction::Command` this produces isn't guaranteed to run
+//!    against a `state` that has already re-synced from the live DOM.
+//!    `handle_mouseup` then compares the actual click coordinates
+//!    against the directive's own rendered bounding rect
+//!    (`EditorView::node_dom_at`) to decide the fix: genuinely within it
+//!    selects it as a whole unit (same as clicking directly on it —
+//!    a rarer, defensive fallback, since the ordinary case is already
+//!    fully handled, and prevented, at `mousedown`); outside it (the
+//!    reported case) runs the same "land outside" escape Enter/Arrow
+//!    keys already use, forward if the click was to the right of the
+//!    rect, backward if to the left.
+//!
+//!    **A second, genuinely separate bug was found WHILE investigating
+//!    this, confirmed live, not assumed**: typing MULTIPLE characters
+//!    immediately after landing a caret in the middle of a line with
+//!    real text still AFTER it (any line, not just one touching a
+//!    directive) could scramble — each keystroke landing one position
+//!    further behind where it should (`"typed"` re-rendering as
+//!    `"tyedp"`). Confirmed this reproduces via a PURE keyboard flow
+//!    (click once to focus, `Home`, then type — zero `ViewAction`/
+//!    `ViewPlugin`/directive involvement at all), so it's unrelated to
+//!    this fix specifically; typing at the very END of a line (nothing
+//!    after the caret) was unaffected. While investigating,
+//!    `apply_view_action` (`taino-edit-leptos`) was found to have a
+//!    real, separate gap of its own — it only ever pushed a
+//!    `ViewAction`'s result into the reactive SIGNAL, never
+//!    synchronously into the live DOM view/selection the way the
+//!    `keydown` handler's own `next` handling already does — fixed (see
+//!    `apply_view_action`'s own doc comment) since it's a real, generic
+//!    correctness gap on its own regardless, but confirmed this did NOT
+//!    account for the scrambling itself at the time (still reproduced
+//!    identically after that fix, and via the pure-keyboard repro that
+//!    never goes through `apply_view_action` at all). The actual root
+//!    cause — and its fix — is item 9.
+//! 9. **The mid-line typing-scramble bug (item 8) root-caused and
+//!    fixed, in `taino-edit-dom` (the fork's contenteditable-sync
+//!    layer, NOT this crate) — a deliberate, scoped patch chosen over
+//!    either continuing to patch around it or rewriting that whole
+//!    layer.** Before deciding which, every bug found this session was
+//!    audited by WHICH layer it lived in: `taino-edit-core` (schema,
+//!    `Transform`/`Step`, position mapping, `Selection`, `Keymap`) had
+//!    zero bugs found across the entire session; every real bug
+//!    (including this one) lived in the DOM bridge specifically —
+//!    `EditorView::read_selection`/`read_dom_changes`, and
+//!    `taino-edit-leptos`'s event wiring — and even THERE, only two of
+//!    its ~ten real responsibilities (DOM-text diffing, selection
+//!    read/write) ever needed a fix; mounting/rendering, IME
+//!    composition, paste, `ViewPlugin` click dispatch, decorations, and
+//!    undo/redo were never touched because they were never broken.
+//!    That ruled out a full rewrite as disproportionate — it would
+//!    discard eight working subsystems to fix problems concentrated in
+//!    one function — and pointed at a scoped replacement of just that
+//!    function instead.
+//!
+//!    **Root cause, confirmed by hand-tracing the actual algorithm
+//!    against the real repro, not guessed**: `read_dom_changes`
+//!    detects an edit by diffing the OLD model text against the NEW
+//!    live DOM text as two plain strings — `find_diff`'s longest-
+//!    common-prefix + longest-common-suffix — with NO awareness of
+//!    where the browser's own caret actually is. Traced by hand through
+//!    the exact failing case (typing `"typed"` into `"plain
+//!    paragraph"`): after the 3rd keystroke, model text
+//!    `"typlain paragraph"` vs. DOM text `"typplain paragraph"` (the
+//!    user typed `"p"` at position 2, right before an ALREADY-EXISTING
+//!    `"p"` two characters later, from `"...lain..."`). Both "insert p
+//!    at 2" and "insert p at 3" produce the IDENTICAL resulting text
+//!    (`"typpplain"`... `"typplain"` either way) — a genuine, provable
+//!    ambiguity, not a fluke — and the unanchored longest-common-prefix
+//!    match always resolves it by greedily extending the prefix as far
+//!    as equality allows, picking the LATER position, which happens to
+//!    be wrong here. The text still renders correctly either way (both
+//!    diffs produce the same string); what silently breaks is the
+//!    model's own notion of where the caret ended up, since a caret
+//!    sitting exactly at the ambiguous boundary maps differently
+//!    depending on which side of the edit range it's considered to be
+//!    on — compounding into a visibly scrambled word after a few such
+//!    keystrokes.
+//!
+//!    **Fixed with `find_diff_anchored`**, layered in front of the
+//!    original `find_diff` (kept, unmodified, as the fallback): when
+//!    the text GREW (a plain insertion, the overwhelmingly common
+//!    typing case) and the browser's own CURRENT collapsed caret is
+//!    known, the edit's boundaries are derived DIRECTLY from that caret
+//!    — which always sits exactly at the END of what was just typed —
+//!    instead of guessed at via string matching at all. The guess is
+//!    still verified against both strings before being trusted (`a[..
+//!    old_start] == b[..old_start]` and `a[old_start..] == b[caret..]`)
+//!    and falls straight through to the original `find_diff` if that
+//!    verification fails, or the text didn't grow, or no caret is
+//!    available (composition commits, paste, spellcheck/autocomplete
+//!    replacing a whole word while the caret sits elsewhere, or
+//!    deletions — none of which fit the "typed insertion" shape this
+//!    targets). Confirmed live via a NEW, dedicated e2e file
+//!    (`../../e2e/tests/mid-line-typing.spec.ts`, deliberately separate
+//!    from `directive-escape.spec.ts` since this was never actually a
+//!    directive bug): the exact repro that started this investigation,
+//!    the pure-keyboard `Home`-then-type repro, a deliberately adversarial
+//!    `"banana"`-typed-into-`"banana"` case (every rotation shares
+//!    characters with its neighbors — the worst case for a plain
+//!    prefix/suffix diff), and a confirmation that typing at the very
+//!    end of a line (unaffected even before this fix) still works.
 
 use regex::Captures;
 use taino_edit_core::{
@@ -366,7 +496,21 @@ fn caret_trapped_in_directive(state: &EditorState) -> Option<(usize, Node)> {
     if !sel.is_empty() {
         return None;
     }
-    let rp = ResolvedPos::resolve(state.doc(), sel.from()).ok()?;
+    caret_trapped_in_directive_at(state.doc(), sel.from())
+}
+
+/// The doc+position half of `caret_trapped_in_directive`, split out so
+/// `directive_popover.rs` can run the exact same check against a plain
+/// `usize` read straight from `EditorView::read_selection` — a mouse
+/// click resolved by the BROWSER's own native caret-from-point placement
+/// (not this crate's `pos_at_point`-based mousedown check) can land
+/// there too, e.g. clicking in the empty space just past a leaf
+/// directive's own rendered pill on the same row, where the browser's
+/// nearest-text hit-testing picks the directive's own trailing content
+/// over anything else. See `directive_popover.rs`'s own `mouseup`
+/// handling for the fix this backs.
+pub(crate) fn caret_trapped_in_directive_at(doc: &Node, pos: usize) -> Option<(usize, Node)> {
+    let rp = ResolvedPos::resolve(doc, pos).ok()?;
     if rp.depth() == 0 {
         return None;
     }
@@ -388,6 +532,26 @@ fn exit_directive(state: &EditorState, dispatch: Option<&mut Dispatch<'_>>, forw
     let Some((start, node)) = directive_at_selection(state) else {
         return false;
     };
+    exit_directive_from(state, dispatch, start, &node, forward)
+}
+
+/// The `(start, node)`-provided half of `exit_directive`, split out so
+/// `directive_popover.rs` can drive the exact same "land outside"
+/// escape from its own `mouseup` handling — a mouse click resolved by
+/// the browser's own native placement (not `directive_at_selection`'s
+/// `state.selection()` read) can land trapped inside a directive too,
+/// and by the time a `ViewAction::Command` this produces actually runs,
+/// there's no guarantee the model's own `state.selection()` has been
+/// re-synced from the live DOM yet — so the caller passes the already-
+/// resolved `(start, node)` directly rather than relying on this
+/// function to re-derive them.
+pub(crate) fn exit_directive_from(
+    state: &EditorState,
+    dispatch: Option<&mut Dispatch<'_>>,
+    start: usize,
+    node: &Node,
+    forward: bool,
+) -> bool {
     let Some(d) = dispatch else {
         return true;
     };

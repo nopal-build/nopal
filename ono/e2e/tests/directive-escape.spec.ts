@@ -32,6 +32,21 @@ import { gotoWithDoc } from "./helpers";
 // anti-corruption guard actually lives now (a generic, atom-level fix
 // in the vendored `taino-edit-leptos` fork, not a per-key allowlist
 // here).
+//
+// A THIRD entry point into this exact same "bare caret trapped inside a
+// directive's content" trap was found and fixed after item 7 shipped:
+// item 7 only ever closed it for KEYBOARD arrow navigation. Clicking in
+// the empty space just past a leaf/text directive's own rendered pill
+// (still the same row, but not actually on the pill) never reached
+// `directive_popover.rs`'s existing `mousedown` check at all (that only
+// matches a click resolving to the position immediately BEFORE the
+// directive starts) — the browser's own native caret-from-point
+// placement ran unopposed and landed a bare caret inside the directive's
+// own text (confirmed live: `window.getSelection()` resolved into the
+// pill's own last character), which the fork's `selection_touches_an_atom`
+// guard then correctly blocked every further keystroke against — read
+// live as "I can no longer add a new line or write anything." See
+// `directive_popover.rs`'s own `handle_mouseup` doc comment for the fix.
 
 test("pressing Enter after selecting a badge always inserts a fresh new line, never reuses or jumps to what's already next", async ({
   page,
@@ -208,4 +223,55 @@ test("a caret that reaches a directive's content via native vertical arrow movem
   // Still exactly one badge, label untouched.
   await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
   await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready");
+});
+
+test("clicking just past a badge's own rendered pill, on the same row, lands a real caret in the following paragraph instead of trapping it inside the label", async ({
+  page,
+}) => {
+  await gotoWithDoc(page, '::badge{label="Ready"}\n\nplain paragraph\n');
+  const badge = page.locator(".ox-directive-leaf").first();
+  const box = await badge.boundingBox();
+  if (!box) throw new Error("badge has no bounding box");
+  await page.mouse.click(box.x + box.width + 100, box.y + box.height / 2);
+
+  // The label is completely untouched — the click never really landed
+  // "on" the directive at all, so no popover, no selection of it either.
+  await expect(page.locator(".ox-directive-popover")).toHaveCount(0);
+  await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready");
+  // A single typed character proves the caret is genuinely live and
+  // sitting right at the start of "plain paragraph" (a single character
+  // insertion, to avoid a separate, unrelated multi-character mid-line
+  // typing bug this repro is not about).
+  await page.keyboard.type("X");
+  await expect(page.locator(".taino-editor p")).toHaveText("Xplain paragraph");
+});
+
+test("clicking just past a badge with nothing after it at all lands in a freshly inserted paragraph", async ({
+  page,
+}) => {
+  await gotoWithDoc(page, '::badge{label="Ready"}\n');
+  const badge = page.locator(".ox-directive-leaf").first();
+  const box = await badge.boundingBox();
+  if (!box) throw new Error("badge has no bounding box");
+  await page.mouse.click(box.x + box.width + 100, box.y + box.height / 2);
+  await page.keyboard.type("typed");
+
+  await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
+  await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready");
+  await expect(page.locator(".taino-editor p")).toHaveText("typed");
+});
+
+test("clicking squarely on the badge's own visible text still selects it and opens the popover, unaffected by the mouseup fix", async ({
+  page,
+}) => {
+  await gotoWithDoc(page, '::badge{label="Ready"}\n\nplain paragraph\n');
+  const badge = page.locator(".ox-directive-leaf").first();
+  const box = await badge.boundingBox();
+  if (!box) throw new Error("badge has no bounding box");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+  await expect(page.locator(".ox-directive-popover")).toHaveCount(1);
+  await page.keyboard.press("Backspace");
+  await expect(page.locator(".ox-directive-leaf")).toHaveCount(0);
+  await expect(page.locator(".taino-editor p")).toHaveText("plain paragraph");
 });

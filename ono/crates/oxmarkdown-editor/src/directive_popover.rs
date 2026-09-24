@@ -92,7 +92,9 @@ fn directive_at(doc: &Node, pos: usize) -> Option<(usize, Node)> {
 /// The `ViewPlugin` half: intercepts a `mousedown` squarely on an
 /// editable directive, stops the browser's own caret placement, and
 /// tells the Leptos layer (via `on_select`) where to render the popover
-/// \u2014 or that none should be showing, for any other click.
+/// — or that none should be showing, for any other click. Also fixes a
+/// SECOND, separate click-related trap on `mouseup` — see
+/// `handle_mouseup`'s own doc comment.
 pub struct DirectivePopoverPlugin {
     on_select: Rc<dyn Fn(Option<PopoverTarget>)>,
 }
@@ -101,13 +103,8 @@ impl DirectivePopoverPlugin {
     pub fn new(on_select: Rc<dyn Fn(Option<PopoverTarget>)>) -> Self {
         Self { on_select }
     }
-}
 
-impl ViewPlugin for DirectivePopoverPlugin {
-    fn handle_event(&self, view: &EditorView, event: &web_sys::Event) -> Option<ViewAction> {
-        if event.type_() != "mousedown" {
-            return None;
-        }
+    fn handle_mousedown(&self, view: &EditorView, event: &web_sys::Event) -> Option<ViewAction> {
         let mouse = event.dyn_ref::<web_sys::MouseEvent>()?;
         let pos = view.pos_at_point(mouse.client_x() as f32, mouse.client_y() as f32)?;
         let Some((start, node)) = directive_at(view.doc(), pos) else {
@@ -129,6 +126,85 @@ impl ViewPlugin for DirectivePopoverPlugin {
         let _ = view.focus();
         (self.on_select)(Some(PopoverTarget { pos: start, x, y }));
         Some(ViewAction::Select(Selection::Node { pos: start }))
+    }
+
+    /// A SECOND, genuinely different click-related trap than the one
+    /// `handle_mousedown` fixes: reported live — clicking in the empty
+    /// space just past a leaf/text directive's own rendered pill (still
+    /// on the same row, but not actually ON the pill) never reaches
+    /// `handle_mousedown`'s own `pos_at_point`/`directive_at` check at
+    /// all (that only matches a click resolving to the position
+    /// immediately BEFORE the directive starts), so `event.
+    /// prevent_default()` is never called and the BROWSER's own native
+    /// caret-from-point placement runs unopposed — which, since the
+    /// directive's own text is the nearest actual content to a click
+    /// past its right edge, lands a bare caret INSIDE it (confirmed live
+    /// via Playwright: `window.getSelection()` resolved into the
+    /// directive's own text node at its last character). Once there,
+    /// per the `oxmarkdown` skill's own "never places a bare caret
+    /// inside it" rule (already enforced for arrow-key navigation — see
+    /// `commands.rs` item 7 — but never for a raw mouse click landing
+    /// there by accident), the fork's own `selection_touches_an_atom`
+    /// guard then blocks every further keystroke, reading live as
+    /// "I can no longer add a new line or write anything."
+    ///
+    /// Checked on `mouseup`, not `mousedown`: the browser's own native
+    /// placement for this click is exactly what needs correcting, so it
+    /// must be allowed to happen first; `EditorView::read_selection` then
+    /// reads back wherever it actually landed (bypassing any assumption
+    /// about `pos_at_point`'s own, separate resolution). If that lands
+    /// `caret_trapped_in_directive_at`, the actual click coordinates are
+    /// compared against the directive's own rendered bounding rect to
+    /// decide the fix: genuinely within it (a rarer, defensive case —
+    /// the ordinary "click squarely on it" path is already fully
+    /// handled, and prevented, at `mousedown`) selects it as a whole
+    /// unit, same as clicking directly on it; outside it (the reported
+    /// case) runs the exact same "land outside" escape Enter/Arrow keys
+    /// already use (`exit_directive_from`), forward if the click was to
+    /// the right of the rect, backward if to the left.
+    fn handle_mouseup(&self, view: &EditorView, event: &web_sys::Event) -> Option<ViewAction> {
+        let mouse = event.dyn_ref::<web_sys::MouseEvent>()?;
+        let Selection::Text { anchor, head } = view.read_selection()? else {
+            return None;
+        };
+        if anchor != head {
+            return None;
+        }
+        let (start, node) = crate::commands::caret_trapped_in_directive_at(view.doc(), anchor)?;
+        let rect = view.node_dom_at(start)?.get_bounding_client_rect();
+        let x = mouse.client_x() as f64;
+        let y = mouse.client_y() as f64;
+        let within = x >= rect.left() && x <= rect.right() && y >= rect.top() && y <= rect.bottom();
+        event.prevent_default();
+        let _ = view.focus();
+        if within {
+            let name = directive_name(&node);
+            if is_editable_directive(node.node_type().name(), &name) {
+                (self.on_select)(Some(PopoverTarget {
+                    pos: start,
+                    x: rect.left(),
+                    y: rect.bottom() + 4.0,
+                }));
+            } else {
+                (self.on_select)(None);
+            }
+            return Some(ViewAction::Select(Selection::Node { pos: start }));
+        }
+        (self.on_select)(None);
+        let forward = x > rect.right();
+        Some(ViewAction::Command(Box::new(move |s, d| {
+            crate::commands::exit_directive_from(s, d, start, &node, forward)
+        })))
+    }
+}
+
+impl ViewPlugin for DirectivePopoverPlugin {
+    fn handle_event(&self, view: &EditorView, event: &web_sys::Event) -> Option<ViewAction> {
+        match event.type_().as_str() {
+            "mousedown" => self.handle_mousedown(view, event),
+            "mouseup" => self.handle_mouseup(view, event),
+            _ => None,
+        }
     }
 }
 

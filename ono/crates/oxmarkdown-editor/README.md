@@ -497,6 +497,138 @@ attributes."** The design below is what actually ships today:
   arrow movement (never clicking at all) self-heals into a selection and
   still escapes cleanly on Enter.
 
+## A mouse click could ALSO trap a bare caret inside a directive — fixed, plus a separate bug found while investigating (see the next section for its fix)
+
+A third entry point into item 4/7's same underlying trap, found live
+after the arrow-key fix above shipped: clicking in the empty space just
+past a leaf/text directive's own rendered pill (still the same row, but
+not actually on the pill) never reached `directive_popover.rs`'s
+existing `mousedown` check at all — that only matches a click resolving
+to the position immediately BEFORE the directive starts. The browser's
+own native caret-from-point placement ran unopposed, and since the
+directive's own text is the nearest actual content past its right edge,
+landed a bare caret INSIDE it (confirmed live: `window.getSelection()`
+resolved into the pill's own text node, at its last character) — which
+the fork's `selection_touches_an_atom` guard then correctly blocked
+every further keystroke against, read live as "I can no longer add a
+new line or write anything."
+
+- **Fixed on `mouseup`, not `mousedown`** — the browser's own native
+  placement for this click has to be allowed to happen first so it can
+  be read back and corrected, rather than guessed at in advance.
+  `caret_trapped_in_directive` (`commands.rs`) was split into a doc+pos
+  helper, `caret_trapped_in_directive_at`, so `directive_popover.rs`'s
+  new `handle_mouseup` can run the exact same check against a plain
+  `usize` read straight from `EditorView::read_selection`, with no
+  `EditorState` available at that point. `exit_directive` was similarly
+  split into `exit_directive_from`, taking the already-resolved
+  `(start, node)` directly rather than re-deriving them from
+  `state.selection()` — the only safe option, since a `ViewAction::
+  Command` this produces isn't guaranteed to run against a `state` that
+  has already re-synced from the live DOM.
+- **The actual click coordinates decide the fix**: compared against the
+  directive's own rendered bounding rect (`EditorView::node_dom_at`),
+  genuinely within it selects it as a whole unit (same as clicking
+  directly on it — a rarer, defensive fallback, since the ordinary case
+  is already fully handled, and prevented, at `mousedown`); outside it
+  (the reported case) runs the exact same "land outside" escape
+  Enter/Arrow keys already use (`exit_directive_from`), forward if the
+  click was to the right of the rect, backward if to the left.
+- **A real, generic gap found and fixed in the fork while investigating
+  this, confirmed live**: `taino-edit-leptos`'s own `apply_view_action`
+  only ever pushed a `ViewAction`'s result into the reactive SIGNAL,
+  never synchronously into the live DOM view/selection the way the
+  `keydown` handler's own `next` handling already does — leaving the
+  actual DOM sync to a separate, async reactive `Effect`, which a fast
+  enough subsequent keystroke could in principle outrun. Fixed to
+  mirror the `keydown` handler's synchronous push exactly, for BOTH
+  `ViewAction` variants.
+- **A second, genuinely separate bug was found WHILE investigating
+  this**, confirmed live: typing MULTIPLE characters immediately after
+  landing a caret in the middle of a line with real text still after it
+  (ANY line, not just one touching a directive) could scramble — each
+  keystroke landing one position further behind where it should
+  (`"typed"` re-rendering as `"tyedp"`). Confirmed this reproduces via a
+  PURE keyboard flow (click once to focus, `Home`, then type — zero
+  `ViewAction`/`ViewPlugin`/directive involvement at all), so it's
+  unrelated to this fix specifically, and confirmed the `apply_view_
+  action` fix above does NOT account for it either (still reproduced
+  identically afterward, at the time). Typing at the very END of a line
+  (nothing after the caret) was unaffected. Root-caused and fixed — see
+  the next section.
+- Confirmed live via e2e tests (`../../e2e/tests/directive-escape.
+  spec.ts`): clicking just past a badge's own pill (with a following
+  paragraph, or with nothing after it at all) lands a real, usable
+  caret outside the directive rather than trapping it inside the label;
+  clicking squarely on the pill is unaffected (still selects + opens the
+  popover).
+
+## The mid-line typing scramble, root-caused and fixed in the fork's contenteditable-sync layer
+
+Found while investigating the click-trap bug above, then deliberately
+treated as its own investigation before deciding whether to keep
+patching `taino-edit` or replace pieces of it: typing multiple
+characters right after landing a caret in the middle of ANY line (with
+real text still after it) could scramble the typed word — e.g. typing
+`"typed"` re-rendering as `"tyedp"`. Confirmed via a pure keyboard flow
+with zero directive involvement, so this was never actually about
+directives, clicking, or this crate's own code at all.
+
+**Before deciding whether to patch further or replace the whole
+contenteditable bridge, every bug found this session was sorted by
+which layer it actually lived in**: `taino-edit-core` (schema,
+`Transform`/`Step`, position mapping, `Selection`, `Keymap`) had ZERO
+bugs found across the entire session. Every real bug — including this
+one — lived in the DOM bridge (`taino-edit-dom`/`taino-edit-leptos`),
+and even within that layer, only two of its roughly TEN real
+responsibilities (DOM-text diffing, selection read/write) ever needed a
+fix; mounting/rendering, IME composition, paste, `ViewPlugin` click
+dispatch, decorations, and undo/redo were never touched, because they
+were never broken. That ruled out rewriting the whole bridge as
+disproportionate (it would discard eight working subsystems to fix
+problems concentrated in one function) and pointed at a scoped
+replacement of just that one function instead.
+
+- **Root cause, confirmed by hand-tracing the real repro against the
+  actual algorithm, not guessed**: `EditorView::read_dom_changes`
+  detects an edit by diffing the OLD model text against the NEW live
+  DOM text as two plain strings — `find_diff`'s longest-common-prefix +
+  longest-common-suffix — with NO awareness of where the browser's own
+  caret actually is. Traced by hand through the exact failing case
+  (typing `"typed"` into `"plain paragraph"`): by the 3rd keystroke,
+  model text `"typlain paragraph"` vs. DOM text `"typplain
+  paragraph"` (the user typed a `"p"` at position 2, right before an
+  ALREADY-EXISTING `"p"` two characters later, from `"...lain..."`).
+  "Insert p at 2" and "insert p at 3" produce the IDENTICAL resulting
+  text — a genuine, provable ambiguity, not a fluke — and the
+  unanchored longest-common-prefix match always resolves it by
+  greedily extending the prefix as far as equality allows, picking the
+  LATER position, which happens to be wrong here. The text still
+  renders correctly either way; what silently breaks is the model's
+  own notion of where the caret ended up, compounding into a visibly
+  scrambled word after a few such keystrokes.
+- **Fixed with `find_diff_anchored`** (`taino-edit-dom/src/view.rs`),
+  layered in front of the original `find_diff` (kept, unmodified, as
+  the fallback): when the text GREW (a plain insertion, the
+  overwhelmingly common typing case) and the browser's own CURRENT
+  collapsed caret is known, the edit's boundaries are derived DIRECTLY
+  from that caret — which always sits exactly at the end of what was
+  just typed — instead of guessed at via string matching at all. The
+  guess is still verified against both strings before being trusted,
+  falling straight through to the original `find_diff` if that
+  verification fails, the text didn't grow, or no caret is available
+  (composition, paste, spellcheck/autocomplete, deletions — none of
+  which fit the "typed insertion" shape this targets).
+- Confirmed live via a new, dedicated e2e file
+  (`../../e2e/tests/mid-line-typing.spec.ts`, deliberately separate
+  from `directive-escape.spec.ts` since this was never actually a
+  directive bug): the exact repro that started the investigation, the
+  pure-keyboard `Home`-then-type repro, a deliberately adversarial
+  `"banana"`-typed-into-`"banana"` case (every rotation shares
+  characters with its neighbors — the worst case for a plain
+  prefix/suffix diff), and confirmation that typing at the very end of
+  a line (already unaffected before this fix) still works.
+
 ## The caret could land right before a checkbox — fixed
 
 Reported live: a checkbox is always its list item's own leading glyph
