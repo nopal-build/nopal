@@ -19,6 +19,7 @@ import {
   createFileRef,
   createVaultFolder,
   getFolderById,
+  getFileRefById,
   listFolderChildren,
   updateFileRef,
   copyFileIntoFolder,
@@ -406,6 +407,11 @@ export async function runDailyLogSync(
         }
         continue;
       }
+
+      // Only the Card author's own files: the id comes from text they can
+      // type, and copying someone else's file would hand it to everyone
+      // on the project (see `fileCardAttachments`).
+      if ((await getFileRefById(attachment.fileId))?.human_id !== humanId) continue;
 
       const copied = await copyFileIntoFolder(attachment.fileId, dailyLogsFolder._id);
       if (!copied) {

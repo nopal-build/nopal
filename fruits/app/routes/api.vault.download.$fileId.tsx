@@ -47,7 +47,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ? file.human_id === user._id
     : await canViewFileRef(user._id, file);
   if (!permitted) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+    // The same 404 as a file that doesn't exist (ADR-023): a refusal
+    // says nothing about what was there.
+    return Response.json({ error: "Not found" }, { status: 404 });
   }
 
   // Sync-scoped tokens may only read files inside syncs/.

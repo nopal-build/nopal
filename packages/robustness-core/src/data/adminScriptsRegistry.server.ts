@@ -49,6 +49,7 @@ import { run as runVaultRootKeys } from "./adminScripts/migrateVaultRootKeys.ser
 import { run as runBackfillSyncedDailyLogDates } from "./adminScripts/backfillSyncedDailyLogDates.server";
 import { run as runReseedGraphlogSkills } from "./adminScripts/reseedGraphlogSkills.server";
 import { run as runDedupeSummaries } from "./adminScripts/dedupeSummaries.server";
+import { run as runCreatorsAsOwners } from "./adminScripts/migrateCreatorsAsOwners.server";
 import type { AdminScriptDefinition } from "./adminScripts/types";
 
 export type { AdminScriptDefinition, AdminScriptRunOpts, AdminScriptResult } from "./adminScripts/types";
@@ -138,6 +139,13 @@ const REGISTRY: AdminScriptDefinition[] = [
     argLabel: "Folder id",
     argRequired: true,
     run: runDedupeSummaries,
+  },
+  {
+    name: "migrate-creators-as-owners",
+    label: "Write project creators in as Owner (ADR-023)",
+    description:
+      "Run once right after the ADR-023 deploy. Adds the Client role if missing, writes each project's creator into its README as Owner (the code no longer assumes it), and rebuilds every project's shared_with so Clients are left out. Idempotent.",
+    run: runCreatorsAsOwners,
   },
 ];
 

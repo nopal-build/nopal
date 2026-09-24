@@ -80,20 +80,20 @@ function GuideRow({ row, showMeter }: { row: DashboardRow; showMeter: boolean })
   );
 }
 
-function ClientProject({ row }: { row: DashboardRow }) {
+/** A project where the viewer is a Client (ADR-023): its name and their
+ * own meter. No link: the project page refuses a Client. */
+function OwnLogProject({ row, showName }: { row: DashboardRow; showName: boolean }) {
   return (
     <Stack gap={2} data-project-row={row.id}>
-      <Link
-        to={`/newspaper/${row.id}`}
-        prefetch="intent"
-        className={`${textSize.lg} ${sprinkles({ fontWeight: "bold" })}`}
-        style={plainLink}
-      >
-        {row.name}
-      </Link>
-      {row.read && <p className={textSize.sm}>{row.read}</p>}
+      {showName && <span className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>{row.name}</span>}
+      {row.canTap && <SteepGauge projectFolderId={row.id} mine={row.mine} />}
     </Stack>
   );
+}
+
+/** Whether a row's role sees only its own log there (Client). */
+function isOwnLogRow(row: DashboardRow): boolean {
+  return row.role === "Client";
 }
 
 function GuideProjects({
@@ -136,9 +136,9 @@ function GuideProjects({
       ) : (
         <Stack gap={3}>
           {rows.map((row) =>
-            row.seat === "client" ? (
+            isOwnLogRow(row) ? (
               <Surface key={row.id} className={sprinkles({ p: 4 })}>
-                <ClientProject row={row} />
+                <OwnLogProject row={row} showName />
               </Surface>
             ) : (
               <GuideRow key={row.id} row={row} showMeter={!topMeter} />
@@ -169,34 +169,42 @@ export function DashboardView({
     projectFolders: { id: string; name: string }[];
   };
 }) {
+  const logBox = (
+    <div data-log-box>
+      <TodayLog entries={log.entries} cardsByDate={log.cardsByDate} projectFolders={log.projectFolders} />
+    </div>
+  );
+
+  // The client screen (ADR-023), for someone whose every role is Client:
+  // today's log, then the Steep-o-meter below it, one per project. Nothing
+  // else: no project row, no read, no link, nothing that counts.
+  if (dashboard.view === "client") {
+    const several = dashboard.rows.length > 1;
+    return (
+      <Stack gap={6}>
+        {logBox}
+        {dashboard.rows.map((row) => (
+          <OwnLogProject key={row.id} row={row} showName={several} />
+        ))}
+      </Stack>
+    );
+  }
+
   const topRow = dashboard.rows.find((r) => r.id === dashboard.topMeterProjectId) ?? null;
   return (
     <Stack gap={10}>
-      {/* The ritual: today's log and one tap on the gauge. A client writes
-          first and says how the terrain feels after; a guide on one
-          project gets the gauge above the log. */}
+      {/* The ritual: the gauge on the one project they tap on, then today's
+          log, the same editor as the Daily Log page. */}
       <Stack gap={6}>
-        {topRow && dashboard.view !== "client" && <SteepGauge projectFolderId={topRow.id} mine={topRow.mine} />}
-        <div data-log-box>
-          <TodayLog entries={log.entries} cardsByDate={log.cardsByDate} projectFolders={log.projectFolders} />
-        </div>
-        {topRow && dashboard.view === "client" && <SteepGauge projectFolderId={topRow.id} mine={topRow.mine} />}
+        {topRow && <SteepGauge projectFolderId={topRow.id} mine={topRow.mine} />}
+        {logBox}
       </Stack>
-
-      {dashboard.view === "client" ? (
-        <Stack gap={8}>
-          {dashboard.rows.map((row) => (
-            <ClientProject key={row.id} row={row} />
-          ))}
-        </Stack>
-      ) : (
-        <GuideProjects
-          rows={dashboard.rows}
-          activeStatus={activeStatus}
-          counts={dashboard.counts ?? { active: 0, completed: 0, trashed: 0 }}
-          topMeter={!!topRow}
-        />
-      )}
+      <GuideProjects
+        rows={dashboard.rows}
+        activeStatus={activeStatus}
+        counts={dashboard.counts ?? { active: 0, completed: 0, trashed: 0 }}
+        topMeter={!!topRow}
+      />
     </Stack>
   );
 }

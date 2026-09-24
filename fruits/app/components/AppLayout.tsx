@@ -1,7 +1,7 @@
 // app/components/AppLayout.tsx
 import { Link, NavLink, useLocation } from "react-router";
 import { ReactNode, useState, useCallback, useEffect } from "react";
-import { useUser, permissions } from "../hooks/useUser";
+import { useUser, useVaultHidden, permissions } from "../hooks/useUser";
 import noLogoColor from "../images/no-logo-color.svg";
 import noLogoWhite from "../images/no-logo-white.svg";
 import { useSchemePref } from "../hooks/useSchemePref";
@@ -127,6 +127,9 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const isDark = schemePref === "dark";
   const user = useUser();
   const isAdmin = permissions.isAdmin(user);
+  // A client gets the Dashboard, the Daily Log and their account, nothing
+  // else (ADR-023); `/vault` refuses them on the server too.
+  const showVault = !useVaultHidden();
   const location = useLocation();
   const currentSectionLabel = getCurrentSectionLabel(location.pathname);
 
@@ -170,15 +173,17 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             >
               Daily Log
             </NavLink>
-            <NavLink
-              to="/vault"
-              prefetch="intent"
-              className={({ isActive }) =>
-                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
-              }
-            >
-              Vault
-            </NavLink>
+            {showVault && (
+              <NavLink
+                to="/vault"
+                prefetch="intent"
+                className={({ isActive }) =>
+                  `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+                }
+              >
+                Vault
+              </NavLink>
+            )}
             {isAdmin && (
               <NavLink
                 to="/maker"
@@ -254,16 +259,18 @@ export function AppLayout({ children }: { children?: ReactNode }) {
               >
                 Daily Log
               </NavLink>
-              <NavLink
-                to="/vault"
-                prefetch="intent"
-                className={({ isActive }) =>
-                  `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
-                }
-                onClick={closeMenu}
-              >
-                Vault
-              </NavLink>
+              {showVault && (
+                <NavLink
+                  to="/vault"
+                  prefetch="intent"
+                  className={({ isActive }) =>
+                    `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                  }
+                  onClick={closeMenu}
+                >
+                  Vault
+                </NavLink>
+              )}
               {isAdmin && (
                 <NavLink
                   to="/maker"

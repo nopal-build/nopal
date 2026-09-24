@@ -28,7 +28,7 @@ import {
   withProjectStatus,
   type ProjectStatus,
 } from "./project.types";
-import { isProjectFolder } from "./projectSharing.server";
+import { getProjectRole, isProjectFolder } from "./projectSharing.server";
 
 export type { ProjectStatus };
 
@@ -75,7 +75,9 @@ export async function setProjectStatus(
   if (!PROJECT_STATUSES.includes(status)) {
     return { ok: false, error: `Unknown status "${status}"` };
   }
-  if (projectFolder.human_id !== actingHumanId) {
+  // The Owner's, like renaming and deleting (ADR-023); being the folder's
+  // creator decides nothing.
+  if (!(await getProjectRole(projectFolder, actingHumanId))?.guiding) {
     return {
       ok: false,
       error: "You don't have permission to change this project's status",

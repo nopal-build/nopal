@@ -1,6 +1,6 @@
 # ADR-022 — A seat is not a permission.
 
-**Status:** Accepted, 2026-09-23
+**Status:** Superseded by [ADR-023](0023-a-client-is-not-in-the-cache.md), 2026-09-24. Accepted 2026-09-23.
 
 **Context.** The dashboard splits by reader: a guide sees across their projects, a client sees their own project and nothing else, and an observer (leadership, or a guide not running this project) looks in without being asked anything. A Steep-o-meter reading from a client reaches the project's guides and observers and nobody else. Projects already had a per-person role, the Sharing Role (Owner, Crafter, Observer), stored as `sharing: [{human, role}]` in the project's README front matter. That role is a permission: `is_owner` decides who may write. Clients were given the least-privileged role, Observer, when legacy shares were backfilled, so "Observer" already meant "a client" in practice and "a leader looking in" in the dashboard guide.
 

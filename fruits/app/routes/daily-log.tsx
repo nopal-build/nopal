@@ -31,8 +31,8 @@ import {
   type DailyLog,
   type DailyLogCard,
 } from "robustness-core/data/dailyLog.server";
-import { getAccessibleProjectFolders, getFolderById } from "robustness-core/data/vault.server";
-import { getProjectRole } from "robustness-core/data/projectSharing.server";
+import { getFolderById } from "robustness-core/data/vault.server";
+import { getProjectRole, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
 import { markOwnMutation } from "../hooks/useVaultEvents";
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -43,12 +43,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Load all entries newest-first; 500 is a generous ceiling for any user
   const { entries } = await getDailyLogs(user._id, { limit: 500 });
 
-  // Real projects for "Add a card" (replaces the old mockup's hardcoded
-  // project list) — the human's own projects, PLUS any project someone
-  // else shared a Sharing Role with them on (any role, including
-  // Observer — Cards are how PhyLog lets a non-owner "contribute" to a
-  // project; see `vault.server.ts`'s `getAccessibleProjectFolders`).
-  const projectFolders = await getAccessibleProjectFolders(user._id);
+  // Projects for "Add a card": every project the person holds a role on,
+  // Client included (ADR-023). A Card is how anyone on a project writes to it.
+  const memberships = await listProjectsFor(user._id);
+  const projectFolders = memberships.map((m) => m.folder);
 
   // Cards for each day that actually references one — a cheap substring
   // check up front so this stays proportional to real Card usage instead
@@ -68,6 +66,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     entries,
     projectFolders: projectFolders.map((f) => ({ id: f._id, name: f.name })),
     cardsByDate,
+    vaultHidden: isClientEverywhere(memberships),
   };
 }
 

@@ -12,7 +12,7 @@ import {
   moveVaultFolder,
 } from "robustness-core/data/vault.server";
 import { canWriteToRoot } from "robustness-core/data/vaultRoots";
-import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
+import { canActAsProjectOwner, getProjectRole } from "robustness-core/data/projectSharing.server";
 import { isFileRefLocked, isVaultRootFolder } from "robustness-core/data/vault.types";
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -42,18 +42,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // not the (necessarily stricter) folder-type content policy.
   const isProjectAnchor = folder.is_folder_type_root && folder.folder_type === "project-n02";
 
-  // The project ANCHOR's own object-level lifecycle (rename/delete/publish
-  // the WHOLE project) stays creator-only — same precedent
-  // `projectStatus.server.ts` already set for project status ("a personal
-  // organizational tool", unlike the collaborator-facing actions Sharing
-  // Roles govern). Every ORDINARY folder inside a shared project extends
-  // to an owner-tier collaborator (Owner/Crafter) exactly like real
-  // ownership — see `canActAsProjectOwner`.
-  const ownershipOk = isProjectAnchor
-    ? folder.human_id === user._id
-    : await canActAsProjectOwner(user._id, folder.human_id, folder._id);
+  // Renaming, deleting or publishing a whole project is its Owner's
+  // (ADR-023); being the folder's creator decides nothing. Everything
+  // inside it is Owner or Crafter (`canActAsProjectOwner`). 404 either
+  // way, so a refusal says nothing about what's here.
+  const ownershipOk =
+    isProjectAnchor && folder.vault_root_key === "projects"
+      ? !!(await getProjectRole(folder, user._id))?.guiding
+      : await canActAsProjectOwner(user._id, folder.human_id, folder._id);
   if (!ownershipOk) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+    return Response.json({ error: "Not found" }, { status: 404 });
   }
 
   const permitted = isProjectAnchor

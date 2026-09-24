@@ -26,7 +26,7 @@ import { listMarksOnPage, readableMark } from "robustness-core/data/graphLogMark
 import { resolveProjectManifest } from "robustness-core/data/project.server";
 import { getProjectStatus } from "robustness-core/data/projectStatus.server";
 import { isIncompleteBannerText, type ProjectStatus } from "robustness-core/data/project.types";
-import { seatFor } from "robustness-core/data/projectSharing.server";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import { listCardsForProject } from "robustness-core/data/dailyLog.server";
@@ -34,8 +34,7 @@ import { getHumansById } from "robustness-core/data/humans.server";
 import {
   PROJECT_TAB_LABELS,
   TAB_FOLDERS,
-  filesForSeat,
-  projectTabsFor,
+  PROJECT_TABS,
   resolveProjectTab,
 } from "robustness-core/data/projectView.server";
 import { AppLayout } from "../components/AppLayout";
@@ -64,13 +63,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response("Not found", { status: 404 });
   }
 
-  // The tabs, by where the viewer sits (ADR-022). Someone who can open the
-  // folder but has no entry on it (reached through a shared parent) gets
-  // the narrowest view, a client's.
-  const seat = (await seatFor(folder, user._id)) ?? "client";
-  const tab = resolveProjectTab(new URL(request.url).searchParams.get("tab"), seat);
+  // Reaching this page at all is the role's (ADR-023): `canViewFolder`
+  // passes for everyone on the project but a Client.
+  const role = await getProjectRole(folder, user._id);
+  const tab = resolveProjectTab(new URL(request.url).searchParams.get("tab"));
   const base = `/newspaper/${folder._id}`;
-  const tabs = projectTabsFor(seat).map((key) => ({
+  const tabs = PROJECT_TABS.map((key) => ({
     key,
     label: PROJECT_TAB_LABELS[key],
     to: key === "efforts" ? base : `${base}?tab=${key}`,
@@ -79,7 +77,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Only the open tab's data: the files are about ten queries.
   const tabFolders = TAB_FOLDERS[tab] ?? null;
   const files: ProjectFileRow[] | null =
-    tabFolders && folder.folder_type === "project-n02" ? filesForSeat(await loadProjectFiles(folder), seat) : null;
+    tabFolders && folder.folder_type === "project-n02" ? await loadProjectFiles(folder) : null;
   const logbook = tab === "logbook" ? await projectLogbook(folder._id) : null;
 
   // Children/README belong to the folder's OWNER, not necessarily the viewer
@@ -117,9 +115,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     folder,
     project,
     status: getProjectStatus(folder),
-    // Status is a personal organizational tool, not a Sharing Role -- only
-    // the project's own creator may change it (see `projectStatus.server.ts`).
-    canEditStatus: folder.human_id === user._id,
+    // Status is the Owner's (see `projectStatus.server.ts`).
+    canEditStatus: !!role?.guiding,
     livePageHash,
     viewerId: user._id,
     marks,
