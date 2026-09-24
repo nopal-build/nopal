@@ -92,14 +92,26 @@ export async function findOwningProjectFolder(
   return ancestry.length > 1 ? ancestry[1] : null;
 }
 
-/** A project's people, read straight from its README.md front matter.
- * `[]` for a project with no README, no front matter or no `sharing` key. */
+/** A project's people: its README.md `sharing` list, with the creator as
+ * Owner when the list doesn't name them (`withCreator`). */
 export async function getProjectSharing(
   projectFolder: VaultFolder,
 ): Promise<ProjectSharingEntry[]> {
   const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
-  if (!readme?.content) return [];
-  return parseProjectSharing(readme.content);
+  return withCreator(projectFolder, readme?.content ? parseProjectSharing(readme.content) : []);
+}
+
+/** The list overrides the assumption (Austin, 2026-09-24): a creator the
+ * list doesn't name is the project's Owner, as always; a creator the list
+ * does name holds the role it gives them, so an admin can be an Observer
+ * on a project they made. Nothing has to be written for existing
+ * projects. */
+export function withCreator(
+  projectFolder: Pick<VaultFolder, "human_id">,
+  sharing: ProjectSharingEntry[],
+): ProjectSharingEntry[] {
+  if (sharing.some((e) => e.human === projectFolder.human_id)) return sharing;
+  return [{ human: projectFolder.human_id, role: GUIDING_ROLE }, ...sharing];
 }
 
 export type ResolvedProjectRole = {
@@ -113,9 +125,8 @@ export type ResolvedProjectRole = {
 
 /**
  * Resolves `humanId`'s role on `projectFolder` from the README's `sharing`
- * list, or `null` when they hold none. The creator is listed like anyone
- * else, as Owner (ADR-023); owning the folder decides nothing, so a
- * creator who set themselves to Observer or Client sees it that way.
+ * list, or `null` when they hold none. A creator the list doesn't name is
+ * Owner (`withCreator`).
  */
 export async function getProjectRole(
   projectFolder: VaultFolder,
@@ -186,15 +197,8 @@ export async function writeProjectSharing(
   await updateFileRef(readme._id, { content: withProjectSharing(readme.content ?? "", entries) });
   await cascadeShareVaultFolder(
     projectFolder._id,
-    entries.filter((e) => reachesProjectWork(e.role)).map((e) => e.human),
+    withCreator(projectFolder, entries).filter((e) => reachesProjectWork(e.role)).map((e) => e.human),
   );
-}
-
-/** A new project's creator, written in as Owner. */
-export async function writeCreatorAsOwner(projectFolder: VaultFolder): Promise<void> {
-  const existing = await getProjectSharing(projectFolder);
-  if (existing.some((e) => e.human === projectFolder.human_id)) return;
-  await writeProjectSharing(projectFolder, [{ human: projectFolder.human_id, role: GUIDING_ROLE }, ...existing]);
 }
 
 export type SetProjectSharingResult =
@@ -231,7 +235,7 @@ export async function setProjectSharing(
       return { ok: false, error: `Unknown role "${entry.role}"` };
     }
   }
-  if (!cleaned.some((e) => e.role === GUIDING_ROLE)) {
+  if (!withCreator(projectFolder, cleaned).some((e) => e.role === GUIDING_ROLE)) {
     return { ok: false, error: "A project needs at least one Owner" };
   }
 
@@ -245,8 +249,10 @@ export type ProjectMembership = { folder: VaultFolder; sharing: ProjectSharingEn
 
 /** Every project `humanId` holds a role on, Client included, in name
  * order: what the dashboard, the Daily Log's "Add a card" and the
- * Steep-o-meter work from. Two queries: the projects, then their READMEs
- * that mention the person. */
+ * Steep-o-meter work from. Two queries: the projects, then the READMEs
+ * that mention the person or belong to their own projects. A project they
+ * created is theirs as Owner unless its list says otherwise, README or
+ * not. */
 export async function listProjectsFor(humanId: string): Promise<ProjectMembership[]> {
   const roots = await query<[{ id: unknown }[]]>(
     `SELECT id FROM vault_folders WHERE vault_root_key = "projects" AND (parent_folder_id = NONE OR parent_folder_id = NULL)`,
@@ -259,15 +265,20 @@ export async function listProjectsFor(humanId: string): Promise<ProjectMembershi
   if (folders.length === 0) return [];
   const readmes = await query<[{ folder_id: string; human_id: string; content?: string }[]]>(
     `SELECT folder_id, human_id, content FROM file_refs
-     WHERE folder_id IN $ids AND string::lowercase(name) = "readme.md" AND string::contains(content ?? "", $humanId)`,
+     WHERE folder_id IN $ids AND string::lowercase(name) = "readme.md"
+       AND (human_id = $humanId OR string::contains(content ?? "", $humanId))`,
     { ids: folders.map((f) => f._id), humanId },
   );
   const byFolder = new Map(folders.map((f) => [f._id, f]));
-  const out: ProjectMembership[] = [];
+  const lists = new Map<string, ProjectSharingEntry[]>();
   for (const row of readmes?.[0] ?? []) {
     const folder = byFolder.get(row.folder_id);
-    if (!folder || folder.human_id !== row.human_id) continue;
-    const sharing = parseProjectSharing(row.content ?? "");
+    if (folder && folder.human_id === row.human_id) lists.set(folder._id, parseProjectSharing(row.content ?? ""));
+  }
+  const out: ProjectMembership[] = [];
+  for (const folder of folders) {
+    if (!lists.has(folder._id) && folder.human_id !== humanId) continue;
+    const sharing = withCreator(folder, lists.get(folder._id) ?? []);
     const role = roleIn(sharing, humanId);
     if (role) out.push({ folder, sharing, role });
   }

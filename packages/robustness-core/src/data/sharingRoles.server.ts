@@ -56,23 +56,10 @@ export function reachesProjectWork(roleName: string): boolean {
   return roleName !== CLIENT_ROLE;
 }
 
-/** Adds any default role missing from `sharing_roles` (the table is only
- * seeded when empty, so an existing environment never got Client). Returns
- * the names it added. */
-export async function ensureDefaultSharingRoles(): Promise<string[]> {
-  const existing = new Set((await getSharingRoles()).map((r) => r.name));
-  const added: string[] = [];
+/** Writes whichever default roles `existing` doesn't have. */
+async function seedMissingSharingRoles(existing: Set<string>): Promise<void> {
   for (const role of DEFAULT_SHARING_ROLES) {
-    if (existing.has(role.name)) continue;
-    await upsert("sharing_roles", role);
-    added.push(role.name);
-  }
-  return added;
-}
-
-async function seedDefaultSharingRoles(): Promise<void> {
-  for (const role of DEFAULT_SHARING_ROLES) {
-    await upsert("sharing_roles", role);
+    if (!existing.has(role.name)) await upsert("sharing_roles", role);
   }
 }
 
@@ -93,9 +80,13 @@ export async function getSharingRoles(): Promise<SharingRole[]> {
     `SELECT * FROM sharing_roles ORDER BY name ASC`,
   );
   const existing = (result?.[0] ?? []).map(formatRecord);
-  if (existing.length > 0) return existing;
+  // Any default missing is added, not only on a first, empty read: an
+  // existing environment never got Client (ADR-023) otherwise. A default
+  // someone deletes by hand comes back on the next read.
+  const names = new Set(existing.map((r) => r.name));
+  if (DEFAULT_SHARING_ROLES.every((r) => names.has(r.name))) return existing;
 
-  await seedDefaultSharingRoles();
+  await seedMissingSharingRoles(names);
   const seeded = await query<[SharingRole[]]>(
     `SELECT * FROM sharing_roles ORDER BY name ASC`,
   );
