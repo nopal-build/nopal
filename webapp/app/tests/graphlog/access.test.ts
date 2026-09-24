@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseProjectSharing } from "robustness-core/data/project.types";
 import { CLIENT_ROLE, GUIDING_ROLE, reachesProjectWork } from "robustness-core/data/sharingRoles.server";
-import { isClientEverywhere, type ProjectMembership } from "robustness-core/data/projectSharing.server";
+import { isClientEverywhere, withCreator, type ProjectMembership } from "robustness-core/data/projectSharing.server";
 import { canViewFolder, type VaultFolder } from "robustness-core/data/vault.types";
 
 const AUSTIN = "k3v9x0q2m7w1b5n8c4d6";
@@ -39,7 +39,24 @@ describe("who reaches a project's work", () => {
   });
 });
 
-describe("owning a project's folder gets nobody in", () => {
+describe("the creator is Owner unless the list says otherwise", () => {
+  const project = { human_id: AUSTIN };
+
+  it("a list that doesn't name the creator has them as Owner", () => {
+    expect(withCreator(project, [{ human: PAUL, role: "Client" }])).toEqual([
+      { human: AUSTIN, role: "Owner" },
+      { human: PAUL, role: "Client" },
+    ]);
+    expect(withCreator(project, [])).toEqual([{ human: AUSTIN, role: "Owner" }]);
+  });
+
+  it("a list that names the creator wins: an admin can be an Observer on a project they made", () => {
+    const listed = [{ human: AUSTIN, role: "Observer" }];
+    expect(withCreator(project, listed)).toEqual(listed);
+  });
+});
+
+describe("the view checks", () => {
   const folder = (over: Partial<VaultFolder>): VaultFolder =>
     ({
       _id: "a1b2c3d4e5f6g7h8i9j0",
@@ -51,15 +68,13 @@ describe("owning a project's folder gets nobody in", () => {
       ...over,
     }) as VaultFolder;
 
-  it("a creator who set themselves to Client is refused their own project", () => {
-    expect(canViewFolder(AUSTIN, folder({}))).toBe(false);
-    expect(canViewFolder(AUSTIN, folder({ shared_with: [AUSTIN] }))).toBe(true);
+  it("the creator reaches their own project, whatever its list says (old caches don't hold creators)", () => {
+    expect(canViewFolder(AUSTIN, folder({}))).toBe(true);
   });
 
-  it("ownership still decides a personal folder and the projects root", () => {
-    expect(canViewFolder(AUSTIN, folder({ vault_root_key: "personal" }))).toBe(true);
-    expect(canViewFolder(AUSTIN, folder({ parent_folder_id: null }))).toBe(true);
-    expect(canViewFolder(PAUL, folder({ vault_root_key: "personal" }))).toBe(false);
+  it("anyone else only through the cache, which leaves Clients out", () => {
+    expect(canViewFolder(PAUL, folder({}))).toBe(false);
+    expect(canViewFolder(PAUL, folder({ shared_with: [PAUL] }))).toBe(true);
   });
 });
 

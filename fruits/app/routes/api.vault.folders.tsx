@@ -11,7 +11,7 @@ import {
   isFolderUnderSyncs,
   validateFolderTypeForParent,
 } from "robustness-core/data/vault.server";
-import { canActAsProjectOwner, writeCreatorAsOwner } from "robustness-core/data/projectSharing.server";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 import {
   isVaultFolderTypeKey,
   type VaultFolderTypeKey,
@@ -111,12 +111,6 @@ export async function action({ request }: ActionFunctionArgs) {
     parent_folder_id: body.parent_folder_id,
     folder_type: folderType,
   });
-
-  // A new project's creator is on it like anyone else, as its Owner: a
-  // written entry, not an unwritten rule about who owns the folder.
-  if (folder && !parent.parent_folder_id && parent.vault_root_key === "projects") {
-    await writeCreatorAsOwner(folder);
-  }
 
   return Response.json({ folder }, { status: 201 });
 }

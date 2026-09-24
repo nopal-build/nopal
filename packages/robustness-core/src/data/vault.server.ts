@@ -174,9 +174,10 @@ export async function canViewFileRef(
   humanId: string,
   file: FileRef,
 ): Promise<boolean> {
-  if (!file.folder_id) return file.human_id === humanId;
+  if (file.human_id === humanId) return true;
+  if (!file.folder_id) return false;
   const folder = await getFolderById(file.folder_id);
-  if (!folder) return file.human_id === humanId;
+  if (!folder) return false;
   return canViewFolder(humanId, folder);
 }
 
