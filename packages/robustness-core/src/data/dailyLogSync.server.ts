@@ -27,6 +27,14 @@ import {
 } from "./vault.server";
 import { getDailyLogCards, listCardEntriesForProject } from "./dailyLog.server";
 import { extractFileAttachments } from "./sorter.server";
+import {
+  authorNames,
+  buildMarksFileContent,
+  listMarksForProject,
+  MARKS_SYNC_FOLDER_NAME,
+  movesOffProject,
+  moveTraceLine,
+} from "./graphLogMarks.server";
 import { createHash } from "node:crypto";
 
 /** The reserved folder name daily-log-sync's own copies land in, directly
@@ -96,7 +104,7 @@ export async function ensureDailyLogsSyncFolder(projectFolder: VaultFolder): Pro
  * `humanId` (not just `date`) because a project can have Cards from
  * several different contributors on the same day — see the `vault` skill's
  * Sharing Roles section. */
-function syncedCardFileName(date: string, humanId: string): string {
+export function syncedCardFileName(date: string, humanId: string): string {
   return `${date}-${humanId}.md`;
 }
 
@@ -149,6 +157,131 @@ export function parseSyncedAttachmentFileName(
   return { date: match[1], humanId: match[2], originalName: match[3] };
 }
 
+/** The project's `Syncs/Marks/` folder, if it has ever had one. */
+async function findMarksSyncFolder(projectFolder: VaultFolder): Promise<VaultFolder | null> {
+  const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
+  const syncs = folders.find((f) => f.is_folder_type_root && f.folder_type === "syncs");
+  if (!syncs) return null;
+  const { folders: syncFolders } = await listFolderChildren(projectFolder.human_id, syncs._id);
+  return syncFolders.find((f) => f.name === MARKS_SYNC_FOLDER_NAME) ?? null;
+}
+
+/** `Syncs/Marks/`, created the first time a project has a mark. */
+async function ensureMarksSyncFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
+  const syncsFolder = await ensureProjectSyncsFolder(projectFolder);
+  const { folders } = await listFolderChildren(projectFolder.human_id, syncsFolder._id);
+  const existing = folders
+    .filter((f) => f.name === MARKS_SYNC_FOLDER_NAME)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+  if (existing) return existing;
+  const created = await createVaultFolder({
+    human_id: projectFolder.human_id,
+    name: MARKS_SYNC_FOLDER_NAME,
+    parent_folder_id: syncsFolder._id,
+    id: systemVaultFolderKey(projectFolder.human_id, MARKS_SYNC_FOLDER_NAME, syncsFolder._id),
+  });
+  if (!created) throw new Error("Failed to create the project's syncs/Marks folder");
+  return created;
+}
+
+/**
+ * Writes the project's marks into `Syncs/Marks/`, one file per person per
+ * day (see `graphLogMarks.server.ts`, "The graph's copy"), so sync-graph
+ * extracts them like any log. Rebuilt from the mark rows every run and
+ * written only where the content changed, the same content-hash rule the
+ * Card copies follow, so an unchanged day is never re-extracted.
+ *
+ * A project with no marks returns before touching anything: no folder,
+ * no file, no hash. That is what keeps every existing project's pipeline
+ * exactly as it was until somebody marks something.
+ */
+export async function syncMarksProjection(projectFolder: VaultFolder): Promise<{ written: number }> {
+  const marks = await listMarksForProject(projectFolder._id);
+  // A project that has never been marked keeps the folder it never had.
+  // One that has must be swept even when its last mark is gone, or a file
+  // nobody can see any more keeps feeding its node into the graph.
+  if (marks.length === 0 && !(await findMarksSyncFolder(projectFolder))) return { written: 0 };
+
+  // A move off this project is REPLACED here by a trace in words: what
+  // left, whose entry it was, who recorded it, never where it went. A
+  // mark that asked for one is held out entirely, because the marker's
+  // own words usually name the destination ("this belongs to Coronado")
+  // and this project's graph feeds this project's page, which a client of
+  // the other project may not be allowed to know exists (Austin,
+  // 2026-09-21). Their words are not lost: they stay on the mark, and a
+  // reader who can see both projects reads them in the margin.
+  //
+  // Traces are collected from the MOVES, not from the marks, because a
+  // refile made from the margin without typing anything has no mark at
+  // all, and something still has to say the entry left.
+  const moves = await movesOffProject(projectFolder._id);
+  const movedMarkIds = new Set(moves.flatMap((m) => (m.markId ? [m.markId] : [])));
+  const names =
+    moves.length > 0
+      ? await authorNames(moves.flatMap((m) => [m.authorHumanId, m.decidedBy]))
+      : new Map<string, string>();
+
+  const byPersonDay = new Map<string, typeof marks>();
+  for (const mark of marks) {
+    if (movedMarkIds.has(mark._id)) continue;
+    const key = syncedCardFileName(mark.date, mark.author_human_id);
+    const list = byPersonDay.get(key) ?? [];
+    list.push(mark);
+    byPersonDay.set(key, list);
+  }
+
+  // Each trace lands in the file for the day whoever recorded it did so,
+  // which is the same shape a mark's own file has.
+  const tracesByPersonDay = new Map<string, string[]>();
+  for (const move of moves) {
+    const markedOn = move.markId ? marks.find((m) => m._id === move.markId)?.date ?? move.decidedOn : move.decidedOn;
+    const key = syncedCardFileName(markedOn, move.decidedBy);
+    const line = moveTraceLine({
+      authorName: names.get(move.authorHumanId) ?? move.authorHumanId,
+      date: move.date,
+      section: move.section,
+      markerName: names.get(move.decidedBy) ?? move.decidedBy,
+      markedOn,
+      status: move.status,
+    });
+    tracesByPersonDay.set(key, [...(tracesByPersonDay.get(key) ?? []), line]);
+    if (!byPersonDay.has(key)) byPersonDay.set(key, []);
+  }
+
+  const marksFolder = await ensureMarksSyncFolder(projectFolder);
+  const { files } = await listFolderChildren(projectFolder.human_id, marksFolder._id);
+  const existingByName = new Map(files.map((f) => [f.name, f]));
+  // A person-day whose marks were all taken back is emptied rather than
+  // left as it was: sync-graph re-reads this folder every run.
+  const emptyHash = contentHash("");
+  for (const [name, file] of existingByName) {
+    if (byPersonDay.has(name) || file.content_hash === emptyHash) continue;
+    await updateFileRef(file._id, { content: "", content_hash: emptyHash });
+  }
+  let written = 0;
+  for (const [name, dayMarks] of byPersonDay) {
+    const content = buildMarksFileContent(dayMarks, tracesByPersonDay.get(name) ?? []);
+    const hash = contentHash(content);
+    const existing = existingByName.get(name);
+    if (existing?.content_hash === hash) continue;
+    if (existing) {
+      await updateFileRef(existing._id, { content, content_hash: hash, date: dayMarks[0].date });
+    } else {
+      await createFileRef({
+        human_id: projectFolder.human_id,
+        name,
+        content,
+        content_type: "text/markdown",
+        content_hash: hash,
+        folder_id: marksFolder._id,
+        date: dayMarks[0].date,
+      });
+    }
+    written++;
+  }
+  return { written };
+}
+
 export type DailyLogSyncResult = {
   /** A Card whose content was newly written or updated this run. */
   synced: { date: string; humanId: string; fileId: string }[];
@@ -156,6 +289,8 @@ export type DailyLogSyncResult = {
   unchanged: { date: string; humanId: string }[];
   /** A Card attachment copied in for the first time this run. */
   attachmentsCopied: { date: string; humanId: string; fileId: string; name: string }[];
+  /** Marks files (`Syncs/Marks/`) written or rewritten this run. */
+  marksWritten?: number;
   /** Reasons this stage finished without doing everything it set out to,
    * same shape every other stage uses. Empty on a clean run.
    *
@@ -220,8 +355,12 @@ export async function runDailyLogSync(
     const card = cards.find((c) => c.projectFolderId === projectFolderId);
     if (!card) continue; // Card was deleted out from under an earlier listing — skip, not an error.
 
+    // A Card emptied by a move (`graphLogMoves.server.ts`) syncs as an
+    // empty copy rather than being left behind: that is what takes the
+    // day out of this project's graph.
+    const content = card.content;
     const targetName = syncedCardFileName(entryDate, humanId);
-    const hash = contentHash(card.content);
+    const hash = contentHash(content);
     const existingFile = existingFileByName.get(targetName);
 
     if (existingFile && existingFile.content_hash === hash) {
@@ -235,13 +374,13 @@ export async function runDailyLogSync(
       }
       result.unchanged.push({ date: entryDate, humanId });
     } else if (existingFile) {
-      await updateFileRef(existingFile._id, { content: card.content, content_hash: hash });
+      await updateFileRef(existingFile._id, { content, content_hash: hash });
       result.synced.push({ date: entryDate, humanId, fileId: existingFile._id });
     } else {
       const created = await createFileRef({
         human_id: projectFolder.human_id,
         name: targetName,
-        content: card.content,
+        content,
         content_type: "text/markdown",
         content_hash: hash,
         folder_id: dailyLogsFolder._id,
@@ -255,7 +394,7 @@ export async function runDailyLogSync(
       }
     }
 
-    for (const attachment of extractFileAttachments(card.content)) {
+    for (const attachment of extractFileAttachments(content)) {
       const attachmentName = syncedAttachmentFileName(entryDate, humanId, attachment.name);
       const existingAttachment = attachmentFileByName.get(attachmentName);
       if (existingAttachment) {
@@ -300,6 +439,11 @@ export async function runDailyLogSync(
       });
     }
   }
+
+  // Marks are entries too. After the Cards, so a day that has both is
+  // extracted once with everything in it.
+  const projected = await syncMarksProjection(projectFolder);
+  result.marksWritten = projected.written;
 
   if (uncopied.length > 0) {
     result.incomplete.push(

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
+import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { uploadFileToS3, deleteFromS3 } from "robustness-core/data/file.server";
 import {
   canWriteToFolderId,
@@ -148,14 +149,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const s3Key = `vault/${user._id}/${folderSegment}/${Date.now()}-${safeName}`;
     const url = await uploadFileToS3(file, s3Key);
 
+    const newContentType = file.type || existing.content_type;
     const updated = await merge("file_refs", fileId, {
       s3_url: url,
       s3_key: s3Key,
-      content_type: file.type || existing.content_type,
+      content_type: newContentType,
       content_hash: sha256(Buffer.from(await file.arrayBuffer())),
       size: file.size,
       updated_at: now,
     });
+
+    // New bytes live under a new s3_key, so any rendition made for the old
+    // one no longer applies (renditionKey is derived from s3_key) — ask the
+    // worker for a fresh one, same call `api.daily-log.upload.tsx` makes.
+    if (updated && (newContentType.startsWith("image/") || newContentType.startsWith("video/"))) {
+      await enqueueRenditionsJob(fileId).catch((err) => console.error("Could not enqueue renditions:", err));
+    }
 
     if (existing.s3_key) {
       try {

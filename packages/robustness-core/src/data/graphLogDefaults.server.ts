@@ -71,6 +71,62 @@ Pull out names, dates, dollar amounts, dimensions, decisions, and deadlines, as 
 A description with a guessed name in it becomes a node that says a person did something they may not have done, and that node is permanent. The graph marks everything you write as an AI description and never as anybody's words, so the reader knows what kind of sentence they are looking at. That protection only works if what you write is exactly what the file shows.
 `;
 
+export const DEFAULT_FILING_SKILL = `Your job is to say what kind of document one attached file is, in one line of reason that names the thing in the file that decided it, so the file lands in the right folder and a cost can be read out for a person to confirm.
+
+You are looking at the file itself (a photo, a PDF, or a text file), its name, and, when one exists, the description another pass already wrote for it. Nothing you write becomes the project's record of events; this is filing. The kind is what the document is, not what the file format is: a photo of a receipt is a receipt, a screenshot of an invoice is an invoice. A video is filed by code, never by you.
+
+# The kinds
+
+One of these, spelled exactly:
+
+- \`photo\`: a picture of the work, the site, a material, a tool, a person doing something.
+- \`problem-photo\`: a picture taken to show something wrong: damage, a defect, a mistake, a hazard.
+- \`drawing\`: a plan, an elevation, a detail, a sketch with dimensions.
+- \`spec\`: a specification or data sheet for a product or material.
+- \`permit\`: a permit, an inspection card, an approval from an authority.
+- \`contract\`: a signed agreement, a change order, a proposal that reads as an agreement.
+- \`receipt\`: proof that something was paid for.
+- \`invoice\`: a request for payment for work done or goods delivered.
+- \`estimate\`: a price given before the work, by us or by a supplier.
+- \`bid\`: a price given before the work by a subcontractor, in answer to a request.
+- \`other\`: anything else, with a reason that says what it is.
+
+# For a receipt, invoice, estimate or bid
+
+Read out, exactly as the document has them:
+
+- \`vendor\`: who is being paid, as written on the document. Never from the file name.
+- \`amount\`: the total, as a plain number with two decimals and no currency sign, like \`412.18\`. The total, not a line item.
+- \`currency\`: a three-letter code, \`USD\` unless the document says otherwise.
+- \`date\`: the document's own date as \`YYYY-MM-DD\`; leave it out if none is printed.
+- \`readFrom\`: the line of the document each value was read from, quoted exactly, one per value.
+
+If the document is one of these kinds but a value is not legible, leave that value out and say so in the reason. Never guess a number, and never take a vendor from the file name.
+
+# What you write
+
+Exactly one fenced \`yaml\` block and nothing outside it:
+
+\`\`\`yaml
+kind: receipt
+reason: A printed store receipt with a total line and a card payment line.
+vendor: Home Depot
+amount: 412.18
+currency: USD
+date: 2026-09-09
+readFrom:
+  - "HOME DEPOT #0472  PHOENIX AZ"
+  - "TOTAL  $412.18"
+  - "09/09/26 14:22"
+\`\`\`
+
+For any other kind, only \`kind\` and \`reason\`.
+
+# What code checks, so you do not have to
+
+The kind is one of the list above; \`amount\` is a number with two decimals; \`date\` is a real calendar date; a cost kind carries a vendor and an amount; a non-cost kind carries no cost fields. A file that fails a check is left unfiled and asked again next run, so it is better to leave a value out than to invent one.
+`;
+
 export const DEFAULT_GRAPH_SKILL = `Your job is to read this project's synced content for one day and add its ideas to that day's graph-log file as nodes.
 
 You do not write summaries, project overviews, or newspapers. Something else does that, later, reading what you leave behind. Your output is the material that layer works from, so the graph has to hold what people actually said, in their words, findable and connected.
@@ -595,10 +651,11 @@ Read it back and ask whether a person who was in the room would recognize it. If
  * 2026-09-16; the stage, its CLI command and this key kept their names,
  * only the file people edit was renamed). `voice` is not a stage: it is
  * `VOICE.md`, read by graph-project-view alone. */
-export type GraphLogDefaultStage = "knowledge" | "graph" | "graphStructure" | "projectView" | "voice";
+export type GraphLogDefaultStage = "knowledge" | "filing" | "graph" | "graphStructure" | "projectView" | "voice";
 
 const STAGE_HARDCODED_DEFAULT: Record<GraphLogDefaultStage, string> = {
   knowledge: DEFAULT_KNOWLEDGE_SKILL,
+  filing: DEFAULT_FILING_SKILL,
   graph: DEFAULT_GRAPH_SKILL,
   graphStructure: DEFAULT_GRAPH_STRUCTURE_SKILL,
   projectView: DEFAULT_PROJECT_VIEW_SKILL,
@@ -610,6 +667,7 @@ const ROW_ID = "main";
 
 type GraphLogDefaultSkillsRow = Data & {
   knowledge?: string | null;
+  filing?: string | null;
   graph?: string | null;
   graphStructure?: string | null;
   projectView?: string | null;
@@ -679,6 +737,7 @@ export async function getAllEffectiveGraphLogDefaultSkills(): Promise<
   };
   return {
     knowledge: resolve("knowledge"),
+    filing: resolve("filing"),
     graph: resolve("graph"),
     graphStructure: resolve("graphStructure"),
     projectView: resolve("projectView"),

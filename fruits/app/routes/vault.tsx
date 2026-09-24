@@ -1,6 +1,17 @@
 // app/routes/vault.tsx
 // The Vault — GitHub-style file browser with a cached folder tree.
 // URL state: ?folder=<folderId> OR ?file=<fileId>; neither → root view.
+import { ProjectFilesView } from "../components/ProjectFilesView";
+// Value imports from `.server` modules are used in the loader only, which
+// React Router strips from the client bundle. Anything the component
+// needs from them (the folder names, the kinds) comes back as loader
+// data: a `.server` value referenced in the component is "Server-only
+// module referenced by client", a 404 on the route's client bundle, and
+// a page that renders but whose buttons are dead (2026-09-22, twice).
+import type { FileFolder, ProjectFileRow } from "robustness-core/data/fileFolders.server";
+import type { FilingKind } from "robustness-core/data/syncFiling.server";
+import { FILE_FOLDERS, loadProjectFiles } from "robustness-core/data/fileFolders.server";
+import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import type { LoaderFunctionArgs } from "react-router";
 import {
   Link,
@@ -134,6 +145,14 @@ type Current =
       /** This folder's own `readme`'s `title`/`description`/`publish` —
        * only meaningful alongside a non-null `websiteAnchor`. */
       websitePageMeta: WebsitePageMeta | null;
+      /** Non-null exactly when `folder` is a project: every file attached
+       * to its daily logs, as the four folders (`fileFolders.server.ts`). */
+      projectFiles: ProjectFileRow[] | null;
+      /** The folder names and the kinds a person may file as, handed to
+       * the component as data: a `.server` value referenced in the
+       * component would be pulled into the client bundle and refused. */
+      fileFolders: readonly FileFolder[];
+      personKinds: readonly FilingKind[];
     }
   | {
       kind: "file";
@@ -301,6 +320,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const websiteAnchorForFolder = findWebsiteAnchor(ancestry);
     const websitePageMetaForFolder =
       websiteAnchorForFolder && readme ? parseWebsitePageMeta(readme.content ?? "") : null;
+    // A project's files by kind, on the project folder only (a person
+    // looking for a file comes here; Austin, 2026-09-22). Request time,
+    // about ten round trips whatever the file count.
+    const projectFiles = isProjectAnchor(folder) && folder.vault_root_key !== "personal" ? await loadProjectFiles(folder) : null;
     current = {
       kind: "folder",
       folder,
@@ -309,6 +332,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       projectManifest: projectManifestForFolder,
       websiteAnchor: websiteAnchorForFolder,
       websitePageMeta: websitePageMetaForFolder,
+      projectFiles,
+      fileFolders: FILE_FOLDERS,
+      personKinds: FILING_KINDS.filter((k) => k !== "video"),
     };
   }
 
@@ -3453,6 +3479,17 @@ export default function VaultV2Page() {
             </div>
           )}
 
+          {/* ── A project's files by kind: Gallery, Documents, Costs, Unsorted ── */}
+          {current.kind === "folder" && current.projectFiles && (
+            <ProjectFilesView
+              projectFolderId={current.folder._id}
+              rows={current.projectFiles}
+              folders={current.fileFolders}
+              kinds={current.personKinds}
+              onOpen={(row) => setSearchParams({ file: row.serveId })}
+              onChanged={() => revalidator.revalidate()}
+            />
+          )}
           {/* ── Folder view — GitHub-style table + optional readme ───────── */}
           {current.kind === "folder" && folderChildren && (
             <>

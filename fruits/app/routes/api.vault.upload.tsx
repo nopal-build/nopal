@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
+import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { uploadFileToS3 } from "robustness-core/data/file.server";
 import {
   canWriteToFolderId,
@@ -134,6 +135,13 @@ export async function action({ request }: ActionFunctionArgs) {
       size: file.size,
       folder_id: folderId,
     });
+
+    // The worker makes the photo's thumbnail and display rendition (or a
+    // video's poster) within seconds; this process never decodes media —
+    // see `api.daily-log.upload.tsx` for the same call.
+    if (fileRef && (fileRef.content_type.startsWith("image/") || fileRef.content_type.startsWith("video/"))) {
+      await enqueueRenditionsJob(fileRef._id).catch((err) => console.error("Could not enqueue renditions:", err));
+    }
 
     return Response.json({ url, fileRef }, { status: 201 });
   } catch (err) {

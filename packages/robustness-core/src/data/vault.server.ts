@@ -530,6 +530,20 @@ export async function getFoldersByIds(ids: string[]): Promise<VaultFolder[]> {
   return (result?.[0] ?? []).map(formatRecord);
 }
 
+/** Listings (no content) for a set of file ids, in one query. The files
+ * view uses it for a project's original attachments, whose ids come from
+ * the Cards and whose rows sit in many writers' day folders. */
+export async function getFileRefListingsByIds(ids: string[]): Promise<FileRefListing[]> {
+  if (!ids.length) return [];
+  const result = await query<[FileRefListing[]]>(
+    `SELECT id, human_id, name, content_type, content_hash, folder_id, size, source, date, created_at, updated_at, archived_at,
+            (s3_key != NONE AND s3_key != null) AS has_s3
+     FROM file_refs WHERE id IN $ids`,
+    { ids: ids.map((id) => new RecordId("file_refs", id)) },
+  );
+  return (result?.[0] ?? []).map(formatRecord) as unknown as FileRefListing[];
+}
+
 export async function getSharedFoldersForHuman(
   humanId: string,
 ): Promise<VaultFolder[]> {

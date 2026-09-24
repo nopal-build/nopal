@@ -25,6 +25,13 @@ export type GraphLogEventKind =
    * cost of a clip (several images in one call) is visible on its own. */
   | "video-knowledge"
   | "text-knowledge"
+  /** A PDF read as a document block; its own kind because a PDF is
+   * priced by its pages, not as one image. */
+  | "pdf-knowledge"
+  /** The filing call: kind, reason, and a cost document's values
+   * (`syncFiling.server.ts`), one per attachment, separate from the
+   * description so its cost is visible on its own. */
+  | "filing-knowledge"
   | "graph-extract"
   | "graph-structure"
   | "project-view";

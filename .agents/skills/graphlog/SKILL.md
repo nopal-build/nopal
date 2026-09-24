@@ -122,6 +122,75 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   against the `"graphlog"` queue); `POST /api/graphlog/sync-knowledge`
   (enqueue) + `GET /api/graphlog/jobs/:jobId` (poll), `nopal graphlog
   sync-knowledge --project <path>`.
+  - A PDF is read whole, as a `document` content block (since
+    2026-09-22; before that every PDF was "unsupported" and had no path
+    into the graph). Up to 20 MB of bytes. A PDF attached before then
+    gets its first sidecar on the next run, and because a day's graph
+    hashes its sidecars, that day re-extracts once; the stage logs it.
+  - **Filing** (`syncFiling.server.ts`): the stage's second question
+    about a file, under its own skill `skills/FILING.md`, into its own
+    file `_knowledge/<base>.filing.md`. The model says the kind (photo,
+    problem-photo, drawing, spec, permit, contract, receipt, invoice,
+    estimate, bid, other; `video` is assigned by code) with a one-line
+    reason, and for a cost kind reads out vendor, amount, currency, date
+    and the lines each came from. Code validates the answer
+    (`validateFiling`: kind in the list, amount two decimals, a real
+    date, cost fields only on cost kinds) and leaves a failing file
+    unfiled, asked again next run. The filing file is read by the Files
+    view and by nothing in the pipeline: it is deliberately not in the
+    description sidecar so no day hash moves and no page changes when a
+    project's existing files are filed. `filing.md` is a reserved skill
+    name; a project seeded before 2026-09-22 has no `FILING.md` until
+    reseeded, which the stage logs (not `incomplete`, on purpose: an
+    INCOMPLETE banner on every old project on a run with nothing new is
+    the page change filing promised not to make).
+  - A video's poster frame (`mediaRenditions.server.ts`) is written
+    here too, by code, from the second of its stills; a video described
+    before posters existed gets one on the next run.
+- **Files: folders, acts, renditions** (2026-09-22; ADR-019, ADR-020).
+  Not a stage. A project's folder in the Vault (`fruits/app/routes/
+  vault.tsx`, `components/ProjectFilesView.tsx`; the project page's
+  "Files" link goes there) shows every attachment in four folders that
+  are views rebuilt on each request (`fileFolders.server.ts`,
+  `projectFileRows`); Gallery is the Vault's own gallery grid and a video
+  is a real player with its poster. A file nothing can read (an archive,
+  a font) is kept as a file: no description, no INCOMPLETE, filed `other`
+  by code (`describedFrom: code`) into Unsorted, the pile that says what
+  the next folder is: Gallery (image/video by content type), Documents
+  (drawing, spec, permit, contract, or `other` filed by a person), Costs
+  (receipt, invoice, estimate, bid) and Unsorted (unfiled, or `other` from
+  the model). A receipt photo is one row in two folders. A row is keyed
+  by the file's ORIGINAL id (the one the Card names; survives a refile)
+  and served by its synced copy's id (the one the graph cites and a
+  collaborator can open; `canViewFileRef` refuses the original to anyone
+  but its writer). Search is a code substring over name, caption, the
+  log block above the directive, the description, the reason, the vendor
+  and the read-from lines. Nothing in that module writes.
+  - A person's act on a file is a mark with `unit.kind = "file"`,
+    `page_hash: null` and an `act` (`FileAct`: `file-as` with a kind, or
+    `confirm-cost` with a verdict and the `filingValuesHash` it confirms),
+    written by `POST /api/graphlog/file-marks`, its sentence code-written
+    in the person's name (`fileActText`). It is projected into
+    `Syncs/Marks/` and extracted like any mark (its context line starts
+    "On the file", and `parseMarkTexts` accepts both prefixes). The page
+    run and the margin never see it: `listUnreadMarks` and
+    `listMarksOnPage` are page-only (`page_hash` set). The files view
+    derives the kind (latest `file-as`, else the filing record) and the
+    cost status (a `confirm-cost` whose `of` equals the current values
+    hash; anything else is unconfirmed). `confirmedCosts` is the only
+    exported list of costs. A tap cannot be rewritten or erased; it is
+    answered by another tap.
+  - Renditions (`mediaKeys.ts`, `mediaRenditions.server.ts`,
+    `mediaQueue.server.ts`, `/api/vault/rendition/:id`): thumb and
+    display WebPs and a video's poster JPEG, keyed by the storage key so
+    an original and its copies share one, MADE IN THE WORKER ONLY: a
+    `renditions` job the upload route enqueues, plus sync-knowledge's
+    backfill from its own decode. The app's route checks S3 and
+    redirects, to the rendition or to the original; it never decodes
+    (Austin, 2026-09-22, after a 502: a HEIC decode holds ~130 MB in
+    WebAssembly and five at once killed the 1 GB app). Pinned by
+    `fruits/app/tests/noMediaProcessingInApp.test.ts`. The markdown
+    keeps `/api/vault/view/<id>`; only what an `<img>` loads changes.
 - **sync-graph** (`syncGraph.server.ts`: `runSyncGraph`) — reads a
   project's `syncs/` tree (including `_knowledge/*.knowledge.md`) and,
   per `skills/GRAPH.md`, extracts citable nodes — verbatim or
@@ -420,6 +489,83 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     recomputes `content_hash` on the project's copy;
     `updateFileRef({content})` alone does not.
 
+## Annotations: marks, and refiling a misfiled entry
+
+A person reading a project's Efforts page can write on it. The unit they
+write on, what that mark becomes, and how long it shows are all decided by
+code; the model reads marks the way it reads any other input.
+
+- **What can be marked** — `oxmarkdown-core/src/markUnits.ts`. One bullet,
+  one `##`/`###` heading, one sentence of a paragraph, one gallery photo,
+  and nothing smaller: no drag, no character ranges. The same module runs
+  on the server (to validate a mark) and in the renderer (to place it), so
+  both agree on a unit's key; sentence splitting is a fixed regex, never
+  `Intl.Segmenter`, whose ICU data differs between Node and browsers. A
+  key only has to hold within one page body, which is all a mark needs.
+- **A mark is an entry** — `graphLogMarks.server.ts`, table
+  `graphlog_marks`. Verbatim, dated, authored, never rewritten by the
+  system. Its author may rewrite or delete it until a run reads it; after
+  that a page may cite it, so it stands. Code projects the rows into
+  `<project>/Syncs/Marks/<date>-<humanId>.md`, named and synced exactly
+  like a Card's copy beside it, so `sync-graph` extracts marks as ordinary
+  sources. Each mark is written with its own record in words (the passage,
+  the section, whose day that passage cites) because node ids are
+  renumbered on re-extraction and a page is rewritten every run.
+- **A mark always becomes a node.** The model reads a marks file like any
+  source and links what it captures, and `marksNotCaptured` writes
+  anything it passed over verbatim afterwards, with no links. Every other
+  source is a day's writing, where judging what is worth capturing is the
+  job; a mark is one deliberate act about one named passage, and the
+  first one in production was judged not worth capturing.
+- **ADR-012 for marks.** A marks file mixes a person's words with a
+  code-written context line quoting the page, so `renderQuoteBlocks` takes
+  a per-block predicate there (`isInsideMarkText`) instead of one answer
+  for the whole source. Only the marker's own words get `==`.
+- **Marks are not writers.** Nodes that came from a marks file are left
+  out of the writers line and the bench-name gate in
+  `graph-project-view`: writing in the margin is not working on the
+  project, and only writers get a bench heading.
+- **How long a mark shows.** Until a run reads it (`read_at`), and no
+  longer: it is a node by then and `Syncs/Marks/` is the record. A mark
+  the page has moved past but nothing has read still shows, re-anchored to
+  a line citing the same entry, then its section heading, then the top,
+  and says it is waiting. There is no page archive; `pageBody.server.ts`
+  exists only to say which page a mark was written on.
+- **What the run does with them** — `graph-project-view`. Unread marks
+  open the gate the way an unread note does, and add one prompt block plus
+  one tool (`read_mark`). With no marks the prompt and
+  the tool array are byte-identical to what they always were; `viewTools`
+  returns `TOOLS` itself. Marks are stamped read only on a clean finish.
+- **Refiling is a person's act, never the model's.** The page run
+  classifies a structural mark (`read_mark`, kind `structural`) and stops
+  there; the margin's own control (`GET /api/graphlog/move-options`, then
+  `POST /api/graphlog/moves`) is what moves anything, with the
+  destination picked by id. A `propose_move` tool existed and was removed
+  (Austin, 2026-09-22): reading what a sentence means and editing
+  somebody's daily log are different things, and only one of them should
+  follow from a model's reading. Do not reintroduce it.
+- **Refiling** — `graphLogMoves.server.ts`, table `graphlog_moves`. A
+  misfiled entry is corrected at the source: the `##` section (or the
+  whole Card) is cut from the Card it was filed under and put, unchanged,
+  into a Card for the right project on the same day, which is then mounted
+  on that day's page. There is no routing layer; every stage rebuilds from
+  the Cards. Guards: the entry must be one the marked passage cites, the
+  destination must be a project both people can see, and only the author's
+  own entry moves — anyone else's becomes a request they confirm
+  (`POST /api/graphlog/moves/:id`). `removeChunk` returns the Card
+  unchanged when the section is not found, never empty. Undo restores the
+  words at the end of the Card.
+- **Another project's name never appears on a page.** A mark that asked
+  for a move is held out of the source project's marks file and replaced
+  by a trace in words; a reader who cannot open the destination sees a
+  placeholder instead of the mark's text; and the page run refuses a write
+  naming a project this one has refiled to, treating a page that still
+  says one as a reason to rewrite (`namesAnotherProject`).
+- **A day whose sources are all empty leaves the graph** — `sync-graph`
+  removes it with no model call. That is what makes a refiled day
+  disappear from the project it left, and it also stops a blank entry
+  costing a call on every run.
+
 ## Reset
 
 GraphLog has three independent, narrower resets — `graphLogReset.server.ts`
@@ -465,8 +611,8 @@ children, everything else (including the `Graph` space) is
   NOT seeded at project-creation time, unlike `skills`.
 - `projectN02.server.ts`:
   - `ensureProjectN02(folder)` — tags `folder` `project-n02` and seeds
-    `skills/KNOWLEDGE.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/`EFFORTS.md`/
-    `VOICE.md` from `graphLogDefaults.server.ts` (one table,
+    `skills/KNOWLEDGE.md`/`FILING.md`/`GRAPH.md`/`GRAPH_STRUCTURE.md`/
+    `EFFORTS.md`/`VOICE.md` from `graphLogDefaults.server.ts` (one table,
     `SKILL_FILE_NAMES`, maps keys to file names for seeding and reseeding). `vault.server.ts`'s
     `createVaultFolder` calls this for every brand new project (and
     `personal`) directly — there's no other container type to default to.

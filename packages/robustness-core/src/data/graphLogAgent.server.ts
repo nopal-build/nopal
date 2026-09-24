@@ -153,7 +153,7 @@ export async function runGraphLogPipeline(
     runDailyLogSync(projectFolderId, {}),
   );
   log(
-    `run: daily-log-sync done (${dailyLogSync.synced.length} synced, ${dailyLogSync.attachmentsCopied.length} attachment(s) copied).`,
+    `run: daily-log-sync done (${dailyLogSync.synced.length} synced, ${dailyLogSync.attachmentsCopied.length} attachment(s) copied${dailyLogSync.marksWritten ? `, ${dailyLogSync.marksWritten} marks file(s) written` : ""}).`,
   );
 
   await throwIfGraphLogCancelled(projectFolderId);

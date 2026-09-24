@@ -29,7 +29,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
   }
 
   try {
-    const url = await getPresignedViewUrl(file.s3_key);
+    const url = await getPresignedViewUrl(file.s3_key, 900, file.content_type);
     return redirect(url);
   } catch (err) {
     console.error("Public presign view error:", err);

@@ -11,6 +11,8 @@
 // rewrite of GraphLog's own logic, only WHERE it runs (and which
 // dependency graph it ships with) changed.
 import { Worker, type Job } from "bullmq";
+import { MEDIA_QUEUE_NAME, type MediaJobData, type MediaJobName } from "robustness-core/data/mediaQueue.server";
+import { makeRenditionsForFile, type RenditionsOutcome } from "robustness-core/data/mediaRenditions.server";
 import {
   GRAPHLOG_QUEUE_NAME,
   acquireProjectGraphLogLock,
@@ -385,6 +387,31 @@ console.log(
 // SAME (folder, fingerprint) can't happen at all (`ensurePublicZipJob`
 // only ever enqueues one), and two DIFFERENT folders zipping at once is
 // perfectly fine to run in parallel.
+// ── Media renditions ────────────────────────────────────────────────────
+// One file per job, one job at a time: a HEIC decode holds ~130 MB in
+// WebAssembly and this is the process that is allowed to spend it (see
+// `mediaRenditions.server.ts`). The queue is fed by the upload routes;
+// sync-knowledge backfills older files on a project's next run.
+const MEDIA_CONCURRENCY = 1;
+
+const mediaWorker = new Worker<MediaJobData, RenditionsOutcome, MediaJobName>(
+  MEDIA_QUEUE_NAME,
+  (job) => makeRenditionsForFile(job.data.fileId),
+  {
+    connection: { url: REDIS_URL, maxRetriesPerRequest: null },
+    concurrency: MEDIA_CONCURRENCY,
+    lockDuration: 5 * 60 * 1000,
+  },
+);
+mediaWorker.on("completed", (job) => {
+  const r = job.returnvalue;
+  console.log(`[worker] renditions ${job.data.fileId}: ${r.written} written${r.skipped ? ` (${r.skipped})` : ""}.`);
+});
+mediaWorker.on("failed", (job, err) => {
+  console.error(`[worker] renditions ${job?.data.fileId} failed:`, err);
+});
+console.log(`[worker] Media worker listening on queue "${MEDIA_QUEUE_NAME}" (concurrency ${MEDIA_CONCURRENCY}).`);
+
 const PUBLIC_ZIP_CONCURRENCY = 2;
 
 async function processPublicZipJob(

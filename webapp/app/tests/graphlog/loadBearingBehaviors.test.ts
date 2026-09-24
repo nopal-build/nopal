@@ -1446,12 +1446,31 @@ describe("graph-structure prunes membership lines whose node is gone", () => {
     const live = node("2026-08-26#3");
     const sections = [
       { heading: "Cladding", content: "Weight: 3\n- 2026-08-20 Node 1 (A) — gone\n- 2026-08-26 Node 3 (G) — here\nStatus: active" },
-      { heading: "Plumbing", content: "- 2026-08-20 Node 2 (L) — gone" },
     ];
     const { sections: pruned, dropped } = pruneStaleMembership(sections, new Map([[live.id, live]]));
-    expect(dropped).toEqual(["2026-08-20#1", "2026-08-20#2"]);
+    expect(dropped).toEqual(["2026-08-20#1"]);
     expect(pruned[0].content).toBe("Weight: 3\n- 2026-08-26 Node 3 (G) — here\nStatus: active");
-    expect(pruned[1].content).toBe("");
+  });
+
+  it("drops a thread that has no nodes, however long it has had none", () => {
+    // It used to keep the heading with its gloss and its Blocking line
+    // and no nodes at all. graph-project-view then read that as a
+    // Blocking thread with no citation and wrote an honest line about it,
+    // which is how an entry refiled to another project went on haunting
+    // the project it left (seen in production, 2026-09-21).
+    const live = node("2026-08-26#3");
+    const sections = [
+      { heading: "", content: "asOfGraphHash: abc" },
+      { heading: "Cladding", content: "- 2026-08-26 Node 3 (G) — here" },
+      // Loses its last node in this sweep.
+      { heading: "HVAC and ERV system specs", content: "Status: open · Blocking: client approval\n- 2026-09-11 Node 1 (A) — moved away" },
+      // Lost them on some earlier run, which is how the first one in
+      // production survived the rule that only caught the transition.
+      { heading: "Old thread", content: "Weight: no inbound links yet · Status: open" },
+    ];
+    const { sections: pruned, droppedThreads } = pruneStaleMembership(sections, new Map([[live.id, live]]));
+    expect(droppedThreads).toEqual(["HVAC and ERV system specs", "Old thread"]);
+    expect(pruned.map((p) => p.heading)).toEqual(["", "Cladding"]);
   });
 
   it("returns the same section objects when nothing is stale", () => {

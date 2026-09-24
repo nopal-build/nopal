@@ -308,6 +308,15 @@ export function withReadmeBody(originalMarkdown: string, newBody: string): strin
  */
 export const README_INCOMPLETE_BANNER_PREFIX = "**This README is incomplete.**";
 
+/** The banner's opening words as plain text, for a reader that has
+ * already dropped the markdown (the mark units treat it as a system
+ * warning, not a thought on the page). */
+export const README_INCOMPLETE_BANNER_TEXT = README_INCOMPLETE_BANNER_PREFIX.replace(/\*\*/g, "");
+
+export function isIncompleteBannerText(text: string): boolean {
+  return text.startsWith(README_INCOMPLETE_BANNER_TEXT);
+}
+
 /** How many reasons the banner names before it stops listing them. The
  * banner is a prompt to go look at the run report, not a replacement for
  * it. */

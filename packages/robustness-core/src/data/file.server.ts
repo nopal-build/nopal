@@ -4,6 +4,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   ObjectCannedACL,
   CreateMultipartUploadCommand,
   UploadPartCommand,
@@ -13,7 +14,6 @@ import {
 import type { S3ClientConfig } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
-import sharp from "sharp";
 
 // S3_ENDPOINT        – full endpoint URL for the S3 client
 //                      local:  http://minio:9000  (internal Docker service name)
@@ -174,17 +174,29 @@ export async function getPresignedDownloadUrl(
  * in an ownership check and a redirect so the rest of the app can just link
  * to a stable, same-origin URL instead of handling S3 URLs directly.
  *
- * @param s3Key     The S3 key of the object to view
- * @param expiresIn Seconds until the URL expires (default: 900 = 15 minutes)
+ * `contentType`, when given, is what the browser is told the bytes are
+ * (`ResponseContentType`, a GetObject response override S3 signs into the
+ * URL). The object's own stored Content-Type is whatever the upload path
+ * guessed at the time, and `getFileContentType` below did not know `.mov`
+ * until 2026-09-22, so a video could sit in the bucket as
+ * `application/octet-stream`: a `<video>` given that plus `nosniff` shows
+ * 0:00 and never plays. The `file_refs` row knows the real type, so the
+ * caller passes it and the bytes in the bucket are left alone.
+ *
+ * @param s3Key       The S3 key of the object to view
+ * @param expiresIn   Seconds until the URL expires (default: 900 = 15 minutes)
+ * @param contentType The Content-Type the response should carry, if known
  */
 export async function getPresignedViewUrl(
   s3Key: string,
   expiresIn = 900,
+  contentType?: string,
 ): Promise<string> {
   const client = createPresignS3Client();
   const cmd = new GetObjectCommand({
     Bucket: process.env.BUCKET_NAME,
     Key: s3Key,
+    ...(contentType ? { ResponseContentType: contentType } : {}),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return getSignedUrl(client as any, cmd, { expiresIn });
@@ -198,6 +210,26 @@ export async function getPresignedViewUrl(
  * actual bytes to a vision-capable LLM call happening server-side, where
  * a redirect makes no sense.
  */
+/** Whether an object is in the bucket. A 404 is `false`, and so is a
+ * 403: S3 answers HEAD on a key that does not exist with 403 when the
+ * caller may Get and Put but not ListBucket, which is how an app role is
+ * often scoped, and a rendition that "exists" would be a 500 on every
+ * image on day one. A real permission fault then surfaces on the Put
+ * that follows. Anything else (no credentials, a network fault) is
+ * thrown, so an outage is never mistaken for "not made yet". */
+export async function objectExists(s3Key: string): Promise<boolean> {
+  const client = createS3Client();
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: process.env.BUCKET_NAME, Key: s3Key }));
+    return true;
+  } catch (err) {
+    const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+    const name = (err as { name?: string })?.name;
+    if (status === 404 || status === 403 || name === "NotFound" || name === "NoSuchKey" || name === "Forbidden") return false;
+    throw err;
+  }
+}
+
 export async function downloadFileBytes(s3Key: string): Promise<Buffer> {
   const client = createS3Client();
   const cmd = new GetObjectCommand({
@@ -287,56 +319,6 @@ class S3RangeReadStream extends Readable {
 export async function downloadFileStream(s3Key: string): Promise<Readable> {
   const client = createS3Client();
   return new S3RangeReadStream(client, process.env.BUCKET_NAME, s3Key);
-}
-
-/**
- * Resizes an image DOWN to fit within `maxDimension` on its longer side
- * (never upscales — `withoutEnlargement`) and re-encodes as WebP, for use
- * as a lightweight gallery thumbnail. The original bytes/format are always
- * left untouched in S3; this is generated on demand by the thumbnail route
- * and never persisted, so a caller must supply its own caching (the public
- * gallery does this with a long-lived, `updated_at`-fingerprinted URL — see
- * `api.vault.public-thumb.$fileId.tsx`).
- *
- * Cropping is deliberately NOT done here — the caller's CSS already
- * handles that (`object-fit: cover` on a fixed-aspect-ratio box), so this
- * only needs to shrink file size/dimensions, not decide what to cut off.
- *
- * Animated (multi-frame) GIF/WebP/PNG is passed through as raw bytes
- * unchanged — sharp's default single-frame read would silently flatten the
- * animation to its first frame, which is worse than serving the original
- * at full size.
- */
-export async function getImageThumbnail(
-  bytes: Buffer,
-  maxDimension = 480,
-): Promise<{ bytes: Buffer; contentType: string }> {
-  const metadata = await sharp(bytes).metadata();
-
-  // Animated (multi-frame) GIF/WebP/PNG passed through unchanged — sharp's
-  // default single-frame read would flatten the animation to its first
-  // frame, which is worse than just serving the original at full size.
-  if ((metadata.pages ?? 1) > 1) {
-    return {
-      bytes,
-      contentType: metadata.format
-        ? `image/${metadata.format}`
-        : "application/octet-stream",
-    };
-  }
-
-  const resized = await sharp(bytes)
-    .rotate() // apply EXIF orientation before resizing, then drop it
-    .resize({
-      width: maxDimension,
-      height: maxDimension,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .webp({ quality: 75 })
-    .toBuffer();
-
-  return { bytes: resized, contentType: "image/webp" };
 }
 
 export async function downloadAndUploadToS3(
@@ -578,10 +560,34 @@ export function getFileContentType(filename: string): string {
       return "image/x-icon";
     case "tiff":
       return "image/tiff";
+    case "heic":
+      return "image/heic";
+    case "heif":
+      return "image/heif";
     case "pdf":
       return "application/pdf";
     case "h264":
       return "video/h264";
+    // A phone's own video formats. Absent until 2026-09-22, so a `.mov`
+    // that reached S3 through a path with no browser-supplied type was
+    // stored as octet-stream and would not play.
+    case "mov":
+      return "video/quicktime";
+    case "mp4":
+    case "m4v":
+      return "video/mp4";
+    case "webm":
+      return "video/webm";
+    case "txt":
+      return "text/plain";
+    case "csv":
+      return "text/csv";
+    case "json":
+      return "application/json";
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     case "zip":
       return "application/zip";
     default:

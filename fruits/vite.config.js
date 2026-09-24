@@ -20,6 +20,16 @@ export default defineConfig({
     // react-markdown, remark-gfm and rehype-raw are ESM-only packages.
     // Vite's SSR build must bundle them instead of externalising them.
     noExternal: ["react-markdown", "remark-gfm", "rehype-raw"],
+    // CommonJS packages that reach this app only through the bundled
+    // `robustness-core` source (its `attachmentFrames.server.ts`). Vite
+    // externalises a dependency this package declares (`sharp`, `yaml`)
+    // and INLINES one it does not, and an inlined CommonJS `ffmpeg-static`
+    // reads `__dirname`, which an ES module does not have: the production
+    // server crashed at boot with ERR_AMBIGUOUS_MODULE_SYNTAX on
+    // 2026-09-22 while the dev server, which runs CommonJS through its own
+    // module runner, never showed it. Declared in package.json too, so
+    // they resolve from /app/node_modules in the pruned deploy image.
+    external: ["ffmpeg-static", "heic-convert"],
   },
   test: {
     globals: true,
