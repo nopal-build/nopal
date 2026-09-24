@@ -27,5 +27,16 @@ taino-edit-dom = { path = "vendor/taino-edit/crates/taino-edit-dom" }
 # must be patched too, or the build ends up with two incompatible copies
 # of the same types (registry vs. vendored). This copy is unmodified.
 taino-edit-core = { path = "vendor/taino-edit/crates/taino-edit-core" }
+# Also patched (added alongside the two above, not present originally):
+# `oxmarkdown-editor` depends on `taino-edit-leptos` directly, and it now
+# carries its own real fix too (`selection_touches_an_atom` in its
+# keydown handler — see `commands.rs`'s own module doc comment, item 7).
+# Missing this patch is a real, confirmed-live gap that shipped once
+# already: `cargo check`/`cargo test` against the submodule directly (a
+# separate Cargo workspace) happily succeed even when this crate is NOT
+# patched into `ono`'s own build at all, silently exercising the
+# unpatched crates.io version instead — only a live browser test caught
+# it (the fix visibly doing nothing).
+taino-edit-leptos = { path = "vendor/taino-edit/crates/taino-edit-leptos" }
 
 [workspace.lints.clippy]

@@ -375,7 +375,7 @@ matching the real product's own "Interactables" convention (see the
   no-op, remove deletes it, `:ref{...}` never opens it, and clicking a
   container's nested content edits normally instead of opening it.
 
-## A directive atom wasn't actually atomic against Enter/Arrow/Space — fixed
+## A directive atom wasn't actually atomic against Enter/Arrow/Space — fixed, then reversed back to the `oxmarkdown` skill's spec
 
 Reported live: pressing Enter after selecting a `::badge{...}` duplicated
 it into two; arrowing away from one with nothing adjacent had nowhere to
@@ -395,45 +395,77 @@ path (confirmed live: produced literal `<font>`/`<span style>`/`<b>`
 garbage neither this schema nor `read_dom_changes` has any tracked
 meaning for).
 
+**This section originally described two more rounds of live-feedback
+fixes that let Space enter a directive's content and type directly into
+it, with arrow keys moving freely within that content once inside. Both
+were fully REVERSED (`commands.rs`'s own module doc comment, item 7),
+by explicit product decision, after re-reading the `oxmarkdown` skill's
+own "Selection model" carefully: it never described a directive's
+rendered content as something you type into directly at all — only
+"click/tap selects and shows a tooltip or a popover for editing its
+attributes."** The design below is what actually ships today:
+
 - **`directive_at_selection`** finds either trap case (a real
   `Selection::Node`/its degraded live-DOM shape, or a caret stuck
   inside a leaf/text directive's own content), backing new `"ArrowLeft"`/
   `"ArrowRight"` entries chained ahead of the base `caret_left`/
-  `caret_right`, brand new `"ArrowUp"`/`"ArrowDown"` entries (unbound
-  before now), and a brand new `" "` (Space) entry — the ONLY way to
-  intercept a keystroke BEFORE Chrome's own native contenteditable
-  handling ever sees it and corrupts something (confirmed by reading
-  `taino-edit-leptos`'s keydown handler: `prevent_default()` fires
-  whenever a bound command actually handles the key, the same
-  mechanism `Enter`/`Backspace`/`Delete` already lean on).
-- **Arrow keys escape via `exit_directive`, always landing in a real
-  textblock**: an adjacent sibling directive is selected as a `Node` in
-  turn (individually navigable, matching the `oxmarkdown` skill's own
-  convention), an adjacent plain block is landed inside directly, and
-  — the part making "always able to arrow out, even with nothing next
-  to it" true — a fresh empty paragraph is inserted and landed in when
-  there's genuinely nothing there at all.
-- **Enter and Space each needed their OWN escape shape after a second
-  round of live feedback — reusing the arrow-key one was wrong, not
-  just imperfect**: reported live, pressing Enter right after a badge
-  that happened to sit next to a totally unrelated directive (e.g. a
-  `:::gallery` immediately following) jumped straight to SELECTING
-  that gallery — surprising, since Enter means "give me a new line,"
-  never "jump to something else." `exit_directive_with_new_line` always
-  inserts a fresh paragraph, unconditionally, ignoring whatever already
-  follows. Space is different again, also by live feedback: exiting
-  immediately on the FIRST press fought the obvious expectation that
-  Space would just keep typing, so the first Space instead appends a
-  literal space to the directive's own visible content and lands a
-  caret right after it. `space_in_directive` edits the rendered CONTENT
-  directly, not the underlying `attributes` attr (e.g. `"badge"`'s own
-  `label`) — a deliberate, documented tradeoff: it stays generic across
-  every directive kind, but reopening the attrs popover (`directive_
-  popover.rs`) and hitting Save regenerates content FROM `attributes`
-  again, discarding a quick Space-edit that was never written back into
-  it. (The FIRST version of this fix also made a SECOND Space exit,
-  same as Enter/Arrow — that turned out to be wrong too; see the next
-  section.)
+  `caret_right`, and brand new `"ArrowUp"`/`"ArrowDown"` entries
+  (unbound before now).
+- **Arrow keys now always SELECT a directive they land on, never enter
+  its content** — matching the skill's own wording exactly ("arrow-key
+  navigation onto it ... always selects only — never ... places a bare
+  caret inside it"). `arrow_left_fixups`/`arrow_right_fixups` peek at
+  where the base `caret_left`/`caret_right` would land (same
+  throwaway-capture technique the checkbox fixup below uses); if that
+  landing spot would be `caret_trapped_in_directive`, it's overridden to
+  `select_directive_as_unit` (a real `Selection::Node`) instead of being
+  left as a bare caret. A caret found ALREADY trapped (native vertical
+  `ArrowUp`/`ArrowDown` movement is the one entry point that can still
+  produce this — no keymap hook to peek at, same residual gap the
+  checkbox fixup documents) self-heals into a `Selection::Node` on the
+  very next ArrowLeft/Right press, rather than being treated as
+  editable text.
+- **Once selected, arrow keys escape via `exit_directive`, always
+  landing in a real textblock**: an adjacent sibling directive is
+  selected as a `Node` in turn (individually navigable, matching the
+  `oxmarkdown` skill's own convention), an adjacent plain block is
+  landed inside directly, and — the part making "always able to arrow
+  out, even with nothing next to it" true — a fresh empty paragraph is
+  inserted and landed in when there's genuinely nothing there at all.
+- **Enter needed its OWN escape shape, not `exit_directive`'s**:
+  reported live, reusing the arrow-key escape for Enter meant pressing
+  Enter right after a badge that happened to sit next to a totally
+  unrelated directive (e.g. a `:::gallery` immediately following) jumped
+  straight to SELECTING that gallery — surprising, since Enter means
+  "give me a new line," never "jump to something else."
+  `exit_directive_with_new_line` always inserts a fresh paragraph,
+  unconditionally, ignoring whatever already follows.
+- **Space has no directive-specific action at all anymore** —
+  `space_in_directive` is deleted outright. The skill's own
+  interactable list gives directives exactly one action ("click/tap
+  selects and shows ... a popover for editing its attributes"); Space
+  isn't in it. Editing a directive's own label now happens ONLY through
+  the attrs popover (`directive_popover.rs`).
+- **The anti-corruption mechanism moved from a per-key keymap allowlist
+  to a real, generic fix in the vendored `taino-edit-leptos` fork**
+  (`vendor/taino-edit`) — the original fix only ever intercepted Space
+  specifically, leaving every OTHER printable key free to reach
+  Chrome's native "replace selected element" corruption path. The new
+  `selection_touches_an_atom` helper (fully generic, no `oxmarkdown`
+  knowledge — just `NodeType::is_atom()`, which already existed in
+  `taino-edit-core` but was never actually consulted by the DOM/Leptos
+  adapters before this patch) makes ANY key, not just ones this crate
+  happens to bind, as unconditionally structural as `"Enter"`/
+  `"Backspace"`/`"Delete"` already were, whenever the live selection is
+  a whole atom. **This patch had to be added to `ono/Cargo.toml`'s own
+  `[patch.crates-io]` table as a NEW entry** (`taino-edit-leptos`,
+  alongside the pre-existing `taino-edit-dom`/`taino-edit-core` ones) —
+  a real, confirmed-live gap of its own: `cargo check`/`cargo test`
+  against the submodule directly (its own separate Cargo workspace)
+  happily succeed even when `ono`'s own build isn't patched to use it at
+  all, silently exercising the unpatched crates.io version instead. Only
+  a live e2e test caught this (the fix visibly doing nothing until the
+  patch entry was added).
 - **A second real, confirmed-live `taino-edit-dom` gap found WHILE
   fixing this, not by reasoning alone**: `EditorView::read_selection`
   ALWAYS reconstructs `Selection::Text`, never `Selection::Node` —
@@ -448,61 +480,22 @@ meaning for).
   keypress; caught immediately by live testing (never trust that a
   model-level `Selection::Node` "just stays set" across a keydown
   round-trip without confirming it against the ACTUAL live browser
-  path, not just a native unit test). `directive_at_selection` now
-  detects both shapes explicitly.
+  path, not just a native unit test). `directive_at_selection` (and the
+  fork's own `selection_touches_an_atom`) both detect both shapes
+  explicitly.
 - Confirmed live via e2e tests
   (`../../e2e/tests/directive-escape.spec.ts`), reproducing the exact
   reported symptoms before asserting each fix: Enter never duplicates
   and always inserts a genuinely NEW paragraph (never reusing or
   jumping to whatever's already next, including an unrelated adjacent
-  directive); Arrow keys always escape even with nothing after the
-  directive, backward landing at the end of the preceding paragraph;
-  the first Space appends to the directive's own content without
-  corrupting the DOM; and a caret that reaches the trap via ordinary
-  keyboard navigation (never clicking at all) still escapes cleanly on
-  Enter.
-
-## Once inside a directive's content, arrow keys and a second Space still misbehaved — fixed
-
-A THIRD round of live feedback on the same directive-editing feature
-found this design was still wrong once combined with "I should be able
-to arrow around inside a directive to edit its contents": after the
-first Space above landed a real caret inside the content, pressing
-ArrowLeft/ArrowRight to move within that text immediately exited the
-directive instead of moving the caret — there was no concept of "moving
-within the content" versus "moving past its true edge." Combined with
-the "second Space exits" design from the previous section, a second
-Space press (meant as "add another space to the label") instead
-silently jumped forward, landing on/selecting whatever directive
-happened to sit next — reported live as "space never adds a space to
-the label ... goes to the next line."
-
-- **`at_directive_content_edge`** checks whether a position sits at the
-  content's true start/end edge. **`arrow_left_fixups`/`arrow_right_
-  fixups`** (the actual `"ArrowLeft"`/`"ArrowRight"` keymap entries)
-  now only call `exit_directive` when the caret is already AT that edge
-  and moving further in that direction — otherwise they defer to the
-  base `caret_left`/`caret_right`, so the caret just moves within the
-  label like ordinary text. The whole-unit-selection case is unchanged:
-  right after clicking a directive, arrow keys still exit
-  unconditionally (standard selection-collapse convention).
-- **`space_in_directive`'s "second Space exits" branch was removed
-  entirely.** Once a real caret is already inside the content
-  (`caret_trapped_in_directive`'s case), Space is no longer special at
-  all: it declines (`false`) and native contenteditable typing handles
-  it exactly like any other character — already proven correct
-  elsewhere via `read_dom_changes`. Only the first Space, while the
-  directive is still selected as a whole unit, keeps its special
-  "append and land inside" behavior.
-- `"ArrowUp"`/`"ArrowDown"` are deliberately left exiting
-  unconditionally, unchanged — vertical movement has no clean
-  single-line "within the label" meaning.
-- Confirmed live via e2e tests (`../../e2e/tests/directive-escape.
-  spec.ts`): a second Space now just extends the label like ordinary
-  typing instead of exiting; ArrowLeft/ArrowRight move the caret within
-  a directive's content once already inside; and ArrowLeft/ArrowRight
-  AT the content's true edge still exit correctly (regression coverage
-  for the case that legitimately should still exit).
+  directive); arrow keys always escape even with nothing after the
+  directive; arrowing FROM an adjacent block onto a directive always
+  SELECTS it (confirmed by a single Backspace removing it outright,
+  never just editing one character of its label); Space and ordinary
+  character typing do nothing at all while a directive is selected, with
+  no corruption; and a caret that reaches the trap via native vertical
+  arrow movement (never clicking at all) self-heals into a selection and
+  still escapes cleanly on Enter.
 
 ## The caret could land right before a checkbox — fixed
 

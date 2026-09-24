@@ -3,33 +3,35 @@ import { gotoWithDoc } from "./helpers";
 
 // Regression tests for a real bug: a directive atom (leaf_directive/
 // text_directive) declares `content: Some("text*")` for its synthetic
-// display label, so it is NOT a true zero-content atom \u2014 `atom: true`
+// display label, so it is NOT a true zero-content atom — `atom: true`
 // only ever governed this crate's OWN click handling
 // (`directive_popover.rs`), never generic keyboard commands. A plain
 // Text caret could end up trapped inside a directive's own content via
 // ordinary ArrowLeft/Right navigation, and once there, Enter called
 // `split_block` on it directly (reported as "pressing Enter adds a new
-// Badge" \u2014 the directive split into two), and typing a character hit a
+// Badge" — the directive split into two), and typing a character hit a
 // genuinely corrupting native-Chrome code path. See `commands.rs`'s own
 // module doc comment (item 4) for the full root-cause writeup.
 //
-// Enter and Space each got their OWN escape shape after a second round
-// of live feedback (item 4's later addendum): Enter ALWAYS inserts a
-// fresh paragraph rather than reusing `exit_directive`'s arrow-key
-// "land on whatever's already next" logic (which surprisingly jumped
-// straight to selecting an unrelated adjacent directive), and Space's
-// FIRST press appends to the directive's own visible content instead
-// of exiting immediately.
+// Enter got its OWN escape shape after a second round of live feedback
+// (item 4's later addendum): it ALWAYS inserts a fresh paragraph rather
+// than reusing `exit_directive`'s arrow-key "land on whatever's already
+// next" logic (which surprisingly jumped straight to selecting an
+// unrelated adjacent directive).
 //
-// A third round of live feedback (item 6) found the design above was
-// STILL wrong once combined with "I should be able to arrow around to
-// edit the contents": a second Space used to force-exit the directive,
-// and arrow keys used to exit unconditionally the moment the caret was
-// already inside the content, rather than moving within it. Now, once
-// a real caret is inside a directive's content, it behaves like any
-// other text caret: Space/typing just extends the label, and arrow
-// keys move normally within the content, only exiting once they'd
-// cross the content's true start/end edge.
+// An intermediate design (items 4/6, since fully reverted) let Space
+// enter a directive's content and type into it directly, with arrow
+// keys moving freely within that content once inside. Item 7 reverses
+// all of that, back to matching the `oxmarkdown` skill's own
+// "Selection model" exactly: arrow-key navigation onto a directive
+// always SELECTS it as a whole unit — never places a bare caret inside
+// its content — and Space has no directive-specific action at all
+// anymore (a directive's only listed action is "click/tap selects and
+// shows a popover for editing its attributes"). See `commands.rs`'s own
+// module doc comment, item 7, for the full writeup, including where the
+// anti-corruption guard actually lives now (a generic, atom-level fix
+// in the vendored `taino-edit-leptos` fork, not a per-key allowlist
+// here).
 
 test("pressing Enter after selecting a badge always inserts a fresh new line, never reuses or jumps to what's already next", async ({
   page,
@@ -42,14 +44,14 @@ test("pressing Enter after selecting a badge always inserts a fresh new line, ne
   // Still exactly one badge, never duplicated.
   await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
   // A BRAND NEW paragraph was inserted between the badge and the
-  // existing one \u2014 "plain paragraph" itself is untouched.
+  // existing one — "plain paragraph" itself is untouched.
   const paragraphs = page.locator(".taino-editor p");
   await expect(paragraphs).toHaveCount(2);
   await expect(paragraphs.nth(0)).toHaveText("!");
   await expect(paragraphs.nth(1)).toHaveText("plain paragraph");
 });
 
-test("pressing Enter next to an unrelated directive never jumps to selecting it \u2014 it always creates a new line", async ({
+test("pressing Enter next to an unrelated directive never jumps to selecting it — it always creates a new line", async ({
   page,
 }) => {
   // The exact reported scenario: a badge sitting right next to a
@@ -107,68 +109,80 @@ test("ArrowLeft/ArrowUp escape backward, landing at the end of the preceding par
   await expect(page.locator(".taino-editor p").first()).toHaveText("before!");
 });
 
-test("the first Space after selecting a badge appends to its own label instead of corrupting the document", async ({
+test("Space does nothing at all while a badge is selected — no label edit, no corruption", async ({
   page,
 }) => {
   await gotoWithDoc(page, '::badge{label="Ready"}\n\nplain paragraph\n');
   await page.locator(".ox-directive-leaf").click();
   await page.keyboard.press("Space");
 
-  // The real bug produced literal <font>/<span style>/<b> garbage; the
-  // fix must leave the document genuinely clean.
+  // The real bug this whole mechanism guards against produced literal
+  // <font>/<span style>/<b> garbage; the fix must leave the document
+  // genuinely untouched, not just "still parseable."
   const html = await page.locator(".taino-editor").innerHTML();
   expect(html).not.toContain("<font");
   expect(html).not.toContain("<b>");
   await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
-  await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready ");
-  // The second (existing) paragraph is untouched \u2014 the first Space
-  // only edited the badge's own content.
+  await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready");
   await expect(page.locator(".taino-editor p")).toHaveText("plain paragraph");
 });
 
-test("a second Space (right after the first) no longer exits — it just extends the label like ordinary typing", async ({
+test("typing an ordinary character while a badge is selected does nothing at all", async ({
   page,
 }) => {
+  // Confirms the fix lives at the generic atom level (the vendored
+  // `taino-edit-leptos` fork's `selection_touches_an_atom`), not a
+  // per-key allowlist that happened to only ever cover Space.
   await gotoWithDoc(page, '::badge{label="Ready"}\n\nplain paragraph\n');
   await page.locator(".ox-directive-leaf").click();
-  await page.keyboard.press("Space");
-  await page.keyboard.press("Space");
-  await page.keyboard.type("!");
+  await page.keyboard.type("x");
 
-  // Still exactly one badge, its label now extended with two spaces and
-  // the typed "!" — nothing exited, nothing duplicated.
+  const html = await page.locator(".taino-editor").innerHTML();
+  expect(html).not.toContain("<font");
+  expect(html).not.toContain("<b>");
   await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
-  await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready  !");
-  // The existing paragraph is completely untouched.
+  await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready");
   await expect(page.locator(".taino-editor p")).toHaveText("plain paragraph");
 });
 
-test("once inside a directive's content, ArrowLeft/ArrowRight move the caret within it instead of exiting", async ({
+test("ArrowRight from the preceding paragraph selects the directive as a unit, confirmed by Backspace removing it in one press", async ({
   page,
 }) => {
-  await gotoWithDoc(page, '::badge{label="Ready"}\n\nplain paragraph\n');
-  await page.locator(".ox-directive-leaf").click();
-  await page.keyboard.press("Space");
-  // Caret now sits right after "Ready " (inside the content, not at the
-  // very start edge). Move left twice, then type — this should land in
-  // the MIDDLE of the label, not exit the directive.
-  await page.keyboard.press("ArrowLeft");
-  await page.keyboard.press("ArrowLeft");
-  await page.keyboard.type("!");
+  await gotoWithDoc(page, 'before\n\n::badge{label="Ready"}\n');
+  await page.locator(".taino-editor p").click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowRight");
+  // If this landed a bare caret one level inside "Ready" (the old bug),
+  // Backspace would delete just its last character. If it genuinely
+  // selected the whole directive (the fix), Backspace removes it
+  // outright, in one press, leaving "before" completely untouched.
+  await page.keyboard.press("Backspace");
 
-  await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
-  await expect(page.locator(".ox-directive-leaf")).toHaveText("Read!y ");
-  await expect(page.locator(".taino-editor p")).toHaveText("plain paragraph");
+  await expect(page.locator(".ox-directive-leaf")).toHaveCount(0);
+  await expect(page.locator(".taino-editor p").first()).toHaveText("before");
 });
 
-test("ArrowLeft at the true start edge of a directive's content still exits backward", async ({
+test("ArrowLeft from the following paragraph selects the preceding directive as a unit, confirmed by Backspace removing it in one press", async ({
+  page,
+}) => {
+  await gotoWithDoc(page, '::badge{label="Ready"}\n\nafter\n');
+  await page.locator(".taino-editor p").click();
+  await page.keyboard.press("Home");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("Backspace");
+
+  await expect(page.locator(".ox-directive-leaf")).toHaveCount(0);
+  await expect(page.locator(".taino-editor p").first()).toHaveText("after");
+});
+
+test("re-entering a directive via ArrowRight after exiting it backward selects it again, never landing a caret inside", async ({
   page,
 }) => {
   await gotoWithDoc(page, 'before\n\n::badge{label="Ready"}\n');
   await page.locator(".ox-directive-leaf").click();
   await page.keyboard.press("ArrowLeft"); // exit backward, landing at the end of "before"
-  await page.keyboard.press("ArrowRight"); // re-enter forward, landing right at the content start edge
-  await page.keyboard.press("ArrowLeft"); // at the start edge already — this should exit again
+  await page.keyboard.press("ArrowRight"); // re-enter — must SELECT, not land inside the label
+  await page.keyboard.press("ArrowLeft"); // already selected — exits backward again
   await page.keyboard.type("!");
 
   await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
@@ -176,20 +190,22 @@ test("ArrowLeft at the true start edge of a directive's content still exits back
   await expect(page.locator(".taino-editor p").first()).toHaveText("before!");
 });
 
-test("a caret that lands inside a directive's own content via keyboard navigation still escapes cleanly on Enter", async ({
+test("a caret that reaches a directive's content via native vertical arrow movement self-heals into a selection, still escaping cleanly on Enter", async ({
   page,
 }) => {
   await gotoWithDoc(page, 'before\n\n::badge{label="Ready"}\n');
-  // Put a real caret at the end of "before", then arrow right/down twice:
-  // once to reach the badge's own text, a second time to land INSIDE it
-  // (the exact trap this bug lived in, reached without ever clicking).
+  // ArrowDown is native browser vertical movement (no keymap hook to
+  // peek at — a documented residual gap, see `commands.rs` item 5/7),
+  // so it can still land a bare caret one level inside the badge's own
+  // content directly. The very next ArrowRight must self-heal that into
+  // a real selection rather than treating it as ordinary text.
   await page.locator(".taino-editor p").click();
   await page.keyboard.press("End");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("Enter");
 
-  // Still exactly one badge.
+  // Still exactly one badge, label untouched.
   await expect(page.locator(".ox-directive-leaf")).toHaveCount(1);
   await expect(page.locator(".ox-directive-leaf")).toHaveText("Ready");
 });
