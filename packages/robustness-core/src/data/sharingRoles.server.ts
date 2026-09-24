@@ -36,7 +36,39 @@ const DEFAULT_SHARING_ROLES: Array<{ name: string; is_owner: boolean }> = [
   { name: "Owner", is_owner: true },
   { name: "Crafter", is_owner: true },
   { name: "Observer", is_owner: false },
+  { name: "Client", is_owner: false },
 ];
+
+/** The one role that runs a project's people side: who is on it and in
+ * what role, renaming, deleting and its status, and other people's Steep
+ * readings. Crafter shares `is_owner` (writing content) but not this
+ * (Austin, 2026-09-24): Crafter is the level that does the work. */
+export const GUIDING_ROLE = "Owner";
+
+/** The role that reaches nothing on a project but its own log (ADR-023):
+ * never in `shared_with`, so every Vault, file and project-page check
+ * refuses it. */
+export const CLIENT_ROLE = "Client";
+
+/** Whether a member with this role reaches the project's work (its page,
+ * Vault folders and files). Everyone but a Client. */
+export function reachesProjectWork(roleName: string): boolean {
+  return roleName !== CLIENT_ROLE;
+}
+
+/** Adds any default role missing from `sharing_roles` (the table is only
+ * seeded when empty, so an existing environment never got Client). Returns
+ * the names it added. */
+export async function ensureDefaultSharingRoles(): Promise<string[]> {
+  const existing = new Set((await getSharingRoles()).map((r) => r.name));
+  const added: string[] = [];
+  for (const role of DEFAULT_SHARING_ROLES) {
+    if (existing.has(role.name)) continue;
+    await upsert("sharing_roles", role);
+    added.push(role.name);
+  }
+  return added;
+}
 
 async function seedDefaultSharingRoles(): Promise<void> {
   for (const role of DEFAULT_SHARING_ROLES) {

@@ -9,7 +9,6 @@ import {
   type ProjectSharingEntry,
 } from "robustness-core/data/projectSharing.server";
 import { getSharingRoles } from "robustness-core/data/sharingRoles.server";
-import { isProjectSeat } from "robustness-core/data/project.types";
 
 /**
  * GET/PUT /api/vault/projects/:folderId/sharing — this app's own project
@@ -23,23 +22,17 @@ async function loadContext(folderId: string, request: Request) {
   const user = await getUserFromRequest(request);
   if (!user) return { error: Response.json({ error: "Not authenticated" }, { status: 401 }) };
 
+  // The people side is the Owner's. An admin may open it on any project,
+  // including one they're on in another role or not on at all: the
+  // deliberate way an admin gives themselves a role, and the way back
+  // after setting themselves to Client. Everyone else gets the same 404
+  // as a project that doesn't exist.
+  const notFound = { error: Response.json({ error: "Not found" }, { status: 404 }) };
   const folder = await getFolderById(folderId);
-  if (!folder) return { error: Response.json({ error: "Not found" }, { status: 404 }) };
-
+  if (!folder || !(await isProjectFolder(folder))) return notFound;
   const role = await getProjectRole(folder, user._id);
-  if (!role) {
-    // 404 (not 403) so a non-collaborator can't probe which project ids exist.
-    return { error: Response.json({ error: "Not found" }, { status: 404 }) };
-  }
-
-  if (!(await isProjectFolder(folder))) {
-    return {
-      error: Response.json(
-        { error: "Sharing roles only apply to project folders" },
-        { status: 400 },
-      ),
-    };
-  }
+  const isAdmin = user.role === "Admin" || user.role === "Super";
+  if (!role?.guiding && !isAdmin) return notFound;
 
   return { user, folder, role };
 }
@@ -83,9 +76,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       (e): e is ProjectSharingEntry =>
         !!e && typeof e.human === "string" && typeof e.role === "string",
     )
-    // A seat is kept only when it is one of the three; anything else is
-    // dropped, and setProjectSharing then keeps whatever seat was there.
-    .map(({ human, role, seat }) => (isProjectSeat(seat) ? { human, role, seat } : { human, role }));
+    .map(({ human, role }) => ({ human, role }));
 
   const result = await setProjectSharing(ctx.user._id, ctx.folder, entries);
   if (!result.ok) {

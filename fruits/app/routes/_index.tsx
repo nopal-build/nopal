@@ -1,8 +1,9 @@
 // app/routes/_index.tsx: the dashboard, the screen everyone lands on.
 //
-// Top: the Steep-o-meter and today's log, the same for everyone. Below:
-// what the system gives back, split by where the person sits on each
-// project (ADR-022). Everything the page shows comes from
+// Someone whose every role is Client gets today's log and the
+// Steep-o-meter, nothing else. Everyone else gets the meter, the log,
+// and what the system gives back per project, each the way their role
+// there shows it (ADR-023). Everything the page shows comes from
 // `loadDashboard`; what it leaves out never reaches the browser.
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect, useLoaderData } from "react-router";
@@ -19,7 +20,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { getDailyLogs, getDailyLogCards, type DailyLogCard } from "robustness-core/data/dailyLog.server";
-import { getAccessibleProjectFolders } from "robustness-core/data/vault.server";
+import { isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
 import { loadDashboard } from "robustness-core/data/dashboard.server";
 import {
   DEFAULT_PROJECT_STATUS,
@@ -39,15 +40,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (statusParam as ProjectStatus)
     : DEFAULT_PROJECT_STATUS;
 
-  // Own projects plus any shared with the person under any role: what the
-  // dashboard arranges, and what a Card in today's log can be added to.
-  const folders = await getAccessibleProjectFolders(user._id);
+  // Every project the person holds a role on (ADR-023): what the dashboard
+  // arranges, and what a Card in today's log can be added to.
+  const memberships = await listProjectsFor(user._id);
 
   // Today's Daily Log, for the shared editor (`TodayLog`): the two most
   // recent entries, since the device's today can be a day ahead of the
   // server's, and their Cards.
   const [dashboard, { entries: recent }] = await Promise.all([
-    loadDashboard(user._id, activeStatus, folders),
+    loadDashboard(user._id, activeStatus, memberships),
     getDailyLogs(user._id, { limit: 2 }),
   ]);
   const cardsByDate: Record<string, DailyLogCard[]> = {};
@@ -60,13 +61,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   return {
-    user: { name: user.name ?? null, email: user.email },
+    // `role` too: the nav reads it through `useUser()` (without it the
+    // Maker link hid itself for admins here).
+    user: { name: user.name ?? null, email: user.email, role: user.role },
+    // The nav reads this (`useVaultHidden`): a client never gets the Vault.
+    vaultHidden: isClientEverywhere(memberships),
     activeStatus,
     dashboard,
     log: {
       entries: recent.map((e) => ({ date: e.date, content: e.content })),
       cardsByDate,
-      projectFolders: folders.map((f) => ({ id: f._id, name: f.name })),
+      projectFolders: memberships.map((m) => ({ id: m.folder._id, name: m.folder.name })),
     },
   };
 }

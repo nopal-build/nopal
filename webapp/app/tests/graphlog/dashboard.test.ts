@@ -1,18 +1,12 @@
 /**
- * The dashboard (ADR-022): who sees what is decided by `buildDashboard`
- * on the server, from where each person sits on each project.
- *
- * Gates for the 2026-09-23 round: test 7 (only your projects) and the
- * server half of test 3 (a steep reading is a quiet note, reaches the
- * guides, and nothing about it travels anywhere else).
+ * The dashboard (ADR-023): who sees what is decided by `buildDashboard`
+ * on the server, from each person's role on each project.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildDashboard, type DashboardProjectInput } from "robustness-core/data/dashboard.server";
-import { keepExistingSeats, seatFromSharing, seatsFromActor } from "robustness-core/data/projectSharing.server";
-import { parseProjectSharing, withProjectSharing } from "robustness-core/data/project.types";
 import { readSidecarReadAndAsk } from "robustness-core/data/effortReadings.server";
 import type { SteepReading } from "robustness-core/data/steepReadings.server";
 
@@ -28,20 +22,22 @@ function project(id: string, name: string, sharing: DashboardProjectInput["shari
   return {
     id,
     name,
-    ownerId: GUIDE,
     status: "active",
     statusAt: null,
     sharing,
-    read: `${name} is framing the second floor.`,
     ask: `Pick the ${name} window supplier this week.`,
   };
 }
 
 const crouch = project(CROUCH, "Crouch Casita", [
-  { human: CLIENT, role: "Observer", seat: "client" },
-  { human: LEAD, role: "Observer", seat: "observer" },
+  { human: GUIDE, role: "Owner" },
+  { human: CLIENT, role: "Client" },
+  { human: LEAD, role: "Observer" },
 ]);
-const coronado = project(CORONADO, "Coronado ADU", [{ human: OTHER_CLIENT, role: "Observer", seat: "client" }]);
+const coronado = project(CORONADO, "Coronado ADU", [
+  { human: GUIDE, role: "Owner" },
+  { human: OTHER_CLIENT, role: "Client" },
+]);
 
 const reading = (human: string, projectId: string, position: SteepReading["position"], date: string): SteepReading => ({
   human_id: human,
@@ -63,45 +59,7 @@ const names = new Map([
   [GUIDE, "Austin"],
 ]);
 
-describe("seats", () => {
-  it("the creator is a guide; an unmarked member sits where their role does; a stranger has none", () => {
-    const ownerTier = new Set(["Owner", "Crafter"]);
-    expect(seatFromSharing({ human_id: GUIDE }, [], GUIDE)).toBe("guide");
-    // The team, unmarked, keeps working as a guide; an unmarked Observer is a client.
-    expect(seatFromSharing({ human_id: GUIDE }, [{ human: LEAD, role: "Owner" }], LEAD, ownerTier)).toBe("guide");
-    expect(seatFromSharing({ human_id: GUIDE }, [{ human: LEAD, role: "Observer" }], LEAD, ownerTier)).toBe("client");
-    // Without the role names, unmarked falls to the least.
-    expect(seatFromSharing({ human_id: GUIDE }, [{ human: LEAD, role: "Owner" }], LEAD)).toBe("client");
-    expect(seatFromSharing({ human_id: GUIDE }, crouch.sharing, CLIENT)).toBe("client");
-    expect(seatFromSharing({ human_id: GUIDE }, crouch.sharing, OTHER_CLIENT)).toBeNull();
-  });
-
-  it("round-trips through README front matter, and a bad seat is dropped", () => {
-    const md = withProjectSharing("# Crouch\n", crouch.sharing);
-    expect(parseProjectSharing(md)).toEqual(crouch.sharing);
-    expect(parseProjectSharing("---\nsharing:\n  - human: x\n    role: Observer\n    seat: boss\n---\n")).toEqual([
-      { human: "x", role: "Observer" },
-    ]);
-  });
-
-  it("a reshare that names only roles keeps each person's seat", () => {
-    const incoming = [{ human: CLIENT, role: "Crafter" }, { human: LEAD, role: "Observer", seat: "guide" as const }];
-    expect(keepExistingSeats(incoming, crouch.sharing)).toEqual([
-      { human: CLIENT, role: "Crafter", seat: "client" },
-      { human: LEAD, role: "Observer", seat: "guide" },
-    ]);
-  });
-});
-
-describe("who may change a seat", () => {
-  it("a guide's save sets seats; anyone else's keeps every seat as it was", () => {
-    const selfPromotion = [{ human: CLIENT, role: "Crafter", seat: "guide" as const }];
-    expect(seatsFromActor(selfPromotion, crouch.sharing, false)).toEqual([{ human: CLIENT, role: "Crafter", seat: "client" }]);
-    expect(seatsFromActor(selfPromotion, crouch.sharing, true)).toEqual(selfPromotion);
-  });
-});
-
-describe("only your projects (test 7)", () => {
+describe("only your projects", () => {
   it("a guide on two projects sees two", () => {
     const d = buildDashboard({ viewerId: GUIDE, projects: [crouch, coronado], readings, names, status: "active" });
     expect(d.view).toBe("guide");
@@ -120,15 +78,23 @@ describe("only your projects (test 7)", () => {
     expect(payload).not.toContain("Sam");
   });
 
-  it("a client sees where it stands, not the guides' ask, and no one's readings", () => {
+  it("a client gets no read, no ask, no one's readings, only their own tap", () => {
     const d = buildDashboard({ viewerId: CLIENT, projects: [crouch], readings, names, status: "active" });
     const [row] = d.rows;
-    expect(row.read).toBe("Crouch Casita is framing the second floor.");
     expect(row.ask).toBeNull();
     expect(row.notes).toEqual([]);
-    // Their own tap comes back so the meter shows it; nobody else's does.
     expect(row.mine).toEqual({ position: "oh-crap", date: "2026-09-23" });
     expect(JSON.stringify(d)).not.toContain("Austin");
+  });
+
+  it("Client on one project and Owner of another: each shows by its own role", () => {
+    const mixed = project(CORONADO, "Coronado ADU", [{ human: CLIENT, role: "Owner" }]);
+    const d = buildDashboard({ viewerId: CLIENT, projects: [crouch, mixed], readings, names, status: "active" });
+    expect(d.view).toBe("guide");
+    const byId = new Map(d.rows.map((r) => [r.id, r]));
+    expect(byId.get(CROUCH)?.role).toBe("Client");
+    expect(byId.get(CROUCH)?.ask).toBeNull();
+    expect(byId.get(CORONADO)?.ask).toContain("window supplier");
   });
 });
 
@@ -139,16 +105,25 @@ describe("a steep reading is a quiet note for the guides (test 3, server half)",
     expect(d.rows[0].mine).toEqual({ position: "steep", date: "2026-09-23" });
   });
 
-  it("reaches an observer too, who does not tap", () => {
+  it("does not reach an Observer or a Crafter, who still tap (readings are the Owners')", () => {
     const d = buildDashboard({ viewerId: LEAD, projects: [crouch], readings, names, status: "active" });
     expect(d.view).toBe("guide");
-    expect(d.rows[0].notes.map((n) => n.who)).toEqual(["Dana"]);
-    expect(d.rows[0].canTap).toBe(false);
-    expect(d.topMeterProjectId).toBeNull();
+    expect(d.rows[0].notes).toEqual([]);
+    expect(d.rows[0].canTap).toBe(true);
+  });
+
+  it("a Crafter, the level that does the work, sees the ask but no one's readings", () => {
+    const withCrafter = project(CROUCH, "Crouch Casita", [...crouch.sharing, { human: OTHER_CLIENT, role: "Crafter" }]);
+    const d = buildDashboard({ viewerId: OTHER_CLIENT, projects: [withCrafter], readings, names, status: "active" });
+    expect(d.rows[0].ask).toContain("window supplier");
+    expect(d.rows[0].notes).toEqual([]);
   });
 
   it("a guide's reading never shows on another guide's row", () => {
-    const withTwoGuides = project(CROUCH, "Crouch Casita", [{ human: LEAD, role: "Crafter", seat: "guide" }]);
+    const withTwoGuides = project(CROUCH, "Crouch Casita", [
+      { human: GUIDE, role: "Owner" },
+      { human: LEAD, role: "Owner" },
+    ]);
     const d = buildDashboard({ viewerId: LEAD, projects: [withTwoGuides], readings, names, status: "active" });
     expect(d.rows[0].notes).toEqual([]);
   });
@@ -185,26 +160,15 @@ describe("the sidecar's read and ask", () => {
   });
 });
 
-// ── The project view's tabs (round 2) ────────────────────────────────────────
-import { filesForSeat, projectTabsFor, resolveProjectTab } from "robustness-core/data/projectView.server";
-import type { ProjectFileRow } from "robustness-core/data/fileFolders.server";
+// ── The project view's tabs ──────────────────────────────────────────────────
+import { PROJECT_TABS, resolveProjectTab } from "robustness-core/data/projectView.server";
 import { isOwnCard } from "robustness-core/data/dailyLog.server";
 
-describe("the project view's tabs, by seat", () => {
-  it("a client gets no Costs tab, and asking for it lands on Efforts", () => {
-    expect(projectTabsFor("client")).toEqual(["efforts", "photos", "files", "logbook"]);
-    expect(projectTabsFor("guide")).toEqual(["efforts", "photos", "files", "costs", "logbook"]);
-    expect(projectTabsFor("observer")).toContain("costs");
-    expect(resolveProjectTab("costs", "client")).toBe("efforts");
-    expect(resolveProjectTab("costs", "guide")).toBe("costs");
-    expect(resolveProjectTab("nonsense", "guide")).toBe("efforts");
-  });
-
-  it("in the project view, a client gets no file filed as a cost, even a receipt photo also in Gallery", () => {
-    const row = (fileId: string, folders: ProjectFileRow["folders"]) => ({ fileId, folders }) as ProjectFileRow;
-    const rows = [row("k1m2n3b4v5c6x7z8l9j0", ["gallery"]), row("r5t6y7u8i9o0p1a2s3d4", ["gallery", "costs"]), row("q1w2e3r4t5y6u7i8o9p0", ["documents"])];
-    expect(filesForSeat(rows, "client").map((r) => r.fileId)).toEqual(["k1m2n3b4v5c6x7z8l9j0", "q1w2e3r4t5y6u7i8o9p0"]);
-    expect(filesForSeat(rows, "guide")).toHaveLength(3);
+describe("the project view's tabs", () => {
+  it("everyone who reaches the page gets every tab; a Client never reaches it (see access.test.ts)", () => {
+    expect(PROJECT_TABS).toEqual(["efforts", "photos", "files", "costs", "logbook"]);
+    expect(resolveProjectTab("costs")).toBe("costs");
+    expect(resolveProjectTab("nonsense")).toBe("efforts");
   });
 });
 

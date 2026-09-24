@@ -1,16 +1,17 @@
 /**
  * The dashboard: what `/` shows each person, decided here and only here.
  *
- * `buildDashboard` is pure. It takes the projects a person can already
- * see, where they sit on each (ADR-022), each project's read and one ask
+ * `buildDashboard` is pure. It takes the projects a person holds a role
+ * on, their role on each (ADR-023), each project's read and one ask
  * from its Efforts sidecar, and recent Steep readings, and returns the
  * only data the page receives. Anything it leaves out never reaches the
  * browser, which is how "a client's reading reaches the guides" and "a
  * client sees their project and nothing else" hold: by what the server
  * returns, not by what the page hides.
  *
- * `loadDashboard` only fetches. It reads each project's README once (for
- * seats) and each Efforts sidecar once, never a whole Graph folder.
+ * `loadDashboard` only fetches: the person's projects and roles
+ * (`listProjectsFor`) and each Efforts sidecar once, never a whole Graph
+ * folder.
  *
  * Nothing here orders by importance. The Efforts sidecar carries no
  * blocking, due or "what this feeds" field, and the guide's rule is that
@@ -20,17 +21,11 @@
 
 import { query } from "./generic.server";
 import { getHumansById } from "./humans.server";
-import { getAccessibleProjectFolders } from "./vault.server";
 import type { VaultFolder } from "./vault.types";
 import { getProjectStatus } from "./projectStatus.server";
-import {
-  parseProjectSharing,
-  type ProjectSeat,
-  type ProjectSharingEntry,
-  type ProjectStatus,
-} from "./project.types";
-import { seatFromSharing } from "./projectSharing.server";
-import { ownerTierRoleNames } from "./sharingRoles.server";
+import type { ProjectSharingEntry, ProjectStatus } from "./project.types";
+import { listProjectsFor, roleIn, type ProjectMembership } from "./projectSharing.server";
+import { CLIENT_ROLE, GUIDING_ROLE } from "./sharingRoles.server";
 import { EFFORTS_SIDECAR_FILE_NAME, readSidecarReadAndAsk } from "./effortReadings.server";
 import { listSteepReadings, type SteepReading } from "./steepReadings.server";
 import type { SteepPosition } from "./steepScale";
@@ -42,11 +37,9 @@ export const STEEP_NOTE_DAYS = 7;
 export type DashboardProjectInput = {
   id: string;
   name: string;
-  ownerId: string;
   status: ProjectStatus;
   statusAt: string | null;
   sharing: ProjectSharingEntry[];
-  read: string | null;
   ask: string | null;
 };
 
@@ -63,17 +56,16 @@ export type SteepNote = {
 export type DashboardRow = {
   id: string;
   name: string;
-  seat: ProjectSeat;
+  /** The viewer's role here (ADR-023). */
+  role: string;
   status: ProjectStatus;
   statusAt: string | null;
-  /** Guide and observer rows: the page's one ask. Client rows: null. */
+  /** The page's one ask. Null on a Client row. */
   ask: string | null;
-  /** Client rows: where it stands, in the page's own words. Guide rows: null. */
-  read: string | null;
-  /** Client readings on this project. Empty on every client row, always. */
+  /** Clients' readings on this project, on an Owner's row only. */
   notes: SteepNote[];
-  /** Whether this person taps the Steep-o-meter on this project. Observers
-   * look in; their own meter belongs to the projects they run. */
+  /** Whether this person taps the Steep-o-meter here: anyone on an active
+   * project. */
   canTap: boolean;
   /** The viewer's own latest reading here, so the meter shows what they
    * tapped. The page decides whether it is today's. */
@@ -84,8 +76,8 @@ export type Dashboard = {
   /** Projects per status, for the guide view's tabs. Null in the client
    * view, which shows no counts and so receives none. */
   counts: Record<ProjectStatus, number> | null;
-  /** "client" when every project this person is on seats them as a
-   * client: no list, no counts, their project first. */
+  /** "client" when every role this person holds is Client: today's log
+   * and a Steep-o-meter per project, nothing else. */
   view: "guide" | "client";
   rows: DashboardRow[];
   /** The one project the meter at the top of the screen is about, when
@@ -100,36 +92,32 @@ export function buildDashboard(input: {
   readings: SteepReading[];
   names: Map<string, string>;
   status: ProjectStatus;
-  /** For unmarked entries; see `seatFromSharing`. */
-  ownerTierRoles?: ReadonlySet<string>;
 }): Dashboard {
-  const { viewerId, projects, readings, names, status, ownerTierRoles } = input;
+  const { viewerId, projects, readings, names, status } = input;
 
-  const seated = projects
-    .map((p) => ({ project: p, seat: seatFromSharing({ human_id: p.ownerId }, p.sharing, viewerId, ownerTierRoles) }))
-    .filter((x): x is { project: DashboardProjectInput; seat: ProjectSeat } => x.seat !== null);
+  const held = projects
+    .map((p) => ({ project: p, role: roleIn(p.sharing, viewerId) }))
+    .filter((x): x is { project: DashboardProjectInput; role: string } => x.role !== null);
 
   const view: Dashboard["view"] =
-    seated.length > 0 && seated.every((x) => x.seat === "client") ? "client" : "guide";
+    held.length > 0 && held.every((x) => x.role === CLIENT_ROLE) ? "client" : "guide";
 
-  const rows: DashboardRow[] = seated
-    // A client only ever sees their active projects: no tabs, no counts.
+  const rows: DashboardRow[] = held
+    // The client view only ever holds active projects: no tabs, no counts.
     .filter((x) => (view === "client" ? x.project.status === "active" : x.project.status === status))
-    .map(({ project, seat }) => {
+    .map(({ project, role }) => {
       const onProject = readings.filter((r) => r.project_folder_id === project.id);
       const mineAll = onProject.filter((r) => r.human_id === viewerId);
       const mine = mineAll.length ? mineAll[mineAll.length - 1] : null;
-      const isClientSeat = seat === "client";
       return {
         id: project.id,
         name: project.name,
-        seat,
+        role,
         status: project.status,
         statusAt: project.statusAt,
-        ask: isClientSeat ? null : project.ask,
-        read: isClientSeat ? project.read : null,
-        notes: isClientSeat ? [] : clientNotes(project, onProject, viewerId, names, ownerTierRoles),
-        canTap: seat !== "observer" && project.status === "active",
+        ask: role === CLIENT_ROLE ? null : project.ask,
+        notes: role === GUIDING_ROLE ? clientNotes(project, onProject, viewerId, names) : [],
+        canTap: project.status === "active",
         mine: mine ? { position: mine.position, date: mine.date } : null,
       };
     });
@@ -138,7 +126,7 @@ export function buildDashboard(input: {
   let counts: Dashboard["counts"] = null;
   if (view === "guide") {
     counts = { active: 0, completed: 0, trashed: 0 };
-    for (const x of seated) counts[x.project.status]++;
+    for (const x of held) counts[x.project.status]++;
   }
   return {
     counts,
@@ -149,19 +137,18 @@ export function buildDashboard(input: {
 }
 
 /** Each client's latest reading on the project, with the reading before
- * it. Readings from guides and observers stay with the person who made
- * them; the ones that reach this row are the clients'. */
+ * it. Readings from anyone who isn't a Client stay with the person who
+ * made them. */
 function clientNotes(
   project: DashboardProjectInput,
   onProject: SteepReading[],
   viewerId: string,
   names: Map<string, string>,
-  ownerTierRoles?: ReadonlySet<string>,
 ): SteepNote[] {
   const byPerson = new Map<string, SteepReading[]>();
   for (const r of onProject) {
     if (r.human_id === viewerId) continue;
-    if (seatFromSharing({ human_id: project.ownerId }, project.sharing, r.human_id, ownerTierRoles) !== "client") continue;
+    if (roleIn(project.sharing, r.human_id) !== CLIENT_ROLE) continue;
     const list = byPerson.get(r.human_id) ?? [];
     list.push(r);
     byPerson.set(r.human_id, list);
@@ -183,24 +170,6 @@ function clientNotes(
 
 function daysAgo(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-}
-
-/** Each project's README content (for its sharing list), one query. */
-async function readmesFor(projects: VaultFolder[]): Promise<Map<string, string>> {
-  const ids = projects.map((p) => p._id);
-  if (ids.length === 0) return new Map();
-  const result = await query<[{ folder_id: string; human_id: string; name: string; content?: string }[]]>(
-    `SELECT folder_id, human_id, name, content FROM file_refs
-     WHERE folder_id IN $ids AND string::lowercase(name) = "readme.md"`,
-    { ids },
-  );
-  const owners = new Map(projects.map((p) => [p._id, p.human_id]));
-  const out = new Map<string, string>();
-  for (const row of result?.[0] ?? []) {
-    if (owners.get(row.folder_id) !== row.human_id) continue;
-    out.set(row.folder_id, row.content ?? "");
-  }
-  return out;
 }
 
 /** Each project's Efforts sidecar, found through its Graph folder: two
@@ -242,50 +211,32 @@ function recordKey(id: unknown): string {
   return s.includes(":") ? s.slice(s.indexOf(":") + 1) : s;
 }
 
-/** `folders` is `getAccessibleProjectFolders(viewerId)`, passed in when the
+/** `memberships` is `listProjectsFor(viewerId)`, passed in when the
  * caller already has it. */
 export async function loadDashboard(
   viewerId: string,
   status: ProjectStatus,
-  folders?: VaultFolder[],
+  memberships?: ProjectMembership[],
 ): Promise<Dashboard> {
-  folders ??= await getAccessibleProjectFolders(viewerId);
-  const [readmes, sidecars, readings, ownerTierRoles] = await Promise.all([
-    readmesFor(folders),
+  memberships ??= await listProjectsFor(viewerId);
+  const folders = memberships.map((m) => m.folder);
+  const [sidecars, readings] = await Promise.all([
     sidecarsFor(folders),
     listSteepReadings(
       folders.map((f) => f._id),
       daysAgo(STEEP_NOTE_DAYS),
     ),
-    ownerTierRoleNames(),
   ]);
   const names = new Map(
     (await getHumansById([...new Set(readings.map((r) => r.human_id))])).map((h) => [h._id, h.name || h.email]),
   );
-  const projects: DashboardProjectInput[] = folders.map((f) => {
-    const { read, ask } = readSidecarReadAndAsk(sidecars.get(f._id));
-    return {
-      id: f._id,
-      name: f.name,
-      ownerId: f.human_id,
-      status: getProjectStatus(f),
-      statusAt: f.project_status_at ?? null,
-      sharing: withViewerSeat(f, parseProjectSharing(readmes.get(f._id) ?? ""), viewerId),
-      read,
-      ask,
-    };
-  });
-  return buildDashboard({ viewerId, projects, readings, names, status, ownerTierRoles });
-}
-
-/** Someone who can open a project (it is in their accessible list) but has
- * no entry in its sharing list reached it through a shared parent. They
- * sit as a client, the narrowest seat, as they do on the project page. */
-function withViewerSeat(
-  folder: VaultFolder,
-  sharing: ProjectSharingEntry[],
-  viewerId: string,
-): ProjectSharingEntry[] {
-  if (seatFromSharing(folder, sharing, viewerId) !== null) return sharing;
-  return [...sharing, { human: viewerId, role: "Observer", seat: "client" }];
+  const projects: DashboardProjectInput[] = memberships.map(({ folder: f, sharing }) => ({
+    id: f._id,
+    name: f.name,
+    status: getProjectStatus(f),
+    statusAt: f.project_status_at ?? null,
+    sharing,
+    ask: readSidecarReadAndAsk(sidecars.get(f._id)).ask,
+  }));
+  return buildDashboard({ viewerId, projects, readings, names, status });
 }

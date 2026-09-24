@@ -1,7 +1,6 @@
 /**
- * The project view's tabs (`/newspaper/:id`), and what each seat may see
- * in them. Decided here on the server; the page only draws what the
- * loader returns (ADR-022).
+ * The project view's tabs (`/newspaper/:id`). Who reaches the page at all
+ * is the role's (ADR-023), refused on the server by `canViewFolder`.
  *
  * Efforts is the page the skills write and comes first. The Logbook is
  * every Card written to the project: anyone on it can get there, and it goes
@@ -9,8 +8,7 @@
  * trace one back to what somebody said (Austin, 2026-09-24).
  */
 
-import type { FileFolder, ProjectFileRow } from "./fileFolders.server";
-import type { ProjectSeat } from "./project.types";
+import type { FileFolder } from "./fileFolders.server";
 
 export type ProjectTab = "efforts" | "photos" | "files" | "costs" | "logbook";
 
@@ -29,24 +27,12 @@ export const TAB_FOLDERS: Partial<Record<ProjectTab, FileFolder[]>> = {
   costs: ["costs"],
 };
 
-/** The tabs a seat gets, in order. Costs are the guides' until the
- * client-facing budget exists (built later from confirmed costs). */
-export function projectTabsFor(seat: ProjectSeat): ProjectTab[] {
-  return seat === "client"
-    ? ["efforts", "photos", "files", "logbook"]
-    : ["efforts", "photos", "files", "costs", "logbook"];
-}
+/** The tabs, in order. Only a role that reaches the project's work opens
+ * the page at all (everyone but a Client, refused by `canViewFolder`), and
+ * each of those gets every tab. */
+export const PROJECT_TABS: ProjectTab[] = ["efforts", "photos", "files", "costs", "logbook"];
 
-/** The requested tab when this seat has it, else Efforts. */
-export function resolveProjectTab(requested: string | null, seat: ProjectSeat): ProjectTab {
-  const tabs = projectTabsFor(seat);
-  return tabs.includes(requested as ProjectTab) ? (requested as ProjectTab) : "efforts";
-}
-
-/** File rows a seat may see. A client gets nothing filed as a cost, in
- * any folder: a receipt photo is in Gallery and Costs both, and it is
- * the Costs half that decides. */
-export function filesForSeat(rows: ProjectFileRow[], seat: ProjectSeat): ProjectFileRow[] {
-  if (seat !== "client") return rows;
-  return rows.filter((r) => !r.folders.includes("costs"));
+/** The requested tab when it exists, else Efforts. */
+export function resolveProjectTab(requested: string | null): ProjectTab {
+  return PROJECT_TABS.includes(requested as ProjectTab) ? (requested as ProjectTab) : "efforts";
 }

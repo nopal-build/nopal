@@ -37,7 +37,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
   if (!(await canViewFileRef(user._id, file))) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+    // The same 404 as a file that doesn't exist (ADR-023): a refusal
+    // says nothing about what was there.
+    return Response.json({ error: "Not found" }, { status: 404 });
   }
   if (!file.s3_key) {
     return Response.json({ error: "No viewable file attached" }, { status: 400 });

@@ -188,6 +188,16 @@ export function isFolderShared(folder: VaultFolder): boolean {
  * with them. Mirrors `canViewFileRef` in vault.server.ts.
  */
 export function canViewFolder(humanId: string, folder: VaultFolder): boolean {
-  if (folder.human_id === humanId) return true;
+  // Inside a project, owning the folder decides nothing: the creator is on
+  // its list like anyone else (ADR-023), so a creator who set themselves to
+  // Client is refused like a client.
+  if (folder.human_id === humanId && !isInsideProject(folder)) return true;
   return Array.isArray(folder.shared_with) && folder.shared_with.includes(humanId);
+}
+
+/** A project or anything under one: every folder in the `projects` root
+ * except the root container itself. Who reaches these is the project's
+ * roles, never ownership. */
+export function isInsideProject(folder: Pick<VaultFolder, "vault_root_key" | "parent_folder_id">): boolean {
+  return folder.vault_root_key === "projects" && !!folder.parent_folder_id;
 }

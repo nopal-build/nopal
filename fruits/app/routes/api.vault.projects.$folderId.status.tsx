@@ -1,12 +1,13 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
-import { isProjectFolder } from "robustness-core/data/projectSharing.server";
+import { getProjectRole, isProjectFolder } from "robustness-core/data/projectSharing.server";
 import {
   getProjectStatus,
   setProjectStatus,
 } from "robustness-core/data/projectStatus.server";
 import { PROJECT_STATUSES, type ProjectStatus } from "robustness-core/data/project.types";
+import { CLIENT_ROLE } from "robustness-core/data/sharingRoles.server";
 
 /**
  * GET/PUT /api/vault/projects/:folderId/status — a project's Active/
@@ -23,13 +24,11 @@ async function loadContext(folderId: string, request: Request) {
   const folder = await getFolderById(folderId);
   if (!folder) return { error: Response.json({ error: "Not found" }, { status: 404 }) };
 
-  if (!(await isProjectFolder(folder))) {
-    return {
-      error: Response.json(
-        { error: "Status only applies to project folders" },
-        { status: 400 },
-      ),
-    };
+  // Anyone who can't reach the project's work gets the same 404 as a
+  // project that doesn't exist (this GET used to answer anyone signed in).
+  const role = (await isProjectFolder(folder)) ? await getProjectRole(folder, user._id) : null;
+  if (!role || role.role === CLIENT_ROLE) {
+    return { error: Response.json({ error: "Not found" }, { status: 404 }) };
   }
 
   return { user, folder };

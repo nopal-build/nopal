@@ -64,7 +64,7 @@ import {
   getSharedFoldersForHuman,
   listFolderChildren,
 } from "robustness-core/data/vault.server";
-import { getProjectRoleForFolderId } from "robustness-core/data/projectSharing.server";
+import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
 import { getRelatedHumans } from "robustness-core/data/relationships.server";
 import { resolveProjectManifest, type ResolvedProject } from "robustness-core/data/project.server";
 import {
@@ -79,10 +79,8 @@ import {
 // client-rendered code, unlike everything from `website.server`/
 // `vault.server` above (loader-only, stripped from the client bundle).
 import {
-  PROJECT_SEATS,
   splitFrontmatter,
   withReadmeBody,
-  type ProjectSeat,
 } from "robustness-core/data/project.types";
 import { Badge } from "stamps/Badge";
 import { AppLayout } from "../components/AppLayout";
@@ -191,6 +189,11 @@ type GraphLogProjectStatus = {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
+  // A client never gets the Vault (ADR-023): the same bare 404 as a page
+  // that doesn't exist.
+  if (isClientEverywhere(await listProjectsFor(user._id))) {
+    throw new Response("Not found", { status: 404 });
+  }
 
   const [roots, ownFolders, sharedFolders, relatedHumansRaw] =
     await Promise.all([
@@ -690,7 +693,7 @@ function CopyLinkButton({ path }: { path: string }) {
 // ─── Share Modal ───────────────────────────────────────────────────────────────────────────────
 
 type ProjectSharingRole = { name: string; is_owner: boolean };
-type ProjectSharingEntry = { human: string; role: string; seat?: ProjectSeat };
+type ProjectSharingEntry = { human: string; role: string };
 
 /**
  * A project's Sharing Roles — supersedes the old "private / everyone /
@@ -717,8 +720,9 @@ function ShareModal({
   const [roles, setRoles] = useState<ProjectSharingRole[]>([]);
   // human id -> role name; absent = not shared with this human at all.
   const [assignments, setAssignments] = useState<Record<string, string>>({});
-  // human id -> seat; absent = unmarked: the seat follows their role (ADR-022).
-  const [seats, setSeats] = useState<Record<string, ProjectSeat>>({});
+  const [people, setPeople] = useState<HumanEntry[]>(allHumans);
+  const [invite, setInvite] = useState({ email: "", name: "", role: "Client" });
+  const [inviteNote, setInviteNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -728,13 +732,8 @@ function ShareModal({
       if (cancelled || !data) return;
       setRoles(data.roles ?? []);
       const next: Record<string, string> = {};
-      const nextSeats: Record<string, ProjectSeat> = {};
-      for (const entry of (data.sharing ?? []) as ProjectSharingEntry[]) {
-        next[entry.human] = entry.role;
-        if (entry.seat) nextSeats[entry.human] = entry.seat;
-      }
+      for (const entry of (data.sharing ?? []) as ProjectSharingEntry[]) next[entry.human] = entry.role;
       setAssignments(next);
-      setSeats(nextSeats);
       setLoading(false);
     })();
     return () => {
@@ -755,9 +754,7 @@ function ShareModal({
 
   const handleSave = async () => {
     setSaving(true);
-    const sharing: ProjectSharingEntry[] = Object.entries(assignments).map(
-      ([human, role]) => (seats[human] ? { human, role, seat: seats[human] } : { human, role }),
-    );
+    const sharing: ProjectSharingEntry[] = Object.entries(assignments).map(([human, role]) => ({ human, role }));
     const data = await apiJson(`/api/vault/projects/${folder._id}/sharing`, {
       method: "PUT",
       body: JSON.stringify({ sharing }),
@@ -770,6 +767,22 @@ function ShareModal({
     fontFamily: "monospace",
     fontSize: "12px",
     padding: "2px 6px",
+  };
+
+  // Invite someone onto this project in a role: a new person gets an
+  // account and the welcome email; someone who exists is just added.
+  const handleInvite = async () => {
+    setInviteNote(null);
+    const data = await apiJson(`/api/vault/projects/${folder._id}/invite`, {
+      method: "POST",
+      body: JSON.stringify({ email: invite.email, name: invite.name || undefined, role: invite.role }),
+    });
+    if (!data?.human) return;
+    const h = data.human as HumanEntry;
+    setPeople((prev) => (prev.some((p) => p._id === h._id) ? prev : [...prev, h]));
+    setRoleFor(h._id, invite.role);
+    setInvite({ email: "", name: "", role: "Client" });
+    setInviteNote(data.created ? `Invited ${h.name || h.email}` : `Added ${h.name || h.email}`);
   };
 
   return (
@@ -790,7 +803,7 @@ function ShareModal({
           </p>
         ) : (
           <div className="vault-human-list">
-            {allHumans.length === 0 ? (
+            {people.length === 0 ? (
               <p
                 className="text-xs font-mono"
                 style={{ color: "var(--text-subtle)", padding: "12px" }}
@@ -798,7 +811,7 @@ function ShareModal({
                 No other humans found.
               </p>
             ) : (
-              allHumans.map((h) => {
+              people.map((h) => {
                 const role = assignments[h._id];
                 return (
                   <label
@@ -838,31 +851,57 @@ function ShareModal({
                         ))}
                       </select>
                     )}
-                    {role && (
-                      <select
-                        aria-label="Seat"
-                        value={seats[h._id] ?? ""}
-                        onChange={(e) =>
-                          setSeats((prev) => {
-                            const next = { ...prev };
-                            if (e.target.value) next[h._id] = e.target.value as ProjectSeat;
-                            else delete next[h._id];
-                            return next;
-                          })
-                        }
-                        style={selectStyle}
-                      >
-                        <option value="">from role</option>
-                        {PROJECT_SEATS.map((seat) => (
-                          <option key={seat} value={seat}>
-                            {seat}
-                          </option>
-                        ))}
-                      </select>
-                    )}
                   </label>
                 );
               })
+            )}
+          </div>
+        )}
+
+        {!loading && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", margin: "12px 0" }}>
+            <span className="text-xs font-mono" style={{ color: "var(--text-subtle)" }}>
+              Invite by email
+            </span>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+              <input
+                aria-label="Email"
+                placeholder="email"
+                value={invite.email}
+                onChange={(e) => setInvite((p) => ({ ...p, email: e.target.value }))}
+                style={{ ...selectStyle, flex: 1, minWidth: 0 }}
+              />
+              <input
+                aria-label="Name"
+                placeholder="name, if they're new"
+                value={invite.name}
+                onChange={(e) => setInvite((p) => ({ ...p, name: e.target.value }))}
+                style={{ ...selectStyle, flex: 1, minWidth: 0 }}
+              />
+              <select
+                aria-label="Role"
+                value={invite.role}
+                onChange={(e) => setInvite((p) => ({ ...p, role: e.target.value }))}
+                style={selectStyle}
+              >
+                {roles.map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleInvite}
+                disabled={!invite.email}
+                className="btn-outline text-xs font-mono px-3 py-1.5 rounded"
+              >
+                Invite
+              </button>
+            </div>
+            {inviteNote && (
+              <span className="text-xs font-mono" style={{ color: "var(--text-subtle)" }}>
+                {inviteNote}
+              </span>
             )}
           </div>
         )}

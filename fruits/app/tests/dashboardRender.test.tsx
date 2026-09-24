@@ -15,11 +15,10 @@ const counts = { active: 2, completed: 0, trashed: 0 };
 const row = (over: Partial<DashboardRow>): DashboardRow => ({
   id: "a1b2c3d4e5f6g7h8i9j0",
   name: "Crouch Casita",
-  seat: "guide",
+  role: "Owner",
   status: "active",
   statusAt: null,
   ask: "Pick the window supplier this week.",
-  read: null,
   notes: [],
   canTap: true,
   mine: null,
@@ -42,7 +41,7 @@ function render(dashboard: Dashboard) {
 const clientDash: Dashboard = {
   counts: null,
   view: "client",
-  rows: [row({ seat: "client", ask: null, read: "Framing is on track." })],
+  rows: [row({ role: "Client", ask: null })],
   topMeterProjectId: "a1b2c3d4e5f6g7h8i9j0",
 };
 const guideDash: Dashboard = {
@@ -56,22 +55,36 @@ const guideDash: Dashboard = {
   ],
   topMeterProjectId: null,
 };
-const observerDash: Dashboard = {
+const watcherDash: Dashboard = {
   counts,
   view: "guide",
-  rows: [row({ seat: "observer", canTap: false })],
-  topMeterProjectId: null,
+  rows: [row({ role: "Observer" })],
+  topMeterProjectId: "a1b2c3d4e5f6g7h8i9j0",
 };
 
 describe("the ritual is on the landing screen (tests 1 and 2, markup)", () => {
-  it("a client: the log box, then the meter, before anything else", () => {
+  it("a client: the log box, then the meter below it, and nothing else (test 2, markup)", () => {
     const html = render(clientDash);
     const meter = html.indexOf("data-steep-meter");
     const box = html.indexOf("data-log-box");
-    const project = html.indexOf("data-project-row");
     expect(box).toBeGreaterThan(-1);
     expect(meter).toBeGreaterThan(box);
-    expect(project).toBeGreaterThan(meter);
+    // No project row to read, no link to a project page, no name when
+    // there's one project.
+    expect(html).not.toContain("/newspaper/");
+    expect(html).not.toContain("Crouch Casita");
+    expect(html).not.toContain("window supplier");
+  });
+
+  it("a client on two projects: a meter for each, named", () => {
+    const html = render({
+      ...clientDash,
+      rows: [row({ role: "Client", ask: null }), row({ id: "q9w8e7r6t5y4u3i2o1p0", name: "Coronado ADU", role: "Client", ask: null })],
+      topMeterProjectId: null,
+    });
+    expect(html.match(/data-steep-meter=/g)?.length).toBe(2);
+    expect(html).toContain("Coronado ADU");
+    expect(html).not.toContain("/newspaper/");
   });
 
   it("a guide on two projects: the log box on top, a meter on each row", () => {
@@ -80,10 +93,19 @@ describe("the ritual is on the landing screen (tests 1 and 2, markup)", () => {
     expect(html.match(/data-steep-meter=/g)?.length).toBe(2);
   });
 
-  it("an observer: the log box, and no meter", () => {
-    const html = render(observerDash);
+  it("an Observer: the log box and their own meter, like anyone on the project", () => {
+    const html = render(watcherDash);
     expect(html).toContain("data-log-box");
-    expect(html).not.toContain("data-steep-meter");
+    expect(html).toContain("data-steep-meter");
+  });
+
+  it("client on one project inside a guide's screen: its row has no link to the page", () => {
+    const html = render({
+      ...guideDash,
+      rows: [guideDash.rows[0], row({ id: "q9w8e7r6t5y4u3i2o1p0", name: "Campbell", role: "Client", ask: null })],
+    });
+    expect(html).toContain("/newspaper/a1b2c3d4e5f6g7h8i9j0");
+    expect(html).not.toContain("/newspaper/q9w8e7r6t5y4u3i2o1p0");
   });
 });
 
@@ -102,7 +124,6 @@ describe("a client is never counted or nagged", () => {
     expect(html).not.toMatch(/\(\d+\)/);
     expect(html).not.toMatch(/Active|Completed|Trashed/);
     expect(html).not.toMatch(/streak|days since|last logged/i);
-    expect(html).toContain("Framing is on track.");
   });
 });
 

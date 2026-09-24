@@ -13,6 +13,14 @@ export function useUser(): Human | null {
   return null;
 }
 
+/** True when the page's loader said this person is a Client on every
+ * project they're on (ADR-023): the nav then offers no Vault, and `/vault`
+ * refuses them. Pages a client can reach (`/`, `/daily-log`, `/profile`)
+ * return `vaultHidden`. */
+export function useVaultHidden(): boolean {
+  return useMatches().some((m) => (m.data as { vaultHidden?: boolean } | null | undefined)?.vaultHidden === true);
+}
+
 function isSuper(user: Human | null): boolean {
   return user?.role === "Super";
 }

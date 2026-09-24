@@ -41,7 +41,7 @@ import {
   SYNC_FOLDER_TYPES,
   type VaultFolderTypeKey,
 } from "./vaultFolderTypes";
-import { isVaultRootFolder } from "./vault.types";
+import { isVaultRootFolder, canViewFolder } from "./vault.types";
 import type { Role } from "./humans.server";
 // File Referencing & Renaming (`fileReferences.server.ts`), `project-n02`
 // seeding (`projectN02.server.ts`), and `website` seeding/publish/settings
@@ -174,13 +174,10 @@ export async function canViewFileRef(
   humanId: string,
   file: FileRef,
 ): Promise<boolean> {
-  if (file.human_id === humanId) return true;
-  if (!file.folder_id) return false;
+  if (!file.folder_id) return file.human_id === humanId;
   const folder = await getFolderById(file.folder_id);
-  if (!folder) return false;
-  return (
-    Array.isArray(folder.shared_with) && folder.shared_with.includes(humanId)
-  );
+  if (!folder) return file.human_id === humanId;
+  return canViewFolder(humanId, folder);
 }
 
 export async function updateFileRef(
@@ -1301,28 +1298,24 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
 }
 
 /**
- * Every project folder `humanId` can target for a daily-log Card — their
- * OWN projects, plus any project someone else has shared a Sharing Role
- * with them on (see `projectSharing.server.ts`). Cards are the one place
- * this app lets ANY role (including Observer) "contribute" to a project it
- * doesn't own — see the vault skill's Daily Log/Cards section.
- *
- * `getTopLevelSharedFolders` already returns exactly the top of each
- * shared subtree (a folder whose parent isn't itself shared) — since a
- * project is only ever shared as a whole via `setProjectSharing` (never a
- * nested subfolder individually), that top is always the project folder
- * itself; the `vault_root_key === "projects"` filter is just defensive
- * (excludes anything unexpected, e.g. a future shareable root).
+ * Every project whose work `humanId` reaches: their id is in its
+ * `shared_with` cache, which holds everyone on it but a Client (ADR-023).
+ * Owning the folder adds nothing. Used for move and refile destinations;
+ * the projects someone holds any role on, Client included, are
+ * `listProjectsFor` (`projectSharing.server.ts`).
  */
 export async function getAccessibleProjectFolders(
   humanId: string,
 ): Promise<VaultFolder[]> {
-  const [owned, sharedTop] = await Promise.all([
-    getProjectFolders(humanId),
-    getTopLevelSharedFolders(humanId),
-  ]);
-  const sharedProjects = sharedTop.filter((f) => f.vault_root_key === "projects");
-  return [...owned, ...sharedProjects];
+  const result = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders
+     WHERE vault_root_key = "projects" AND $humanId IN shared_with
+     ORDER BY name ASC`,
+    { humanId },
+  );
+  const reached = (result?.[0] ?? []).map(formatRecord);
+  const ids = new Set(reached.map((f) => f._id));
+  return reached.filter((f) => !!f.parent_folder_id && !ids.has(f.parent_folder_id));
 }
 
 /** Finds a folder's own `README.md` (case-insensitive), owned by `ownerId`
