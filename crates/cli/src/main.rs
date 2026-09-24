@@ -331,10 +331,11 @@ enum VaultCommand {
         /// Stop sharing — clears the whole collaborator list.
         #[arg(long, conflicts_with = "with")]
         private: bool,
-        /// Share with a person and assign their role, as EMAIL:ROLE
+        /// Share with a person and assign their role, as EMAIL:ROLE, or
+        /// EMAIL:ROLE:SEAT where SEAT is guide, client or observer
         /// (repeatable). Replaces the current collaborator list rather
-        /// than adding to it.
-        #[arg(long = "with", value_name = "EMAIL:ROLE")]
+        /// than adding to it; a person named without a seat keeps theirs.
+        #[arg(long = "with", value_name = "EMAIL:ROLE[:SEAT]")]
         with: Vec<String>,
     },
     /// Publish a folder to a public URL — no login required to view it.

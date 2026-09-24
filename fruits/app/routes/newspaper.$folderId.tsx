@@ -16,7 +16,7 @@
 // anyone who can view this folder always sees this route; there's no
 // redirect-to-vault fallback to worry about missing here.
 import type { LoaderFunctionArgs } from "react-router";
-import { Link, redirect, useLoaderData, useRevalidator } from "react-router";
+import { Link, redirect, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { useCallback, useMemo, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
 import { canViewFolder } from "robustness-core/data/vault.types";
@@ -26,10 +26,29 @@ import { listMarksOnPage, readableMark } from "robustness-core/data/graphLogMark
 import { resolveProjectManifest } from "robustness-core/data/project.server";
 import { getProjectStatus } from "robustness-core/data/projectStatus.server";
 import { isIncompleteBannerText, type ProjectStatus } from "robustness-core/data/project.types";
+import { seatFor } from "robustness-core/data/projectSharing.server";
+import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
+import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
+import { listCardsForProject } from "robustness-core/data/dailyLog.server";
+import { getHumansById } from "robustness-core/data/humans.server";
+import {
+  PROJECT_TAB_LABELS,
+  TAB_FOLDERS,
+  filesForSeat,
+  projectTabsFor,
+  resolveProjectTab,
+} from "robustness-core/data/projectView.server";
 import { AppLayout } from "../components/AppLayout";
+import { CardTabs } from "../components/stamps-candidates/CardTabs";
+import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
+import OxRenderer from "../components/OxRenderer";
+import { ProjectFilesView } from "../components/ProjectFilesView";
 import { ProjectView } from "../components/ProjectView";
 import type { MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
 import { sprinkles } from "stamps/sprinkles.css";
+import { CenterContent } from "stamps/CenterContent";
+import { Cluster } from "stamps/Cluster";
+import { Stack } from "stamps/Stack";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 
@@ -44,6 +63,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!folder || !canViewFolder(user._id, folder)) {
     throw new Response("Not found", { status: 404 });
   }
+
+  // The tabs, by where the viewer sits (ADR-022). Someone who can open the
+  // folder but has no entry on it (reached through a shared parent) gets
+  // the narrowest view, a client's.
+  const seat = (await seatFor(folder, user._id)) ?? "client";
+  const tab = resolveProjectTab(new URL(request.url).searchParams.get("tab"), seat);
+  const base = `/newspaper/${folder._id}`;
+  const tabs = projectTabsFor(seat).map((key) => ({
+    key,
+    label: PROJECT_TAB_LABELS[key],
+    to: key === "efforts" ? base : `${base}?tab=${key}`,
+  }));
+
+  // Only the open tab's data: the files are about ten queries.
+  const tabFolders = TAB_FOLDERS[tab] ?? null;
+  const files: ProjectFileRow[] | null =
+    tabFolders && folder.folder_type === "project-n02" ? filesForSeat(await loadProjectFiles(folder), seat) : null;
+  const logbook = tab === "logbook" ? await projectLogbook(folder._id) : null;
 
   // Children/README belong to the folder's OWNER, not necessarily the viewer
   // (this folder may only be reachable because it's shared with them).
@@ -86,7 +123,32 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     livePageHash,
     viewerId: user._id,
     marks,
+    tab,
+    tabs,
+    tabFolders,
+    files,
+    // Server values the files view needs, as data (never imported into
+    // the component, which would pull a `.server` module into the bundle).
+    fileKinds: FILING_KINDS.filter((k) => k !== "video"),
+    logbook,
   };
+}
+
+/** Every Card written to the project, one per person per day, newest
+ * day first. */
+async function projectLogbook(projectFolderId: string) {
+  const cards = (await listCardsForProject(projectFolderId)).filter((c) => c.content.trim());
+  const names = new Map(
+    (await getHumansById([...new Set(cards.map((c) => c.humanId))])).map((h) => [h._id, h.name || h.email]),
+  );
+  return cards
+    .map((c) => ({ fileId: c.fileId, who: names.get(c.humanId) ?? "Someone", date: c.date, content: c.content }))
+    .sort((a, b) => b.date.localeCompare(a.date) || a.who.localeCompare(b.who));
+}
+
+function longDate(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 /** The writer's own calendar day, which is what a mark is dated with. */
@@ -143,9 +205,32 @@ function ProjectStatusControl({
   );
 }
 
+/** The Logbook: what each person wrote about this project, one card per
+ * person per day, pinned into a scrapbook. Read-only; each person edits
+ * their own on the Daily Log. */
+function Logbook({ cards }: { cards: { fileId: string; who: string; date: string; content: string }[] }) {
+  if (cards.length === 0) {
+    return (
+      <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+        Nobody has written about this project in a daily log yet.
+      </p>
+    );
+  }
+  return (
+    <PinnedCardWall>
+      {cards.map((c) => (
+        <PinnedCard key={c.fileId} title={c.who} label={longDate(c.date)} data-logbook-card>
+          <OxRenderer markdown={c.content} />
+        </PinnedCard>
+      ))}
+    </PinnedCardWall>
+  );
+}
+
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, livePageHash, viewerId, marks } =
+  const { folder, project, status, canEditStatus, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook } =
     useLoaderData<typeof loader>();
+  const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
   const revalidator = useRevalidator();
 
@@ -298,38 +383,41 @@ export default function NewspaperRoute() {
 
   return (
     <AppLayout>
-      <div className="container mx-auto px-4 py-12">
-        <div className="mb-8">
-          <Link
-            to="/"
-            className="text-xs subtle-text hover:opacity-80"
-            style={{ textDecoration: "none" }}
-          >
+      <CenterContent maxWidth={1280}>
+        <Stack gap={2} className={sprinkles({ mb: 8 })}>
+          <Link to="/" className={textSize.xs} style={{ color: semanticColors.textSubtle, textDecoration: "none" }}>
             ← Dashboard
           </Link>
-          <div className="flex items-baseline justify-between gap-4 mt-2">
-            <h1 className="font-bold text-2xl mb-1">
+          <Cluster gap={4} align="baseline" style={{ justifyContent: "space-between" }}>
+            <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>
               {manifest.title ?? folder.name}
             </h1>
-            <div className="flex items-center gap-3 shrink-0">
-              {canEditStatus ? (
-                <ProjectStatusControl folderId={folder._id} status={status} />
-              ) : (
-                <span className="text-xs subtle-text capitalize">{status}</span>
-              )}
-              <Link
-                to={`/vault?folder=${folder._id}`}
-                className="text-xs subtle-text hover:opacity-80 whitespace-nowrap"
-                style={{ textDecoration: "none" }}
-              >
-                Files →
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        <ProjectView body={body} galleryFolders={galleryFolders} annotations={annotations} />
-      </div>
+            {canEditStatus ? (
+              <ProjectStatusControl folderId={folder._id} status={status} />
+            ) : (
+              <span className={`${textSize.xs} ${sprinkles({ textTransform: "capitalize" })}`} style={{ color: semanticColors.textSubtle }}>
+                {status}
+              </span>
+            )}
+          </Cluster>
+        </Stack>
+        <CardTabs tabs={tabs} active={tab} label="Project">
+          {tab === "efforts" && (
+            <ProjectView body={body} galleryFolders={galleryFolders} annotations={annotations} />
+          )}
+          {files && tabFolders && (
+            <ProjectFilesView
+              projectFolderId={folder._id}
+              rows={files}
+              folders={tabFolders}
+              kinds={fileKinds}
+              onOpen={(row) => navigate(`/vault?file=${row.serveId}`)}
+              onChanged={() => revalidator.revalidate()}
+            />
+          )}
+          {logbook && <Logbook cards={logbook} />}
+        </CardTabs>
+      </CenterContent>
     </AppLayout>
   );
 }

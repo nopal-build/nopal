@@ -131,6 +131,10 @@ body {
   background-color: var(--color-surface-page);
   color: var(--color-text-primary);
   min-height: 100vh;
+  /* OT L22 (the app's sans) reads cramped at its default 0 spacing
+     (Austin, 2026-09-24). The writing surface sets its own, the same 1px,
+     as `--ox-letter-spacing` in oxmarkdown.css. */
+  letter-spacing: 1px;
 }
 
 .page-wrapper {
