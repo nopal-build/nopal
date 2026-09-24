@@ -117,7 +117,6 @@ function getCurrentSectionLabel(pathname: string): string {
   if (pathname.startsWith("/vault")) return "Vault";
   if (pathname.startsWith("/profile")) return "Profile";
   if (pathname.startsWith("/maker")) return "Maker";
-  if (pathname.startsWith("/styles")) return "Stamps";
   return "Dashboard";
 }
 

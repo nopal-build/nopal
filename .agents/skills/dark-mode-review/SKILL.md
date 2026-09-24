@@ -40,9 +40,10 @@ adding here if marketing dark-mode bugs turn out to be a recurring problem.
    ```
    npx vite-node scripts/visual-check.ts [--email=someone@example.com] [path ...]
    ```
-   - With no path arguments, it screenshots `/styles` — the living style
-     guide (`app/routes/styles.tsx`), which exercises the shared component
-     library end-to-end and is the single best default target.
+   - With no path arguments, it screenshots `/maker/stamps` — the Stamps
+     design system guide (`app/routes/maker_.stamps.tsx`), which exercises
+     the shared component library end-to-end and is the single best
+     default target.
    - Pass one or more paths to check specific pages, e.g.:
      ```
      npx vite-node scripts/visual-check.ts /profile /daily-log
@@ -54,6 +55,14 @@ adding here if marketing dark-mode bugs turn out to be a recurring problem.
      feature).
 4. Screenshots are written to `fruits/tmp/visual-check/<route>--light.png`
    and `<route>--dark.png` (gitignored — throwaway output, not committed).
+   `fullPage: true` genuinely captures everything below the fold, including
+   on routes taller than one viewport — `AppLayout` renders an
+   independently-scrolling `<main>` (fixed height, own `overflow: scroll`)
+   rather than letting the whole document scroll, which silently truncated
+   `fullPage` captures to one viewport's worth of `<main>` before the
+   script started forcing it to lay out at full content height first (a
+   real repro, not just CSS-reading: `document.documentElement`/`body`
+   both reported a fixed `100vh`-ish height regardless of actual content).
 5. **Read both PNGs directly** with the file-reading tool and compare them
    side by side. Look specifically for:
    - Text with too little contrast against its background in either mode

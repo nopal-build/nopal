@@ -10,4 +10,18 @@
     font-display: swap;
     src: url(/fonts/IndieFlower-Regular.ttf) format("truetype");
   }
+
+  /* Variable font, single `wght` axis (100–700, default 100) — the
+     `font-weight: 100 700` range lets the browser pick any weight in
+     between rather than snapping to the nearest static instance. Used as
+     the app's default sans (see tailwind.config.ts's `fontFamily.sans`
+     and stamps/tokens.ts's `fonts.sans`, which both need to list the
+     exact same family name). */
+  @font-face {
+    font-family: "OT L22 Variable";
+    font-style: normal;
+    font-weight: 100 700;
+    font-display: swap;
+    src: url(/fonts/OTL22Variable.ttf) format("truetype-variations");
+  }
 }

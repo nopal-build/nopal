@@ -107,8 +107,8 @@ export const semanticColors = {
   surfaceInset: "var(--color-surface-inset)",
   surfaceBorder: "var(--color-surface-border)",
 
-  // Form fields deliberately don't follow the day/night surface swap —
-  // see the comment above `--color-field-bg` in root.css.
+  // Same day/night inversion as `surfaceCard`/`surfaceBorder` — see the
+  // comment above `--color-field-bg` in root.css.
   fieldBg: "var(--color-field-bg)",
   fieldBorder: "var(--color-field-border)",
   fieldText: "var(--color-field-text)",
@@ -121,7 +121,11 @@ export const semanticColors = {
 // config (the whole point is for `stamps` consumers to need zero Tailwind
 // knowledge at all).
 export const fonts = {
-  sans: '-apple-system, BlinkMacSystemFont, sans-serif',
+  // Variable font (single `wght` axis, 100–700) — the `@font-face` (see
+  // both apps' `tailwind.css`) declares that whole range under this exact
+  // family name, so any numeric `font-weight` in between renders its own
+  // real interpolated weight instead of snapping to a static instance.
+  sans: '"OT L22 Variable", -apple-system, BlinkMacSystemFont, sans-serif',
   serif: '-apple-system-ui-serif, ui-serif, Georgia, serif',
   mono: 'ui-monospace, SFMono-Regular, Monaco, "Andale Mono", "Ubuntu Mono", monospace',
   hand: '"Indie Flower", cursive',

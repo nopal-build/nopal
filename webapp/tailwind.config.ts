@@ -8,7 +8,7 @@ export default {
   },
   theme: {
     fontFamily: {
-      sans: ["-apple-system", "BlinkMacSystemFont", "sans-serif"],
+      sans: ['"OT L22 Variable"', "-apple-system", "BlinkMacSystemFont", "sans-serif"],
       serif: ["-apple-system-ui-serif", "ui-serif", "Georgia", "serif"],
       mono: [
         "ui-monospace",

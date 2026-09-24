@@ -1,0 +1,12 @@
+{
+  "name": "oxmarkdown-editor-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Headless-browser tests driving REAL keyboard input against oxmarkdown-editor's CSR build \u2014 the only way to catch genuine browser/contenteditable quirks (e.g. the nbsp-trailing-space bug), since those depend on the actual rendering engine's own text-insertion behavior, not just our Rust logic. See README.md.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}

@@ -148,8 +148,8 @@ reads naturally as "at," and is muscle memory from Zed/Slack/Notion/GitHub.
   "human," it just calls this and shows what comes back. "Create a page
   when nothing matches" isn't a mention-plugin feature either: an
   implementation can include a synthetic "create" result and act on it
-  once selected. See `fruits/styles/oxmarkdown` (`#mentions`) for a working
-  mock.
+  once selected. See `fruits/maker/stamps/oxmarkdown` (`#mentions`) for a
+  working mock.
 - Built on `@lexical/react`'s `LexicalTypeaheadMenuPlugin` +
   `useBasicTypeaheadTriggerMatch("@", { minLength: 0 })` — already
   implements "`@` at the start of a word" (`user@example.com` doesn't

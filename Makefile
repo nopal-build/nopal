@@ -66,9 +66,15 @@ start: dev
 ## One-time setup: trusts the local Caddy reverse proxy's self-signed CA
 ## (see Caddyfile) in your OS's trust store, so browsers accept
 ## https://nopal.dev / https://o.nopal.dev without a security warning.
-## Safe to re-run any time (e.g. after `make clean` wipes the caddy_data
-## volume and regenerates a new CA). macOS only for now — on Linux, import
-## the printed .crt path into your distro's ca-certificates store by hand.
+## `make clean`/`make reset` deliberately preserve the `caddy_data`/
+## `caddy_config` volumes (see `clean`'s own comment) so this CA survives
+## them and you normally only need to run this once. Still safe to re-run
+## any time — e.g. if you ever DO wipe those volumes by hand (a bare
+## `docker compose down -v`, or `docker volume rm nopal_caddy_data`), a
+## fresh CA gets generated and your OS/browser need re-trusting it, which
+## surfaces as a browser cert error (e.g. SEC_ERROR_BAD_SIGNATURE in
+## Firefox) until you do. macOS only for now — on Linux, import the
+## printed .crt path into your distro's ca-certificates store by hand.
 trust-local-certs:
 	docker compose up -d caddy
 	@echo "Waiting for Caddy to generate its local CA root cert..."
@@ -226,9 +232,23 @@ stop: down
 ## Destroy all data and start fresh.
 reset: clean dev migrate seed
 
-## Stop all containers and delete all named volumes — all data will be lost.
+## Stop all containers and delete all named volumes EXCEPT `caddy_data`/
+## `caddy_config` — all app/DB/node_modules data will be lost, but the
+## local Caddy reverse proxy's self-signed CA survives, so you don't need
+## to re-run `trust-local-certs` (and restart your browser) after every
+## `make clean`/`make reset`. Looks up each volume by its
+## `com.docker.compose.volume`/`com.docker.compose.project` labels rather
+## than hardcoding a `nopal_`-prefixed name, so this still works if the
+## repo ever lives in a differently-named directory (Compose derives the
+## project name from the directory unless overridden).
 clean:
-	docker compose down -v
+	docker compose down
+	@PROJECT=$$(docker compose config --format json | grep -o '"name": *"[^"]*"' | head -1 | sed -E 's/.*"([^"]+)"$$/\1/'); \
+	for v in $$(docker compose config --volumes); do \
+		case "$$v" in caddy_data|caddy_config) continue ;; esac; \
+		id=$$(docker volume ls -q --filter "label=com.docker.compose.project=$$PROJECT" --filter "label=com.docker.compose.volume=$$v"); \
+		[ -n "$$id" ] && docker volume rm $$id; \
+	done
 
 ## Run the nopal CLI (e.g. `make cli ARGS="login"` or `make cli ARGS="whoami"`).
 ## Prefer `./bin/nopal <args>` directly during day-to-day testing — same thing,

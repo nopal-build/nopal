@@ -153,7 +153,28 @@
   line-height: 1.2;
   letter-spacing: var(--ox-letter-spacing);
   color: var(--ox-color-text);
-  overflow-x: hidden;
+  /* `clip`, NOT `hidden` -- and `overflow-y: visible` spelled out
+     explicitly right below, rather than left to its initial default.
+     Real CSS spec gotcha, found by a real repro (a `::line{...}` inside
+     `:::section-title{...}`, absolutely-positioned and deliberately
+     drawn BELOW this element's own normal-flow content height, showing
+     up with a phantom vertical scrollbar): per the CSS Overflow spec,
+     if `overflow-x`/`overflow-y` differ AND one of them is `visible`
+     while the other is anything OTHER than `visible` or `clip`, the
+     `visible` one gets silently forced to compute as `auto` instead --
+     this happens regardless of whether that axis was left at its
+     (`visible`) default or spelled out explicitly, so writing
+     `overflow-y: visible` alongside a plain `overflow-x: hidden` does
+     NOT dodge it. `clip` is the one non-`visible` keyword exempt from
+     triggering that forcing -- functionally identical to `hidden` for
+     this rule's own real purpose (clipping the gutter markers/remove-
+     button that hang outside this element's own padding box on
+     either side, per the comment above), just without accidentally
+     making the OTHER axis scrollable the moment some descendant (like
+     that `::line{...}`) legitimately extends past this element's normal
+     content height. */
+  overflow-x: clip;
+  overflow-y: visible;
   overflow-wrap: break-word;
   /* Preserve every space exactly as saved, including runs of 2+ — the
      browser default (`normal`) collapses a run of ASCII spaces to one,
@@ -869,6 +890,15 @@
 .ox-content.ox-file-caption-editor > .ox-dot-grid {
   background-image: none;
   padding-bottom: 0;
+}
+
+/* General-purpose version of the above, without the caption editor's
+   other side effects (no margin/padding changes) -- for any caller that
+   just wants a plain dot-free surface, e.g. a static preview rendering
+   next to an editable markdown source (see the `/maker/stamps/scratch`
+   guide). Same `.ox-dot-grid` child-selector gotcha applies. */
+.ox-content.ox-no-dots > .ox-dot-grid {
+  background-image: none;
 }
 
 /* ── File image zoom modal (`components/OxRenderer.tsx`'s

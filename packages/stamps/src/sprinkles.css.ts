@@ -37,6 +37,12 @@ const space = {
   40: "10rem",
 } as const;
 
+// Exported so `Stack`/`Cluster`/`Grid` (the "within-content" layout
+// primitives — see the Stamps guide's Layout category) can type their own
+// `gap` prop against the exact same scale instead of accepting a bare
+// `number`/`string`.
+export type Space = keyof typeof space;
+
 const spaceProperties = defineProperties({
   properties: {
     padding: space,

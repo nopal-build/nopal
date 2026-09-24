@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ono — oxmarkdown-leptos Phase 1 spike</title>
+  <style>
+    body {
+      max-width: 720px;
+      margin: 40px auto;
+      padding: 0 20px;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      line-height: 1.5;
+    }
+    h1, h2, h3 { line-height: 1.2; }
+    .ox-status {
+      background: #efe;
+      border: 1px solid #9c9;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
+    .ox-directive {
+      border: 1px dashed #999;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin: 12px 0;
+      background: #fafafa;
+    }
+    .ox-directive-textDirective {
+      display: inline-block;
+      border-style: solid;
+      padding: 1px 6px;
+      margin: 0 2px;
+    }
+    .ox-directive-label {
+      display: block;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      color: #666;
+    }
+    .ox-directive-textDirective .ox-directive-label { display: inline; }
+    .ox-directive-body { margin-top: 6px; }
+    .ox-unknown-node {
+      color: #a00;
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+    }
+    .ox-parse-error {
+      color: #a00;
+      background: #fee;
+      padding: 8px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+    }
+    mark { background: #ffe58a; }
+  </style>
+</head>
+<body>
+  <div class="ox-status">
+    <strong>ono / oxmarkdown-leptos</strong> — the SAME demo as
+    <code>oxmarkdown-web</code> (compare at
+    <a href="http://127.0.0.1:4173/">127.0.0.1:4173</a>), rendered with
+    Leptos instead of hand-rolled <code>web-sys</code> DOM construction.
+    Click a task checkbox — same real save loop (mutate AST, serialize
+    via <code>oxmarkdown_rs::serialize_document</code>, re-parse,
+    re-render), but Leptos owns the re-render step entirely: no manual
+    <code>set_inner_html</code>, no leaked click listeners.
+  </div>
+  <!-- Leptos's mount_to_body appends its own root (<div id="app">,
+       from the App component's view) directly as a child of <body> —
+       no placeholder element needed here, unlike oxmarkdown-web's
+       explicit #app target element. -->
+  <script type="module">
+    import init, { mount } from "./pkg/oxmarkdown_leptos.js";
+    async function run() {
+      await init();
+      mount();
+    }
+    run();
+  </script>
+</body>
+</html>

@@ -24,6 +24,20 @@ import { recipe, type RecipeVariants } from "@vanilla-extract/recipes";
 import { colors, darkModeMediaQuery } from "./tokens";
 
 export const button = recipe({
+  // Applies to every variant — previously each call site had to
+  // remember to bolt on its own `opacity-50 cursor-not-allowed` (or
+  // equivalent), the exact kind of easy-to-forget, easy-to-typo styling
+  // this recipe exists to make unnecessary. `disabled` is real HTML
+  // state, not a variant prop, so this lives in `base` (always applied)
+  // rather than as its own `variants` entry.
+  base: {
+    selectors: {
+      "&:disabled": {
+        opacity: 0.5,
+        cursor: "not-allowed",
+      },
+    },
+  },
   variants: {
     variant: {
       primary: {

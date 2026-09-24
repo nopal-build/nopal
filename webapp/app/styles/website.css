@@ -1,0 +1,348 @@
+/**
+ * Visual chrome for `/v2` website-page directives
+ * (`oxmarkdown/websiteDirectives.tsx`). Deliberately SEPARATE from
+ * `oxmarkdown.css` — that stylesheet is the shared dot-grid prose identity
+ * used everywhere else in the app (Daily Log, Vault, Project Newspaper,
+ * Skills) and shouldn't grow one-off marketing-page rules. Reuses the
+ * existing brand palette (`root.css`) rather than inventing new colors —
+ * a couple of paler tints may get added as new rungs on the SAME families
+ * later if a full-bleed band reads too saturated; not needed yet.
+ */
+
+/* ── Page-level default background ─────────────────────────────────────── */
+/* The `/v2` site's own resting background -- deliberately the literal
+   `surface-day-100`/`surface-night-100` pair (a website-specific choice),
+   NOT the semantic `--color-surface-page` token root.css already defines
+   for the rest of the app (which resolves dark mode to `--purple`
+   instead) -- these are two different design decisions that happen to
+   share a light-mode value. Neither `--surface-day-100` nor
+   `--surface-night-100` auto-swaps with `prefers-color-scheme` on its own
+   (only the semantic tier does that in root.css); this variable is what
+   actually does the swapping here. Applied to `V2Layout`'s outer wrapper
+   (`routes/v2.tsx`) so it shows through anywhere a `:::section{...}` band
+   doesn't cover (header, footer, gaps) -- and reused by `.website-bg-cream`
+   below, so a `bg="cream"` section is just an explicit way of asking for
+   this same default, not a second, independently-maintained color. */
+:root {
+  --website-bg-page: var(--surface-day-100);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --website-bg-page: var(--surface-night-100);
+  }
+}
+.website-page-bg {
+  background: var(--website-bg-page);
+}
+
+/* ── Accent colors that DO swap by scheme (green/red only) ─────────────── */
+/* `red`/`green` read as noticeably duller/lower-contrast against a dark
+   background than they do against a light one, so both get a lighter
+   dark-mode counterpart -- `--green-light`/`--red-light` (root.css)
+   already exist for exactly this. `purple` deliberately does NOT get an
+   entry here -- see `:::section-title{...}`'s own text-shadow comment
+   in this file for why a fixed literal purple was already chosen to
+   work in both schemes. Consumers (`:::section-title{color="..."}`,
+   `::line{color="..."}` via `toAccentColorVar` in `websiteDirectives.tsx`)
+   read ONLY these two tokens, never the raw `--green`/`--red` aliases
+   directly, so both stay in sync automatically. */
+:root {
+  --website-accent-green: var(--green);
+  --website-accent-red: var(--red);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --website-accent-green: var(--green-light);
+    --website-accent-red: var(--red-light);
+  }
+}
+
+/* Manual override for the `/maker/stamps/scratch` guide's own light/dark
+   PREVIEW toggle (`maker_.stamps_.scratch.tsx`) -- lets it show either
+   scheme's colors regardless of the browser's actual OS-level
+   `prefers-color-scheme`. Plain descendant custom-property declarations
+   like these always win over whatever an ancestor's `@media` block
+   resolved to (ordinary CSS inheritance: the nearest declared value
+   wins, regardless of specificity) -- no exotic `light-dark()`/
+   `color-scheme` mechanism needed. Deliberately narrow: only the tokens
+   THIS file actually makes scheme-aware today (the two accents above,
+   plus the page background) -- NOT a general reproduction of
+   `.ox-tokens`'s own (much larger) dark-mode block, which is a separate,
+   unrelated concern from today's ask. */
+.website-preview-force-light {
+  --website-accent-green: var(--green);
+  --website-accent-red: var(--red);
+  --website-bg-page: var(--surface-day-100);
+}
+.website-preview-force-dark {
+  --website-accent-green: var(--green-light);
+  --website-accent-red: var(--red-light);
+  --website-bg-page: var(--surface-night-100);
+}
+
+/* ── Section (`:::section{bg="..."}`) ──────────────────────────────────── */
+
+.website-section {
+  padding: 48px 0;
+}
+
+.website-section-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.website-bg-cream {
+  background: var(--website-bg-page);
+}
+.website-bg-peach {
+  background: var(--clay-300);
+}
+.website-bg-mint {
+  background: var(--cactus-300);
+}
+.website-bg-lavender {
+  background: var(--moonlight-500);
+}
+
+/* Optional heading-color override (`accent="red"|"green"|"purple"`) for a
+   section whose body text should read as an emphasized color, independent
+   of its background — e.g. a closing CTA's red heading on a peach band. */
+.website-section[data-website-accent="red"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--red);
+}
+.website-section[data-website-accent="green"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--green);
+}
+.website-section[data-website-accent="purple"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--purple);
+}
+
+/* ── Stamp illustrations (`::stamp{...}`) ──────────────────────────────── */
+/* The stamp graphics themselves (frame, perforated edge, price glyph, and
+   artwork) are complete pre-designed SVGs (`public/guides/stamp-*.svg`) --
+   see `oxmarkdown/websiteStamps.tsx`. Only positioning/rotation/float live
+   here. */
+
+.website-stamp {
+  display: inline-block;
+  max-width: 132px;
+  transform: rotate(var(--stamp-rotate, 0deg));
+}
+
+.website-stamp-img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.website-stamp-missing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 100px;
+  min-height: 130px;
+  padding: 16px;
+  border: 2px dashed var(--text-subtle);
+  border-radius: 4px;
+  color: var(--text-subtle);
+  font-size: 0.8em;
+  transform: rotate(var(--stamp-rotate, 0deg));
+}
+
+.website-stamp-float-left {
+  float: left;
+  margin: 0 16px 8px 0;
+}
+.website-stamp-float-right {
+  float: right;
+  margin: 0 0 8px 16px;
+}
+
+/* ── Icons (`::icon{...}`) ─────────────────────────────────────────────── */
+
+.website-icon {
+  display: inline-flex;
+  color: var(--purple);
+  vertical-align: middle;
+}
+
+.website-icon-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.website-icon-placeholder {
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--text-subtle);
+  border-radius: 50%;
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.website-icon-file {
+  vertical-align: middle;
+}
+
+/* ── Waypoints (`::waypoint{...}`) ─────────────────────────────────────── */
+/* Zero-size on purpose — a pure position marker, never visible layout. The
+   wavy connector overlay (not yet built) reads its own live position via
+   `getBoundingClientRect`, so it must sit inline exactly where the author
+   placed it, contributing no width/height of its own. */
+
+.website-waypoint {
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
+
+/* ── Pricing card (`:::pricing-card{...}`) ─────────────────────────────── */
+/* ── Section title (`:::section-title{icon="..."}`, `::line{...}`) ───── */
+/* An icon + a real heading + (usually) a wavy `::line{...}` composed as
+   one titled-header unit. Flex, not grid -- the line is `position:
+   absolute` inside this box regardless (see `WavyLine.tsx`), so it's
+   already removed from flow; the icon and heading are the only two real
+   flex children that need arranging, and `margin-left: auto` on the
+   heading pushes it to the right edge whether or not an icon is present
+   (more robust than `justify-content: space-between`, which only reads
+   right with exactly two items). */
+.website-section-title {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  min-height: 90px;
+  margin: 24px 0;
+}
+
+.website-section-title .website-icon-file {
+  position: relative;
+  z-index: 1;
+}
+
+.website-section-title .website-line {
+  z-index: 0;
+}
+
+.website-section-title :is(h1, h2, h3, h4, h5, h6) {
+  position: relative;
+  z-index: 1;
+  /* `8px` bottom, not `0` -- `.website-section-title`'s own `align-items:
+     flex-end` means this heading otherwise sits flush against the box's
+     bottom edge, the exact same spot the `::line{...}` (below it,
+     `z-index: 0`) usually curves through -- leaving zero breathing room
+     between the text's own descenders and the line under it. */
+  margin: 0 0 8px auto;
+  text-align: right;
+  /* A crisp, hard-edged offset -- zero blur radius reads as a graphic-
+     design drop shadow, not a soft CSS glow. `--purple` (not a semantic
+     token -- a fixed `--plum-700` alias, never redefined for dark mode)
+     deliberately stays the SAME literal dark plum in both color schemes:
+     the heading's own text color already swaps per scheme via
+     oxmarkdown's `--ox-color-accent` (a medium purple in light mode,
+     pale `--moon` in dark mode), and a fixed dark shadow reads as a
+     legible drop shadow against EITHER of those on its own, with no
+     dark-mode override needed here at all. */
+  text-shadow: 1px 1px 0 var(--purple);
+}
+
+/* Suppress oxmarkdown's own `#`/`##`/`###` gutter-marker glyph here --
+   this heading is meant to read as a bespoke graphic title, not as
+   embedded prose echoing its raw markdown syntax next to it. */
+.website-section-title :is(h1, h2, h3)::before {
+  content: none;
+}
+
+/* Optional heading-color override (`color="red"|"green"|"purple"`) --
+   same named-color vocabulary and technique as `:::section{accent="..."}`
+   above. Deliberately a SEPARATE attribute/rule from that one (not
+   reused) -- `:::section-title{...}` and `:::section{...}` are two
+   different directives that happen to both want a named accent color.
+   `red`/`green` read the SCHEME-AWARE `--website-accent-*` tokens
+   (above), not the raw `--red`/`--green` aliases directly -- `purple`
+   stays literal, see this rule block's own text-shadow comment below
+   for why. */
+.website-section-title[data-website-color="red"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--website-accent-red);
+}
+.website-section-title[data-website-color="green"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--website-accent-green);
+}
+.website-section-title[data-website-color="purple"] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--purple);
+}
+
+/* ── Pricing card (`:::pricing-card{...}`) ─────────────────────────────── */
+
+.website-pricing-card {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+  background: var(--color-surface-card);
+}
+
+.website-pricing-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.website-pricing-card-name {
+  font-weight: bold;
+  color: var(--green);
+}
+
+.website-pricing-card-price {
+  font-weight: bold;
+  color: var(--purple);
+}
+
+.website-pricing-card-body :is(ul, ol) {
+  margin: 0;
+  padding-left: 20px;
+}
+
+/* ── Buttons (`::button{...}`, pricing card's own cta) ─────────────────── */
+
+.website-button {
+  display: inline-block;
+  padding: 10px 20px;
+  background: var(--purple);
+  color: var(--white);
+  border-radius: 999px;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.website-pricing-card-cta {
+  margin-top: 12px;
+}
+
+/* ── Daily-log embed (`::daily-log{...}`) ──────────────────────────────── */
+
+.website-daily-log-embed {
+  border-left: 3px solid var(--green);
+  background: var(--surface-day-100);
+  border-radius: 4px;
+  padding: 16px 20px;
+  margin: 16px 0;
+}
+
+.website-daily-log-embed-header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: 0.85em;
+  color: var(--text-subtle);
+}
+
+.website-daily-log-embed-project {
+  font-weight: bold;
+  color: var(--purple);
+}

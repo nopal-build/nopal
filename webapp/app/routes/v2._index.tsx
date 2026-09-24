@@ -14,6 +14,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) =>
   data ? buildWebsiteMeta(data.title, data.description) : [];
 
 export default function V2Index() {
-  const { body, isDraftPreview } = useLoaderData<typeof loader>();
-  return <WebsitePageView body={body} isDraftPreview={isDraftPreview} />;
+  const { body, isDraftPreview, dailyLogEntries } = useLoaderData<typeof loader>();
+  return <WebsitePageView body={body} isDraftPreview={isDraftPreview} dailyLogEntries={dailyLogEntries} />;
 }

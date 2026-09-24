@@ -18,14 +18,16 @@ app-native, not shared with `webapp` at all.
 
 ## UI conventions
 
-- Before building or editing any form/UI, check `app/routes/styles.tsx`
-  — always. It's the living style guide for this app: it documents shared
-  components, default classes, and patterns that should be reused everywhere.
-  Specifically read section `#component-guide` ("00 · Component Decision
-  Guide") first — it has a quick lookup table ("I need to build… → use this"),
-  a full component inventory, and rules for when to extract a new component
-  vs. keep markup inline. Don't skip this step even for "small" UI changes;
-  it's faster than re-deriving a pattern that already exists.
+- Before building or editing any form/UI, check the Stamps guide at
+  `/maker/stamps` (`app/routes/maker_.stamps.tsx`) — always. It's the
+  living design system reference for this app: every category (Foundations
+  — Colors/Typography/Spacing/Icons; Layout; Actions — Buttons/Links/Copy
+  Actions; Forms; Surfaces — Boxes & Cards/Badges & Chips; Overlays &
+  Menus; Patterns — Collections) has a real, working example of the
+  actual component, not just a description. Don't skip this step even for
+  "small" UI changes; it's faster than re-deriving a pattern that already
+  exists. For the rules on when to extract a new component vs. keep
+  markup inline, see "Deciding whether to componentize" below.
 - Always use the shared components from `packages/stamps` (e.g. `Input`,
   `Badge`, `Chip`, `Modal`, `Surface`, `CircleButton`, `MoreMenu`,
   `SearchCollection`, `CopyField` — imported as `stamps/Input`, `stamps/Badge`,
@@ -33,8 +35,8 @@ app-native, not shared with `webapp` at all.
   copy-to-clipboard rows. If a raw element or duplicated pattern is used
   instead of an existing component, that's a bug — replace it. New *shared*
   (cross-surface-ready) primitives belong in `packages/stamps`, not
-  `app/components` — see `#component-guide` in `styles.tsx` for the
-  full inventory of what's already there and where it lives. `app/components`
+  `app/components` — see the Stamps guide (`/maker/stamps`) for the full
+  inventory of what's already there and where it lives. `app/components`
   is for this app's own components (`AppLayout`, `DailyLogDay`, `OxEditor`,
   `OxRenderer`, `ProjectView`, etc.) that aren't meant to be shared —
   `Layout`/`Footer`/`GoodAssets` here are the marketing-chrome duplicates
@@ -80,17 +82,17 @@ app-native, not shared with `webapp` at all.
 - Don't re-apply styling that a shared component already provides by default
   (e.g. `Input` already has border/radius/padding baked in). Only pass a
   `className` for one-off overrides.
-- Deciding whether to componentize (see `#component-guide` for the full
-  version): used once → keep it inline. Repeated 2+ times in one route file →
-  extract a local, unexported component in that same file. Needed on a
-  second route, or wraps a native form element → promote it to
-  `packages/stamps` (or `app/components/` if it's genuinely app-specific,
-  not meant to be shared) and document it in `styles.tsx` in the same
-  change. Prefer generic, slot-based props (e.g. `SearchCollection`'s
+- Deciding whether to componentize: used once → keep it inline. Repeated
+  2+ times in one route file → extract a local, unexported component in
+  that same file. Needed on a second route, or wraps a native form
+  element → promote it to `packages/stamps` (or `app/components/` if it's
+  genuinely app-specific, not meant to be shared) and document it in the
+  Stamps guide (`/maker/stamps`, `app/routes/maker_.stamps.tsx`) in the
+  same change. Prefer generic, slot-based props (e.g. `SearchCollection`'s
   `resultsSlot`) over baking one route's business logic into the shared
   component.
 - If you add a new visual pattern, component, or prop (e.g. `Input`'s
-  `hideLabel`), add a corresponding live example to `styles.tsx` in
+  `hideLabel`), add a corresponding live example to the Stamps guide in
   the same change so it stays the single source of truth — an undocumented
   component might as well not exist to the next agent that touches this repo.
 - Keep edits consistent with existing formatting/indentation in the file you're

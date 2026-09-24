@@ -1,9 +1,9 @@
-// app/routes/styles_.oxmarkdown.tsx
+// app/routes/maker_.stamps_.oxmarkdown.tsx
 //
-// A dedicated, evolving page for OxMarkdown — reachable from the Design
-// System page (`/styles`), not nested under it (this file's name
-// breaks nesting at both `fruits_` and `styles_`, same convention as
-// `vault.tsx` breaking nesting under `fruits`).
+// A dedicated, evolving page for OxMarkdown — reachable from the Stamps
+// guide (`/maker/stamps`), not nested under it (this file's name breaks
+// nesting at both `maker_` and `stamps_`, same convention as every other
+// `maker_.*` leaf page). Admin/Super gated, same as the rest of /maker.
 //
 // Two purposes, both maintained going forward as OxMarkdown grows:
 //   1. A live playground — edit markdown, see it render, try theme
@@ -20,7 +20,14 @@
 // visual reminder, not the full rationale (that's the skill file).
 import { useMemo, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
-import { Link, redirect, useLoaderData } from "react-router";
+import {
+  Link,
+  data,
+  redirect,
+  useLoaderData,
+  useRouteError,
+  isRouteErrorResponse,
+} from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import OxRenderer from "../components/OxRenderer";
@@ -28,11 +35,68 @@ import OxEditor from "../components/OxEditor";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import type { MentionItem, MentionSearch } from "oxmarkdown-core";
 import { surfaceBase } from "stamps/surface.css";
+import { ErrorPanel } from "stamps/ErrorPanel";
+import { CenterContent } from "stamps/CenterContent";
+import { link } from "stamps/link.css";
+import { textSize } from "stamps/typography.css";
+
+async function requireMakerAccess(request: Request) {
+  const user = await getUser(request);
+  if (!user) throw redirect("/login");
+  if (user.role !== "Admin" && user.role !== "Super") {
+    throw data("Forbidden", { status: 403 });
+  }
+  return user;
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await getUser(request);
-  if (!user) return redirect("/login");
+  const user = await requireMakerAccess(request);
   return { user };
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  if (isRouteErrorResponse(error) && error.status === 403) {
+    return (
+      <AppLayout>
+        <CenterContent maxWidth={480}>
+          <ErrorPanel
+            status={403}
+            title="Access Denied"
+            message="OxMarkdown is only available to Admin and Super accounts."
+            action={
+              <Link to="/maker/stamps" className={`${link} ${textSize.sm}`}>
+                ← Back to Stamps
+              </Link>
+            }
+          />
+        </CenterContent>
+      </AppLayout>
+    );
+  }
+
+  return (
+    <AppLayout>
+      <CenterContent maxWidth={480}>
+        <ErrorPanel
+          title="Something went wrong"
+          message={
+            isRouteErrorResponse(error)
+              ? `${error.status} — ${error.statusText}`
+              : error instanceof Error
+                ? error.message
+                : "An unexpected error occurred."
+          }
+          action={
+            <Link to="/maker/stamps" className={`${link} ${textSize.sm}`}>
+              ← Back to Stamps
+            </Link>
+          }
+        />
+      </CenterContent>
+    </AppLayout>
+  );
 }
 
 // ─── Helpers (mirrors styles.tsx's Section/Label pattern) ────────────
@@ -940,7 +1004,7 @@ export default function OxMarkdownStyles() {
         {/* Page header */}
         <div className="mb-12">
           <Link
-            to="/styles"
+            to="/maker/stamps"
             className="text-xs subtle-text hover:opacity-80"
             style={{ textDecoration: "none" }}
           >

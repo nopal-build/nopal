@@ -3,7 +3,7 @@ import type { FocusEventHandler } from "react";
 import { field, label as labelRecipe, wrapper } from "./input.css";
 
 type InputProps = {
-  type?: "text" | "textarea" | "dropdown" | "date" | "number";
+  type?: "text" | "textarea" | "date" | "number";
   label: string;
   name: string;
   value?: string;

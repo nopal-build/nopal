@@ -2,8 +2,8 @@
  * The real, vault-backed `MentionSearch` implementation (see
  * `oxmarkdown/mention.ts`) — the server-side half of `@` mentions on real
  * routes (Daily Log today; Vault/`ProjectView` later). The demo mock on
- * `fruits/styles/oxmarkdown` has its own small in-memory stand-in; this is
- * the real thing, called from `routes/api.mentions.search.tsx`.
+ * `fruits/maker/stamps/oxmarkdown` has its own small in-memory stand-in;
+ * this is the real thing, called from `routes/api.mentions.search.tsx`.
  *
  * Behavior, per spec:
  *   - Empty query: the human's 5 most recently SELECTED mentions
