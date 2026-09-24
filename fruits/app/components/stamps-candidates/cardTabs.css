@@ -1,0 +1,39 @@
+/* Recipe-card tabs in a box (`CardTabs.tsx`): index-card
+   dividers standing up behind the card that's open. Flat and a little
+   uneven on purpose (corner radii and a hair of tilt differ tab to tab),
+   on stamps' semantic variables so dark mode follows. */
+.card-tabs { display: flex; flex-direction: column; }
+.card-tabs__row {
+  display: flex; align-items: flex-end; gap: 2px;
+  padding: 0 10px; overflow-x: auto; scrollbar-width: none;
+  position: relative; z-index: 1;
+}
+.card-tabs__row::-webkit-scrollbar { display: none; }
+.card-tabs__tab {
+  flex: 0 0 auto;
+  padding: 9px 18px 12px; margin-bottom: -6px;
+  font-family: inherit; font-size: 0.95rem; font-weight: 500; line-height: 1.2;
+  color: var(--color-text-subtle); text-decoration: none; white-space: nowrap;
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-surface-border); border-bottom: none;
+  border-radius: 12px 16px 0 0;
+  transform: translateY(4px) rotate(-0.6deg);
+  transition: transform 150ms ease;
+}
+.card-tabs__tab:nth-child(2n) { border-radius: 16px 11px 0 0; transform: translateY(4px) rotate(0.5deg); }
+.card-tabs__tab:nth-child(3n) { border-radius: 10px 14px 0 0; transform: translateY(4px) rotate(-0.3deg); }
+.card-tabs__tab:hover { color: var(--color-text-brand); transform: translateY(1px); }
+.card-tabs__tab:focus-visible { outline: 2px solid var(--color-text-brand); outline-offset: 2px; }
+/* The open card: same paper as the box, no seam, standing straight. */
+.card-tabs__tab[aria-current="page"] {
+  background: var(--color-surface-card); color: var(--color-text-primary); font-weight: 700;
+  transform: none; position: relative; z-index: 2; padding-bottom: 14px;
+}
+.card-tabs__box {
+  position: relative; z-index: 1;
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-surface-border);
+  border-radius: 6px 14px 12px 14px;
+  padding: 24px 20px;
+}
+@media (max-width: 600px) { .card-tabs__box { padding: 20px 12px; } .card-tabs__tab { padding: 8px 14px 12px; } }

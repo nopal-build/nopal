@@ -849,6 +849,24 @@ export function readSidecarMeta(content: string | null | undefined): { today: st
   }
 }
 
+/** The page's read (its intro's first paragraph) and its one ask, from a
+ * written `Graph/efforts.md`: what the dashboard shows for a project
+ * without deciding anything again. Either is null when absent. */
+export function readSidecarReadAndAsk(content: string | null | undefined): { read: string | null; ask: string | null } {
+  const none = { read: null, ask: null };
+  if (!content) return none;
+  const start = content.indexOf("```json\n");
+  const end = content.lastIndexOf("\n```");
+  if (start === -1 || end === -1 || end <= start) return none;
+  try {
+    const data = JSON.parse(content.slice(start + 8, end)) as { read?: unknown; ask?: unknown };
+    const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+    return { read: text(data.read), ask: text(data.ask) };
+  } catch {
+    return none;
+  }
+}
+
 /** The efforts a previously written `Graph/efforts.md` recorded, or null
  * when there is none or it cannot be read. */
 export function readEffortsSidecar(content: string | null | undefined): PreviousEffort[] | null {

@@ -467,6 +467,13 @@ export async function createDailyLogCard(
  * md_version snapshotting; it's a much smaller, single-project scope, and
  * per-day granularity already gives it a natural history via the day
  * itself. */
+/** Whether a Card save names one of the saver's own Cards for that day
+ * (`getDailyLogCards(humanId, date)`). `saveDailyLogCard` writes by file
+ * id alone, so the caller checks this first. */
+export function isOwnCard(cards: Pick<DailyLogCard, "fileId">[], cardFileId: string): boolean {
+  return cards.some((c) => c.fileId === cardFileId);
+}
+
 export async function saveDailyLogCard(fileId: string, content: string): Promise<void> {
   await updateFileRef(fileId, { content });
 }

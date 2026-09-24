@@ -21,10 +21,14 @@ import {
   data,
   redirect,
   useRouteError,
+  useSearchParams,
   isRouteErrorResponse,
 } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
+import { CardTabs } from "../components/stamps-candidates/CardTabs";
+import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
+import { SlopeGauge } from "../components/stamps-candidates/SlopeGauge";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { Surface } from "stamps/Surface";
 import { surfaceBorderOnly } from "stamps/surface.css";
@@ -224,6 +228,7 @@ const NAV: NavCategory[] = [
     ],
   },
   { label: "Patterns", sections: [{ id: "collections", label: "Collections" }] },
+  { label: "Candidates", sections: [{ id: "candidates", label: "Stamps Candidates" }] },
 ];
 
 // Stable (module-level, never re-created) so `useScrollSpy` doesn't tear
@@ -1506,6 +1511,86 @@ function CollectionsSection() {
   );
 }
 
+// ─── Candidates ──────────────────────────────────────────────────────────────
+// Components built in the app that may move into stamps: generic, no app
+// code, plain CSS on stamps' semantic variables until one graduates
+// (`fruits/app/tests/stampsCandidates.test.ts` holds them to that).
+
+const DEMO_SLOPE = [
+  { key: "flat", label: "Flat" },
+  { key: "rolling", label: "Rolling" },
+  { key: "uphill", label: "Uphill" },
+  { key: "steep", label: "Steep" },
+  { key: "oh-crap", label: "Oh crap" },
+] as const;
+type DemoSlopeKey = (typeof DEMO_SLOPE)[number]["key"];
+
+const DEMO_TABS = ["efforts", "photos", "files", "costs", "logbook"] as const;
+
+function CandidatesSection() {
+  const [full, setFull] = useState<DemoSlopeKey | null>(null);
+  const [compact, setCompact] = useState<DemoSlopeKey | null>("uphill");
+  const [params] = useSearchParams();
+  const requested = params.get("demoTab");
+  const tab = DEMO_TABS.find((t) => t === requested) ?? "efforts";
+
+  return (
+    <Section id="candidates" title="Stamps Candidates">
+      <Stack gap={10}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "560px" }}>
+          In <Code>fruits/app/components/stamps-candidates</Code>: built for
+          the dashboard and the project page, kept free of app code so one
+          that earns its place moves into <Code>packages/stamps</Code> with
+          its CSS rewritten in vanilla-extract, and one that doesn't is
+          deleted.
+        </p>
+
+        <Stack gap={3}>
+          <SpecimenCaption>SlopeGauge: a slope set by tapping a word (the Steep-o-meter wraps it)</SpecimenCaption>
+          <Cluster gap={8} align="flex-end">
+            <div style={{ width: 360, maxWidth: "100%" }}>
+              <SlopeGauge options={DEMO_SLOPE} chosen={full} onChoose={setFull} caption="How steep is this stretch?" />
+            </div>
+            <div style={{ width: 260, maxWidth: "100%" }}>
+              <SlopeGauge options={DEMO_SLOPE} chosen={compact} onChoose={setCompact} caption="Compact" size="compact" />
+            </div>
+          </Cluster>
+        </Stack>
+
+        <Stack gap={3}>
+          <SpecimenCaption>CardTabs: recipe cards in a box, one link per tab</SpecimenCaption>
+          <CardTabs
+            label="Demo"
+            active={tab}
+            tabs={DEMO_TABS.map((t) => ({
+              key: t,
+              label: t[0].toUpperCase() + t.slice(1),
+              to: `?demoTab=${t}#candidates`,
+            }))}
+          >
+            <p className={textSize.sm}>The {tab} card is open.</p>
+          </CardTabs>
+        </Stack>
+
+        <Stack gap={3}>
+          <SpecimenCaption>PinnedCard in a PinnedCardWall: the Logbook's cards</SpecimenCaption>
+          <PinnedCardWall>
+            <PinnedCard title="Lucas J" label="Wed, Aug 26">
+              <p className={textSize.sm}>Working with Beaudy and Gerald on site today.</p>
+            </PinnedCard>
+            <PinnedCard title="James W" label="Thu, Sep 24">
+              <p className={textSize.sm}>Windows arrived.</p>
+            </PinnedCard>
+            <PinnedCard title="Austin" label="Tue, Sep 22">
+              <p className={textSize.sm}>The sheet metal shop sent the invoice for the eave flashing and drip edge today. Net 30.</p>
+            </PinnedCard>
+          </PinnedCardWall>
+        </Stack>
+      </Stack>
+    </Section>
+  );
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function MakerStamps() {
@@ -1547,6 +1632,8 @@ export default function MakerStamps() {
             <OverlaysSection />
             <MenusSection />
             <CollectionsSection />
+
+            <CandidatesSection />
           </Stack>
         </CenterContent>
       </DrawerContent>

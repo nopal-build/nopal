@@ -77,6 +77,12 @@ export async function getSharingRoleByName(
   return roles.find((r) => r.name === name) ?? null;
 }
 
+/** The names of the roles that grant owner-tier permissions (Owner and
+ * Crafter by default), for reading many sharing entries at once. */
+export async function ownerTierRoleNames(): Promise<Set<string>> {
+  return new Set((await getSharingRoles()).filter((r) => r.is_owner).map((r) => r.name));
+}
+
 /** Whether `roleName` grants owner-tier permissions. Fails CLOSED (false)
  * for an unrecognized role name — e.g. a name left behind in a project's
  * README after its definition was later removed from `sharing_roles`. */

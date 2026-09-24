@@ -9,6 +9,7 @@ import {
   type ProjectSharingEntry,
 } from "robustness-core/data/projectSharing.server";
 import { getSharingRoles } from "robustness-core/data/sharingRoles.server";
+import { isProjectSeat } from "robustness-core/data/project.types";
 
 /**
  * GET/PUT /api/vault/projects/:folderId/sharing — this app's own project
@@ -77,10 +78,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!Array.isArray(body.sharing)) {
     return Response.json({ error: "sharing must be an array" }, { status: 400 });
   }
-  const entries = body.sharing.filter(
-    (e): e is ProjectSharingEntry =>
-      !!e && typeof e.human === "string" && typeof e.role === "string",
-  );
+  const entries = body.sharing
+    .filter(
+      (e): e is ProjectSharingEntry =>
+        !!e && typeof e.human === "string" && typeof e.role === "string",
+    )
+    // A seat is kept only when it is one of the three; anything else is
+    // dropped, and setProjectSharing then keeps whatever seat was there.
+    .map(({ human, role, seat }) => (isProjectSeat(seat) ? { human, role, seat } : { human, role }));
 
   const result = await setProjectSharing(ctx.user._id, ctx.folder, entries);
   if (!result.ok) {

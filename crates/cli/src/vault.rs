@@ -498,7 +498,14 @@ fn related_humans(client: &Client) -> Result<Vec<RelatedHuman>, Box<dyn Error + 
 struct SharingEntry {
     human: String,
     role: String,
+    /// guide, client or observer (ADR-022). Absent means the server keeps
+    /// whatever seat the person already had; with none, the server reads
+    /// the seat from their role (ADR-022).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    seat: Option<String>,
 }
+
+const SEATS: [&str; 3] = ["guide", "client", "observer"];
 
 #[derive(Debug, Clone, Deserialize)]
 struct SharingGetResponse {
@@ -538,8 +545,19 @@ pub fn share(
             println!("{}/ is shared with:", folder.name);
             for entry in &resp.sharing {
                 match humans.iter().find(|h| h._id == entry.human) {
-                    Some(h) => println!("  {} <{}> — {}", h.name, h.email, entry.role),
-                    None => println!("  {} — {}", entry.human, entry.role),
+                    Some(h) => println!(
+                        "  {} <{}> — {}, {}",
+                        h.name,
+                        h.email,
+                        entry.role,
+                        entry.seat.as_deref().unwrap_or("unmarked")
+                    ),
+                    None => println!(
+                        "  {} — {}, {}",
+                        entry.human,
+                        entry.role,
+                        entry.seat.as_deref().unwrap_or("unmarked")
+                    ),
                 }
             }
         }
@@ -555,25 +573,42 @@ pub fn share(
         let mut matched = Vec::new();
         let mut bad = Vec::new();
         for spec in with {
-            let Some((email, role)) = spec.rsplit_once(':') else {
-                bad.push(format!("'{spec}' — expected EMAIL:ROLE"));
-                continue;
+            let parts: Vec<&str> = spec.split(':').map(str::trim).collect();
+            let (email, role, seat) = match parts.as_slice() {
+                [email, role] => (*email, *role, None),
+                [email, role, seat] => (*email, *role, Some(seat.to_lowercase())),
+                _ => {
+                    bad.push(format!("'{spec}' — expected EMAIL:ROLE or EMAIL:ROLE:SEAT"));
+                    continue;
+                }
             };
-            let want = email.trim().to_lowercase();
-            let role = role.trim();
+            let want = email.to_lowercase();
             if role.is_empty() {
                 bad.push(format!("'{spec}' — expected EMAIL:ROLE"));
                 continue;
+            }
+            if let Some(seat) = &seat {
+                if !SEATS.contains(&seat.as_str()) {
+                    bad.push(format!("'{spec}' — seat must be guide, client or observer"));
+                    continue;
+                }
             }
             match humans
                 .iter()
                 .find(|h| h.email.trim().to_lowercase() == want)
             {
                 Some(h) => {
-                    matched.push(format!("{} <{}> — {}", h.name, h.email, role));
+                    matched.push(format!(
+                        "{} <{}> — {}{}",
+                        h.name,
+                        h.email,
+                        role,
+                        seat.as_deref().map(|s| format!(", {s}")).unwrap_or_default()
+                    ));
                     entries.push(SharingEntry {
                         human: h._id.clone(),
                         role: role.to_string(),
+                        seat,
                     });
                 }
                 None => bad.push(format!("'{email}' — no such shareable human")),
@@ -581,8 +616,8 @@ pub fn share(
         }
         if !bad.is_empty() {
             return Err(format!(
-                "Couldn't share with:\n{}\n(Format is EMAIL:ROLE, e.g. \
-                 jane@example.com:Crafter. They also need an account and a \
+                "Couldn't share with:\n{}\n(Format is EMAIL:ROLE or EMAIL:ROLE:SEAT, e.g. \
+                 jane@example.com:Crafter or sam@example.com:Observer:client. They also need an account and a \
                  relationship with you — see who's available on your profile page.)",
                 bad.iter()
                     .map(|b| format!("  {b}"))

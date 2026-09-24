@@ -41,9 +41,12 @@
    happen — it defines variables only, no visual styles of its own, so it's
    safe to stack onto something that already has its own look. */
 .ox-tokens {
-  --ox-font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  /* The app's one font family (stamps' `fonts.sans`), with the system
+     font behind it for any glyph it lacks. 1px of letter spacing: at 0
+     the font reads cramped in longer writing (Austin, 2026-09-24). */
+  --ox-font-family: "OT L22 Variable", -apple-system, BlinkMacSystemFont, sans-serif;
   --ox-font-weight: 267;
-  --ox-letter-spacing: 0.5px;
+  --ox-letter-spacing: 1px;
   --ox-grid: 41px;
 
   --ox-color-text: var(--purple, #3f2b46);

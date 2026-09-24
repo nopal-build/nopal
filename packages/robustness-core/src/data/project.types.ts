@@ -93,7 +93,25 @@ export type ProjectManifest = {
  * defined/validated). The project's own creator is never listed here —
  * they're always an implicit "Owner", resolved from the folder's own
  * `human_id` instead. */
-export type ProjectSharingEntry = { human: string; role: string };
+export type ProjectSharingEntry = { human: string; role: string; seat?: ProjectSeat };
+
+/** Where a person sits on a project, which decides what their dashboard
+ * shows them. Deliberately separate from `role`: a Sharing Role is a
+ * permission (can this person write), a seat is a posture (is this
+ * person running the work, receiving it, or looking in). The project's
+ * creator is always a guide. Anyone else with no seat sits where their
+ * sharing role already puts them: an owner-tier role (Owner, Crafter),
+ * which can already write everything, reads as a guide; any other role
+ * reads as a client, the seat with the least in it. A default never
+ * grants more than the role already does (Austin, 2026-09-24). See
+ * `seatFromSharing` and ADR-022. */
+export type ProjectSeat = "guide" | "client" | "observer";
+export const PROJECT_SEATS: readonly ProjectSeat[] = ["guide", "client", "observer"];
+export const UNMARKED_SEAT: ProjectSeat = "client";
+
+export function isProjectSeat(value: unknown): value is ProjectSeat {
+  return typeof value === "string" && (PROJECT_SEATS as readonly string[]).includes(value);
+}
 
 /** The payload a project view needs to render. Built server-side by
  * `resolveProjectManifest` in `project.server.ts`. Deliberately narrow —
@@ -158,8 +176,9 @@ function parseSharingList(raw: unknown): ProjectSharingEntry[] {
     if (!entry || typeof entry !== "object") continue;
     const human = (entry as Record<string, unknown>).human;
     const role = (entry as Record<string, unknown>).role;
+    const seat = (entry as Record<string, unknown>).seat;
     if (typeof human === "string" && human && typeof role === "string" && role) {
-      out.push({ human, role });
+      out.push(isProjectSeat(seat) ? { human, role, seat } : { human, role });
     }
   }
   return out;

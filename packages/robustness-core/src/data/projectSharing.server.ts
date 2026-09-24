@@ -38,9 +38,11 @@ import type { FileRef } from "./vault.types";
 import {
   parseProjectSharing,
   withProjectSharing,
+  UNMARKED_SEAT,
+  type ProjectSeat,
   type ProjectSharingEntry,
 } from "./project.types";
-import { getSharingRoleByName, isOwnerTierRole } from "./sharingRoles.server";
+import { getSharingRoleByName, isOwnerTierRole, ownerTierRoleNames } from "./sharingRoles.server";
 
 export type { ProjectSharingEntry };
 
@@ -122,6 +124,68 @@ export async function getProjectRole(
   const entry = sharing.find((e) => e.human === humanId);
   if (!entry) return null;
   return { role: entry.role, isOwner: await isOwnerTierRole(entry.role) };
+}
+
+/** Where `humanId` sits on a project, read from a sharing list already
+ * in hand (so a dashboard over many projects reads each README once).
+ * The creator is always a guide. An entry with a seat has that seat. An
+ * entry with none sits where its sharing role puts it: a role named in
+ * `ownerTierRoles` (see `ownerTierRoleNames`) reads as a guide, anything
+ * else as a client. Leave `ownerTierRoles` out and every unmarked entry is
+ * a client, so forgetting it errs toward less. `null` means the person is
+ * not on the project at all. */
+export function seatFromSharing(
+  projectFolder: Pick<VaultFolder, "human_id">,
+  sharing: ProjectSharingEntry[],
+  humanId: string,
+  ownerTierRoles: ReadonlySet<string> = new Set(),
+): ProjectSeat | null {
+  if (projectFolder.human_id === humanId) return "guide";
+  const entry = sharing.find((e) => e.human === humanId);
+  if (!entry) return null;
+  if (entry.seat) return entry.seat;
+  return ownerTierRoles.has(entry.role) ? "guide" : UNMARKED_SEAT;
+}
+
+export async function seatFor(
+  projectFolder: VaultFolder,
+  humanId: string,
+): Promise<ProjectSeat | null> {
+  return seatFromSharing(
+    projectFolder,
+    await getProjectSharing(projectFolder),
+    humanId,
+    await ownerTierRoleNames(),
+  );
+}
+
+/** An incoming sharing list that says nothing about a person's seat keeps
+ * the seat they already had. The share API and the CLI both replace the
+ * whole list, and a reshare that only names roles must not quietly turn a
+ * client back into a guide. */
+export function keepExistingSeats(
+  incoming: ProjectSharingEntry[],
+  existing: ProjectSharingEntry[],
+): ProjectSharingEntry[] {
+  return incoming.map((entry) => {
+    if (entry.seat) return entry;
+    const before = existing.find((e) => e.human === entry.human)?.seat;
+    return before ? { ...entry, seat: before } : entry;
+  });
+}
+
+/** The seats a sharing save may set. Only someone seated as a guide on the
+ * project changes seats; anyone else who may save the list (a client given
+ * Crafter to upload photos, say) saves roles only, and every seat stays
+ * as it was. Otherwise a client could seat themselves as a guide and read
+ * every reading, ask and cost. */
+export function seatsFromActor(
+  incoming: ProjectSharingEntry[],
+  existing: ProjectSharingEntry[],
+  actorIsGuide: boolean,
+): ProjectSharingEntry[] {
+  const asked = actorIsGuide ? incoming : incoming.map(({ human, role }) => ({ human, role }));
+  return keepExistingSeats(asked, existing);
 }
 
 /** Convenience wrapper for callers that only have a folder ID (e.g. a
@@ -210,7 +274,11 @@ export async function setProjectSharing(
   }
 
   const readme = await getOrCreateReadme(projectFolder.human_id, projectFolder._id);
-  const updatedContent = withProjectSharing(readme.content ?? "", cleaned);
+  const existing = parseProjectSharing(readme.content ?? "");
+  const actorIsGuide =
+    seatFromSharing(projectFolder, existing, actingHumanId, await ownerTierRoleNames()) === "guide";
+  const seated = seatsFromActor(cleaned, existing, actorIsGuide);
+  const updatedContent = withProjectSharing(readme.content ?? "", seated);
   await updateFileRef(readme._id, { content: updatedContent });
 
   await cascadeShareVaultFolder(
@@ -218,5 +286,5 @@ export async function setProjectSharing(
     cleaned.map((e) => e.human),
   );
 
-  return { ok: true, sharing: cleaned };
+  return { ok: true, sharing: seated };
 }

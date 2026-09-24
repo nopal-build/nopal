@@ -48,7 +48,9 @@ export function ProjectFilesView({
 }) {
   const [params, setParams] = useSearchParams();
   const requested = params.get(FILES_PARAM);
-  const active: FileFolder = folders.includes(requested as FileFolder) ? (requested as FileFolder) : "gallery";
+  // The first folder given is the default (the Vault gives all four,
+  // Gallery first; a project tab may give only Documents and Unsorted).
+  const active: FileFolder = folders.includes(requested as FileFolder) ? (requested as FileFolder) : folders[0];
   const q = params.get(QUERY_PARAM) ?? "";
   const counts = Object.fromEntries(folders.map((f) => [f, rows.filter((r) => r.folders.includes(f)).length])) as Record<FileFolder, number>;
   const shown = rows.filter((r) => r.folders.includes(active) && matches(r, q)).sort((a, b) => b.date.localeCompare(a.date));
@@ -63,7 +65,7 @@ export function ProjectFilesView({
   return (
     <section className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 })} aria-label="Files by kind">
       <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 })}>
-        {folders.map((f) => (
+        {folders.length > 1 && folders.map((f) => (
           <Link key={f} to={hrefFor(f)} style={{ textDecoration: "none" }}>
             <Chip active={f === active}>
               {FOLDER_TITLES[f]} · {counts[f]}

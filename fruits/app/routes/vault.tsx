@@ -78,7 +78,12 @@ import {
 // Pure, server-free helpers (no `.server` suffix) — safe to import into
 // client-rendered code, unlike everything from `website.server`/
 // `vault.server` above (loader-only, stripped from the client bundle).
-import { splitFrontmatter, withReadmeBody } from "robustness-core/data/project.types";
+import {
+  PROJECT_SEATS,
+  splitFrontmatter,
+  withReadmeBody,
+  type ProjectSeat,
+} from "robustness-core/data/project.types";
 import { Badge } from "stamps/Badge";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "stamps/MoreMenu";
@@ -685,7 +690,7 @@ function CopyLinkButton({ path }: { path: string }) {
 // ─── Share Modal ───────────────────────────────────────────────────────────────────────────────
 
 type ProjectSharingRole = { name: string; is_owner: boolean };
-type ProjectSharingEntry = { human: string; role: string };
+type ProjectSharingEntry = { human: string; role: string; seat?: ProjectSeat };
 
 /**
  * A project's Sharing Roles — supersedes the old "private / everyone /
@@ -712,6 +717,8 @@ function ShareModal({
   const [roles, setRoles] = useState<ProjectSharingRole[]>([]);
   // human id -> role name; absent = not shared with this human at all.
   const [assignments, setAssignments] = useState<Record<string, string>>({});
+  // human id -> seat; absent = unmarked: the seat follows their role (ADR-022).
+  const [seats, setSeats] = useState<Record<string, ProjectSeat>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -721,10 +728,13 @@ function ShareModal({
       if (cancelled || !data) return;
       setRoles(data.roles ?? []);
       const next: Record<string, string> = {};
+      const nextSeats: Record<string, ProjectSeat> = {};
       for (const entry of (data.sharing ?? []) as ProjectSharingEntry[]) {
         next[entry.human] = entry.role;
+        if (entry.seat) nextSeats[entry.human] = entry.seat;
       }
       setAssignments(next);
+      setSeats(nextSeats);
       setLoading(false);
     })();
     return () => {
@@ -746,7 +756,7 @@ function ShareModal({
   const handleSave = async () => {
     setSaving(true);
     const sharing: ProjectSharingEntry[] = Object.entries(assignments).map(
-      ([human, role]) => ({ human, role }),
+      ([human, role]) => (seats[human] ? { human, role, seat: seats[human] } : { human, role }),
     );
     const data = await apiJson(`/api/vault/projects/${folder._id}/sharing`, {
       method: "PUT",
@@ -824,6 +834,28 @@ function ShareModal({
                         {roles.map((r) => (
                           <option key={r.name} value={r.name}>
                             {r.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {role && (
+                      <select
+                        aria-label="Seat"
+                        value={seats[h._id] ?? ""}
+                        onChange={(e) =>
+                          setSeats((prev) => {
+                            const next = { ...prev };
+                            if (e.target.value) next[h._id] = e.target.value as ProjectSeat;
+                            else delete next[h._id];
+                            return next;
+                          })
+                        }
+                        style={selectStyle}
+                      >
+                        <option value="">from role</option>
+                        {PROJECT_SEATS.map((seat) => (
+                          <option key={seat} value={seat}>
+                            {seat}
                           </option>
                         ))}
                       </select>
