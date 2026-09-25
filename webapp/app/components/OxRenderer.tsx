@@ -28,7 +28,7 @@
  * instead, modeled off the same design language.
  */
 
-import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, createContext, Fragment, isValidElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { Definition, RootContent } from "mdast";
 import {
@@ -826,7 +826,25 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     // Not interactive yet — nested-interactable selection inside a container
     // is TODO 5 in the oxmarkdown skill, deferred until Editing mode exists.
     if (!renderer) return <Fragment key={key}>{rendered}</Fragment>;
-    return <Fragment key={key}>{renderer({ attrs, label: null, children: rendered })}</Fragment>;
+    const registered = renderer({ attrs, label: null, children: rendered });
+    // Attach `key` directly onto the registry's OWN returned element via
+    // `cloneElement`, rather than wrapping it in another `<Fragment
+    // key={key}>` (as this used to, unconditionally) -- mirrors a REAL BUG
+    // fix made in `fruits/app/components/OxRenderer.tsx` (this file's
+    // source of truth): a `<Fragment>` can't carry a `className` (or any
+    // other DOM prop), so THAT copy's `renderBlockNodes` "0 blank lines =
+    // 0 margin" mechanism (`cloneElement(rendered, {className: "ox-no-gap-
+    // before"})` -- NOT present in this trimmed copy's own simpler
+    // `renderBlockNodes`, which only has the extra-blank-line spacer logic)
+    // could never actually reach a registered container directive's real
+    // host element, since it only ever cloned the wrapping Fragment, which
+    // silently drops unsupported props. Applied here too for the same
+    // underlying correctness reason and to keep both copies structurally
+    // in sync, even though nothing in this copy exercises it yet. Falls
+    // back to the old Fragment-wrapping only if a registry entry doesn't
+    // return a single real element (an array, a string, ...), which
+    // `cloneElement` can't attach a key to directly.
+    return isValidElement(registered) ? cloneElement(registered, { key }) : <Fragment key={key}>{registered}</Fragment>;
   }
 
   const content = renderer ? (

@@ -41,6 +41,7 @@ export const palette = {
     700: "var(--plum-700)",
   },
   cactus: {
+    100: "var(--cactus-100)",
     300: "var(--cactus-300)",
     500: "var(--cactus-500)",
   },

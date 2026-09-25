@@ -1755,13 +1755,22 @@ function FocusedPadView({
     createFetcher.submit({ intent: "create", padId: pad.id }, { method: "post", encType: "application/json" });
   }
 
-  // Every member's CURRENT markdown, in order, joined the same way
-  // multiple directives sit one after another on a real page (a blank line
-  // between each).
+  // Every member's CURRENT markdown, in order, joined with ZERO blank
+  // lines -- not a stylistic no-op. `OxRenderer`'s own "padding reflects
+  // blank lines in the source" rhythm (`countBlankLines`/`renderBlockNodes`,
+  // `ox-no-gap-before` -- see the oxmarkdown skill's own "Design language")
+  // means a single joining `\n\n` (one blank line) used to draw a real,
+  // unwanted grid-unit gap between each Scratch's own `:::section{...}`
+  // (ON TOP of that directive's own internal padding) -- an artifact of
+  // this join, not something any Scratch's own author actually wrote.
+  // `.trim()` matters here as much as the join character itself: without
+  // it, a scratch whose OWN markdown happens to end with a trailing
+  // newline would silently reintroduce that same blank line regardless of
+  // what this joins with.
   const combinedMarkdown = pad.scratchIds
-    .map((id) => scratchById.get(id)?.markdown ?? "")
-    .filter((md) => md.trim().length > 0)
-    .join("\n\n");
+    .map((id) => scratchById.get(id)?.markdown?.trim() ?? "")
+    .filter((md) => md.length > 0)
+    .join("\n");
 
   const availableToAdd = allScratches.filter((s) => !pad.scratchIds.includes(s.id));
 
@@ -1966,6 +1975,12 @@ export default function StampsScratch() {
   const focusedEntry = focus.kind === "scratch" ? (resolvedEntries.find((e) => e.id === focus.id) ?? resolvedEntries[0]) : undefined;
   const focusedPad = focus.kind === "pad" ? (pads.find((p) => p.id === focus.id) ?? pads[0]) : undefined;
   const focusedPaper = focus.kind === "paper" ? (TRACING_PAPERS.find((p) => p.id === focus.id) ?? TRACING_PAPERS[0]) : undefined;
+  // Every scratch belongs to EXACTLY one pad, always (see `action`'s own
+  // doc comment) -- used both by `FocusedEntryView` (its own "Delete"/"+
+  // New scratch" need to know which pad to stay inside) and by the
+  // breadcrumb below (a focused scratch's breadcrumb should point back at
+  // ITS OWN pad, not the generic Stamps guide).
+  const ownerPad = focusedEntry ? pads.find((p) => p.scratchIds.includes(focusedEntry.id)) : undefined;
 
   // A bare `/maker/stamps/scratch` visit (no `?scratch=`/`?pad=`/`?paper=`
   // at all) picks up wherever this browser last left off, client-side
@@ -2055,13 +2070,38 @@ export default function StampsScratch() {
       >
         <CenterContent maxWidth={viewMode === "focus" ? 1400 : 1100}>
           <div className={sprinkles({ mb: 6 })}>
-            <Link
-              to="/maker/stamps"
-              className={`${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
-              style={{ color: semanticColors.textSubtle, textDecoration: "none" }}
-            >
-              ← Stamps
-            </Link>
+            {focus.kind === "scratch" && ownerPad ? (
+              // A Scratch always belongs to exactly one Pad -- send its
+              // breadcrumb back to THAT pad (the thing you'd actually
+              // navigated in from), not the generic Stamps guide. A button,
+              // not a `Link`, since this stays on the very same route (just
+              // a different `?pad=` focus) -- same convention every other
+              // in-page focus change here already uses (`navigateFocus`/
+              // `focusOnPad`), not a real route navigation.
+              <button
+                type="button"
+                onClick={() => focusOnPad(ownerPad.id)}
+                className={`${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
+                style={{
+                  color: semanticColors.textSubtle,
+                  textDecoration: "none",
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                }}
+              >
+                ← {ownerPad.name}
+              </button>
+            ) : (
+              <Link
+                to="/maker/stamps"
+                className={`${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
+                style={{ color: semanticColors.textSubtle, textDecoration: "none" }}
+              >
+                ← Stamps
+              </Link>
+            )}
             <div
               className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 3, mt: 2, mb: 2 })}
             >
@@ -2116,7 +2156,7 @@ export default function StampsScratch() {
             <FocusedEntryView
               key={focusedEntry.id}
               scratch={focusedEntry}
-              ownerPadId={pads.find((p) => p.scratchIds.includes(focusedEntry.id))?.id}
+              ownerPadId={ownerPad?.id}
               onFocusScratch={focusOnScratch}
               onDeleted={handleFocusedDeleted}
               previewScheme={previewScheme}

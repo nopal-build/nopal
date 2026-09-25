@@ -960,7 +960,24 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     // Not interactive yet — nested-interactable selection inside a container
     // is TODO 5 in the oxmarkdown skill, deferred until Editing mode exists.
     if (!renderer) return <Fragment key={key}>{rendered}</Fragment>;
-    return <Fragment key={key}>{renderer({ attrs, label: null, children: rendered })}</Fragment>;
+    const registered = renderer({ attrs, label: null, children: rendered });
+    // Attach `key` directly onto the registry's OWN returned element via
+    // `cloneElement`, rather than wrapping it in another `<Fragment
+    // key={key}>` (as this used to, unconditionally) — REAL BUG this
+    // fixes: a `<Fragment>` can't carry a `className` (or any other DOM
+    // prop), so `renderBlockNodes`'s own "0 blank lines = 0 margin"
+    // mechanism (`cloneElement(rendered, {className: "ox-no-gap-before"})`)
+    // could never actually reach a registered container directive's real
+    // host element (e.g. `:::section{...}`'s own `<section>`) — it only
+    // ever cloned the wrapping Fragment, which silently drops unsupported
+    // props, leaving every registered container directive permanently
+    // unable to participate in that rhythm (confirmed via a real repro:
+    // two adjacent `:::section{...}` blocks with ZERO blank lines between
+    // them in the source still rendered with the full one-grid-unit gap).
+    // Falls back to the old Fragment-wrapping only if a registry entry
+    // doesn't return a single real element (an array, a string, ...),
+    // which `cloneElement` can't attach a key to directly.
+    return isValidElement(registered) ? cloneElement(registered, { key }) : <Fragment key={key}>{registered}</Fragment>;
   }
 
   const content = renderer ? (
