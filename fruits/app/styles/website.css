@@ -111,15 +111,66 @@
 
 /* Optional heading-color override (`accent="red"|"green"|"purple"`) for a
    section whose body text should read as an emphasized color, independent
-   of its background — e.g. a closing CTA's red heading on a peach band. */
+   of its background — e.g. a closing CTA's red heading on a peach band.
+   `red`/`green` read the SCHEME-AWARE `--website-accent-*` tokens (top of
+   this file), same as `:::section-title{color="..."}` -- `purple` stays
+   literal, same reasoning as that rule's own comment. */
 .website-section[data-website-accent="red"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--red);
+  color: var(--website-accent-red);
 }
 .website-section[data-website-accent="green"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--green);
+  color: var(--website-accent-green);
 }
 .website-section[data-website-accent="purple"] :is(h1, h2, h3, h4, h5, h6) {
   color: var(--purple);
+}
+
+/* Optional list-style override (`list="timeline"`) -- a NAMED bullet
+   style, same "small fixed vocabulary of pre-designed looks" spirit as
+   `bg="cream|peach|mint|lavender"` above, not a raw color knob (a section
+   theme's bullet is a whole little graphic, not just a tint). Swaps the
+   visible bullet itself, not just its color -- overrides `content` on the
+   SAME `::before` `oxmarkdown.css`'s own `.ox-content ul > li:not(.ox-task-item)::before`
+   already draws its plain —/– dash with (`list-style: none` means there's
+   no real native `::marker` box here to swap instead), at higher
+   specificity (two class-level selectors here vs. `.ox-content`'s one).
+   `fill`/`stroke` are literal hex (`--cactus-500`/`--cactus-300`) baked
+   into the SVG data URI itself, same convention
+   `.ox-task-checkbox.checked::after`'s checkmark SVG (`oxmarkdown.css`)
+   already uses -- a custom property can't be referenced from inside one.
+   The connector line below deliberately reads `--cactus-500` (the dot's
+   own darker fill), NOT `--cactus-300` -- `bg="mint"` (above) is ITSELF
+   `--cactus-300`, so that would make the line (and the dot's stroke ring)
+   literally invisible on the most likely real pairing of the two. */
+.website-section[data-website-list="timeline"] li:not(.ox-task-item)::before {
+  content: "";
+  top: 15px;
+  left: -20px;
+  width: 11px;
+  height: 11px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 11 11'%3E%3Ccircle cx='5.5' cy='5.5' r='5' fill='%235DA06D' stroke='%2386CB97'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+}
+.website-section[data-website-list="timeline"] li:not(.ox-task-item)::after {
+  /* A vertical connector line threading through each dot, top to bottom
+     of the list -- the actual "timeline" part of the name. Drawn from
+     THIS item's own dot down into the gap before the next one
+     (`:not(:last-child)`, below, extends it past this li's own bottom
+     edge) -- a single-item list has no `:last-child`-excluded sibling, so
+     it draws no stray line at all. */
+  content: "";
+  position: absolute;
+  left: -15.5px;
+  top: 15px;
+  width: 1px;
+  background: var(--cactus-500);
+  pointer-events: none;
+}
+.website-section[data-website-list="timeline"] li:not(.ox-task-item):not(:last-child)::after {
+  bottom: -1.3em;
+}
+.website-section[data-website-list="timeline"] li:not(.ox-task-item):last-child::after {
+  display: none;
 }
 
 /* ── Stamp illustrations (`::stamp{...}`) ──────────────────────────────── */

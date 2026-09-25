@@ -323,8 +323,8 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "section",
     name: "Section",
-    directive: ':::section{bg="..." accent="..."}',
-    note: "Container. `bg` picks a full-bleed background class (`cream`/`peach`/`mint`/`lavender`, each aliasing an existing palette token — see `website.css`); `accent` optionally recolors headings inside it (`red`/`green`/`purple`) via a `data-website-accent` attribute. Body renders through the ordinary OxRenderer pipeline — nothing section-specific about the heading/paragraph/list styling itself.",
+    directive: ':::section{bg="..." accent="..." list="..."}',
+    note: "Container -- a themeable area, not a fully bespoke one: a handful of independent knobs, not complete control over every style. `bg` picks a full-bleed background class (`cream`/`peach`/`mint`/`lavender`, each aliasing an existing palette token — see `website.css`); `accent` optionally recolors headings inside it (`red`/`green`/`purple`); `list` optionally swaps in a NAMED bullet style for the body's own lists (`timeline` today — a small dot + connecting line, not just a tint), fully independent of `accent`. Body renders through the ordinary OxRenderer pipeline otherwise — nothing else section-specific about the heading/paragraph/list styling itself.",
     fullBleed: true,
     attributes: [
       {
@@ -335,8 +335,15 @@ const TRACING_PAPERS: TracingPaper[] = [
         options: [{ value: "cream" }, { value: "peach" }, { value: "mint" }, { value: "lavender" }],
       },
       { key: "accent", label: "accent", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
+      {
+        key: "list",
+        label: "list",
+        kind: "select",
+        default: "timeline",
+        options: [{ value: "", label: "(default dash)" }, { value: "timeline", label: "timeline" }],
+      },
     ],
-    buildMarkdown: (v) => `:::section{bg="${v.bg}"${v.accent ? ` accent="${v.accent}"` : ""}}
+    buildMarkdown: (v) => `:::section{bg="${v.bg}"${v.accent ? ` accent="${v.accent}"` : ""}${v.list ? ` list="${v.list}"` : ""}}
 ## At a Cost
 
 - We favored synthetic materials for their higher performance metrics.

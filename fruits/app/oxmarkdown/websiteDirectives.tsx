@@ -37,8 +37,17 @@
  * they never trigger this.
  *
  * Directive vocabulary (first functional pass):
- *   :::section{bg="cream|peach|mint|lavender" accent="..."}  — full-bleed
- *     colored band; body renders through the ordinary pipeline.
+ *   :::section{bg="cream|peach|mint|lavender" accent="red|green|purple" list="timeline"}
+ *     — full-bleed colored band; body renders through the ordinary
+ *     pipeline. `accent` recolors headings (named-color vocabulary, same
+ *     as `:::section-title`/`::line`); `list` swaps in a NAMED bullet
+ *     style for the body's own lists (a small dot + connecting line for
+ *     `"timeline"` today) -- a whole pre-designed look, not a raw color,
+ *     same "named vocabulary" spirit `bg` itself already has. Both
+ *     optional/independent of each other. Deliberately a themeable-area
+ *     directive, not a fully bespoke-per-section one: bg/accent/list are
+ *     the handful of knobs worth exposing, not every possible CSS
+ *     property.
  *   ::stamp{name="coffee|mtn|nopal|quail" rotate="deg" float="left|right|inline" id="..."}
  *     — a complete, pre-designed postage-stamp graphic (see
  *     `websiteStamps.tsx`); `id` doubles as a waypoint.
@@ -184,6 +193,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
         <section
           className={`website-section ${bgClass}`}
           data-website-accent={attrs.accent || undefined}
+          data-website-list={attrs.list || undefined}
         >
           <div className="website-section-inner">{children}</div>
         </section>
