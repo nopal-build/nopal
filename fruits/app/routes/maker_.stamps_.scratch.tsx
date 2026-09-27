@@ -526,6 +526,48 @@ ${v.question}
 ${v.answer}
 :::`,
   },
+  {
+    id: "grid",
+    name: "Grid",
+    directive: ':::grid{columns="N"} ... ::col ... ::col ... ::: (not new — the existing built-in)',
+    note: "Not a website-specific directive — the same pre-existing basic side-by-side layout (`oxmarkdown`'s own `renderDirective`, `OxRenderer.tsx`), reused as-is. `columns` picks how many EQUAL (`1fr`) columns the grid has — defaults to the number of `::col`-split cells when omitted, clamped to 1–6. `::col` is what splits cells: everything BEFORE the first `::col` is cell 1, then each `::col` after it starts a new cell. Collapses to a single column below `640px`. Included here for the same reason the Toggle paper above is: it's part of the same content vocabulary these pages compose with, even though it isn't website-specific.",
+    attributes: [
+      {
+        key: "columns",
+        label: "columns",
+        kind: "select",
+        default: "2",
+        options: [{ value: "2" }, { value: "3" }, { value: "4" }],
+      },
+      { key: "cell1", label: "cell 1", kind: "text", default: "Left content" },
+      { key: "cell2", label: "cell 2", kind: "text", default: "Right content" },
+    ],
+    buildMarkdown: (v) => `:::grid{columns="${v.columns}"}
+${v.cell1}
+::col
+${v.cell2}
+:::`,
+  },
+  {
+    id: "gallery",
+    name: "Gallery",
+    directive: ':::gallery{max-columns="N"} ![alt](url) ![alt](url) ::: (not new — the existing built-in)',
+    note: 'Not a website-specific directive — a basic photo/video grid built on ORDINARY markdown images (`![alt](url)`) as its own children, not a per-photo leaf directive (lets a gallery degrade to a plain sequence of images on any renderer that doesn\'t understand it). `max-columns` caps how many columns wide it gets before wrapping — omit it to let the image count decide instead. Demo images below are real assets already served under `/guides/` (the same stamp artwork `::stamp{...}` uses), so this actually renders something — unlike `::gallery{folder="..."}` (the vault-folder-backed LEAF sibling of this directive), which needs real vault access this static playground doesn\'t have and so isn\'t included here.',
+    attributes: [
+      {
+        key: "maxColumns",
+        label: "max-columns",
+        kind: "select",
+        default: "",
+        options: [{ value: "", label: "(auto)" }, { value: "2" }, { value: "3" }],
+      },
+    ],
+    buildMarkdown: (v) => `:::gallery${v.maxColumns ? `{max-columns="${v.maxColumns}"}` : ""}
+![coffee stamp](/guides/stamp-coffee.svg)
+![mountain stamp](/guides/stamp-mtn.svg)
+![nopal stamp](/guides/stamp-nopal.svg)
+:::`,
+  },
 ];
 
 // ─── Scratches / Pads ───────────────────────────────────────────────────────
