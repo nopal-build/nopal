@@ -84,14 +84,28 @@ export function WebsiteStamp({
   }
 
   if (forcedScheme) {
+    // Same TWO-element contract as the `<picture>` case below (an outer
+    // sizing wrapper + an inner filling `<img>`), NOT one element wearing
+    // both classes -- REAL BUG found here: `.ox-content img { max-width:
+    // 100% }` (oxmarkdown.css) is a descendant selector (one class + one
+    // element, more specific than `.website-stamp`'s own plain class), so
+    // it silently wins over `.website-stamp`'s `max-width: 132px` on any
+    // element that's BOTH an `<img>` AND carries `.website-stamp` directly
+    // -- blowing the stamp up to full width. In the `<picture>` case that
+    // global reset only ever lands on the INNER `.website-stamp-img`,
+    // which is harmless (the outer `<picture>` -- not an `<img>` tag, so
+    // the reset can't touch it -- is what actually does the 132px
+    // capping). Keeping that same split here, with a plain `<span>`
+    // standing in for `<picture>` (no `<source>` needed once the asset's
+    // already resolved), avoids the collision the exact same way.
     return (
-      <img
-        src={asset[forcedScheme]}
-        alt=""
-        className={`website-stamp website-stamp-img ${floatClass}`}
+      <span
+        className={`website-stamp ${floatClass}`}
         style={style}
         data-waypoint-id={waypointId || undefined}
-      />
+      >
+        <img src={asset[forcedScheme]} alt="" className="website-stamp-img" />
+      </span>
     );
   }
 
