@@ -15,10 +15,21 @@ export function useUser(): Human | null {
 
 /** True when the page's loader said this person is a Client on every
  * project they're on (ADR-023): the nav then offers no Vault, and `/vault`
- * refuses them. Pages a client can reach (`/`, `/daily-log`, `/profile`)
- * return `vaultHidden`. */
+ * refuses them. Pages a client can reach (`/daily-log`, `/profile`, their
+ * project) return `vaultHidden` (`navFor`). */
 export function useVaultHidden(): boolean {
   return useMatches().some((m) => (m.data as { vaultHidden?: boolean } | null | undefined)?.vaultHidden === true);
+}
+
+/** The first tab: My Project (straight to it) for someone on one active
+ * project, My Projects otherwise. Pages that don't say (`navFor`) get My
+ * Projects, and `/` sends a one-project person on. */
+export function useHome(): { plural: boolean; projectId: string | null } {
+  for (const m of useMatches()) {
+    const home = (m.data as { home?: { plural: boolean; projectId: string | null } } | null | undefined)?.home;
+    if (home) return home;
+  }
+  return { plural: true, projectId: null };
 }
 
 function isSuper(user: Human | null): boolean {

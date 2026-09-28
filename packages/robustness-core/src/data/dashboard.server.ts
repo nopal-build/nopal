@@ -25,7 +25,8 @@ import type { VaultFolder } from "./vault.types";
 import { getProjectStatus } from "./projectStatus.server";
 import type { ProjectSharingEntry, ProjectStatus } from "./project.types";
 import { listProjectsFor, roleIn, type ProjectMembership } from "./projectSharing.server";
-import { CLIENT_ROLE, GUIDING_ROLE } from "./sharingRoles.server";
+import { CLIENT_ROLE } from "./sharingRoles.server";
+import { featuresOf } from "./features";
 import { EFFORTS_SIDECAR_FILE_NAME, readSidecarReadAndAsk } from "./effortReadings.server";
 import { listSteepReadings, type SteepReading } from "./steepReadings.server";
 import type { SteepPosition } from "./steepScale";
@@ -40,6 +41,8 @@ export type DashboardProjectInput = {
   status: ProjectStatus;
   statusAt: string | null;
   sharing: ProjectSharingEntry[];
+  /** The Efforts page's opening, in its own words. */
+  read: string | null;
   ask: string | null;
 };
 
@@ -60,9 +63,12 @@ export type DashboardRow = {
   role: string;
   status: ProjectStatus;
   statusAt: string | null;
+  /** The Efforts page's opening. Null on a Client row. */
+  read: string | null;
   /** The page's one ask. Null on a Client row. */
   ask: string | null;
-  /** Clients' readings on this project, on an Owner's row only. */
+  /** Clients' readings on this project, where the viewer's group gets
+   * `steepReadings` (Guide). */
   notes: SteepNote[];
   /** Whether this person taps the Steep-o-meter here: anyone on an active
    * project. */
@@ -115,8 +121,9 @@ export function buildDashboard(input: {
         role,
         status: project.status,
         statusAt: project.statusAt,
+        read: role === CLIENT_ROLE ? null : project.read,
         ask: role === CLIENT_ROLE ? null : project.ask,
-        notes: role === GUIDING_ROLE ? clientNotes(project, onProject, viewerId, names) : [],
+        notes: featuresOf(role).includes("steepReadings") ? clientNotes(project, onProject, viewerId, names) : [],
         canTap: project.status === "active",
         mine: mine ? { position: mine.position, date: mine.date } : null,
       };
@@ -211,6 +218,17 @@ function recordKey(id: unknown): string {
   return s.includes(":") ? s.slice(s.indexOf(":") + 1) : s;
 }
 
+/** The viewer's own latest Steep reading on one project, for the meter
+ * on the project page. Never anyone else's. */
+export async function ownLatestReading(
+  viewerId: string,
+  projectFolderId: string,
+): Promise<{ position: SteepPosition; date: string } | null> {
+  const mine = (await listSteepReadings([projectFolderId], daysAgo(STEEP_NOTE_DAYS))).filter((r) => r.human_id === viewerId);
+  const last = mine[mine.length - 1];
+  return last ? { position: last.position, date: last.date } : null;
+}
+
 /** `memberships` is `listProjectsFor(viewerId)`, passed in when the
  * caller already has it. */
 export async function loadDashboard(
@@ -236,7 +254,7 @@ export async function loadDashboard(
     status: getProjectStatus(f),
     statusAt: f.project_status_at ?? null,
     sharing,
-    ask: readSidecarReadAndAsk(sidecars.get(f._id)).ask,
+    ...readSidecarReadAndAsk(sidecars.get(f._id)),
   }));
   return buildDashboard({ viewerId, projects, readings, names, status });
 }

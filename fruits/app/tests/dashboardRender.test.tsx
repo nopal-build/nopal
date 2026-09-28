@@ -15,9 +15,10 @@ const counts = { active: 2, completed: 0, trashed: 0 };
 const row = (over: Partial<DashboardRow>): DashboardRow => ({
   id: "a1b2c3d4e5f6g7h8i9j0",
   name: "Crouch Casita",
-  role: "Owner",
+  role: "Guide",
   status: "active",
   statusAt: null,
+  read: null,
   ask: "Pick the window supplier this week.",
   notes: [],
   canTap: true,
@@ -76,7 +77,7 @@ describe("the ritual is on the landing screen (tests 1 and 2, markup)", () => {
     expect(html).not.toContain("window supplier");
   });
 
-  it("a client on two projects: a meter for each, named", () => {
+  it("a client on two projects: a meter for each, named, each a way in (2026-09-25: the page shows what the list gives them)", () => {
     const html = render({
       ...clientDash,
       rows: [row({ role: "Client", ask: null }), row({ id: "q9w8e7r6t5y4u3i2o1p0", name: "Coronado ADU", role: "Client", ask: null })],
@@ -84,7 +85,7 @@ describe("the ritual is on the landing screen (tests 1 and 2, markup)", () => {
     });
     expect(html.match(/data-steep-meter=/g)?.length).toBe(2);
     expect(html).toContain("Coronado ADU");
-    expect(html).not.toContain("/newspaper/");
+    expect(html).toContain("/newspaper/q9w8e7r6t5y4u3i2o1p0");
   });
 
   it("a guide on two projects: the log box on top, a meter on each row", () => {
@@ -99,13 +100,13 @@ describe("the ritual is on the landing screen (tests 1 and 2, markup)", () => {
     expect(html).toContain("data-steep-meter");
   });
 
-  it("client on one project inside a guide's screen: its row has no link to the page", () => {
+  it("client on one project inside a guide's screen: both rows lead to their page", () => {
     const html = render({
       ...guideDash,
       rows: [guideDash.rows[0], row({ id: "q9w8e7r6t5y4u3i2o1p0", name: "Campbell", role: "Client", ask: null })],
     });
     expect(html).toContain("/newspaper/a1b2c3d4e5f6g7h8i9j0");
-    expect(html).not.toContain("/newspaper/q9w8e7r6t5y4u3i2o1p0");
+    expect(html).toContain("/newspaper/q9w8e7r6t5y4u3i2o1p0");
   });
 });
 

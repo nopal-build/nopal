@@ -25,6 +25,7 @@ function project(id: string, name: string, sharing: DashboardProjectInput["shari
     status: "active",
     statusAt: null,
     sharing,
+    read: `${name} is at the end of the climb.`,
     ask: `Pick the ${name} window supplier this week.`,
   };
 }
@@ -169,6 +170,7 @@ describe("the project view's tabs", () => {
     expect(PROJECT_TABS).toEqual(["efforts", "photos", "files", "costs", "logbook"]);
     expect(resolveProjectTab("costs")).toBe("costs");
     expect(resolveProjectTab("nonsense")).toBe("efforts");
+    expect(resolveProjectTab(null)).toBe("efforts");
   });
 });
 

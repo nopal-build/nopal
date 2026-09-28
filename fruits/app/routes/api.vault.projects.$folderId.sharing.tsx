@@ -8,7 +8,7 @@ import {
   setProjectSharing,
   type ProjectSharingEntry,
 } from "robustness-core/data/projectSharing.server";
-import { getSharingRoles } from "robustness-core/data/sharingRoles.server";
+import { GROUPS, featuresOf } from "robustness-core/data/features";
 
 /**
  * GET/PUT /api/vault/projects/:folderId/sharing — this app's own project
@@ -22,7 +22,7 @@ async function loadContext(folderId: string, request: Request) {
   const user = await getUserFromRequest(request);
   if (!user) return { error: Response.json({ error: "Not authenticated" }, { status: 401 }) };
 
-  // The people side is the Owner's. An admin may open it on any project,
+  // The people side is the Guide's. An admin may open it on any project,
   // including one they're on in another role or not on at all: the
   // deliberate way an admin gives themselves a role, and the way back
   // after setting themselves to Client. Everyone else gets the same 404
@@ -44,14 +44,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const ctx = await loadContext(folderId, request);
   if ("error" in ctx) return ctx.error;
 
-  const [sharing, roles] = await Promise.all([
-    getProjectSharing(ctx.folder),
-    getSharingRoles(),
-  ]);
+  const sharing = await getProjectSharing(ctx.folder);
 
+  // The groups on the features list are the only choices.
   return Response.json({
     sharing,
-    roles: roles.map((r) => ({ name: r.name, is_owner: r.is_owner })),
+    roles: GROUPS.map((name) => ({ name, is_owner: featuresOf(name).includes("edit") })),
     yourRole: ctx.role,
   });
 }

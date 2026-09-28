@@ -1,36 +1,55 @@
-// Test 1 of the 2026-09-24 user types round (ADR-023): signed in as a
-// Client on one project, every surface refuses (a 404 that names
-// nothing), for another project and for everything on their own project
-// that clients aren't given, guessed ids and typed URLs included. What a
-// person needs to be a person still works: the dashboard, the Daily Log,
-// their own Steep tap, their own attachment. Then the controls: a
-// Crafter (the Nopalito level, not an admin) on the same project reaches
-// its work and not its people side (test 4), and the Owner reaches
-// everything.
+// The Campbell walk, over HTTP (2026-09-25 people, access and features
+// round; first written for ADR-023). Gates tests 1 to 4 and 9:
+//   1. A Client on one project gets My Project (Efforts, Photos, their own
+//      Steep tap) and the Daily Log. Everything else on the project, and
+//      anything on another project, is refused by the server, typed URLs
+//      and guessed file ids included, and a photo of a receipt too.
+//   3. The admin sees everyone in /maker/humans and moves the client to
+//      Observer and back there; what the client reaches follows on the
+//      next load. A client or crafter can't open the list.
+//   4. A Guide who isn't an admin moves people below Guide on their own
+//      project, and makes nobody a Guide, touches no admin, and can't reach
+//      another project's people.
+//   9. The Crafter reaches the project's work as before; the Guide
+//      reaches its people.
+// While the client is an Observer: they read the Costs tab and mark the
+// page, and don't move an entry, file a file or write a Card.
+// Taking the client off the project empties the Card they wrote today,
+// and they can't write to it again.
 //
-// From fruits/, against a running local stack (or production with a test
-// account, by HOST):
+// Everything the walk changes it puts back. With SEED_RECEIPT=1 (default
+// on localhost) and no receipt photo on the project, the crafter files one
+// photo as a receipt first and files it back as a photo at the end.
+//
+// From fruits/, against a running local stack (or production with test
+// accounts, by HOST):
 //   source ../webapp/.env; unset SESSION_SECRET
-//   npx vite-node scripts/campbell-walk.ts <clientEmail> <nopalitoEmail> <guideEmail> <ownProjectId> <otherProjectId>
+//   npx vite-node scripts/campbell-walk.ts <client> <crafter> <guide> <admin> <ownProjectId> <otherProjectId>
+// <guide> must not be an admin; the walk makes them Guide on the project
+// through the Maker and puts their old role back.
 import { query } from "robustness-core/data/generic.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumanByEmail } from "robustness-core/data/humans.server";
+import { getProjectSharing } from "robustness-core/data/projectSharing.server";
+import { loadProjectFiles } from "robustness-core/data/fileFolders.server";
+import { getDailyLogCards } from "robustness-core/data/dailyLog.server";
 import { sessionStorage } from "../app/modules/auth/session.server";
 
-const [clientEmail, nopalitoEmail, guideEmail, ownId, otherId] = process.argv.slice(2);
+const [clientEmail, crafterEmail, guideEmail, adminEmail, ownId, otherId] = process.argv.slice(2);
 const HOST = process.env.HOST ?? "http://localhost:3001";
+const SEED_RECEIPT = (process.env.SEED_RECEIPT ?? (HOST.includes("localhost") ? "1" : "0")) === "1";
 if (!otherId) {
-  console.error("usage: campbell-walk.ts <client> <nopalito> <guide> <ownProjectId> <otherProjectId>");
+  console.error("usage: campbell-walk.ts <client> <crafter> <guide> <admin> <ownProjectId> <otherProjectId>");
   process.exit(1);
 }
 
-async function cookieFor(email: string): Promise<string> {
+async function person(email: string) {
   const human = await getHumanByEmail(email);
   if (!human) throw new Error(`no person ${email}`);
   const session = await sessionStorage.getSession();
   session.set("user", human);
   session.set("sessionIssuedAt", Date.now());
-  return (await sessionStorage.commitSession(session)).split(";")[0];
+  return { id: human._id, role: human.role, cookie: (await sessionStorage.commitSession(session)).split(";")[0] };
 }
 
 const own = (await getFolderById(ownId))!;
@@ -53,9 +72,7 @@ async function fileUnder(projectId: string, where = ""): Promise<string | null> 
   }
   return null;
 }
-const ownFile = await fileUnder(ownId, `AND name != "README.md"`);
 const otherFile = await fileUnder(otherId);
-const costFile = await fileUnder(ownId, `AND string::contains(name, "cost")`);
 const subfolder = String(
   ((await query<[{ id: { id: string } }[]]>(`SELECT id FROM vault_folders WHERE parent_folder_id = $id LIMIT 1`, { id: ownId }))?.[0]?.[0])?.id.id ?? ownId,
 );
@@ -85,53 +102,140 @@ async function hit(cookie: string, label: string, method: string, path: string, 
   lines.push(`${ok ? "ok  " : "FAIL"} ${label}: ${method} ${path} -> ${res.status} (want ${expect})${note}`);
   return text;
 }
-
-// ── The client ───────────────────────────────────────────────────────────
-const client = await cookieFor(clientEmail);
-lines.push(`# client ${clientEmail} on ${own.name}`);
-const dash = await hit(client, "dashboard", "GET", "/", 200);
-for (const s of [other.name, "/newspaper/"]) {
-  if (dash.includes(s)) {
-    failures++;
-    lines.push(`FAIL dashboard carries "${s}"`);
-  }
+function check(label: string, ok: boolean) {
+  if (!ok) failures++;
+  lines.push(`${ok ? "ok  " : "FAIL"} ${label}`);
 }
-await hit(client, "daily log", "GET", "/daily-log", 200);
-await hit(client, "own project page", "GET", `/newspaper/${ownId}`, 404);
-await hit(client, "own Costs tab, typed", "GET", `/newspaper/${ownId}?tab=costs`, 404);
-await hit(client, "own Logbook, typed", "GET", `/newspaper/${ownId}?tab=logbook`, 404);
-await hit(client, "other project page", "GET", `/newspaper/${otherId}`, 404);
-await hit(client, "the Vault", "GET", "/vault", 404);
-await hit(client, "own project in the Vault", "GET", `/vault?folder=${ownId}`, 404);
-await hit(client, "own project's folders", "GET", `/api/vault/folders/${ownId}/children`, 404);
-await hit(client, "a subfolder, guessed", "GET", `/api/vault/folders/${subfolder}/children`, 404);
-await hit(client, "own project's people", "GET", `/api/vault/projects/${ownId}/sharing`, 404);
-await hit(client, "own project's status", "GET", `/api/vault/projects/${ownId}/status`, 404);
-await hit(client, "other project's status", "GET", `/api/vault/projects/${otherId}/status`, 404);
-await hit(client, "invite someone", "POST", `/api/vault/projects/${ownId}/invite`, 404, { email: "x@example.com", role: "client" });
-await hit(client, "set own role", "PUT", `/api/vault/projects/${ownId}/sharing`, 404, { sharing: [] });
-for (const [what, id] of [["a file on own project", ownFile], ["a cost file", costFile], ["a file on another project", otherFile]] as const) {
+const form = (fields: Record<string, string>) => {
+  const f = new FormData();
+  for (const [k, v] of Object.entries(fields)) f.set(k, v);
+  return f;
+};
+
+const client = await person(clientEmail);
+const crafter = await person(crafterEmail);
+const guide = await person(guideEmail);
+const admin = await person(adminEmail);
+if (guide.role !== "Human") throw new Error(`${guideEmail} is ${guide.role}; test 4 needs a Guide who isn't an admin`);
+const before = await getProjectSharing(own);
+const roleOf = async (id: string) => (await getProjectSharing(own)).find((e) => e.human === id)?.role ?? null;
+const setGroup = (who: { cookie: string }, humanId: string, group: string, label: string) =>
+  hit(who.cookie, label, "POST", "/maker/humans", 200, form({ humanId, projectId: ownId, group }));
+const putSharing = async (who: { cookie: string }, change: Record<string, string>, label: string, want: number) => {
+  const now = await getProjectSharing(own);
+  const next = [...now.filter((e) => !(e.human in change)), ...Object.entries(change).map(([human, role]) => ({ human, role }))];
+  return hit(who.cookie, label, "PUT", `/api/vault/projects/${ownId}/sharing`, want, { sharing: next });
+};
+
+// ── Photos: one the client may open, one receipt photo they may not ─────
+let rows = await loadProjectFiles(own);
+const photos = rows.filter((r) => r.folders.includes("gallery") && !r.folders.includes("costs") && r.copyFileId);
+let receipt = rows.find((r) => r.folders.includes("gallery") && r.folders.includes("costs") && r.copyFileId) ?? null;
+let seeded: string | null = null;
+if (!receipt && SEED_RECEIPT && photos.length > 1) {
+  const target = photos[photos.length - 1];
+  await hit(crafter.cookie, "seed: crafter files a photo as a receipt", "POST", "/api/graphlog/file-marks", 201, {
+    projectFolderId: ownId,
+    fileId: target.fileId,
+    act: { kind: "file-as", fileKind: "receipt" },
+  });
+  seeded = target.fileId;
+  rows = await loadProjectFiles(own);
+  receipt = rows.find((r) => r.fileId === seeded) ?? null;
+}
+const photo = rows.find((r) => r.folders.includes("gallery") && !r.folders.includes("costs") && r.copyFileId) ?? null;
+const doc = rows.find((r) => !r.folders.includes("gallery") && r.copyFileId) ?? null;
+
+// ── Test 3, first half: the admin's list ─────────────────────────────────
+lines.push(`# admin ${adminEmail}`);
+const list = await hit(admin.cookie, "the humans list", "GET", "/maker/humans", 200);
+check("the list names the client", list.includes(clientEmail));
+await setGroup(admin, guide.id, "Guide", "make the walk's guide a Guide");
+check("the guide is Guide", (await roleOf(guide.id)) === "Guide");
+await setGroup(admin, client.id, "Observer", "move the client to Observer");
+check("the client is Observer", (await roleOf(client.id)) === "Observer");
+
+// ── The client as an Observer: reads and marks, doesn't move, file or log ─
+lines.push(`# client as Observer`);
+await hit(client.cookie, "Costs tab, now given", "GET", `/newspaper/${ownId}?tab=costs`, 200);
+// 409 is the stale page hash: past the feature check, which is a 403.
+await hit(client.cookie, "a mark, let through", "POST", "/api/graphlog/marks", 409, { projectFolderId: ownId, pageHash: "x", unitKey: "x", text: "hello" });
+await hit(client.cookie, "a move", "POST", "/api/graphlog/moves", 403, {
+  projectFolderId: ownId,
+  unitKey: "x",
+  entryFileId: "x",
+  destProjectFolderId: otherId,
+});
+await hit(client.cookie, "file a file", "POST", "/api/graphlog/file-marks", 403, {
+  projectFolderId: ownId,
+  fileId: "x",
+  act: { kind: "file-as", fileKind: "photo" },
+});
+const card = await hit(client.cookie, "a Card on the project", "POST", "/daily-log", 200, {
+  date: new Date().toISOString().slice(0, 10),
+  createCardForProject: ownId,
+});
+check("the Card is refused", card.includes("don't have access"));
+
+await setGroup(admin, client.id, "Client", "move the client back to Client");
+check("the client is Client", (await roleOf(client.id)) === "Client");
+
+// ── Test 1: the client ───────────────────────────────────────────────────
+lines.push(`# client ${clientEmail} on ${own.name}`);
+await hit(client.cookie, "home, straight to My Project", "GET", "/", 302);
+await hit(client.cookie, "daily log", "GET", "/daily-log", 200);
+const page = await hit(client.cookie, "own project, Efforts", "GET", `/newspaper/${ownId}`, 200);
+check("the page names no other project", !page.includes(other.name));
+check("the page has no Vault link", !page.includes('href="/vault"'));
+check("the page shows who's on the project", page.includes("data-project-people"));
+const photosTab = await hit(client.cookie, "own project, Photos", "GET", `/newspaper/${ownId}?tab=photos`, 200);
+check("Photos carries no cost", !photosTab.includes('"vendor"'));
+if (receipt) check("Photos leaves out the receipt photo", !photosTab.includes(receipt.serveId));
+if (photo) check("Photos carries the photo", photosTab.includes(photo.serveId));
+await hit(client.cookie, "own Files tab, typed", "GET", `/newspaper/${ownId}?tab=files`, 404);
+await hit(client.cookie, "own Costs tab, typed", "GET", `/newspaper/${ownId}?tab=costs`, 404);
+await hit(client.cookie, "own Logbook, typed", "GET", `/newspaper/${ownId}?tab=logbook`, 404);
+await hit(client.cookie, "other project page", "GET", `/newspaper/${otherId}`, 404);
+await hit(client.cookie, "the Vault", "GET", "/vault", 404);
+await hit(client.cookie, "own project in the Vault", "GET", `/vault?folder=${ownId}`, 404);
+await hit(client.cookie, "own project's folders", "GET", `/api/vault/folders/${ownId}/children`, 404);
+await hit(client.cookie, "a subfolder, guessed", "GET", `/api/vault/folders/${subfolder}/children`, 404);
+await hit(client.cookie, "own project's people", "GET", `/api/vault/projects/${ownId}/sharing`, 404);
+await hit(client.cookie, "own project's status", "GET", `/api/vault/projects/${ownId}/status`, 404);
+await hit(client.cookie, "other project's status", "GET", `/api/vault/projects/${otherId}/status`, 404);
+await hit(client.cookie, "invite someone", "POST", `/api/vault/projects/${ownId}/invite`, 404, { email: "x@example.com", role: "Client" });
+await hit(client.cookie, "set own role", "PUT", `/api/vault/projects/${ownId}/sharing`, 404, { sharing: [] });
+await hit(client.cookie, "the humans list", "GET", "/maker/humans", 403);
+if (photo) {
+  await hit(client.cookie, "a photo, view", "GET", `/api/vault/view/${photo.serveId}`, 302);
+  await hit(client.cookie, "a photo, thumbnail", "GET", `/api/vault/rendition/${photo.serveId}?size=thumb`, 302);
+  await hit(client.cookie, "a photo, record", "GET", `/api/vault/${photo.serveId}`, 404);
+  await hit(client.cookie, "a photo, in the Vault", "GET", `/vault?file=${photo.serveId}`, 404);
+} else lines.push("skip a photo: none on the project");
+for (const [what, id] of [
+  ["a receipt photo", receipt?.serveId],
+  ["a document", doc?.serveId],
+  ["a file on another project", otherFile],
+] as const) {
   if (!id) {
     lines.push(`skip ${what}: none found locally`);
     continue;
   }
-  await hit(client, `${what}, view`, "GET", `/api/vault/view/${id}`, 404);
-  await hit(client, `${what}, record`, "GET", `/api/vault/${id}`, 404);
-  await hit(client, `${what}, download`, "GET", `/api/vault/download/${id}`, 404);
-  await hit(client, `${what}, rendition`, "GET", `/api/vault/rendition/${id}`, 404);
-  await hit(client, `${what}, in the Vault`, "GET", `/vault?file=${id}`, 404);
+  await hit(client.cookie, `${what}, view`, "GET", `/api/vault/view/${id}`, 404);
+  await hit(client.cookie, `${what}, record`, "GET", `/api/vault/${id}`, 404);
+  await hit(client.cookie, `${what}, download`, "GET", `/api/vault/download/${id}`, 404);
+  await hit(client.cookie, `${what}, rendition`, "GET", `/api/vault/rendition/${id}`, 404);
 }
-await hit(client, "a mark", "POST", "/api/graphlog/marks", 404, { projectFolderId: ownId, pageHash: "x", unitKey: "x", text: "hello" });
-await hit(client, "a move", "POST", "/api/graphlog/moves", 0, { projectFolderId: ownId });
-await hit(client, "move options", "GET", `/api/graphlog/move-options?projectFolderId=${ownId}`, 404);
-await hit(client, "a GraphLog run", "POST", "/api/graphlog/run", 404, { projectFolderId: ownId });
-await hit(client, "own Steep tap", "POST", "/api/steep", 200, { projectFolderId: ownId, position: "uphill" });
-await hit(client, "Steep on another project", "POST", "/api/steep", 404, { projectFolderId: otherId, position: "uphill" });
-// Their own attachment: upload to today, then load it back.
-const form = new FormData();
-form.set("date", new Date().toISOString().slice(0, 10));
-form.set("file", new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "campbell-walk.png", { type: "image/png" }));
-const up = await hit(client, "own attachment, upload", "POST", "/api/daily-log/upload", 201, form);
+await hit(client.cookie, "a mark", "POST", "/api/graphlog/marks", 404, { projectFolderId: ownId, pageHash: "x", unitKey: "x", text: "hello" });
+await hit(client.cookie, "a move", "POST", "/api/graphlog/moves", 0, { projectFolderId: ownId });
+await hit(client.cookie, "move options", "GET", `/api/graphlog/move-options?projectFolderId=${ownId}`, 404);
+await hit(client.cookie, "a GraphLog run", "POST", "/api/graphlog/run", 404, { projectFolderId: ownId });
+await hit(client.cookie, "own Steep tap", "POST", "/api/steep", 200, { projectFolderId: ownId, position: "uphill" });
+await hit(client.cookie, "Steep on another project", "POST", "/api/steep", 404, { projectFolderId: otherId, position: "uphill" });
+const upload = new FormData();
+upload.set("date", new Date().toISOString().slice(0, 10));
+upload.set("file", new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "campbell-walk.png", { type: "image/png" }));
+const up = await hit(client.cookie, "own attachment, upload", "POST", "/api/daily-log/upload", 201, upload);
 const upId = (() => {
   try {
     const j = JSON.parse(up);
@@ -140,29 +244,90 @@ const upId = (() => {
     return null;
   }
 })();
-// Served by redirect to storage (ADR-021), so the 302 is the success;
-// a refusal would be a 404.
-if (upId) await hit(client, "own attachment, loads", "GET", `/api/vault/view/${upId}`, 302);
+// Served by redirect to storage (ADR-021), so the 302 is the success.
+if (upId) await hit(client.cookie, "own attachment, loads", "GET", `/api/vault/view/${upId}`, 302);
 else lines.push(`skip own attachment, loads: upload answered ${up.slice(0, 120)}`);
 
-// ── The Nopalito, working on the same project (test 4) ───────────────────
-const nopalito = await cookieFor(nopalitoEmail);
-lines.push(`# nopalito ${nopalitoEmail}`);
-await hit(nopalito, "project page", "GET", `/newspaper/${ownId}`, 200);
-await hit(nopalito, "Costs tab", "GET", `/newspaper/${ownId}?tab=costs`, 200);
-await hit(nopalito, "Logbook", "GET", `/newspaper/${ownId}?tab=logbook`, 200);
-if (costFile) await hit(nopalito, "a cost file's record", "GET", `/api/vault/${costFile}`, 200);
-if (ownFile) await hit(nopalito, "a file's record", "GET", `/api/vault/${ownFile}`, 200);
-await hit(nopalito, "another project", "GET", `/newspaper/${otherId}`, 404);
-await hit(nopalito, "the people list", "GET", `/api/vault/projects/${ownId}/sharing`, 404);
-await hit(nopalito, "invite someone", "POST", `/api/vault/projects/${ownId}/invite`, 404, { email: "x@example.com", role: "client" });
+// ── Test 9: the crafter ──────────────────────────────────────────────────
+lines.push(`# crafter ${crafterEmail}`);
+await hit(crafter.cookie, "project page", "GET", `/newspaper/${ownId}`, 200);
+await hit(crafter.cookie, "Photos", "GET", `/newspaper/${ownId}?tab=photos`, 200);
+await hit(crafter.cookie, "Files", "GET", `/newspaper/${ownId}?tab=files`, 200);
+const costs = await hit(crafter.cookie, "Costs tab", "GET", `/newspaper/${ownId}?tab=costs`, 200);
+if (receipt) check("Costs carries the receipt photo", costs.includes(receipt.serveId));
+await hit(crafter.cookie, "Logbook", "GET", `/newspaper/${ownId}?tab=logbook`, 200);
+if (receipt) await hit(crafter.cookie, "the receipt photo", "GET", `/api/vault/view/${receipt.serveId}`, 302);
+if (doc) await hit(crafter.cookie, "a document's record", "GET", `/api/vault/${doc.serveId}`, 200);
+await hit(crafter.cookie, "another project", "GET", `/newspaper/${otherId}`, 404);
+await hit(crafter.cookie, "the people list", "GET", `/api/vault/projects/${ownId}/sharing`, 404);
+await hit(crafter.cookie, "invite someone", "POST", `/api/vault/projects/${ownId}/invite`, 404, { email: "x@example.com", role: "Client" });
+if (crafter.role === "Human") await hit(crafter.cookie, "the humans list", "GET", "/maker/humans", 403);
 
-// ── The guide ────────────────────────────────────────────────────────────
-const guide = await cookieFor(guideEmail);
+// ── Test 4: a Guide who isn't an admin ───────────────────────────────────
 lines.push(`# guide ${guideEmail}`);
-await hit(guide, "project page", "GET", `/newspaper/${ownId}`, 200);
-await hit(guide, "the people list", "GET", `/api/vault/projects/${ownId}/sharing`, 200);
-if (ownFile) await hit(guide, "a file's record", "GET", `/api/vault/${ownFile}`, 200);
+await hit(guide.cookie, "project page", "GET", `/newspaper/${ownId}`, 200);
+await hit(guide.cookie, "the people list", "GET", `/api/vault/projects/${ownId}/sharing`, 200);
+await putSharing(guide, { [client.id]: "Observer" }, "regroup the client to Observer", 200);
+await putSharing(guide, { [client.id]: "Client" }, "and back to Client", 200);
+check("the client is Client again", (await roleOf(client.id)) === "Client");
+await putSharing(guide, { [crafter.id]: "Guide" }, "make the crafter a Guide", 403);
+await putSharing(guide, { [admin.id]: "Crafter" }, "put an admin on the project", 403);
+await hit(guide.cookie, "invite a Guide", "POST", `/api/vault/projects/${ownId}/invite`, 403, { email: crafterEmail, role: "Guide" });
+await hit(guide.cookie, "another project's people", "GET", `/api/vault/projects/${otherId}/sharing`, 404);
+await hit(guide.cookie, "the humans list", "GET", "/maker/humans", 403);
+check("the crafter is still what they were", (await roleOf(crafter.id)) === (before.find((e) => e.human === crafter.id)?.role ?? null));
+
+// ── Taken off, the client's Card from today is scrapped ─────────────────
+lines.push(`# the client comes off`);
+const today = new Date().toISOString().slice(0, 10);
+await hit(client.cookie, "a Card on the project", "POST", "/daily-log", 200, { date: today, createCardForProject: ownId });
+const ownCard = async () => (await getDailyLogCards(client.id, today)).find((c) => c.projectFolderId === ownId) ?? null;
+const written = await ownCard();
+if (written) {
+  await hit(client.cookie, "write in it", "POST", "/daily-log", 200, { date: today, content: "the walk wrote this", cardFileId: written.fileId });
+  check("the Card has words", (await ownCard())?.content === "the walk wrote this");
+  await setGroup(admin, client.id, "", "take the client off");
+  check("the client is off", (await roleOf(client.id)) === null);
+  check("the Card is empty", (await ownCard())?.content === "");
+  const again = await hit(client.cookie, "write in it again", "POST", "/daily-log", 200, { date: today, content: "back again", cardFileId: written.fileId });
+  check("refused, still empty", again.includes("not writing to that project") && (await ownCard())?.content === "");
+  await setGroup(admin, client.id, "Client", "put the client back");
+  check("the client is Client", (await roleOf(client.id)) === "Client");
+} else check("the client's Card was made", false);
+
+// ── The creator comes off only once someone else is the Guide ───────────
+// Putting them back names them on the list, where before they may have
+// been Guide by default: the same people, one more line in the README.
+const creator = own.human_id;
+const creatorBefore = before.find((e) => e.human === creator)?.role ?? "Guide";
+if (creator !== guide.id) {
+  lines.push(`# the creator`);
+  await setGroup(admin, creator, "", "take the creator off while the guide is Guide");
+  check("the creator is off", (await roleOf(creator)) === null);
+  await setGroup(admin, creator, creatorBefore, "put the creator back");
+  check("the creator is back", (await roleOf(creator)) === creatorBefore);
+}
+
+// ── Put everything back ──────────────────────────────────────────────────
+const guideBefore = before.find((e) => e.human === guide.id)?.role ?? "";
+await setGroup(admin, guide.id, guideBefore, "put the guide back");
+const guides = (await getProjectSharing(own)).filter((e) => e.role === "Guide").map((e) => e.human);
+if (guides.length === 1 && guides[0] === creator) {
+  await setGroup(admin, creator, "", "take the creator off with nobody else Guide");
+  check("refused: the creator is still on", (await roleOf(creator)) === creatorBefore);
+} else {
+  lines.push(`skip the creator refusal: the project has other Guides`);
+}
+if (seeded) {
+  await hit(crafter.cookie, "seed: file the receipt back as a photo", "POST", "/api/graphlog/file-marks", 201, {
+    projectFolderId: ownId,
+    fileId: seeded,
+    act: { kind: "file-as", fileKind: "photo" },
+  });
+}
+const after = await getProjectSharing(own);
+const key = (l: { human: string; role: string }[]) => JSON.stringify([...l].sort((x, y) => x.human.localeCompare(y.human)));
+check("the project's people are as they were", key(after) === key(before));
 
 console.log(lines.join("\n"));
 console.log(failures ? `\n${failures} FAILED` : "\nall held");

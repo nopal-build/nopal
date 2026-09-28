@@ -1,6 +1,6 @@
 // app/routes/profile.tsx
 import { useState, useEffect } from "react";
-import { isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { navFor } from "../data/nav.server";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -119,8 +119,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const inviteExpired = url.searchParams.get("inviteExpired") === "1";
   return {
     user,
-    // The nav reads this (`useVaultHidden`): a client never gets the Vault.
-    vaultHidden: isClientEverywhere(await listProjectsFor(user._id)),
+    // The nav reads these (`useVaultHidden`, `useHome`).
+    ...(await navFor(user._id)),
     waivers,
     relatedHumans,
     passkeys,

@@ -36,6 +36,7 @@ export function ProjectFilesView({
   kinds,
   onOpen,
   onChanged,
+  canFile = true,
 }: {
   projectFolderId: string;
   rows: ProjectFileRow[];
@@ -45,6 +46,9 @@ export function ProjectFilesView({
   onOpen: (row: ProjectFileRow) => void;
   /** Reload after a tap wrote a mark. */
   onChanged: () => void;
+  /** The viewer's group gets `edit`: without it, no File as, Correct or
+   * Accepted (the server refuses them anyway). */
+  canFile?: boolean;
 }) {
   const [params, setParams] = useSearchParams();
   const requested = params.get(FILES_PARAM);
@@ -107,7 +111,7 @@ export function ProjectFilesView({
       ) : (
         <ul className={sprinkles({ display: "flex", flexDirection: "column", gap: 6 })} style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {shown.map((row) => (
-            <FileRow key={row.fileId} row={row} projectFolderId={projectFolderId} kinds={kinds} onOpen={onOpen} onChanged={onChanged} />
+            <FileRow key={row.fileId} row={row} projectFolderId={projectFolderId} kinds={kinds} onOpen={onOpen} onChanged={onChanged} canFile={canFile} />
           ))}
         </ul>
       )}
@@ -143,12 +147,14 @@ function FileRow({
   kinds,
   onOpen,
   onChanged,
+  canFile,
 }: {
   row: ProjectFileRow;
   projectFolderId: string;
   kinds: readonly FilingKind[];
   onOpen: (row: ProjectFileRow) => void;
   onChanged: () => void;
+  canFile: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -249,7 +255,7 @@ function FileRow({
                 ))}
               </ul>
             )}
-            {row.cost.status === "unconfirmed" && row.cost.amount && (
+            {canFile && row.cost.status === "unconfirmed" && row.cost.amount && (
               <div className={sprinkles({ display: "flex", gap: 2, marginTop: 1 })}>
                 <button type="button" disabled={busy} className={button({ variant: "outline" })} onClick={() => act({ act: { kind: "confirm-cost", verdict: "correct" } })}>
                   Correct
@@ -278,7 +284,7 @@ function FileRow({
           </ul>
         )}
 
-        <div className={sprinkles({ display: "flex", alignItems: "center", gap: 2, marginTop: 1 })}>
+        {canFile && <div className={sprinkles({ display: "flex", alignItems: "center", gap: 2, marginTop: 1 })}>
           <MoreMenu
             label="File as"
             trigger={({ toggle, open }) => (
@@ -293,7 +299,7 @@ function FileRow({
               {error}
             </span>
           )}
-        </div>
+        </div>}
       </div>
     </li>
   );

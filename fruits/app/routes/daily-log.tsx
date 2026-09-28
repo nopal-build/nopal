@@ -32,7 +32,9 @@ import {
   type DailyLogCard,
 } from "robustness-core/data/dailyLog.server";
 import { getFolderById } from "robustness-core/data/vault.server";
-import { getProjectRole, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { getProjectRole, listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { featuresOf } from "robustness-core/data/features";
+import { navFor } from "../data/nav.server";
 import { markOwnMutation } from "../hooks/useVaultEvents";
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -43,10 +45,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Load all entries newest-first; 500 is a generous ceiling for any user
   const { entries } = await getDailyLogs(user._id, { limit: 500 });
 
-  // Projects for "Add a card": every project the person holds a role on,
-  // Client included (ADR-023). A Card is how anyone on a project writes to it.
+  // Projects for "Add a card": every project whose group gets `dailyLog`
+  // (a Client does; an Observer doesn't write to the project).
   const memberships = await listProjectsFor(user._id);
-  const projectFolders = memberships.map((m) => m.folder);
+  const projectFolders = memberships.filter((m) => featuresOf(m.role).includes("dailyLog")).map((m) => m.folder);
 
   // Cards for each day that actually references one — a cheap substring
   // check up front so this stays proportional to real Card usage instead
@@ -66,7 +68,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     entries,
     projectFolders: projectFolders.map((f) => ({ id: f._id, name: f.name })),
     cardsByDate,
-    vaultHidden: isClientEverywhere(memberships),
+    ...(await navFor(user._id, memberships)),
   };
 }
 
@@ -92,12 +94,10 @@ export async function action({ request }: ActionFunctionArgs) {
         createCardForProject?: string;
       };
       if (!date || !createCardForProject) return { error: "Invalid request" };
-      // A Card is how a non-owner "contributes" to a shared project, so
-      // this must accept more than just projects `user` owns — but still
-      // requires SOME Sharing Role on the target project, not an
-      // arbitrary folder id.
+      // A Card is how anyone on a project writes to it: their group has
+      // to get `dailyLog` there (an Observer's doesn't).
       const projectFolder = await getFolderById(createCardForProject);
-      if (!projectFolder || !(await getProjectRole(projectFolder, user._id))) {
+      if (!projectFolder || !(await getProjectRole(projectFolder, user._id))?.features.includes("dailyLog")) {
         return { error: "You don't have access to that project" };
       }
       const card = await createDailyLogCard(user._id, date, createCardForProject);
@@ -119,8 +119,16 @@ export async function action({ request }: ActionFunctionArgs) {
     if (cardFileId) {
       // Only one of this person's own Cards for that day. Without this,
       // any signed-in person could overwrite any file whose id they knew.
-      if (!isOwnCard(await getDailyLogCards(user._id, date), cardFileId)) {
+      const cards = await getDailyLogCards(user._id, date);
+      if (!isOwnCard(cards, cardFileId)) {
         return { error: "Not found" };
+      }
+      // And only while they're still on its project with `dailyLog`: taken
+      // off, their Card is emptied (`removalScrap.server.ts`) and stays so.
+      const cardProjectId = cards.find((c) => c.fileId === cardFileId)!.projectFolderId;
+      const cardProject = await getFolderById(cardProjectId);
+      if (!cardProject || !(await getProjectRole(cardProject, user._id))?.features.includes("dailyLog")) {
+        return { error: "You're not writing to that project anymore." };
       }
       await saveDailyLogCard(cardFileId, content);
       return { success: true };

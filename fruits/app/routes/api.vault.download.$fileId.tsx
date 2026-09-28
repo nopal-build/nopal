@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
+import { canReadFile } from "robustness-core/data/featureAccess.server";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { canViewFileRef, getFileRefById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
+import { getFileRefById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
 import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
 
 /**
@@ -17,7 +18,7 @@ import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
  *     itself (see `triggerFileDownload` in `vault.tsx`).
  *
  * The file's owner, or anyone granted view access through a shared
- * folder, may download via this endpoint (`canViewFileRef`).
+ * folder, may download via this endpoint (`canReadFile`).
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const scoped = await getScopedUserFromRequest(request);
@@ -45,7 +46,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // owner-only.
   const permitted = syncScoped
     ? file.human_id === user._id
-    : await canViewFileRef(user._id, file);
+    : await canReadFile(user._id, file);
   if (!permitted) {
     // The same 404 as a file that doesn't exist (ADR-023): a refusal
     // says nothing about what was there.

@@ -70,7 +70,8 @@ function GuideRow({ row, showMeter }: { row: DashboardRow; showMeter: boolean })
             </span>
           )}
         </Cluster>
-        {row.ask && <p className={textSize.sm}>{row.ask}</p>}
+        {row.read && <p className={textSize.sm}>{row.read}</p>}
+        {row.ask && <p className={textSize.sm} style={subtle}>{row.ask}</p>}
         {row.notes.map((note) => (
           <NoteLine key={`${note.who}-${note.date}`} note={note} />
         ))}
@@ -80,12 +81,16 @@ function GuideRow({ row, showMeter }: { row: DashboardRow; showMeter: boolean })
   );
 }
 
-/** A project where the viewer is a Client (ADR-023): its name and their
- * own meter. No link: the project page refuses a Client. */
+/** A project where the viewer is a Client: its name, a way in (the page
+ * shows what the features list gives them), and their own meter. */
 function OwnLogProject({ row, showName }: { row: DashboardRow; showName: boolean }) {
   return (
     <Stack gap={2} data-project-row={row.id}>
-      {showName && <span className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>{row.name}</span>}
+      {showName && (
+        <Link to={`/newspaper/${row.id}`} className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`} style={{ color: "inherit" }}>
+          {row.name}
+        </Link>
+      )}
       {row.canTap && <SteepGauge projectFolderId={row.id} mine={row.mine} />}
     </Stack>
   );
