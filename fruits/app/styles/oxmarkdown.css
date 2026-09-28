@@ -236,6 +236,19 @@
   content: none;
 }
 
+/* General modifier: plain paper, for pages the skills write (the Efforts
+   page, via `ProjectView`), as against what a person writes (a daily log,
+   a Card, the Logbook), which keeps the dot grid and the heading markers
+   (Austin, 2026-09-28). No dot grid and no # / ## / ### / > glyphs in the
+   gutter; list markers stay, since a list still needs them. Apply via the
+   `className` prop (`className="ox-plain"`), like `ox-no-gutter`. */
+.ox-content.ox-plain .ox-dot-grid {
+  background-image: none;
+}
+.ox-content.ox-plain :is(h1, h2, h3, blockquote)::before {
+  content: none;
+}
+
 /* ── Gutter markers (# / ## / ### / >) ──────────────────────────── */
 
 .ox-content :is(h1, h2, h3, blockquote) {
@@ -404,6 +417,28 @@
    than the `> *:not(:first-child)` combinators it must win over. */
 .ox-content .ox-no-gap-before {
   margin-top: 0 !important;
+}
+
+/* Headings and lists keep one rhythm whatever the source's blank lines
+   say (Austin, 2026-09-28): a heading always has one grid row above it,
+   what it heads sits right under it, a list (nested ones too) sits right
+   under the line above it, and extra blank lines collapse to the one gap
+   any two blocks already get. Pages the skills write don't keep blank
+   lines consistently, and every surface that renders OxMarkdown should
+   read the same. Editing mode still shows the source's real rows.
+   `!important` so these win over the rhythm rule's combinators above. */
+.ox-dot-grid > :is(h1, h2, h3, h4):not(:first-child) {
+  margin-top: var(--ox-grid) !important;
+}
+.ox-dot-grid > :is(h1, h2, h3, h4) + :not(.ox-blank-line-spacer),
+.ox-dot-grid > :is(h1, h2, h3, h4) + .ox-blank-line-spacer + *,
+.ox-dot-grid > :is(h1, h2, h3, h4) + .ox-blank-line-spacer + .ox-blank-line-spacer + *,
+.ox-dot-grid > :is(h1, h2, h3, h4) + .ox-blank-line-spacer + .ox-blank-line-spacer + .ox-blank-line-spacer + *,
+.ox-content :is(ul, ol) {
+  margin-top: 0 !important;
+}
+.ox-content .ox-blank-line-spacer {
+  display: none;
 }
 
 /* One per blank line BEYOND the single one CommonMark already requires to
@@ -1793,30 +1828,64 @@ div.ox-markable {
   opacity: 0.8;
 }
 
+/* The pen's popover is only a position: the stamp `Surface` inside it
+   (`MarkComposer`) is the card, so none of the popover's own chrome. */
 .ox-mark-popover {
   width: 320px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
 }
 .ox-mark-popover.ox-popover--sheet {
   width: 100%;
 }
+/* The writing sits on the card's own off-white, like the footer under
+   it, not on the collection well's page white (Austin, 2026-09-28). */
+.ox-mark-composer > div:first-child {
+  background: transparent;
+}
 .ox-mark-composer textarea {
   min-height: 96px;
+  background: var(--color-surface-card);
+}
+/* The pen's footer: the move link on the left, the actions on the right,
+   one line; the move form, when open, takes the whole width. */
+.ox-mark-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ox-mark-footer > .ox-mark-move {
+  flex-basis: 100%;
 }
 .ox-mark-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 12px;
+  margin-left: auto;
 }
-.ox-mark-actions button {
-  padding: 6px 14px;
+/* A quiet action (Cancel, Back, Take it back): the stamp `link`, small,
+   with the button's own chrome unset. */
+.ox-mark-quiet {
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
 .ox-mark-actions button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 .ox-mark-error {
-  margin-top: 6px;
   font-size: 0.85rem;
   color: var(--ox-mark-color);
 }
@@ -1825,9 +1894,6 @@ div.ox-markable {
   font-family: var(--ox-font-family);
   font-size: 0.8rem;
 }
-.ox-mark-note__action button {
-  padding: 2px 10px;
-}
 
 /* The refile control under the pen. */
 .ox-mark-move__note {
@@ -1835,14 +1901,13 @@ div.ox-markable {
   font-size: 0.78rem;
   color: var(--ox-color-subtle);
 }
+/* Looks like the stamp `link` it carries; this only unsets the button. */
 .ox-mark-move__open {
   display: block;
-  margin-top: 8px;
   padding: 0;
+  text-align: left;
+  font: inherit;
   font-size: 0.8rem;
-  color: var(--ox-color-link);
-  text-decoration: underline;
-  text-underline-offset: 3px;
   background: none;
   border: 0;
   cursor: pointer;

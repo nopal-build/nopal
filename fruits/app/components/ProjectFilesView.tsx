@@ -10,7 +10,7 @@ import type { FileFolder, ProjectFileRow } from "robustness-core/data/fileFolder
 import type { FilingKind } from "robustness-core/data/syncFiling.server";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
-import { Input } from "stamps/Input";
+import { SearchField } from "stamps/SearchField";
 import { MoreMenu } from "stamps/MoreMenu";
 import { button } from "stamps/button.css";
 import { sprinkles } from "stamps/sprinkles.css";
@@ -91,10 +91,8 @@ export function ProjectFilesView({
             });
           }}
         >
-          <Input name={QUERY_PARAM} label="Search files" hideLabel placeholder="Find a file by what it is about…" defaultValue={q} />
-          <button type="submit" className={button({ variant: "outline" })}>
-            Search
-          </button>
+          {/* The stamp search bar; Enter searches. */}
+          <SearchField name={QUERY_PARAM} label="Search files" placeholder="Find a file by what it is about…" defaultValue={q} />
         </form>
       </div>
 

@@ -57,8 +57,10 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!folder || !canViewFolder(user._id, folder)) {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
-  // Marking is a feature (`features.ts`): an Observer reads, and doesn't.
-  if (!(await getProjectRole(folder, user._id))?.features.includes("marks")) {
+  // Marking is a feature (`features.ts`). Without `feeds` (an Observer)
+  // the note waits for a Guide (`suggestions.server.ts`).
+  const features = (await getProjectRole(folder, user._id))?.features ?? [];
+  if (!features.includes("marks")) {
     return Response.json({ error: "You can read this project, not mark it." }, { status: 403 });
   }
 
@@ -80,6 +82,7 @@ export async function action({ request }: ActionFunctionArgs) {
     text,
     pageHash: body.pageHash,
     unit: snapshotUnit(unit),
+    suggestion: !features.includes("feeds"),
   });
   if (!mark) return Response.json({ error: "The mark didn't save. Try again." }, { status: 500 });
   return Response.json({ id: mark._id }, { status: 201 });

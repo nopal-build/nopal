@@ -93,7 +93,20 @@ export type GraphLogMark = Data & {
   read_date: string | null;
   /** A routing override this mark asked for, if any. */
   move_id: string | null;
+  /** Set when the writer's group has no `feeds` (an Observer): the mark
+   * waits for a Guide, who takes it (then it reads like any other) or
+   * passes it. Absent on everyone else's (`suggestions.server.ts`). */
+  suggestion?: SuggestionStatus | null;
+  /** The Guide who took or passed it. */
+  decided_by?: string | null;
 };
+
+export type SuggestionStatus = "pending" | "taken" | "passed";
+
+/** Only marks that feed the project: everyone's but a suggestion not yet
+ * taken. Every read that reaches the page run, the margin, the files view
+ * or the syncs goes through it. */
+const FEEDS = `(suggestion = NONE OR suggestion = NULL OR suggestion = "taken")`;
 
 /** A mark as the page shows it: who, when, what. */
 export type PageMark = {
@@ -120,6 +133,8 @@ export type PageMark = {
    * about, saying so, rather than disappearing before anything answered
    * it. */
   waiting: boolean;
+  /** A suggestion still waiting for a Guide (`suggestions.server.ts`). */
+  suggestion: boolean;
 };
 
 let tableEnsured = false;
@@ -181,6 +196,8 @@ export async function createMark(input: {
   pageHash: string | null;
   unit: MarkUnitSnapshot;
   act?: FileAct | null;
+  /** The writer's group has no `feeds`: it waits for a Guide. */
+  suggestion?: boolean;
 }): Promise<GraphLogMark | null> {
   await ensureTable();
   const id = newId();
@@ -197,6 +214,7 @@ export async function createMark(input: {
     read_at: null,
     read_date: null,
     move_id: null,
+    suggestion: input.suggestion ? "pending" : null,
   });
   const record = Array.isArray(result) ? result[0] : result;
   return record ? formatRecord(record as unknown as GraphLogMark) : null;
@@ -211,8 +229,9 @@ async function selectMarks(where: string, params: Record<string, unknown>): Prom
   return (result?.[0] ?? []).map(formatRecord);
 }
 
+/** Every mark that feeds the project (`FEEDS`): what the syncs copy. */
 export function listMarksForProject(projectFolderId: string): Promise<GraphLogMark[]> {
-  return selectMarks("project_folder_id = $projectFolderId", { projectFolderId });
+  return selectMarks(`project_folder_id = $projectFolderId AND ${FEEDS}`, { projectFolderId });
 }
 
 /** A mark written on the page, as opposed to on a file. The page run and
@@ -223,9 +242,18 @@ const PAGE_ONLY = "page_hash != NONE AND page_hash != NULL";
 
 /** Marks no clean page run has read yet, oldest first. Page marks only. */
 export function listUnreadMarks(projectFolderId: string): Promise<GraphLogMark[]> {
-  return selectMarks(`project_folder_id = $projectFolderId AND ${PAGE_ONLY} AND (read_at = NONE OR read_at = NULL)`, {
+  return selectMarks(`project_folder_id = $projectFolderId AND ${PAGE_ONLY} AND ${FEEDS} AND (read_at = NONE OR read_at = NULL)`, {
     projectFolderId,
   });
+}
+
+/** Marks written as suggestions (`suggestions.server.ts`), every status,
+ * optionally one writer's. */
+export function listSuggestionMarks(projectFolderId: string, authorHumanId?: string): Promise<GraphLogMark[]> {
+  return selectMarks(
+    `project_folder_id = $projectFolderId AND suggestion != NONE AND suggestion != NULL${authorHumanId ? " AND author_human_id = $authorHumanId" : ""}`,
+    { projectFolderId, authorHumanId },
+  );
 }
 
 /** Every mark on a file of this project, oldest first: a person's acts
@@ -233,7 +261,7 @@ export function listUnreadMarks(projectFolderId: string): Promise<GraphLogMark[]
  * kind and a cost's status from the latest act; nothing is ever set on
  * the file. */
 export function listFileMarks(projectFolderId: string): Promise<GraphLogMark[]> {
-  return selectMarks("project_folder_id = $projectFolderId AND unit.kind = 'file'", { projectFolderId });
+  return selectMarks(`project_folder_id = $projectFolderId AND unit.kind = 'file' AND ${FEEDS}`, { projectFolderId });
 }
 
 /** Whether a mark is a page mark (a file mark has no page hash). */
@@ -268,7 +296,13 @@ export async function getMark(id: string): Promise<GraphLogMark | null> {
  * re-anchors, in order, to a line citing the same entry, then to its own
  * section's heading, then to the top of the page, and says it is waiting.
  */
-export async function listMarksOnPage(projectFolderId: string, rawReadme: string): Promise<PageMark[]> {
+export async function listMarksOnPage(
+  projectFolderId: string,
+  rawReadme: string,
+  /** Also the page suggestions still waiting for a Guide: one writer's
+   * own, or every one (a Guide). Nobody else sees them. */
+  suggestionsFor?: { authorHumanId: string } | "all",
+): Promise<PageMark[]> {
   const units = pageMarkUnits(rawReadme);
   const live = pageHash(rawReadme);
   // Unread marks, plus any mark still carrying a move somebody has to
@@ -277,8 +311,13 @@ export async function listMarksOnPage(projectFolderId: string, rawReadme: string
   // decision away with it.
   const unread = await listUnreadMarks(projectFolderId);
   const pending = await marksWithPendingMoves(projectFolderId);
+  const suggested = suggestionsFor
+    ? (
+        await listSuggestionMarks(projectFolderId, suggestionsFor === "all" ? undefined : suggestionsFor.authorHumanId)
+      ).filter((m) => m.suggestion === "pending" && isPageMark(m))
+    : [];
   const seen = new Set(unread.map((m) => m._id));
-  const marks = [...unread, ...pending.filter((m) => !seen.has(m._id))].flatMap((m) => {
+  const marks = [...unread, ...pending.filter((m) => !seen.has(m._id)), ...suggested].flatMap((m) => {
     // On its own passage while the page it was written on still stands;
     // beside the nearest thing it was about once that page is rewritten.
     const anchor = m.page_hash === live ? m.unit.key : anchorMark(units, m.unit);
@@ -299,6 +338,7 @@ export async function listMarksOnPage(projectFolderId: string, rawReadme: string
     moveAuthorHumanId: (m.move_id && moves.get(m.move_id)?.author) || null,
     moveDestFolderId: (m.move_id && moves.get(m.move_id)?.dest) || null,
     waiting: m.page_hash !== live,
+    suggestion: m.suggestion === "pending",
   }));
 }
 

@@ -40,6 +40,7 @@
     "./data/steepScale": "./src/data/steepScale.ts",
     "./data/features": "./src/data/features.ts",
     "./data/featureAccess.server": "./src/data/featureAccess.server.ts",
+    "./data/suggestions.server": "./src/data/suggestions.server.ts",
     "./data/dashboard.server": "./src/data/dashboard.server.ts",
     "./data/projectView.server": "./src/data/projectView.server.ts",
     "./data/impersonationEvents.server": "./src/data/impersonationEvents.server.ts",

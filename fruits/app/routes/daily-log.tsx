@@ -28,10 +28,12 @@ import {
   createDailyLogCard,
   saveDailyLogCard,
   isOwnCard,
+  holdCardForGuide,
   type DailyLog,
   type DailyLogCard,
 } from "robustness-core/data/dailyLog.server";
 import { getFolderById } from "robustness-core/data/vault.server";
+import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { getProjectRole, listProjectsFor } from "robustness-core/data/projectSharing.server";
 import { featuresOf } from "robustness-core/data/features";
 import { navFor } from "../data/nav.server";
@@ -95,12 +97,14 @@ export async function action({ request }: ActionFunctionArgs) {
       };
       if (!date || !createCardForProject) return { error: "Invalid request" };
       // A Card is how anyone on a project writes to it: their group has
-      // to get `dailyLog` there (an Observer's doesn't).
+      // to get `dailyLog` there. Without `feeds` (an Observer) it waits
+      // for a Guide (`suggestions.server.ts`). A website takes no Cards.
       const projectFolder = await getFolderById(createCardForProject);
-      if (!projectFolder || !(await getProjectRole(projectFolder, user._id))?.features.includes("dailyLog")) {
+      const features = projectFolder && !isWebsiteFolder(projectFolder) ? (await getProjectRole(projectFolder, user._id))?.features ?? [] : [];
+      if (!features.includes("dailyLog")) {
         return { error: "You don't have access to that project" };
       }
-      const card = await createDailyLogCard(user._id, date, createCardForProject);
+      const card = await createDailyLogCard(user._id, date, createCardForProject, { suggestion: !features.includes("feeds") });
       return { success: true, card };
     }
 
@@ -125,11 +129,15 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       // And only while they're still on its project with `dailyLog`: taken
       // off, their Card is emptied (`removalScrap.server.ts`) and stays so.
-      const cardProjectId = cards.find((c) => c.fileId === cardFileId)!.projectFolderId;
-      const cardProject = await getFolderById(cardProjectId);
-      if (!cardProject || !(await getProjectRole(cardProject, user._id))?.features.includes("dailyLog")) {
+      const card = cards.find((c) => c.fileId === cardFileId)!;
+      const cardProject = await getFolderById(card.projectFolderId);
+      const features = cardProject ? (await getProjectRole(cardProject, user._id))?.features ?? [] : [];
+      if (!features.includes("dailyLog")) {
         return { error: "You're not writing to that project anymore." };
       }
+      // Without `feeds` (an Observer) new words wait for a Guide, even on a
+      // Card made before (`suggestions.server.ts`).
+      if (!features.includes("feeds") && !card.suggestion) await holdCardForGuide(cardFileId, card.content);
       await saveDailyLogCard(cardFileId, content);
       return { success: true };
     }

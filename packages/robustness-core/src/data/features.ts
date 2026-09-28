@@ -42,20 +42,26 @@ export const FEATURE_NAMES = [
   "edit",
   /** Running the project: its people, name, status and deletion. */
   "people",
+  /** What they write (Cards, notes) goes into the project as written.
+   * Without it, it waits as a suggestion for a Guide (Austin, 2026-09-28). */
+  "feeds",
+  /** Taking or passing what someone without `feeds` suggests. */
+  "suggestions",
 ] as const;
 export type Feature = (typeof FEATURE_NAMES)[number];
 
 const READING: Feature[] = ["efforts", "photos", "files", "costs", "logbook"];
 
 /** The list. Guide is what Owner reached, Crafter what Crafter reached;
- * Observer reads what a Crafter reads and marks it, and doesn't edit or
- * write a Card (Austin, 2026-09-27: it keeps their focus clear);
+ * Observer reads what a Crafter reads, writes Cards and notes, and doesn't
+ * edit; what they write waits as a suggestion until a Guide takes it
+ * (Austin, 2026-09-28);
  * Client gets Efforts, Photos, their own tap and their own log. */
 export const GROUP_FEATURES: Record<Group, readonly Feature[]> = {
-  Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people"],
-  Crafter: [...READING, "marks", "steepTap", "dailyLog", "edit"],
-  Observer: [...READING, "marks", "steepTap"],
-  Client: ["efforts", "photos", "steepTap", "dailyLog"],
+  Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people", "feeds", "suggestions"],
+  Crafter: [...READING, "marks", "steepTap", "dailyLog", "edit", "feeds"],
+  Observer: [...READING, "marks", "steepTap", "dailyLog"],
+  Client: ["efforts", "photos", "steepTap", "dailyLog", "feeds"],
 };
 
 /** Old names a README may still carry. Owner folded into Guide

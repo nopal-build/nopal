@@ -5,9 +5,9 @@
  * are `fruits/scripts/campbell-walk.ts` against a running stack.
  */
 import { describe, expect, it } from "vitest";
-import { GROUP_FEATURES, featuresOf, groupOf, type Feature, type Group } from "robustness-core/data/features";
+import { GROUPS, GROUP_FEATURES, featuresOf, groupOf, type Feature, type Group } from "robustness-core/data/features";
 import { changedHumans, promotionRefusal, resolveRole } from "robustness-core/data/projectSharing.server";
-import { isReachablePhoto, resolveProjectTab, rowsForReader, tabsFor } from "robustness-core/data/projectView.server";
+import { isReachablePhoto, resolveProjectTab, rowsForReader, seesSuggestions, tabsFor } from "robustness-core/data/projectView.server";
 import type { ProjectFileRow } from "robustness-core/data/fileFolders.server";
 
 const row = (id: string, folders: ProjectFileRow["folders"], cost: ProjectFileRow["cost"] = null): ProjectFileRow =>
@@ -38,7 +38,7 @@ describe("the groups", () => {
   it("test 9: a Guide reaches what an Owner did, a Crafter what a Crafter did", () => {
     const guide = resolveRole("Owner");
     expect(guide).toMatchObject({ isOwner: true, guiding: true });
-    expect(tabsFor(guide.features)).toEqual(["efforts", "photos", "files", "costs", "logbook"]);
+    expect(tabsFor(guide.features)).toEqual(["efforts", "photos", "files", "costs", "logbook", "suggestions"]);
     expect(guide.features).toEqual(expect.arrayContaining(["marks", "steepTap", "steepReadings", "dailyLog"]));
 
     const crafter = resolveRole("Crafter");
@@ -47,13 +47,22 @@ describe("the groups", () => {
     expect(crafter.features).not.toContain("steepReadings");
   });
 
-  it("an Observer reads what a Crafter reads and marks it, and doesn't edit or write a Card", () => {
+  it("an Observer reads what a Crafter reads, writes Cards and notes, and what they write waits for a Guide", () => {
     const observer = resolveRole("Observer");
-    expect(tabsFor(observer.features)).toEqual(tabsFor(resolveRole("Crafter").features));
+    expect(tabsFor(observer.features)).toEqual([...tabsFor(resolveRole("Crafter").features), "suggestions"]);
     expect(observer).toMatchObject({ isOwner: false, guiding: false });
-    expect(observer.features).toContain("marks");
-    // Moving an entry, filing a file and confirming a cost are `edit`.
-    for (const f of ["edit", "dailyLog"] as Feature[]) expect(observer.features).not.toContain(f);
+    expect(observer.features).toEqual(expect.arrayContaining(["marks", "dailyLog"]));
+    // Moving an entry, filing a file and confirming a cost are `edit`;
+    // without `feeds` what they write is a suggestion.
+    for (const f of ["edit", "feeds", "suggestions"] as Feature[]) expect(observer.features).not.toContain(f);
+  });
+
+  it("only a Guide takes suggestions; everyone but an Observer feeds the project", () => {
+    for (const g of ["Guide", "Crafter", "Client"] as Group[]) expect(featuresOf(g)).toContain("feeds");
+    expect(GROUPS.filter((g) => featuresOf(g).includes("suggestions"))).toEqual(["Guide"]);
+    expect(seesSuggestions(featuresOf("Crafter"))).toBe(false);
+    expect(seesSuggestions(featuresOf("Client"))).toBe(false);
+    expect(seesSuggestions(featuresOf("Observer"))).toBe(true);
   });
 
   it("a Client gets Efforts, Photos, their own tap and their own log, and runs nothing", () => {

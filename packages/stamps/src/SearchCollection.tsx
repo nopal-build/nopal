@@ -1,15 +1,8 @@
 // packages/stamps/src/SearchCollection.tsx
 import type { ReactNode } from "react";
-import { Input } from "./Input";
-import {
-  box,
-  divider,
-  footerArea,
-  searchFieldInput,
-  searchFieldWrapper,
-  searchIcon,
-  well,
-} from "./searchCollection.css";
+import type { Input } from "./Input";
+import { box, divider, footerArea, well } from "./searchCollection.css";
+import { SearchField } from "./SearchField";
 import { Surface } from "./Surface";
 
 type SearchCollectionProps<T> = {
@@ -29,12 +22,12 @@ type SearchCollectionProps<T> = {
   /** Shown in the list area when `items` is empty and no `resultsSlot` is given. */
   emptyState?: ReactNode;
   /**
-   * Props for the search field at the bottom of the box. This is a plain
-   * `<Input>` under the hood (so it participates in a wrapping `<Form>` via
+   * Props for the search field at the bottom of the box (`SearchField`,
+   * a plain `<Input>` under the hood (so it participates in a wrapping `<Form>` via
    * `name` like any other field) — pass `value`/`defaultValue` + `onChange`
    * to drive filtering.
    */
-  searchInputProps: React.ComponentProps<typeof Input>;
+  searchInputProps: Omit<React.ComponentProps<typeof Input>, "hideLabel" | "type">;
   /** Rendered under the search input — inline errors, hints, etc. */
   footer?: ReactNode;
   /** Height of the scrollable list area. Defaults to `380px`. */
@@ -80,30 +73,7 @@ export function SearchCollection<T>({
       <hr className={divider} />
 
       <div className={footerArea}>
-        <div className={searchFieldWrapper}>
-          <Input
-            hideLabel
-            className={[searchFieldInput, searchInputProps.className]
-              .filter(Boolean)
-              .join(" ")}
-            {...searchInputProps}
-          />
-          <svg
-            aria-hidden="true"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={searchIcon}
-          >
-            <circle cx="11" cy="11" r="7" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-        </div>
+        <SearchField {...searchInputProps} />
 
         {footer}
       </div>

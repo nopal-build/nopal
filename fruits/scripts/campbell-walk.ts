@@ -12,8 +12,9 @@
 //      another project's people.
 //   9. The Crafter reaches the project's work as before; the Guide
 //      reaches its people.
-// While the client is an Observer: they read the Costs tab and mark the
-// page, and don't move an entry, file a file or write a Card.
+// While the client is an Observer: they read the Costs tab; their Card and
+// note wait for a Guide, who takes the Card and passes the note; they
+// don't move an entry or file a file.
 // Taking the client off the project empties the Card they wrote today,
 // and they can't write to it again.
 //
@@ -28,11 +29,13 @@
 // <guide> must not be an admin; the walk makes them Guide on the project
 // through the Maker and puts their old role back.
 import { query } from "robustness-core/data/generic.server";
-import { getFolderById } from "robustness-core/data/vault.server";
+import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { getHumanByEmail } from "robustness-core/data/humans.server";
 import { getProjectSharing } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles } from "robustness-core/data/fileFolders.server";
-import { getDailyLogCards } from "robustness-core/data/dailyLog.server";
+import { getDailyLogCards, listCardsForProject } from "robustness-core/data/dailyLog.server";
+import { listSuggestionMarks, listUnreadMarks, pageMarkUnits } from "robustness-core/data/graphLogMarks.server";
+import { pageHash } from "robustness-core/data/pageBody.server";
 import { sessionStorage } from "../app/modules/auth/session.server";
 
 const [clientEmail, crafterEmail, guideEmail, adminEmail, ownId, otherId] = process.argv.slice(2);
@@ -155,11 +158,10 @@ check("the guide is Guide", (await roleOf(guide.id)) === "Guide");
 await setGroup(admin, client.id, "Observer", "move the client to Observer");
 check("the client is Observer", (await roleOf(client.id)) === "Observer");
 
-// ── The client as an Observer: reads and marks, doesn't move, file or log ─
+// ── The client as an Observer: reads, suggests, doesn't move or file ─────
 lines.push(`# client as Observer`);
 await hit(client.cookie, "Costs tab, now given", "GET", `/newspaper/${ownId}?tab=costs`, 200);
-// 409 is the stale page hash: past the feature check, which is a 403.
-await hit(client.cookie, "a mark, let through", "POST", "/api/graphlog/marks", 409, { projectFolderId: ownId, pageHash: "x", unitKey: "x", text: "hello" });
+await hit(client.cookie, "their Suggestions tab", "GET", `/newspaper/${ownId}?tab=suggestions`, 200);
 await hit(client.cookie, "a move", "POST", "/api/graphlog/moves", 403, {
   projectFolderId: ownId,
   unitKey: "x",
@@ -171,11 +173,35 @@ await hit(client.cookie, "file a file", "POST", "/api/graphlog/file-marks", 403,
   fileId: "x",
   act: { kind: "file-as", fileKind: "photo" },
 });
-const card = await hit(client.cookie, "a Card on the project", "POST", "/daily-log", 200, {
-  date: new Date().toISOString().slice(0, 10),
-  createCardForProject: ownId,
-});
-check("the Card is refused", card.includes("don't have access"));
+
+// What an Observer writes waits for a Guide: a Card and a note.
+const day = new Date().toISOString().slice(0, 10);
+const WORDS = "the walk suggests this";
+const fed = async () => (await listCardsForProject(ownId)).find((c) => c.humanId === client.id && c.date === day)?.content ?? "";
+await hit(client.cookie, "a Card on the project", "POST", "/daily-log", 200, { date: day, createCardForProject: ownId });
+const suggested = (await getDailyLogCards(client.id, day)).find((c) => c.projectFolderId === ownId) ?? null;
+check("the Card is a suggestion", !!suggested?.suggestion);
+if (suggested) {
+  await hit(client.cookie, "write in it", "POST", "/daily-log", 200, { date: day, content: WORDS, cardFileId: suggested.fileId });
+  check("the project doesn't get it yet", (await fed()) === "");
+  await hit(crafter.cookie, "a crafter takes it", "POST", "/api/graphlog/suggestions", 404, { projectFolderId: ownId, kind: "card", id: suggested.fileId, verdict: "take" });
+  const tab = await hit(guide.cookie, "the guide's Suggestions tab", "GET", `/newspaper/${ownId}?tab=suggestions`, 200);
+  check("the guide sees it", tab.includes(WORDS));
+  await hit(guide.cookie, "the guide takes it", "POST", "/api/graphlog/suggestions", 200, { projectFolderId: ownId, kind: "card", id: suggested.fileId, verdict: "take" });
+  check("the project gets it, as written", (await fed()) === WORDS);
+}
+const readme = (await getReadmeFileForFolder(own.human_id, own._id))?.content ?? "";
+const passage = pageMarkUnits(readme)[0];
+if (passage) {
+  await hit(client.cookie, "a note", "POST", "/api/graphlog/marks", 201, { projectFolderId: ownId, pageHash: pageHash(readme), unitKey: passage.key, text: WORDS });
+  const note = (await listSuggestionMarks(ownId, client.id)).find((m) => m.text === WORDS && m.suggestion === "pending");
+  check("the note is a suggestion", !!note);
+  check("the page run doesn't read it", !(await listUnreadMarks(ownId)).some((m) => m._id === note?._id));
+  if (note) {
+    await hit(guide.cookie, "the guide passes it", "POST", "/api/graphlog/suggestions", 200, { projectFolderId: ownId, kind: "note", id: note._id, verdict: "pass" });
+    check("still unread by the page run", !(await listUnreadMarks(ownId)).some((m) => m._id === note._id));
+  }
+} else lines.push("skip the note: the page has no passages");
 
 await setGroup(admin, client.id, "Client", "move the client back to Client");
 check("the client is Client", (await roleOf(client.id)) === "Client");
@@ -251,6 +277,7 @@ else lines.push(`skip own attachment, loads: upload answered ${up.slice(0, 120)}
 // ── Test 9: the crafter ──────────────────────────────────────────────────
 lines.push(`# crafter ${crafterEmail}`);
 await hit(crafter.cookie, "project page", "GET", `/newspaper/${ownId}`, 200);
+await hit(crafter.cookie, "Suggestions, typed", "GET", `/newspaper/${ownId}?tab=suggestions`, 404);
 await hit(crafter.cookie, "Photos", "GET", `/newspaper/${ownId}?tab=photos`, 200);
 await hit(crafter.cookie, "Files", "GET", `/newspaper/${ownId}?tab=files`, 200);
 const costs = await hit(crafter.cookie, "Costs tab", "GET", `/newspaper/${ownId}?tab=costs`, 200);

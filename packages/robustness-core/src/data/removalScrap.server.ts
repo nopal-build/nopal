@@ -16,7 +16,7 @@
  * redaction, which is its own piece of work.
  */
 
-import { query, formatRecord } from "./generic.server";
+import { query, formatRecord, merge } from "./generic.server";
 import type { FileRef } from "./vault.types";
 import { saveDailyLogCard } from "./dailyLog.server";
 import { runDailyLogSync, syncMarksProjection } from "./dailyLogSync.server";
@@ -36,12 +36,15 @@ export async function scrapRecentWriting(projectFolderId: string, humanId: strin
        AND human_id = $humanId AND updated_at >= $since`,
     { projectFolderId, humanId, since },
   );
+  // A suggestion Card feeds what a Guide took (`taken_content`), so that
+  // goes too, or the sync would keep feeding it.
   const cards = (result?.[0] ?? [])
     .map((r) => formatRecord(r as unknown as FileRef))
-    .filter((c) => !!c.date && !!(c.content ?? "").trim());
+    .filter((c) => !!c.date && !!`${c.content ?? ""}${c.taken_content ?? ""}`.trim());
   for (const card of cards) {
     await saveDailyLogCard(card._id, "");
-    await dropSyncedAttachments(projectFolderId, humanId, card.date!, card.content ?? "");
+    if (card.suggestion) await merge("file_refs", card._id, { taken_content: null, passed_content: null });
+    await dropSyncedAttachments(projectFolderId, humanId, card.date!, `${card.content ?? ""}\n${card.taken_content ?? ""}`);
   }
   const marks = await scrapMarksSince(projectFolderId, humanId, since);
   // The empty copies and the marks' copy reach the project's syncs now,

@@ -46,6 +46,8 @@ import { SidebarToggleIcon } from "stamps/SidebarToggleIcon";
 import { Modal } from "stamps/Modal";
 import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
 import { SearchCollection } from "stamps/SearchCollection";
+import { SearchField } from "stamps/SearchField";
+import { Select } from "stamps/Select";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
 import { Grid } from "stamps/Grid";
@@ -1252,9 +1254,41 @@ function FormInputsSection() {
             the DOM for screen readers.
           </p>
           <div style={{ maxWidth: "260px" }}>
-            <Input label="Search" name="search-demo" placeholder="Search…" hideLabel />
+            <Input label="Name" name="hide-label-demo" placeholder="Name" hideLabel />
           </div>
-          <SpecimenCaption>{'<Input label="Search" hideLabel />'}</SpecimenCaption>
+          <SpecimenCaption>{'<Input label="Name" hideLabel />'}</SpecimenCaption>
+        </Stack>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Select
+          </div>
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            <Code>Select</Code> from <Code>stamps/Select</Code>: the dropdown,
+            a native <Code>select</Code> drawn as the stamp field with its own
+            chevron. <Code>normal</Code> sits beside an <Code>Input</Code>;{" "}
+            <Code>small</Code> sits in a row of text, like a person's group on
+            the Humans page.
+          </p>
+          <Cluster gap={4} align="flex-end">
+            <div style={{ width: "220px" }}>
+              <Select
+                label="Group"
+                name="select-demo"
+                placeholder="Pick a group"
+                options={["Guide", "Crafter", "Observer", "Client"].map((g) => ({ value: g, label: g }))}
+              />
+            </div>
+            <Select
+              label="Group, small"
+              hideLabel
+              size="small"
+              name="select-demo-small"
+              defaultValue="Client"
+              options={["Guide", "Crafter", "Observer", "Client"].map((g) => ({ value: g, label: g }))}
+            />
+          </Cluster>
+          <SpecimenCaption>{'<Select label="Group" name="group" size="small" options={[...]} />'}</SpecimenCaption>
         </Stack>
       </Stack>
     </Section>
@@ -1481,7 +1515,6 @@ function SearchCollectionDemo() {
         }
         searchInputProps={{
           label: "Search fruits",
-          hideLabel: true,
           name: "fruit-search",
           value: query,
           onChange: (e) => setQuery(e.target.value),
@@ -1506,6 +1539,15 @@ function CollectionsSection() {
           the demo below) or submit-to-create.
         </p>
         <SearchCollectionDemo />
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>SearchField</Code> from <Code>stamps/SearchField</Code>: the
+          search bar on its own, the same one <Code>SearchCollection</Code>{" "}
+          uses. Every search bar in the app is this.
+        </p>
+        <div style={{ maxWidth: "320px" }}>
+          <SearchField label="Search" name="search-field-demo" placeholder="Search…" />
+        </div>
+        <SpecimenCaption>{'<SearchField label="Search" name="q" placeholder="Search…" />'}</SpecimenCaption>
       </Stack>
     </Section>
   );
