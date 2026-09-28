@@ -37,7 +37,7 @@
  * they never trigger this.
  *
  * Directive vocabulary (first functional pass):
- *   :::section{bg="cream|peach|mint|lavender" accent="red|green|purple" list="timeline"}
+ *   :::section{bg="cream|peach|mint|lavender|white" accent="red|green|purple" list="timeline"}
  *     — full-bleed colored band; body renders through the ordinary
  *     pipeline. `accent` recolors headings (named-color vocabulary, same
  *     as `:::section-title`/`::line`); `list` swaps in a NAMED bullet
@@ -105,11 +105,20 @@
  *     absolute — anchor/delta semantics don't apply there) is built in
  *     `WavyLine.tsx` but not wired to a directive yet — reserved for the
  *     Home template's page-spanning connector.
- *   :::pricing-card{name="..." price="..." cta="..." cta-href="..."} —
- *     body is an ordinary bullet list of features.
- *   ::button{text="..." href="..."} — a standalone CTA pill link (the
- *     pricing card's own `cta`/`cta-href` render through the same
- *     `.website-button` style).
+ *   :::pricing-card{name="..." price="..." cta="..." cta-href="..." cta-variant="primary|purple|secondary|yellow|outline"} —
+ *     body is an ordinary bullet list of features; `cta-variant` -- see
+ *     `::button`'s own entry below -- defaults to `primary`.
+ *   ::button{text="..." href="..." variant="primary|purple|secondary|yellow|outline"} —
+ *     a standalone CTA link, styled with `stamps/button.css`'s own
+ *     `button({ variant })` recipe (the site's ordinary buttons elsewhere
+ *     in the app) rather than a bespoke website-only look. `variant`
+ *     (default `primary`) picks any of the recipe's own variants —
+ *     `purple`/`outline` don't bake in their own padding/display (see
+ *     `button.css.ts`'s own comments), so this directive supplies the
+ *     same fallback values the Stamps guide's own specimen page already
+ *     demonstrates for both, rather than rendering an incomplete-looking
+ *     button. The pricing card's own `cta`/`cta-href` render through the
+ *     exact same recipe.
  *   ::badge{text="..." variant="neutral|success|warning|danger"} — a
  *     status pill, reusing `stamps/Badge` (same component the "Draft"
  *     preview banner already uses) rather than a bespoke style.
@@ -119,16 +128,38 @@
  *     `resolveWebsiteDailyLogEntries`) since it needs real vault/DB access
  *     `OxRenderer` never has on its own.
  */
+import type { CSSProperties } from "react";
 import type { DirectiveRegistry } from "./directiveRegistry";
 import { WebsiteIcon } from "./websiteIcons";
 import { WebsiteStamp } from "./websiteStamps";
 import { WavyLine } from "./WavyLine";
 import OxRenderer from "../components/OxRenderer";
 import { Badge } from "stamps/Badge";
+import { button as stampsButton } from "stamps/button.css";
 import { parseLinePoints, type LineCurveKind } from "oxmarkdown-core";
 import "../styles/website.css";
 
 const LINE_CURVE_KINDS = ["smooth", "straight", "bezier"] as const;
+
+const WEBSITE_BUTTON_VARIANTS = ["primary", "purple", "secondary", "yellow", "outline"] as const;
+type WebsiteButtonVariant = (typeof WEBSITE_BUTTON_VARIANTS)[number];
+function toWebsiteButtonVariant(v: string | undefined): WebsiteButtonVariant {
+  return (WEBSITE_BUTTON_VARIANTS as readonly string[]).includes(v ?? "")
+    ? (v as WebsiteButtonVariant)
+    : "primary";
+}
+
+/** `purple`/`outline` deliberately don't bake in their own padding/display
+ * (see `stamps/button.css.ts`'s own comments -- `purple` is `primary`
+ * minus the padding, `outline` brings both display and padding itself) --
+ * a plain markdown attribute has no way to supply arbitrary CSS, so a page
+ * author picking either still gets a complete-looking button here,
+ * matching the exact fallback values the Stamps guide's own specimen page
+ * (`maker_.stamps.tsx`'s `BUTTON_VARIANTS`) already demonstrates for both. */
+const WEBSITE_BUTTON_VARIANT_STYLE: Partial<Record<WebsiteButtonVariant, CSSProperties>> = {
+  purple: { padding: "8px 20px" },
+  outline: { padding: "8px 16px", display: "inline-flex" },
+};
 function toLineCurveKind(v: string | undefined): LineCurveKind {
   return (LINE_CURVE_KINDS as readonly string[]).includes(v ?? "") ? (v as LineCurveKind) : "smooth";
 }
@@ -181,10 +212,18 @@ const SECTION_BG_CLASS: Record<string, string> = {
   peach: "website-bg-peach",
   mint: "website-bg-mint",
   lavender: "website-bg-lavender",
+  white: "website-bg-white",
 };
 
 export function buildWebsiteDirectiveRegistry(opts: {
   dailyLogEntries: Record<string, WebsiteDailyLogEntry>;
+  /** Forces `::stamp{...}`'s light/dark asset pick, bypassing its own
+   * `<picture>`/`<source media="...">` OS-driven selection -- see
+   * `WebsiteStamp`'s own `forcedScheme` comment (`websiteStamps.tsx`) for
+   * why that needs an explicit override instead of a CSS trick. Passed
+   * by the Vault website editor's / `/maker/stamps/scratch` guide's own
+   * preview toggle; leave undefined for the real public `/v2` page. */
+  forcedScheme?: "light" | "dark";
 }): DirectiveRegistry {
   return {
     section({ attrs, children }) {
@@ -209,6 +248,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
           rotate={Number.isFinite(rotate) ? rotate : 0}
           float={float}
           waypointId={attrs.id}
+          forcedScheme={opts.forcedScheme}
         />
       );
     },
@@ -252,6 +292,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
     },
 
     "pricing-card"({ attrs, children }) {
+      const ctaVariant = toWebsiteButtonVariant(attrs["cta-variant"]);
       return (
         <div className="website-pricing-card">
           <div className="website-pricing-card-header">
@@ -260,7 +301,11 @@ export function buildWebsiteDirectiveRegistry(opts: {
           </div>
           <div className="website-pricing-card-body">{children}</div>
           {attrs.cta && attrs["cta-href"] && (
-            <a className="website-button website-pricing-card-cta" href={attrs["cta-href"]}>
+            <a
+              className={`${stampsButton({ variant: ctaVariant })} website-button-link website-pricing-card-cta`}
+              href={attrs["cta-href"]}
+              style={{ textDecoration: "none", ...WEBSITE_BUTTON_VARIANT_STYLE[ctaVariant] }}
+            >
               {attrs.cta}
             </a>
           )}
@@ -270,8 +315,26 @@ export function buildWebsiteDirectiveRegistry(opts: {
 
     button({ attrs }) {
       if (!attrs.text || !attrs.href) return null;
+      const variant = toWebsiteButtonVariant(attrs.variant);
+      // `stamps/button.css`'s own recipe -- see this file's header comment
+      // for why the `::button` directive uses the site's ordinary button
+      // look instead of a bespoke one. `textDecoration: "none"` inline --
+      // the recipe is applied polymorphically to `<button>`/`<a>`/`<Link>`
+      // across the app and never bakes in an anchor-specific reset itself
+      // (same convention `v2.tsx`'s own nav `<Link>` already uses).
+      // `website-button-link` -- see `oxmarkdown.css`'s own `.ox-content a`
+      // rule (and `website.css`'s comment on this class) for why a plain
+      // recipe class alone isn't enough on an `<a>` here: a REAL BUG, not
+      // just belt-and-suspenders (confirmed via a real render, not just
+      // CSS-reading) -- `.ox-content a`'s own `color` rule is MORE specific
+      // than the recipe's own plain class and was winning the cascade
+      // regardless of variant.
       return (
-        <a className="website-button" href={attrs.href}>
+        <a
+          className={`${stampsButton({ variant })} website-button-link`}
+          href={attrs.href}
+          style={{ textDecoration: "none", ...WEBSITE_BUTTON_VARIANT_STYLE[variant] }}
+        >
           {attrs.text}
         </a>
       );

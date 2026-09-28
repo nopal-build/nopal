@@ -28,7 +28,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --website-bg-page: var(--surface-night-100);
+    --website-bg-page: var(--purple);
   }
 }
 .website-page-bg {
@@ -70,18 +70,22 @@
   }
 }
 
-/* Manual override for the `/maker/stamps/scratch` guide's own light/dark
-   PREVIEW toggle (`maker_.stamps_.scratch.tsx`) -- lets it show either
-   scheme's colors regardless of the browser's actual OS-level
-   `prefers-color-scheme`. Plain descendant custom-property declarations
-   like these always win over whatever an ancestor's `@media` block
-   resolved to (ordinary CSS inheritance: the nearest declared value
-   wins, regardless of specificity) -- no exotic `light-dark()`/
-   `color-scheme` mechanism needed. Deliberately narrow: only the tokens
-   THIS file actually makes scheme-aware today (the two accents above,
-   plus the page background) -- NOT a general reproduction of
-   `.ox-tokens`'s own (much larger) dark-mode block, which is a separate,
-   unrelated concern from today's ask. */
+/* Manual override for the `/maker/stamps/scratch` guide's / Vault website
+   editor's (`WebsitePageSplitEditor` in `vault.tsx`) own light/dark
+   PREVIEW toggle -- lets either show either scheme's colors regardless
+   of the browser's actual OS-level `prefers-color-scheme`. Plain
+   descendant custom-property declarations like these always win over
+   whatever an ancestor's `@media` block resolved to (ordinary CSS
+   inheritance: the nearest declared value wins, regardless of
+   specificity) -- no exotic `light-dark()`/`color-scheme` mechanism
+   needed. Only covers the 2 tokens THIS file makes scheme-aware (plus
+   the page background) -- `oxmarkdown.css`'s OWN much larger `.ox-tokens`
+   dark-mode block (actual TEXT colors: headings, links, code background,
+   etc.) is handled separately, right there in that file, because that
+   block sets those properties directly on the SAME element rather than
+   an ancestor -- plain inheritance can't reach it, so it needs its own
+   `.website-preview-force-{light,dark} .ox-tokens` selector instead of
+   this simpler trick. See that file's comment for why. */
 .website-preview-force-light {
   --website-accent-green: var(--green);
   --website-accent-red: var(--red);
@@ -90,7 +94,7 @@
 .website-preview-force-dark {
   --website-accent-green: var(--green-light);
   --website-accent-red: var(--red-light);
-  --website-bg-page: var(--surface-night-100);
+  --website-bg-page: var(--purple);
 }
 
 /* ── Content shell (`WebsitePageContent`, packages/stamps) ──────────────── */
@@ -145,6 +149,22 @@
 .ox-content.website-page-ox {
   padding-left: 0;
   padding-right: 0;
+  /* The base `.ox-content` rule (oxmarkdown.css) sets `overflow-x: clip`
+     to contain gutter-marker overflow -- this class already zeroes that
+     gutter out, so there's nothing left needing containment, and the
+     clip actively breaks `.website-section`'s own intentional negative-
+     margin bleed below: `.ox-content`'s own box is exactly this shell's
+     CONTENT width (narrower than its padded box), so the clip cut the
+     bleed off right at that boundary -- a real, confirmed bug (found via
+     a direct repro, not just CSS-reading), not merely a theoretical risk.
+     `overflow-y` stays whatever the base rule already set (`visible`) --
+     setting ONLY `overflow-x` here keeps both axes still matching
+     (`visible`/`visible`), which matters: per the CSS Overflow spec, a
+     MISMATCHED pair (one `visible`, the other anything but `visible`/
+     `clip`) silently forces the `visible` one to compute as `auto`
+     instead -- oxmarkdown.css's own `.ox-content` comment documents this
+     exact gotcha already. */
+  overflow-x: visible;
 }
 .ox-content.website-page-ox :is(ul, ol) {
   padding-left: 26px;
@@ -189,7 +209,7 @@
    the variable directly. */
 @container (min-width: 720px) {
   .website-section {
-    border-radius: 16px;
+    border-radius: 4px;
   }
 }
 
@@ -221,6 +241,16 @@
 }
 .website-bg-lavender {
   background: var(--moonlight-500);
+}
+/* `cream` (above) is literally just `--website-bg-page` -- the page's OWN
+   resting background -- so a section left at the default `bg` (or
+   explicitly `bg="cream"`) reads as invisible/blended-in, not a distinct
+   band. `white` gives a real, always-white (not scheme-aware, same as
+   `peach`/`mint`/`lavender` above -- none of those swap in dark mode
+   either) option for a section that should actually stand OUT against
+   the page, cream included. */
+.website-bg-white {
+  background: var(--white);
 }
 
 /* Optional heading-color override (`accent="red"|"green"|"purple"`) for a
@@ -483,15 +513,24 @@
 
 /* ── Buttons (`::button{...}`, pricing card's own cta) ─────────────────── */
 
-.website-button {
-  display: inline-block;
-  padding: 10px 20px;
-  background: var(--purple);
-  color: var(--white);
-  border-radius: 999px;
-  text-decoration: none;
-  font-weight: bold;
-}
+/* The look itself is `stamps/button.css`'s own `button({ variant: "..." })`
+   recipe now (`websiteDirectives.tsx`) -- no bespoke `.website-button`
+   class anymore, so a `/v2` CTA matches every other button in the app
+   instead of drifting into its own pill-shaped look. `variant` on the
+   `::button{...}` directive picks any of the recipe's own variants
+   (`primary` default, `purple`/`secondary`/`yellow`/`outline`).
+
+   `.website-button-link` (applied alongside the recipe class at every
+   call site, see `websiteDirectives.tsx`) is a marker class ONLY --
+   carries no rules of its own here. `oxmarkdown.css`'s `.ox-content a`
+   rule excludes it (`:not(.website-button-link)`) instead of this file
+   re-declaring a color override -- a real, confirmed bug once this
+   directive supported more than one variant: re-declaring a fixed color
+   here could only ever match ONE variant's own intended text color,
+   fighting (and winning against) every other variant's own correct one
+   sitting right there in the recipe. Excluding the marker class from the
+   competing rule instead lets the recipe's own plain class win outright,
+   for any variant, unimpeded. */
 
 .website-pricing-card-cta {
   margin-top: 12px;

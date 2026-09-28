@@ -5,8 +5,15 @@
 // itself is organized into now:
 //
 //   1. `palette`        — raw values, nature-themed families (on brand for
-//                          a company named after the prickly pear cactus)
-//                          on a 100–900 scale, populated lazily.
+//                          a company named after the prickly pear cactus),
+//                          each on a full 100–900 scale. Only specific
+//                          rungs per family are "real" (referenced by a
+//                          `colors` alias or `semanticColors` token below
+//                          — see root.css's own comment above each family
+//                          for which); the rest are generated tints/
+//                          shades for a broader working palette during
+//                          development, not meant to be reached for over
+//                          a semantic token.
 //   2. `colors`         — literal color-name aliases onto specific palette
 //                          rungs (`purple` === `plum` 700, etc.) — kept for
 //                          shorthand/memory ("purple" is faster to say/
@@ -35,29 +42,70 @@
 // too without any of these exported names changing.
 export const palette = {
   plum: {
+    100: "var(--plum-100)",
     200: "var(--plum-200)",
     300: "var(--plum-300)",
     400: "var(--plum-400)",
+    500: "var(--plum-500)",
+    600: "var(--plum-600)",
     700: "var(--plum-700)",
+    800: "var(--plum-800)",
+    900: "var(--plum-900)",
   },
   cactus: {
     100: "var(--cactus-100)",
+    200: "var(--cactus-200)",
     300: "var(--cactus-300)",
+    400: "var(--cactus-400)",
     500: "var(--cactus-500)",
+    600: "var(--cactus-600)",
+    700: "var(--cactus-700)",
+    800: "var(--cactus-800)",
+    900: "var(--cactus-900)",
   },
   clay: {
+    100: "var(--clay-100)",
+    200: "var(--clay-200)",
     300: "var(--clay-300)",
+    400: "var(--clay-400)",
     500: "var(--clay-500)",
+    600: "var(--clay-600)",
+    700: "var(--clay-700)",
+    800: "var(--clay-800)",
+    900: "var(--clay-900)",
   },
   dune: {
+    100: "var(--dune-100)",
+    200: "var(--dune-200)",
     300: "var(--dune-300)",
+    400: "var(--dune-400)",
     500: "var(--dune-500)",
+    600: "var(--dune-600)",
+    700: "var(--dune-700)",
+    800: "var(--dune-800)",
+    900: "var(--dune-900)",
   },
   bloom: {
+    100: "var(--bloom-100)",
+    200: "var(--bloom-200)",
+    300: "var(--bloom-300)",
+    400: "var(--bloom-400)",
     500: "var(--bloom-500)",
+    600: "var(--bloom-600)",
+    700: "var(--bloom-700)",
+    800: "var(--bloom-800)",
+    900: "var(--bloom-900)",
   },
   moonlight: {
+    100: "var(--moonlight-100)",
+    200: "var(--moonlight-200)",
+    300: "var(--moonlight-300)",
+    400: "var(--moonlight-400)",
     500: "var(--moonlight-500)",
+    600: "var(--moonlight-600)",
+    700: "var(--moonlight-700)",
+    800: "var(--moonlight-800)",
+    900: "var(--moonlight-900)",
   },
   surface: {
     day: {

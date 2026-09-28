@@ -35,6 +35,7 @@ export function WebsiteStamp({
   rotate = 0,
   float = "inline",
   waypointId,
+  forcedScheme,
 }: {
   name: string;
   /** Degrees — matches the mockups' slightly-tilted stamp cards. The
@@ -43,6 +44,22 @@ export function WebsiteStamp({
   rotate?: number;
   float?: "left" | "right" | "inline";
   waypointId?: string;
+  /** Forces which asset of the light/dark pair renders, bypassing the
+   * `<picture>`/`<source media="...">` selection below entirely -- for the
+   * Vault website editor's / `/maker/stamps/scratch` guide's own preview
+   * toggle (`.website-preview-force-{light,dark}`, fruits-only). That
+   * toggle is a pure CSS trick (an ancestor class + higher-specificity
+   * overrides), and `<source media="(prefers-color-scheme: dark)">` is
+   * NOT a CSS rule at all -- it's resolved by the browser's own
+   * media-query engine against the ACTUAL OS/browser scheme at parse
+   * time, completely outside the page's CSS cascade. No selector,
+   * however specific, can override which `<source>` a `<picture>`
+   * picked -- so previewing the opposite scheme needs this explicit prop
+   * instead, which swaps the rendered `<img>` directly in JS/markup
+   * rather than relying on the browser to re-decide. Always undefined
+   * here (webapp has no preview toggle) -- kept for parity with fruits'
+   * copy since this component/prop shape is meant to stay identical. */
+  forcedScheme?: "light" | "dark";
 }) {
   const asset = WEBSITE_STAMPS[name];
   const style = { "--stamp-rotate": `${rotate}deg` } as CSSProperties;
@@ -60,6 +77,18 @@ export function WebsiteStamp({
       >
         stamp: {name || "?"}
       </span>
+    );
+  }
+
+  if (forcedScheme) {
+    return (
+      <img
+        src={asset[forcedScheme]}
+        alt=""
+        className={`website-stamp website-stamp-img ${floatClass}`}
+        style={style}
+        data-waypoint-id={waypointId || undefined}
+      />
     );
   }
 

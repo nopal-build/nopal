@@ -27,6 +27,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   createFileRef,
   getFileRefById,
+  getFolderAncestry,
   getFolderById,
   listFolderChildren,
   updateFileRef,
@@ -477,24 +478,35 @@ export async function getPrimaryWebsiteFolder(): Promise<VaultFolder | null> {
  * (whenever `content`/`name`/`folder_id` is part of it) via the lazy
  * `getWebsiteModule()` import there — a no-op for the overwhelming
  * majority of vault writes, which have nothing to do with a `website`
- * project at all. Only bumps the cache when the edited file's own folder
+ * project at all. Only does real work when the edited file's own folder
  * is actually `folder_type: "website"` (denormalized onto every
- * descendant of a website anchor, so this needs no ancestry walk to
- * check).
+ * descendant of a website anchor, so THIS part needs no ancestry walk).
  *
- * Bumps the PRIMARY site's cache version regardless of which `website`
- * project the file actually lives in — today there's only ever one
- * (`getPrimaryWebsiteFolder`, config-selected), the same simplification
- * that function's own doc comment already calls out. A multi-site future
- * would need this to resolve the file's OWN anchor (walk its ancestry for
- * `is_folder_type_root && folder_type === "website"`, `findWebsiteAnchor`
- * above already does exactly that given an ancestry array) rather than
- * always reaching for the one primary site.
+ * Resolves the file's OWN website anchor via its ancestry
+ * (`getFolderAncestry` + `findWebsiteAnchor`, above) rather than reaching
+ * for `getPrimaryWebsiteFolder()` (which reads `WEBSITE_PROJECT_FOLDER_ID`)
+ * — a REAL BUG this fixes, not just a multi-site nicety: this function
+ * runs inside `vault.server.ts`'s `updateFileRef`, i.e. inside WHICHEVER
+ * app's process actually saved the file (in practice, `fruits`, since
+ * that's where the Vault UI lives) — and `WEBSITE_PROJECT_FOLDER_ID` has
+ * never been configured for `fruits` (see
+ * `fruits/scripts/copy-secrets-from-webapp.sh`'s own comment: "fruits has
+ * no use for" it — true until this cache existed). Reaching for it here
+ * meant `getPrimaryWebsiteFolder()` always returned `null` in the process
+ * that actually needed to invalidate, so a saved edit never bumped the
+ * version at all — confirmed directly (a real repro: patching this exact
+ * file's content through the real API and checking Redis showed the
+ * version never moved), not just reasoned about. The only reason an edit
+ * ever became visible was this cache's own 1-hour TTL backstop expiring.
+ * Resolving the file's own anchor instead needs no cross-app env var at
+ * all, and is correct for a future multi-site world too (bumps the
+ * SPECIFIC site the file belongs to, not always "the primary one").
  */
 export async function invalidateWebsiteCacheForFile(file: FileRef): Promise<void> {
   if (!file.folder_id) return;
   const folder = await getFolderById(file.folder_id);
   if (folder?.folder_type !== "website") return;
-  const siteFolder = await getPrimaryWebsiteFolder();
-  if (siteFolder) await invalidateWebsiteCache(siteFolder._id);
+  const ancestry = await getFolderAncestry(file.folder_id);
+  const anchor = findWebsiteAnchor(ancestry);
+  if (anchor) await invalidateWebsiteCache(anchor._id);
 }

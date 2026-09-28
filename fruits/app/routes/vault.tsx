@@ -1622,6 +1622,16 @@ function WebsitePageSplitEditor({
   // always starts on Preview (matches the mockup's own "(default)" note).
   const [mobileView, setMobileView] = useState<"preview" | "markdown">("preview");
 
+  // Forces the Preview pane's own `--website-bg-page`/`--website-accent-*`
+  // tokens (website.css) to a specific scheme, regardless of this browser's
+  // actual `prefers-color-scheme` -- same mechanism (and same default,
+  // "light") as the `/maker/stamps/scratch` guide's own preview toggle
+  // (`PreviewBox`'s `previewScheme` there). NOT persisted -- a per-session
+  // preview aid, not a real setting. Desktop-only, same as "Flip layout"
+  // right alongside it below -- the whole toolbar this lives in is hidden
+  // on mobile (`.vault-website-editor-toolbar`'s own `@media` rule).
+  const [previewScheme, setPreviewScheme] = useState<"light" | "dark">("light");
+
   // Self-contained fullscreen takeover -- see `.vault-website-editor--
   // expanded`'s own CSS comment for why this doesn't need to reach into
   // Vault's own sidebar/topbar state to hide them.
@@ -1704,6 +1714,22 @@ function WebsitePageSplitEditor({
         />
         <ActionBar>
           <ActionBarGroup>
+            <ActionBarButton
+              active={previewScheme === "light"}
+              onClick={() => setPreviewScheme("light")}
+              aria-label="Preview in light mode"
+            >
+              Light
+            </ActionBarButton>
+            <ActionBarButton
+              active={previewScheme === "dark"}
+              onClick={() => setPreviewScheme("dark")}
+              aria-label="Preview in dark mode"
+            >
+              Dark
+            </ActionBarButton>
+          </ActionBarGroup>
+          <ActionBarGroup>
             <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">
               <LayoutFlipIcon mdSide={mdSide} />
             </ActionBarButton>
@@ -1753,7 +1779,19 @@ function WebsitePageSplitEditor({
               <span>Preview</span>
               <span className="vault-website-editor-mobile-expand">{expandButton}</span>
             </div>
-            <div className="vault-website-editor-preview-body">
+            <div
+              className={`vault-website-editor-preview-body ${
+                previewScheme === "dark" ? "website-preview-force-dark" : "website-preview-force-light"
+              }`}
+              // Same technique the scratch guide's own `PreviewBox` uses --
+              // `--website-bg-page` is exactly the token the two force-scheme
+              // classes above override, so painting it here (rather than
+              // leaving this pane showing `Surface`'s own neutral app-panel
+              // background) makes the preview's own resting background
+              // actually flip with the toggle too, not just section/accent
+              // colors inside it.
+              style={{ background: "var(--website-bg-page)" }}
+            >
               {/* `dailyLogEntries: {}` -- an unresolved `::daily-log{...}`
                   renders nothing here, same documented fail-soft behavior
                   the `/maker/stamps/scratch` playground's own preview
@@ -1769,7 +1807,7 @@ function WebsitePageSplitEditor({
               <WebsitePageContent>
                 <OxRenderer
                   markdown={body}
-                  directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {} })}
+                  directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme: previewScheme })}
                   className="ox-no-dots ox-no-heading-marks website-page-ox"
                 />
               </WebsitePageContent>

@@ -92,7 +92,30 @@ export function useStickyPaneMaxHeight(
       const scrollerRect = scroller!.getBoundingClientRect();
       const naturalOffset = paneRect.top - scrollerRect.top + scroller!.scrollTop;
 
-      setMaxHeight(Math.max(0, available - naturalOffset));
+      const raw = available - naturalOffset;
+      // A REAL BUG, found via a real repro, not just reasoning about the
+      // math: a non-positive `raw` here has always meant "this particular
+      // measurement is garbage" in every case actually seen -- `available`
+      // reading near-zero because the scroller's own ancestors hadn't
+      // resolved a definite height yet at that exact moment (a `height:
+      // 100%`-up-the-chain layout, like `appLayoutShell.css.ts`'s, only
+      // resolves once EVERY ancestor up to `<html>` has one -- timing-
+      // sensitive around hydration/first paint), OR `naturalOffset` coming
+      // out anomalously large for some other transient reason -- NEVER a
+      // legitimate "this sticky sidebar genuinely has zero room." The old
+      // code trusted it anyway (`Math.max(0, raw)`), silently clamping to
+      // a bogus `0` that collapsed `panel` to nothing -- and nothing ever
+      // recovered it afterward unless the scroller's size happened to
+      // change again later (a real window resize), since nothing else ever
+      // re-runs this. Skipping the update instead -- leaving whatever
+      // value (or `null`, falling back to this file's own CSS `100vh`)
+      // already applied -- means a bad reading is simply ignored rather
+      // than committed; `ResizeObserver` keeps firing on every subsequent
+      // real size change regardless, so a good measurement still lands the
+      // moment one's actually available, with no retry/poll needed here.
+      if (raw <= 0) return;
+
+      setMaxHeight(raw);
     }
 
     recompute();

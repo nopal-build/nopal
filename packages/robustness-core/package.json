@@ -68,6 +68,7 @@
     "./data/vaultFolderTypes": "./src/data/vaultFolderTypes.ts",
     "./data/vaultRoots": "./src/data/vaultRoots.ts",
     "./data/website.server": "./src/data/website.server.ts",
+    "./data/websiteCache.server": "./src/data/websiteCache.server.ts",
     "./data/websiteScratches.server": "./src/data/websiteScratches.server.ts",
     "./data/websiteScratchPads.server": "./src/data/websiteScratchPads.server.ts",
     "./util/nopalDirectives": "./src/util/nopalDirectives.ts",

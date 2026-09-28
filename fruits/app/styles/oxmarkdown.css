@@ -125,6 +125,55 @@
   }
 }
 
+/* Manual override for the Vault website-page editor's / `/maker/stamps/
+   scratch` guide's own light/dark PREVIEW toggle (`WebsitePageSplitEditor`
+   in `vault.tsx`, `PreviewBox` in `maker_.stamps_.scratch.tsx`) -- lets
+   either force the opposite scheme's TEXT colors regardless of the
+   browser's actual OS-level `prefers-color-scheme`. `website.css`'s own
+   `.website-preview-force-{light,dark}` classes already do this for the
+   3 `--website-*` tokens they own, but that trick only works there
+   because nothing on the descendant element itself re-declares those
+   same properties, so plain ancestor-to-descendant custom-property
+   INHERITANCE is free to carry the forced value all the way down. These
+   `--ox-*` tokens are different: `.ox-tokens` (below, and the real
+   `@media` block above) sets them directly on THAT SAME element (the
+   `OxRenderer` root div), so a value declared on an ancestor wrapper
+   never gets a chance to be inherited at all -- the descendant's own
+   rule always wins over inheritance, and the real OS scheme's `@media`
+   query keeps deciding which one that is. Selecting `.ox-tokens` itself
+   here (not just the ancestor) is what actually fixes that: two classes
+   beats one, so this reliably out-specifies the plain `.ox-tokens`/
+   `@media (prefers-color-scheme: dark) { .ox-tokens {...} }` rules above
+   in EITHER direction, regardless of which one the browser's real query
+   currently matches. Deliberately omits `--ox-color-grid-dot` (it's a
+   `color-mix()` formula that already reads `--ox-color-text` live, so it
+   self-corrects for free) and `--ox-color-selected-{bg,border}` (same
+   story via `--ox-color-accent`) -- redeclaring either here would fight
+   the separate `@media (min-resolution: 2x)` block further down for
+   `--ox-color-grid-dot` specifically. */
+.website-preview-force-light .ox-tokens {
+  --ox-color-text: var(--purple, #3f2b46);
+  --ox-color-heading: var(--purple, #3f2b46);
+  --ox-color-accent: var(--purple-light, #7f5b8b);
+  --ox-color-link: var(--purple-light, #7f5b8b);
+  --ox-color-subtle: var(--text-subtle, #817186);
+  --ox-color-code-bg: var(--midground, #ece7f3);
+  --ox-color-mark-bg: var(--yellow-light, #fcf0c4);
+  --ox-color-border: var(--midground, #ece7f3);
+  --ox-color-unknown: var(--red, #a63b31);
+}
+.website-preview-force-dark .ox-tokens {
+  --ox-color-text: var(--dark-text, #e8ddd4);
+  --ox-color-heading: var(--moon, #c4c6fc);
+  --ox-color-accent: var(--moon, #c4c6fc);
+  --ox-color-link: white;
+  --ox-color-subtle: var(--text-subtle-dark, #c8b8ce);
+  --ox-color-code-bg: var(--dark-farground, #221a28);
+  --ox-color-mark-bg: color-mix(in srgb, var(--yellow-light, #fcf0c4) 35%, var(--dark-farground, #221a28));
+  --ox-color-border: var(--dark-midground, #6d6e99);
+  --ox-color-unknown: var(--red-light, #f6c8c3);
+}
+
 @media (min-resolution: 2x) {
   .ox-tokens {
     --ox-color-grid-dot: color-mix(in srgb, var(--ox-color-text) 40%, transparent);
@@ -389,7 +438,24 @@
 .ox-dot-grid > *:not(:first-child),
 .ox-content blockquote > *:not(:first-child),
 .ox-content li > *:not(:first-child),
-.ox-content .ox-toggle-body > *:not(:first-child) {
+.ox-content .ox-toggle-body > *:not(:first-child),
+/* A REAL BUG, found via a real repro (a list directly followed by
+   `::button{...}`, exactly one blank line apart, inside a
+   `:::section{...}`): these website-directive container wrappers
+   (`website.css`) render their own block children (`renderBlockNodes`)
+   directly inside themselves, same as every case already listed above --
+   but were never added here, so any two ordinary block siblings inside a
+   section/pricing-card body rendered with ZERO gap between them, exactly
+   the missing-rhythm bug this rule's own header already describes, just
+   never noticed for these since most existing section content happened
+   not to expose it (a single list, or other incidental margins masking
+   the missing rhythm). Deliberately NOT `.website-section-title` too --
+   that one's own layout is a specific flex/`align-items: flex-end`
+   composition with an absolutely-positioned `::line{...}`, not a plain
+   flow of block siblings, and blindly adding margin-top there risks
+   breaking that alignment instead of fixing a rhythm gap. */
+.ox-content .website-section-inner > *:not(:first-child),
+.ox-content .website-pricing-card-body > *:not(:first-child) {
   margin-top: var(--ox-grid);
 }
 
@@ -611,7 +677,20 @@
 
 /* ── Links / images / thematic break ───────────────────────────────────── */
 
-.ox-content a {
+/* `:not(.website-button-link)` -- a `::button{...}`/pricing-card CTA
+   (`fruits/app/oxmarkdown/websiteDirectives.tsx`) renders as an `<a>` but
+   is a BUTTON, styled with `stamps/button.css`'s own recipe -- not a
+   prose link, and this rule's own `color`/`underline` (meant for actual
+   inline links) was winning the cascade over the recipe's own per-variant
+   text color regardless of which variant was chosen (a REAL, confirmed
+   bug: a `primary` button rendered with purple-light text in light mode,
+   white-on-white in dark mode -- `--ox-color-link`'s own values happen to
+   collide with the recipe's background in each scheme). Excluding it here
+   (rather than re-declaring a color override elsewhere, which would only
+   ever match ONE variant's own intended color) lets the recipe's plain
+   class win outright for ANY variant, unimpeded -- the general, correct
+   fix once more than one variant needs to work. */
+.ox-content a:not(.website-button-link) {
   color: var(--ox-color-link);
   text-decoration: underline;
 }

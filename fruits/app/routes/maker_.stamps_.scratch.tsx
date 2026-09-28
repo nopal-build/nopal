@@ -324,7 +324,7 @@ const TRACING_PAPERS: TracingPaper[] = [
     id: "section",
     name: "Section",
     directive: ':::section{bg="..." accent="..." list="..."}',
-    note: "Container -- a themeable area, not a fully bespoke one: a handful of independent knobs, not complete control over every style. `bg` picks a full-bleed background class (`cream`/`peach`/`mint`/`lavender`, each aliasing an existing palette token — see `website.css`); `accent` optionally recolors headings inside it (`red`/`green`/`purple`); `list` optionally swaps in a NAMED bullet style for the body's own lists (`timeline` today — a small dot + connecting line, not just a tint), fully independent of `accent`. Body renders through the ordinary OxRenderer pipeline otherwise — nothing else section-specific about the heading/paragraph/list styling itself.",
+    note: "Container -- a themeable area, not a fully bespoke one: a handful of independent knobs, not complete control over every style. `bg` picks a full-bleed background class (`cream`/`peach`/`mint`/`lavender`/`white`, each aliasing an existing palette token — see `website.css`; `cream` is literally the page's own resting background, so it reads as blended-in/invisible rather than a distinct band -- `white` is for a section that should actually stand out); `accent` optionally recolors headings inside it (`red`/`green`/`purple`); `list` optionally swaps in a NAMED bullet style for the body's own lists (`timeline` today — a small dot + connecting line, not just a tint), fully independent of `accent`. Body renders through the ordinary OxRenderer pipeline otherwise — nothing else section-specific about the heading/paragraph/list styling itself.",
     fullBleed: true,
     attributes: [
       {
@@ -332,7 +332,7 @@ const TRACING_PAPERS: TracingPaper[] = [
         label: "bg",
         kind: "select",
         default: "mint",
-        options: [{ value: "cream" }, { value: "peach" }, { value: "mint" }, { value: "lavender" }],
+        options: [{ value: "cream" }, { value: "peach" }, { value: "mint" }, { value: "lavender" }, { value: "white" }],
       },
       { key: "accent", label: "accent", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
       {
@@ -452,8 +452,8 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "pricing-card",
     name: "Pricing card",
-    directive: ':::pricing-card{name="..." price="..." cta="..." cta-href="..."}',
-    note: "Container. Header row (name + price) + body (ordinary children, typically a bullet list) + an optional CTA rendered through the same `.website-button` style as a standalone `::button`.",
+    directive: ':::pricing-card{name="..." price="..." cta="..." cta-href="..." cta-variant="primary|purple|secondary|yellow|outline"}',
+    note: "Container. Header row (name + price) + body (ordinary children, typically a bullet list) + an optional CTA rendered through the same `stamps/button.css` `button({ variant })` recipe as a standalone `::button` (`cta-variant`, default `primary`).",
     attributes: [
       { key: "name", label: "name", kind: "text", default: "Light-Guide" },
       { key: "price", label: "price", kind: "text", default: "$1,499/mo" },
@@ -468,13 +468,20 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "button",
     name: "Button",
-    directive: '::button{text="..." href="..."}',
-    note: "Leaf. A standalone CTA pill link — same visual class the pricing card's own cta uses.",
+    directive: '::button{text="..." href="..." variant="primary|purple|secondary|yellow|outline"}',
+    note: "Leaf. A standalone CTA link, styled with `stamps/button.css`'s own `button({ variant })` recipe (same one the pricing card's own cta uses) -- the site's ordinary buttons, not a bespoke website-only look.",
     attributes: [
       { key: "text", label: "text", kind: "text", default: "Meet with a Guide" },
       { key: "href", label: "href", kind: "text", default: "#" },
+      {
+        key: "variant",
+        label: "variant",
+        kind: "select",
+        default: "primary",
+        options: [{ value: "primary" }, { value: "purple" }, { value: "secondary" }, { value: "yellow" }, { value: "outline" }],
+      },
     ],
-    buildMarkdown: (v) => `::button{text="${v.text}" href="${v.href}"}`,
+    buildMarkdown: (v) => `::button{text="${v.text}" href="${v.href}"${v.variant && v.variant !== "primary" ? ` variant="${v.variant}"` : ""}}`,
   },
   {
     id: "badge",
@@ -900,7 +907,7 @@ function PreviewBox({
    * the guide's own toggle preview either one on demand. */
   previewScheme: "light" | "dark";
 }) {
-  const registry = buildWebsiteDirectiveRegistry({ dailyLogEntries: {} });
+  const registry = buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme: previewScheme });
   return (
     <div
       className={previewScheme === "dark" ? "website-preview-force-dark" : "website-preview-force-light"}

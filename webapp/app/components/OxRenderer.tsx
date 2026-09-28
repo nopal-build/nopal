@@ -33,6 +33,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type { Definition, RootContent } from "mdast";
 import {
   parseOxDocument,
+  countBlankLines,
   countExtraBlankLines,
   directiveAttrs,
   isDirectiveNode,
@@ -252,6 +253,23 @@ function renderNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode {
  * `OxEditor`'s Editing-mode import so both surfaces agree). Without this,
  * "1 blank line" and "5 blank lines" between two paragraphs render byte-
  * identically — confirmed regression, see the oxmarkdown skill's TODO 10.
+ *
+ * Also handles the ZERO-blank-line case: CommonMark lets several block
+ * types (a list, an ATX heading, a blockquote, a thematic break, ...)
+ * "interrupt" a paragraph with no blank line at all between them in the
+ * source (e.g. `"Good Building\n# The Terrain"` parses as a paragraph
+ * immediately followed by a heading, not one merged block). The default
+ * `.ox-content` rhythm CSS assumes the ordinary "exactly one blank line
+ * apart" case and would otherwise draw a gap the source never had — tagged
+ * `ox-no-gap-before` here so the CSS can zero its margin for exactly this
+ * case, keeping the render faithful to the actual source line breaks.
+ * Ported from `fruits/app/components/OxRenderer.tsx` (this file's source
+ * of truth) — a real, confirmed gap between the two copies (a page's own
+ * title, immediately preceded by a no-blank-line paragraph, rendered with
+ * a stray 41px `--ox-grid` gap above it here that the Vault preview
+ * — reading the SAME markdown through fruits' own, already-fixed copy —
+ * never had).
+ *
  * Only meaningful for block content (root children, a blockquote's/
  * container directive's children, ...) — inline phrasing content (a
  * paragraph's own children) doesn't have this concept and should keep
@@ -261,13 +279,28 @@ function renderBlockNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode 
   const out: ReactNode[] = [];
   for (let i = 0; i < list.length; i++) {
     const node = list[i];
+    let rendered = renderNode(node, i, ctx);
     if (i > 0) {
-      const extra = countExtraBlankLines(list[i - 1], node);
-      for (let s = 0; s < extra; s++) {
-        out.push(<div key={`spacer-${i}-${s}`} className="ox-blank-line-spacer" aria-hidden="true" />);
+      const gap = countBlankLines(list[i - 1], node);
+      if (gap === 0) {
+        // No blank line at all separated these two blocks in the source (e.g. a
+        // list/heading/blockquote interrupting a paragraph per CommonMark's own
+        // interrupt rules) — the default `margin-top: var(--ox-grid)` rhythm
+        // rule assumes the ordinary "exactly one blank line apart" case and
+        // would otherwise draw a gap the source never had.
+        rendered = isValidElement<{ className?: string }>(rendered)
+          ? cloneElement(rendered, {
+              className: [rendered.props.className, "ox-no-gap-before"].filter(Boolean).join(" "),
+            })
+          : rendered;
+      } else {
+        const extra = countExtraBlankLines(list[i - 1], node);
+        for (let s = 0; s < extra; s++) {
+          out.push(<div key={`spacer-${i}-${s}`} className="ox-blank-line-spacer" aria-hidden="true" />);
+        }
       }
     }
-    out.push(renderNode(node, i, ctx));
+    out.push(rendered);
   }
   return out;
 }
@@ -834,13 +867,10 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     // source of truth): a `<Fragment>` can't carry a `className` (or any
     // other DOM prop), so THAT copy's `renderBlockNodes` "0 blank lines =
     // 0 margin" mechanism (`cloneElement(rendered, {className: "ox-no-gap-
-    // before"})` -- NOT present in this trimmed copy's own simpler
-    // `renderBlockNodes`, which only has the extra-blank-line spacer logic)
-    // could never actually reach a registered container directive's real
-    // host element, since it only ever cloned the wrapping Fragment, which
-    // silently drops unsupported props. Applied here too for the same
-    // underlying correctness reason and to keep both copies structurally
-    // in sync, even though nothing in this copy exercises it yet. Falls
+    // before"})` -- now ALSO present here, see `renderBlockNodes`'s own
+    // comment above) could never actually reach a registered container
+    // directive's real host element, since it only ever cloned the
+    // wrapping Fragment, which silently drops unsupported props. Falls
     // back to the old Fragment-wrapping only if a registry entry doesn't
     // return a single real element (an array, a string, ...), which
     // `cloneElement` can't attach a key to directly.

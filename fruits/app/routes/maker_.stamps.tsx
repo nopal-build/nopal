@@ -433,6 +433,33 @@ const ALIAS_GROUPS: Array<{ label: string; names: string[] }> = [
   { label: "Text", names: ["--text-subtle", "--text-subtle-dark"] },
 ];
 
+const EXTENDED_PALETTE_GROUPS: Array<{ label: string; names: string[] }> = [
+  {
+    label: "Plum",
+    names: ["--plum-100", "--plum-200", "--plum-300", "--plum-400", "--plum-500", "--plum-600", "--plum-700", "--plum-800", "--plum-900"],
+  },
+  {
+    label: "Cactus",
+    names: ["--cactus-100", "--cactus-200", "--cactus-300", "--cactus-400", "--cactus-500", "--cactus-600", "--cactus-700", "--cactus-800", "--cactus-900"],
+  },
+  {
+    label: "Clay",
+    names: ["--clay-100", "--clay-200", "--clay-300", "--clay-400", "--clay-500", "--clay-600", "--clay-700", "--clay-800", "--clay-900"],
+  },
+  {
+    label: "Dune",
+    names: ["--dune-100", "--dune-200", "--dune-300", "--dune-400", "--dune-500", "--dune-600", "--dune-700", "--dune-800", "--dune-900"],
+  },
+  {
+    label: "Bloom",
+    names: ["--bloom-100", "--bloom-200", "--bloom-300", "--bloom-400", "--bloom-500", "--bloom-600", "--bloom-700", "--bloom-800", "--bloom-900"],
+  },
+  {
+    label: "Moonlight",
+    names: ["--moonlight-100", "--moonlight-200", "--moonlight-300", "--moonlight-400", "--moonlight-500", "--moonlight-600", "--moonlight-700", "--moonlight-800", "--moonlight-900"],
+  },
+];
+
 const SEMANTIC_GROUPS: Array<{ label: string; names: string[] }> = [
   {
     label: "Text",
@@ -496,12 +523,33 @@ function ColorsSection() {
             <SwatchGroup key={group.label} label={group.label} names={group.names} format={format} scheme={scheme} />
           ))}
         </Stack>
+
+        <Stack gap={5}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Extended palette (100–900) — not for AI/components to reach for
+          </div>
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            A full tint/shade ramp per hue, for a broader palette to pull
+            from during development — <em>not</em> the tokens to default
+            to (keep using the semantic tokens/aliases above for that).
+            Only specific rungs per family are real, designed colors
+            (the ones already shown above as aliases or semantic tokens);
+            everything else here is generated — linearly interpolated/
+            extrapolated in HSL through those real rungs — purely to fill
+            out the scale. Safe to ignore unless you're hand-picking a
+            one-off shade for something that doesn't have a semantic
+            role yet.
+          </p>
+          {EXTENDED_PALETTE_GROUPS.map((group) => (
+            <SwatchGroup key={group.label} label={group.label} names={group.names} format={format} scheme={scheme} />
+          ))}
+        </Stack>
       </Stack>
     </Section>
   );
 }
 
-// ─── Typography ────────────────────────────────────────────────────────────
+// ─── Typography ───────────────────────────────────────────────────────────────
 
 type TypeSizeToken = keyof typeof textSize;
 type FontWeightToken = "normal" | "medium" | "semibold" | "bold";
