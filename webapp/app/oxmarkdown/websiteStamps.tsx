@@ -11,7 +11,12 @@
  * app's dark-mode convention (no in-app toggle).
  */
 import type { CSSProperties } from "react";
-import "../styles/website.css";
+// No `import "../styles/website.css"` here (unlike fruits' copy) --
+// this module is ONLY ever reached via `WebsitePageView`, which is ONLY
+// ever reached under `/v2/*` -- see `websiteIcons.tsx`'s own comment
+// (right above its own now-removed twin of this import) for why that
+// makes this redundant, and a real repro'd source of an EXTRA jump on
+// top of the one this whole change is meant to fix.
 
 /** Registered stamp illustrations, by name — referenced from markdown as
  * `::stamp{name="mtn"}`. Add a new pair of files under

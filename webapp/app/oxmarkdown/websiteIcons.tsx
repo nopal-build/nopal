@@ -16,7 +16,19 @@
  * page, it just looks obviously unfinished.
  */
 import type { CSSProperties, FC } from "react";
-import "../styles/website.css";
+// No `import "../styles/website.css"` here (unlike fruits' copy) --
+// this module is ONLY ever reached via `WebsitePageView`, which is ONLY
+// ever reached under `/v2/*` -- `routes/v2.tsx`'s own `links()` already
+// guarantees `website.css` is loaded (as a real render-blocking `<link>`,
+// not a JS-injected dev-mode `<style>` tag) before this ever renders. A
+// second, redundant plain import here doesn't just duplicate bytes -- it
+// re-introduces a SECOND, later-arriving copy of the same rules via
+// Vite's dev-mode CSS-injection path, competing with the first and
+// producing an extra flash/jump right after the blocking `<link>` had
+// already settled (found via a real repro: sampling a live
+// `:::section-title{...}` heading's position every 50ms after
+// navigation showed a clean single jump with only the `?url` link, and
+// an extra SECOND jump once this import was still also present).
 
 type IconComponent = FC<{ className?: string }>;
 

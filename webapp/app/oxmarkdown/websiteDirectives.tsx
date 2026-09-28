@@ -131,7 +131,11 @@ import OxRenderer from "../components/OxRenderer";
 import { Badge } from "stamps/Badge";
 import { button as stampsButton } from "stamps/button.css";
 import { parseLinePoints, type LineCurveKind } from "oxmarkdown-core";
-import "../styles/website.css";
+// No `import "../styles/website.css"` here (unlike fruits' copy) --
+// this registry is ONLY ever built by `WebsitePageView`, which is ONLY
+// ever reached under `/v2/*` -- see `websiteIcons.tsx`'s own comment for
+// why that makes this redundant, and a real repro'd source of an EXTRA
+// jump on top of the one this whole change is meant to fix.
 
 const LINE_CURVE_KINDS = ["smooth", "straight", "bezier"] as const;
 

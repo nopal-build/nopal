@@ -82,14 +82,17 @@
    whatever an ancestor's `@media` block resolved to (ordinary CSS
    inheritance: the nearest declared value wins, regardless of
    specificity) -- no exotic `light-dark()`/`color-scheme` mechanism
-   needed. Only covers the 2 tokens THIS file makes scheme-aware (plus
-   the page background) -- `oxmarkdown.css`'s OWN much larger `.ox-tokens`
-   dark-mode block (actual TEXT colors: headings, links, code background,
-   etc.) is handled separately, right there in that file, because that
-   block sets those properties directly on the SAME element rather than
-   an ancestor -- plain inheritance can't reach it, so it needs its own
-   `.website-preview-force-{light,dark} .ox-tokens` selector instead of
-   this simpler trick. See that file's comment for why. */
+   needed. Only covers the tokens THIS file makes scheme-aware (the 2
+   accents, the page background) -- `oxmarkdown.css`'s OWN much larger
+   `.ox-tokens` dark-mode block (actual TEXT colors: headings, links,
+   code background, etc.) is handled separately, right there in that
+   file, because that block sets those properties directly on the SAME
+   element rather than an ancestor -- plain inheritance can't reach it,
+   so it needs its own `.website-preview-force-{light,dark} .ox-tokens`
+   selector instead of this simpler trick. `bg="mint"`'s own dark-mode
+   swap (above) needs that SAME `.ox-tokens`-style selector too, further
+   below -- `background` on `.website-bg-mint` is likewise a direct
+   declaration on that same class, not an ancestor's custom property. */
 .website-preview-force-light {
   --website-accent-green: var(--green);
   --website-accent-red: var(--red);
@@ -99,6 +102,23 @@
   --website-accent-green: var(--green-light);
   --website-accent-red: var(--red-light);
   --website-bg-page: var(--purple);
+}
+
+/* `bg="mint"`'s own dark-mode swap (`.website-bg-mint`, above) needs
+   its OWN pair of overrides here too, separate from the two plain
+   `.website-preview-force-{light,dark}` blocks above -- `background` is
+   declared directly on `.website-bg-mint` itself (by both the plain rule
+   AND its `@media` variant), not read from an ancestor's custom
+   property, so plain inheritance can't reach it the way it does for
+   `--website-accent-*`/`--website-bg-page`. Two classes' worth of
+   specificity here reliably beats the one-class `@media` rule above in
+   EITHER direction, the exact same trick `oxmarkdown.css`'s own
+   `.website-preview-force-{light,dark} .ox-tokens` already uses. */
+.website-preview-force-light .website-bg-mint {
+  background: var(--cactus-100);
+}
+.website-preview-force-dark .website-bg-mint {
+  background: var(--cactus-800);
 }
 
 /* ── Content shell (`WebsitePageContent`, packages/stamps) ──────────────── */
@@ -243,6 +263,16 @@
 .website-bg-mint {
   background: var(--cactus-100);
 }
+/* The one exception to "`peach`/`lavender`/`white` stay static, no
+   dark-mode swap" below -- `--cactus-100` (a pale mint) reads as a bright,
+   washed-out patch against the dark scene, so `mint` alone gets a real
+   dark-mode counterpart: `--cactus-800`, deep enough to read as a distinct
+   tinted band rather than fighting the page's own dark background. */
+@media (prefers-color-scheme: dark) {
+  .website-bg-mint {
+    background: var(--cactus-800);
+  }
+}
 .website-bg-lavender {
   background: var(--moonlight-500);
 }
@@ -250,9 +280,9 @@
    resting background -- so a section left at the default `bg` (or
    explicitly `bg="cream"`) reads as invisible/blended-in, not a distinct
    band. `white` gives a real, always-white (not scheme-aware, same as
-   `peach`/`mint`/`lavender` above -- none of those swap in dark mode
-   either) option for a section that should actually stand OUT against
-   the page, cream included. */
+   `peach`/`lavender` above -- `mint`, just above, is the one exception)
+   option for a section that should actually stand OUT against the page,
+   cream included. */
 .website-bg-white {
   background: var(--white);
 }

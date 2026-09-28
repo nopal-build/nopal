@@ -50,7 +50,14 @@ import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import { CircleButton } from "stamps/CircleButton";
 import { surfaceBase } from "stamps/surface.css";
-import "../styles/oxmarkdown.css";
+// No `import "../styles/oxmarkdown.css"` here (unlike fruits' copy) --
+// this component is ONLY ever used by `WebsitePageView`/
+// `websiteDirectives.tsx`, both ONLY ever reached under `/v2/*` -- see
+// `oxmarkdown/websiteIcons.tsx`'s own comment for why that makes this
+// redundant, and a real repro'd source of an EXTRA jump on top of the
+// one this whole change is meant to fix. `routes/v2.tsx`'s own `links()`
+// is what actually guarantees `oxmarkdown.css` loads (as a real
+// render-blocking `<link>`) before this ever renders.
 
 export interface OxRendererProps {
   markdown: string;
