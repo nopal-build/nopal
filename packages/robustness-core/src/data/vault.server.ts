@@ -651,7 +651,11 @@ async function getAllNestedFolderIds(parentId: string): Promise<string[]> {
   return ids;
 }
 
-/** Strip `removedHumanId` out of every folder `ownerId` owns that lists it in `shared_with`. */
+/** Strip `removedHumanId` out of every folder `ownerId` owns that lists it
+ * in `shared_with`, outside projects. A project's cache is its people
+ * list's (`writeProjectSharing`); a relationship never decides who is on a
+ * project (2026-09-25), and stripping it here left the list saying one
+ * thing and the cache another. */
 async function unshareFolderFromHuman(
   ownerId: string,
   removedHumanId: string,
@@ -659,6 +663,7 @@ async function unshareFolderFromHuman(
   const folders = await getFoldersByHuman(ownerId);
   for (const folder of folders) {
     if (
+      folder.vault_root_key !== "projects" &&
       Array.isArray(folder.shared_with) &&
       folder.shared_with.includes(removedHumanId)
     ) {
@@ -1084,14 +1089,21 @@ export async function ensureVaultRootFolders(
   // predates this type, same convention as the `vault_root_key` backfill
   // above (see the top-of-file import comment for why a static import
   // of `projectN02.server`'s mutual dependency on this file is safe).
+  // Once per root per server process: the seeding is about twenty
+  // queries and this runs on most page loads (2026-09-27). A deleted
+  // skill file comes back on the next restart instead of the next load.
   const personalIndex = roots.findIndex((r) => r.vault_root_key === "personal");
-  if (personalIndex !== -1) {
+  if (personalIndex !== -1 && !shapedPersonalRoots.has(roots[personalIndex]._id)) {
     const { ensureProjectN02 } = await getProjectN02Module();
     roots[personalIndex] = await ensureProjectN02(roots[personalIndex]);
+    shapedPersonalRoots.add(roots[personalIndex]._id);
   }
 
   return roots;
 }
+
+/** `personal` roots already stamped and seeded by this process. */
+const shapedPersonalRoots = new Set<string>();
 
 // Same literal `dailyLogSync.server.ts`'s `DAILY_LOGS_SYNC_FOLDER_NAME`
 // uses for every OTHER project's synced-in copy of a Card — duplicated

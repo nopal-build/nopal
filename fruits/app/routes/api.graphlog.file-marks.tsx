@@ -1,4 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { canViewFolder } from "robustness-core/data/vault.types";
@@ -48,6 +49,15 @@ export async function action({ request }: ActionFunctionArgs) {
   const folder = await getFolderById(body.projectFolderId);
   if (!folder || !canViewFolder(user._id, folder)) {
     return Response.json({ error: "Project not found" }, { status: 404 });
+  }
+  // A note on a file is `marks`; filing it or confirming its cost is
+  // `edit` (`features.ts`): an Observer writes the first, not the others.
+  const features = (await getProjectRole(folder, user._id))?.features ?? [];
+  if (!features.includes("marks")) {
+    return Response.json({ error: "You can read this project, not mark it." }, { status: 403 });
+  }
+  if (body.act && !features.includes("edit")) {
+    return Response.json({ error: "You can mark this file, not file it or confirm its cost." }, { status: 403 });
   }
 
   // The same projection the files view shows, so a confirmation names

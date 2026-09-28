@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseProjectSharing } from "robustness-core/data/project.types";
+import { parseCreatorRemoved, parseProjectSharing, withProjectSharing } from "robustness-core/data/project.types";
 import { CLIENT_ROLE, GUIDING_ROLE, reachesProjectWork } from "robustness-core/data/sharingRoles.server";
 import { isClientEverywhere, withCreator, type ProjectMembership } from "robustness-core/data/projectSharing.server";
 import { canViewFolder, type VaultFolder } from "robustness-core/data/vault.types";
@@ -18,11 +18,16 @@ const PAUL = "z1x2c3v4b5n6m7l8k9j0";
 
 describe("who reaches a project's work", () => {
   it("everyone but a Client", () => {
+    expect(reachesProjectWork("Guide")).toBe(true);
     expect(reachesProjectWork("Owner")).toBe(true);
     expect(reachesProjectWork("Crafter")).toBe(true);
     expect(reachesProjectWork("Observer")).toBe(true);
     expect(reachesProjectWork(CLIENT_ROLE)).toBe(false);
-    expect(GUIDING_ROLE).toBe("Owner");
+    expect(GUIDING_ROLE).toBe("Guide");
+  });
+
+  it("a name that isn't a group reaches nothing, the cache included", () => {
+    expect(reachesProjectWork("Foreman")).toBe(false);
   });
 
   it("the client screen is for someone who is a Client everywhere, and only them", () => {
@@ -32,6 +37,13 @@ describe("who reaches a project's work", () => {
     expect(isClientEverywhere([])).toBe(false);
   });
 
+  it("an old Owner in a README reads as Guide, and an unknown name is kept, not dropped", () => {
+    expect(parseProjectSharing("---\nsharing:\n  - human: a\n    role: Owner\n  - human: b\n    role: Foreman\n---\n")).toEqual([
+      { human: "a", role: "Guide" },
+      { human: "b", role: "Foreman" },
+    ]);
+  });
+
   it("an old seat in a README is ignored", () => {
     expect(parseProjectSharing("---\nsharing:\n  - human: a\n    role: Observer\n    seat: client\n---\n")).toEqual([
       { human: "a", role: "Observer" },
@@ -39,20 +51,30 @@ describe("who reaches a project's work", () => {
   });
 });
 
-describe("the creator is Owner unless the list says otherwise", () => {
+describe("the creator is Guide unless the list says otherwise", () => {
   const project = { human_id: AUSTIN };
 
-  it("a list that doesn't name the creator has them as Owner", () => {
+  it("a list that doesn't name the creator has them as Guide", () => {
     expect(withCreator(project, [{ human: PAUL, role: "Client" }])).toEqual([
-      { human: AUSTIN, role: "Owner" },
+      { human: AUSTIN, role: "Guide" },
       { human: PAUL, role: "Client" },
     ]);
-    expect(withCreator(project, [])).toEqual([{ human: AUSTIN, role: "Owner" }]);
+    expect(withCreator(project, [])).toEqual([{ human: AUSTIN, role: "Guide" }]);
   });
 
   it("a list that names the creator wins: an admin can be an Observer on a project they made", () => {
     const listed = [{ human: AUSTIN, role: "Observer" }];
     expect(withCreator(project, listed)).toEqual(listed);
+  });
+
+  it("a creator taken off holds nothing, and naming them again clears it", () => {
+    const others = [{ human: PAUL, role: "Guide" }];
+    expect(withCreator(project, others, true)).toEqual(others);
+    const off = withProjectSharing("---\ntitle: Casita\n---\nbody", others, true);
+    expect(parseCreatorRemoved(off)).toBe(true);
+    const back = withProjectSharing(off, [...others, { human: AUSTIN, role: "Guide" }], false);
+    expect(parseCreatorRemoved(back)).toBe(false);
+    expect(back).toContain("title: Casita");
   });
 });
 

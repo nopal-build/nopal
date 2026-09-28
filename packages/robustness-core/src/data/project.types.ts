@@ -40,6 +40,7 @@
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { ResolvedGalleryImage } from "oxmarkdown-core";
+import { groupOf } from "./features";
 
 /**
  * "document": single column, always — the blog/docs feel. This is just the
@@ -157,7 +158,9 @@ function parseSharingList(raw: unknown): ProjectSharingEntry[] {
     const human = (entry as Record<string, unknown>).human;
     const role = (entry as Record<string, unknown>).role;
     if (typeof human === "string" && human && typeof role === "string" && role) {
-      out.push({ human, role });
+      // An old name reads as the group it became (Owner is Guide); a
+      // name nobody knows is kept as written and reaches nothing.
+      out.push({ human, role: groupOf(role) ?? role });
     }
   }
   return out;
@@ -179,6 +182,20 @@ export function parseProjectSharing(markdown: string): ProjectSharingEntry[] {
     return parseSharingList((data as Record<string, unknown>).sharing);
   } catch {
     return [];
+  }
+}
+
+/** Whether the README says its creator was taken off the project
+ * (`creator_removed: true`, written by `withProjectSharing`). Without it
+ * a creator the list doesn't name is its Guide (`withCreator`). */
+export function parseCreatorRemoved(markdown: string): boolean {
+  const { frontmatter } = splitFrontmatter(markdown);
+  if (!frontmatter) return false;
+  try {
+    const data = parseYaml(frontmatter);
+    return !!data && typeof data === "object" && (data as Record<string, unknown>).creator_removed === true;
+  } catch {
+    return false;
   }
 }
 
@@ -210,6 +227,7 @@ export function parseProjectStatus(markdown: string): ProjectStatus {
 export function withProjectSharing(
   markdown: string,
   entries: ProjectSharingEntry[],
+  creatorRemoved = false,
 ): string {
   const { frontmatter, body } = splitFrontmatter(markdown);
   let data: Record<string, unknown> = {};
@@ -228,6 +246,8 @@ export function withProjectSharing(
   }
   if (entries.length > 0) data.sharing = entries;
   else delete data.sharing;
+  if (creatorRemoved) data.creator_removed = true;
+  else delete data.creator_removed;
 
   if (Object.keys(data).length === 0) return body;
   const yamlText = stringifyYaml(data).trimEnd();

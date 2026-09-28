@@ -36,7 +36,6 @@
 import { query, formatRecord } from "../generic.server";
 import { getFolderById } from "../vault.server";
 import { getProjectSharing, setProjectSharing, type ProjectSharingEntry } from "../projectSharing.server";
-import { getSharingRoles } from "../sharingRoles.server";
 import { getHumansById } from "../humans.server";
 import type { VaultFolder } from "../vault.types";
 import type { AdminScriptRunOpts, AdminScriptResult } from "./types";
@@ -53,13 +52,9 @@ async function sharedProjectFolders(): Promise<VaultFolder[]> {
 }
 
 export async function run({ dryRun, log }: AdminScriptRunOpts): Promise<AdminScriptResult> {
-  const roles = await getSharingRoles();
-  const defaultRole = roles.find((r) => !r.is_owner)?.name ?? roles[0]?.name;
-  if (!defaultRole) {
-    const message = "No sharing roles defined at all — aborting.";
-    log(message);
-    return { summary: message };
-  }
+  // Observer, named: "the first non-owner role by name" became Client
+  // once Client existed (ADR-023), which is the no-access role.
+  const defaultRole = "Observer";
   log(`Default backfill role: "${defaultRole}"${dryRun ? " (dry run — no writes)" : ""}`);
 
   const projects = await sharedProjectFolders();

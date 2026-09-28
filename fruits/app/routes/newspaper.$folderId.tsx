@@ -26,7 +26,7 @@ import { listMarksOnPage, readableMark } from "robustness-core/data/graphLogMark
 import { resolveProjectManifest } from "robustness-core/data/project.server";
 import { getProjectStatus } from "robustness-core/data/projectStatus.server";
 import { isIncompleteBannerText, type ProjectStatus } from "robustness-core/data/project.types";
-import { getProjectRole } from "robustness-core/data/projectSharing.server";
+import { getProjectSharing, resolveRole } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import { listCardsForProject } from "robustness-core/data/dailyLog.server";
@@ -34,9 +34,14 @@ import { getHumansById } from "robustness-core/data/humans.server";
 import {
   PROJECT_TAB_LABELS,
   TAB_FOLDERS,
-  PROJECT_TABS,
   resolveProjectTab,
+  rowsForReader,
+  tabsFor,
 } from "robustness-core/data/projectView.server";
+import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
+import { ownLatestReading } from "robustness-core/data/dashboard.server";
+import { navFor } from "../data/nav.server";
+import { SteepGauge } from "../components/SteepGauge";
 import { AppLayout } from "../components/AppLayout";
 import { CardTabs } from "../components/stamps-candidates/CardTabs";
 import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
@@ -59,26 +64,38 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!folderId) throw new Response("Not found", { status: 404 });
 
   const folder = await getFolderById(folderId);
-  if (!folder || !canViewFolder(user._id, folder)) {
-    throw new Response("Not found", { status: 404 });
-  }
+  if (!folder) throw new Response("Not found", { status: 404 });
 
-  // Reaching this page at all is the role's (ADR-023): `canViewFolder`
-  // passes for everyone on the project but a Client.
-  const role = await getProjectRole(folder, user._id);
-  const tab = resolveProjectTab(new URL(request.url).searchParams.get("tab"));
+  // What this page shows is the viewer's group's features (`features.ts`).
+  // Someone in the cache with no role on the list (a share from before
+  // roles) reads as an Observer, as they did; a Client is never in the
+  // cache and reaches the page through their features alone.
+  const sharing = await getProjectSharing(folder);
+  const own = sharing.find((e) => e.human === user._id);
+  const role = own && groupOf(own.role) ? resolveRole(own.role) : null;
+  const inCache = canViewFolder(user._id, folder);
+  const features = role ? role.features : inCache ? featuresOf("Observer") : [];
+  const allowed = tabsFor(features);
+  const tab = resolveProjectTab(new URL(request.url).searchParams.get("tab"), allowed);
+  if (!tab) throw new Response("Not found", { status: 404 });
   const base = `/newspaper/${folder._id}`;
-  const tabs = PROJECT_TABS.map((key) => ({
+  const tabs = allowed.map((key) => ({
     key,
     label: PROJECT_TAB_LABELS[key],
-    to: key === "efforts" ? base : `${base}?tab=${key}`,
+    to: key === allowed[0] ? base : `${base}?tab=${key}`,
   }));
 
   // Only the open tab's data: the files are about ten queries.
   const tabFolders = TAB_FOLDERS[tab] ?? null;
   const files: ProjectFileRow[] | null =
-    tabFolders && folder.folder_type === "project-n02" ? await loadProjectFiles(folder) : null;
+    tabFolders && folder.folder_type === "project-n02" ? rowsForReader(await loadProjectFiles(folder), features) : null;
   const logbook = tab === "logbook" ? await projectLogbook(folder._id) : null;
+  const canMark = features.includes("marks");
+  // Everyone on the project sees who else is on it, Clients included
+  // (Austin, 2026-09-27). Changing it stays the Guide's.
+  const people = await projectPeople(sharing);
+  // Moving a passage, filing a file, confirming a cost (`features.ts`).
+  const canEdit = features.includes("edit");
 
   // Children/README belong to the folder's OWNER, not necessarily the viewer
   // (this folder may only be reachable because it's shared with them).
@@ -95,7 +112,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // written; to everyone else the project's existence is not theirs to
   // learn (Austin, 2026-09-21), so they get the same placeholder the
   // graph gets. `moveDestFolderId` never leaves the server.
-  const marks = await Promise.all(
+  const marks = !canMark ? [] : await Promise.all(
     (await listMarksOnPage(folder._id, readme?.content ?? "")).map(async (mark) => {
       const dest = mark.moveDestFolderId ? await getFolderById(mark.moveDestFolderId) : null;
       return readableMark(mark, !!dest && canViewFolder(user._id, dest));
@@ -115,8 +132,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     folder,
     project,
     status: getProjectStatus(folder),
-    // Status is the Owner's (see `projectStatus.server.ts`).
+    // Status is the Guide's (see `projectStatus.server.ts`).
     canEditStatus: !!role?.guiding,
+    canMark,
+    canEdit,
+    people,
+    // The meter sits top left on the project, with the viewer's own
+    // reading only (Austin, 2026-09-25).
+    // Only a role on the list taps: /api/steep refuses a share from before
+    // roles, which reads as an Observer here.
+    steep: role?.features.includes("steepTap") && getProjectStatus(folder) === "active"
+      ? { mine: await ownLatestReading(user._id, folder._id) }
+      : null,
+    // A client has no Vault: a photo opens as itself.
+    openInVault: inCache,
+    ...(await navFor(user._id)),
     livePageHash,
     viewerId: user._id,
     marks,
@@ -129,6 +159,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     fileKinds: FILING_KINDS.filter((k) => k !== "video"),
     logbook,
   };
+}
+
+/** The project's people by name, Guides first, then by the features
+ * list's order. A role name that isn't a group is nobody here. */
+async function projectPeople(sharing: { human: string; role: string }[]) {
+  const members = sharing.flatMap((e) => {
+    const group = groupOf(e.role);
+    return group ? [{ human: e.human, group }] : [];
+  });
+  const names = new Map(
+    (await getHumansById(members.map((m) => m.human))).map((h) => [h._id, h.name || h.email]),
+  );
+  return members
+    .map((m) => ({ name: names.get(m.human) ?? "Someone", group: m.group }))
+    .sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || a.name.localeCompare(b.name));
 }
 
 /** Every Card written to the project, one per person per day, newest
@@ -225,7 +270,7 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -367,24 +412,28 @@ export default function NewspaperRoute() {
               }
             : undefined,
       })),
-      canMark: true,
+      canMark,
       onSend: onSend,
       onErase: onErase,
-      loadMoveOptions: loadMoveOptions,
-      onMove: onMove,
+      // No move for someone who marks and doesn't edit (an Observer).
+      loadMoveOptions: canEdit ? loadMoveOptions : undefined,
+      onMove: canEdit ? onMove : undefined,
       onMoveAction,
       skipParagraph: isIncompleteBannerText,
     }),
-    [marks, onSend, onErase, loadMoveOptions, onMove, onMoveAction, viewerId],
+    [marks, canMark, canEdit, onSend, onErase, loadMoveOptions, onMove, onMoveAction, viewerId],
   );
 
   return (
     <AppLayout>
       <CenterContent maxWidth={1280}>
         <Stack gap={2} className={sprinkles({ mb: 8 })}>
-          <Link to="/" className={textSize.xs} style={{ color: semanticColors.textSubtle, textDecoration: "none" }}>
-            ← Dashboard
-          </Link>
+          {home.plural && (
+            <Link to="/" className={textSize.xs} style={{ color: semanticColors.textSubtle, textDecoration: "none" }}>
+              ← My Projects
+            </Link>
+          )}
+          {steep && <SteepGauge projectFolderId={folder._id} mine={steep.mine} size="compact" />}
           <Cluster gap={4} align="baseline" style={{ justifyContent: "space-between" }}>
             <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>
               {manifest.title ?? folder.name}
@@ -397,6 +446,16 @@ export default function NewspaperRoute() {
               </span>
             )}
           </Cluster>
+          {people.length > 0 && (
+            <p className={textSize.sm} data-project-people>
+              {people.map((p, i) => (
+                <span key={i}>
+                  {i > 0 && " · "}
+                  {p.name} <span style={{ color: semanticColors.textSubtle }}>{p.group}</span>
+                </span>
+              ))}
+            </p>
+          )}
         </Stack>
         <CardTabs tabs={tabs} active={tab} label="Project">
           {tab === "efforts" && (
@@ -408,8 +467,9 @@ export default function NewspaperRoute() {
               rows={files}
               folders={tabFolders}
               kinds={fileKinds}
-              onOpen={(row) => navigate(`/vault?file=${row.serveId}`)}
+              onOpen={(row) => (openInVault ? navigate(`/vault?file=${row.serveId}`) : window.open(row.urls.display, "_blank"))}
               onChanged={() => revalidator.revalidate()}
+              canFile={canEdit}
             />
           )}
           {logbook && <Logbook cards={logbook} />}

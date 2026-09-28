@@ -276,6 +276,21 @@ export default function FruitsMaker() {
               className="font-bold text-lg font-mono purple-text"
               style={{ margin: 0 }}
             >
+              Humans
+            </h2>
+            <Link
+              to="/maker/humans"
+              prefetch="intent"
+              className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
+            >
+              Everyone and their groups →
+            </Link>
+          </div>
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
+            <h2
+              className="font-bold text-lg font-mono purple-text"
+              style={{ margin: 0 }}
+            >
               GraphLog Usage
             </h2>
             <Link

@@ -1,6 +1,7 @@
 /**
- * The project view's tabs (`/newspaper/:id`). Who reaches the page at all
- * is the role's (ADR-023), refused on the server by `canViewFolder`.
+ * The project view's tabs (`/newspaper/:id`). Which tabs a member sees,
+ * and which files they're sent, is their group's features (`features.ts`),
+ * refused on the server, not just hidden.
  *
  * Efforts is the page the skills write and comes first. The Logbook is
  * every Card written to the project: anyone on it can get there, and it goes
@@ -8,7 +9,8 @@
  * trace one back to what somebody said (Austin, 2026-09-24).
  */
 
-import type { FileFolder } from "./fileFolders.server";
+import type { FileFolder, ProjectFileRow } from "./fileFolders.server";
+import type { Feature } from "./features";
 
 export type ProjectTab = "efforts" | "photos" | "files" | "costs" | "logbook";
 
@@ -27,12 +29,39 @@ export const TAB_FOLDERS: Partial<Record<ProjectTab, FileFolder[]>> = {
   costs: ["costs"],
 };
 
-/** The tabs, in order. Only a role that reaches the project's work opens
- * the page at all (everyone but a Client, refused by `canViewFolder`), and
- * each of those gets every tab. */
+/** The tabs, in order. Each is a feature of the same name on the
+ * features list (`features.ts`): a group sees the tabs it is given. */
 export const PROJECT_TABS: ProjectTab[] = ["efforts", "photos", "files", "costs", "logbook"];
 
-/** The requested tab when it exists, else Efforts. */
-export function resolveProjectTab(requested: string | null): ProjectTab {
-  return PROJECT_TABS.includes(requested as ProjectTab) ? (requested as ProjectTab) : "efforts";
+/** The tabs a member with these features sees, in order. */
+export function tabsFor(features: readonly Feature[]): ProjectTab[] {
+  return PROJECT_TABS.filter((t) => features.includes(t));
+}
+
+/** The tab to open: the one asked for when it is given, and the first
+ * given one when none (or no real tab) was asked for. Null, a 404, when a
+ * real tab is asked for that this member isn't given. */
+export function resolveProjectTab(requested: string | null, allowed: readonly ProjectTab[] = PROJECT_TABS): ProjectTab | null {
+  if (!PROJECT_TABS.includes(requested as ProjectTab)) return allowed[0] ?? null;
+  return allowed.includes(requested as ProjectTab) ? (requested as ProjectTab) : null;
+}
+
+/** The file rows a member with these features is sent: only rows that
+ * sit in a tab they're given; without `costs`, no cost file at all (a
+ * photo of a receipt is a cost file) and no cost read off anything;
+ * without `logbook`, not the log's words around an attachment. */
+export function rowsForReader(rows: readonly ProjectFileRow[], features: readonly Feature[]): ProjectFileRow[] {
+  const folders = new Set(tabsFor(features).flatMap((t) => TAB_FOLDERS[t] ?? []));
+  const costs = features.includes("costs");
+  const logbook = features.includes("logbook");
+  return rows
+    .filter((r) => r.folders.some((f) => folders.has(f)))
+    .filter((r) => costs || !r.folders.includes("costs"))
+    .map((r) => (costs && logbook ? r : { ...r, cost: costs ? r.cost : null, context: logbook ? r.context : "" }));
+}
+
+/** Whether a member with these features may open this file as a photo:
+ * the Photos rule, the same one the tab shows. */
+export function isReachablePhoto(row: Pick<ProjectFileRow, "folders">, features: readonly Feature[]): boolean {
+  return features.includes("photos") && row.folders.includes("gallery") && !row.folders.includes("costs");
 }

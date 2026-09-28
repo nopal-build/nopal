@@ -6,7 +6,8 @@ import {
   isProjectFolder,
   setProjectSharing,
 } from "robustness-core/data/projectSharing.server";
-import { getSharingRoleByName } from "robustness-core/data/sharingRoles.server";
+import { groupOf } from "robustness-core/data/features";
+import { GUIDING_ROLE } from "robustness-core/data/sharingRoles.server";
 import type { VaultFolder } from "robustness-core/data/vault.types";
 import { inviteHuman } from "./invites.server";
 
@@ -18,9 +19,10 @@ export type InviteToProjectResult =
  * An invite names a person, one project and one role (ADR-023). Someone
  * new gets an account (`inviteHuman`: the welcome email and their vault)
  * and the role; someone who already exists is just given the role. Only
- * the project's Owner, or an admin, may invite; everything is checked
- * before anything is created, so a refused invite leaves no half-made
- * person behind.
+ * the project's Guide, or an admin, may invite, and only an admin invites
+ * a Guide or puts an admin on a project (`setProjectSharing`). Everything
+ * is checked before anything is created, so a refused invite leaves no
+ * half-made person behind.
  */
 export async function inviteToProject(
   actor: Human,
@@ -35,7 +37,8 @@ export async function inviteToProject(
   if (!isAdmin && !(await getProjectRole(input.project, actor._id))?.guiding) {
     return { ok: false, error: "Not found" };
   }
-  if (!(await getSharingRoleByName(input.role))) return { ok: false, error: `Unknown role "${input.role}"` };
+  if (!groupOf(input.role)) return { ok: false, error: `Unknown role "${input.role}"` };
+  if (!isAdmin && groupOf(input.role) === GUIDING_ROLE) return { ok: false, error: "Only an admin can make someone a Guide" };
 
   let human = await getHumanByEmail(email);
   const created = !human;

@@ -476,6 +476,20 @@ export async function eraseMark(
   return { ok: true };
 }
 
+/** Deletes the notes `authorHumanId` wrote on the project since
+ * `sinceIso`, for `scrapRecentWriting` (taking someone off a project).
+ * A tap (`act`) stands, and so does a mark that moved an entry: it is the
+ * only handle anyone has on that move. Returns how many went. */
+export async function scrapMarksSince(projectFolderId: string, authorHumanId: string, sinceIso: string): Promise<number> {
+  const marks = await selectMarks(
+    "project_folder_id = $projectFolderId AND author_human_id = $authorHumanId AND created_at >= $since",
+    { projectFolderId, authorHumanId, since: sinceIso },
+  );
+  const scrap = marks.filter((m) => !m.act && !m.move_id);
+  for (const mark of scrap) await remove(TABLE, mark._id);
+  return scrap.length;
+}
+
 /** How a citation reads in words: "Gerald L's 2026-09-09 entry". */
 export function describeRef(ref: MarkUnitRef): string {
   return `${ref.name}'s ${ref.date} entry`;

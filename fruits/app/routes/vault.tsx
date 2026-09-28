@@ -741,7 +741,8 @@ function ShareModal({
     };
   }, [folder._id, apiJson]);
 
-  const defaultRole = roles.find((r) => !r.is_owner)?.name ?? roles[0]?.name ?? "";
+  // The least a new name gets: Client, the group that reaches least.
+  const defaultRole = roles.find((r) => r.name === "Client")?.name ?? roles[0]?.name ?? "";
 
   const setRoleFor = (humanId: string, role: string | null) => {
     setAssignments((prev) => {
