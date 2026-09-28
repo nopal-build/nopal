@@ -952,34 +952,16 @@
   padding-top: 4px;
 }
 
-/* Content should reach 100% of the container's width -- this is a
-   read-only preview, not an editor, so `.ox-content`'s own reserved
-   `--ox-grid` (41px) gutter on each side isn't needed here.
-   `.ox-no-gutter` was tried first and reverted -- it ALSO suppresses
-   list-dash/ordered-list markers via `content: none`, which the real
-   published site DOES show (confirmed: `WebsitePageView.tsx` renders
-   with no special className at all, and a direct A/B check here showed
-   `content: "\u2014"` present by default) -- too broad a hammer for
-   "just remove the reserved width", it would have lost real, still-
-   wanted content styling along with it.
-
-   So: zero padding at the `.ox-content` level itself (headings/
-   paragraphs/full-bleed `:::section{...}` all reach the true edge --
-   confirmed heading markers already don't render for this content,
-   nothing lost there), but `ul`/`ol` keep a SMALL, marker-sized-only
-   padding of their own -- just enough room for the bullet dash (hangs
-   at `-18px`) or an ordered-list number (hangs at `-1.8em`, the wider of
-   the two) to stay visible without being clipped by `.ox-content`'s own
-   `overflow-x: clip`, rather than needing the full 41px every other
-   element no longer does. */
-.vault-website-editor-preview-ox {
-  padding-left: 0;
-  padding-right: 0;
-}
-
-.vault-website-editor-preview-ox :is(ul, ol) {
-  padding-left: 26px;
-}
+/* The reading-column max-width, the `.ox-content` padding reset, and the
+   `:::section{...}` full-bleed-until-capped/border-radius treatment all
+   moved to the SHARED `WebsitePageContent` component (`packages/stamps`)
+   + its `.website-page-content`/`.website-page-ox`/`.website-section`
+   rules in `website.css` -- this preview and the real public `/v2`
+   renderer (`WebsitePageView`) now go through the exact same wrapper and
+   className contract instead of each keeping its own hand-tuned recipe,
+   so the two can't quietly drift apart the way they had started to here
+   (this file used to carry its own, Vault-only `14px`/`26px` version of
+   the same numbers `website.css` already had). */
 
 .vault-website-editor-mobile-bar {
   display: none;

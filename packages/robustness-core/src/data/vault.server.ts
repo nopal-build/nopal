@@ -218,6 +218,15 @@ export async function updateFileRef(
       const { propagateTargetChange } = await getFileReferencesModule();
       await propagateTargetChange([{ type: "file", id: updated._id }]);
     }
+    if ("content" in updates || "name" in updates || "folder_id" in updates) {
+      // A no-op for the overwhelming majority of vault writes -- only
+      // actually bumps a cache version when this file lives inside a
+      // `website` project (see `invalidateWebsiteCacheForFile`'s own doc
+      // comment). Covers a page's own content edits, its publish-toggle
+      // (which rewrites `content`'s front matter), and renames/moves.
+      const { invalidateWebsiteCacheForFile } = await getWebsiteModule();
+      await invalidateWebsiteCacheForFile(updated);
+    }
   }
   return updated;
 }

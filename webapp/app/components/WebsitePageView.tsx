@@ -2,6 +2,7 @@ import { Link, NavLink } from "react-router";
 import OxRenderer from "./OxRenderer";
 import { Surface } from "stamps/Surface";
 import { Badge } from "stamps/Badge";
+import { WebsitePageContent } from "stamps/WebsitePageContent";
 import { navLink } from "stamps/navLink.css";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
@@ -79,7 +80,7 @@ export function WebsitePageView({
 }) {
   const directives = buildWebsiteDirectiveRegistry({ dailyLogEntries });
   return (
-    <>
+    <WebsitePageContent>
       {isDraftPreview && (
         <Surface
           className={sprinkles({
@@ -97,8 +98,23 @@ export function WebsitePageView({
           </span>
         </Surface>
       )}
-      <OxRenderer markdown={body} directives={directives} />
-    </>
+      {/* `ox-no-heading-marks` -- a published page isn't markdown source;
+          a title shouldn't render with a literal `#` in front of it (see
+          oxmarkdown.css). `ox-no-dots` -- the dot-grid background reads as
+          an editing-surface affordance ("you're writing in a document"),
+          not something a public marketing page should show; same
+          treatment the Vault's own website-page preview already gets
+          (`vault.tsx`'s `WebsitePageSplitEditor`). `website-page-ox` --
+          this renderer contributes no horizontal padding of its own;
+          `WebsitePageContent` (stamps) already owns that -- same
+          className list the Vault preview's own `OxRenderer` uses, so the
+          two stay identical (see `website.css`). */}
+      <OxRenderer
+        markdown={body}
+        directives={directives}
+        className="ox-no-heading-marks ox-no-dots website-page-ox"
+      />
+    </WebsitePageContent>
   );
 }
 

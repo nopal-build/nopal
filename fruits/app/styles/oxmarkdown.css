@@ -47,7 +47,10 @@
   --ox-grid: 41px;
 
   --ox-color-text: var(--purple, #3f2b46);
-  --ox-color-heading: black;
+  /* `--purple`, not a literal black -- nopal's palette never uses pure
+     black; `--purple` (`--plum-700`) is the darkest color available, and
+     already what `--ox-color-text` above reads. */
+  --ox-color-heading: var(--purple, #3f2b46);
   --ox-color-accent: var(--purple-light, #7f5b8b);
   /* Links specifically (`<a>`, the "add file" trigger, a Card's "open
      project" link) — a SEPARATE token from `--ox-color-accent` on
@@ -230,6 +233,22 @@
 .ox-content.ox-no-gutter ol > li::before,
 .ox-content.ox-no-gutter .ox-task-item-editing--checked::before,
 .ox-content.ox-no-gutter .ox-task-item-editing--unchecked::before {
+  content: none;
+}
+
+/* Narrower modifier than `.ox-no-gutter` above -- hides ONLY the heading
+   gutter glyph (`#`/`##`/`###`), leaving the reserved gutter padding,
+   bullet/ordered-list markers, and the blockquote quote-mark untouched.
+   The gutter glyphs read as a nice "you're looking at raw markdown"
+   affordance in an editor, but a published, read-only page (`/v2/*`'s
+   `WebsitePageView`, and the Vault website-page preview alongside it)
+   isn't markdown source -- a title shouldn't render with a literal `#` in
+   front of it there. `:::section{...}`/`:::section-title{...}` already
+   suppress this for headings INSIDE them (`.website-section`/
+   `.website-section-title` in website.css) -- this covers everything
+   else, most importantly a page's own top-level title, which sits
+   outside any section. */
+.ox-content.ox-no-heading-marks :is(h1, h2, h3)::before {
   content: none;
 }
 

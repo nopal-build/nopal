@@ -38,7 +38,8 @@
     "./Cluster": "./src/Cluster.tsx",
     "./Grid": "./src/Grid.tsx",
     "./useScrollSpy": "./src/useScrollSpy.ts",
-    "./useStickyPaneMaxHeight": "./src/useStickyPaneMaxHeight.ts"
+    "./useStickyPaneMaxHeight": "./src/useStickyPaneMaxHeight.ts",
+    "./WebsitePageContent": "./src/WebsitePageContent.tsx"
   },
   "peerDependencies": {
     "react": "^18.3.1"

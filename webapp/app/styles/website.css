@@ -35,6 +35,19 @@
   background: var(--website-bg-page);
 }
 
+/* The single source of truth for the reading column's own width -- used
+   directly by `.website-page-content` below, and mirrored (as a literal,
+   since a custom property can't be read inside an `@media`/`@container`
+   condition in any shipping browser today) by the `@container` breakpoint
+   on `.website-section` further down. If this number ever changes, that
+   breakpoint's own literal `720px` needs updating by hand right alongside
+   it -- same "keep two numbers in sync by hand" precedent as this file's
+   `.website-section-inner` (below) and `vault.css`'s own list-indent
+   comment. */
+:root {
+  --website-content-max-width: 720px;
+}
+
 /* ── Accent colors that DO swap by scheme (green/red only) ─────────────── */
 /* `red`/`green` read as noticeably duller/lower-contrast against a dark
    background than they do against a light one, so both get a lighter
@@ -80,14 +93,108 @@
   --website-bg-page: var(--surface-night-100);
 }
 
+/* ── Content shell (`WebsitePageContent`, packages/stamps) ──────────────── */
+/* The max-width "reading column" both a published `/v2` page
+   (`WebsitePageView`) and the Vault website-page editor's own live preview
+   (`WebsitePageSplitEditor`) render their body into -- the ONE shared React
+   component both use (`packages/stamps/src/WebsitePageContent.tsx`) so the
+   two never drift apart, even though the CSS backing its className here is
+   still duplicated by hand into each app's own copy of this file, like
+   everything else in it (see this file's own header comment).
+
+   `container-type: inline-size` turns this element into a CONTAINER QUERY
+   context for `.website-section`'s own breakpoint below -- deliberately
+   NOT a `@media` viewport query: the Vault editor's own preview pane can
+   be much narrower than the browser's actual viewport (a split Markdown/
+   Preview layout, or just a narrower window than the published page would
+   assume), and a `@media` query would key off the whole window's width
+   instead of THIS element's own actual rendered width -- exactly the
+   mismatch that would make the Vault preview stop looking "identical" to
+   the real public page the instant the browser window is wide but the
+   preview PANE isn't.
+
+   `box-sizing: border-box` is explicit here -- this codebase has no global
+   border-box reset, and `width: 100%` combined with non-zero padding under
+   the default `content-box` would add that padding ON TOP of 100%,
+   overflowing whatever this sits inside. With border-box, `max-width`
+   below caps this element's own OUTER (border) box at content-max-width +
+   48px (24px padding, both sides) -- 768px at the default 720px. */
+.website-page-content {
+  container-type: inline-size;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(var(--website-content-max-width, 720px) + 48px);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* The `OxRenderer` rendering a website page's body should contribute NO
+   horizontal padding/gutter of its own -- `.website-page-content` above is
+   the only inset, on both apps' pages alike. Pass this alongside
+   `ox-no-heading-marks ox-no-dots` on the SAME `<OxRenderer
+   className="...">` in both `WebsitePageView` and `WebsitePageSplitEditor`.
+   `ul`/`ol` still need SOME of their own padding regardless of this
+   element's own zero -- `overflow-x: clip` on `.ox-content` (oxmarkdown.css)
+   clips relative to ITS OWN box, so a bullet dash (hangs at `-18px`) or an
+   ordered-list number (hangs at `-1.8em`, the wider of the two) needs room
+   inside `.ox-content` itself; the ancestor `.website-page-content`'s own
+   24px padding doesn't help with that at all, since it lives on a
+   different element's box. 26px matches this exact math (`-1.8em` at
+   `oxmarkdown.css`'s default type scale is ~23px; 26px leaves a few
+   pixels' breathing room past that). */
+.ox-content.website-page-ox {
+  padding-left: 0;
+  padding-right: 0;
+}
+.ox-content.website-page-ox :is(ul, ol) {
+  padding-left: 26px;
+}
+
 /* ── Section (`:::section{bg="..."}`) ──────────────────────────────────── */
 
+/* `margin-left`/`margin-right: -24px` exactly cancels `.website-page-content`'s
+   own horizontal padding above, so this band always exactly fills that
+   shell's own box -- nothing more exotic (no `100vw`/`calc(50% - 50vw)`
+   viewport-breakout hack) is needed, because the shell ITSELF already does
+   all the work of being "100% width, up to a cap, centered": a plain
+   child that fills its own direct parent's box automatically inherits
+   BOTH of the shell's own regimes for free --
+     - shell narrower than its cap (any viewport under ~768px): the shell
+       already spans the full available width, so this band does too --
+       edge to edge with the real viewport.
+     - shell AT its cap (~768px, `--website-content-max-width` + 48px): the
+       shell stops growing, so this band does too, automatically -- it
+       just keeps exactly matching its own (now-fixed-width) parent.
+   See `.website-page-content` above for why this needs no ancestor to
+   actually BE the viewport width -- unlike the classic breakout hack, this
+   works identically no matter how wide the surrounding chrome (`<main>`
+   on the public site, a much narrower split-editor PANE in the Vault) is. */
 .website-section {
   padding: 48px 0;
+  margin-left: -24px;
+  margin-right: -24px;
+}
+
+/* Once the content shell itself is no longer edge-to-edge (its own
+   container inline-size has hit its cap, so there's now real page
+   background visible on either side of it), a section reads as a
+   floating "card," not a physical edge of the page -- gains rounded
+   corners to match. `720px`, not `768px`: a container query's `width`/
+   `min-width` always measures the container's own CONTENT box, which
+   excludes `.website-page-content`'s own 24px-a-side padding regardless of
+   its `box-sizing` -- so this fires exactly when THAT content box (capped
+   at `--website-content-max-width`) hits its own limit, not the shell's
+   padded outer box. Keep this literal in sync with that variable by hand
+   -- see `.website-page-content`'s own comment for why it can't just read
+   the variable directly. */
+@container (min-width: 720px) {
+  .website-section {
+    border-radius: 16px;
+  }
 }
 
 .website-section-inner {
-  max-width: 720px;
+  max-width: var(--website-content-max-width, 720px);
   margin: 0 auto;
   padding: 0 24px;
 }

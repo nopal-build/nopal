@@ -65,10 +65,12 @@ export default function V2Layout() {
         )}
       </header>
 
-      <main
-        className={sprinkles({ flexGrow: 1 })}
-        style={{ width: "100%", maxWidth: 720, margin: "0 auto", padding: "32px 24px 64px" }}
-      >
+      {/* Horizontal max-width/centering lives on `WebsitePageContent`
+          (stamps) now, inside `WebsitePageView` -- shared with the Vault
+          preview's own identical wrapper (see `website.css`'s
+          `.website-page-content`). This `<main>` only owns the page-level
+          VERTICAL rhythm above/below it. */}
+      <main className={sprinkles({ flexGrow: 1 })} style={{ width: "100%", padding: "32px 0 64px" }}>
         <Outlet />
       </main>
 

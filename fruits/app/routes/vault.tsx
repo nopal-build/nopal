@@ -81,6 +81,7 @@ import {
 import { splitFrontmatter, withReadmeBody } from "robustness-core/data/project.types";
 import { Badge } from "stamps/Badge";
 import { Surface } from "stamps/Surface";
+import { WebsitePageContent } from "stamps/WebsitePageContent";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "stamps/MoreMenu";
 import { ActionBar, ActionBarButton, ActionBarGroup } from "stamps/ActionBar";
@@ -1759,12 +1760,19 @@ function WebsitePageSplitEditor({
                   already accepts (real resolution needs server-side vault
                   access this client component doesn't have). Every other
                   website directive (`:::section`, `::stamp`, ...) renders
-                  for real. */}
-              <OxRenderer
-                markdown={body}
-                directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {} })}
-                className="vault-website-editor-preview-ox"
-              />
+                  for real. `WebsitePageContent` (stamps) + the
+                  `website-page-ox` className below are the SAME shared
+                  wrapper/class the public `/v2` renderer uses
+                  (`WebsitePageView`) -- see `website.css` -- so this
+                  preview stays visually and functionally identical to the
+                  real published page. */}
+              <WebsitePageContent>
+                <OxRenderer
+                  markdown={body}
+                  directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {} })}
+                  className="ox-no-dots ox-no-heading-marks website-page-ox"
+                />
+              </WebsitePageContent>
             </div>
           </Surface>
         </div>
