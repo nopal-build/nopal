@@ -39,6 +39,9 @@ import { CopyField } from "stamps/CopyField";
 import { CircleButton } from "stamps/CircleButton";
 import { HamburgerNeqIcon } from "stamps/HamburgerNeqIcon";
 import { SidebarToggleIcon } from "stamps/SidebarToggleIcon";
+import { ExpandIcon } from "stamps/ExpandIcon";
+import { LayoutFlipIcon } from "stamps/LayoutFlipIcon";
+import { ActionBar, ActionBarGroup, ActionBarButton } from "stamps/ActionBar";
 import { Modal } from "stamps/Modal";
 import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
 import { SearchCollection } from "stamps/SearchCollection";
@@ -876,6 +879,42 @@ function IconsSection() {
               </LabeledCard>
             </Stack>
           </Surface>
+
+          <Surface className={sprinkles({ p: 5 })}>
+            <Stack gap={3}>
+              <Cluster gap={3}>
+                <div className={toggleButton} aria-hidden="true" style={{ color: semanticColors.textBrand }}>
+                  <ExpandIcon />
+                </div>
+              </Cluster>
+              <LabeledCard label="ExpandIcon — stamps/ExpandIcon">
+                A fullscreen-toggle glyph — two opposing corner-arrows on a
+                diagonal. <Code>currentColor</Code>-based, same convention
+                as <Code>SidebarToggleIcon</Code>'s own stroke. Vault's
+                website-page split editor uses this for its Expand button
+                (rotates 180° when already expanded).
+              </LabeledCard>
+            </Stack>
+          </Surface>
+
+          <Surface className={sprinkles({ p: 5 })}>
+            <Stack gap={3}>
+              <Cluster gap={3}>
+                <div className={toggleButton} aria-hidden="true">
+                  <LayoutFlipIcon mdSide="left" />
+                </div>
+                <div className={toggleButton} aria-hidden="true">
+                  <LayoutFlipIcon mdSide="right" />
+                </div>
+              </Cluster>
+              <LabeledCard label="LayoutFlipIcon — stamps/LayoutFlipIcon">
+                Plain CSS boxes, not an SVG — a narrow (fixed-width) box and
+                a wide (greedy) box, ordered by <Code>mdSide</Code> to show
+                the CURRENT layout rather than a generic swap glyph. Vault's
+                split editor's own "Flip Layout" button.
+              </LabeledCard>
+            </Stack>
+          </Surface>
         </Grid>
       </Stack>
     </Section>
@@ -1135,8 +1174,65 @@ function ButtonsSection() {
             />
           </Cluster>
         </Stack>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Action Bar
+          </div>
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            <Code>ActionBar</Code>/<Code>ActionBarGroup</Code>/
+            <Code>ActionBarButton</Code> from <Code>stamps/ActionBar</Code> —
+            a small toolbar of icon or text buttons, joined into a shared-
+            border pill via <Code>ActionBarGroup</Code> (even a standalone
+            button is its own one-button group, so every button gets the
+            identical border/radius/hover treatment). Built for Vault's
+            website-page split editor's own Flip Layout + Expand controls,
+            but generic — nothing here is Vault-specific. Click either
+            group below.
+          </p>
+          <ActionBarDemo />
+        </Stack>
       </Stack>
     </Section>
+  );
+}
+
+/** Self-contained — owns its own layout/active state so it can drop into
+ * this page without wiring anything up, same idea as `HamburgerNeqDemo`.
+ * Mirrors the two REAL `ActionBarGroup` shapes Vault's split editor
+ * actually uses: an icon pair (Flip Layout + Expand) and a text pair
+ * with one side "active" (its own mobile Preview/Markdown toggle). */
+function ActionBarDemo() {
+  const [mdSide, setMdSide] = useState<"left" | "right">("left");
+  const [expanded, setExpanded] = useState(false);
+  const [mobileView, setMobileView] = useState<"preview" | "markdown">("preview");
+
+  return (
+    <Cluster gap={6} align="flex-start">
+      <ActionBar>
+        <ActionBarGroup>
+          <ActionBarButton onClick={() => setMdSide((v) => (v === "left" ? "right" : "left"))} aria-label="Flip layout">
+            <LayoutFlipIcon mdSide={mdSide} />
+          </ActionBarButton>
+          <ActionBarButton onClick={() => setExpanded((v) => !v)} aria-label={expanded ? "Exit fullscreen" : "Expand"}>
+            <span style={{ display: "inline-flex", transform: expanded ? "rotate(180deg)" : undefined }}>
+              <ExpandIcon />
+            </span>
+          </ActionBarButton>
+        </ActionBarGroup>
+      </ActionBar>
+
+      <ActionBar>
+        <ActionBarGroup>
+          <ActionBarButton active={mobileView === "preview"} onClick={() => setMobileView("preview")} aria-label="Show preview">
+            Preview
+          </ActionBarButton>
+          <ActionBarButton active={mobileView === "markdown"} onClick={() => setMobileView("markdown")} aria-label="Show markdown">
+            Markdown
+          </ActionBarButton>
+        </ActionBarGroup>
+      </ActionBar>
+    </Cluster>
   );
 }
 
