@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
+import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { getProjectRole } from "robustness-core/data/projectSharing.server";
 import { enqueueGraphLogJob, getGraphLogProjectStatus } from "robustness-core/data/graphLogQueue.server";
 
@@ -28,6 +29,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const folder = await getFolderById(projectFolderId);
   if (!folder) return Response.json({ error: "Project not found" }, { status: 404 });
+  if (isWebsiteFolder(folder)) return Response.json({ error: "A website doesn't run GraphLog." }, { status: 400 });
   const role = await getProjectRole(folder, user._id);
   // An Admin/Super may trigger this against ANY project or personal space,
   // not just ones they own or hold an owner-tier Sharing Role on -- the

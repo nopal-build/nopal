@@ -36,6 +36,7 @@ import type { FileRef } from "./vault.types";
 import { parseCreatorRemoved, parseProjectSharing, withProjectSharing, type ProjectSharingEntry } from "./project.types";
 import { CLIENT_ROLE, GUIDING_ROLE, reachesProjectWork } from "./sharingRoles.server";
 import { featuresOf, groupOf, type Feature } from "./features";
+import { isWebsiteFolder } from "./vaultFolderTypes";
 import { query, formatRecord } from "./generic.server";
 import { getHumanById, getHumansById } from "./humans.server";
 
@@ -333,6 +334,10 @@ export type ProjectMembership = { folder: VaultFolder; sharing: ProjectSharingEn
 export async function listProjectsFor(humanId: string): Promise<ProjectMembership[]> {
   const out: ProjectMembership[] = [];
   for (const { folder, sharing } of await readProjectLists(humanId)) {
+    // A website is shared like a project but isn't one to anyone's
+    // dashboard, nav or daily log (Austin, 2026-09-28). The Maker's list
+    // (`listEveryProject`) keeps it, so people can be given access.
+    if (isWebsiteFolder(folder)) continue;
     const role = roleIn(sharing, humanId);
     if (role && groupOf(role)) out.push({ folder, sharing, role });
   }

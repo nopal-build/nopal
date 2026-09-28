@@ -6,7 +6,7 @@ import "./cardTabs.css";
  * Tabs that look like recipe cards in a box: the open card joins the box
  * below it, the others stand a little lower behind it. Each tab is a link
  * (`?tab=`), so the back button and a shared link land on the same card.
- * On a phone the row scrolls sideways rather than wrapping.
+ * The row never scrolls: on a narrow screen it wraps.
  */
 export function CardTabs({
   tabs,

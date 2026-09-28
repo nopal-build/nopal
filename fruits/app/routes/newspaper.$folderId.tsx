@@ -23,6 +23,8 @@ import { canViewFolder } from "robustness-core/data/vault.types";
 import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
 import { listMarksOnPage, readableMark } from "robustness-core/data/graphLogMarks.server";
+import { listSuggestions } from "robustness-core/data/suggestions.server";
+import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { resolveProjectManifest } from "robustness-core/data/project.server";
 import { getProjectStatus } from "robustness-core/data/projectStatus.server";
 import { isIncompleteBannerText, type ProjectStatus } from "robustness-core/data/project.types";
@@ -50,6 +52,7 @@ import { ProjectFilesView } from "../components/ProjectFilesView";
 import { ProjectView } from "../components/ProjectView";
 import type { MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
 import { sprinkles } from "stamps/sprinkles.css";
+import { button } from "stamps/button.css";
 import { CenterContent } from "stamps/CenterContent";
 import { Cluster } from "stamps/Cluster";
 import { Stack } from "stamps/Stack";
@@ -65,6 +68,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const folder = await getFolderById(folderId);
   if (!folder) throw new Response("Not found", { status: 404 });
+  // A website is its markdown files, edited in the Vault; it has no
+  // Efforts, graph or log (Austin, 2026-09-28).
+  if (isWebsiteFolder(folder)) return redirect(`/vault?folder=${folder._id}`);
 
   // What this page shows is the viewer's group's features (`features.ts`).
   // Someone in the cache with no role on the list (a share from before
@@ -90,12 +96,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const files: ProjectFileRow[] | null =
     tabFolders && folder.folder_type === "project-n02" ? rowsForReader(await loadProjectFiles(folder), features) : null;
   const logbook = tab === "logbook" ? await projectLogbook(folder._id) : null;
-  const canMark = features.includes("marks");
+  // Only a role on the list marks: /api/graphlog/marks refuses a share
+  // from before roles, which reads as an Observer here (same as Steep).
+  const canMark = !!role?.features.includes("marks");
   // Everyone on the project sees who else is on it, Clients included
   // (Austin, 2026-09-27). Changing it stays the Guide's.
   const people = await projectPeople(sharing);
   // Moving a passage, filing a file, confirming a cost (`features.ts`).
   const canEdit = features.includes("edit");
+  // What someone without `feeds` writes waits for a Guide
+  // (`suggestions.server.ts`): a Guide sees every one, the writer their own.
+  const decides = features.includes("suggestions");
+  const suggestionsFor = decides ? ("all" as const) : !features.includes("feeds") ? { authorHumanId: user._id } : undefined;
+  const suggestions = tab === "suggestions" ? await listSuggestions(folder._id, decides ? undefined : user._id) : null;
 
   // Children/README belong to the folder's OWNER, not necessarily the viewer
   // (this folder may only be reachable because it's shared with them).
@@ -113,7 +126,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // learn (Austin, 2026-09-21), so they get the same placeholder the
   // graph gets. `moveDestFolderId` never leaves the server.
   const marks = !canMark ? [] : await Promise.all(
-    (await listMarksOnPage(folder._id, readme?.content ?? "")).map(async (mark) => {
+    (await listMarksOnPage(folder._id, readme?.content ?? "", suggestionsFor)).map(async (mark) => {
       const dest = mark.moveDestFolderId ? await getFolderById(mark.moveDestFolderId) : null;
       return readableMark(mark, !!dest && canViewFolder(user._id, dest));
     }),
@@ -136,6 +149,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     canEditStatus: !!role?.guiding,
     canMark,
     canEdit,
+    decides,
+    suggestions,
     people,
     // The meter sits top left on the project, with the viewer's own
     // reading only (Austin, 2026-09-25).
@@ -159,6 +174,96 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     fileKinds: FILING_KINDS.filter((k) => k !== "video"),
     logbook,
   };
+}
+
+type SuggestionRow = NonNullable<Awaited<ReturnType<typeof listSuggestions>>>[number];
+
+const SUGGESTION_STATUS_WORDS: Record<SuggestionRow["status"], string> = {
+  pending: "waiting for a Guide",
+  taken: "taken into the project",
+  passed: "passed",
+};
+
+/** What someone without `feeds` wrote, waiting for a Guide. A Guide sees
+ * every one waiting and takes it (in as written, credited) or passes it;
+ * the writer sees their own and where each stands. */
+function SuggestionsView({
+  projectFolderId,
+  suggestions,
+  decides,
+  onChanged,
+}: {
+  projectFolderId: string;
+  suggestions: SuggestionRow[];
+  decides: boolean;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const decide = async (s: SuggestionRow, verdict: "take" | "pass") => {
+    setBusy(s.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/graphlog/suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectFolderId, kind: s.kind, id: s.id, verdict }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "That didn't go through. Try again.");
+        return;
+      }
+      onChanged();
+    } catch {
+      setError("That didn't go through. Check your connection and try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (suggestions.length === 0) {
+    return (
+      <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+        {decides ? "Nothing waiting. What an Observer writes shows up here for you to take or pass." : "Nothing yet. What you write on this project waits here until a Guide takes it."}
+      </p>
+    );
+  }
+  return (
+    <Stack gap={4}>
+      {error && (
+        <p className={textSize.sm} style={{ color: semanticColors.textDanger }}>
+          {error}
+        </p>
+      )}
+      {suggestions.map((s) => (
+        <PinnedCard key={`${s.kind}:${s.id}`} title={s.authorName} label={`${longDate(s.date)} · ${s.kind === "card" ? "Card" : "Note"}`} data-suggestion>
+          <Stack gap={2}>
+            {s.context && (
+              <p className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+                {s.context}
+              </p>
+            )}
+            {s.kind === "card" ? <OxRenderer markdown={s.text} /> : <p className={textSize.sm}>{s.text}</p>}
+            {decides && s.status === "pending" ? (
+              <Cluster gap={2}>
+                <button type="button" disabled={busy === s.id} className={button({ variant: "primary" })} onClick={() => decide(s, "take")}>
+                  Take it
+                </button>
+                <button type="button" disabled={busy === s.id} className={button({ variant: "outline" })} onClick={() => decide(s, "pass")}>
+                  Pass
+                </button>
+              </Cluster>
+            ) : (
+              <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+                {SUGGESTION_STATUS_WORDS[s.status]}
+              </span>
+            )}
+          </Stack>
+        </PinnedCard>
+      ))}
+    </Stack>
+  );
 }
 
 /** The project's people by name, Guides first, then by the features
@@ -270,7 +375,7 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -401,6 +506,7 @@ export default function NewspaperRoute() {
         date: m.date,
         text: m.text,
         waiting: m.waiting,
+        suggestion: m.suggestion,
         moved: m.moved,
         move:
           m.moveId && m.moveStatus
@@ -473,6 +579,14 @@ export default function NewspaperRoute() {
             />
           )}
           {logbook && <Logbook cards={logbook} />}
+          {suggestions && (
+            <SuggestionsView
+              projectFolderId={folder._id}
+              suggestions={suggestions}
+              decides={decides}
+              onChanged={() => revalidator.revalidate()}
+            />
+          )}
         </CardTabs>
       </CenterContent>
     </AppLayout>

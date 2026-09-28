@@ -37,6 +37,7 @@ import {
   isSpaceFolderTypeKey,
   isSyncFamilyFolderType,
   isSyncFolderTypeKey,
+  isWebsiteFolder,
   SPACE_FOLDER_TYPES,
   SYNC_FOLDER_TYPES,
   type VaultFolderTypeKey,
@@ -1328,7 +1329,8 @@ export async function getAccessibleProjectFolders(
   );
   const reached = (result?.[0] ?? []).map(formatRecord);
   const ids = new Set(reached.map((f) => f._id));
-  return reached.filter((f) => !!f.parent_folder_id && !ids.has(f.parent_folder_id));
+  // A website is no place to move an entry to (`isWebsiteFolder`).
+  return reached.filter((f) => !!f.parent_folder_id && !ids.has(f.parent_folder_id) && !isWebsiteFolder(f));
 }
 
 /** Finds a folder's own `README.md` (case-insensitive), owned by `ownerId`

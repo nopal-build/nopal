@@ -36,7 +36,7 @@ import { splitFrontmatter } from "./project.types";
 import { merge } from "./generic.server";
 import { getAllEffectiveGraphLogDefaultSkills, type GraphLogDefaultStage } from "./graphLogDefaults.server";
 import { systemVaultFolderKey } from "./vault.server";
-import { CONTAINER_FOLDER_TYPES, isContainerFolderTypeKey } from "./vaultFolderTypes";
+import { CONTAINER_FOLDER_TYPES, isContainerFolderTypeKey, isWebsiteFolder } from "./vaultFolderTypes";
 
 // ─── Seeding ────────────────────────────────────────────────────────────
 
@@ -289,6 +289,8 @@ export async function findProjectGraphFolder(projectFolder: VaultFolder): Promis
  * lazily, the first time it actually has a `graph-log-*.md` file to
  * write. */
 export async function ensureProjectGraphFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
+  // A website has no graph (`isWebsiteFolder`).
+  if (isWebsiteFolder(projectFolder)) throw new Error("A website has no graph");
   const existing = await findProjectGraphFolder(projectFolder);
   if (existing) return existing;
   // Same deterministic-id fix as `applyProjectN02Shape`'s own Skills-folder

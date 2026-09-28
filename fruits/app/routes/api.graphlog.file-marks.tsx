@@ -110,6 +110,8 @@ export async function action({ request }: ActionFunctionArgs) {
     pageHash: null,
     unit: fileMarkUnit(row),
     act,
+    // Without `feeds` (an Observer) a note waits for a Guide.
+    suggestion: !features.includes("feeds"),
   });
   if (!mark) return Response.json({ error: "The mark didn't save. Try again." }, { status: 500 });
   return Response.json({ id: mark._id, text }, { status: 201 });

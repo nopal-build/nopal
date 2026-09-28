@@ -12,7 +12,7 @@
 import type { FileFolder, ProjectFileRow } from "./fileFolders.server";
 import type { Feature } from "./features";
 
-export type ProjectTab = "efforts" | "photos" | "files" | "costs" | "logbook";
+export type ProjectTab = "efforts" | "photos" | "files" | "costs" | "logbook" | "suggestions";
 
 export const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
   efforts: "Efforts",
@@ -20,6 +20,7 @@ export const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
   files: "Files",
   costs: "Costs",
   logbook: "Logbook",
+  suggestions: "Suggestions",
 };
 
 /** Which file folders each file tab shows. */
@@ -30,12 +31,22 @@ export const TAB_FOLDERS: Partial<Record<ProjectTab, FileFolder[]>> = {
 };
 
 /** The tabs, in order. Each is a feature of the same name on the
- * features list (`features.ts`): a group sees the tabs it is given. */
-export const PROJECT_TABS: ProjectTab[] = ["efforts", "photos", "files", "costs", "logbook"];
+ * features list (`features.ts`): a group sees the tabs it is given.
+ * Suggestions is the one exception (`seesSuggestions`). */
+export const PROJECT_TABS: ProjectTab[] = ["efforts", "photos", "files", "costs", "logbook", "suggestions"];
 
 /** The tabs a member with these features sees, in order. */
 export function tabsFor(features: readonly Feature[]): ProjectTab[] {
-  return PROJECT_TABS.filter((t) => features.includes(t));
+  return PROJECT_TABS.filter((t) => (t === "suggestions" ? seesSuggestions(features) : features.includes(t)));
+}
+
+/** The Suggestions tab: a Guide, to take or pass them, and someone whose
+ * writing waits there (no `feeds`), to see their own. */
+export function seesSuggestions(features: readonly Feature[]): boolean {
+  return (
+    features.includes("suggestions") ||
+    (!features.includes("feeds") && (features.includes("dailyLog") || features.includes("marks")))
+  );
 }
 
 /** The tab to open: the one asked for when it is given, and the first

@@ -376,3 +376,11 @@ export function isFolderTypePublishable(
     ? VAULT_FOLDER_TYPES[folderType].publishable
     : false;
 }
+
+/** A website project (Austin, 2026-09-28): markdown files that render the
+ * site, edited in the Vault. It sits under `projects` beside the GraphLog
+ * projects but has none of their machinery: no graph, skills, syncs,
+ * runs, Cards, dashboard tile or project page. */
+export function isWebsiteFolder(folder: { folder_type?: string | null }): boolean {
+  return folder.folder_type === "website";
+}

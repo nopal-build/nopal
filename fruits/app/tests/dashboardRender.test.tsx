@@ -1,9 +1,6 @@
 /**
- * The dashboard as rendered (2026-09-23 round). Gates the markup half of
- * tests 1 and 2 (the meter and the log box are on the landing screen for
- * every seat) and test 3 (a steep note has no alarm in it). The tap half
- * of 1 and 2 is a Playwright walk on a phone-sized viewport against the
- * local stack, and Austin's phone in production.
+ * The dashboard as rendered. My Projects is projects only (2026-09-28):
+ * no log box, no meter. Test 3 (a steep note has no alarm in it) stands.
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -26,15 +23,9 @@ const row = (over: Partial<DashboardRow>): DashboardRow => ({
   ...over,
 });
 
-// A data router, since today's log (TodayLog) uses fetchers and revalidation.
+// A data router, since the rows are links.
 function render(dashboard: Dashboard) {
-  const element = (
-    <DashboardView
-      activeStatus="active"
-      dashboard={dashboard}
-      log={{ entries: [], cardsByDate: {}, projectFolders: [] }}
-    />
-  );
+  const element = <DashboardView activeStatus="active" dashboard={dashboard} />;
   const router = createMemoryRouter([{ path: "/", element }]);
   return renderToStaticMarkup(<RouterProvider router={router} />);
 }
@@ -63,41 +54,23 @@ const watcherDash: Dashboard = {
   topMeterProjectId: "a1b2c3d4e5f6g7h8i9j0",
 };
 
-describe("the ritual is on the landing screen (tests 1 and 2, markup)", () => {
-  it("a client: the log box, then the meter below it, and nothing else (test 2, markup)", () => {
-    const html = render(clientDash);
-    const meter = html.indexOf("data-steep-meter");
-    const box = html.indexOf("data-log-box");
-    expect(box).toBeGreaterThan(-1);
-    expect(meter).toBeGreaterThan(box);
-    // No project row to read, no link to a project page, no name when
-    // there's one project.
-    expect(html).not.toContain("/newspaper/");
-    expect(html).not.toContain("Crouch Casita");
-    expect(html).not.toContain("window supplier");
+describe("My Projects is projects only (2026-09-28)", () => {
+  it("no log box and no meter, for anyone: the log is on the Daily Log page, the meter on the project", () => {
+    for (const dash of [clientDash, guideDash, watcherDash]) {
+      const html = render(dash);
+      expect(html).not.toContain("data-log-box");
+      expect(html).not.toContain("data-steep-meter");
+    }
   });
 
-  it("a client on two projects: a meter for each, named, each a way in (2026-09-25: the page shows what the list gives them)", () => {
+  it("a client: each project, named, a way in", () => {
     const html = render({
       ...clientDash,
       rows: [row({ role: "Client", ask: null }), row({ id: "q9w8e7r6t5y4u3i2o1p0", name: "Coronado ADU", role: "Client", ask: null })],
-      topMeterProjectId: null,
     });
-    expect(html.match(/data-steep-meter=/g)?.length).toBe(2);
-    expect(html).toContain("Coronado ADU");
+    expect(html).toContain("/newspaper/a1b2c3d4e5f6g7h8i9j0");
     expect(html).toContain("/newspaper/q9w8e7r6t5y4u3i2o1p0");
-  });
-
-  it("a guide on two projects: the log box on top, a meter on each row", () => {
-    const html = render(guideDash);
-    expect(html.indexOf("data-log-box")).toBeLessThan(html.indexOf("data-project-row"));
-    expect(html.match(/data-steep-meter=/g)?.length).toBe(2);
-  });
-
-  it("an Observer: the log box and their own meter, like anyone on the project", () => {
-    const html = render(watcherDash);
-    expect(html).toContain("data-log-box");
-    expect(html).toContain("data-steep-meter");
+    expect(html).not.toContain("window supplier");
   });
 
   it("client on one project inside a guide's screen: both rows lead to their page", () => {

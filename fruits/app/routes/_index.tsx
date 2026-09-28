@@ -1,8 +1,8 @@
 // app/routes/_index.tsx: the dashboard, the screen everyone lands on.
 //
-// Someone whose every role is Client gets today's log and the
-// Steep-o-meter, nothing else. Everyone else gets the meter, the log,
-// and what the system gives back per project, each the way their role
+// My Projects: the projects, nothing else (Austin, 2026-09-28): the log
+// is on the Daily Log page and the meter on each project's page. Each
+// project shows what the system gives back, the way the viewer's role
 // there shows it (ADR-023). Everything the page shows comes from
 // `loadDashboard`; what it leaves out never reaches the browser.
 import type { LoaderFunctionArgs } from "react-router";
@@ -19,10 +19,8 @@ import { Stack } from "stamps/Stack";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
-import { getDailyLogs, getDailyLogCards, type DailyLogCard } from "robustness-core/data/dailyLog.server";
 import { listProjectsFor } from "robustness-core/data/projectSharing.server";
 import { navFor } from "../data/nav.server";
-import { featuresOf } from "robustness-core/data/features";
 import { loadDashboard } from "robustness-core/data/dashboard.server";
 import {
   DEFAULT_PROJECT_STATUS,
@@ -43,27 +41,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : DEFAULT_PROJECT_STATUS;
 
   // Every project the person holds a role on (ADR-023): what the dashboard
-  // arranges, and what a Card in today's log can be added to.
+  // arranges.
   const memberships = await listProjectsFor(user._id);
   const nav = await navFor(user._id, memberships);
   // One project: My Project is the project itself.
   if (nav.home.projectId) return redirect(`/newspaper/${nav.home.projectId}`);
 
-  // Today's Daily Log, for the shared editor (`TodayLog`): the two most
-  // recent entries, since the device's today can be a day ahead of the
-  // server's, and their Cards.
-  const [dashboard, { entries: recent }] = await Promise.all([
-    loadDashboard(user._id, activeStatus, memberships),
-    getDailyLogs(user._id, { limit: 2 }),
-  ]);
-  const cardsByDate: Record<string, DailyLogCard[]> = {};
-  await Promise.all(
-    recent
-      .filter((e) => e.content.includes("::card{"))
-      .map(async (e) => {
-        cardsByDate[e.date] = await getDailyLogCards(user._id, e.date);
-      }),
-  );
+  const dashboard = await loadDashboard(user._id, activeStatus, memberships);
 
   return {
     // `role` too: the nav reads it through `useUser()` (without it the
@@ -73,13 +57,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...nav,
     activeStatus,
     dashboard,
-    log: {
-      entries: recent.map((e) => ({ date: e.date, content: e.content })),
-      cardsByDate,
-      projectFolders: memberships
-        .filter((m) => featuresOf(m.role).includes("dailyLog"))
-        .map((m) => ({ id: m.folder._id, name: m.folder.name })),
-    },
   };
 }
 
@@ -155,7 +132,7 @@ function AppStatusMenu() {
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { user, activeStatus, dashboard, log } = useLoaderData<typeof loader>();
+  const { user, activeStatus, dashboard } = useLoaderData<typeof loader>();
   return (
     <AppLayout>
       <CenterContent maxWidth={860}>
@@ -166,7 +143,7 @@ export default function DashboardPage() {
             </h1>
             <AppStatusMenu />
           </Cluster>
-          <DashboardView activeStatus={activeStatus} dashboard={dashboard} log={log} />
+          <DashboardView activeStatus={activeStatus} dashboard={dashboard} />
         </Stack>
       </CenterContent>
     </AppLayout>

@@ -3,12 +3,14 @@
    uneven on purpose (corner radii and a hair of tilt differ tab to tab),
    on stamps' semantic variables so dark mode follows. */
 .card-tabs { display: flex; flex-direction: column; }
+/* Never a scroll container: with `overflow-x` set, the tilted tabs and
+   their overlap onto the box made the row scroll up and down (Austin,
+   2026-09-28). A narrow screen wraps to a second row instead. */
 .card-tabs__row {
-  display: flex; align-items: flex-end; gap: 2px;
-  padding: 0 10px; overflow-x: auto; scrollbar-width: none;
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2px;
+  padding: 0 10px;
   position: relative; z-index: 1;
 }
-.card-tabs__row::-webkit-scrollbar { display: none; }
 .card-tabs__tab {
   flex: 0 0 auto;
   padding: 9px 18px 12px; margin-bottom: -6px;

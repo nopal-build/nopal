@@ -24,7 +24,10 @@ import {
   type OxDocument,
 } from "oxmarkdown-core";
 import { Input } from "stamps/Input";
-import { button } from "stamps/button.css";
+import { Surface } from "stamps/Surface";
+import { copyButton } from "stamps/copyField.css";
+import { link } from "stamps/link.css";
+import { box, divider, footerArea, well } from "stamps/searchCollection.css";
 import OxPopover from "./OxPopover";
 
 /** A mark as the page shows it. */
@@ -40,6 +43,9 @@ export interface OxMarkNote {
    * it yet, so it sits next to the nearest thing it was about and says
    * so, rather than vanishing before anything answers it. */
   waiting?: boolean;
+  /** A suggestion a Guide hasn't taken yet: only its writer and the
+   * project's Guides see it. */
+  suggestion?: boolean;
   /** Set when the mark refiled a daily-log entry under another project;
    * the note then says so, never which one. */
   moved?: boolean;
@@ -283,7 +289,7 @@ function MoveControl({
 
   if (!open) {
     return (
-      <button type="button" className="ox-mark-move__open" onClick={() => void start()}>
+      <button type="button" className={`${link} ox-mark-move__open`} onClick={() => void start()}>
         This belongs to another project
       </button>
     );
@@ -376,12 +382,12 @@ function MoveControl({
       )}
       {error && <div className="ox-mark-error">{error}</div>}
       <div className="ox-mark-actions">
-        <button type="button" className={button({ variant: "outline" })} onClick={() => setOpen(false)}>
+        <button type="button" className={QUIET} onClick={() => setOpen(false)}>
           Back
         </button>
         <button
           type="button"
-          className={button({ variant: "secondary" })}
+          className={ACT}
           disabled={busy || !entry || !destId || needsWords}
           onClick={() => void move()}
         >
@@ -391,6 +397,11 @@ function MoveControl({
     </div>
   );
 }
+
+/** The pen's buttons, from the `CopyField` stamp (Austin, 2026-09-28): the
+ * one action is its small copy button, everything else a quiet link. */
+const ACT = `btn-secondary ${copyButton}`;
+const QUIET = `${link} ox-mark-quiet`;
 
 function MarkComposer({
   unit,
@@ -437,9 +448,12 @@ function MarkComposer({
     onDone();
   };
 
+  // Built like the stamp `SearchCollection` (Austin, 2026-09-28): a
+  // `Surface` card, the writing in its well on top, the stamp divider, and
+  // the footer with what else you can do and the buttons.
   return (
-    <div
-      className="ox-mark-composer"
+    <Surface
+      className={`${box} ox-mark-composer`}
       onKeyDown={(e) => {
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
@@ -448,45 +462,44 @@ function MarkComposer({
       }}
     >
       {!moving && (
-      <Input
-        type="textarea"
-        label="Your mark"
-        hideLabel
-        name={`mark-${unit.key}`}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="What's on your mind?"
-        autoFocus
-      />
+        <div className={well}>
+          <Input
+            type="textarea"
+            label="Your mark"
+            hideLabel
+            name={`mark-${unit.key}`}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="What's on your mind?"
+            autoFocus
+          />
+        </div>
       )}
+      {!moving && <hr className={divider} />}
+      <div className={footerArea}>
       {error && !moving && <div className="ox-mark-error">{error}</div>}
+      {/* One quiet row: the other thing you can do on the left, the
+          stamp's small copy action on the right. */}
+      <div className="ox-mark-footer">
       <MoveControl unit={unit} ctx={ctx} text={text} onDone={onDone} onOpenChange={setMoving} />
       {!moving && (
       <div className="ox-mark-actions">
         {mine && ctx.onErase && (
-          <button
-            type="button"
-            className={`${button({ variant: "outline" })} ox-mark-actions__erase`}
-            disabled={sending}
-            onClick={() => void erase()}
-          >
+          <button type="button" className={`${QUIET} ox-mark-actions__erase`} disabled={sending} onClick={() => void erase()}>
             Take it back
           </button>
         )}
-        <button type="button" className={button({ variant: "outline" })} onClick={onDone}>
+        <button type="button" className={QUIET} onClick={onDone}>
           Cancel
         </button>
-        <button
-          type="button"
-          className={button({ variant: "secondary" })}
-          disabled={sending || !text.trim()}
-          onClick={() => void send()}
-        >
+        <button type="button" className={ACT} disabled={sending || !text.trim()} onClick={() => void send()}>
           {sending ? "Saving" : mine ? "Save" : "Send"}
         </button>
       </div>
       )}
-    </div>
+      </div>
+      </div>
+    </Surface>
   );
 }
 
@@ -501,7 +514,11 @@ export function MarkNotes({ ctx, unitKeys }: { ctx: AnnotationCtx; unitKeys: str
       {notes.map((n) => (
         <span key={n.id} className={`ox-mark-note${n.authorHumanId === ctx.viewerId ? " ox-mark-note--mine" : ""}`}>
           <span className="ox-mark-note__text">{n.text}</span>
-          {n.waiting && <span className="ox-mark-note__waiting">waiting for the next run</span>}
+          {n.suggestion ? (
+            <span className="ox-mark-note__waiting">a suggestion, waiting for a Guide</span>
+          ) : (
+            n.waiting && <span className="ox-mark-note__waiting">waiting for the next run</span>
+          )}
           {n.moved && <span className="ox-mark-note__moved">refiled under another project</span>}
           {n.move?.status === "requested" && (
             <span className="ox-mark-note__moved">asks to file this under another project</span>
@@ -540,7 +557,7 @@ function MoveAction({
   };
   return (
     <span className="ox-mark-note__action">
-      <button type="button" className={button({ variant: "outline" })} disabled={busy} onClick={() => void run()}>
+      <button type="button" className={ACT} disabled={busy} onClick={() => void run()}>
         {action === "confirm" ? "File it there" : "Put it back"}
       </button>
       {error && <span className="ox-mark-error">{error}</span>}

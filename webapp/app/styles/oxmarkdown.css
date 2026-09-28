@@ -240,6 +240,19 @@
   content: none;
 }
 
+/* General modifier: plain paper, for pages the skills write (the Efforts
+   page, via `ProjectView`), as against what a person writes (a daily log,
+   a Card, the Logbook), which keeps the dot grid and the heading markers
+   (Austin, 2026-09-28). No dot grid and no # / ## / ### / > glyphs in the
+   gutter; list markers stay, since a list still needs them. Apply via the
+   `className` prop (`className="ox-plain"`), like `ox-no-gutter`. */
+.ox-content.ox-plain .ox-dot-grid {
+  background-image: none;
+}
+.ox-content.ox-plain :is(h1, h2, h3, blockquote)::before {
+  content: none;
+}
+
 /* ── Gutter markers (# / ## / ### / >) ──────────────────────────── */
 
 .ox-content :is(h1, h2, h3, blockquote) {
@@ -396,6 +409,29 @@
 .ox-content .ox-blank-line-spacer {
   margin-top: 0 !important;
 }
+
+/* Headings and lists keep one rhythm whatever the source's blank lines
+   say (Austin, 2026-09-28): a heading always has one grid row above it,
+   what it heads sits right under it, a list (nested ones too) sits right
+   under the line above it, and extra blank lines collapse to the one gap
+   any two blocks already get. Pages the skills write don't keep blank
+   lines consistently, and every surface that renders OxMarkdown should
+   read the same. Editing mode still shows the source's real rows.
+   `!important` so these win over the rhythm rule's combinators above. */
+.ox-dot-grid > :is(h1, h2, h3, h4):not(:first-child) {
+  margin-top: var(--ox-grid) !important;
+}
+.ox-dot-grid > :is(h1, h2, h3, h4) + :not(.ox-blank-line-spacer),
+.ox-dot-grid > :is(h1, h2, h3, h4) + .ox-blank-line-spacer + *,
+.ox-dot-grid > :is(h1, h2, h3, h4) + .ox-blank-line-spacer + .ox-blank-line-spacer + *,
+.ox-dot-grid > :is(h1, h2, h3, h4) + .ox-blank-line-spacer + .ox-blank-line-spacer + .ox-blank-line-spacer + *,
+.ox-content :is(ul, ol) {
+  margin-top: 0 !important;
+}
+.ox-content .ox-blank-line-spacer {
+  display: none;
+}
+
 
 /* One per blank line BEYOND the single one CommonMark already requires to
    separate two blocks — see `renderBlockNodes` in `OxRenderer.tsx`. Exactly

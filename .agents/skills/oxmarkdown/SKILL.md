@@ -303,6 +303,21 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
     import (`editingTransforms.ts`'s `convertBlockList`) was already
     correct here for free — it only ever inserts `countBlankLines` empty
     paragraphs, which is already 0 in this case.
+  - **Headings and lists override the source's blank lines in the static
+    renderer (Austin, 2026-09-28).** A heading always gets one grid row
+    above it (even with `ox-no-gap-before`), the block right under a
+    heading gets none, and a list (nested ones included) gets none above
+    it. Extra blank lines beyond the first collapse: `.ox-blank-line-spacer`
+    is hidden, so the section above about spacer rows now describes the
+    markup, not what shows. Pages the skills write don't keep blank lines
+    consistently, and every surface should read the same, so this lives in
+    both `oxmarkdown.css` copies (fruits and webapp), never in a page's own
+    CSS. Editing mode still shows the source's real rows.
+  - **`ox-plain` (2026-09-28): pages the skills write render on plain
+    paper.** No dot grid and no heading/blockquote gutter glyphs; list
+    markers stay. `ProjectView` (the Efforts page) passes it; a daily log,
+    a Card and the Logbook don't, and keep the dot grid. Same modifier
+    pattern as `ox-no-gutter`, in both `oxmarkdown.css` copies.
   - **Nested (2nd-order+) list indentation was ALSO only ever applied
     editor-only** (`.ox-editing-surface li > ul`/`ol`) — the static/
     Interacting renderer relied solely on a bullet-glyph change (`—` vs

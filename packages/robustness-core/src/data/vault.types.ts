@@ -44,6 +44,16 @@ export type FileRef = {
    * if the project folder is later renamed; the CURRENT display name is
    * always resolved fresh from this id, never cached on the card itself. */
   project_folder_id?: string | null;
+  /** A Card from someone whose group has no `feeds` (an Observer): it
+   * feeds the project only with `taken_content`, the words a Guide last
+   * took (`suggestions.server.ts`). */
+  suggestion?: boolean;
+  /** What a Guide last took from this Card, fed as written. */
+  taken_content?: string | null;
+  /** What a Guide last passed on. Later words wait again. */
+  passed_content?: string | null;
+  /** The Guide who last took or passed it. */
+  decided_by?: string | null;
   created_at: string;
   updated_at: string;
   /** How the file is shared when accessed via a shared folder. Defaults to "view". */

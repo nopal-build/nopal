@@ -68,6 +68,7 @@ import {
 } from "robustness-core/data/apiTokens.server";
 import { AppLayout } from "../components/AppLayout";
 import { Input } from "stamps/Input";
+import { SearchField } from "stamps/SearchField";
 import { Badge } from "stamps/Badge";
 import { Modal } from "stamps/Modal";
 import { MoreMenu } from "stamps/MoreMenu";
@@ -2522,39 +2523,14 @@ export default function Profile() {
                   />
 
                   <div className="flex flex-col gap-3 p-3">
-                    <div className="relative">
-                      <Input
-                        label="Email"
-                        hideLabel
-                        name="email"
-                        defaultValue={needsInviteDetails ? inviteEmail : ""}
-                        onChange={(e) => setEmailQuery(e.target.value)}
-                        required
-                        placeholder="Search or invite by email"
-                        className="pr-9"
-                      />
-                      <svg
-                        aria-hidden="true"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="absolute pointer-events-none"
-                        style={{
-                          right: "10px",
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          color: "var(--text-subtle)",
-                        }}
-                      >
-                        <circle cx="11" cy="11" r="7" />
-                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                      </svg>
-                    </div>
+                    <SearchField
+                      label="Email"
+                      name="email"
+                      defaultValue={needsInviteDetails ? inviteEmail : ""}
+                      onChange={(e) => setEmailQuery(e.target.value)}
+                      required
+                      placeholder="Search or invite by email"
+                    />
 
                     {relationshipResult && "error" in relationshipResult && (
                       <div className="red-text text-sm">
