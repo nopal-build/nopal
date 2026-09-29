@@ -411,6 +411,12 @@ export function isHumanActive(human: Human): boolean {
 }
 
 /** True while a human's invite is still pending completion — see `isHumanActive`. */
+/** Admin or Super: the people the Maker's stats, the CLI and the API are
+ * for, and who make Guides. One place for the check (2026-09-29). */
+export function isStaff(human: Pick<Human, "role"> | { role?: string | null } | null | undefined): boolean {
+  return human?.role === "Admin" || human?.role === "Super";
+}
+
 export function isHumanInvited(human: Human): boolean {
   return Boolean(human.inviteToken);
 }
