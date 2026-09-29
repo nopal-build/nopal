@@ -75,8 +75,24 @@
 import { useEffect } from "react";
 import { $insertNodes, COMMAND_PRIORITY_HIGH, PASTE_COMMAND } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { DRAG_DROP_PASTE } from "@lexical/rich-text";
+import { mergeRegister } from "@lexical/utils";
 import { parseOxDocument } from "oxmarkdown-core";
 import { importOxDocument } from "./editingTransforms";
+import { insertFilesAtSelection, nameForPastedFile, type UploadFileFn } from "./fileDirective";
+
+/** The image files on a clipboard, if any: a screenshot, an image copied
+ * from a page or another app. A copied image usually comes with a
+ * `text/html` `<img>` too; the file is the thing, the HTML isn't. */
+function imageFilesFrom(data: DataTransfer): File[] {
+  const out: File[] = [];
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file) out.push(nameForPastedFile(file));
+  }
+  return out;
+}
 
 /** Reduces an HTML clipboard payload to plain text, without ever letting
  * the browser execute or render it — `DOMParser` builds a detached
@@ -133,14 +149,47 @@ function normalizePastedLines(text: string): string {
   return out.join("\n");
 }
 
-export default function MarkdownPastePlugin(): null {
+export default function MarkdownPastePlugin({
+  allowFileAttachments = false,
+  onUploadFile,
+}: {
+  /** Where `::file` rows are allowed (a card), a pasted image becomes one
+   * (Austin, 2026-09-29): saved and described the same way as a file
+   * picked with "add file". Elsewhere an image paste is ignored. */
+  allowFileAttachments?: boolean;
+  onUploadFile?: UploadFileFn;
+} = {}): null {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
-    return editor.registerCommand(
+    return mergeRegister(
+      // A file dropped on the editor (Lexical's rich-text plugin turns the
+      // drop into this command): an image lands the same way as a paste.
+      editor.registerCommand(
+        DRAG_DROP_PASTE,
+        (files) => {
+          if (!allowFileAttachments) return false;
+          const images = files.filter((f) => f.type.startsWith("image/")).map(nameForPastedFile);
+          if (images.length === 0) return false;
+          insertFilesAtSelection(editor, images, onUploadFile);
+          return true;
+        },
+        COMMAND_PRIORITY_HIGH,
+      ),
+      editor.registerCommand(
       PASTE_COMMAND,
       (event) => {
         if (!(event instanceof ClipboardEvent) || !event.clipboardData) return false;
+
+        // An image on the clipboard: the same row and upload as "add file".
+        if (allowFileAttachments) {
+          const images = imageFilesFrom(event.clipboardData);
+          if (images.length > 0) {
+            event.preventDefault();
+            insertFilesAtSelection(editor, images, onUploadFile);
+            return true;
+          }
+        }
 
         const rawText =
           event.clipboardData.getData("text/plain") ||
@@ -155,8 +204,9 @@ export default function MarkdownPastePlugin(): null {
         return true;
       },
       COMMAND_PRIORITY_HIGH,
+      ),
     );
-  }, [editor]);
+  }, [editor, allowFileAttachments, onUploadFile]);
 
   return null;
 }

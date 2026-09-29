@@ -197,7 +197,7 @@ function HumanDisclosure({ person, groups }: { person: HumanRow; groups: readonl
             {person.role && <Badge>{person.role}</Badge>}
           </Cluster>
           <span className={textSize.xs} style={subtle}>
-            {person.projects.length === 0 ? "no project" : person.projects.map((p) => `${p.name}: ${p.group}`).join(" · ")}
+            {person.projects.length === 0 ? "no project" : person.projects.length === 1 ? "1 project" : `${person.projects.length} projects`}
           </span>
         </Cluster>
       }
