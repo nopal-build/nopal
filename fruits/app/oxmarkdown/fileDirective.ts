@@ -40,7 +40,9 @@ import {
   $createParagraphNode,
   $getNodeByKey,
   $getRoot,
+  $getSelection,
   $isElementNode,
+  $isRangeSelection,
   $isTextNode,
   type LexicalEditor,
   type LexicalNode,
@@ -231,6 +233,57 @@ export function pickFilesAndInsertAtBlock(
     // focuses (it's delayed via rAF polling, so it naturally runs AFTER
     // that immediate, synchronous selection) — exactly the desired
     // result: land in the new file's caption, not the outer editor.
+    if (firstKey) focusFileCaptionOnceMounted(editor, firstKey);
+    if (onUploadFile) uploadAndAttach(editor, entries, onUploadFile);
+  });
+}
+
+/** A pasted image arrives as a `File` named "image.png" by every browser;
+ * a dated name tells pastes apart in the Files tab and the syncs. */
+export function nameForPastedFile(file: File): File {
+  if (file.name && !/^image\.(png|jpe?g|gif|webp)$/i.test(file.name)) return file;
+  const ext = (file.type.split("/")[1] || "png").replace("jpeg", "jpg");
+  const d = new Date();
+  const stamp = [d.getFullYear(), d.getMonth() + 1, d.getDate()].map((n) => String(n).padStart(2, "0")).join("-") +
+    "-" + [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, "0")).join("") + String(d.getMilliseconds()).padStart(3, "0");
+  return new File([file], `pasted-${stamp}.${ext}`, { type: file.type });
+}
+
+/** Files already in hand (a paste, a drop): the same `::file` rows the
+ * picker makes, inserted after the block the caret is in (or at the end
+ * when there's no caret), each uploaded the same way.
+ *
+ * Called from a command handler, which already runs inside an update, so
+ * this `editor.update()` is QUEUED, not run at once (the same Lexical rule
+ * `pickFilesAndInsertAtBlock` documents). The upload kick-off therefore
+ * sits INSIDE the callback, after the rows exist; a first version put it
+ * after the call and uploaded nothing, since the list was still empty. */
+export function insertFilesAtSelection(editor: LexicalEditor, files: File[], onUploadFile?: UploadFileFn): void {
+  if (files.length === 0) return;
+  editor.update(() => {
+    let firstKey: string | null = null;
+    const entries: { file: File; nodeKey: string }[] = [];
+    const selection = $getSelection();
+    const anchorBlock = $isRangeSelection(selection) ? getTopLevelBlock(selection.anchor.getNode()) : null;
+    let cursor: LexicalNode | null = anchorBlock;
+    for (const file of files) {
+      const directive = createFileDirectiveNode(file);
+      if (cursor) {
+        cursor.insertAfter(directive);
+      } else {
+        $getRoot().append(directive);
+      }
+      cursor = directive;
+      entries.push({ file, nodeKey: directive.getKey() });
+      if (firstKey === null) firstKey = directive.getKey();
+    }
+    // Room to keep typing under the last row, as the slash command leaves.
+    if (cursor) {
+      const following = $createParagraphNode();
+      cursor.insertAfter(following);
+      following.select();
+    }
+    if (anchorBlock && $isElementNode(anchorBlock) && anchorBlock.getTextContent() === "") anchorBlock.remove();
     if (firstKey) focusFileCaptionOnceMounted(editor, firstKey);
     if (onUploadFile) uploadAndAttach(editor, entries, onUploadFile);
   });

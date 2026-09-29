@@ -389,7 +389,7 @@ function OxEditingSurface({
                 onUploadFile={onUploadFile}
               />
               <DirectiveShortcutPlugin />
-              <MarkdownPastePlugin />
+              <MarkdownPastePlugin allowFileAttachments={allowFileAttachments} onUploadFile={onUploadFile} />
               <ChecklistUpgradePlugin />
               <ToggleListPlugin />
               {mentionSearch && (
