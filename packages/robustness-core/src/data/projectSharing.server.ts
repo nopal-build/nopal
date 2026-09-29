@@ -38,7 +38,7 @@ import { CLIENT_ROLE, GUIDING_ROLE, reachesProjectWork } from "./sharingRoles.se
 import { featuresOf, groupOf, type Feature } from "./features";
 import { isWebsiteFolder } from "./vaultFolderTypes";
 import { query, formatRecord } from "./generic.server";
-import { getHumanById, getHumansById, type Human } from "./humans.server";
+import { getHumanById, getHumansById, isStaff, type Human } from "./humans.server";
 
 export type { ProjectSharingEntry };
 
@@ -245,7 +245,7 @@ export async function setProjectSharing(
 
   const actor = await getHumanById(actingHumanId);
   const actingRole = await getProjectRole(projectFolder, actingHumanId);
-  const isAdmin = actor?.role === "Admin" || actor?.role === "Super";
+  const isAdmin = isStaff(actor);
   if (!actingRole?.guiding && !isAdmin) {
     return { ok: false, error: "You don't have permission to change sharing on this project" };
   }
@@ -409,7 +409,7 @@ export async function canStartProject(
   human: Pick<Human, "_id" | "role">,
   memberships?: ProjectMembership[],
 ): Promise<boolean> {
-  if (human.role === "Admin" || human.role === "Super") return true;
+  if (isStaff(human)) return true;
   return guidesAny(memberships ?? (await listProjectsFor(human._id)));
 }
 

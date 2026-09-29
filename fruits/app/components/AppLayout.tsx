@@ -129,7 +129,8 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const user = useUser();
   // The Maker is for admins and for anyone guiding a project (ADR-026);
   // `/maker` refuses everyone else on the server too.
-  const showMaker = permissions.isAdmin(user) || useMaker();
+  const guidesAProject = useMaker();
+  const showMaker = permissions.isAdmin(user) || guidesAProject;
   // A client gets their project, the Daily Log and their account, nothing
   // else (ADR-023); `/vault` refuses them on the server too.
   const showVault = !useVaultHidden();

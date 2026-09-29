@@ -6,15 +6,15 @@
 // admins see every project's; anyone else gets the same 404 as a project
 // that doesn't exist. Starting a project lands here with only you on it.
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Link, data, isRouteErrorResponse, redirect, useLoaderData, useRouteError } from "react-router";
+import { Link, data, redirect, useLoaderData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { assignableGroups } from "robustness-core/data/features";
 import { navFor } from "../data/nav.server";
 import { candidatesFor, isStaff, peopleAction, peopleOn, runsPeople } from "../data/projectPeople.server";
 import { AppLayout } from "../components/AppLayout";
+import { MakerErrorBoundary } from "../components/MakerErrorBoundary";
 import { ProjectPeople } from "../components/ProjectPeople";
-import { Badge } from "stamps/Badge";
 import { CenterContent } from "stamps/CenterContent";
 import { Cluster } from "stamps/Cluster";
 import { Stack } from "stamps/Stack";
@@ -30,7 +30,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const folder = params.folderId ? await getFolderById(params.folderId) : undefined;
   if (!folder || !(await runsPeople(user, folder))) throw data("Not found", { status: 404 });
 
-  const staff = isStaff(user.role);
+  const staff = isStaff(user);
   const [project, everyone, nav] = await Promise.all([peopleOn(folder), candidatesFor(user), navFor(user._id)]);
   return {
     user: { name: user.name ?? null, email: user.email, role: user.role },
@@ -52,32 +52,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export function ErrorBoundary() {
-  const error = useRouteError();
-  const notFound = isRouteErrorResponse(error) && error.status === 404;
-  return (
-    <AppLayout>
-      <CenterContent maxWidth={480}>
-        <Surface className={sprinkles({ p: 6, mt: 8 })}>
-          <Stack gap={3}>
-            <Badge variant={notFound ? "neutral" : "danger"}>{notFound ? "404" : "Error"}</Badge>
-            <h1 className={`${textSize.xl} ${sprinkles({ fontWeight: "bold" })}`}>
-              {notFound ? "No project here" : "Something went wrong"}
-            </h1>
-            <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-              {notFound
-                ? "Not a project you guide."
-                : error instanceof Error
-                  ? error.message
-                  : "An unexpected error occurred."}
-            </p>
-            <Link to="/maker/projects" className={`${link} ${textSize.sm}`}>
-              ← Projects and humans
-            </Link>
-          </Stack>
-        </Surface>
-      </CenterContent>
-    </AppLayout>
-  );
+  return <MakerErrorBoundary notFound="Not a project you guide." backTo={{ to: "/maker/projects", label: "← Projects and humans" }} />;
 }
 
 export default function MakerProject() {

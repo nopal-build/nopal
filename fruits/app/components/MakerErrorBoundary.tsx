@@ -10,14 +10,21 @@ import { surfaceBase } from "stamps/surface.css";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 
-export function MakerErrorBoundary() {
+export function MakerErrorBoundary({
+  notFound = "There's no page at this address.",
+  backTo = { to: "/", label: "← Back to Dashboard" },
+}: {
+  /** What a 404 says here, when the page knows better than the default. */
+  notFound?: string;
+  backTo?: { to: string; label: string };
+} = {}) {
   const error = useRouteError();
   const status = isRouteErrorResponse(error) ? error.status : null;
   const copy =
     status === 403
       ? { title: "Access Denied", text: "The Maker is for admins and guides." }
       : status === 404
-        ? { title: "Nothing here", text: "There's no page at this address." }
+        ? { title: "Nothing here", text: notFound }
         : {
             title: "Something went wrong",
             text: isRouteErrorResponse(error) ? `${error.status}: ${error.statusText}` : error instanceof Error ? error.message : "An unexpected error occurred.",
@@ -29,8 +36,8 @@ export function MakerErrorBoundary() {
           {status && <Badge variant={status === 403 ? "danger" : "neutral"}>{status}</Badge>}
           <h1 className="font-bold text-xl">{copy.title}</h1>
           <p className="text-sm subtle-text">{copy.text}</p>
-          <Link to="/" className={`${link} ${textSize.sm}`}>
-            ← Back to Dashboard
+          <Link to={backTo.to} className={`${link} ${textSize.sm}`}>
+            {backTo.label}
           </Link>
         </div>
       </div>

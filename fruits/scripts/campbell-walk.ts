@@ -244,7 +244,7 @@ await hit(client.cookie, "the humans list", "GET", "/maker/projects?tab=humans",
 await hit(client.cookie, "the CLI login page", "GET", "/cli-login?port=4321&state=x", 403);
 await hit(client.cookie, "mint an API token", "POST", "/profile", 403, form({ intent: "generate-api-token", name: "walk" }));
 const profile = await hit(client.cookie, "their profile", "GET", "/profile", 200);
-check("no CLI, tokens or invite on it", !profile.includes("CLI sessions") && !profile.includes("Personal access tokens") && !profile.includes("Search or invite by email"));
+check("no CLI, tokens or invite on it", !profile.includes("CLI sessions") && !profile.includes("Personal access tokens") && !profile.includes('value="add-relationship"'));
 if (photo) {
   await hit(client.cookie, "a photo, view", "GET", `/api/vault/view/${photo.serveId}`, 302);
   await hit(client.cookie, "a photo, thumbnail", "GET", `/api/vault/rendition/${photo.serveId}?size=thumb`, 302);

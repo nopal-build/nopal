@@ -10,6 +10,7 @@ import {
   getHumans,
   getHumansById,
   isHumanInvited,
+  isStaff,
   type Human,
 } from "robustness-core/data/humans.server";
 import { deleteRelationshipsForHuman, getRelatedHumans } from "robustness-core/data/relationships.server";
@@ -31,14 +32,12 @@ export type PersonRow = { id: string; name: string; email: string };
 export type MemberRow = PersonRow & { group: string; invited: boolean };
 export type PeopleProject = { id: string; name: string; href: string; members: MemberRow[] };
 
-export function isStaff(role: string | undefined): boolean {
-  return role === "Admin" || role === "Super";
-}
+export { isStaff };
 
 /** Whether `viewer` runs this project's people: its Guide, or an admin. */
 export async function runsPeople(viewer: Pick<Human, "_id" | "role">, folder: VaultFolder): Promise<boolean> {
   if (!(await isProjectFolder(folder))) return false;
-  return isStaff(viewer.role) || !!(await getProjectRole(folder, viewer._id))?.guiding;
+  return isStaff(viewer) || !!(await getProjectRole(folder, viewer._id))?.guiding;
 }
 
 const personRow = (h: Human): PersonRow => ({ id: h._id, name: displayName(h), email: h.email });
@@ -77,8 +76,8 @@ export async function peopleOnMany(
  * they know (what the share modal offered), so a guide isn't handed the
  * whole directory. A full email typed still finds anyone with an account
  * (`inviteToProject` looks them up), or invites someone new. */
-export async function candidatesFor(viewer: Human): Promise<PersonRow[]> {
-  const humans = isStaff(viewer.role) ? ((await getHumans())?.data ?? []) : await getRelatedHumans(viewer);
+export async function candidatesFor(viewer: Human, everyone?: Human[]): Promise<PersonRow[]> {
+  const humans = isStaff(viewer) ? (everyone ?? (await getHumans())?.data ?? []) : await getRelatedHumans(viewer);
   return humans
     .filter((h) => h._id !== viewer._id)
     .map(personRow)
@@ -115,6 +114,12 @@ export async function peopleAction(viewer: Human, form: FormData, request: Reque
   if (!humanId) return { error: "Not found" };
   if (intent === "withdraw") return withdrawInvite(viewer, folder, humanId);
   if (group && !groupOf(group)) return { error: `Unknown group "${group}"` };
+  // "Remove" on someone who hasn't accepted yet is a withdraw too: the
+  // placeholder account shouldn't outlive its only invite.
+  if (!group) {
+    const human = await getHumanById(humanId);
+    if (human && isHumanInvited(human)) return withdrawInvite(viewer, folder, humanId);
+  }
 
   const others = (await getProjectSharing(folder)).filter((e) => e.human !== humanId);
   const result = await setProjectSharing(viewer._id, folder, group ? [...others, { human: humanId, role: group }] : others);

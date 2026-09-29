@@ -12,16 +12,13 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, Form, useLoaderData, useActionData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { createApiTokenWithExchangeCode } from "robustness-core/data/apiTokens.server";
+import { isStaff } from "robustness-core/data/humans.server";
 import { AuthShell, AuthErrorText } from "../components/AuthShell";
 import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { button } from "stamps/button.css";
 
 const CLI_IS_FOR_ADMINS = "The nopal CLI is for admins.";
-
-function isAdminOrSuper(user: { role?: string }): boolean {
-  return user.role === "Admin" || user.role === "Super";
-}
 
 function parsePort(value: string | null): string | null {
   return value && /^\d{1,5}$/.test(value) ? value : null;
@@ -49,7 +46,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
   }
   // The CLI is for admins and supers (Austin, 2026-09-29).
-  if (!isAdminOrSuper(user)) return data({ error: CLI_IS_FOR_ADMINS }, { status: 403 });
+  if (!isStaff(user)) return data({ error: CLI_IS_FOR_ADMINS }, { status: 403 });
 
   return data({ email: user.email, port, state, hostname });
 }
@@ -63,7 +60,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  if (!isAdminOrSuper(user)) return data({ error: CLI_IS_FOR_ADMINS }, { status: 403 });
+  if (!isStaff(user)) return data({ error: CLI_IS_FOR_ADMINS }, { status: 403 });
 
   const form = await request.formData();
   const intent = form.get("intent");
