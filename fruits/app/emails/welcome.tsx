@@ -89,8 +89,7 @@ export function Welcome({
         )}
 
         <p style={{ margin: "0 0 20px", lineHeight: "1.6" }}>
-          Get started by setting up a passkey — sign in instantly with your
-          fingerprint, face, or PIN instead of a code, from now on.
+          Set up a passkey and you'll sign in with your fingerprint, face or PIN from now on.
         </p>
 
         <a

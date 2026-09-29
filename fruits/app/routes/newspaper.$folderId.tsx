@@ -33,6 +33,7 @@ import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/file
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import { listCardsForProject } from "robustness-core/data/dailyLog.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { firstName } from "robustness-core/data/humanNames";
 import {
   PROJECT_TAB_LABELS,
   TAB_FOLDERS,
@@ -225,7 +226,7 @@ function SuggestionsView({
   if (suggestions.length === 0) {
     return (
       <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-        {decides ? "Nothing waiting. What an Observer writes shows up here for you to take or pass." : "Nothing yet. What you write on this project waits here until a Guide takes it."}
+        {decides ? "Nothing waiting." : "Nothing yet. What you write waits here for a Guide."}
       </p>
     );
   }
@@ -274,7 +275,7 @@ async function projectPeople(sharing: { human: string; role: string }[]) {
     return group ? [{ human: e.human, group }] : [];
   });
   const names = new Map(
-    (await getHumansById(members.map((m) => m.human))).map((h) => [h._id, h.name || h.email]),
+    (await getHumansById(members.map((m) => m.human))).map((h) => [h._id, firstName(h)]),
   );
   return members
     .map((m) => ({ name: names.get(m.human) ?? "Someone", group: m.group }))
@@ -286,7 +287,7 @@ async function projectPeople(sharing: { human: string; role: string }[]) {
 async function projectLogbook(projectFolderId: string) {
   const cards = (await listCardsForProject(projectFolderId)).filter((c) => c.content.trim());
   const names = new Map(
-    (await getHumansById([...new Set(cards.map((c) => c.humanId))])).map((h) => [h._id, h.name || h.email]),
+    (await getHumansById([...new Set(cards.map((c) => c.humanId))])).map((h) => [h._id, firstName(h)]),
   );
   return cards
     .map((c) => ({ fileId: c.fileId, who: names.get(c.humanId) ?? "Someone", date: c.date, content: c.content }))
@@ -359,7 +360,7 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
   if (cards.length === 0) {
     return (
       <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-        Nobody has written about this project in a daily log yet.
+        No cards yet.
       </p>
     );
   }

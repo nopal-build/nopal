@@ -105,7 +105,7 @@ export function ErrorBoundary() {
           <h1 className="font-bold text-xl">Something went wrong</h1>
           <p className="text-sm subtle-text">
             {isRouteErrorResponse(error)
-              ? `${error.status} — ${error.statusText}`
+              ? `${error.status}: ${error.statusText}`
               : error instanceof Error
                 ? error.message
                 : "An unexpected error occurred."}
@@ -210,7 +210,7 @@ export default function FruitsMakerScriptsRun() {
         <div className={`${surfaceBase} p-5`}>
           {log.length === 0 ? (
             <p className="text-sm subtle-text" style={{ margin: 0 }}>
-              {run.ok === null ? "Still running — no log lines yet." : "No log lines were recorded for this run."}
+              {run.ok === null ? "Still running: no log lines yet." : "No log lines were recorded for this run."}
             </p>
           ) : (
             <pre

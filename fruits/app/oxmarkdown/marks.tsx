@@ -326,8 +326,7 @@ function MoveControl({
       {busy && !options && <div className="ox-mark-move__row">Looking…</div>}
       {options && options.entries.length === 0 && (
         <div className="ox-mark-move__note">
-          Nothing on this line came from a daily-log entry, so there is nothing here to file elsewhere. Mark a line
-          that carries a citation to move what it came from.
+          Nothing on this line came from a daily log, so there's nothing to move.
         </div>
       )}
       {options && options.entries.length > 0 && (

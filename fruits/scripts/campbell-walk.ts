@@ -4,7 +4,7 @@
 //      Steep tap) and the Daily Log. Everything else on the project, and
 //      anything on another project, is refused by the server, typed URLs
 //      and guessed file ids included, and a photo of a receipt too.
-//   3. The admin sees everyone in /maker/humans and moves the client to
+//   3. The admin sees everyone in /maker/projects?tab=humans and moves the client to
 //      Observer and back there; what the client reaches follows on the
 //      next load. A client or crafter can't open the list.
 //   4. A Guide who isn't an admin moves people below Guide on their own
@@ -12,6 +12,10 @@
 //      another project's people.
 //   9. The Crafter reaches the project's work as before; the Guide
 //      reaches its people.
+// And the Maker (ADR-026, 2026-09-28): the Guide sees their own project
+// there and not the other, regroups through it, can't make a Guide; a
+// Crafter or Client has no Maker and is refused by URL; someone guiding
+// nothing can't start a project; a Client leaves a note with the pen.
 // While the client is an Observer: they read the Costs tab; their Card and
 // note wait for a Guide, who takes the Card and passes the note; they
 // don't move an entry or file a file.
@@ -31,7 +35,8 @@
 import { query } from "robustness-core/data/generic.server";
 import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { getHumanByEmail } from "robustness-core/data/humans.server";
-import { getProjectSharing } from "robustness-core/data/projectSharing.server";
+import { getProjectSharing, guidesAny, listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { ensureVaultRootFolders } from "robustness-core/data/vault.server";
 import { loadProjectFiles } from "robustness-core/data/fileFolders.server";
 import { getDailyLogCards, listCardsForProject } from "robustness-core/data/dailyLog.server";
 import { listSuggestionMarks, listUnreadMarks, pageMarkUnits } from "robustness-core/data/graphLogMarks.server";
@@ -123,7 +128,7 @@ if (guide.role !== "Human") throw new Error(`${guideEmail} is ${guide.role}; tes
 const before = await getProjectSharing(own);
 const roleOf = async (id: string) => (await getProjectSharing(own)).find((e) => e.human === id)?.role ?? null;
 const setGroup = (who: { cookie: string }, humanId: string, group: string, label: string) =>
-  hit(who.cookie, label, "POST", "/maker/humans", 200, form({ humanId, projectId: ownId, group }));
+  hit(who.cookie, label, "POST", "/maker/projects", 200, form({ humanId, projectId: ownId, group }));
 const putSharing = async (who: { cookie: string }, change: Record<string, string>, label: string, want: number) => {
   const now = await getProjectSharing(own);
   const next = [...now.filter((e) => !(e.human in change)), ...Object.entries(change).map(([human, role]) => ({ human, role }))];
@@ -149,9 +154,11 @@ if (!receipt && SEED_RECEIPT && photos.length > 1) {
 const photo = rows.find((r) => r.folders.includes("gallery") && !r.folders.includes("costs") && r.copyFileId) ?? null;
 const doc = rows.find((r) => !r.folders.includes("gallery") && r.copyFileId) ?? null;
 
+const crafterGuides = guidesAny(await listProjectsFor(crafter.id));
+
 // ── Test 3, first half: the admin's list ─────────────────────────────────
 lines.push(`# admin ${adminEmail}`);
-const list = await hit(admin.cookie, "the humans list", "GET", "/maker/humans", 200);
+const list = await hit(admin.cookie, "the humans list", "GET", "/maker/projects?tab=humans", 200);
 check("the list names the client", list.includes(clientEmail));
 await setGroup(admin, guide.id, "Guide", "make the walk's guide a Guide");
 check("the guide is Guide", (await roleOf(guide.id)) === "Guide");
@@ -231,7 +238,13 @@ await hit(client.cookie, "own project's status", "GET", `/api/vault/projects/${o
 await hit(client.cookie, "other project's status", "GET", `/api/vault/projects/${otherId}/status`, 404);
 await hit(client.cookie, "invite someone", "POST", `/api/vault/projects/${ownId}/invite`, 404, { email: "x@example.com", role: "Client" });
 await hit(client.cookie, "set own role", "PUT", `/api/vault/projects/${ownId}/sharing`, 404, { sharing: [] });
-await hit(client.cookie, "the humans list", "GET", "/maker/humans", 403);
+await hit(client.cookie, "the humans list", "GET", "/maker/projects?tab=humans", 403);
+// The CLI and the API are the admins' (2026-09-29); a Client's profile
+// carries neither and the server refuses both.
+await hit(client.cookie, "the CLI login page", "GET", "/cli-login?port=4321&state=x", 403);
+await hit(client.cookie, "mint an API token", "POST", "/profile", 403, form({ intent: "generate-api-token", name: "walk" }));
+const profile = await hit(client.cookie, "their profile", "GET", "/profile", 200);
+check("no CLI, tokens or invite on it", !profile.includes("CLI sessions") && !profile.includes("Personal access tokens") && !profile.includes("Search or invite by email"));
 if (photo) {
   await hit(client.cookie, "a photo, view", "GET", `/api/vault/view/${photo.serveId}`, 302);
   await hit(client.cookie, "a photo, thumbnail", "GET", `/api/vault/rendition/${photo.serveId}?size=thumb`, 302);
@@ -252,7 +265,16 @@ for (const [what, id] of [
   await hit(client.cookie, `${what}, download`, "GET", `/api/vault/download/${id}`, 404);
   await hit(client.cookie, `${what}, rendition`, "GET", `/api/vault/rendition/${id}`, 404);
 }
-await hit(client.cookie, "a mark", "POST", "/api/graphlog/marks", 404, { projectFolderId: ownId, pageHash: "x", unitKey: "x", text: "hello" });
+// A Client leaves a note with the pen (ADR-026), and it lands as written;
+// taking the client off later in the walk scraps it with the rest.
+if (passage) {
+  await hit(client.cookie, "a note with the pen", "POST", "/api/graphlog/marks", 201, {
+    projectFolderId: ownId,
+    pageHash: pageHash(readme),
+    unitKey: passage.key,
+    text: "the walk's client noted this",
+  });
+} else await hit(client.cookie, "a note with the pen (no passage)", "POST", "/api/graphlog/marks", 400, { projectFolderId: ownId, pageHash: pageHash(readme), unitKey: "x", text: "hello" });
 await hit(client.cookie, "a move", "POST", "/api/graphlog/moves", 0, { projectFolderId: ownId });
 await hit(client.cookie, "move options", "GET", `/api/graphlog/move-options?projectFolderId=${ownId}`, 404);
 await hit(client.cookie, "a GraphLog run", "POST", "/api/graphlog/run", 404, { projectFolderId: ownId });
@@ -288,7 +310,7 @@ if (doc) await hit(crafter.cookie, "a document's record", "GET", `/api/vault/${d
 await hit(crafter.cookie, "another project", "GET", `/newspaper/${otherId}`, 404);
 await hit(crafter.cookie, "the people list", "GET", `/api/vault/projects/${ownId}/sharing`, 404);
 await hit(crafter.cookie, "invite someone", "POST", `/api/vault/projects/${ownId}/invite`, 404, { email: "x@example.com", role: "Client" });
-if (crafter.role === "Human") await hit(crafter.cookie, "the humans list", "GET", "/maker/humans", 403);
+if (crafter.role === "Human") await hit(crafter.cookie, "the humans list", "GET", "/maker/projects?tab=humans", crafterGuides ? 404 : 403);
 
 // ── Test 4: a Guide who isn't an admin ───────────────────────────────────
 lines.push(`# guide ${guideEmail}`);
@@ -301,8 +323,33 @@ await putSharing(guide, { [crafter.id]: "Guide" }, "make the crafter a Guide", 4
 await putSharing(guide, { [admin.id]: "Crafter" }, "put an admin on the project", 403);
 await hit(guide.cookie, "invite a Guide", "POST", `/api/vault/projects/${ownId}/invite`, 403, { email: crafterEmail, role: "Guide" });
 await hit(guide.cookie, "another project's people", "GET", `/api/vault/projects/${otherId}/sharing`, 404);
-await hit(guide.cookie, "the humans list", "GET", "/maker/humans", 403);
+await hit(guide.cookie, "the humans list (a tab a Guide isn't given)", "GET", "/maker/projects?tab=humans", 404);
 check("the crafter is still what they were", (await roleOf(crafter.id)) === (before.find((e) => e.human === crafter.id)?.role ?? null));
+
+// ── The Maker: the guide's own projects, and nobody else's Maker ────────
+lines.push(`# the Maker`);
+const makerPage = await hit(guide.cookie, "the Maker", "GET", "/maker", 200);
+check("the Maker has the tile and no stats or usage", makerPage.includes("data-maker-tile") && !makerPage.includes("General Stats") && !makerPage.includes("GraphLog Usage"));
+const projectsPage = await hit(guide.cookie, "Projects and humans", "GET", "/maker/projects", 200);
+check("it lists the guide's project", projectsPage.includes(`data-maker-project="${ownId}"`));
+check("and not the other one", !projectsPage.includes(`data-maker-project="${otherId}"`) && !projectsPage.includes(other.name));
+check("and offers no Humans tab", !projectsPage.includes('data-tab="humans"'));
+await hit(guide.cookie, "own project in the Maker", "GET", `/maker/projects/${ownId}`, 200);
+await hit(guide.cookie, "the other project in the Maker", "GET", `/maker/projects/${otherId}`, 404);
+await hit(guide.cookie, "regroup the client through the Maker", "POST", `/maker/projects/${ownId}`, 200, form({ humanId: client.id, group: "Observer" }));
+check("the client is Observer", (await roleOf(client.id)) === "Observer");
+await hit(guide.cookie, "and back", "POST", `/maker/projects/${ownId}`, 200, form({ humanId: client.id, group: "Client" }));
+check("the client is Client again", (await roleOf(client.id)) === "Client");
+await hit(guide.cookie, "make the crafter a Guide through the Maker", "POST", `/maker/projects/${ownId}`, 200, form({ humanId: crafter.id, group: "Guide" }));
+check("refused: the crafter is not a Guide", (await roleOf(crafter.id)) !== "Guide");
+await hit(crafter.cookie, crafterGuides ? "the Maker (the crafter guides elsewhere)" : "the Maker", "GET", "/maker", crafterGuides ? 200 : 403);
+await hit(crafter.cookie, "this project in the Maker", "GET", `/maker/projects/${ownId}`, 404);
+await hit(client.cookie, "the Maker", "GET", "/maker", 403);
+await hit(client.cookie, "this project in the Maker", "GET", `/maker/projects/${ownId}`, 404);
+// Someone guiding nothing can't start a project, from any route.
+const clientRoot = (await ensureVaultRootFolders(client.id)).find((r) => r.vault_root_key === "projects");
+if (clientRoot) await hit(client.cookie, "start a project in the Vault", "POST", "/api/vault/folders", 403, { name: "the walk's project", parent_folder_id: clientRoot._id });
+await hit(client.cookie, "start a project in the Maker", "POST", "/maker/projects", 403, form({ intent: "start", name: "the walk's project" }));
 
 // ── Taken off, the client's Card from today is scrapped ─────────────────
 lines.push(`# the client comes off`);

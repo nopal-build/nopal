@@ -119,7 +119,7 @@ function GuideProjects({
       </Cluster>
       {activeStatus === "trashed" && rows.length > 0 && (
         <p className={textSize.xs} style={subtle}>
-          Trashed projects are permanently deleted 30 days after being trashed.
+          Trashed projects are deleted after 30 days.
         </p>
       )}
       {rows.length === 0 ? (

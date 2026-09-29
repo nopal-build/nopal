@@ -112,7 +112,7 @@ export function ErrorBoundary() {
           <h1 className="font-bold text-xl">Something went wrong</h1>
           <p className="text-sm subtle-text">
             {isRouteErrorResponse(error)
-              ? `${error.status} — ${error.statusText}`
+              ? `${error.status}: ${error.statusText}`
               : error instanceof Error
                 ? error.message
                 : "An unexpected error occurred."}
@@ -142,22 +142,22 @@ const STAGE_META: Record<GraphLogDefaultStage, { title: string; file: string; bl
   graph: {
     title: "Graph",
     file: "skills/GRAPH.md",
-    blurb: "Seeded into a brand new project's GRAPH.md — sync-graph's own real starter instructions (not \"skip\"), extracting citable nodes into Graph/graph-log-*.md.",
+    blurb: "Seeded into a brand new project's GRAPH.md: sync-graph's own real starter instructions (not \"skip\"), extracting citable nodes into Graph/graph-log-*.md.",
   },
   graphStructure: {
     title: "Graph Structure",
     file: "skills/GRAPH_STRUCTURE.md",
-    blurb: "Seeded into a brand new project's GRAPH_STRUCTURE.md — graph-structure's own real starter instructions, organizing the whole graph into Graph/graph-structure.md.",
+    blurb: "Seeded into a brand new project's GRAPH_STRUCTURE.md: graph-structure's own real starter instructions, organizing the whole graph into Graph/graph-structure.md.",
   },
   projectView: {
     title: "Efforts",
     file: "skills/EFFORTS.md",
-    blurb: "Seeded into a brand new project's EFFORTS.md — graph-project-view's instructions for the Efforts page it writes into README.md from graph-structure.md and the nodes. Was PROJECT_VIEW.md before 2026-09-16.",
+    blurb: "Seeded into a brand new project's EFFORTS.md: graph-project-view's instructions for the Efforts page it writes into README.md from graph-structure.md and the nodes. Was PROJECT_VIEW.md before 2026-09-16.",
   },
   voice: {
     title: "Voice",
     file: "skills/VOICE.md",
-    blurb: "Seeded into a brand new project's VOICE.md — how the project manager writes to the group. Read by graph-project-view only, never by the extraction stages. A living document: edit it here, then Reseed on the projects that should pick it up.",
+    blurb: "Seeded into a brand new project's VOICE.md: how the project manager writes to the group. Read by graph-project-view only, never by the extraction stages. A living document: edit it here, then Reseed on the projects that should pick it up.",
   },
 };
 

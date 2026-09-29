@@ -18,7 +18,6 @@ import {
 } from "@simplewebauthn/browser";
 import { getUser, updateUserSession } from "../modules/auth/auth.server";
 import {
-  getHumanByEmail,
   getHumanById,
   updateHumanName,
   updateHumanRole,
@@ -46,7 +45,6 @@ import {
   getRelationshipsForHuman,
 } from "robustness-core/data/relationships.server";
 import {
-  inviteHuman,
   canResendInvite,
   resendInvite,
 } from "../data/invites.server";
@@ -67,8 +65,9 @@ import {
   type ApiToken,
 } from "robustness-core/data/apiTokens.server";
 import { AppLayout } from "../components/AppLayout";
+import { useHome } from "../hooks/useUser";
+import { displayName } from "robustness-core/data/humanNames";
 import { Input } from "stamps/Input";
-import { SearchField } from "stamps/SearchField";
 import { Badge } from "stamps/Badge";
 import { Modal } from "stamps/Modal";
 import { MoreMenu } from "stamps/MoreMenu";
@@ -100,7 +99,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       getRelatedHumans(user, { includeRevoked: true }),
       getPasskeysByHuman(user._id),
       getRelationshipsForHuman(user._id),
-      getApiTokensByHuman(user._id),
+      // The CLI and the API are the admins' (Austin, 2026-09-29).
+      isAdminOrSuper(user) ? getApiTokensByHuman(user._id) : Promise.resolve([]),
     ]);
 
   // Revoked relationships are excluded from `relatedHumans` for regular
@@ -362,101 +362,6 @@ async function handleRemoveAlias(request: Request, form: FormData) {
     { intent: "remove-alias" as const, success: true, human: updated },
     { headers: { "Set-Cookie": setCookie } },
   );
-}
-
-async function handleAddRelationship(request: Request, form: FormData) {
-  const user = await getUser(request);
-  if (!user) return redirect("/login");
-
-  const email = String(form.get("email") ?? "")
-    .trim()
-    .toLowerCase();
-  const name = String(form.get("name") ?? "").trim();
-  const note = String(form.get("note") ?? "").trim();
-
-  if (!email || !EMAIL_RE.test(email)) {
-    return data(
-      {
-        intent: "add-relationship" as const,
-        error: "Please enter a valid email address.",
-      },
-      { status: 400 },
-    );
-  }
-  if (email === user.email.trim().toLowerCase()) {
-    return data(
-      { intent: "add-relationship" as const, error: "That's your own email." },
-      { status: 400 },
-    );
-  }
-
-  const existing = await getHumanByEmail(email);
-
-  if (existing) {
-    const result = await createRelationship(user._id, existing._id, user._id);
-    if (result.status === "already-related") {
-      return data(
-        {
-          intent: "add-relationship" as const,
-          error: "You already have a relationship with that human.",
-        },
-        { status: 400 },
-      );
-    }
-    if (result.status === "revoked-by-other") {
-      return data(
-        {
-          intent: "add-relationship" as const,
-          error:
-            "This relationship was revoked. Only the person who revoked it can reconnect.",
-        },
-        { status: 403 },
-      );
-    }
-    return data({
-      intent: "add-relationship" as const,
-      success: true,
-      name: existing.name,
-      invited: false,
-    });
-  }
-
-  // No human with that email yet — need a name (and optional note) to invite them.
-  if (!name) {
-    return data({
-      intent: "add-relationship" as const,
-      needsInvite: true,
-      email,
-    });
-  }
-
-  const invited = await inviteHuman(
-    {
-      email,
-      name,
-      role: "Human",
-      inviteNote: note || undefined,
-      invitedByHumanId: user._id,
-    },
-    request,
-  );
-  if (!invited) {
-    return data(
-      {
-        intent: "add-relationship" as const,
-        error: "Failed to invite that person.",
-      },
-      { status: 500 },
-    );
-  }
-
-  await createRelationship(user._id, invited._id, user._id);
-  return data({
-    intent: "add-relationship" as const,
-    success: true,
-    name: invited.name,
-    invited: true,
-  });
 }
 
 async function handleResendInvite(request: Request, form: FormData) {
@@ -867,6 +772,13 @@ async function handleRevokeApiToken(request: Request, form: FormData) {
 async function handleGenerateApiToken(request: Request, form: FormData) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
+  // The API is for admins and supers (Austin, 2026-09-29).
+  if (!isAdminOrSuper(user)) {
+    return data(
+      { intent: "generate-api-token" as const, error: "The API is for admins." },
+      { status: 403 },
+    );
+  }
 
   const rawName = String(form.get("name") ?? "").trim();
   if (!rawName) {
@@ -896,9 +808,6 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "update-name");
 
-  if (intent === "add-relationship") {
-    return handleAddRelationship(request, form);
-  }
   if (intent === "resend-invite") {
     return handleResendInvite(request, form);
   }
@@ -1199,7 +1108,7 @@ function RelationshipCard({
         className="text-sm min-w-0"
         style={revoked ? { opacity: 0.5, filter: "grayscale(0.6)" } : undefined}
       >
-        <div className="font-bold truncate">{human.name}</div>
+        <div className="font-bold truncate">{displayName(human)}</div>
         <div className="truncate subtle-text">{human.email}</div>
         {resendData && "error" in resendData && (
           <div className="red-text">{resendData.error}</div>
@@ -1218,7 +1127,7 @@ function RelationshipCard({
         )}
         {forceLogoutData && "success" in forceLogoutData && (
           <div style={{ color: "var(--green)" }}>
-            Logged out — they'll need to sign back in.
+            Logged out. They'll need to sign back in.
           </div>
         )}
       </div>
@@ -1255,7 +1164,7 @@ function RelationshipCard({
               title={
                 resendReady
                   ? undefined
-                  : "An invite was sent recently — try again shortly."
+                  : "Sent a moment ago. Try again in a minute."
               }
               onClick={submitResend}
             >
@@ -1272,7 +1181,7 @@ function RelationshipCard({
               title={
                 revokedByViewer
                   ? "You revoked this relationship."
-                  : `${human.name} revoked this relationship — only they can reconnect.`
+                  : `${human.name} revoked this. Only they can reconnect.`
               }
             >
               <Badge variant="danger">
@@ -1420,9 +1329,7 @@ function RelationshipCard({
           >
             <div className="flex flex-col gap-4">
               <p className="text-sm">
-                Force <strong>{human.name}</strong> to log out of every
-                device? They'll need to sign back in — with an email code or
-                passkey — the next time they use Nopal.
+                Log <strong>{human.name}</strong> out of every device? They'll sign back in next time.
               </p>
               {forceLogoutData && "error" in forceLogoutData && (
                 <div className="red-text text-sm">{forceLogoutData.error}</div>
@@ -1457,9 +1364,7 @@ function RelationshipCard({
           >
             <div className="flex flex-col gap-4">
               <p className="text-sm">
-                Suspend <strong>{human.name}</strong>? They'll be logged out
-                of every device immediately, and won't be able to log back
-                in — by email code, passkey, or CLI/API token — until you
+                Suspend <strong>{human.name}</strong>? They're logged out everywhere and can't sign in until you
                 unsuspend them.
               </p>
               {suspendData && "error" in suspendData && (
@@ -1670,33 +1575,11 @@ export default function Profile() {
     (t) => !t.name.endsWith("(personal access token)"),
   );
 
-  // The relationships email input does double duty: it filters the visible
-  // cards live as you type, and doubles as the "add relationship" field —
-  // submitting it adds/invites whatever email is currently typed. The
-  // search runs across the whole list (active + revoked) rather than
-  // treating revoked ones as a separate, unsearchable group — they just
-  // always sort to the end, under their own heading.
-  const [emailQuery, setEmailQuery] = useState("");
-  const normalizedEmailQuery = emailQuery.trim().toLowerCase();
-  const filteredRelatedHumans = normalizedEmailQuery
-    ? relatedHumans.filter((human) =>
-        human.email.toLowerCase().includes(normalizedEmailQuery),
-      )
-    : relatedHumans;
-  const filteredActiveRelatedHumans = filteredRelatedHumans.filter(
-    (human) => !revokedRelationships[human._id],
-  );
-  const filteredRevokedRelatedHumans = filteredRelatedHumans.filter(
-    (human) => revokedRelationships[human._id],
-  );
-  const emailQueryLooksValid = EMAIL_RE.test(emailQuery.trim());
-  // A valid, typed-out email with no existing relationship for it at all —
-  // show an "Add" card in place of the (empty) results instead of just a
-  // dead end.
-  const emailQueryHasNoMatch = !relatedHumans.some(
-    (human) => human.email.toLowerCase() === normalizedEmailQuery,
-  );
-  const showAddCard = emailQueryLooksValid && emailQueryHasNoMatch;
+  // The list: active relationships, then revoked ones under their own
+  // heading. Adding or inviting someone happens on a project's page in the
+  // Maker (ADR-026); here you see who you're related to.
+  const activeRelatedHumans = relatedHumans.filter((human) => !revokedRelationships[human._id]);
+  const revokedRelatedHumans = relatedHumans.filter((human) => revokedRelationships[human._id]);
 
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
@@ -1738,6 +1621,8 @@ export default function Profile() {
   // than a separate search UI — the Relationships section's own list and
   // email filter double as the account picker.
   const isManager = isAdminOrSuper(user);
+  // One project, one word (Austin, 2026-09-29): the nav already knows.
+  const home = useHome();
 
   async function impersonate(target: Human): Promise<void> {
     const res = await fetch("/api/admin/impersonate", {
@@ -1900,8 +1785,6 @@ export default function Profile() {
     }
   }
 
-  const relationshipResult =
-    actionData?.intent === "add-relationship" ? actionData : undefined;
   const passkeyDeleteResult =
     actionData?.intent === "delete-passkey" ? actionData : undefined;
   const apiTokenRevokeResult =
@@ -1932,14 +1815,6 @@ export default function Profile() {
     if (nameResult && "success" in nameResult) setEditingName(false);
   }, [nameResult]);
 
-  const needsInviteDetails =
-    relationshipResult && "needsInvite" in relationshipResult
-      ? relationshipResult.needsInvite
-      : false;
-  const inviteEmail =
-    relationshipResult && "email" in relationshipResult
-      ? relationshipResult.email
-      : "";
 
   const knownOtherAccounts = knownAccounts.filter(
     (account) => account.email.toLowerCase() !== user.email.toLowerCase(),
@@ -1990,7 +1865,7 @@ export default function Profile() {
       >
         <h1 className="font-bold text-2xl mb-1">Personal Profile</h1>
         <p className="text-sm mb-4" style={{ color: "var(--text-subtle)" }}>
-          Manage your name, email, and logins.
+          Your name, email and logins.
         </p>
 
         {/* Switch account / Logout live together in the section nav on md+
@@ -2396,159 +2271,54 @@ export default function Profile() {
                 className="text-sm mb-4"
                 style={{ color: "var(--text-subtle)" }}
               >
-                {isAdminOrSuper(user)
-                  ? "As an Admin/Super, you can see and share vault folders with everyone."
-                  : "Humans you have a relationship with can share vault folders with you, and vice versa. Admins and Supers can always see you."}
+                {isManager ? "Everyone with a Nopal account." : `Other humans on your ${home.plural ? "projects" : "project"}.`}
               </p>
 
-              {/* Single visual box: fixed-height scrollable relationship
-                  list on top (active, then revoked), the search/invite
-                  input right below it, separated by a divider. The whole
-                  thing is one <Form> so the "Add" card in the results area
-                  can submit it directly. */}
               <div className={`${surfaceBase} flex flex-col`}>
-                <Form
-                  method="post"
-                  key={
-                    relationshipResult
-                      ? JSON.stringify(relationshipResult)
-                      : "new"
-                  }
-                  className="flex flex-col"
+                <div
+                  className="collection-well flex flex-col gap-2 overflow-y-auto p-3"
+                  style={{ maxHeight: "380px" }}
+                  data-relationships
                 >
-                  <input type="hidden" name="intent" value="add-relationship" />
+                  {activeRelatedHumans.length === 0 && revokedRelatedHumans.length === 0 ? (
+                    <div className={`${surfaceBase} p-3 text-sm`}>
+                      Nobody yet.
+                    </div>
+                  ) : (
+                    <>
+                      {activeRelatedHumans.map((human) => (
+                        <RelationshipCard
+                          key={human._id}
+                          human={human}
+                          viewerId={user._id}
+                          viewerRole={user.role}
+                          revokedBy={revokedRelationships[human._id]}
+                          onImpersonate={isManager ? impersonate : undefined}
+                        />
+                      ))}
 
-                  <div
-                    className="collection-well flex flex-col gap-2 overflow-y-auto p-3"
-                    style={{ height: "380px" }}
-                  >
-                    {showAddCard ? (
-                      needsInviteDetails ? (
-                        <div
-                          className={`${surfaceBase} p-3 flex flex-col gap-3`}
-                          style={{ borderStyle: "dashed" }}
-                        >
-                          <div className="text-sm font-bold">
-                            Add {inviteEmail}
-                          </div>
-                          <Input
-                            label="Name"
-                            name="name"
-                            required
-                            placeholder="Their name"
-                            autoFocus
-                          />
-                          <Input
-                            type="textarea"
-                            label="Invite note (optional)"
-                            name="note"
-                            placeholder="Let them know why you're adding them"
-                          />
-                          <div className="text-right">
-                            <button className="btn-secondary" type="submit">
-                              Send Invite
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          type="submit"
-                          className={`${surfaceBase} p-3 text-sm text-left`}
-                          style={{ borderStyle: "dashed", cursor: "pointer" }}
-                        >
-                          <span className="font-bold">
-                            + Add {emailQuery.trim()}
-                          </span>
-                        </button>
-                      )
-                    ) : filteredActiveRelatedHumans.length === 0 &&
-                      filteredRevokedRelatedHumans.length === 0 ? (
-                      normalizedEmailQuery ? (
-                        <div
-                          className={`${surfaceBase} p-3 text-sm`}
-                          style={{ opacity: 0.5, filter: "grayscale(0.6)" }}
-                        >
-                          <div className="font-bold">No results</div>
-                          <div>
-                            Keep typing a full email address to invite them.
-                          </div>
-                        </div>
-                      ) : (
-                        <div className={`${surfaceBase} p-3 text-sm`}>
-                          No relationships yet.
-                        </div>
-                      )
-                    ) : (
-                      <>
-                        {filteredActiveRelatedHumans.map((human) => (
-                          <RelationshipCard
-                            key={human._id}
-                            human={human}
-                            viewerId={user._id}
-                            viewerRole={user.role}
-                            revokedBy={revokedRelationships[human._id]}
-                            onImpersonate={isManager ? impersonate : undefined}
-                          />
-                        ))}
-
-                        {filteredRevokedRelatedHumans.length > 0 && (
-                          <>
-                            <h3 className="font-bold text-sm mt-2">
-                              Revoked relationships
-                            </h3>
-                            {filteredRevokedRelatedHumans.map((human) => (
-                              <RelationshipCard
-                                key={human._id}
-                                human={human}
-                                viewerId={user._id}
-                                viewerRole={user.role}
-                                revokedBy={revokedRelationships[human._id]}
-                                onImpersonate={
-                                  isManager ? impersonate : undefined
-                                }
-                              />
-                            ))}
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                  <hr
-                    style={{
-                      borderColor: "currentColor",
-                      opacity: 0.2,
-                      margin: 0,
-                    }}
-                  />
-
-                  <div className="flex flex-col gap-3 p-3">
-                    <SearchField
-                      label="Email"
-                      name="email"
-                      defaultValue={needsInviteDetails ? inviteEmail : ""}
-                      onChange={(e) => setEmailQuery(e.target.value)}
-                      required
-                      placeholder="Search or invite by email"
-                    />
-
-                    {relationshipResult && "error" in relationshipResult && (
-                      <div className="red-text text-sm">
-                        {relationshipResult.error}
-                      </div>
-                    )}
-                    {relationshipResult && "success" in relationshipResult && (
-                      <div
-                        className="text-sm"
-                        style={{ color: "var(--green)" }}
-                      >
-                        {relationshipResult.invited
-                          ? `Invited ${relationshipResult.name} and added the relationship.`
-                          : `Added ${relationshipResult.name}.`}
-                      </div>
-                    )}
-                  </div>
-                </Form>
+                      {revokedRelatedHumans.length > 0 && (
+                        <>
+                          <h3 className="font-bold text-sm mt-2">
+                            Revoked relationships
+                          </h3>
+                          {revokedRelatedHumans.map((human) => (
+                            <RelationshipCard
+                              key={human._id}
+                              human={human}
+                              viewerId={user._id}
+                              viewerRole={user.role}
+                              revokedBy={revokedRelationships[human._id]}
+                              onImpersonate={
+                                isManager ? impersonate : undefined
+                              }
+                            />
+                          ))}
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </section>
 
@@ -2559,8 +2329,7 @@ export default function Profile() {
                 className="text-sm mb-4"
                 style={{ color: "var(--text-subtle)" }}
               >
-                Sign in with your device's fingerprint, face, or PIN instead of
-                an email code.
+                Sign in with your fingerprint, face or PIN.
               </p>
 
               {passkeys.length === 0 ? (
@@ -2598,15 +2367,18 @@ export default function Profile() {
                 </button>
               </div>
 
+              {/* The CLI and the API are for admins and supers (Austin,
+                  2026-09-29); the server refuses everyone else a token
+                  too (`handleGenerateApiToken`, `cli-login`). */}
+              {isManager && (
+                <>
               <h3 className="font-bold mt-6 mb-1">CLI sessions</h3>
               <p
                 className="text-sm mb-4"
                 style={{ color: "var(--text-subtle)" }}
               >
-                Devices that have signed in with{" "}
-                <span className="font-mono">nopal login</span>. Revoke any you
-                don't recognize or no longer use — sessions also expire on
-                their own after 30 days.
+                Devices signed in with <span className="font-mono">nopal login</span>. They expire after 30
+                days.
               </p>
 
               <div className={`${surfaceBase} p-3 text-sm mb-4`}>
@@ -2668,15 +2440,13 @@ export default function Profile() {
                 className="text-sm mb-4"
                 style={{ color: "var(--text-subtle)" }}
               >
-                For scripts and automation that call the Nopal API directly,
-                without a CLI login flow. Never expire on their own — revoke
-                one to invalidate it.
+                For scripts that call the API. They last until you revoke them.
               </p>
 
               {apiTokenGenerateResult && "token" in apiTokenGenerateResult && (
                 <div className={`${surfaceBase} p-3 text-sm mb-4`}>
                   <div className="mb-2 red-text font-bold">
-                    Copy this now — it won't be shown again.
+                    Copy this now. It won't be shown again.
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -2732,6 +2502,8 @@ export default function Profile() {
                   ))}
                 </div>
               )}
+                </>
+              )}
             </section>
 
             {/* ── Waivers ────────────────────────────────────────── */}
@@ -2742,8 +2514,8 @@ export default function Profile() {
                 style={{ color: "var(--text-subtle)" }}
               >
                 {waivers.length > 0
-                  ? "Here's your signed waiver. You can sign a new one at any time."
-                  : "You haven't signed a workers' compensation waiver yet."}
+                  ? "Your signed waiver. You can sign a new one any time."
+                  : "No waiver signed yet."}
               </p>
 
               {waivers.length > 0 && (

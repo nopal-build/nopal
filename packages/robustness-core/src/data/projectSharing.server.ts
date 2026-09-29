@@ -38,7 +38,7 @@ import { CLIENT_ROLE, GUIDING_ROLE, reachesProjectWork } from "./sharingRoles.se
 import { featuresOf, groupOf, type Feature } from "./features";
 import { isWebsiteFolder } from "./vaultFolderTypes";
 import { query, formatRecord } from "./generic.server";
-import { getHumanById, getHumansById } from "./humans.server";
+import { getHumanById, getHumansById, type Human } from "./humans.server";
 
 export type { ProjectSharingEntry };
 
@@ -394,6 +394,23 @@ async function readProjectLists(
  * screen and no Vault. Someone on no project isn't a client anywhere. */
 export function isClientEverywhere(memberships: ProjectMembership[]): boolean {
   return memberships.length > 0 && memberships.every((m) => m.role === CLIENT_ROLE);
+}
+
+/** Whether any of these memberships guides its project (`people`). */
+export function guidesAny(memberships: readonly Pick<ProjectMembership, "role">[]): boolean {
+  return memberships.some((m) => resolveRole(m.role).guiding);
+}
+
+/** Who may start a project (Austin, 2026-09-28, ADR-026): an admin, or
+ * someone already guiding one. A brand-new guide gets their first project
+ * from an admin, who starts it and makes them its Guide. The Maker is the
+ * place; the Vault's "+ New folder" at the projects root points there. */
+export async function canStartProject(
+  human: Pick<Human, "_id" | "role">,
+  memberships?: ProjectMembership[],
+): Promise<boolean> {
+  if (human.role === "Admin" || human.role === "Super") return true;
+  return guidesAny(memberships ?? (await listProjectsFor(human._id)));
 }
 
 /** A SurrealDB record id as the bare key the rest of the app stores. */

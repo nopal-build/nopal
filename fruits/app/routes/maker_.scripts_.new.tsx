@@ -80,7 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (await isAnyAdminScriptRunning()) {
-    return data({ error: "Another admin script is already running — wait for it to finish first." }, { status: 409 });
+    return data({ error: "Another admin script is already running: wait for it to finish first." }, { status: 409 });
   }
 
   const jobId = await enqueueAdminScriptJob({
@@ -120,7 +120,7 @@ export function ErrorBoundary() {
           <h1 className="font-bold text-xl">Something went wrong</h1>
           <p className="text-sm subtle-text">
             {isRouteErrorResponse(error)
-              ? `${error.status} — ${error.statusText}`
+              ? `${error.status}: ${error.statusText}`
               : error instanceof Error
                 ? error.message
                 : "An unexpected error occurred."}
@@ -228,12 +228,12 @@ export default function FruitsMakerScriptsNew() {
 
         <h1 className="font-bold text-xl mb-2">Run a script</h1>
         <p className="text-sm subtle-text mb-6" style={{ maxWidth: "620px" }}>
-          Newest first. Runs are serialized — only one at a time across every script.
+          Newest first. Runs are serialized: only one at a time across every script.
         </p>
 
         {running && (
           <div className="mb-6">
-            <Badge variant="warning">A script is currently running — wait for it to finish before starting another.</Badge>
+            <Badge variant="warning">A script is currently running: wait for it to finish before starting another.</Badge>
           </div>
         )}
 

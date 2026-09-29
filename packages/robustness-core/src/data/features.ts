@@ -56,13 +56,23 @@ const READING: Feature[] = ["efforts", "photos", "files", "costs", "logbook"];
  * Observer reads what a Crafter reads, writes Cards and notes, and doesn't
  * edit; what they write waits as a suggestion until a Guide takes it
  * (Austin, 2026-09-28);
- * Client gets Efforts, Photos, their own tap and their own log. */
+ * Client gets Efforts, Photos, the pen for a note, their own tap and
+ * their own log (Austin, 2026-09-28: "clients should be able to mark
+ * with the annotation"; moving, filing and confirming stay `edit`). */
 export const GROUP_FEATURES: Record<Group, readonly Feature[]> = {
   Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people", "feeds", "suggestions"],
   Crafter: [...READING, "marks", "steepTap", "dailyLog", "edit", "feeds"],
   Observer: [...READING, "marks", "steepTap", "dailyLog"],
-  Client: ["efforts", "photos", "steepTap", "dailyLog", "feeds"],
+  Client: ["efforts", "photos", "marks", "steepTap", "dailyLog", "feeds"],
 };
+
+/** The groups someone may give: every group for an admin; a Guide who
+ * isn't one gives Client, Crafter or Observer (only an admin makes a
+ * Guide, ADR-024). The server refuses the rest either way
+ * (`promotionRefusal`); this keeps dead choices off the screen. */
+export function assignableGroups(isAdmin: boolean): Group[] {
+  return isAdmin ? [...GROUPS] : GROUPS.filter((g) => g !== GUIDE);
+}
 
 /** Old names a README may still carry. Owner folded into Guide
  * (2026-09-25); read as Guide, written as Guide on the next save. */

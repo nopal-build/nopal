@@ -242,11 +242,11 @@ function AddCardSection({
       <Cluster gap={2}>
         {projectFolders.length === 0 ? (
           <span className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-            No projects yet. Create one in the Vault first.
+            No projects yet.
           </span>
         ) : available.length === 0 ? (
           <span className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-            Every project already has a card today.
+            {projectFolders.length === 1 ? "Your project has a card today." : "Every project has a card today."}
           </span>
         ) : (
           available.map((p) => (

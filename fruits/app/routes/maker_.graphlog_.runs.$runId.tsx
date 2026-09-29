@@ -109,7 +109,7 @@ export function ErrorBoundary() {
           <h1 className="font-bold text-xl">Something went wrong</h1>
           <p className="text-sm subtle-text">
             {isRouteErrorResponse(error)
-              ? `${error.status} — ${error.statusText}`
+              ? `${error.status}: ${error.statusText}`
               : error instanceof Error
                 ? error.message
                 : "An unexpected error occurred."}
@@ -245,7 +245,7 @@ function CoverageSection({
   if (!coverage) {
     return (
       <p className="text-sm subtle-text" style={{ margin: 0, marginTop: "12px" }}>
-        Coverage not measured — graph-project-view never reached a clean finish this run.
+        Coverage not measured: graph-project-view never reached a clean finish this run.
       </p>
     );
   }
@@ -367,7 +367,7 @@ function EventRow({
       {text && (
         <details style={{ marginLeft: "70px" }}>
           <summary className="text-xs font-mono subtle-text" style={{ cursor: "pointer" }}>
-            {text.length.toLocaleString()} character(s) of model text — click to expand
+            {text.length.toLocaleString()} character(s) of model text: click to expand
           </summary>
           <pre
             className="text-xs"
@@ -476,7 +476,7 @@ export default function FruitsMakerGraphLogRun() {
           {events.length === 0 ? (
             <p className="text-sm subtle-text" style={{ margin: 0 }}>
               {run.ok === null
-                ? "Still running — no events recorded yet."
+                ? "Still running: no events recorded yet."
                 : "No events were recorded for this run."}
             </p>
           ) : (

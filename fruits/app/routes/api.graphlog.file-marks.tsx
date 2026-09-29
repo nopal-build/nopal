@@ -5,6 +5,7 @@ import { getFolderById } from "robustness-core/data/vault.server";
 import { canViewFolder } from "robustness-core/data/vault.types";
 import { createMark, fileActText, markDate, MARK_TEXT_LIMIT, type FileAct } from "robustness-core/data/graphLogMarks.server";
 import { fileMarkUnit, loadProjectFiles } from "robustness-core/data/fileFolders.server";
+import { rowsForReader } from "robustness-core/data/projectView.server";
 import { filingValuesHash, isFilingKind } from "robustness-core/data/syncFiling.server";
 
 /**
@@ -46,13 +47,16 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!body.projectFolderId || !body.fileId) {
     return Response.json({ error: "projectFolderId and fileId are required" }, { status: 400 });
   }
+  // Admitted by role, not by the cache, as `/api/graphlog/marks`: a Client
+  // is never in `shared_with` (ADR-023) and notes a photo all the same.
   const folder = await getFolderById(body.projectFolderId);
-  if (!folder || !canViewFolder(user._id, folder)) {
+  const role = folder ? await getProjectRole(folder, user._id) : null;
+  if (!folder || (!role && !canViewFolder(user._id, folder))) {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
   // A note on a file is `marks`; filing it or confirming its cost is
   // `edit` (`features.ts`): an Observer writes the first, not the others.
-  const features = (await getProjectRole(folder, user._id))?.features ?? [];
+  const features = role?.features ?? [];
   if (!features.includes("marks")) {
     return Response.json({ error: "You can read this project, not mark it." }, { status: 403 });
   }
@@ -61,8 +65,10 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // The same projection the files view shows, so a confirmation names
-  // exactly the reading the person was looking at.
-  const row = (await loadProjectFiles(folder)).find((r) => r.fileId === body.fileId);
+  // exactly the reading the person was looking at; and only the rows this
+  // group is shown (`rowsForReader`), so a Client's note can't land on a
+  // receipt they never see.
+  const row = rowsForReader(await loadProjectFiles(folder), features).find((r) => r.fileId === body.fileId);
   if (!row) return Response.json({ error: "That file is not attached to this project's daily logs." }, { status: 400 });
 
   let act: FileAct | null = null;

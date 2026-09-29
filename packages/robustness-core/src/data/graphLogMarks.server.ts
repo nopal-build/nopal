@@ -1,3 +1,4 @@
+import { firstName } from "./humanNames";
 /**
  * Marks: a person's words written on a thought on the Efforts page.
  *
@@ -447,7 +448,7 @@ async function movesById(
 
 export async function authorNames(humanIds: string[]): Promise<Map<string, string>> {
   const humans = await getHumansById([...new Set(humanIds)]);
-  return new Map(humans.map((h) => [h._id, h.name || h.email]));
+  return new Map(humans.map((h) => [h._id, firstName(h)]));
 }
 
 /** Called on a clean page run only, with the ids that run was OFFERED

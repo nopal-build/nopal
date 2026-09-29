@@ -38,6 +38,7 @@
     "./data/humans.server": "./src/data/humans.server.ts",
     "./data/steepReadings.server": "./src/data/steepReadings.server.ts",
     "./data/steepScale": "./src/data/steepScale.ts",
+    "./data/humanNames": "./src/data/humanNames.ts",
     "./data/features": "./src/data/features.ts",
     "./data/featureAccess.server": "./src/data/featureAccess.server.ts",
     "./data/suggestions.server": "./src/data/suggestions.server.ts",

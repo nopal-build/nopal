@@ -115,7 +115,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return Response.json(
         {
           error:
-            "Sharing is managed via PUT /api/vault/projects/:folderId/sharing now — see the vault skill's Sharing Roles section.",
+            "Sharing is managed via PUT /api/vault/projects/:folderId/sharing. See the vault skill's Sharing Roles section.",
         },
         { status: 400 },
       );
@@ -142,13 +142,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
       // time without needing to re-validate them on every move).
       if (folder.is_folder_type_root) {
         return Response.json(
-          { error: "This folder's type is pinned — it cannot be moved" },
+          { error: "This folder's type is pinned, so it can't be moved" },
           { status: 403 },
         );
       }
       if (isFolderShared(folder)) {
         return Response.json(
-          { error: "Shared folders cannot be moved — unshare it first" },
+          { error: "Unshare this folder before moving it" },
           { status: 403 },
         );
       }
@@ -194,7 +194,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         return Response.json(
           {
             error:
-              "This folder contains shared folders and cannot be moved — unshare them first",
+              "Unshare the folders inside before moving this one",
           },
           { status: 403 },
         );

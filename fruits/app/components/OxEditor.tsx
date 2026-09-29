@@ -302,7 +302,7 @@ function OxEditingSurface({
   minRows,
   fileCaptionFlow,
   cardFlow,
-  placeholder = "Start typing — try “/” for commands…",
+  placeholder = "Start typing, or “/” for commands…",
 }: OxEditorProps) {
   const initialConfig = useMemo<InitialConfigType>(
     () => ({

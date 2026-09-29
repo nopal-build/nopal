@@ -1,7 +1,8 @@
 // app/components/AppLayout.tsx
 import { Link, NavLink, useLocation } from "react-router";
 import { ReactNode, useState, useCallback, useEffect } from "react";
-import { useHome, useUser, useVaultHidden, permissions } from "../hooks/useUser";
+import { useHome, useMaker, useUser, useVaultHidden, permissions } from "../hooks/useUser";
+import { displayName } from "robustness-core/data/humanNames";
 import noLogoColor from "../images/no-logo-color.svg";
 import noLogoWhite from "../images/no-logo-white.svg";
 import { useSchemePref } from "../hooks/useSchemePref";
@@ -89,7 +90,7 @@ function ImpersonationBanner({ targetName }: { targetName: string }) {
       }}
     >
       <span>
-        Viewing as <strong>{targetName}</strong> — signed in as{" "}
+        Viewing as <strong>{targetName}</strong>, signed in as{" "}
         {status.adminName ?? status.adminEmail}
       </span>
       <button
@@ -126,7 +127,9 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const schemePref = useSchemePref();
   const isDark = schemePref === "dark";
   const user = useUser();
-  const isAdmin = permissions.isAdmin(user);
+  // The Maker is for admins and for anyone guiding a project (ADR-026);
+  // `/maker` refuses everyone else on the server too.
+  const showMaker = permissions.isAdmin(user) || useMaker();
   // A client gets their project, the Daily Log and their account, nothing
   // else (ADR-023); `/vault` refuses them on the server too.
   const showVault = !useVaultHidden();
@@ -144,7 +147,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
       className={sprinkles({ display: "flex", flexDirection: "column" })}
       style={{ height: "100vh" }}
     >
-      {user && <ImpersonationBanner targetName={user.name || user.email} />}
+      {user && <ImpersonationBanner targetName={displayName(user)} />}
       <div className={shellClass} style={{ height: "auto", flex: 1, minHeight: 0 }}>
         {/* ===== TOP NAV BAR (desktop ≥860px) ===== */}
         <header className={topbar}>
@@ -187,7 +190,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 Vault
               </NavLink>
             )}
-            {isAdmin && (
+            {showMaker && (
               <NavLink
                 to="/maker"
                 prefetch="intent"
@@ -274,7 +277,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                   Vault
                 </NavLink>
               )}
-              {isAdmin && (
+              {showMaker && (
                 <NavLink
                   to="/maker"
                   prefetch="intent"

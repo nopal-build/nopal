@@ -182,7 +182,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return Response.json(
       {
         error:
-          "This file is locked — daily-log files can only be modified on the day they were uploaded.",
+          "This file is locked. Daily log files can only change on the day they were uploaded.",
       },
       { status: 403 },
     );

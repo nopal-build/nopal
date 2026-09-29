@@ -1,3 +1,4 @@
+import { displayName } from "robustness-core/data/humanNames";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import {
@@ -31,7 +32,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const sharedFoldersWithOwner = sharedFolders.map((f) => ({
     ...f,
     ownerName:
-      ownerMap[f.human_id]?.name ?? ownerMap[f.human_id]?.email ?? "Unknown",
+      ownerMap[f.human_id] ? displayName(ownerMap[f.human_id]) : "Unknown",
     ownerHumanId: f.human_id,
   }));
 

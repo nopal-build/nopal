@@ -1,15 +1,18 @@
 // app/routes/maker.tsx
+// The Maker: the way in to projects and humans (ADR-026), and for admins
+// the stats, usage and scripts below. An admin and anyone guiding a
+// project reach it; everyone else is refused, in the nav and on the
+// server (Austin, 2026-09-28: "one place").
 import type { LoaderFunctionArgs } from "react-router";
 import {
   Link,
   data,
   redirect,
   useLoaderData,
-  useRouteError,
-  isRouteErrorResponse,
 } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
+import { MakerErrorBoundary } from "../components/MakerErrorBoundary";
 import { Badge } from "stamps/Badge";
 import { surfaceBase } from "stamps/surface.css";
 import { link } from "stamps/link.css";
@@ -18,77 +21,43 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { getMakerStats, type MakerRangeDays } from "robustness-core/data/makerStats.server";
 import { getGraphLogUsageSummary } from "robustness-core/data/graphLogMetrics.server";
+import { guidesAny, listEveryProject, listProjectsFor, resolveRole } from "robustness-core/data/projectSharing.server";
+import { getHumans } from "robustness-core/data/humans.server";
+import { navFor } from "../data/nav.server";
+import { isStaff } from "../data/projectPeople.server";
 import stamp22cLight from "../images/stamps/22c-light.svg";
 import stamp22cDark from "../images/stamps/22c-dark.svg";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  if (user.role !== "Admin" && user.role !== "Super") {
+  const staff = isStaff(user.role);
+  const memberships = await listProjectsFor(user._id);
+  if (!staff && !guidesAny(memberships)) {
     throw data("Forbidden", { status: 403 });
   }
+
+  // The tile's numbers: every project and everyone for an admin; the
+  // projects they guide for a Guide.
+  const counts = staff
+    ? { projects: (await listEveryProject()).length, people: ((await getHumans())?.data ?? []).length }
+    : { projects: memberships.filter((m) => resolveRole(m.role).guiding).length, people: null };
 
   const url = new URL(request.url);
   // TODO: support a custom start/end range once there's demand for it —
   // for now this is a simple 7 vs 30 day toggle.
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
 
-  const [stats, graphLogUsage] = await Promise.all([
-    getMakerStats(days),
-    getGraphLogUsageSummary(days),
-  ]);
+  // The stats and the usage are the admins'; a Guide's page never asks.
+  const [stats, graphLogUsage] = staff
+    ? await Promise.all([getMakerStats(days), getGraphLogUsageSummary(days)])
+    : [null, null];
 
-  return { user, days, stats, graphLogUsage };
+  return { user, staff, counts, days, stats, graphLogUsage, ...(await navFor(user._id, memberships)) };
 }
 
 export function ErrorBoundary() {
-  const error = useRouteError();
-
-  if (isRouteErrorResponse(error) && error.status === 403) {
-    return (
-      <AppLayout>
-        <div
-          className="container mx-auto px-4 py-12"
-          style={{ maxWidth: "480px" }}
-        >
-          <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
-            <Badge variant="danger">403</Badge>
-            <h1 className="font-bold text-xl">Access Denied</h1>
-            <p className="text-sm subtle-text">
-              The Maker dashboard is only available to Admin and Super
-              accounts.
-            </p>
-            <Link to="/" className={`${link} ${textSize.sm}`}>
-              ← Back to Dashboard
-            </Link>
-          </div>
-        </div>
-      </AppLayout>
-    );
-  }
-
-  return (
-    <AppLayout>
-      <div
-        className="container mx-auto px-4 py-12"
-        style={{ maxWidth: "480px" }}
-      >
-        <div className={`${surfaceBase} p-6 flex flex-col gap-3`}>
-          <h1 className="font-bold text-xl">Something went wrong</h1>
-          <p className="text-sm subtle-text">
-            {isRouteErrorResponse(error)
-              ? `${error.status} — ${error.statusText}`
-              : error instanceof Error
-                ? error.message
-                : "An unexpected error occurred."}
-          </p>
-          <Link to="/" className={`${link} ${textSize.sm}`}>
-            ← Back to Dashboard
-          </Link>
-        </div>
-      </div>
-    </AppLayout>
-  );
+  return <MakerErrorBoundary />;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -178,8 +147,32 @@ function StampsPromoCard() {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
+/** The way in: start a project, see who's on each, everyone's groups. */
+function ProjectsAndHumansTile({ counts, staff }: { counts: { projects: number; people: number | null }; staff: boolean }) {
+  const summary = staff
+    ? `${counts.projects} ${counts.projects === 1 ? "project" : "projects"} · ${counts.people} people`
+    : `${counts.projects} ${counts.projects === 1 ? "project" : "projects"} you guide`;
+  return (
+    <Link
+      to="/maker/projects"
+      prefetch="intent"
+      className={`${surfaceBase} ${sprinkles({ p: 5, display: "flex", flexDirection: "column", gap: 1 })}`}
+      style={{ textDecoration: "none", color: "inherit" }}
+      data-maker-tile="projects-and-humans"
+    >
+      <h3 className="font-bold text-lg purple-light-text" style={{ margin: 0 }}>
+        Projects and humans
+      </h3>
+      <p className="text-sm subtle-text" style={{ margin: 0 }}>
+        Projects, and who's on them.
+      </p>
+      <span className="text-sm font-mono purple-light-text">{summary} →</span>
+    </Link>
+  );
+}
+
 export default function FruitsMaker() {
-  const { user, days, stats, graphLogUsage } = useLoaderData<typeof loader>();
+  const { user, staff, counts, days, stats, graphLogUsage } = useLoaderData<typeof loader>();
 
   return (
     <AppLayout>
@@ -187,8 +180,21 @@ export default function FruitsMaker() {
         className="container mx-auto px-4 py-12"
         style={{ maxWidth: "860px" }}
       >
+        <section className="mb-12">
+          <ProjectsAndHumansTile counts={counts} staff={staff} />
+        </section>
+
+        {staff && stats && graphLogUsage && (
+          <>
         {/* ── General Stats ─────────────────────────────────────────────── */}
         <section className="mb-12">
+          <hr
+            style={{
+              borderColor: "currentColor",
+              opacity: 0.12,
+              margin: "0 0 24px",
+            }}
+          />
           <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
             <h2
               className="font-bold text-lg font-mono purple-text"
@@ -226,10 +232,11 @@ export default function FruitsMaker() {
             </div>
 
             {stats.unattributedInRange.length > 0 ? (
-              <p className="text-sm subtle-text" style={{ marginBottom: "8px" }}>
-                {stats.unattributedInRange.reduce((n, u) => n + u.logCount, 0)} log(s) in this range belong to
-                an id with no humans row ({stats.unattributedInRange.map((u) => u.humanId).join(", ")}), so they
-                are counted above and missing from this table.
+              <p className="text-sm subtle-text" style={{ marginBottom: "8px" }} title={stats.unattributedInRange.map((u) => u.humanId).join(", ")}>
+                {(() => {
+                  const n = stats.unattributedInRange.reduce((sum, u) => sum + u.logCount, 0);
+                  return n === 1 ? "1 log in this range is from an account that no longer exists. It's in the count above, not this table." : `${n} logs in this range are from accounts that no longer exist. They're in the count above, not this table.`;
+                })()}
               </p>
             ) : null}
             {stats.humansInRange.length === 0 ? (
@@ -276,21 +283,6 @@ export default function FruitsMaker() {
               className="font-bold text-lg font-mono purple-text"
               style={{ margin: 0 }}
             >
-              Humans
-            </h2>
-            <Link
-              to="/maker/humans"
-              prefetch="intent"
-              className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
-            >
-              Everyone and their groups →
-            </Link>
-          </div>
-          <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
-            <h2
-              className="font-bold text-lg font-mono purple-text"
-              style={{ margin: 0 }}
-            >
               GraphLog Usage
             </h2>
             <Link
@@ -305,7 +297,7 @@ export default function FruitsMaker() {
           {graphLogUsage.pricingStale && (
             <div className="mb-3">
               <Badge variant="warning">
-                Pricing table is {graphLogUsage.pricingAgeDays} days old — verify against
+                Pricing table is {graphLogUsage.pricingAgeDays} days old. Check
                 platform.claude.com/docs/en/about-claude/pricing
               </Badge>
             </div>
@@ -375,8 +367,7 @@ export default function FruitsMaker() {
               </Link>
             </div>
             <p className="text-sm subtle-text" style={{ margin: 0 }}>
-              Repair/maintenance scripts, run against production by the worker — no local prod
-              credentials needed. Super only.
+              Repair scripts, run in production by the worker. Super only.
             </p>
           </section>
         )}
@@ -392,6 +383,8 @@ export default function FruitsMaker() {
           />
           <StampsPromoCard />
         </section>
+          </>
+        )}
       </div>
     </AppLayout>
   );

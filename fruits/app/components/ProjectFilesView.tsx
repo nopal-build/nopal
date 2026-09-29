@@ -24,6 +24,15 @@ const FOLDER_TITLES: Record<FileFolder, string> = {
   unsorted: "Unsorted",
 };
 
+/** What a person is looking for on each tab (Austin, 2026-09-29): the
+ * search and the empty state say "photo", not "file", on the Gallery. */
+const FOLDER_WORDS: Record<FileFolder, { find: string; none: string; noMatch: string }> = {
+  gallery: { find: "Find a photo…", none: "No photos yet.", noMatch: "No photo matches" },
+  documents: { find: "Find a document…", none: "No documents yet.", noMatch: "No document matches" },
+  costs: { find: "Find a receipt…", none: "No costs yet.", noMatch: "No receipt matches" },
+  unsorted: { find: "Find a file…", none: "Nothing unsorted.", noMatch: "Nothing unsorted matches" },
+};
+
 /** URL state: `files=<folder>` and `q=<search>`, kept beside whatever
  * else is in the query (the Vault's own `folder=`). */
 export const FILES_PARAM = "files";
@@ -92,17 +101,13 @@ export function ProjectFilesView({
           }}
         >
           {/* The stamp search bar; Enter searches. */}
-          <SearchField name={QUERY_PARAM} label="Search files" placeholder="Find a file by what it is about…" defaultValue={q} />
+          <SearchField name={QUERY_PARAM} label={FOLDER_WORDS[active].find} placeholder={FOLDER_WORDS[active].find} defaultValue={q} />
         </form>
       </div>
 
       {shown.length === 0 ? (
         <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-          {rows.length === 0
-            ? "No files have been attached to this project's daily logs yet."
-            : q
-              ? `Nothing in ${FOLDER_TITLES[active]} matches “${q}”.`
-              : `Nothing in ${FOLDER_TITLES[active]} yet.`}
+          {q ? `${FOLDER_WORDS[active].noMatch} “${q}”.` : FOLDER_WORDS[active].none}
         </p>
       ) : active === "gallery" ? (
         <GalleryGrid rows={shown} onOpen={onOpen} />
