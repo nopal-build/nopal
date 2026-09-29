@@ -1,4 +1,4 @@
-import { getHumanByEmail, type Human } from "robustness-core/data/humans.server";
+import { getHumanByEmail, isStaff, type Human } from "robustness-core/data/humans.server";
 import { createRelationship } from "robustness-core/data/relationships.server";
 import {
   getProjectRole,
@@ -33,7 +33,7 @@ export async function inviteToProject(
   if (!email.includes("@")) return { ok: false, error: "That doesn't look like an email address" };
   if (!(await isProjectFolder(input.project))) return { ok: false, error: "Not found" };
 
-  const isAdmin = actor.role === "Admin" || actor.role === "Super";
+  const isAdmin = isStaff(actor);
   if (!isAdmin && !(await getProjectRole(input.project, actor._id))?.guiding) {
     return { ok: false, error: "Not found" };
   }

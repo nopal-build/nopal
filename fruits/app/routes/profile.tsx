@@ -99,8 +99,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       getRelatedHumans(user, { includeRevoked: true }),
       getPasskeysByHuman(user._id),
       getRelationshipsForHuman(user._id),
-      // The CLI and the API are the admins' (Austin, 2026-09-29).
-      isAdminOrSuper(user) ? getApiTokensByHuman(user._id) : Promise.resolve([]),
+      getApiTokensByHuman(user._id),
     ]);
 
   // Revoked relationships are excluded from `relatedHumans` for regular
@@ -2370,7 +2369,7 @@ export default function Profile() {
               {/* The CLI and the API are for admins and supers (Austin,
                   2026-09-29); the server refuses everyone else a token
                   too (`handleGenerateApiToken`, `cli-login`). */}
-              {isManager && (
+              {(isManager || cliSessionTokens.length > 0) && (
                 <>
               <h3 className="font-bold mt-6 mb-1">CLI sessions</h3>
               <p
@@ -2381,6 +2380,7 @@ export default function Profile() {
                 days.
               </p>
 
+              {isManager && (
               <div className={`${surfaceBase} p-3 text-sm mb-4`}>
                 <div className="mb-2">
                   Don't have the CLI yet?{" "}
@@ -2414,6 +2414,7 @@ export default function Profile() {
                 </div>
               </div>
 
+              )}
               {cliSessionTokens.length === 0 ? (
                 <div
                   className={`${surfaceBase} p-3 text-sm mb-4`}
@@ -2435,6 +2436,10 @@ export default function Profile() {
                 </div>
               )}
 
+                </>
+              )}
+              {(isManager || personalAccessTokens.length > 0) && (
+                <>
               <h3 className="font-bold mt-6 mb-1">Personal access tokens</h3>
               <p
                 className="text-sm mb-4"
@@ -2443,6 +2448,8 @@ export default function Profile() {
                 For scripts that call the API. They last until you revoke them.
               </p>
 
+              {isManager && (
+                <>
               {apiTokenGenerateResult && "token" in apiTokenGenerateResult && (
                 <div className={`${surfaceBase} p-3 text-sm mb-4`}>
                   <div className="mb-2 red-text font-bold">
@@ -2495,6 +2502,8 @@ export default function Profile() {
                 </div>
               )}
 
+                </>
+              )}
               {personalAccessTokens.length > 0 && (
                 <div className="flex flex-col gap-2 mb-4">
                   {personalAccessTokens.map((token) => (

@@ -31,7 +31,7 @@ import stamp22cDark from "../images/stamps/22c-dark.svg";
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  const staff = isStaff(user.role);
+  const staff = isStaff(user);
   const memberships = await listProjectsFor(user._id);
   if (!staff && !guidesAny(memberships)) {
     throw data("Forbidden", { status: 403 });
@@ -150,7 +150,7 @@ function StampsPromoCard() {
 /** The way in: start a project, see who's on each, everyone's groups. */
 function ProjectsAndHumansTile({ counts, staff }: { counts: { projects: number; people: number | null }; staff: boolean }) {
   const summary = staff
-    ? `${counts.projects} ${counts.projects === 1 ? "project" : "projects"} · ${counts.people} people`
+    ? `${counts.projects} ${counts.projects === 1 ? "project" : "projects"} · ${counts.people} ${counts.people === 1 ? "person" : "people"}`
     : `${counts.projects} ${counts.projects === 1 ? "project" : "projects"} you guide`;
   return (
     <Link

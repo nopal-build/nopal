@@ -12,6 +12,7 @@ import {
   validateFolderTypeForParent,
 } from "robustness-core/data/vault.server";
 import { canActAsProjectOwner, canStartProject } from "robustness-core/data/projectSharing.server";
+import { startProject } from "../data/startProject.server";
 import {
   isVaultFolderTypeKey,
   type VaultFolderTypeKey,
@@ -72,10 +73,17 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: "Parent folder not found" }, { status: 404 });
   }
 
-  // A direct child of a `projects` root is a project. Starting one is for
-  // an admin or someone already guiding a project (ADR-026), whichever
-  // way the request comes: the Maker, the CLI's `vault mkdir`, or typed.
-  if (!parent.parent_folder_id && parent.vault_root_key === "projects" && !(await canStartProject(user))) {
+  // A direct child of a `projects` root is a project. Starting one is
+  // `startProject`, the same path the Maker takes (ADR-026): who may, the
+  // name, the seeding. A website there (a Super's, `folder_type`) still
+  // goes the folder way below, gated the same.
+  const atProjectsRoot = !parent.parent_folder_id && parent.vault_root_key === "projects";
+  if (atProjectsRoot && !body.folder_type) {
+    const started = await startProject(user, body.name);
+    if (!started.ok) return Response.json({ error: started.error }, { status: started.status });
+    return Response.json({ folder: started.folder }, { status: 201 });
+  }
+  if (atProjectsRoot && !(await canStartProject(user))) {
     return Response.json({ error: "Start a project in the Maker" }, { status: 403 });
   }
 

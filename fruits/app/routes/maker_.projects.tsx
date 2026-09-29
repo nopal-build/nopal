@@ -12,19 +12,12 @@ import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Form, Link, data, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
+import { guidesAny, listEveryProject, listProjectsFor, resolveRole, roleIn } from "robustness-core/data/projectSharing.server";
+import { startProject } from "../data/startProject.server";
 import { getHumans } from "robustness-core/data/humans.server";
-import {
-  canStartProject,
-  guidesAny,
-  listEveryProject,
-  listProjectsFor,
-  resolveRole,
-  roleIn,
-} from "robustness-core/data/projectSharing.server";
 import { GROUPS, GROUP_FEATURES, assignableGroups, groupOf, type Group } from "robustness-core/data/features";
 import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { displayName } from "robustness-core/data/humanNames";
-import { createVaultFolder, ensureVaultRootFolders, listFolderChildren } from "robustness-core/data/vault.server";
 import { navFor } from "../data/nav.server";
 import { candidatesFor, isStaff, peopleAction, peopleOnMany, type PeopleProject, type PersonRow } from "../data/projectPeople.server";
 import { AppLayout } from "../components/AppLayout";
@@ -51,7 +44,7 @@ const TAB_LABELS: Record<Tab, string> = { projects: "Projects", humans: "Humans"
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  const staff = isStaff(user.role);
+  const staff = isStaff(user);
   const memberships = await listProjectsFor(user._id);
   if (!staff && !guidesAny(memberships)) throw data("Forbidden", { status: 403 });
 
@@ -62,7 +55,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // An admin: every project, websites marked. A Guide: the ones they guide.
   const everyProject = staff ? await listEveryProject() : memberships.filter((m) => resolveRole(m.role).guiding);
-  const [peopleProjects, everyone] = await Promise.all([peopleOnMany(everyProject), candidatesFor(user)]);
+  // One humans read for an admin: the candidates and the Humans tab share it.
+  const allHumans = staff ? ((await getHumans())?.data ?? []) : null;
+  const [peopleProjects, everyone] = await Promise.all([peopleOnMany(everyProject), candidatesFor(user, allHumans ?? undefined)]);
   const projects = peopleProjects.map((p, i) => ({
     ...p,
     website: isWebsiteFolder(everyProject[i].folder),
@@ -77,8 +72,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const entry = sharing.find((e) => e.human === id);
       return entry ? [{ id: folder._id, name: folder.name, group: entry.role }] : [];
     });
-  const humans = staff
-    ? ((await getHumans())?.data ?? []).map((h) => ({ id: h._id as string, name: displayName(h), email: h.email, role: h.role as string | null, projects: onProjects(h._id) }))
+  const humans = allHumans
+    ? allHumans.map((h) => ({ id: h._id as string, name: displayName(h), email: h.email, role: h.role as string | null, projects: onProjects(h._id) }))
     : [...new Map(peopleProjects.flatMap((p) => p.members).map((m) => [m.id, m])).values()].map((m) => ({
         id: m.id,
         name: m.name,
@@ -102,12 +97,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-/** Starting a project (Austin, 2026-09-28): a name, and it's yours as
- * Guide, the way a project made in the Vault always was
- * (`createVaultFolder` under your own `projects` root seeds its Skills;
- * the README, syncs and graph come when something writes them). Nothing
- * refuses a name twice today, so this does: two projects with one name
- * would be one name on My Projects and two rows here. Any other post is
+/** Starting a project is `startProject`, the one path; any other post is
  * a people change from a twirled-down row (`peopleAction`). */
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUser(request);
@@ -115,19 +105,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   if (form.get("intent") !== "start") return peopleAction(user, form, request);
 
-  if (!(await canStartProject(user))) throw data("Forbidden", { status: 403 });
-  const name = String(form.get("name") ?? "").trim();
-  if (!name) return { error: "Give the project a name." };
-
-  const root = (await ensureVaultRootFolders(user._id)).find((r) => r.vault_root_key === "projects");
-  if (!root) return { error: "Your Vault has no projects folder yet. Try again." };
-  const { folders } = await listFolderChildren(user._id, root._id);
-  if (folders.some((f) => f.name.trim().toLowerCase() === name.toLowerCase())) {
-    return { error: `You already have a project called "${name}".` };
+  const result = await startProject(user, String(form.get("name") ?? ""));
+  if (!result.ok) {
+    if (result.status === 403) throw data("Forbidden", { status: 403 });
+    return { error: result.error };
   }
-  const folder = await createVaultFolder({ human_id: user._id, name, parent_folder_id: root._id });
-  if (!folder) return { error: "The project didn't save. Try again." };
-  return redirect(`/maker/projects/${folder._id}`);
+  return redirect(`/maker/projects/${result.folder._id}`);
 }
 
 export function ErrorBoundary() {

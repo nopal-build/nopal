@@ -238,6 +238,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // file/folder outright but holds an owner-tier Sharing Role on the
   // project it lives under.
   let viewerIsOwnerTierOnProject = false;
+  // Runs its people (`people`, a Guide): the "People…" item goes to the Maker.
+  let viewerGuidesProject = false;
 
   if (fileParam) {
     const file = await getFileRefById(fileParam);
@@ -270,6 +272,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (file.human_id !== user._id && file.folder_id) {
       const role = await getProjectRoleForFolderId(file.folder_id, user._id);
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
+      viewerGuidesProject = Boolean(role?.guiding);
     }
     const websiteAnchorForFile = findWebsiteAnchor(ancestry);
     const websitePageMetaForFile =
@@ -315,6 +318,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (folder.human_id !== user._id) {
       const role = await getProjectRoleForFolderId(folder._id, user._id);
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
+      viewerGuidesProject = Boolean(role?.guiding);
     }
     const websiteAnchorForFolder = findWebsiteAnchor(ancestry);
     const websitePageMetaForFolder =
@@ -341,6 +345,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     relatedHumans,
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
+    viewerGuidesProject,
     // The nav: a Guide's Maker tab stays lit while they're in here.
     ...(await navFor(user._id, memberships)),
   };
@@ -1587,6 +1592,7 @@ export default function VaultV2Page() {
     relatedHumans,
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
+    viewerGuidesProject,
   } = useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
@@ -2751,6 +2757,10 @@ export default function VaultV2Page() {
     isTopLevelProject &&
     isRootShareable(current.folder.vault_root_key) &&
     isFolderTypeShareable(currentFolderType);
+  // The people page in the Maker is a Guide's or an admin's (`runsPeople`);
+  // a Crafter edits content and isn't sent to a page that refuses them.
+  const canOpenPeople =
+    canShareCurrent && (isOwnedByViewer || viewerGuidesProject || user.role === "Admin" || user.role === "Super");
   const canPublishCurrent =
     isEffectiveOwner &&
     canManageAnchorLifecycle &&
@@ -2846,7 +2856,7 @@ export default function VaultV2Page() {
     }
     // People come and go on the project's page in the Maker (ADR-026), the
     // one place for it; this only gets you there.
-    if (canShareCurrent && current.kind === "folder") {
+    if (canOpenPeople && current.kind === "folder") {
       const id = current.folder._id;
       moreActions.push({ label: "People…", onClick: () => navigate(`/maker/projects/${id}`) });
     }
