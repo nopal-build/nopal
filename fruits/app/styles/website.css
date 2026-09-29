@@ -24,9 +24,9 @@
    (only the semantic tier does that in root.css); this variable is what
    actually does the swapping here. Applied to `V2Layout`'s outer wrapper
    (`routes/v2.tsx`) so it shows through anywhere a `:::section{...}` band
-   doesn't cover (header, footer, gaps) -- and reused by `.website-bg-cream`
-   below, so a `bg="cream"` section is just an explicit way of asking for
-   this same default, not a second, independently-maintained color. */
+   doesn't cover (header, footer, gaps), and anywhere no `bg="..."` is
+   given at all (a section with no explicit background just shows this
+   default through). */
 :root {
   --website-bg-page: var(--surface-day-100);
 }
@@ -104,21 +104,28 @@
   --website-bg-page: var(--purple);
 }
 
-/* `bg="mint"`'s own dark-mode swap (`.website-bg-mint`, above) needs
-   its OWN pair of overrides here too, separate from the two plain
-   `.website-preview-force-{light,dark}` blocks above -- `background` is
-   declared directly on `.website-bg-mint` itself (by both the plain rule
-   AND its `@media` variant), not read from an ancestor's custom
-   property, so plain inheritance can't reach it the way it does for
-   `--website-accent-*`/`--website-bg-page`. Two classes' worth of
-   specificity here reliably beats the one-class `@media` rule above in
-   EITHER direction, the exact same trick `oxmarkdown.css`'s own
-   `.website-preview-force-{light,dark} .ox-tokens` already uses. */
+/* `bg="mint"`/`bg="white"`'s own dark-mode swaps (`.website-bg-mint`/
+   `.website-bg-white`, above) need their OWN pairs of overrides here
+   too, separate from the two plain `.website-preview-force-{light,dark}`
+   blocks above -- `background` is declared directly on each class
+   itself (by both the plain rule AND its `@media` variant), not read
+   from an ancestor's custom property, so plain inheritance can't reach
+   it the way it does for `--website-accent-*`/`--website-bg-page`. Two
+   classes' worth of specificity here reliably beats the one-class
+   `@media` rule above in EITHER direction, the exact same trick
+   `oxmarkdown.css`'s own `.website-preview-force-{light,dark} .ox-tokens`
+   already uses. */
 .website-preview-force-light .website-bg-mint {
   background: var(--cactus-100);
 }
 .website-preview-force-dark .website-bg-mint {
   background: var(--cactus-800);
+}
+.website-preview-force-light .website-bg-white {
+  background: var(--white);
+}
+.website-preview-force-dark .website-bg-white {
+  background: var(--purple-light);
 }
 
 /* ── Content shell (`WebsitePageContent`, packages/stamps) ──────────────── */
@@ -217,6 +224,12 @@
   padding: 48px 0;
   margin-left: -24px;
   margin-right: -24px;
+  /* `margin-top`/`margin-bottom` deliberately NOT set here -- `:::section
+     {margin="N"}` (websiteDirectives.tsx's `parseSectionMarginStyle`)
+     sets those as an INLINE style instead (a `calc(N * var(--ox-grid))`
+     formula), since the multiplier is a free-form per-instance number,
+     not a small fixed vocabulary a CSS class could represent the way
+     `bg`/`list` do above. */
 }
 
 /* Once the content shell itself is no longer edge-to-edge (its own
@@ -241,6 +254,14 @@
   max-width: var(--website-content-max-width, 720px);
   margin: 0 auto;
   padding: 0 24px;
+  /* The positioned ancestor an `::icon{position="x,y"}` (websiteDirectives.tsx's
+     `parseIconPosition`) resolves its own `left`/`top` PERCENTAGES against,
+     for its first real use: one rendered directly inside `:::section{...}`'s
+     own body. A DIFFERENT container (a pricing-card body, a toggle body, ...)
+     would need this exact same treatment before a positioned icon inside IT
+     had any visible effect -- not added preemptively anywhere else until an
+     actual use needs it there too. */
+  position: relative;
 }
 
 /* Suppress oxmarkdown's own `#`/`##`/`###` gutter-marker glyph on a
@@ -254,61 +275,39 @@
   content: none;
 }
 
-.website-bg-cream {
-  background: var(--website-bg-page);
-}
-.website-bg-peach {
-  background: var(--clay-300);
-}
 .website-bg-mint {
   background: var(--cactus-100);
 }
-/* The one exception to "`peach`/`lavender`/`white` stay static, no
-   dark-mode swap" below -- `--cactus-100` (a pale mint) reads as a bright,
-   washed-out patch against the dark scene, so `mint` alone gets a real
-   dark-mode counterpart: `--cactus-800`, deep enough to read as a distinct
-   tinted band rather than fighting the page's own dark background. */
+/* `--cactus-100` (a pale mint) reads as a bright, washed-out patch
+   against the dark scene, so `mint` gets a real dark-mode counterpart:
+   `--cactus-800`, deep enough to read as a distinct tinted band rather
+   than fighting the page's own dark background. */
 @media (prefers-color-scheme: dark) {
   .website-bg-mint {
     background: var(--cactus-800);
   }
 }
-.website-bg-lavender {
-  background: var(--moonlight-500);
-}
-/* `cream` (above) is literally just `--website-bg-page` -- the page's OWN
-   resting background -- so a section left at the default `bg` (or
-   explicitly `bg="cream"`) reads as invisible/blended-in, not a distinct
-   band. `white` gives a real, always-white (not scheme-aware, same as
-   `peach`/`lavender` above -- `mint`, just above, is the one exception)
-   option for a section that should actually stand OUT against the page,
-   cream included. */
+/* `white` is for a section that should actually stand OUT against the
+   page -- reading fine as a real, bright white against the light scene,
+   but a jarring, near-blinding slab against the dark one, so it gets a
+   real dark-mode counterpart too: `--purple-light`, a lighter purple
+   that still reads as a distinct "raised" band without clashing with
+   the page's own dark background. */
 .website-bg-white {
   background: var(--white);
 }
-
-/* Optional heading-color override (`accent="red"|"green"|"purple"`) for a
-   section whose body text should read as an emphasized color, independent
-   of its background — e.g. a closing CTA's red heading on a peach band.
-   `red`/`green` read the SCHEME-AWARE `--website-accent-*` tokens (top of
-   this file), same as `:::section-title{color="..."}` -- `purple` stays
-   literal, same reasoning as that rule's own comment. */
-.website-section[data-website-accent="red"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--website-accent-red);
-}
-.website-section[data-website-accent="green"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--website-accent-green);
-}
-.website-section[data-website-accent="purple"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--purple);
+@media (prefers-color-scheme: dark) {
+  .website-bg-white {
+    background: var(--purple-light);
+  }
 }
 
 /* Optional list-style override (`list="timeline"`) -- a NAMED bullet
    style, same "small fixed vocabulary of pre-designed looks" spirit as
-   `bg="cream|peach|mint|lavender"` above, not a raw color knob (a section
-   theme's bullet is a whole little graphic, not just a tint). Swaps the
-   visible bullet itself, not just its color -- overrides `content` on the
-   SAME `::before` `oxmarkdown.css`'s own `.ox-content ul > li:not(.ox-task-item)::before`
+   `bg="mint|white"` above, not a raw color knob (a section theme's
+   bullet is a whole little graphic, not just a tint). Swaps the visible
+   bullet itself, not just its color -- overrides `content` on the SAME
+   `::before` `oxmarkdown.css`'s own `.ox-content ul > li:not(.ox-task-item)::before`
    already draws its plain —/– dash with (`list-style: none` means there's
    no real native `::marker` box here to swap instead), at higher
    specificity (two class-level selectors here vs. `.ox-content`'s one).
@@ -318,12 +317,12 @@
    already uses -- a custom property can't be referenced from inside one.
    The connector line below deliberately reads `--cactus-500` (the dot's
    own darker fill), NOT `--cactus-300` (the dot's own stroke ring) --
-   `--cactus-500` reads reliably against all four `bg="..."` options above,
+   `--cactus-500` reads reliably against both `bg="..."` options above,
    including `bg="mint"` itself (`--cactus-100`, much lighter than either
    green rung) -- an earlier version of `bg="mint"` was ITSELF
    `--cactus-300`, which made `--cactus-300` collide/disappear against it;
    kept reading `--cactus-500` after lightening `mint` since it's still
-   the better/darker choice for legibility on `cream`/`peach`/`lavender`
+   the better/darker choice for legibility on `white`/the unset default
    too. */
 .website-section[data-website-list="timeline"] li:not(.ox-task-item)::before {
   content: "";
@@ -493,14 +492,14 @@
 }
 
 /* Optional heading-color override (`color="red"|"green"|"purple"`) --
-   same named-color vocabulary and technique as `:::section{accent="..."}`
-   above. Deliberately a SEPARATE attribute/rule from that one (not
-   reused) -- `:::section-title{...}` and `:::section{...}` are two
-   different directives that happen to both want a named accent color.
-   `red`/`green` read the SCHEME-AWARE `--website-accent-*` tokens
-   (above), not the raw `--red`/`--green` aliases directly -- `purple`
-   stays literal, see this rule block's own text-shadow comment below
-   for why. */
+   same named-color vocabulary and technique `::line{color="..."}`
+   (`websiteDirectives.tsx`) also reads. `:::section{...}` deliberately
+   has NO equivalent of its own -- a section's own headings just read
+   the ordinary default text color; this is the one place a heading
+   inside a themed section can still stand out on purpose. `red`/`green`
+   read the SCHEME-AWARE `--website-accent-*` tokens (above), not the
+   raw `--red`/`--green` aliases directly -- `purple` stays literal, see
+   this rule block's own text-shadow comment below for why. */
 .website-section-title[data-website-color="red"] :is(h1, h2, h3, h4, h5, h6) {
   color: var(--website-accent-red);
 }

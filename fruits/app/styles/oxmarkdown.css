@@ -401,97 +401,41 @@
   margin: 0;
 }
 
-/* Ordinary prose rhythm for the static/Interacting renderer: every block
-   sibling gets one grid unit of space above it, on every parent
-   `renderBlockNodes` (OxRenderer.tsx) ever renders a run of sibling
-   blocks into — the top-level document, plus every nested block
-   container (a blockquote's body, a list item's own body, a toggle's
-   body; `.ox-grid-cell` already has its own identical rule below, next
-   to the rest of the grid directive's CSS).
+/* Ordinary prose rhythm for the static/Interacting renderer, REVERSED
+   DECISION -- read this before ever adding a DEFAULT/baseline
+   `margin-top`/gap rule back here for "every block sibling." This used to
+   be a real rule (`.ox-dot-grid > *:not(:first-child)` and several
+   siblings, one per container `renderBlockNodes` ever renders a run of
+   blocks into), giving every block ONE grid unit of space above it
+   UNCONDITIONALLY, with `.ox-blank-line-spacer` below only ever adding
+   MORE on top for blank lines BEYOND that first, automatic one, and a
+   `.ox-no-gap-before` override class clawing the baseline back to zero
+   for the one case (a list/heading/blockquote interrupting a paragraph
+   with NO blank line at all, legal per CommonMark's own interrupt rules)
+   it could detect. That whole three-part system is GONE now: it kept
+   silently reappearing (added, "lost," re-added, found missing on some
+   new container, re-added again) because it was fighting its own stated
+   goal the whole time -- a published page's spacing must come ENTIRELY
+   from the file's own actual blank-line count (or an explicit knob like
+   `:::section{margin="N"}`, website.css), not an invisible per-transition
+   default baked into every possible block-list container by hand.
 
-   THIS RULE WAS MISSING ENTIRELY despite being long-documented in this
-   skill's Design language section — with it absent, every pair of
-   ordinary adjacent blocks (the overwhelmingly common "exactly one blank
-   line apart" case, since `.ox-blank-line-spacer` below only ever
-   accounts for EXTRA blank lines beyond that first one) rendered with
-   ZERO gap between them: two consecutive paragraphs read as one
-   continuous run of lines, sharply different from Editing mode's own
-   blank-line handling (a real empty row, always visible) even though
-   both are meant to represent the exact same one grid unit of
-   separation. Reported more than once as "spacing gets collapsed" and
-   mis-diagnosed as an inline (multiple-spaces-within-a-line) issue before
-   this, the actual block-level rhythm bug, was found. Editing mode
-   itself is UNAFFECTED by any of this — it doesn't use margin for this at
-   all, see "Blank lines between blocks are real rows, not CSS margin, in
-   Editing mode" elsewhere in this file's design language notes.
-
-   `.ox-dot-grid`, NOT `.ox-content`, on the first selector below — a real
-   miss the first time this rule was written. Per "41×41px dot grid
-   background" above, `OxRenderer.tsx` always nests actual content one
-   level deeper, inside a `.ox-dot-grid` child `<div>` — `.ox-content`
-   ITSELF only ever has that one wrapper as its sole direct child, so
-   `.ox-content > *:not(:first-child)` matches nothing at all at the top
-   level (that one wrapper both IS the first child and is the ONLY
-   child). This is exactly the kind of thing the three-surface testing
-   convention below is for — confirmed only after actually looking at the
-   rendered result, not just reasoning about the CSS in the abstract. */
-.ox-dot-grid > *:not(:first-child),
-.ox-content blockquote > *:not(:first-child),
-.ox-content li > *:not(:first-child),
-.ox-content .ox-toggle-body > *:not(:first-child),
-/* A REAL BUG, found via a real repro (a list directly followed by
-   `::button{...}`, exactly one blank line apart, inside a
-   `:::section{...}`): these website-directive container wrappers
-   (`website.css`) render their own block children (`renderBlockNodes`)
-   directly inside themselves, same as every case already listed above --
-   but were never added here, so any two ordinary block siblings inside a
-   section/pricing-card body rendered with ZERO gap between them, exactly
-   the missing-rhythm bug this rule's own header already describes, just
-   never noticed for these since most existing section content happened
-   not to expose it (a single list, or other incidental margins masking
-   the missing rhythm). Deliberately NOT `.website-section-title` too --
-   that one's own layout is a specific flex/`align-items: flex-end`
-   composition with an absolutely-positioned `::line{...}`, not a plain
-   flow of block siblings, and blindly adding margin-top there risks
-   breaking that alignment instead of fixing a rhythm gap. */
-.ox-content .website-section-inner > *:not(:first-child),
-.ox-content .website-pricing-card-body > *:not(:first-child) {
-  margin-top: var(--ox-grid);
-}
-
-/* `.ox-blank-line-spacer` (below) already contributes its own full grid
-   unit of height per EXTRA blank line beyond the first — it must never
-   ALSO pick up the rule above's margin-top, or a 2-blank-line gap would
-   render as 3 grid units instead of 2 (the spacer's own height, PLUS a
-   margin-top the rule above would otherwise also give it for being a
-   non-first child, PLUS the real node right after it separately getting
-   its own baseline margin-top too). `!important` because this needs to
-   win over the rule above regardless of which of its several selectors
-   (or `.ox-grid-cell`'s own, separate rule below) matched — a plain class
-   selector alone is LESS specific than any of those `> *:not(:first-
-   child)` combinators, so without it this would silently lose the
-   cascade back to the rule it's meant to override. */
-.ox-content .ox-blank-line-spacer {
-  margin-top: 0 !important;
-}
-
-/* Tagged by `renderBlockNodes` (OxRenderer.tsx) when a block had ZERO blank
-   lines before it in the source (e.g. a list/heading/blockquote
-   interrupting a paragraph per CommonMark's own interrupt rules, like
-   "Definitions:\n- Dogma: ..."). The rhythm rule above assumes the
-   ordinary "exactly one blank line apart" case; this overrides it back to
-   zero so adjacent-with-no-blank-line source renders with no gap, matching
-   the source exactly. `!important` for the same reason `.ox-blank-line-
-   spacer` needs it above: a plain class selector alone is less specific
-   than the `> *:not(:first-child)` combinators it must win over. */
-.ox-content .ox-no-gap-before {
-  margin-top: 0 !important;
-}
-
-/* One per blank line BEYOND the single one CommonMark already requires to
-   separate two blocks — see `renderBlockNodes` in `OxRenderer.tsx`. Exactly
-   one grid row tall so extra intentional spacing still lines up with the
-   dot grid, the same rhythm rule every other element here follows. */
+   `renderBlockNodes` (`OxRenderer.tsx`) now computes the ENTIRE gap
+   itself, directly and LITERALLY from the source's own blank-line count
+   (`countBlankLines`, no "minus one for the first automatic one"
+   reduction), and expresses it ONLY via `.ox-blank-line-spacer` elements
+   below -- no CSS margin rule of any kind needed here anymore. Zero blank
+   lines (an ordinary CommonMark interrupt) means zero spacers; ONE blank
+   line -- the overwhelmingly common case in ordinary prose -- means ONE
+   grid unit, not zero; two blank lines means two units; and so on. (An
+   earlier version of this fix used `countExtraBlankLines` here instead,
+   treating that first blank line as free -- confirmed WRONG via a real
+   screenshot comparison: a page's own real, literal blank lines were
+   rendering with no visible gap at all, directly contradicting "spacing
+   comes entirely from the file.") This also means Editing mode and the
+   static renderer now agree EXACTLY on how many grid units a given
+   blank-line count is worth (both read `countBlankLines` directly) --
+   they always should have. */
 .ox-blank-line-spacer {
   height: var(--ox-grid);
 }
@@ -1658,12 +1602,11 @@ img.ox-file-thumb {
   gap: var(--ox-grid);
 }
 
-/* Each cell keeps its OWN normal block rhythm (`renderBlockNodes`, same as
-   the top-level document) — a cell with several paragraphs/a heading still
-   reads top-to-bottom exactly like ordinary prose, just narrower. */
-.ox-grid-cell > *:not(:first-child) {
-  margin-top: var(--ox-grid);
-}
+/* A cell's own gap between blocks comes entirely from
+   `.ox-blank-line-spacer` now (`renderBlockNodes`, same mechanism as the
+   top-level document) -- no `margin-top` rule needed here at all anymore,
+   see that CSS class's own comment for why a baseline rule like this one
+   used to be was deliberately removed everywhere it existed. */
 
 /* Below the same breakpoint every other OxMarkdown mobile treatment uses
    (`OxPopover`, the `@`-mention menu) — a grid narrow enough to need a

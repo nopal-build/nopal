@@ -323,8 +323,8 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "section",
     name: "Section",
-    directive: ':::section{bg="..." accent="..." list="..."}',
-    note: "Container -- a themeable area, not a fully bespoke one: a handful of independent knobs, not complete control over every style. `bg` picks a full-bleed background class (`cream`/`peach`/`mint`/`lavender`/`white`, each aliasing an existing palette token — see `website.css`; `cream` is literally the page's own resting background, so it reads as blended-in/invisible rather than a distinct band -- `white` is for a section that should actually stand out); `accent` optionally recolors headings inside it (`red`/`green`/`purple`); `list` optionally swaps in a NAMED bullet style for the body's own lists (`timeline` today — a small dot + connecting line, not just a tint), fully independent of `accent`. Body renders through the ordinary OxRenderer pipeline otherwise — nothing else section-specific about the heading/paragraph/list styling itself.",
+    directive: ':::section{bg="..." list="..." margin="N"}',
+    note: "Container -- a themeable area, not a fully bespoke one: a handful of independent knobs, not complete control over every style. `bg` picks a full-bleed background class (`mint`/`white`, each aliasing an existing palette token — see `website.css`; both have real dark-mode counterparts of their own, `--cactus-800`/`--purple-light` -- leaving `bg` unset shows the page's own resting background through instead, reading as blended-in/invisible rather than a distinct band); `list` optionally swaps in a NAMED bullet style for the body's own lists (`timeline` today — a small dot + connecting line, not just a tint); `margin` adds extra top/bottom breathing room around the section as a MULTIPLE of the shared `--ox-grid` unit (41px today), e.g. `margin=\"2\"` = `82px` -- negative numbers pull an adjacent section closer instead. Body renders through the ordinary OxRenderer pipeline otherwise — nothing else section-specific about the heading/paragraph/list styling itself, including heading COLOR: a section's own headings just read the ordinary default text color -- reach for the Section title paper (below) instead when a heading specifically needs to stand out.",
     fullBleed: true,
     attributes: [
       {
@@ -332,9 +332,8 @@ const TRACING_PAPERS: TracingPaper[] = [
         label: "bg",
         kind: "select",
         default: "mint",
-        options: [{ value: "cream" }, { value: "peach" }, { value: "mint" }, { value: "lavender" }, { value: "white" }],
+        options: [{ value: "", label: "(none, transparent)" }, { value: "mint" }, { value: "white" }],
       },
-      { key: "accent", label: "accent", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
       {
         key: "list",
         label: "list",
@@ -342,13 +341,17 @@ const TRACING_PAPERS: TracingPaper[] = [
         default: "timeline",
         options: [{ value: "", label: "(default dash)" }, { value: "timeline", label: "timeline" }],
       },
+      { key: "margin", label: "margin (x grid unit)", kind: "text", default: "", placeholder: "e.g. 2" },
     ],
-    buildMarkdown: (v) => `:::section{bg="${v.bg}"${v.accent ? ` accent="${v.accent}"` : ""}${v.list ? ` list="${v.list}"` : ""}}
+    buildMarkdown: (v) => {
+      const attrs = [v.bg && `bg="${v.bg}"`, v.list && `list="${v.list}"`, v.margin && `margin="${v.margin}"`].filter(Boolean).join(" ");
+      return `:::section{${attrs}}
 ## At a Cost
 
 - We favored synthetic materials for their higher performance metrics.
 - The risks increased and the improvements diminished.
-:::`,
+:::`;
+    },
   },
   {
     id: "stamp",
@@ -379,8 +382,8 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "icon",
     name: "Icon",
-    directive: '::icon{name="..." size="sm|md|lg" id="..."}',
-    note: 'Leaf. Checks real file-based assets first (**Files**, below), then a small set of inline-drawn placeholder shapes (**Placeholders**), then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** drop a new SVG under `public/guides/`, then add one `{name: path}` entry to `WEBSITE_ICON_FILES` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.',
+    directive: '::icon{name="..." size="sm|md|lg" id="..." position="x,y"}',
+    note: 'Leaf. Checks real file-based assets first (**Files**, below), then a small set of inline-drawn placeholder shapes (**Placeholders**), then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** drop a new SVG under `public/guides/`, then add one `{name: path}` entry to `WEBSITE_ICON_FILES` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.\n\n**`position="x,y"` (optional):** absolutely positions the icon instead of leaving it inline -- the SAME normalized coordinate system (`x` 0-100, `y` 0-40) and anchor-letter (`L`/`C`/`R`/`T`/`C`/`B`) + plain-delta vocabulary `::line{points="..."}` uses for its own points, just resolved to a single CSS `left`/`top` percentage pair instead of an SVG path. Only has a visible effect when its container is `position: relative` -- `:::section{...}`\'s own body (`.website-section-inner`) already is, for its first real use; try e.g. `R4,T4` to tuck it into a section\'s own top-right corner.',
     attributes: [
       { key: "name", label: "name", kind: "select", default: "sun-home", options: ICON_NAME_OPTIONS },
       {
@@ -390,8 +393,9 @@ const TRACING_PAPERS: TracingPaper[] = [
         default: "lg",
         options: [{ value: "sm" }, { value: "md" }, { value: "lg" }],
       },
+      { key: "position", label: "position (x,y)", kind: "text", default: "", placeholder: "e.g. R4,T4" },
     ],
-    buildMarkdown: (v) => `::icon{name="${v.name}" size="${v.size}"}`,
+    buildMarkdown: (v) => `::icon{name="${v.name}" size="${v.size}"${v.position ? ` position="${v.position}"` : ""}}`,
   },
   {
     id: "icon-placeholder",
@@ -947,6 +951,39 @@ function PreviewBox({
   );
 }
 
+/** Side-by-side Light + Dark instances of the SAME markdown -- Tracing
+ * Papers (unlike a Scratch/Pad, which stay on the page-level toggle,
+ * `previewScheme`/`PREVIEW_SCHEME_OPTIONS` below) are FIXED, read-only
+ * examples, so there's no real cost to always rendering both at once --
+ * comparing a directive's light vs. dark treatment is exactly the kind
+ * of "quick decision" a Tracing Paper exists to support, and flipping a
+ * single toggle back and forth to do that is strictly slower than just
+ * looking at both. `flexWrap` -- stacks light-over-dark on a narrow
+ * column (a List row's own thumbnail) instead of squeezing two illegibly
+ * narrow renders side by side. */
+function PreviewBoxPair({
+  fullBleed,
+  markdown,
+  minHeight,
+}: {
+  fullBleed?: boolean;
+  markdown: string;
+  minHeight: number;
+}) {
+  return (
+    <div className={sprinkles({ display: "flex", gap: 3, flexWrap: "wrap" })}>
+      <div style={{ flex: "1 1 0", minWidth: 0 }}>
+        <ColumnLabel>Light</ColumnLabel>
+        <PreviewBox fullBleed={fullBleed} markdown={markdown} minHeight={minHeight} previewScheme="light" />
+      </div>
+      <div style={{ flex: "1 1 0", minWidth: 0 }}>
+        <ColumnLabel>Dark</ColumnLabel>
+        <PreviewBox fullBleed={fullBleed} markdown={markdown} minHeight={minHeight} previewScheme="dark" />
+      </div>
+    </div>
+  );
+}
+
 /** Renders a "note"/"description" -- plain markdown (inline `` `code` ``
  * spans, mainly), through the same `OxRenderer` pipeline as the actual
  * preview markdown, just without any expectation of block-level directives
@@ -1376,7 +1413,6 @@ function FocusedTracingPaperView({
   paper,
   pads,
   onFocusScratch,
-  previewScheme,
 }: {
   paper: TracingPaper;
   /** Every existing Pad -- "Use as new Scratch" needs one to create the
@@ -1386,7 +1422,6 @@ function FocusedTracingPaperView({
    * own throwaway pad by default. */
   pads: ResolvedPad[];
   onFocusScratch: (id: string) => void;
-  previewScheme: "light" | "dark";
 }) {
   // Keyed by `key={paper.id}` at the call site, so switching Tracing
   // Papers always starts fresh from THAT paper's own defaults.
@@ -1437,9 +1472,9 @@ function FocusedTracingPaperView({
 
   return (
     <div className={sprinkles({ display: "flex", gap: 5, flexWrap: "wrap" })} style={{ alignItems: "flex-start" }}>
-      <div style={{ flex: "1 1 480px", minWidth: 0 }}>
+      <div style={{ flex: "2 1 640px", minWidth: 0 }}>
         <ColumnLabel>Rendered (static)</ColumnLabel>
-        <PreviewBox fullBleed={paper.fullBleed} markdown={markdown} minHeight={Math.max(paper.previewMinHeight ?? 0, 480)} previewScheme={previewScheme} />
+        <PreviewBoxPair fullBleed={paper.fullBleed} markdown={markdown} minHeight={Math.max(paper.previewMinHeight ?? 0, 480)} />
       </div>
       <div style={{ flex: "0 1 340px", minWidth: 280 }}>
         <ColumnLabel>Directive</ColumnLabel>
@@ -1566,11 +1601,9 @@ function FocusedTracingPaperView({
 function TracingPaperRow({
   paper,
   onFocus,
-  previewScheme,
 }: {
   paper: TracingPaper;
   onFocus: () => void;
-  previewScheme: "light" | "dark";
 }) {
   const markdown = paper.buildMarkdown(Object.fromEntries(paper.attributes.map((a) => [a.key, a.default])));
   return (
@@ -1583,7 +1616,7 @@ function TracingPaperRow({
         alignItems: "flex-start",
       }}
     >
-      <div style={{ flex: "0 0 260px", minWidth: 0 }}>
+      <div style={{ flex: "0 0 480px", minWidth: 0 }}>
         <ColumnLabel>Render</ColumnLabel>
         {/* `maxHeight` + `overflow: auto`, NOT `alignItems: stretch` on the
             row -- a wide/tall real example (e.g. `:::section{...}`'s own
@@ -1594,7 +1627,7 @@ function TracingPaperRow({
             predictable, scannable size regardless of how tall any one
             example's real render happens to be. */}
         <div style={{ maxHeight: 220, overflow: "auto" }}>
-          <PreviewBox fullBleed={paper.fullBleed} markdown={markdown} minHeight={paper.previewMinHeight ?? 120} previewScheme={previewScheme} />
+          <PreviewBoxPair fullBleed={paper.fullBleed} markdown={markdown} minHeight={paper.previewMinHeight ?? 120} />
         </div>
       </div>
       <div style={{ flex: "1 1 auto", minWidth: 0 }}>
@@ -1805,17 +1838,18 @@ function FocusedPadView({
   }
 
   // Every member's CURRENT markdown, in order, joined with ZERO blank
-  // lines -- not a stylistic no-op. `OxRenderer`'s own "padding reflects
-  // blank lines in the source" rhythm (`countBlankLines`/`renderBlockNodes`,
-  // `ox-no-gap-before` -- see the oxmarkdown skill's own "Design language")
-  // means a single joining `\n\n` (one blank line) used to draw a real,
-  // unwanted grid-unit gap between each Scratch's own `:::section{...}`
-  // (ON TOP of that directive's own internal padding) -- an artifact of
-  // this join, not something any Scratch's own author actually wrote.
-  // `.trim()` matters here as much as the join character itself: without
-  // it, a scratch whose OWN markdown happens to end with a trailing
-  // newline would silently reintroduce that same blank line regardless of
-  // what this joins with.
+  // lines -- not a stylistic no-op. `OxRenderer`'s own "a real blank line
+  // gets a real `.ox-blank-line-spacer` grid unit" rhythm
+  // (`countBlankLines`/`renderBlockNodes`, OxRenderer.tsx -- see the
+  // oxmarkdown skill's own "Between blocks" section) means a single
+  // joining `\n\n` (one blank line) WOULD draw a real, unwanted grid-unit
+  // gap between each Scratch's own `:::section{...}` (ON TOP of that
+  // directive's own internal padding) -- an artifact of this join, not
+  // something any Scratch's own author actually wrote. `.trim()` matters
+  // here as much as the join character itself: without it, a scratch
+  // whose OWN markdown happens to end with a trailing newline would
+  // silently reintroduce that same blank line regardless of what this
+  // joins with.
   const combinedMarkdown = pad.scratchIds
     .map((id) => scratchById.get(id)?.markdown?.trim() ?? "")
     .filter((md) => md.length > 0)
@@ -2021,6 +2055,14 @@ export default function StampsScratch() {
   // `focus`/`viewMode` below.
   const [previewScheme, setPreviewScheme] = useState<PreviewScheme>("light");
 
+  // Tracing Papers (List mode is ALWAYS the Tracing Papers list -- see
+  // `viewMode`'s own type comment -- or Focus mode on one specifically)
+  // always render `PreviewBoxPair` (both schemes at once, side by side)
+  // instead of reading `previewScheme` -- the page-level Light/Dark
+  // toggle has nothing to drive there anymore, so it's hidden rather than
+  // left sitting around looking like it still does something.
+  const isTracingPaperView = viewMode === "list" || focus.kind === "paper";
+
   const focusedEntry = focus.kind === "scratch" ? (resolvedEntries.find((e) => e.id === focus.id) ?? resolvedEntries[0]) : undefined;
   const focusedPad = focus.kind === "pad" ? (pads.find((p) => p.id === focus.id) ?? pads[0]) : undefined;
   const focusedPaper = focus.kind === "paper" ? (TRACING_PAPERS.find((p) => p.id === focus.id) ?? TRACING_PAPERS[0]) : undefined;
@@ -2167,7 +2209,9 @@ export default function StampsScratch() {
                       : (focusedEntry?.name ?? "Scratch")}
               </h1>
               <div className={sprinkles({ display: "flex", gap: 2 })}>
-                <SegmentedToggle value={previewScheme} onChange={setPreviewScheme} options={PREVIEW_SCHEME_OPTIONS} />
+                {!isTracingPaperView && (
+                  <SegmentedToggle value={previewScheme} onChange={setPreviewScheme} options={PREVIEW_SCHEME_OPTIONS} />
+                )}
                 <SegmentedToggle value={viewMode} onChange={changeViewMode} options={VIEW_MODE_OPTIONS} />
               </div>
             </div>
@@ -2199,7 +2243,6 @@ export default function StampsScratch() {
               paper={focusedPaper}
               pads={pads}
               onFocusScratch={focusOnScratch}
-              previewScheme={previewScheme}
             />
           ) : viewMode === "focus" && focusedEntry ? (
             <FocusedEntryView
@@ -2213,7 +2256,7 @@ export default function StampsScratch() {
           ) : (
             <Stack gap={4}>
               {TRACING_PAPERS.map((paper) => (
-                <TracingPaperRow key={paper.id} paper={paper} onFocus={() => focusOnPaper(paper.id)} previewScheme={previewScheme} />
+                <TracingPaperRow key={paper.id} paper={paper} onFocus={() => focusOnPaper(paper.id)} />
               ))}
             </Stack>
           )}

@@ -85,6 +85,7 @@ import { WebsitePageContent } from "stamps/WebsitePageContent";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "stamps/MoreMenu";
 import { ActionBar, ActionBarButton, ActionBarGroup } from "stamps/ActionBar";
+import { button as actionBarButtonClass } from "stamps/actionBar.css";
 import { ExpandIcon } from "stamps/ExpandIcon";
 import { LayoutFlipIcon } from "stamps/LayoutFlipIcon";
 import { useStickyPaneMaxHeight } from "stamps/useStickyPaneMaxHeight";
@@ -1728,6 +1729,25 @@ function WebsitePageSplitEditor({
             >
               Dark
             </ActionBarButton>
+          </ActionBarGroup>
+          <ActionBarGroup>
+            {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
+                itself uses (`stamps/actionBar.css`), rather than extending
+                that shared component with an `href` variant -- matches this
+                codebase's own established convention (`button.css`'s own
+                recipe, `link.css`, `surfaceBase`, ...) of applying a
+                recipe's className polymorphically at each call site instead
+                of baking router-awareness into a router-agnostic `stamps`
+                component. Opens in a new tab -- this is a REFERENCE jump
+                (going to look up/try a directive's own vocabulary), not a
+                navigation away from the file currently being edited here. */}
+            <Link
+              to="/maker/stamps/scratch"
+              className={actionBarButtonClass({ active: false })}
+              aria-label="Open the website directives scratch pad in a new tab"
+            >
+              Scratch pad
+            </Link>
           </ActionBarGroup>
           <ActionBarGroup>
             <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">

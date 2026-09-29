@@ -37,22 +37,38 @@
  * they never trigger this.
  *
  * Directive vocabulary (first functional pass):
- *   :::section{bg="cream|peach|mint|lavender|white" accent="red|green|purple" list="timeline"}
+ *   :::section{bg="mint|white" list="timeline" margin="N"}
  *     — full-bleed colored band; body renders through the ordinary
- *     pipeline. `accent` recolors headings (named-color vocabulary, same
- *     as `:::section-title`/`::line`); `list` swaps in a NAMED bullet
- *     style for the body's own lists (a small dot + connecting line for
- *     `"timeline"` today) -- a whole pre-designed look, not a raw color,
- *     same "named vocabulary" spirit `bg` itself already has. Both
- *     optional/independent of each other. Deliberately a themeable-area
- *     directive, not a fully bespoke-per-section one: bg/accent/list are
- *     the handful of knobs worth exposing, not every possible CSS
- *     property.
+ *     pipeline. `list` swaps in a NAMED bullet style for the body's own
+ *     lists (a small dot + connecting line for `"timeline"` today) -- a
+ *     whole pre-designed look, not a raw color, same "named vocabulary"
+ *     spirit `bg` itself already has. `margin` adds extra top/bottom
+ *     breathing room around the section, as a MULTIPLE of the shared
+ *     `--ox-grid` unit (41px today) rather than a raw pixel count --
+ *     `margin="2"` means `2 * 41px` = `82px` (see `parseSectionMarginStyle`,
+ *     below, for why that stays token-driven instead of a hardcoded
+ *     number); negative values pull an adjacent section closer instead.
+ *     Deliberately a themeable-area directive, not a fully bespoke-per-
+ *     section one: bg/list/margin are the handful of knobs worth
+ *     exposing, not every possible CSS property. Heading COLOR is
+ *     deliberately NOT one of them -- a section's own headings just read
+ *     the ordinary default text color; reach for `:::section-
+ *     title{color="..."}` (below) instead when a heading specifically
+ *     needs to stand out.
  *   ::stamp{name="coffee|mtn|nopal|quail" rotate="deg" float="left|right|inline" id="..."}
  *     — a complete, pre-designed postage-stamp graphic (see
  *     `websiteStamps.tsx`); `id` doubles as a waypoint.
- *   ::icon{name="..." size="sm|md|lg" id="..."} — a bare named
- *     illustration, for inline glyphs or standalone floating shapes.
+ *   ::icon{name="..." size="sm|md|lg" id="..." position="x,y"} — a bare
+ *     named illustration, for inline glyphs or standalone floating
+ *     shapes. `position` is optional -- omit it and the icon renders
+ *     inline exactly as it always has; give it an `"x,y"` pair (the
+ *     SAME normalized coordinate system `::line{points="..."}` resolves
+ *     its own points against, below -- anchors and deltas both work
+ *     identically) to absolutely position it INSTEAD, relative to
+ *     whatever element it's rendered inside (today: `.website-section-
+ *     inner`, for `:::section{...}` -- see `parseIconPosition`'s own
+ *     comment for why other containers need the same `position:
+ *     relative` treatment before this works inside THEM too).
  *   ::waypoint{id="..."} — an invisible anchor for the (future) wavy
  *     connector overlay to measure; renders nothing visible on its own.
  *   :::section-title{icon="..." color="red|green|purple"} — an icon + a
@@ -61,7 +77,7 @@
  *     the layout. The heading stays real markdown inside it, so an
  *     unaware renderer just shows a plain heading, no visible artifact.
  *     `color` recolors JUST the heading text (same named-color vocabulary
- *     as `:::section{accent="..."}`, via the same
+ *     `::line{color="..."}` below also reads, via the same
  *     `data-website-color`-attribute-selector technique) — it does NOT
  *     also recolor a `::line{...}` nested alongside it; that's `::line`'s
  *     own, independent `color` attribute (below), since a bare `::line`
@@ -136,7 +152,7 @@ import { WavyLine } from "./WavyLine";
 import OxRenderer from "../components/OxRenderer";
 import { Badge } from "stamps/Badge";
 import { button as stampsButton } from "stamps/button.css";
-import { parseLinePoints, type LineCurveKind } from "oxmarkdown-core";
+import { parseLinePoints, resolveLinePoints, type LineCurveKind } from "oxmarkdown-core";
 import "../styles/website.css";
 
 const LINE_CURVE_KINDS = ["smooth", "straight", "bezier"] as const;
@@ -164,17 +180,17 @@ function toLineCurveKind(v: string | undefined): LineCurveKind {
   return (LINE_CURVE_KINDS as readonly string[]).includes(v ?? "") ? (v as LineCurveKind) : "smooth";
 }
 
-/** Same named-color vocabulary `:::section{accent="..."}` already uses --
- * shared here so `::line{color="..."}` resolves to the exact same CSS
- * variable a `color="..."` on `:::section-title{...}` would (that one
- * goes through CSS attribute selectors instead -- see `website.css` --
- * since it targets a heading already rendered as `children`, not a prop
- * this registry can pass directly). `red`/`green` read the SAME scheme-
- * aware `--website-accent-*` tokens `:::section-title{color="..."}`
- * reads (website.css) -- a line drawn alongside a green/red heading
- * should recolor right along with it in dark mode, not go stale.
- * `purple` stays a literal, scheme-invariant token (no dark-mode
- * counterpart exists for it, by design -- see website.css). */
+/** Same named-color vocabulary `:::section-title{color="..."}` already
+ * uses -- shared here so `::line{color="..."}` resolves to the exact
+ * same CSS variable a `color="..."` there would (that one goes through
+ * CSS attribute selectors instead -- see `website.css` -- since it
+ * targets a heading already rendered as `children`, not a prop this
+ * registry can pass directly). `red`/`green` read the SAME scheme-aware
+ * `--website-accent-*` tokens `:::section-title{color="..."}` reads
+ * (website.css) -- a line drawn alongside a green/red heading should
+ * recolor right along with it in dark mode, not go stale. `purple`
+ * stays a literal, scheme-invariant token (no dark-mode counterpart
+ * exists for it, by design -- see website.css). */
 const ACCENT_COLOR_VARS: Record<string, string> = {
   red: "var(--website-accent-red)",
   green: "var(--website-accent-green)",
@@ -182,6 +198,69 @@ const ACCENT_COLOR_VARS: Record<string, string> = {
 };
 function toAccentColorVar(name: string | undefined): string | undefined {
   return name ? ACCENT_COLOR_VARS[name] : undefined;
+}
+
+/** `::icon{position="x,y"}` -- reuses the EXACT SAME coordinate system
+ * `::line{points="x,y x,y ..."}` resolves its own points against
+ * (`parseLinePoints`/`resolveLinePoints`, `oxmarkdown-core`'s
+ * `wavyLine.ts`): `x` normalized 0-100, `y` normalized 0-40 (the same
+ * fixed `viewBoxHeight` `::line{...}` itself still defaults to, since
+ * neither directive exposes that as its own attribute today), each half
+ * either a plain delta number or an `L`/`C`/`R` (x) / `T`/`C`/`B` (y)
+ * anchor letter. A single point's "delta" already resolves as absolute
+ * (the cursor starts at `(0, 0)`), so anchors and deltas both work here
+ * exactly like they do in a real multi-point `points="..."` list.
+ *
+ * Unlike `::line{...}` (which needs real measured PIXELS to draw an SVG
+ * path through multiple points), positioning exactly ONE element can
+ * just use plain CSS `left`/`top` PERCENTAGES on an absolutely-
+ * positioned box -- the browser already resolves those against the
+ * nearest POSITIONED ancestor's own measured size on every layout/
+ * resize, for free, with no `ResizeObserver`/`getBoundingClientRect`
+ * measurement dance the way `WavyLine.tsx` needs. That positioned
+ * ancestor is whatever element the `::icon{...}` happens to render
+ * inside -- today that's `.website-section-inner` (website.css), for
+ * the first real use inside `:::section{...}`. Placing one inside some
+ * OTHER container needs that container to be `position: relative` too,
+ * the same way, before this has any visible effect there.
+ *
+ * Represents the icon's TOP-LEFT corner, not its center (simplest to
+ * reason about, and consistent with what `left`/`top` mean everywhere
+ * else in CSS) -- nudge `x`/`y` by roughly half the icon's own rendered
+ * size for a visually "centered on this point" placement instead.
+ * Returns `undefined` for an absent/unparseable `position` -- the caller
+ * then renders exactly as it always did (ordinary inline flow), matching
+ * `::icon{...}`'s own "no position given = unchanged" contract. */
+const ICON_POSITION_VIEWBOX_HEIGHT = 40;
+function parseIconPosition(raw: string | undefined): CSSProperties | undefined {
+  const tokens = parseLinePoints(raw);
+  if (tokens.length !== 1) return undefined;
+  const [point] = resolveLinePoints(tokens, ICON_POSITION_VIEWBOX_HEIGHT);
+  return { position: "absolute", left: `${point.x}%`, top: `${(point.y / ICON_POSITION_VIEWBOX_HEIGHT) * 100}%` };
+}
+
+/** `:::section{margin="N"}` -- `N` MULTIPLIES the shared `--ox-grid`
+ * token (oxmarkdown.css, 41px today -- the same single-source-of-truth
+ * vertical-rhythm unit every other spacing decision across OxMarkdown
+ * already derives from) to get a real `margin-top`/`margin-bottom` in
+ * px, e.g. `margin="2"` -> `2 * 41px` = `82px`. Reads the token via a
+ * plain CSS `calc()` in an inline style rather than computing a literal
+ * pixel number here in JS, so a section's own margin stays correct even
+ * if `--ox-grid` itself is ever retuned (a caller-supplied `oxmarkdown/
+ * theme.ts` override, or a future grid-size change) -- matches this
+ * whole codebase's own standing preference for reading a shared token
+ * over hardcoding its current value. Applies to BOTH top and bottom
+ * symmetrically (a single knob for "extra breathing room around this
+ * section," not independent per-side control) -- negative numbers work
+ * fine too (pulls an adjacent section closer, even overlapping, via
+ * ordinary CSS margin math). Returns `undefined` for an absent/
+ * unparseable `margin` -- the caller then renders with its own ordinary
+ * default spacing, unchanged. */
+function parseSectionMarginStyle(raw: string | undefined): CSSProperties | undefined {
+  const multiplier = Number(raw);
+  if (!Number.isFinite(multiplier)) return undefined;
+  const margin = `calc(${multiplier} * var(--ox-grid, 41px))`;
+  return { marginTop: margin, marginBottom: margin };
 }
 
 const BADGE_VARIANTS = ["neutral", "success", "warning", "danger"] as const;
@@ -208,10 +287,7 @@ export function dailyLogEntryKey(date: string, project: string): string {
 }
 
 const SECTION_BG_CLASS: Record<string, string> = {
-  cream: "website-bg-cream",
-  peach: "website-bg-peach",
   mint: "website-bg-mint",
-  lavender: "website-bg-lavender",
   white: "website-bg-white",
 };
 
@@ -231,8 +307,8 @@ export function buildWebsiteDirectiveRegistry(opts: {
       return (
         <section
           className={`website-section ${bgClass}`}
-          data-website-accent={attrs.accent || undefined}
           data-website-list={attrs.list || undefined}
+          style={parseSectionMarginStyle(attrs.margin)}
         >
           <div className="website-section-inner">{children}</div>
         </section>
@@ -255,7 +331,14 @@ export function buildWebsiteDirectiveRegistry(opts: {
 
     icon({ attrs }) {
       const size = attrs.size === "sm" || attrs.size === "lg" ? attrs.size : "md";
-      return <WebsiteIcon name={attrs.name ?? ""} size={size} waypointId={attrs.id} />;
+      return (
+        <WebsiteIcon
+          name={attrs.name ?? ""}
+          size={size}
+          waypointId={attrs.id}
+          positionStyle={parseIconPosition(attrs.position)}
+        />
+      );
     },
 
     waypoint({ attrs }) {

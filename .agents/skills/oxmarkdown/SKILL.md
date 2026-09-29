@@ -230,8 +230,12 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
 - **Editing mode specifically must act like a code editor**: one line in
   the markdown = one row in the editor, every row the same height off the
   41px grid — no margins standing in for blank lines that should just be
-  real rows. (The static `OxRenderer` keeps ordinary margin-based prose
-  rhythm; this principle is specific to the live-editable surface.)
+  real rows. (The static `OxRenderer` now follows this SAME "no implied
+  margin" principle too, just expressed differently — see "Between
+  blocks," below, for the current, REVERSED policy. Don't trust an older
+  memory of "the static renderer keeps ordinary document-style margin
+  rhythm instead" — that used to be true and was a deliberate decision at
+  the time, but it was reversed for good, explicit reasons; see below.)
 - **Every space in the saved markdown is preserved on screen, exactly,
   on ALL THREE surfaces (static, Interacting, Editing) — both WITHIN a
   line (multiple spaces) and BETWEEN blocks (blank-line rhythm).** Two
@@ -258,51 +262,73 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
     which wins outright over an INHERITED value from an ancestor
     regardless of the ancestor's specificity, so those two keep their
     own (stricter, no-wrap) whitespace handling unchanged.
-  - **Between blocks — the actual root cause of the real bug report**:
-    the static/Interacting renderer was missing block-rhythm margin
-    ENTIRELY at the top level, so two ordinary adjacent blocks (the
-    overwhelmingly common "exactly one blank line apart" case —
-    `.ox-blank-line-spacer` below only ever accounts for EXTRA blank
-    lines beyond that first one) rendered with ZERO gap between them,
-    reading as one continuous run of lines — sharply different from
-    Editing mode's own blank-line handling (a real empty row, always
-    visible), even though both are meant to represent the same one grid
-    unit of separation. Root cause: `.ox-content > *:not(:first-child) {
-    margin-top: var(--ox-grid) }`, the rule this skill had long
-    documented as already existing, had EITHER never actually been added
-    or been lost — and even once (re)added, the very same direct-child
-    selector still matched nothing, because real content sits ONE LEVEL
-    DEEPER than `.ox-content` itself (inside the `.ox-dot-grid` child
-    `<div>` — see "41×41px dot grid background" above); `.ox-content`'s
-    ONE direct child IS `.ox-dot-grid`, so `:not(:first-child)` never
-    matched anything at that level at all. Fixed for real on
-    `.ox-dot-grid > *:not(:first-child)` (plus the equivalent for every
-    OTHER place `renderBlockNodes` renders a run of sibling blocks into a
-    shared parent — `blockquote`, a list item's own body, a toggle's
-    body; `.ox-grid-cell` already had its own correct version of this
-    same rule, written correctly from the start since it has no
-    dot-grid-style wrapper of its own to trip over), confirmed with an
-    actual screenshot, not just CSS reasoning — reasoning about the
-    selector alone is exactly what produced the first, silently-wrong
-    "fix." `.ox-blank-line-spacer` itself is excluded
-    (`margin-top: 0 !important`) from all of these — it already
-    contributes its own full grid unit of height per extra blank line, so
-    it must never ALSO pick up this rule's margin or a 2-blank-line gap
-    would render as 3 grid units instead of 2.
-  - **The flip side of the same bug: the static renderer also always added
-    the baseline one-grid-unit gap even when the source had ZERO blank
-    lines between two blocks** — e.g. `"Definitions:\n- Dogma: ..."` (a
-    list interrupting a paragraph with no blank line, legal per
-    CommonMark's own interrupt rules) rendered with a gap the source never
-    had. `renderBlockNodes` (`OxRenderer.tsx`) now checks
-    `countBlankLines(prev, node) === 0` and tags that node
-    `ox-no-gap-before` (`oxmarkdown.css`, `margin-top: 0 !important`, same
-    override pattern as `.ox-blank-line-spacer`) via `cloneElement` —
-    applied to whatever host element `renderNode` returned, since block
-    nodes aren't rendered through one common wrapper. Editing mode's own
-    import (`editingTransforms.ts`'s `convertBlockList`) was already
-    correct here for free — it only ever inserts `countBlankLines` empty
-    paragraphs, which is already 0 in this case.
+  - **Between blocks — REVERSED POLICY, read this in full before ever
+    reaching for a default/baseline `margin-top` rule here again.** For a
+    long stretch, the static/Interacting renderer gave every block ONE
+    implied grid unit of margin for the ordinary "exactly one blank line
+    apart" case — a bare CSS rule (`.ox-dot-grid > *:not(:first-child) {
+    margin-top: var(--ox-grid) }`, repeated once per container
+    `renderBlockNodes` ever renders a run of blocks into: the top-level
+    document, a blockquote's body, a list item's own body, a toggle's
+    body, a grid cell, `:::section{...}`'s own body, ...), reasoned about
+    at the time as necessary to match Editing mode's own "blank lines are
+    real, always-visible rows." `.ox-blank-line-spacer` only ever added
+    MORE on top of that baseline for blank lines beyond the first, and a
+    `.ox-no-gap-before` class (attached via `cloneElement`, since block
+    nodes don't share one common wrapper) clawed the baseline back to
+    zero for the one case it could detect (a list/heading/blockquote
+    interrupting a paragraph with NO blank line at all, legal per
+    CommonMark's own interrupt rules).
+
+    **That whole three-part system is GONE now, deliberately reversed** —
+    it kept silently reappearing (added, "lost," re-added, found missing
+    on some new container type, re-added again — this happened enough
+    times that a real product owner explicitly asked "how do we make sure
+    we stop adding this margin") precisely because a class-based default
+    plus an exception-class override is easy to reintroduce piecemeal on
+    a new container without anyone noticing the DEFAULT itself is the
+    actual problem. The design goal was reframed: **a published page's
+    spacing must come ENTIRELY from the file's own actual content** — its
+    real blank-line count, or an explicit knob like
+    `:::section{margin="N"}` (`website.css`) — never an invisible
+    per-transition rhythm a page author never asked for. OxMarkdown
+    should function more like a plain-text editor and less like a
+    document renderer that imposes its own typographic decisions.
+
+    `renderBlockNodes` (`OxRenderer.tsx`) now computes the ENTIRE gap
+    itself, directly and LITERALLY from `countBlankLines` (`oxmarkdown-
+    core`, the RAW blank-line count — no reduction), and expresses it
+    ONLY as `.ox-blank-line-spacer` elements — one per literal blank line
+    in the source, full stop. No CSS margin rule of any kind is needed on
+    ANY block-list container anymore, and no `cloneElement`/class-
+    injection mechanism either (`ox-no-gap-before` no longer exists — the
+    zero-blank-line CommonMark-interrupt case just naturally gets zero
+    spacers). **The concrete effect**: zero blank lines still means zero
+    gap, but a single blank line between two ordinary paragraphs/headings
+    (the overwhelmingly common case in normal prose) now DOES get exactly
+    one `--ox-grid` unit — it's a real line in the file, so it earns real
+    space, no different from any other blank line. Two blank lines gives
+    two units; three gives three; and so on, with NO "first one is free"
+    discount. **A first attempt at this fix used `countExtraBlankLines`
+    (`max(0, blankLines - 1)`) instead — WRONG, confirmed via a real
+    screenshot comparison against the actual source file**: it made the
+    ordinary single-blank-line case render with ZERO gap too, which
+    LOOKED like it satisfied "no invisible default" but actually violated
+    the real goal even more directly — a page author's own real, literal
+    blank line was being silently erased instead of rendering as nothing
+    BUT what's actually there. The correct rule is the simplest possible
+    one: `.ox-blank-line-spacer` count == literal blank-line count,
+    always, with no reduction of any kind.
+
+    **This also means Editing mode and the static renderer now agree
+    EXACTLY**, for the first time, on how many grid units a given
+    blank-line count is worth — both ultimately read `countBlankLines`
+    directly (`editingTransforms.ts`'s `convertBlockList` for Editing
+    mode, unchanged; `renderBlockNodes` above for static/Interacting) — so
+    the earlier-flagged "deliberate divergence between the two" this
+    bullet used to document doesn't exist anymore either; that was a
+    symptom of the `countExtraBlankLines` mistake above, not a real,
+    separate design tradeoff worth keeping.
   - **Nested (2nd-order+) list indentation was ALSO only ever applied
     editor-only** (`.ox-editing-surface li > ul`/`ol`) — the static/
     Interacting renderer relied solely on a bullet-glyph change (`—` vs
@@ -360,6 +386,28 @@ aren't re-litigated from scratch:
 - **Backspace and Delete are symmetric** — both fully remove a selected
   interactable (no "revert to raw text" step; retyping via `/` is easy
   enough that the extra export-escaping machinery wasn't worth it).
+- **The static renderer's block-to-block spacing has NO default/baseline
+  margin, full stop — reversed from an earlier design.** See "Between
+  blocks" under Design language above for the complete history/reasoning;
+  this entry exists so it's ALSO found here, in the section explicitly for
+  "don't re-litigate this." Short version: `renderBlockNodes`
+  (`OxRenderer.tsx`) renders `N` real blank lines in the source as exactly
+  `N` `.ox-blank-line-spacer` grid units — LITERAL, no reduction (an
+  interim version of this fix used `N - 1`, treating the first blank line
+  as "free"; WRONG, confirmed by a real screenshot comparison against the
+  source file — an author's own real, single blank line was rendering
+  with no visible gap at all). There is NO CSS rule anywhere that gives a
+  block margin just for being a non-first sibling. **Before adding one**
+  (even scoped to one new container type, even just to "restore
+  missing-looking rhythm" you noticed in a screenshot): the fix you
+  actually want is almost certainly either (a) the source is genuinely
+  missing a blank line where visible space is wanted (add one, don't add
+  CSS), or (b) the container needs an explicit spacing attribute of its
+  own (the pattern: `:::section{margin="N"}`,
+  `website.css`/`websiteDirectives.tsx`) — not a default rhythm rule. This
+  exact mistake (a class-based default plus an exception-class override,
+  silently missing on whatever container is new this time) was made and
+  "corrected" enough times that it's the reason this entry exists at all.
 - **No hand-splitting the document by `\n\n`.** Parse once into a real
   mdast tree (`mdast-util-from-markdown` + micromark); `mdast-util-directive`,
   `micromark-extension-directive`, `mdast-util-frontmatter`, and
@@ -395,8 +443,13 @@ aren't re-litigated from scratch:
   free. Export uses a stateless `blankLineJoin` (`mdast-util-to-markdown`'s
   `join` option) that inspects adjacent real mdast nodes directly, so N
   empty paragraphs serialize to exactly N blank lines. The static
-  `OxRenderer` keeps CSS margin-based rhythm instead
-  (`.ox-content > *:not(:first-child)`) — normal for read-only prose.
+  `OxRenderer` renders the SAME `N` as `N` real `.ox-blank-line-spacer`
+  grid units now (see "Between blocks" in Design language, above) — the
+  two surfaces agree exactly on how much space a given blank-line count is
+  worth, for the first time (a past version of this bullet said the
+  static side used `.ox-content > *:not(:first-child)` CSS margin instead,
+  and a version after that said it used `N - 1` spacer units — both
+  superseded; see "Between blocks" for why).
 - **Checklists never use `@lexical/list`'s native `"check"` list type.**
   Every list is plain `"bullet"`; whether an item has a checkbox is a field
   on a custom `OxListItemNode extends ListItemNode`

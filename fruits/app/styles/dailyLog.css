@@ -65,32 +65,14 @@
   }
 }
 
-/* Restores a visible paragraph-to-paragraph gap for the ordinary case —
-   exactly ONE blank line, the bare minimum CommonMark requires to
-   separate two blocks at all. `.ox-content p { margin: 0 }`
-   (oxmarkdown.css) means the static renderer otherwise draws a plain
-   single-blank-line paragraph break pixel-IDENTICAL to a soft-wrapped
-   continuation line within the SAME paragraph — only blank lines BEYOND
-   that first one get their own visible `.ox-blank-line-spacer` row
-   (`countExtraBlankLines`/`renderBlockNodes`, OxRenderer.tsx). This adds
-   the missing baseline unit so the preview actually looks like the real
-   entry's own paragraph breaks, not a run-on block.
-
-   Deliberately scoped to just THIS preview (`.ox-dot-grid`'s children,
-   reached through `.daily-log-fade` on the `.ox-content` ancestor — see
-   oxmarkdown.css for why the real block content lives one level below
-   `.ox-content` itself) rather than a blanket `.ox-content` rule, to
-   stay a narrow, low-risk addition while the editor itself is being
-   actively worked on elsewhere. `:not(.ox-blank-line-spacer)` keeps this
-   ADDITIVE with the existing extra-blank-line spacers rather than
-   double-counting: a spacer's own height already accounts for one more
-   blank line, so it doesn't need a margin-top of its own too — the real
-   content block that follows one still gets this rule's margin-top,
-   which is exactly the "one more unit for one more blank line" rhythm
-   this rule is establishing for the baseline case. */
-.ox-content.daily-log-fade > .ox-dot-grid > *:not(:first-child):not(.ox-blank-line-spacer) {
-  margin-top: var(--ox-grid, 41px);
-}
+/* REMOVED (was: a scoped baseline `margin-top: var(--ox-grid)` on the
+   ordinary "exactly one blank line apart" case, just for THIS preview) --
+   `oxmarkdown.css`'s own `.ox-blank-line-spacer` comment explains the
+   full, app-wide change this was one of several instances of:
+   `renderBlockNodes` (OxRenderer.tsx) now gives every literal blank line
+   in the source its own real `.ox-blank-line-spacer` grid unit, uniformly,
+   everywhere -- including this preview -- so a scoped local rule just for
+   THIS context is redundant, not merely different, now. */
 
 /* The solid rule + "Keep writing" button BELOW the day frame —
    deliberately a plain divider, not a second bordered box. Same border
