@@ -18,12 +18,11 @@ export default function LoginError() {
     <AuthShell title="Login Problem">
       <div className={`${surfaceBase} ${textSize.lg} ${sprinkles({ p: 4 })}`}>
         <p>
-          There has been a problem logging in as this user. Please
-          contact{" "}
+          Something went wrong signing you in. Email{" "}
           <a href="mailto:human@nopal.build" className={link}>
             human@nopal.build
           </a>{" "}
-          for help.
+          and we'll sort it out.
         </p>
       </div>
       <div className={sprinkles({ mt: 8 })}>

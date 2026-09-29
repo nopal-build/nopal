@@ -18,6 +18,8 @@
     "./searchCollection.css": "./src/searchCollection.css.ts",
     "./SearchField": "./src/SearchField.tsx",
     "./Select": "./src/Select.tsx",
+    "./Disclosure": "./src/Disclosure.tsx",
+    "./disclosure.css": "./src/disclosure.css.ts",
     "./CopyField": "./src/CopyField.tsx",
     "./copyField.css": "./src/copyField.css.ts",
     "./sprinkles.css": "./src/sprinkles.css.ts",

@@ -13,6 +13,7 @@ import {
   isRouteErrorResponse,
   redirect,
   useLoaderData,
+  useNavigate,
   useRevalidator,
   useRouteError,
   useSearchParams,
@@ -60,6 +61,8 @@ import {
   listFolderChildren,
 } from "robustness-core/data/vault.server";
 import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { navFor } from "../data/nav.server";
+import { displayName } from "robustness-core/data/humanNames";
 import { getRelatedHumans } from "robustness-core/data/relationships.server";
 import { resolveProjectManifest, type ResolvedProject } from "robustness-core/data/project.server";
 import {
@@ -178,7 +181,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!user) return redirect("/login");
   // A client never gets the Vault (ADR-023): the same bare 404 as a page
   // that doesn't exist.
-  if (isClientEverywhere(await listProjectsFor(user._id))) {
+  const memberships = await listProjectsFor(user._id);
+  if (isClientEverywhere(memberships)) {
     throw new Response("Not found", { status: 404 });
   }
 
@@ -201,7 +205,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // longer, scrollable list.
   const relatedHumans: HumanEntry[] = relatedHumansRaw
     .map((h) => ({ _id: h._id, name: h.name, email: h.email }))
-    .sort((x, y) => (x.name || x.email).localeCompare(y.name || y.email));
+    .sort((x, y) => displayName(x).localeCompare(displayName(y)));
 
   // The left tree's folder skeleton needs BOTH the human's own folders and
   // every folder shared with them, so shared subtrees render/expand the same
@@ -337,6 +341,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     relatedHumans,
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
+    // The nav: a Guide's Maker tab stays lit while they're in here.
+    ...(await navFor(user._id, memberships)),
   };
 }
 
@@ -578,7 +584,7 @@ function CsvTableView({ content }: { content: string }) {
         {body.length} row{body.length === 1 ? "" : "s"} · {header.length} column
         {header.length === 1 ? "" : "s"}
         {truncated &&
-          ` — showing first ${CSV_TABLE_MAX_ROWS}, download the file to see the rest`}
+          `, showing the first ${CSV_TABLE_MAX_ROWS}. Download the file for the rest`}
       </div>
     </div>
   );
@@ -676,240 +682,6 @@ function CopyLinkButton({ path }: { path: string }) {
 
 type ProjectSharingRole = { name: string; is_owner: boolean };
 type ProjectSharingEntry = { human: string; role: string };
-
-/**
- * A project's Sharing Roles — supersedes the old "private / everyone /
- * specific people" modal entirely (see `projectSharing.server.ts`).
- * "Everyone in the app" is gone; every collaborator now gets an explicit
- * named Role (Owner/Crafter/Observer by default — see
- * `sharingRoles.server.ts`), stored directly in the project's own
- * README.md front matter. Loads/saves via
- * `/api/vault/projects/:folderId/sharing` rather than the generic folder
- * PATCH endpoint.
- */
-function ShareModal({
-  folder,
-  allHumans,
-  onClose,
-  apiJson,
-}: {
-  folder: VaultFolder;
-  allHumans: HumanEntry[];
-  onClose: () => void;
-  apiJson: (url: string, options?: RequestInit) => Promise<any>;
-}) {
-  const [loading, setLoading] = useState(true);
-  const [roles, setRoles] = useState<ProjectSharingRole[]>([]);
-  // human id -> role name; absent = not shared with this human at all.
-  const [assignments, setAssignments] = useState<Record<string, string>>({});
-  const [people, setPeople] = useState<HumanEntry[]>(allHumans);
-  const [invite, setInvite] = useState({ email: "", name: "", role: "Client" });
-  const [inviteNote, setInviteNote] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const data = await apiJson(`/api/vault/projects/${folder._id}/sharing`);
-      if (cancelled || !data) return;
-      setRoles(data.roles ?? []);
-      const next: Record<string, string> = {};
-      for (const entry of (data.sharing ?? []) as ProjectSharingEntry[]) next[entry.human] = entry.role;
-      setAssignments(next);
-      setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [folder._id, apiJson]);
-
-  // The least a new name gets: Client, the group that reaches least.
-  const defaultRole = roles.find((r) => r.name === "Client")?.name ?? roles[0]?.name ?? "";
-
-  const setRoleFor = (humanId: string, role: string | null) => {
-    setAssignments((prev) => {
-      const next = { ...prev };
-      if (role) next[humanId] = role;
-      else delete next[humanId];
-      return next;
-    });
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    const sharing: ProjectSharingEntry[] = Object.entries(assignments).map(([human, role]) => ({ human, role }));
-    const data = await apiJson(`/api/vault/projects/${folder._id}/sharing`, {
-      method: "PUT",
-      body: JSON.stringify({ sharing }),
-    });
-    setSaving(false);
-    if (data) onClose();
-  };
-
-  const selectStyle: React.CSSProperties = {
-    fontFamily: "monospace",
-    fontSize: "12px",
-    padding: "2px 6px",
-  };
-
-  // Invite someone onto this project in a role: a new person gets an
-  // account and the welcome email; someone who exists is just added.
-  const handleInvite = async () => {
-    setInviteNote(null);
-    const data = await apiJson(`/api/vault/projects/${folder._id}/invite`, {
-      method: "POST",
-      body: JSON.stringify({ email: invite.email, name: invite.name || undefined, role: invite.role }),
-    });
-    if (!data?.human) return;
-    const h = data.human as HumanEntry;
-    setPeople((prev) => (prev.some((p) => p._id === h._id) ? prev : [...prev, h]));
-    setRoleFor(h._id, invite.role);
-    setInvite({ email: "", name: "", role: "Client" });
-    setInviteNote(data.created ? `Invited ${h.name || h.email}` : `Added ${h.name || h.email}`);
-  };
-
-  return (
-    <div className="vault-modal-backdrop" onClick={onClose}>
-      <div className="vault-modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="vault-modal-title">Share "{folder.name}"</h3>
-        <p
-          className="text-xs font-mono"
-          style={{ color: "var(--text-subtle)", marginTop: "-8px", marginBottom: "16px" }}
-        >
-          Give a collaborator a Role on this project. There's no "everyone"
-          option — pick people explicitly.
-        </p>
-
-        {loading ? (
-          <p className="text-xs font-mono" style={{ padding: "12px" }}>
-            Loading…
-          </p>
-        ) : (
-          <div className="vault-human-list">
-            {people.length === 0 ? (
-              <p
-                className="text-xs font-mono"
-                style={{ color: "var(--text-subtle)", padding: "12px" }}
-              >
-                No other humans found.
-              </p>
-            ) : (
-              people.map((h) => {
-                const role = assignments[h._id];
-                return (
-                  <label
-                    key={h._id}
-                    className={`vault-human-row ${role ? "vault-human-row--checked" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={!!role}
-                      onChange={() =>
-                        setRoleFor(h._id, role ? null : defaultRole)
-                      }
-                      style={{ accentColor: "var(--purple)", cursor: "pointer", flexShrink: 0 }}
-                    />
-                    <span
-                      className="text-sm font-mono"
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {h.name || h.email}
-                    </span>
-                    {role && (
-                      <select
-                        value={role}
-                        onChange={(e) => setRoleFor(h._id, e.target.value)}
-                        style={selectStyle}
-                      >
-                        {roles.map((r) => (
-                          <option key={r.name} value={r.name}>
-                            {r.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </label>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        {!loading && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px", margin: "12px 0" }}>
-            <span className="text-xs font-mono" style={{ color: "var(--text-subtle)" }}>
-              Invite by email
-            </span>
-            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-              <input
-                aria-label="Email"
-                placeholder="email"
-                value={invite.email}
-                onChange={(e) => setInvite((p) => ({ ...p, email: e.target.value }))}
-                style={{ ...selectStyle, flex: 1, minWidth: 0 }}
-              />
-              <input
-                aria-label="Name"
-                placeholder="name, if they're new"
-                value={invite.name}
-                onChange={(e) => setInvite((p) => ({ ...p, name: e.target.value }))}
-                style={{ ...selectStyle, flex: 1, minWidth: 0 }}
-              />
-              <select
-                aria-label="Role"
-                value={invite.role}
-                onChange={(e) => setInvite((p) => ({ ...p, role: e.target.value }))}
-                style={selectStyle}
-              >
-                {roles.map((r) => (
-                  <option key={r.name} value={r.name}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={handleInvite}
-                disabled={!invite.email}
-                className="btn-outline text-xs font-mono px-3 py-1.5 rounded"
-              >
-                Invite
-              </button>
-            </div>
-            {inviteNote && (
-              <span className="text-xs font-mono" style={{ color: "var(--text-subtle)" }}>
-                {inviteNote}
-              </span>
-            )}
-          </div>
-        )}
-
-        <div
-          style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}
-        >
-          <button
-            onClick={onClose}
-            className="btn-outline text-xs font-mono px-3 py-1.5 rounded"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || loading}
-            className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Project role banner (debug aid) ─────────────────────────────
 
@@ -1079,6 +851,7 @@ function NewFolderPanel({
   parentFolder,
   isSpaceTypeEligible,
   canCreateWebsite,
+  websiteOnly = false,
   existingChildren,
   onCreate,
 }: {
@@ -1096,6 +869,9 @@ function NewFolderPanel({
    * `validateFolderTypeForParent`; this only controls whether the choice is
    * even offered. */
   canCreateWebsite: boolean;
+  /** At the `projects` root a project starts in the Maker (ADR-026), so
+   * the only thing this panel makes there is a website, for a Super. */
+  websiteOnly?: boolean;
   existingChildren: VaultFolder[];
   onCreate: (name: string, folderType: string | null) => void;
 }) {
@@ -1124,7 +900,7 @@ function NewFolderPanel({
 
   const [name, setName] = useState("");
   const [containerType, setContainerType] = useState<"project" | "website">(
-    "project",
+    websiteOnly ? "website" : "project",
   );
   const [syncType, setSyncType] = useState<SyncFolderTypeKey | null>(null);
   const canSubmit = name.trim().length > 0;
@@ -1142,7 +918,7 @@ function NewFolderPanel({
 
   return (
     <div style={{ width: "230px" }}>
-      {canCreateWebsite && (
+      {canCreateWebsite && !websiteOnly && (
         <div style={{ display: "flex", gap: "4px", padding: "2px 2px 6px" }}>
           {(
             [
@@ -1404,7 +1180,7 @@ function WebsitePublishToggle({
       onClick={handleClick}
       disabled={saving}
       style={{ border: "none", background: "none", padding: 0, cursor: saving ? "default" : "pointer" }}
-      title={isPublished ? "Published — click to unpublish" : "Draft — click to publish"}
+      title={isPublished ? "Published. Click to unpublish" : "Draft. Click to publish"}
     >
       <Badge variant={isPublished ? "success" : "neutral"}>
         {saving ? "…" : isPublished ? "Published" : "Draft"}
@@ -1814,6 +1590,7 @@ export default function VaultV2Page() {
   } = useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
+  const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
 
   // ─── Sidebar (mobile drawer) ────────────────────────────────────────────────
@@ -2088,7 +1865,6 @@ export default function VaultV2Page() {
   const [graphLogBusy, setGraphLogBusy] = useState<"run" | "rerun-outputs" | "reset" | "cancel" | "reseed-skills" | null>(null);
   const [graphLogScheduleBusy, setGraphLogScheduleBusy] = useState(false);
   const [graphLogStatus, setGraphLogStatus] = useState<GraphLogProjectStatus | null>(null);
-  const [shareOpen, setShareOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [siteSettingsOpen, setSiteSettingsOpen] = useState(false);
 
@@ -2307,7 +2083,7 @@ export default function VaultV2Page() {
 
       xhr.onerror = () => {
         activeUploadIds.current.delete(id);
-        failUpload(id, "Network error — check your connection and retry.");
+        failUpload(id, "Network error. Check your connection and try again.");
       };
 
       xhr.ontimeout = () => {
@@ -3068,8 +2844,11 @@ export default function VaultV2Page() {
     if (canMoveCurrent) {
       moreActions.push({ label: "Move", onClick: () => setMoveOpen(true) });
     }
-    if (canShareCurrent) {
-      moreActions.push({ label: "Share", onClick: () => setShareOpen(true) });
+    // People come and go on the project's page in the Maker (ADR-026), the
+    // one place for it; this only gets you there.
+    if (canShareCurrent && current.kind === "folder") {
+      const id = current.folder._id;
+      moreActions.push({ label: "People…", onClick: () => navigate(`/maker/projects/${id}`) });
     }
     if (canPublishCurrent) {
       if (folderOwnPublic) {
@@ -3359,16 +3138,21 @@ export default function VaultV2Page() {
                     className="vault-toolbar-btn"
                     disabled={!!downloadAllProgress}
                     onClick={handleDownloadAll}
-                    title="Downloads each file in this folder individually (not a zip) — sub-folders aren't included"
+                    title="Downloads each file here, not the sub-folders"
                   >
                     {downloadAllProgress
                       ? `↓ Downloading ${downloadAllProgress.done}/${downloadAllProgress.total}…`
                       : "↓ Download all"}
                   </button>
                 )}
-                {canWriteCurrent && (
+                {canWriteCurrent && current.folder._id === projectsRootId && user.role !== "Super" && (
+                  <Link to="/maker/projects" className="vault-toolbar-btn" data-start-in-maker>
+                    Start a project in the Maker →
+                  </Link>
+                )}
+                {canWriteCurrent && (current.folder._id !== projectsRootId || user.role === "Super") && (
                   <MoreMenu
-                    label="New folder"
+                    label={current.folder._id === projectsRootId ? "New website" : "New folder"}
                     align="left"
                     trigger={({ toggle, open, label }) => (
                       <button
@@ -3379,7 +3163,7 @@ export default function VaultV2Page() {
                         aria-expanded={open}
                         onClick={toggle}
                       >
-                        + New folder
+                        + {label}
                       </button>
                     )}
                   >
@@ -3395,6 +3179,7 @@ export default function VaultV2Page() {
                           current.folder._id === projectsRootId &&
                           user.role === "Super"
                         }
+                        websiteOnly={current.folder._id === projectsRootId}
                         existingChildren={
                           foldersByParent[current.folder._id] ?? []
                         }
@@ -3630,7 +3415,7 @@ export default function VaultV2Page() {
                         {row.upload.name}
                         {row.upload.status === "error" && (
                           <span className="vault-v2-upload-error">
-                            {" — "}
+                            {": "}
                             {row.upload.error}
                           </span>
                         )}
@@ -3798,19 +3583,6 @@ export default function VaultV2Page() {
             ))}
         </div>
       </div>
-
-      {/* Share modal */}
-      {shareOpen && current.kind === "folder" && (
-        <ShareModal
-          folder={current.folder}
-          allHumans={relatedHumans}
-          onClose={() => {
-            setShareOpen(false);
-            invalidateAndRevalidate([current.folder._id, current.folder.parent_folder_id]);
-          }}
-          apiJson={apiJson}
-        />
-      )}
 
       {/* Move modal */}
       {moveOpen && current.kind === "folder" && (

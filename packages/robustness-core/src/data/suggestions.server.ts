@@ -1,3 +1,4 @@
+import { firstName } from "./humanNames";
 /**
  * Suggestions (Austin, 2026-09-28). Someone whose group has no `feeds`
  * (an Observer) writes Cards and notes like anyone on the project, but
@@ -84,7 +85,7 @@ export async function listSuggestions(projectFolderId: string, authorHumanId?: s
   ].filter((s) => authorHumanId || s.status === "pending");
 
   const names = new Map(
-    (await getHumansById([...new Set(out.map((s) => s.authorHumanId))])).map((h) => [h._id, h.name || h.email]),
+    (await getHumansById([...new Set(out.map((s) => s.authorHumanId))])).map((h) => [h._id, firstName(h)]),
   );
   return out
     .map((s) => ({ ...s, authorName: names.get(s.authorHumanId) ?? "Someone" }))

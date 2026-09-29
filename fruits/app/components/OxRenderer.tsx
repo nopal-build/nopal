@@ -1090,7 +1090,7 @@ export function FileDirectiveLayout({
       ) : (
         <div
           className="ox-file-thumb"
-          title={uploadError ? `${name} — upload failed` : name}
+          title={uploadError ? `${name}: upload failed` : name}
           data-upload-error={uploadError ? "true" : undefined}
           aria-hidden="true"
         />

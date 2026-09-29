@@ -65,13 +65,16 @@ describe("the groups", () => {
     expect(seesSuggestions(featuresOf("Observer"))).toBe(true);
   });
 
-  it("a Client gets Efforts, Photos, their own tap and their own log, and runs nothing", () => {
+  it("a Client gets Efforts, Photos, the pen, their own tap and their own log, and runs nothing", () => {
     const client = resolveRole("Client");
     expect(tabsFor(client.features)).toEqual(["efforts", "photos"]);
     expect(client.features).toEqual(expect.arrayContaining(["steepTap", "dailyLog"]));
     expect(client).toMatchObject({ isOwner: false, guiding: false });
     expect(client.features).not.toContain("steepReadings");
-    expect(client.features).not.toContain("marks");
+    // A note with the pen (Austin, 2026-09-28); moving, filing and
+    // confirming a cost are `edit`, which a Client never has.
+    expect(client.features).toContain("marks");
+    for (const f of ["edit", "files", "costs", "people", "suggestions"] as Feature[]) expect(client.features).not.toContain(f);
   });
 });
 

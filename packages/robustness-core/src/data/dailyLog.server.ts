@@ -506,7 +506,7 @@ export async function saveDailyLogCard(fileId: string, content: string): Promise
 
 const SAMPLE_LOG_MARKDOWN = `# Welcome to your Daily Log
 
-This is a sample entry so you can see all the markdown you can use. Delete it whenever — your real entries will live right alongside it.
+A sample entry to show what the markdown can do. Delete it whenever you like.
 
 ---
 

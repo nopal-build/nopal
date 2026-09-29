@@ -1,3 +1,4 @@
+import { firstName } from "./humanNames";
 /**
  * The dashboard: what `/` shows each person, decided here and only here.
  *
@@ -246,7 +247,7 @@ export async function loadDashboard(
     ),
   ]);
   const names = new Map(
-    (await getHumansById([...new Set(readings.map((r) => r.human_id))])).map((h) => [h._id, h.name || h.email]),
+    (await getHumansById([...new Set(readings.map((r) => r.human_id))])).map((h) => [h._id, firstName(h)]),
   );
   const projects: DashboardProjectInput[] = memberships.map(({ folder: f, sharing }) => ({
     id: f._id,

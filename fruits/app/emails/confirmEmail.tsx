@@ -79,8 +79,7 @@ export function ConfirmEmail({ code, type }: ConfirmEmailProps) {
           lineHeight: "1.5",
         }}
       >
-        If you didn't request this, you can safely ignore this email — no
-        changes will be made without the code above.
+        Didn't ask for this? Ignore it. Nothing changes without the code above.
       </p>
     </div>
   );

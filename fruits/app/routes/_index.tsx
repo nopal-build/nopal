@@ -21,6 +21,7 @@ import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { listProjectsFor } from "robustness-core/data/projectSharing.server";
 import { navFor } from "../data/nav.server";
+import { firstName } from "robustness-core/data/humanNames";
 import { loadDashboard } from "robustness-core/data/dashboard.server";
 import {
   DEFAULT_PROJECT_STATUS,
@@ -139,7 +140,7 @@ export default function DashboardPage() {
         <Stack gap={8}>
           <Cluster gap={4} align="flex-start" style={{ justifyContent: "space-between" }}>
             <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>
-              Hello, {user.name ?? user.email}
+              Hello, {firstName(user)}
             </h1>
             <AppStatusMenu />
           </Cluster>

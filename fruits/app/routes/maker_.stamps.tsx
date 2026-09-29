@@ -47,6 +47,7 @@ import { Modal } from "stamps/Modal";
 import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
 import { SearchCollection } from "stamps/SearchCollection";
 import { SearchField } from "stamps/SearchField";
+import { Disclosure } from "stamps/Disclosure";
 import { Select } from "stamps/Select";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
@@ -1548,6 +1549,23 @@ function CollectionsSection() {
           <SearchField label="Search" name="search-field-demo" placeholder="Search…" />
         </div>
         <SpecimenCaption>{'<SearchField label="Search" name="q" placeholder="Search…" />'}</SpecimenCaption>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>Disclosure</Code> from <Code>stamps/Disclosure</Code>: the
+          twirl-down. A row in a list that opens in place to show more and
+          closes again, without leaving the page. A native{" "}
+          <Code>{"<details>"}</Code>, so it works with the keyboard and
+          without JavaScript. Stack them for a list that expands one row at
+          a time (the Maker's projects and humans).
+        </p>
+        <Surface className={sprinkles({ px: 3 })} style={{ maxWidth: "480px" }}>
+          <Disclosure summary={<span className={textSize.sm}>Crouch Casita <span style={{ color: semanticColors.textSubtle }}>· 7 people</span></span>}>
+            <p className={textSize.sm} style={{ margin: 0 }}>Who's on it, and the controls to change that, twirl down here.</p>
+          </Disclosure>
+          <Disclosure summary={<span className={textSize.sm}>Coronado ADU <span style={{ color: semanticColors.textSubtle }}>· 1 person</span></span>}>
+            <p className={textSize.sm} style={{ margin: 0 }}>Each row opens on its own; the others stay put.</p>
+          </Disclosure>
+        </Surface>
+        <SpecimenCaption>{'<Disclosure summary={<span>Crouch Casita</span>}>…</Disclosure>'}</SpecimenCaption>
       </Stack>
     </Section>
   );

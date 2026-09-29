@@ -17,6 +17,12 @@ import { surfaceBase } from "stamps/surface.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { button } from "stamps/button.css";
 
+const CLI_IS_FOR_ADMINS = "The nopal CLI is for admins.";
+
+function isAdminOrSuper(user: { role?: string }): boolean {
+  return user.role === "Admin" || user.role === "Super";
+}
+
 function parsePort(value: string | null): string | null {
   return value && /^\d{1,5}$/.test(value) ? value : null;
 }
@@ -42,6 +48,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const redirectTo = `/cli-login${url.search}`;
     return redirect(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
   }
+  // The CLI is for admins and supers (Austin, 2026-09-29).
+  if (!isAdminOrSuper(user)) return data({ error: CLI_IS_FOR_ADMINS }, { status: 403 });
 
   return data({ email: user.email, port, state, hostname });
 }
@@ -50,10 +58,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const user = await getUser(request);
   if (!user) {
     return data(
-      { error: "You're no longer signed in — go back to your terminal and try again." },
+      { error: "You're no longer signed in. Go back to your terminal and try again." },
       { status: 401 },
     );
   }
+
+  if (!isAdminOrSuper(user)) return data({ error: CLI_IS_FOR_ADMINS }, { status: 403 });
 
   const form = await request.formData();
   const intent = form.get("intent");
@@ -63,7 +73,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (!port || !state) {
     return data(
-      { error: "Missing login details — go back to your terminal and try again." },
+      { error: "Missing login details. Go back to your terminal and try again." },
       { status: 400 },
     );
   }
@@ -74,7 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const staged = await createApiTokenWithExchangeCode(user._id, `CLI login on ${hostname}`);
   if (!staged) {
-    return data({ error: "Couldn't create a CLI session — please try again." }, { status: 500 });
+    return data({ error: "Couldn't create a CLI session. Try again." }, { status: 500 });
   }
 
   const callbackUrl = `http://127.0.0.1:${port}/callback?code=${encodeURIComponent(

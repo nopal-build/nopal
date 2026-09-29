@@ -21,6 +21,13 @@ export function useVaultHidden(): boolean {
   return useMatches().some((m) => (m.data as { vaultHidden?: boolean } | null | undefined)?.vaultHidden === true);
 }
 
+/** True when the page's loader said this person guides a project
+ * (`navFor`): the nav then offers the Maker, where they start projects
+ * and run their people. An admin gets the Maker regardless. */
+export function useMaker(): boolean {
+  return useMatches().some((m) => (m.data as { maker?: boolean } | null | undefined)?.maker === true);
+}
+
 /** The first tab: My Project (straight to it) for someone on one active
  * project, My Projects otherwise. Pages that don't say (`navFor`) get My
  * Projects, and `/` sends a one-project person on. */
