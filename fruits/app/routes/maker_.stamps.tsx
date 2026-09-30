@@ -1052,7 +1052,35 @@ const BUTTON_VARIANTS: ButtonExample[] = [
     note: "No padding or display baked in at all — bring both.",
     style: { padding: "8px 16px", display: "inline-flex" },
   },
+  {
+    variant: "quiet",
+    label: "Keep them on",
+    code: 'button({ variant: "quiet" })',
+    note: "The quiet choice beside an action: reads as a link, never competes with the button next to it.",
+  },
 ];
+
+/** A row's action and its quiet alternative, at the size a list or a
+ * card wants. The pair every in-page yes-or-no uses (Suggestions, the
+ * Maker's people rows, a seed packet). */
+function CompactPairSpecimen() {
+  return (
+    <Stack gap={2} align="flex-start" style={{ maxWidth: "320px" }}>
+      <Cluster gap={3} align="center">
+        <button type="button" className={button({ variant: "secondary", size: "compact" })}>
+          Take it
+        </button>
+        <button type="button" className={button({ variant: "quiet" })}>
+          Pass
+        </button>
+      </Cluster>
+      <SpecimenCaption>{'button({ variant: "secondary", size: "compact" })  +  button({ variant: "quiet" })'}</SpecimenCaption>
+      <p className={textSize.xs} style={{ color: semanticColors.textSubtle, margin: 0 }}>
+        primary is the page's one big call; secondary at compact is a row's. Any variant with padding takes size: "compact".
+      </p>
+    </Stack>
+  );
+}
 
 /** One button, rendered for real (not a swatch standing in for it) —
  * captioned with the exact `button(...)` call that produced it. */
@@ -1103,6 +1131,12 @@ function ButtonsSection() {
           </Cluster>
         </Stack>
 
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Compact, and the quiet choice beside it
+          </div>
+          <CompactPairSpecimen />
+        </Stack>
         <Stack gap={3}>
           <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
             Danger tint

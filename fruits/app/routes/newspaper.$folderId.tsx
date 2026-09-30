@@ -34,6 +34,8 @@ import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import { listCardsForProject } from "robustness-core/data/dailyLog.server";
 import { listSeedDays } from "robustness-core/data/seed.server";
 import { loadBudget } from "robustness-core/data/budget.server";
+import { currentSeedRound, listPacketFiles, listSeedQuestions } from "robustness-core/data/seedPackets.server";
+import { SeedPacket, SeedRoundQuiet, type SeedingForPage } from "../components/SeedPacket";
 import { BudgetView, type BudgetNames } from "../components/BudgetView";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { firstName } from "robustness-core/data/humanNames";
@@ -100,6 +102,36 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const files: ProjectFileRow[] | null =
     tabFolders && folder.folder_type === "project-n02" ? rowsForReader(await loadProjectFiles(folder), features) : null;
   const logbook = tab === "logbook" ? await projectLogbook(folder) : null;
+  // Seeding (`seedPackets.server.ts`): while a round is open, everyone
+  // with a role on the project has their own seed packet here; Guides
+  // also get Sow, the round's two ends, and everyone's packets. Someone
+  // in the cache with no role has none of it, and neither does anyone
+  // once the round is ended.
+  let seeding: SeedingForPage | null = null;
+  if (role) {
+    const round = await currentSeedRound(folder._id);
+    const guiding = role.guiding;
+    const packetFiles = round || guiding ? await listPacketFiles(folder._id, guiding ? undefined : user._id) : [];
+    const row = (f: (typeof packetFiles)[number]) => ({ id: f._id, name: f.name, sown: !!f.sown_at });
+    let guide: SeedingForPage["guide"] = null;
+    if (guiding) {
+      const owners = new Map((await getHumansById([...new Set(packetFiles.map((f) => f.human_id))])).map((h) => [h._id, firstName(h)]));
+      const byPerson = new Map<string, ReturnType<typeof row>[]>();
+      for (const f of packetFiles) {
+        const person = owners.get(f.human_id) ?? "Someone";
+        byPerson.set(person, [...(byPerson.get(person) ?? []), row(f)]);
+      }
+      guide = {
+        waiting: packetFiles.filter((f) => !f.sown_at).length,
+        questions: (await listSeedQuestions(folder._id, "pending")).length,
+        packets: [...byPerson.entries()].map(([person, files]) => ({ person, files })).sort((a, b) => a.person.localeCompare(b.person)),
+      };
+    }
+    if (round || guide) {
+      seeding = { open: !!round, mine: round ? packetFiles.filter((f) => f.human_id === user._id).map(row) : null, guide };
+    }
+  }
+
   // The Budget: a view under Costs for the `budget` feature (Guides).
   // A typed URL without the feature is refused like a tab; the link only
   // shows once a budget has been started (features.ts, `budget`).
@@ -188,6 +220,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // the component, which would pull a `.server` module into the bundle).
     fileKinds: FILING_KINDS.filter((k) => k !== "video"),
     logbook,
+    seeding,
     budgetView,
     budget,
     budgetNames,
@@ -256,7 +289,7 @@ function SuggestionsView({
         </p>
       )}
       {suggestions.map((s) => (
-        <PinnedCard key={`${s.kind}:${s.id}`} title={s.authorName} label={`${longDate(s.date)} · ${s.kind === "card" ? "Card" : "Note"}`} data-suggestion>
+        <PinnedCard key={`${s.kind}:${s.id}`} title={s.authorName} label={`${longDate(s.date)} · ${s.kind === "card" ? "Card" : s.kind === "note" ? "Note" : "Question"}`} data-suggestion data-question={s.kind === "question" || undefined}>
           <Stack gap={2}>
             {s.context && (
               <p className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
@@ -264,12 +297,30 @@ function SuggestionsView({
               </p>
             )}
             {s.kind === "card" ? <OxRenderer markdown={s.text} /> : <p className={textSize.sm}>{s.text}</p>}
-            {decides && s.status === "pending" ? (
-              <Cluster gap={2}>
-                <button type="button" disabled={busy === s.id} className={button({ variant: "primary" })} onClick={() => decide(s, "take")}>
+            {decides && s.status === "pending" && s.kind === "question" ? (
+              // A question from sowing: the sentence above it asks, and
+              // each answer says what it does (`seedQuestionMeaning`).
+              <Stack gap={1}>
+                <Cluster gap={3} align="center">
+                  <button type="button" disabled={busy === s.id} className={button({ variant: "secondary", size: "compact" })} onClick={() => decide(s, "take")}>
+                    Yes
+                  </button>
+                  <button type="button" disabled={busy === s.id} className={`${button({ variant: "quiet" })} ${textSize.xs}`} onClick={() => decide(s, "pass")}>
+                    No
+                  </button>
+                </Cluster>
+                {s.answers && (
+                  <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+                    {s.answers.yes} {s.answers.no}
+                  </span>
+                )}
+              </Stack>
+            ) : decides && s.status === "pending" ? (
+              <Cluster gap={3} align="center">
+                <button type="button" disabled={busy === s.id} className={button({ variant: "secondary", size: "compact" })} onClick={() => decide(s, "take")}>
                   Take it
                 </button>
-                <button type="button" disabled={busy === s.id} className={button({ variant: "outline" })} onClick={() => decide(s, "pass")}>
+                <button type="button" disabled={busy === s.id} className={`${button({ variant: "quiet" })} ${textSize.xs}`} onClick={() => decide(s, "pass")}>
                   Pass
                 </button>
               </Cluster>
@@ -347,6 +398,16 @@ function ProjectStatusControl({
 
   const changeStatus = async (next: ProjectStatus) => {
     if (next === status) return;
+    // Leaving Active is asked first (Austin, 2026-09-30): the control
+    // writes on a single pick, and a trashed project is deleted for good
+    // by the daily cleanup after 30 days. Coming back to Active is not.
+    const ask =
+      next === "trashed"
+        ? "Move this project to the trash? It's deleted for good after 30 days. Until then you can set it back to Active."
+        : next === "completed"
+          ? "Mark this project completed? It leaves everyone's active projects. You can set it back to Active."
+          : null;
+    if (ask && !window.confirm(ask)) return;
     setUpdating(true);
     try {
       await fetch(`/api/vault/projects/${folderId}/status`, {
@@ -366,13 +427,15 @@ function ProjectStatusControl({
       value={status}
       disabled={updating}
       onChange={(e) => changeStatus(e.target.value as ProjectStatus)}
-      className="text-xs font-mono"
+      // Quiet on purpose: it is a Guide's occasional control, not part of
+      // the page's headline.
+      className={textSize.xs}
       style={{
-        background: "var(--farground)",
-        border: "1px solid var(--midground)",
-        color: "inherit",
-        borderRadius: "6px",
-        padding: "3px 6px",
+        background: "transparent",
+        border: "none",
+        color: semanticColors.textSubtle,
+        padding: 0,
+        cursor: "pointer",
       }}
     >
       <option value="active">Active</option>
@@ -405,7 +468,7 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, budgetView, budget, budgetNames, canBudget } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, seeding, budgetView, budget, budgetNames, canBudget } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -563,26 +626,23 @@ export default function NewspaperRoute() {
   return (
     <AppLayout>
       <CenterContent maxWidth={1280}>
-        <Stack gap={2} className={sprinkles({ mb: 8 })}>
+        <Stack gap={2} className={sprinkles({ mb: 8 })} data-project-header>
           {home.plural && (
             <Link to="/" className={textSize.xs} style={{ color: semanticColors.textSubtle, textDecoration: "none" }}>
               ← My Projects
             </Link>
           )}
-          {steep && <SteepGauge projectFolderId={folder._id} mine={steep.mine} size="compact" />}
+          {(steep || seeding?.mine) && (
+            <Cluster gap={6} align="flex-start" style={{ justifyContent: "space-between" }}>
+              {steep && <SteepGauge projectFolderId={folder._id} mine={steep.mine} size="compact" />}
+              {/* The seeding tile, only while a round is open. */}
+              {seeding?.mine && <SeedPacket projectFolderId={folder._id} files={seeding.mine} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
+            </Cluster>
+          )}
+          <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>
+            {manifest.title ?? folder.name}
+          </h1>
           <Cluster gap={4} align="baseline" style={{ justifyContent: "space-between" }}>
-            <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>
-              {manifest.title ?? folder.name}
-            </h1>
-            {canEditStatus ? (
-              <ProjectStatusControl folderId={folder._id} status={status} />
-            ) : (
-              <span className={`${textSize.xs} ${sprinkles({ textTransform: "capitalize" })}`} style={{ color: semanticColors.textSubtle }}>
-                {status}
-              </span>
-            )}
-          </Cluster>
-          {people.length > 0 && (
             <p className={textSize.sm} data-project-people>
               {people.map((p, i) => (
                 <span key={i}>
@@ -591,7 +651,22 @@ export default function NewspaperRoute() {
                 </span>
               ))}
             </p>
-          )}
+            {/* The project's status, small, at the end of the people line:
+                a Guide changes it here; everyone else reads it. Beside it,
+                Beside it, for a Guide with no round open, the one compact
+                button that opens one: the durable spot when no seeding is
+                happening (Austin, 2026-09-30). */}
+            <Cluster gap={4} align="center">
+              {seeding?.guide && !seeding.open && <SeedRoundQuiet projectFolderId={folder._id} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
+              {canEditStatus ? (
+                <ProjectStatusControl folderId={folder._id} status={status} />
+              ) : (
+              <span className={`${textSize.xs} ${sprinkles({ textTransform: "capitalize" })}`} style={{ color: semanticColors.textSubtle }}>
+                {status}
+              </span>
+              )}
+            </Cluster>
+          </Cluster>
         </Stack>
         <CardTabs tabs={tabs} active={tab} label="Project">
           {tab === "efforts" && (

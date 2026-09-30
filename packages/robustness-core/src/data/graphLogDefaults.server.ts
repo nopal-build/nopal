@@ -651,7 +651,48 @@ Read it back and ask whether a person who was in the room would recognize it. If
  * 2026-09-16; the stage, its CLI command and this key kept their names,
  * only the file people edit was renamed). `voice` is not a stage: it is
  * `VOICE.md`, read by graph-project-view alone. */
-export type GraphLogDefaultStage = "knowledge" | "filing" | "graph" | "graphStructure" | "projectView" | "voice";
+export const DEFAULT_SOW_SKILL = `You are reading one file from a person's seed packet: everything they had about this project from before it started logging here. Your job is to give it the shape of a daily log: who wrote what, on which day, in their own words. You do not decide what matters. The graph stage reads what you leave the way it reads any day's log and decides what earns a node; it splits, links and drops on its own. What you leave out it never sees.
+
+Later stages cite each line under its speaker, on a page the whole team reads. Two outcomes are not recoverable once that page is read: words under the wrong person's name, and a quote that was tidied and is no longer what they said. Everything below follows from avoiding those two.
+
+## What you receive
+
+One file, or one part of a long file: its name, who added it, and the names already known on this project. It may be a message thread, an email export, meeting notes, someone's own notes about conversations, or a standalone document. Code checks every line you propose against the file and writes the result.
+
+## The three tools
+
+\`file_kind\`, once, first. A \`conversation\` is things people said on particular days and gets split into days. A \`document\` is standalone (a report, an estimate, an inspection, a proposal): give the date written inside it and its author if it names one, add nothing else, and stop. The document itself is the record.
+
+\`add_line\`: one message, or one entry in someone's notes, as one person wrote it.
+
+- \`date\` is the day it was said, not the day it was written up or added. Use the date the file gives for that message. A month and day with no year is still the file giving the date: you are told when the file was added, and the year follows from that. Only when the file gives no day at all and you are estimating, set \`date_sure\` to false.
+- \`text\` is copied from the file exactly. Typos, odd punctuation and half-sentences stay as they are. Code refuses any \`text\` that is not in the file word for word. You may leave off the quotation marks around a quote and join a bullet's sub-bullets onto one line; nothing else.
+- \`speaker\` is the name the file uses for whoever said it. When the file shows only a handle, an initial or a number, or says "likely" or "probably" about who it is, give your best name and set \`speaker_sure\` to false; a guide answers that with one yes or no. The file settling it somewhere else (a later message that names whose number it is) counts as the file saying so. Your own inference from context does not.
+- A message is one line, whole. Never split it into points; the graph stage does that, and it needs the sentences together to do it right. Never trim it to the part that seems to matter.
+
+\`add_noted\`: a fact the file reports that nobody said in those words. One plain sentence, your words, no opinion.
+
+## What to keep
+
+Every message with words in it, under the person who wrote it. A greeting, a thanks or a reaction ("Wow, fast", "Thank you!!!") with nothing else in it can go; anything more stays. When you are unsure whether something is worth keeping, keep it. The graph stage is built to drop what carries nothing, and cannot recover what you dropped.
+
+Leave out only what is not a person's words on that day:
+
+- Quoted reply chains, signatures and forwarded headers in an email. Those words were already said once; keep them where they were first said.
+- A few words quoted in the middle of someone else's sentence. A fragment like that is the writer's choice of words to lift, not a thing the person said on its own. If the fact matters, it is a Noted line.
+- Anything a summarizer wrote about what people said: headlines, framing sentences around a quote, confidence notes, flags, audits, readings of what someone "seems" to think. Only the quoted words are someone's. (The summarizer's own entries, written as themselves on a day, are their words and stay.)
+
+What to leave out for privacy is not yours to decide. The person who added the file chose what to share.
+
+## Noted, sparingly
+
+A Noted line is for an event or a number the file reports with no quote behind it: a contract signed, a meeting moved, a price, a date something finished, who is doing what. When a line you kept already carries the fact, do not also note it. Do not note a summarizer's interpretation, a task someone checked off, or a restatement of several lines. If the project's page ends up citing Noted lines where it could have cited a person, the seed has lost what it was for.
+
+## Working
+
+Read the whole part first, then make your calls, many per turn. When every message is placed, stop.`;
+
+export type GraphLogDefaultStage = "knowledge" | "filing" | "graph" | "graphStructure" | "projectView" | "voice" | "sow";
 
 const STAGE_HARDCODED_DEFAULT: Record<GraphLogDefaultStage, string> = {
   knowledge: DEFAULT_KNOWLEDGE_SKILL,
@@ -660,6 +701,7 @@ const STAGE_HARDCODED_DEFAULT: Record<GraphLogDefaultStage, string> = {
   graphStructure: DEFAULT_GRAPH_STRUCTURE_SKILL,
   projectView: DEFAULT_PROJECT_VIEW_SKILL,
   voice: DEFAULT_VOICE_SKILL,
+  sow: DEFAULT_SOW_SKILL,
 };
 
 const TABLE = "graphlog_default_skills";
@@ -672,6 +714,7 @@ type GraphLogDefaultSkillsRow = Data & {
   graphStructure?: string | null;
   projectView?: string | null;
   voice?: string | null;
+  sow?: string | null;
   updatedAt?: string;
   updatedByHumanId?: string;
 };
@@ -742,6 +785,7 @@ export async function getAllEffectiveGraphLogDefaultSkills(): Promise<
     graphStructure: resolve("graphStructure"),
     projectView: resolve("projectView"),
     voice: resolve("voice"),
+    sow: resolve("sow"),
   };
 }
 
@@ -758,10 +802,14 @@ export async function setGraphLogDefaultSkillOverride(
   const existing = await getOverrideRow();
   await upsert(new RecordId(TABLE, ROW_ID), {
     knowledge: existing?.knowledge ?? null,
+    // `filing` was missing from this list, so saving any other stage's
+    // default erased a FILING.md override. Every field is carried.
+    filing: existing?.filing ?? null,
     graph: existing?.graph ?? null,
     graphStructure: existing?.graphStructure ?? null,
     projectView: existing?.projectView ?? null,
     voice: existing?.voice ?? null,
+    sow: existing?.sow ?? null,
     [stage]: content && content.trim().length > 0 ? content : null,
     updatedAt: new Date().toISOString(),
     updatedByHumanId,

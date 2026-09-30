@@ -101,6 +101,38 @@ export const button = recipe({
           },
         },
       },
+      // The quiet choice beside an action ("Pass", "No", "Keep them on"):
+      // reads as a link, sits on the same baseline as the button next to
+      // it, and never competes with it. The Maker's people rows built
+      // this inline three times before it was a variant (2026-09-30).
+      quiet: {
+        display: "inline-flex",
+        alignItems: "center",
+        background: "none",
+        border: 0,
+        padding: 0,
+        color: colors.purpleLight,
+        textDecoration: "underline",
+        textUnderlineOffset: 3,
+        cursor: "pointer",
+        "@media": {
+          [darkModeMediaQuery]: {
+            color: colors.darkForeground,
+          },
+        },
+      },
+    },
+    // A row's action, not a page's: the size the Maker's people rows and
+    // the Copy field use (`copyButton`), for a button that sits in a list
+    // or beside text. Declared after `variant` so its padding wins the
+    // tie with the variant's own.
+    size: {
+      compact: {
+        padding: "6px 12px",
+        fontSize: "0.75rem",
+        lineHeight: 1.4,
+        alignItems: "center",
+      },
     },
     // Only meaningful on `secondary` today (the only variant the old
     // `--btn-color` override was ever actually used on) — declared after

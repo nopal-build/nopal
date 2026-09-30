@@ -23,9 +23,13 @@ import type { FileRef, VaultFolder } from "./vault.types";
 import { getHumansById } from "./humans.server";
 import { getMark, listSuggestionMarks, markContextLine, type SuggestionStatus } from "./graphLogMarks.server";
 import { runDailyLogSync, syncMarksProjection } from "./dailyLogSync.server";
+import { listPacketFiles, listSeedQuestions, seedQuestionMeaning, seedQuestionSentence } from "./seedPackets.server";
+import { decideSeedQuestion } from "./sow.server";
 
 export type Suggestion = {
-  kind: "card" | "note";
+  /** A `question` is raised by the sow stage about one line from a seed
+   * packet (`seedPackets.server.ts`): a yes or no, not a take or pass. */
+  kind: "card" | "note" | "question";
   id: string;
   authorHumanId: string;
   authorName: string;
@@ -35,6 +39,8 @@ export type Suggestion = {
   /** For a note: the passage or file it was written on. */
   context: string | null;
   status: SuggestionStatus;
+  /** For a question: what yes and no each do, in a line. */
+  answers?: { yes: string; no: string };
 };
 
 /** Where a suggestion Card stands: its current words against what a
@@ -84,12 +90,39 @@ export async function listSuggestions(projectFolderId: string, authorHumanId?: s
     })),
   ].filter((s) => authorHumanId || s.status === "pending");
 
+  // Questions from sowing: for the Guides alone, and only while waiting.
+  // The "author" is whose packet the line came from.
+  const questions = authorHumanId ? [] : await listSeedQuestions(projectFolderId, "pending");
+  const packetOwners = new Map<string, string>();
+  if (questions.length > 0) {
+    for (const f of await listPacketFiles(projectFolderId)) packetOwners.set(f._id, f.human_id);
+  }
+
   const names = new Map(
-    (await getHumansById([...new Set(out.map((s) => s.authorHumanId))])).map((h) => [h._id, firstName(h)]),
+    (
+      await getHumansById([...new Set([...out.map((s) => s.authorHumanId), ...packetOwners.values()])])
+    ).map((h) => [h._id, firstName(h)]),
   );
-  return out
-    .map((s) => ({ ...s, authorName: names.get(s.authorHumanId) ?? "Someone" }))
-    .sort((a, b) => b.date.localeCompare(a.date));
+  const asked: Suggestion[] = questions.map((q) => {
+    const owner = packetOwners.get(q.packet_file_id) ?? "";
+    return {
+      kind: "question" as const,
+      id: q._id,
+      authorHumanId: owner,
+      authorName: `${names.get(owner) ?? "Someone"}'s seed packet`,
+      date: q.date,
+      text: q.text,
+      context: seedQuestionSentence(q),
+      status: "pending" as const,
+      answers: seedQuestionMeaning(q),
+    };
+  });
+  return [
+    ...asked,
+    ...out
+      .map((s) => ({ ...s, authorName: names.get(s.authorHumanId) ?? "Someone" }))
+      .sort((a, b) => b.date.localeCompare(a.date)),
+  ];
 }
 
 /**
@@ -100,12 +133,14 @@ export async function listSuggestions(projectFolderId: string, authorHumanId?: s
  */
 export async function decideSuggestion(input: {
   project: VaultFolder;
-  kind: "card" | "note";
+  kind: "card" | "note" | "question";
   id: string;
   verdict: "take" | "pass";
   guideHumanId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const { project, kind, id, verdict, guideHumanId } = input;
+  // A question's two buttons are Yes and No; they travel as take and pass.
+  if (kind === "question") return decideSeedQuestion({ project, id, verdict: verdict === "take" ? "yes" : "no", guideHumanId });
   if (kind === "card") {
     const rows = await query<[FileRef[]]>(`SELECT * FROM file_refs WHERE id = $rid`, { rid: new RecordId("file_refs", id) });
     const card = rows?.[0]?.[0] ? formatRecord(rows[0][0] as unknown as FileRef) : null;

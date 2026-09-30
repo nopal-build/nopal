@@ -61,12 +61,14 @@ import { getHumansById } from "./humans.server";
 import { getProjectSharing } from "./projectSharing.server";
 import { findProjectGraphFolder } from "./projectN02.server";
 import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
+import { clearSownForProject, deleteSeedQuestionsForProject, sownSeedDays } from "./seedPackets.server";
 import {
   createFileRef,
   createVaultFolder,
   deleteFileRef,
   deleteVaultFolderCascade,
   getFileRefById,
+  getFileRefsByFolderIds,
   listFolderChildren,
   systemVaultFolderKey,
   updateFileRef,
@@ -90,6 +92,14 @@ export const SEED_DAY_FILE_RE = /^(\d{4}-\d{2}-\d{2})\.md$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const GRAPH_DAY_RE = /^graph-log-(\d{4}-\d{2}-\d{2})\.md$/;
 const SRC_LINE_RE = /^\s*-\s*src:\s*(.*)$/;
+
+/** Whether a heading is the noted section: "Noted" in any case, with or
+ * without the parenthetical. A near miss would otherwise become a
+ * speaker called "Noted", its facts highlighted as that person's words.
+ * Pure. */
+export function isNotedHeading(heading: string): boolean {
+  return /^noted\b/i.test(heading.trim());
+}
 
 export function isSeedDayFileName(name: string): boolean {
   return SEED_DAY_FILE_RE.test(name);
@@ -136,7 +146,7 @@ export type SeedDay = {
 };
 
 /** Top-level bullets of a markdown list, continuation lines joined. */
-function topLevelBullets(text: string): string[] {
+export function topLevelBullets(text: string): string[] {
   const out: string[] = [];
   for (const line of text.split("\n")) {
     const top = /^-\s+(.*)$/.exec(line);
@@ -162,7 +172,7 @@ export function parseSeedDay(markdown: string): SeedDay {
   const flush = () => {
     if (heading === null) return;
     const text = lines.join("\n").trim();
-    if (heading === SEED_NOTED_HEADING) {
+    if (isNotedHeading(heading)) {
       if (text) noted = { text, bullets: topLevelBullets(text) };
     } else if (text) {
       sections.push({ speaker: heading, text, sources: [...new Set(sources)] });
@@ -187,6 +197,165 @@ export function parseSeedDay(markdown: string): SeedDay {
   }
   flush();
   return { kind, sections, noted };
+}
+
+// ─── A seed day as groups, for merging ──────────────────────────────────
+//
+// `parseSeedDay` above is what the graph reads: a section's words with
+// the `- src:` lines lifted out. Adding to a day that already exists (a
+// second seed packet, or a guide's yes to a question) needs the other
+// view: which bullets sit under which `- src:` line, so new lines can be
+// added under their own source and nothing already there is touched.
+
+/** Bullets that share one `- src:` line. A bullet is kept as written,
+ * its own sub-bullets included. */
+export type SeedGroup = { bullets: string[]; src: string | null };
+
+export type SeedDayDoc = {
+  /** The front matter's text, kept byte for byte; null when there is none. */
+  frontmatter: string | null;
+  sections: { speaker: string; groups: SeedGroup[] }[];
+  /** The noted section's bullets, as written. */
+  noted: string[];
+};
+
+/** A bullet and a candidate line compared as words: whitespace
+ * collapsed, the leading marker aside. */
+export function seedBulletKey(text: string): string {
+  return text.replace(/^[ \t]*[-*][ \t]+/gm, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Reads a seed day into sections, groups and bullets. Pure. */
+export function parseSeedDayDoc(markdown: string): SeedDayDoc {
+  const { frontmatter, body } = splitFrontmatter(markdown);
+  const doc: SeedDayDoc = { frontmatter, sections: [], noted: [] };
+  let heading: string | null = null;
+  let groups: SeedGroup[] = [];
+  let bullets: string[] = [];
+  const closeGroup = (src: string | null) => {
+    if (bullets.length > 0) groups.push({ bullets, src });
+    bullets = [];
+  };
+  const closeSection = () => {
+    if (heading === null) return;
+    if (isNotedHeading(heading)) {
+      doc.noted.push(...groups.flatMap((g) => g.bullets), ...bullets);
+    } else {
+      closeGroup(null);
+      if (groups.length > 0) doc.sections.push({ speaker: heading, groups });
+    }
+    groups = [];
+    bullets = [];
+  };
+  for (const line of body.split("\n")) {
+    const h2 = /^##\s+(.+?)\s*$/.exec(line);
+    if (h2) {
+      closeSection();
+      heading = h2[1];
+      continue;
+    }
+    if (heading === null) continue;
+    const src = SRC_LINE_RE.exec(line);
+    if (src && /^\s+/.test(line)) {
+      closeGroup(src[1].trim() || null);
+      continue;
+    }
+    const top = /^-\s+(.*)$/.exec(line);
+    if (top) bullets.push(top[1].trimEnd());
+    else if (line.trim() && bullets.length > 0) bullets[bullets.length - 1] = `${bullets[bullets.length - 1]}\n${line.trimEnd()}`;
+  }
+  closeSection();
+  return doc;
+}
+
+/** Writes a seed day back in the shape `parseSeedDay` reads. Pure. */
+export function renderSeedDayDoc(doc: SeedDayDoc): string {
+  const blocks: string[] = [];
+  for (const section of doc.sections) {
+    const groups = section.groups
+      .filter((g) => g.bullets.length > 0)
+      .map((g) => [...g.bullets.map((b) => `- ${b}`), g.src ? `  - src: ${g.src}` : null].filter((l) => l !== null).join("\n"));
+    if (groups.length > 0) blocks.push(`## ${section.speaker}\n\n${groups.join("\n\n")}`);
+  }
+  if (doc.noted.length > 0) blocks.push(`## ${SEED_NOTED_HEADING}\n\n${doc.noted.map((b) => `- ${b}`).join("\n")}`);
+  const body = `${blocks.join("\n\n")}\n`;
+  return doc.frontmatter === null ? body : `---\n${doc.frontmatter}\n---\n\n${body}`;
+}
+
+export type SeedAddition = {
+  lines: { speaker: string; text: string; src: string | null }[];
+  noted: string[];
+};
+
+/** Adds lines to a seed day without touching what is there: a line
+ * already in the day (under anyone, or noted) is not written twice, a
+ * new line goes under its speaker in a group with its own source, and a
+ * day that does not exist yet is made. Returns the content and how many
+ * lines went in. Pure. */
+export function mergeSeedDay(
+  existing: string | null,
+  date: string,
+  addition: SeedAddition,
+): { content: string; added: number; skipped: number } {
+  const doc: SeedDayDoc = existing
+    ? parseSeedDayDoc(existing)
+    : { frontmatter: `date: ${date}\nkind: seed\nsource: seed packets`, sections: [], noted: [] };
+  const present = new Set<string>([
+    ...doc.sections.flatMap((s) => s.groups.flatMap((g) => g.bullets.map(seedBulletKey))),
+    ...doc.noted.map(seedBulletKey),
+  ]);
+  let added = 0;
+  let skipped = 0;
+  for (const line of addition.lines) {
+    const key = seedBulletKey(line.text);
+    if (!key || present.has(key)) {
+      skipped += 1;
+      continue;
+    }
+    present.add(key);
+    let section = doc.sections.find((s) => s.speaker.toLowerCase() === line.speaker.trim().toLowerCase());
+    if (!section) {
+      section = { speaker: line.speaker.trim(), groups: [] };
+      doc.sections.push(section);
+    }
+    // The last group when it carries the same source, else a new one: a
+    // packet's lines sit together under the packet's own src line.
+    const last = section.groups[section.groups.length - 1];
+    if (last && last.src === line.src) last.bullets.push(key);
+    else section.groups.push({ bullets: [key], src: line.src });
+    added += 1;
+  }
+  for (const text of addition.noted) {
+    const key = seedBulletKey(text);
+    if (!key || present.has(key)) {
+      skipped += 1;
+      continue;
+    }
+    present.add(key);
+    doc.noted.push(key);
+    added += 1;
+  }
+  return { content: renderSeedDayDoc(doc), added, skipped };
+}
+
+/** Moves one noted line under a person (a guide's yes to "who said
+ * this?"). Returns the content unchanged when the line is not in the
+ * day's Noted section any more. Pure. */
+export function moveNotedToSpeaker(content: string, text: string, speaker: string, src: string | null): string {
+  const doc = parseSeedDayDoc(content);
+  const key = seedBulletKey(text);
+  const idx = doc.noted.findIndex((b) => seedBulletKey(b) === key);
+  if (idx === -1) return content;
+  doc.noted.splice(idx, 1);
+  let section = doc.sections.find((s) => s.speaker.toLowerCase() === speaker.trim().toLowerCase());
+  if (!section) {
+    section = { speaker: speaker.trim(), groups: [] };
+    doc.sections.push(section);
+  }
+  const last = section.groups[section.groups.length - 1];
+  if (last && last.src === src) last.bullets.push(key);
+  else section.groups.push({ bullets: [key], src });
+  return renderSeedDayDoc(doc);
 }
 
 /** `_people.md`: one line per name, `- Name — role`. Pure. */
@@ -324,11 +493,14 @@ export function buildSeedDocumentSource(input: {
   meta: SeedDocumentMeta;
   links: ReadonlyMap<string, string | null>;
   memberNames: ReadonlyMap<string, string>;
+  /** The file's own stamped date, for a document whose front matter has
+   * none (edited in the Vault after the push). Never an empty date. */
+  fileDate?: string;
 }): SeedSource {
   const author = input.meta.author ?? SEED_NOTED_NAME;
   const humanId = input.meta.author ? input.links.get(input.meta.author) ?? null : null;
   const name = (humanId && input.memberNames.get(humanId)) || author;
-  const date = input.meta.date ?? "";
+  const date = input.meta.date ?? input.fileDate ?? "";
   const humanAuthored = !!input.meta.author;
   return {
     label: `"${input.name}" (a document seeded with the project's history${input.meta.author ? `, written by ${name}` : ", author unknown"}; dated ${date})`,
@@ -493,7 +665,15 @@ export async function applySeed(
 
   const spoken = new Set<string>();
   const days = selectSeedDays(payload.days, range);
+  // A push replaces a day by name. A day a seed packet has written to
+  // holds lines the pushed file does not have, so replacing it would
+  // erase them without a word: that day is refused and named.
+  const sown = await sownSeedDays(projectFolder._id);
   for (const day of days) {
+    if (sown.has(day.date) && seedFiles.get(`${day.date}.md`)?.content_hash !== contentHash(day.content)) {
+      report.days.skipped.push({ name: `${day.date}.md`, reason: "a seed packet has added to this day; a push would replace those lines" });
+      continue;
+    }
     const parsed = parseSeedDay(day.content);
     if (parsed.kind !== "seed") {
       report.days.skipped.push({ name: `${day.date}.md`, reason: "front matter is not `kind: seed`" });
@@ -554,6 +734,78 @@ export async function applySeed(
   return report;
 }
 
+// ─── One day, one document: what the sow stage writes through ───────────
+
+/** A seed day's file and its content, or null when the day has none. */
+export async function readSeedDayFile(projectFolder: VaultFolder, date: string): Promise<{ fileId: string; content: string } | null> {
+  const seed = await findSeedSyncFolder(projectFolder);
+  if (!seed) return null;
+  const { files } = await listFolderChildren(projectFolder.human_id, seed._id);
+  const listing = files.find((f) => f.name === `${date}.md`);
+  if (!listing) return null;
+  const full = await getFileRefById(listing._id);
+  return full ? { fileId: full._id, content: full.content ?? "" } : null;
+}
+
+/** Writes one seed day (made or replaced by name), stamped with its date
+ * and hash exactly as a push stamps it. */
+export async function writeSeedDayFile(projectFolder: VaultFolder, date: string, content: string): Promise<SeedFileOutcome> {
+  const seedFolder = await ensureSeedSyncFolder(projectFolder);
+  const existing = await listingByName(projectFolder.human_id, seedFolder._id);
+  return writeSeedFile({ humanId: projectFolder.human_id, folder: seedFolder, existing, name: `${date}.md`, content, date });
+}
+
+/** Writes one text document into `Syncs/Seed/documents/`. */
+export async function writeSeedDocumentFile(projectFolder: VaultFolder, name: string, content: string, date: string): Promise<SeedFileOutcome> {
+  const seedFolder = await ensureSeedSyncFolder(projectFolder);
+  const docs = await ensureChildFolder(projectFolder.human_id, seedFolder, SEED_DOCUMENTS_FOLDER_NAME);
+  const existing = await listingByName(projectFolder.human_id, docs._id);
+  return writeSeedFile({ humanId: projectFolder.human_id, folder: docs, existing, name, content, date });
+}
+
+/** Files a standalone file (a PDF, a photo) as a seed document on the
+ * bytes it already has in storage. The same name with the same hash is
+ * the same document. Returns the file's id. */
+export async function addSeedDocumentObject(
+  projectFolder: VaultFolder,
+  input: { name: string; s3Key: string; s3Url: string | null; contentType: string; size: number; contentHash: string; date: string },
+): Promise<string> {
+  const seedFolder = await ensureSeedSyncFolder(projectFolder);
+  const docs = await ensureChildFolder(projectFolder.human_id, seedFolder, SEED_DOCUMENTS_FOLDER_NAME);
+  const { files } = await listFolderChildren(projectFolder.human_id, docs._id);
+  const same = files.find((f) => f.name === input.name && f.content_hash === input.contentHash);
+  if (same) return same._id;
+  const created = await createFileRef({
+    human_id: projectFolder.human_id,
+    name: files.some((f) => f.name === input.name) ? `${input.date} ${input.name}` : input.name,
+    s3_key: input.s3Key,
+    s3_url: input.s3Url,
+    content_type: input.contentType,
+    content_hash: input.contentHash,
+    size: input.size,
+    folder_id: docs._id,
+    date: input.date,
+  });
+  if (!created) throw new Error(`Failed to file ${input.name}`);
+  return created._id;
+}
+
+/** Every name the seed already speaks under: the day files' headings
+ * and the people file. A speaker on this list is known to the project
+ * even with no account. */
+export async function seedSpeakerNames(projectFolder: VaultFolder): Promise<string[]> {
+  const names = new Set<string>();
+  for (const day of await listSeedDays(projectFolder)) for (const s of parseSeedDay(day.content).sections) names.add(s.speaker);
+  const seed = await findSeedSyncFolder(projectFolder);
+  if (seed) {
+    const { files } = await listFolderChildren(projectFolder.human_id, seed._id);
+    const people = files.find((f) => f.name === SEED_PEOPLE_FILE_NAME);
+    const file = people ? await getFileRefById(people._id) : undefined;
+    for (const name of parseSeedPeople(file?.content ?? "").keys()) names.add(name);
+  }
+  return [...names];
+}
+
 // ─── Reading it back ────────────────────────────────────────────────────
 
 export type SeedDayListing = { fileId: string; date: string; content: string };
@@ -562,14 +814,11 @@ export type SeedDayListing = { fileId: string; date: string; content: string };
 export async function listSeedDays(projectFolder: VaultFolder): Promise<SeedDayListing[]> {
   const seed = await findSeedSyncFolder(projectFolder);
   if (!seed) return [];
-  const { files } = await listFolderChildren(projectFolder.human_id, seed._id);
-  const out: SeedDayListing[] = [];
-  for (const f of files) {
-    if (!isSeedDayFileName(f.name) || !f.date) continue;
-    const full = await getFileRefById(f._id);
-    if (full?.content?.trim()) out.push({ fileId: f._id, date: f.date, content: full.content });
-  }
-  return out.sort((a, b) => a.date.localeCompare(b.date));
+  // One query for the folder, not one per day.
+  return (await getFileRefsByFolderIds([seed._id]))
+    .filter((f) => isSeedDayFileName(f.name) && !!f.date && !!f.content?.trim())
+    .map((f) => ({ fileId: f._id, date: f.date!, content: f.content! }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // ─── The wipe ───────────────────────────────────────────────────────────
@@ -658,8 +907,10 @@ export async function wipeSeed(projectFolder: VaultFolder): Promise<SeedWipeRepo
   const liveDates = new Set<string>();
   await collectDates(humanId, seed.parent_folder_id!, seed._id, liveDates);
 
-  await deleteVaultFolderCascade(seed._id);
-
+  // The graph first, the folder last: if a graph step fails the Seed
+  // folder is still there and the wipe can run again. The other order
+  // left seed-only days in Graph/ with nothing to remove them, since
+  // sync-graph never revisits a date with no source.
   const { remove, reextract } = wipeDecisions(seedDates, liveDates);
   const removedDays: string[] = [];
   const reextractDays: string[] = [];
@@ -695,5 +946,12 @@ export async function wipeSeed(projectFolder: VaultFolder): Promise<SeedWipeRepo
       reextractDays.push(date);
     }
   }
+
+  await deleteVaultFolderCascade(seed._id);
+  // What the packets made is gone with the folder, so nothing may still
+  // say it was sown or still ask about it: every packet file waits again
+  // and Sow rebuilds the seed from the packets.
+  await deleteSeedQuestionsForProject(projectFolder._id);
+  await clearSownForProject(projectFolder._id);
   return { removedFiles: seedCount.files, removedDays, reextractDays, hadSeed: true };
 }

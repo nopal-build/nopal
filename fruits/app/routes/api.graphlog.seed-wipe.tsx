@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
-import { getProjectRole } from "robustness-core/data/projectSharing.server";
+import { getProjectRole, isProjectFolder } from "robustness-core/data/projectSharing.server";
 import { isStaff } from "robustness-core/data/humans.server";
 import { wipeSeed } from "robustness-core/data/seed.server";
 
@@ -32,7 +32,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const folder = await getFolderById(body.projectFolderId);
-  if (!folder) return Response.json({ error: "Project not found" }, { status: 404 });
+  if (!folder || !(await isProjectFolder(folder))) return Response.json({ error: "Project not found" }, { status: 404 });
   const role = await getProjectRole(folder, user._id);
   if (!role || !isStaff(user)) {
     return Response.json({ error: "Project not found" }, { status: 404 });

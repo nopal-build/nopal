@@ -19,7 +19,7 @@
  */
 
 import { RecordId } from "surrealdb";
-import { defineTable, query, upsert } from "./generic.server";
+import { defineTable, newRecordId, query, upsert } from "./generic.server";
 import { BUDGET_LINES, budgetLineName, budgetTotals, isValidConfidence, isValidEstimate, lowHigh } from "./budgetLines";
 
 const TABLE = "budget_changes";
@@ -37,14 +37,6 @@ export type BudgetChange = {
   created_at: string;
   kind: "start" | "change";
 };
-
-/** Random id in the shape SurrealDB generates (20 lowercase alnum),
- * the same helper `graphLogMarks.server.ts` keeps for its rows. */
-function newId(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = crypto.getRandomValues(new Uint8Array(20));
-  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
-}
 
 let tableEnsured = false;
 async function ensureTable(): Promise<void> {
@@ -83,7 +75,7 @@ export async function listBudgetChanges(projectFolderId: string): Promise<Budget
 async function appendChange(input: Omit<BudgetChange, "_id" | "created_at">): Promise<BudgetChange | null> {
   await ensureTable();
   const row = { ...input, created_at: new Date().toISOString() };
-  const result = await upsert(new RecordId(TABLE, newId()), row);
+  const result = await upsert(new RecordId(TABLE, newRecordId()), row);
   const record = Array.isArray(result) ? result[0] : result;
   return record ? formatChange(record as Record<string, unknown>) : null;
 }
@@ -148,17 +140,22 @@ export async function startBudget(input: {
   if ((await listBudgetChanges(input.projectFolderId)).length > 0) {
     return { ok: false, error: "This project already has a budget.", status: 409 };
   }
-  for (const l of input.lines) {
-    await appendChange({
-      project_folder_id: input.projectFolderId,
-      line_key: l.key,
-      estimate: l.estimate,
-      confidence: l.confidence,
-      author_human_id: input.authorHumanId,
-      date: input.asOf,
-      kind: "start",
-    });
-  }
+  // All the start rows in one statement, so a failure halfway leaves no
+  // half budget that can never be started again (the 409 above).
+  await ensureTable();
+  const now = new Date().toISOString();
+  const rows = input.lines.map((l) => ({
+    id: new RecordId(TABLE, newRecordId()),
+    project_folder_id: input.projectFolderId,
+    line_key: l.key,
+    estimate: l.estimate,
+    confidence: l.confidence,
+    author_human_id: input.authorHumanId,
+    date: input.asOf,
+    created_at: now,
+    kind: "start",
+  }));
+  await query(`INSERT INTO ${TABLE} $rows`, { rows });
   const budget = await loadBudget(input.projectFolderId);
   return budget ? { ok: true, budget } : { ok: false, error: "Couldn't start the budget.", status: 400 };
 }

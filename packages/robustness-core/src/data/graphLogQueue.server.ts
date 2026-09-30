@@ -48,6 +48,9 @@ export type GraphLogJobName =
    * non-destructive counterpart of `reset-graph`. See `composeStageSkill`
    * in `projectN02.server.ts`. */
   | "rerun-outputs"
+  /** Turns the project's seed packets into seed (`sow.server.ts`). Its
+   * own job, pressed by a guide: never part of `run`. */
+  | "sow"
   | "reset"
   | "reset-project-view"
   | "reset-graph"

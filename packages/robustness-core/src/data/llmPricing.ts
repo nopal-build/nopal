@@ -27,7 +27,7 @@
  * against https://platform.claude.com/docs/en/about-claude/pricing —
  * whether or not the numbers actually changed, so staleness reflects
  * "last checked," not just "last edited." */
-export const PRICING_AS_OF = "2026-08-14";
+export const PRICING_AS_OF = "2026-09-25";
 
 const PRICING_MAX_AGE_DAYS = 30;
 
@@ -37,6 +37,9 @@ export type ModelPricing = {
   inputPerMTok: number;
   /** USD per 1,000,000 output tokens — same tier/scope as above. */
   outputPerMTok: number;
+  /** USD per 1,000,000 cached tokens READ, where Anthropic prices it
+   * below the usual tenth of input. Omitted: `CACHE_READ_MULTIPLIER`. */
+  cacheReadPerMTok?: number;
 };
 
 // Anthropic's 5-minute ("ephemeral", the only TTL this app uses -- see
@@ -44,8 +47,11 @@ export type ModelPricing = {
 // ON TOP OF a model's own `inputPerMTok`: a WRITE (the first time a given
 // prefix is cached) costs 25% MORE than an ordinary input token, and a
 // READ (a later call reusing that exact cached prefix) costs 90% LESS.
-// These ratios are fixed by Anthropic across every model that supports
-// caching, so they live here once rather than per-model.
+// The write ratio holds across every model. The read ratio was the same
+// everywhere until the 5.x models: Fable 5.1 reads at $0.25 against $10
+// input (a fortieth) and Opus 5.5 at $0.20 against $4 (a twentieth), so
+// a model may carry its own `cacheReadPerMTok` and the multiplier is the
+// default for the rest.
 const CACHE_WRITE_MULTIPLIER = 1.25;
 const CACHE_READ_MULTIPLIER = 0.1;
 
@@ -54,6 +60,12 @@ const CACHE_READ_MULTIPLIER = 0.1;
 // need an entry — an unlisted model just can't be cost-estimated yet
 // (`estimateCostUsd` returns null, never throws).
 const MODEL_PRICING: Record<string, ModelPricing> = {
+  // The page stage's default since 2026-09-14, and unpriced here until
+  // 2026-09-30: every Fable call showed as no cost on the dashboard.
+  "claude-fable-5-1": { inputPerMTok: 10, outputPerMTok: 50, cacheReadPerMTok: 0.25 },
+  "claude-opus-5-5": { inputPerMTok: 4, outputPerMTok: 20, cacheReadPerMTok: 0.2 },
+  "claude-opus-5": { inputPerMTok: 5, outputPerMTok: 25 },
+  "claude-sonnet-5-5": { inputPerMTok: 2, outputPerMTok: 10 },
   "claude-sonnet-5": { inputPerMTok: 2, outputPerMTok: 10 },
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-sonnet-4-5-20250929": { inputPerMTok: 3, outputPerMTok: 15 },
@@ -77,7 +89,7 @@ export function estimateCostUsd(
     (inputTokens / 1_000_000) * pricing.inputPerMTok +
     (outputTokens / 1_000_000) * pricing.outputPerMTok +
     (cacheWriteTokens / 1_000_000) * pricing.inputPerMTok * CACHE_WRITE_MULTIPLIER +
-    (cacheReadTokens / 1_000_000) * pricing.inputPerMTok * CACHE_READ_MULTIPLIER
+    (cacheReadTokens / 1_000_000) * (pricing.cacheReadPerMTok ?? pricing.inputPerMTok * CACHE_READ_MULTIPLIER)
   );
 }
 

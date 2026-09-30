@@ -161,6 +161,7 @@ const STAGE_LABELS: Record<GraphLogStage, string> = {
   "sync-graph": "Sync Graph",
   "graph-structure": "Graph Structure",
   "graph-project-view": "Graph Project View",
+  sow: "Sow",
 };
 
 function SectionHeader({ children }: { children: React.ReactNode }) {

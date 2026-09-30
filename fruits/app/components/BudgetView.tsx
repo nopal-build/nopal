@@ -22,14 +22,9 @@ import { semanticColors } from "stamps/tokens";
 import { budgetTotals, lowHigh } from "robustness-core/data/budgetLines";
 import type { BudgetView as Budget } from "robustness-core/data/budget.server";
 import "./budgetView.css";
+import { localDateString } from "./TodayLog";
 
 export type BudgetNames = Record<string, string>;
-
-/** Today where the person is, `YYYY-MM-DD`. */
-function localDay(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 function dollars(n: number): string {
   return `$${Math.round(n).toLocaleString("en-US")}`;
@@ -135,7 +130,7 @@ function BudgetLines({ projectFolderId, budget, names, onChanged }: { projectFol
     setError(null);
     // The change is dated the writer's own day, as a mark is, not the
     // server's clock.
-    const err = await post({ act: "change", projectFolderId, key, estimate: line.draft.estimate, confidence: line.draft.confidence, date: localDay() });
+    const err = await post({ act: "change", projectFolderId, key, estimate: line.draft.estimate, confidence: line.draft.confidence, date: localDateString() });
     setBusy(null);
     if (err) setError(err);
     else onChanged();
@@ -160,7 +155,17 @@ function BudgetLines({ projectFolderId, budget, names, onChanged }: { projectFol
           <Disclosure
             key={l.key}
             summary={
-              <div role="row" className="budget-row" onClick={(e) => e.stopPropagation()}>
+              <div
+                role="row"
+                className="budget-row"
+                // A click in a field or on Save must not twirl the row. The
+                // summary's toggle is a default action, so it is prevented
+                // for those targets (stopPropagation never reached it).
+                onClick={(e) => {
+                  const tag = (e.target as HTMLElement).tagName;
+                  if (tag === "INPUT" || tag === "BUTTON" || tag === "LABEL") e.preventDefault();
+                }}
+              >
                 <span role="cell">{l.name}</span>
                 <span role="cell">
                   <Input
@@ -191,7 +196,7 @@ function BudgetLines({ projectFolderId, budget, names, onChanged }: { projectFol
                 <span role="cell" className={cell}>{dollars(l.high)}</span>
                 <span role="cell">
                   {l.dirty && (
-                    <button type="button" className={button({ variant: "primary" })} disabled={busy === l.key} onClick={() => save(l.key)}>
+                    <button type="button" className={button({ variant: "secondary", size: "compact" })} disabled={busy === l.key} onClick={() => save(l.key)}>
                       Save
                     </button>
                   )}

@@ -18,8 +18,10 @@ import { query, upsert, remove, formatRecord, defineTable, type Data } from "./g
 import type { LlmUsage } from "./llmProvider";
 import { estimateCostUsd, isPricingStale, pricingAgeDays } from "./llmPricing";
 
-export type GraphLogStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view";
+export type GraphLogStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view" | "sow";
 export type GraphLogEventKind =
+  /** One seed packet file read by the sow stage. */
+  | "sow"
   | "photo-knowledge"
   /** A video described from a few still frames -- its own kind so the
    * cost of a clip (several images in one call) is visible on its own. */
@@ -358,6 +360,7 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
       "sync-graph": emptyStageTotals(),
       "graph-structure": emptyStageTotals(),
       "graph-project-view": emptyStageTotals(),
+      sow: emptyStageTotals(),
     },
     nodesWrittenInRange: 0,
     runCount: 0,
@@ -456,6 +459,7 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
       "graph-structure": summary.byStage["graph-structure"].estimatedCostUsd / summary.nodesWrittenInRange,
       "graph-project-view":
         summary.byStage["graph-project-view"].estimatedCostUsd / summary.nodesWrittenInRange,
+      sow: summary.byStage.sow.estimatedCostUsd / summary.nodesWrittenInRange,
     };
   }
 

@@ -56,7 +56,7 @@ const DEFAULT_MAX_TOKENS = 32768;
 const DEFAULT_EFFORT: LlmEffort | undefined = undefined;
 
 /** The GraphLog stages that call a model. */
-export type GraphLogModelStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view";
+export type GraphLogModelStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view" | "sow";
 
 /**
  * Which model, at what effort, each stage runs on when nothing overrides
@@ -100,6 +100,17 @@ const STAGE_DEFAULTS: Record<GraphLogModelStage, { model: string; effort?: LlmEf
   "sync-graph": { model: DEFAULT_MODEL, effort: "medium" },
   "graph-structure": { model: DEFAULT_MODEL, effort: "high" },
   "graph-project-view": { model: "claude-fable-5-1", effort: "high" },
+  // The seeding stage (`sow.server.ts`): one run per packet file.
+  // Chosen from the week grid (2026-09-30, Campbell's 7/20 to 7/29
+  // rebuilt from its raw cards, three runs a model, scored by
+  // `sowScore.ts`): Opus 5.5, Fable 5.1 and Sonnet 5 all recovered 31 of
+  // 32 lines verbatim with no wrong name; Sonnet kept every quote in the
+  // file, chatter included; Fable was the steadiest at $1.09 a file;
+  // Opus matched it on everything that matters at $0.39 and twice the
+  // speed. The output is mostly copied quotes, so no model writes fewer
+  // tokens here the way Fable does on the page. SOW.md is written for
+  // Opus 5.5.
+  sow: { model: "claude-opus-5-5", effort: "medium" },
 };
 
 /** The model and effort `stage` runs on, after env overrides. Exported

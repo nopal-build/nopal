@@ -25,6 +25,7 @@ import { runSyncGraph } from "robustness-core/data/syncGraph.server";
 import { runGraphStructure } from "robustness-core/data/graphStructure.server";
 import { coverageFromJobResult, readmeChangedFromJobResult, runGraphProjectView, syncReadmeIncompleteBanner } from "robustness-core/data/graphProjectView.server";
 import { runGraphLogPipeline } from "robustness-core/data/graphLogAgent.server";
+import { runSow } from "robustness-core/data/sow.server";
 import {
   resetProjectView,
   resetGraph,
@@ -103,6 +104,11 @@ async function runGraphLogJob(
         log: onProgress,
         perf,
       });
+      if (!result.ok) throw new Error(result.error);
+      return result;
+    }
+    case "sow": {
+      const result = await perf.time("sow", "fn", "runSow", null, () => runSow(projectFolder, job.data.actingHumanId, { log: onProgress }));
       if (!result.ok) throw new Error(result.error);
       return result;
     }

@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
-import { getProjectRole } from "robustness-core/data/projectSharing.server";
+import { getProjectRole, isProjectFolder } from "robustness-core/data/projectSharing.server";
 import { applySeed, type SeedPayload } from "robustness-core/data/seed.server";
 
 /**
@@ -56,7 +56,10 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const folder = await getFolderById(body.projectFolderId);
-  if (!folder) return Response.json({ error: "Project not found" }, { status: 404 });
+  // A project folder only: the creator of any folder reads as its Guide
+  // (`withCreator`), so without this a seed could land in a subfolder or
+  // a personal space nothing reads, or throw on a website.
+  if (!folder || !(await isProjectFolder(folder))) return Response.json({ error: "Project not found" }, { status: 404 });
   // A project's history is its Guides' to bring in (admins through their
   // group, like any view); a Crafter, who may run a stage, may not. The
   // same 404 as a project they can't see.
