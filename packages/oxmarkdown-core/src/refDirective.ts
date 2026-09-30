@@ -43,7 +43,17 @@ export interface RefAttrs {
    * every other usage should omit this attribute entirely, which is the
    * same as `false`. */
   verbose?: boolean;
+  /** Where the cited words came from when it was not somebody's daily
+   * log. `seed`: history taken in from records before the project logged
+   * in O.No, spoken by the named person. `seed-noted`: a fact noted at
+   * seeding that nobody said in those words; the name is then the
+   * literal "Seed" and never a person. Omitted for a live entry, which
+   * is every citation written before 2026-09-29. */
+  origin?: RefOrigin;
 }
+
+export type RefOrigin = "seed" | "seed-noted";
+export const REF_ORIGINS: readonly RefOrigin[] = ["seed", "seed-noted"];
 
 /** Attribute keys as written into the directive's `{...}` — kept as named
  * constants so the writer (GraphLog) and reader (`OxRenderer.tsx`) can't
@@ -54,6 +64,7 @@ export const REF_ATTR_KEYS = {
   datetime: "datetime",
   location: "location",
   verbose: "verbose",
+  origin: "origin",
 } as const;
 
 /** `micromark-extension-directive`'s attribute-value parser has NO escape
@@ -89,6 +100,9 @@ export function buildRefDirectiveMarkdown(attrs: RefAttrs): string {
   if (attrs.verbose) {
     parts.push(`${REF_ATTR_KEYS.verbose}="true"`);
   }
+  if (attrs.origin) {
+    parts.push(`${REF_ATTR_KEYS.origin}="${attrs.origin}"`);
+  }
   return `:ref{${parts.join(" ")}}`;
 }
 
@@ -111,7 +125,14 @@ export function parseRefAttrs(node: DirectiveNode): RefAttrs | null {
     datetime,
     location,
     verbose: attrs[REF_ATTR_KEYS.verbose] === "true",
+    origin: parseRefOrigin(attrs[REF_ATTR_KEYS.origin]),
   };
+}
+
+/** The `origin` attribute, or undefined for a value nobody knows (a live
+ * entry has none; a hand-edited one degrades to "live", never crashes). */
+export function parseRefOrigin(value: string | null | undefined): RefOrigin | undefined {
+  return value && (REF_ORIGINS as readonly string[]).includes(value) ? (value as RefOrigin) : undefined;
 }
 
 export function isRefDirective(node: { type: string; name?: string }): node is TextDirective {

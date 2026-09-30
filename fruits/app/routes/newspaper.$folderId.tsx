@@ -27,11 +27,14 @@ import { listSuggestions } from "robustness-core/data/suggestions.server";
 import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { resolveProjectManifest } from "robustness-core/data/project.server";
 import { getProjectStatus } from "robustness-core/data/projectStatus.server";
-import { isIncompleteBannerText, type ProjectStatus } from "robustness-core/data/project.types";
+import { isIncompleteBannerText, splitFrontmatter, type ProjectStatus } from "robustness-core/data/project.types";
 import { getProjectSharing, resolveRole } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import { listCardsForProject } from "robustness-core/data/dailyLog.server";
+import { listSeedDays } from "robustness-core/data/seed.server";
+import { loadBudget } from "robustness-core/data/budget.server";
+import { BudgetView, type BudgetNames } from "../components/BudgetView";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { firstName } from "robustness-core/data/humanNames";
 import {
@@ -96,7 +99,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const tabFolders = TAB_FOLDERS[tab] ?? null;
   const files: ProjectFileRow[] | null =
     tabFolders && folder.folder_type === "project-n02" ? rowsForReader(await loadProjectFiles(folder), features) : null;
-  const logbook = tab === "logbook" ? await projectLogbook(folder._id) : null;
+  const logbook = tab === "logbook" ? await projectLogbook(folder) : null;
+  // The Budget: a view under Costs for the `budget` feature (Guides).
+  // A typed URL without the feature is refused like a tab; the link only
+  // shows once a budget has been started (features.ts, `budget`).
+  const budgetView = tab === "costs" && new URL(request.url).searchParams.get("view") === "budget";
+  if (budgetView && !features.includes("budget")) throw new Response("Not found", { status: 404 });
+  const budget = tab === "costs" && features.includes("budget") ? await loadBudget(folder._id) : null;
+  const budgetNames: BudgetNames = {};
+  if (budget) {
+    const ids = [...new Set(budget.lines.flatMap((l) => l.history.map((h) => h.author_human_id)))];
+    for (const h of await getHumansById(ids)) budgetNames[h._id] = firstName(h);
+  }
   // Only a role on the list marks: /api/graphlog/marks refuses a share
   // from before roles, which reads as an Observer here (same as Steep).
   const canMark = !!role?.features.includes("marks");
@@ -174,6 +188,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // the component, which would pull a `.server` module into the bundle).
     fileKinds: FILING_KINDS.filter((k) => k !== "video"),
     logbook,
+    budgetView,
+    budget,
+    budgetNames,
+    canBudget: features.includes("budget"),
   };
 }
 
@@ -284,14 +302,25 @@ async function projectPeople(sharing: { human: string; role: string }[]) {
 
 /** Every Card written to the project, one per person per day, newest
  * day first. */
-async function projectLogbook(projectFolderId: string) {
-  const cards = (await listCardsForProject(projectFolderId)).filter((c) => c.content.trim());
+/** The Cards, and the seed days beside them: a seed day is nobody's Card
+ * (Austin, 2026-09-29: "never as someone's daily log"), so it is pinned
+ * under "Seed" with its own badge, where the groups that see logs see it. */
+async function projectLogbook(folder: Parameters<typeof listSeedDays>[0]) {
+  const cards = (await listCardsForProject(folder._id)).filter((c) => c.content.trim());
   const names = new Map(
     (await getHumansById([...new Set(cards.map((c) => c.humanId))])).map((h) => [h._id, firstName(h)]),
   );
-  return cards
-    .map((c) => ({ fileId: c.fileId, who: names.get(c.humanId) ?? "Someone", date: c.date, content: c.content }))
-    .sort((a, b) => b.date.localeCompare(a.date) || a.who.localeCompare(b.who));
+  const seed = (await listSeedDays(folder)).map((s) => ({ fileId: s.fileId, who: "Seed", date: s.date, content: s.content, seeded: true }));
+  return [
+    ...cards.map((c) => ({ fileId: c.fileId, who: names.get(c.humanId) ?? "Someone", date: c.date, content: c.content, seeded: false })),
+    ...seed,
+  ].sort((a, b) => b.date.localeCompare(a.date) || Number(a.seeded) - Number(b.seeded) || a.who.localeCompare(b.who));
+}
+
+/** A seed day without its front matter: the sections as the seeder wrote
+ * them, headings and all, so a reader sees whose words each group is. */
+function seedDayBody(markdown: string): string {
+  return splitFrontmatter(markdown).body.trim();
 }
 
 function longDate(date: string): string {
@@ -356,7 +385,7 @@ function ProjectStatusControl({
 /** The Logbook: what each person wrote about this project, one card per
  * person per day, pinned into a scrapbook. Read-only; each person edits
  * their own on the Daily Log. */
-function Logbook({ cards }: { cards: { fileId: string; who: string; date: string; content: string }[] }) {
+function Logbook({ cards }: { cards: { fileId: string; who: string; date: string; content: string; seeded: boolean }[] }) {
   if (cards.length === 0) {
     return (
       <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
@@ -367,8 +396,8 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
   return (
     <PinnedCardWall>
       {cards.map((c) => (
-        <PinnedCard key={c.fileId} title={c.who} label={longDate(c.date)} data-logbook-card>
-          <OxRenderer markdown={c.content} />
+        <PinnedCard key={c.fileId} title={c.who} label={c.seeded ? `${longDate(c.date)} · seeded history` : longDate(c.date)} data-logbook-card data-seeded={c.seeded || undefined}>
+          <OxRenderer markdown={c.seeded ? seedDayBody(c.content) : c.content} />
         </PinnedCard>
       ))}
     </PinnedCardWall>
@@ -376,7 +405,7 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, budgetView, budget, budgetNames, canBudget } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -568,7 +597,21 @@ export default function NewspaperRoute() {
           {tab === "efforts" && (
             <ProjectView body={body} galleryFolders={galleryFolders} annotations={annotations} />
           )}
-          {files && tabFolders && (
+          {tab === "costs" && canBudget && (
+            <p className={textSize.sm} style={{ marginBottom: 12 }}>
+              {budgetView ? (
+                <Link to={`/newspaper/${folder._id}?tab=costs`}>Receipts</Link>
+              ) : budget ? (
+                <Link to={`/newspaper/${folder._id}?tab=costs&view=budget`}>Budget</Link>
+              ) : (
+                <Link to={`/newspaper/${folder._id}?tab=costs&view=budget`}>Start a budget</Link>
+              )}
+            </p>
+          )}
+          {budgetView && (
+            <BudgetView projectFolderId={folder._id} budget={budget} names={budgetNames} onChanged={() => revalidator.revalidate()} />
+          )}
+          {files && tabFolders && !budgetView && (
             <ProjectFilesView
               projectFolderId={folder._id}
               rows={files}

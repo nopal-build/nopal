@@ -51,7 +51,7 @@ function contentHash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-async function ensureProjectSyncsFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
+export async function ensureProjectSyncsFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
   // A website has no syncs (`isWebsiteFolder`): whatever got here is a bug.
   if (isWebsiteFolder(projectFolder)) throw new Error("A website has no syncs");
   const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);

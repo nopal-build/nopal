@@ -1478,18 +1478,24 @@ function RefDirectiveStatic({
   if (!parsed) {
     return <span className="ox-directive-unknown">:ref</span>;
   }
-  const { name, humanId, datetime, location, verbose } = parsed;
+  const { name, humanId, datetime, location, verbose, origin } = parsed;
   const shown = refDisplayName(name, ambiguousFirstNames);
   const nameNode = humanId ? (
     <a href={humanProfileHref(humanId)}>{shown}</a>
   ) : (
     <span>{shown}</span>
   );
+  // Seeded history says so wherever it is cited (Austin, 2026-09-29:
+  // "marked as seed everywhere it shows"): a word after the date, and a
+  // row in the popover. The attribute is written by sync-graph from the
+  // Seed folder (`seed.server.ts`); a live entry has none.
+  const originWord = origin === "seed" ? "seeded" : origin === "seed-noted" ? "noted at seeding" : null;
 
   if (verbose) {
     return (
       <span className="ox-ref ox-ref--verbose">
         {nameNode} · {formatRefDatetime(datetime)} ·{" "}
+        {originWord ? <>{originWord} · </> : null}
         <a href={location}>source</a>
       </span>
     );
@@ -1505,6 +1511,7 @@ function RefDirectiveStatic({
       humanId={humanId}
       datetime={formatRefDatetime(datetime)}
       location={location}
+      originWord={originWord}
     />
   );
 }
@@ -1515,6 +1522,7 @@ function RefDirectiveMarker({
   humanId,
   datetime,
   location,
+  originWord,
 }: {
   name: string;
   /** What the accessible label says. The visible glyph is always `*`; this
@@ -1524,6 +1532,8 @@ function RefDirectiveMarker({
   humanId?: string;
   datetime: string;
   location: string;
+  /** "seeded" or "noted at seeding" for a citation into seeded history. */
+  originWord?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
@@ -1554,6 +1564,12 @@ function RefDirectiveMarker({
           <span>When</span>
           <span>{datetime}</span>
         </div>
+        {originWord && (
+          <div className="ox-ref-popover-row">
+            <span>From</span>
+            <span>{originWord === "seeded" ? "seeded history, before the project logged here" : "noted at seeding, nobody's words"}</span>
+          </div>
+        )}
         <div className="ox-ref-popover-row">
           <span>Source</span>
           <a href={location}>{location}</a>

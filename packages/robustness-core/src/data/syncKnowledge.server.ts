@@ -60,6 +60,7 @@ import { downloadFileBytes } from "./file.server";
 import { imageRenditionsExist, renditionKey, writeImageRenditions, writeVideoPoster } from "./mediaRenditions.server";
 import { objectExists } from "./file.server";
 import { parseSyncedCardFileName } from "./dailyLogSync.server";
+import { isSeedDayFileName, isSeedInstructionFileName, SEED_SYNC_FOLDER_NAME } from "./seed.server";
 import { formatSeconds, hasFfmpeg, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
 import {
   FILING_FRAMING,
@@ -264,14 +265,20 @@ function buildKnowledgeContent(input: {
 async function collectSyncCandidates(
   humanId: string,
   folderId: string,
+  /** True inside `Syncs/Seed/` itself: its day files are people's words
+   * (read by sync-graph, like a Card) and its underscored files are the
+   * intake's instructions; neither is a file to describe. Its
+   * `documents/` and any photo in it are (`seed.server.ts`). */
+  inSeedFolder = false,
 ): Promise<SyncKnowledgeCandidate[]> {
   const { folders, files } = await listFolderChildren(humanId, folderId);
   const out: SyncKnowledgeCandidate[] = files
     .filter((f) => !parseSyncedCardFileName(f.name))
+    .filter((f) => !inSeedFolder || (!isSeedDayFileName(f.name) && !isSeedInstructionFileName(f.name)))
     .map((f) => ({ fileId: f._id, name: f.name }));
   for (const sub of folders) {
     if (sub.name === KNOWLEDGE_FOLDER_NAME) continue;
-    out.push(...(await collectSyncCandidates(humanId, sub._id)));
+    out.push(...(await collectSyncCandidates(humanId, sub._id, sub.name === SEED_SYNC_FOLDER_NAME && !inSeedFolder)));
   }
   return out;
 }

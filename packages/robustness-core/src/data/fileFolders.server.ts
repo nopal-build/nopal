@@ -38,6 +38,7 @@ import { splitFrontmatter, splitReadmeSections } from "./project.types";
 import { findProjectGraphFolder } from "./projectN02.server";
 import { filingFileName, filingValuesHash, isCostKind, readFilingRecord, type Filing, type FilingKind, type FilingSource } from "./syncFiling.server";
 import { KNOWLEDGE_FOLDER_NAME, knowledgeFileName } from "./syncKnowledge.server";
+import { findSeedDocumentsFolder, linkSeedNames, parseSeedDocument, seedMembers } from "./seed.server";
 import { getFileRefListingsByIds, getFileRefsByFolderIds, listFolderChildren, type VaultFolder } from "./vault.server";
 
 export type CardAttachment = {
@@ -179,8 +180,23 @@ export type ProjectFileRow = {
   urls: { thumb: string; display: string; original: string; poster: string | null };
 };
 
+/** A document seeded with the project's history (`seed.server.ts`): a
+ * second home for a file beside the Card (ADR-019). It is its own copy,
+ * so one id serves as original, copy and citation. */
+export type SeedDocumentInput = {
+  fileId: string;
+  name: string;
+  date: string;
+  authorName: string;
+  /** The account the author's name links to, or null. */
+  authorHumanId: string | null;
+  contentType: string;
+  size: number | null;
+};
+
 export type FileFoldersInput = {
   attachments: CardAttachment[];
+  seedDocuments?: SeedDocumentInput[];
   originals: Map<string, { content_type: string; size?: number | null }>;
   dailyFiles: { _id: string; name: string; content_type: string; size?: number | null }[];
   knowledgeFiles: { name: string; content: string | null }[];
@@ -292,22 +308,30 @@ export function projectFileRows(input: FileFoldersInput): ProjectFileRow[] {
     marksByFile.set(id, [...(marksByFile.get(id) ?? []), m]);
   }
 
-  return input.attachments.map((a) => {
-    const copyName = syncedAttachmentFileName(a.date, a.authorHumanId, a.name);
-    const copy = dailyByName.get(copyName) ?? null;
-    const cardCopy = dailyByName.get(syncedCardFileName(a.date, a.authorHumanId)) ?? null;
-    const original = input.originals.get(a.fileId);
-    const contentType = copy?.content_type ?? original?.content_type ?? "application/octet-stream";
-    const size = copy?.size ?? original?.size ?? null;
-    const serveId = copy?._id ?? a.fileId;
-
+  const rowFrom = (input2: {
+    fileId: string;
+    serveId: string;
+    name: string;
+    contentType: string;
+    size: number | null;
+    date: string;
+    authorHumanId: string;
+    authorName: string;
+    caption: string;
+    context: string;
+    cardFileId: string;
+    cardCopyFileId: string | null;
+    copyFileId: string | null;
+    copyName: string;
+  }): ProjectFileRow => {
+    const { copyName, serveId } = input2;
     const knowledge = knowledgeByName.get(knowledgeFileName(copyName)) ?? null;
     const description = knowledge ? splitFrontmatter(knowledge).body.trim() || null : null;
     const filingRecord = readFilingRecord(knowledgeByName.get(filingFileName(copyName)));
     const filing = filingRecord?.filing ?? null;
     const filingSource = filingRecord?.describedFrom ?? null;
 
-    const acts: FileActRecord[] = (marksByFile.get(a.fileId) ?? [])
+    const acts: FileActRecord[] = (marksByFile.get(input2.fileId) ?? [])
       .map((m) => ({
         id: m._id,
         authorHumanId: m.author_human_id,
@@ -346,19 +370,19 @@ export function projectFileRows(input: FileFoldersInput): ProjectFileRow[] {
     const effortNames = [...new Set(threads.flatMap((t) => effortsByThread.get(t.toLowerCase()) ?? []))];
 
     const row: ProjectFileRow = {
-      fileId: a.fileId,
+      fileId: input2.fileId,
       serveId,
-      name: a.name,
-      contentType,
-      size,
-      date: a.date,
-      authorHumanId: a.authorHumanId,
-      authorName: input.names.get(a.authorHumanId) ?? a.authorHumanId,
-      caption: a.caption,
-      context: a.context,
-      cardFileId: a.cardFileId,
-      cardCopyFileId: cardCopy?._id ?? null,
-      copyFileId: copy?._id ?? null,
+      name: input2.name,
+      contentType: input2.contentType,
+      size: input2.size,
+      date: input2.date,
+      authorHumanId: input2.authorHumanId,
+      authorName: input2.authorName,
+      caption: input2.caption,
+      context: input2.context,
+      cardFileId: input2.cardFileId,
+      cardCopyFileId: input2.cardCopyFileId,
+      copyFileId: input2.copyFileId,
       description,
       filing,
       filingSource,
@@ -375,12 +399,57 @@ export function projectFileRows(input: FileFoldersInput): ProjectFileRow[] {
         thumb: `/api/vault/rendition/${serveId}?size=thumb`,
         display: `/api/vault/rendition/${serveId}?size=display`,
         original: `/api/vault/view/${serveId}`,
-        poster: isVideo(contentType) ? `/api/vault/rendition/${serveId}?size=poster` : null,
+        poster: isVideo(input2.contentType) ? `/api/vault/rendition/${serveId}?size=poster` : null,
       },
     };
     row.folders = foldersOf(row);
     return row;
+  };
+
+  // A seed document is its own copy: one id, cited by the graph and
+  // served to a reader, with the seed's author as its author.
+  const seedRows = (input.seedDocuments ?? []).map((d) =>
+    rowFrom({
+      fileId: d.fileId,
+      serveId: d.fileId,
+      name: d.name,
+      contentType: d.contentType,
+      size: d.size,
+      date: d.date,
+      authorHumanId: d.authorHumanId ?? "",
+      authorName: d.authorName,
+      caption: "",
+      context: "Seeded with the project's history",
+      cardFileId: "",
+      cardCopyFileId: d.fileId,
+      copyFileId: d.fileId,
+      copyName: d.name,
+    }),
+  );
+
+  const cardRows = input.attachments.map((a) => {
+    const copyName = syncedAttachmentFileName(a.date, a.authorHumanId, a.name);
+    const copy = dailyByName.get(copyName) ?? null;
+    const cardCopy = dailyByName.get(syncedCardFileName(a.date, a.authorHumanId)) ?? null;
+    const original = input.originals.get(a.fileId);
+    return rowFrom({
+      fileId: a.fileId,
+      serveId: copy?._id ?? a.fileId,
+      name: a.name,
+      contentType: copy?.content_type ?? original?.content_type ?? "application/octet-stream",
+      size: copy?.size ?? original?.size ?? null,
+      date: a.date,
+      authorHumanId: a.authorHumanId,
+      authorName: input.names.get(a.authorHumanId) ?? a.authorHumanId,
+      caption: a.caption,
+      context: a.context,
+      cardFileId: a.cardFileId,
+      cardCopyFileId: cardCopy?._id ?? null,
+      copyFileId: copy?._id ?? null,
+      copyName,
+    });
   });
+  return [...cardRows, ...seedRows];
 }
 
 // ── I/O ──────────────────────────────────────────────────────────────────────
@@ -413,8 +482,36 @@ export async function loadProjectFiles(folder: VaultFolder): Promise<ProjectFile
   const graphFolder = await findProjectGraphFolder(folder);
   const graphFiles = graphFolder ? (await getFileRefsByFolderIds([graphFolder._id])).map((f) => ({ name: f.name, content: f.content })) : [];
 
+  // Documents seeded with the project's history (`seed.server.ts`), each
+  // its own copy, with the seed's author linked to an account when the
+  // name is someone on the project. Their sidecars sit beside them.
+  const seedDocuments: SeedDocumentInput[] = [];
+  const seedDocsFolder = await findSeedDocumentsFolder(folder);
+  if (seedDocsFolder) {
+    const children = await listFolderChildren(folder.human_id, seedDocsFolder._id);
+    const knowledge = children.folders.find((f) => f.name === KNOWLEDGE_FOLDER_NAME);
+    if (knowledge) knowledgeFiles = [...knowledgeFiles, ...(await getFileRefsByFolderIds([knowledge._id])).map((f) => ({ name: f.name, content: f.content }))];
+    const docs = (await getFileRefsByFolderIds([seedDocsFolder._id])).filter((f) => !!f.date);
+    const metas = docs.map((f) => ({ file: f, meta: parseSeedDocument(f.content ?? "") }));
+    const members = metas.length > 0 ? await seedMembers(folder) : [];
+    const { links } = linkSeedNames(metas.map((m) => m.meta.author ?? "").filter(Boolean), members);
+    const memberName = new Map(members.map((m) => [m.humanId, m.name]));
+    for (const { file, meta } of metas) {
+      const humanId = meta.author ? links.get(meta.author) ?? null : null;
+      seedDocuments.push({
+        fileId: file._id,
+        name: file.name,
+        date: file.date!,
+        authorName: (humanId && memberName.get(humanId)) || meta.author || "Seed",
+        authorHumanId: humanId,
+        contentType: file.content_type,
+        size: file.size,
+      });
+    }
+  }
+
   const marks = await listFileMarks(folder._id);
   const names = await authorNames([...attachments.map((a) => a.authorHumanId), ...marks.map((m) => m.author_human_id)]);
 
-  return projectFileRows({ attachments, originals, dailyFiles, knowledgeFiles, graphFiles, marks, names });
+  return projectFileRows({ attachments, seedDocuments, originals, dailyFiles, knowledgeFiles, graphFiles, marks, names });
 }

@@ -66,7 +66,9 @@ append-only, same as the graph it protects.
 | [0024](0024-a-features-list-decides-what-a-group-reaches.md) | A features list decides what each group reaches, and the server reads it. |
 | [0025](0025-observers-suggest-guides-decide-websites-are-not-projects.md) | Observers suggest and Guides decide; a website is not a GraphLog project. |
 | [0026](0026-the-maker-is-the-one-place-for-projects-and-people.md) | The Maker is the one place a project starts and its people are run. |
+| [0027](0027-seeded-history-is-its-own-kind-of-entry.md) | Seeded history is its own kind of entry, built by the same stages. |
+| [0028](0028-a-budget-line-is-a-history-of-estimates.md) | A budget line is a history of estimates, and it is the guides'. |
 
 0001 to 0017, 0019 and 0020 are GraphLog decisions (`graphlog` skill);
-0018 and 0021 to 0026 cover the whole repo. This directory isn't GraphLog-specific and future ADRs from
+0018 and 0021 to 0028 cover the whole repo. This directory isn't GraphLog-specific and future ADRs from
 other parts of Nopal belong here too, continuing the same numbering.
