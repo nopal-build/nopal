@@ -16,7 +16,11 @@ import {
   isSeedDayFileName,
   isSeedInstructionFileName,
   linkSeedNames,
+  mergeSeedDay,
+  moveNotedToSpeaker,
   parseSeedDay,
+  parseSeedDayDoc,
+  renderSeedDayDoc,
   parseSeedDocument,
   parseSeedPeople,
   SEED_NOTED_NAME,
@@ -176,6 +180,12 @@ describe("what sync-graph reads from a seed day", () => {
     expect(sources[2].label).toMatch(/nobody said/);
   });
 
+  it("a heading that only says Noted, in any case, is still the noted section and never a speaker", () => {
+    const loose = parseSeedDay(DAY.replace("## Noted (not anyone's words)", "## noted"));
+    expect(loose.sections.map((s) => s.speaker)).not.toContain("noted");
+    expect(loose.noted?.bullets.length).toBe(parseSeedDay(DAY).noted?.bullets.length);
+  });
+
   it("the citation round-trips through the node index with its origin", () => {
     const refLine = buildRefDirectiveMarkdown(sources[2].ref);
     const nodes = parseGraphLogNodes("2026-07-20", `### Node 1\nCeiling demo priced at $11,700.\n\n*Noted when this history was seeded. Not a quotation, and not anyone's words.*\n${refLine}\n`);
@@ -232,6 +242,12 @@ author: Austin
     expect(source.ref).toMatchObject({ name: SEED_NOTED_NAME, origin: "seed-noted" });
     expect(source.humanAuthored).toBe(false);
   });
+
+  it("with no date in its front matter takes the file's own day, never an empty one", () => {
+    const meta = parseSeedDocument(DOC.replace("date: 2026-04-22\n", ""));
+    const source = buildSeedDocumentSource({ fileId: "doc1", name: "x.md", meta, links: new Map(), memberNames: new Map(), fileDate: "2026-04-23" });
+    expect(source.ref.datetime).toBe("2026-04-23T12:00:00Z");
+  });
 });
 
 describe("a push takes a range, and a wipe removes only what the seed alone fed", () => {
@@ -274,3 +290,56 @@ function attrsOf(ref: Parameters<typeof buildRefDirectiveMarkdown>[0]): Record<s
   for (const m of md.matchAll(/([\w-]+)="([^"]*)"/g)) out[m[1]] = m[2];
   return out;
 }
+
+describe("adding to a seed day without overwriting it (seed packets, 2026-09-30)", () => {
+  it("a day read as groups and written back reads the same to the graph", () => {
+    const doc = parseSeedDayDoc(DAY);
+    expect(doc.sections.map((s) => [s.speaker, s.groups.map((g) => [g.bullets.length, g.src])])).toEqual([
+      ["Austin", [[2, "daily note"], [2, '"This Healthy House" client thread'], [1, "demo-contractor thread"]]],
+      ["Beaudy", [[1, "demo-contractor thread"]]],
+    ]);
+    expect(doc.noted).toHaveLength(5);
+    const again = parseSeedDay(renderSeedDayDoc(doc));
+    const before = parseSeedDay(DAY);
+    expect(again.kind).toBe("seed");
+    expect(again.sections.map((s) => [s.speaker, s.sources, s.text.replace(/\s+/g, " ")])).toEqual(before.sections.map((s) => [s.speaker, s.sources, s.text.replace(/\s+/g, " ")]));
+    expect(again.noted?.bullets).toEqual(before.noted?.bullets);
+  });
+
+  it("a packet's lines go under their speaker with the packet's own source, and what was there stays", () => {
+    const merged = mergeSeedDay(DAY, "2026-07-20", {
+      lines: [
+        { speaker: "Erica", text: "Do the beams upstairs have to come down too?", src: "Erica's packet: thread.txt" },
+        { speaker: "austin", text: "I need to sign contracts for our electrical and structural engineers today.", src: "Erica's packet: thread.txt" },
+        { speaker: "Austin", text: "The engineers want to see both ceilings.", src: "Erica's packet: thread.txt" },
+      ],
+      noted: ["Michelle Meisenbach (M5) signed her contract.", "The deposit was 50%."],
+    });
+    expect(merged).toMatchObject({ added: 3, skipped: 2 });
+    const day = parseSeedDay(merged.content);
+    expect(day.sections.map((s) => s.speaker)).toEqual(["Austin", "Beaudy", "Erica"]);
+    expect(day.sections[0].sources).toEqual(["daily note", '"This Healthy House" client thread', "demo-contractor thread", "Erica's packet: thread.txt"]);
+    expect(day.sections[0].text).toMatch(/sign contracts for our electrical/);
+    expect(day.sections[0].text.match(/sign contracts/g)).toHaveLength(1);
+    expect(day.noted?.bullets).toHaveLength(6);
+    // Merging the same packet again changes nothing.
+    expect(mergeSeedDay(merged.content, "2026-07-20", { lines: [{ speaker: "Erica", text: "Do the beams upstairs have to come down too?", src: "x" }], noted: [] })).toMatchObject({ added: 0, skipped: 1, content: merged.content });
+  });
+
+  it("a day that does not exist yet is made in the seed shape", () => {
+    const made = mergeSeedDay(null, "2026-08-02", { lines: [{ speaker: "Beaudy", text: "Bid attached.", src: "Beaudy's packet: bids.eml" }], noted: ["The bid was $18,400."] });
+    const day = parseSeedDay(made.content);
+    expect(day.kind).toBe("seed");
+    expect(day.sections).toEqual([{ speaker: "Beaudy", text: "- Bid attached.", sources: ["Beaudy's packet: bids.eml"] }]);
+    expect(day.noted?.bullets).toEqual(["The bid was $18,400."]);
+  });
+
+  it("a guide's yes moves one noted line under the person, and only that line", () => {
+    const withNoted = mergeSeedDay(DAY, "2026-07-20", { lines: [], noted: ["keep the perimeter till the engineer rules"] }).content;
+    const moved = moveNotedToSpeaker(withNoted, "keep the perimeter till the engineer rules", "Beaudy", "demo-contractor thread");
+    const day = parseSeedDay(moved);
+    expect(day.noted?.bullets).toHaveLength(5);
+    expect(day.sections[1].text).toMatch(/keep the perimeter till the engineer rules/);
+    expect(moveNotedToSpeaker(moved, "keep the perimeter till the engineer rules", "Beaudy", null)).toBe(moved);
+  });
+});

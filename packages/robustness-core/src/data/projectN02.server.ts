@@ -122,6 +122,7 @@ export const SKILL_FILE_NAMES: Record<GraphLogDefaultStage, string> = {
   graphStructure: "GRAPH_STRUCTURE.md",
   projectView: "EFFORTS.md",
   voice: "VOICE.md",
+  sow: "SOW.md",
 };
 
 /** Former names of seeded files, deleted by `reseedProjectN02Skills` when
@@ -386,6 +387,9 @@ export const RESERVED_SKILL_FILE_NAMES = new Set([
   "efforts.md",
   "project_view.md",
   "voice.md",
+  // Read by the sow stage alone (`sow.server.ts`): how a seed packet's
+  // file becomes seed. Reserved for the same reason as filing.md.
+  "sow.md",
   "skill.md",
 ]);
 

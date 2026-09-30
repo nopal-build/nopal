@@ -407,6 +407,33 @@ for (const [who, label] of [[crafter, "a crafter"], [client, "a client"]] as con
 await hit(guide.cookie, "budget: a line nobody started", "POST", "/api/budget", 404, { act: "change", projectFolderId: ownId, key: "no-such-line", estimate: 1 });
 await hit(guide.cookie, "budget: a table that doesn't fit is refused", "POST", "/api/budget", 400, { act: "start", projectFolderId: ownId, asOf: "2026-04-22", table: "| line item | cost estimate | confidence |\n|---|---|---|\n| solar | $1 | 0.5 |\n" });
 
+// ── Seed packets (2026-09-30): a packet is its owner's and the Guides' ───
+// The guide opens a round; the client adds a file; nobody but the client
+// and the guides can open it; only a guide sows or ends the round.
+await hit(crafter.cookie, "packets: a crafter can't open a round", "POST", "/api/seed-round", 404, { projectFolderId: ownId, act: "open" });
+await hit(guide.cookie, "packets: the guide opens a round", "POST", "/api/seed-round", 200, { projectFolderId: ownId, act: "open" });
+const packetForm = new FormData();
+packetForm.append("projectFolderId", ownId);
+packetForm.append("file", new File(["8/2 Walker: the walk added a line.\n"], "walk-thread.txt", { type: "text/plain" }));
+const added = await hit(client.cookie, "packets: the client adds a file to their packet", "POST", "/api/seed-packet", 201, packetForm);
+const packetId = (() => { try { return (JSON.parse(added) as { id?: string }).id ?? null; } catch { return null; } })();
+check("packets: the file was added", !!packetId);
+if (packetId) {
+  await hit(client.cookie, "packets: the client opens their own file", "GET", `/api/seed-packet/${packetId}`, 200);
+  await hit(guide.cookie, "packets: a guide opens it", "GET", `/api/seed-packet/${packetId}`, 200);
+  await hit(crafter.cookie, "packets: a crafter can't", "GET", `/api/seed-packet/${packetId}`, 404);
+  await hit(crafter.cookie, "packets: a crafter can't take it out", "POST", "/api/seed-packet", 404, { act: "remove", id: packetId });
+  await hit(crafter.cookie, "packets: a crafter can't sow", "POST", "/api/graphlog/sow", 404, { projectFolderId: ownId });
+  await hit(client.cookie, "packets: a client can't sow", "POST", "/api/graphlog/sow", 404, { projectFolderId: ownId });
+  await hit(client.cookie, "packets: a client can't end the round", "POST", "/api/seed-round", 404, { projectFolderId: ownId, act: "end" });
+  await hit(client.cookie, "packets: the client takes it back out", "POST", "/api/seed-packet", 200, { act: "remove", id: packetId });
+}
+await hit(guide.cookie, "packets: the guide ends the round (nothing left to sow)", "POST", "/api/seed-round", 200, { projectFolderId: ownId, act: "end" });
+const lateForm = new FormData();
+lateForm.append("projectFolderId", ownId);
+lateForm.append("file", new File(["late"], "late.txt", { type: "text/plain" }));
+await hit(client.cookie, "packets: nothing is added once the round is ended", "POST", "/api/seed-packet", 409, lateForm);
+
 // ── Put everything back ──────────────────────────────────────────────────
 const guideBefore = before.find((e) => e.human === guide.id)?.role ?? "";
 await setGroup(admin, guide.id, guideBefore, "put the guide back");

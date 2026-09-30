@@ -8,7 +8,8 @@ import { decideSuggestion } from "robustness-core/data/suggestions.server";
  * POST /api/graphlog/suggestions
  *
  * A Guide takes or passes one suggestion (`suggestions.server.ts`):
- * { projectFolderId, kind: "card" | "note", id, verdict: "take" | "pass" }.
+ * { projectFolderId, kind: "card" | "note" | "question", id, verdict: "take" | "pass" }.
+ * For a question from sowing, take is yes and pass is no.
  * Only someone whose group gets `suggestions` on that project (a Guide);
  * anyone else gets the same 404 as a project that isn't there.
  */
@@ -23,7 +24,7 @@ export async function action({ request }: ActionFunctionArgs) {
     id?: string;
     verdict?: string;
   };
-  if (!body.projectFolderId || !body.id || (body.kind !== "card" && body.kind !== "note")) {
+  if (!body.projectFolderId || !body.id || (body.kind !== "card" && body.kind !== "note" && body.kind !== "question")) {
     return Response.json({ error: "Pick a suggestion first." }, { status: 400 });
   }
   if (body.verdict !== "take" && body.verdict !== "pass") {

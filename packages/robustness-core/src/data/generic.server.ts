@@ -129,6 +129,14 @@ export async function select<T extends Data>(thing: RecordId | string) {
   return undefined;
 }
 
+/** Random id in the shape SurrealDB generates (20 lowercase alnum), for
+ * a row made in code. */
+export function newRecordId(): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
+}
+
 export async function defineTable(name: string) {
   return await query(
     `DEFINE TABLE IF NOT EXISTS ${name} TYPE ANY SCHEMALESS PERMISSIONS NONE`,

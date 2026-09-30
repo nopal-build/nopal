@@ -764,6 +764,37 @@ export function marksNotCaptured(
   return missed;
 }
 
+/**
+ * The noted-at-seeding lines this day's extraction left out. Like
+ * `marksNotCaptured`, but a noted bullet is several sentences where a
+ * mark is one, and the model often keeps part of it or splits it. A
+ * bullet counts as captured when a node block holds the whole bullet OR
+ * the bullet holds a node's whole quote (a sentence or more of it), so
+ * the fallback never writes a fact a second time beside the model's take.
+ * Pure.
+ */
+export function notedNotCaptured(
+  sourceNotedTexts: readonly (readonly string[] | null)[],
+  nodeBlocks: readonly string[],
+): { text: string; sourceIndex: number }[] {
+  const flat = (v: string) => v.replace(/==/g, "").replace(/\s+/g, " ").trim();
+  const captured = nodeBlocks.map((block) => ({
+    whole: flat(block),
+    // The quote lines only: no heading, ref directive, link list or origin note.
+    quote: flat(block.split("\n").filter((l) => !/^(#{1,6} |:ref\{|- \[|\*Noted)/.test(l.trim())).join(" ")),
+  }));
+  const missed: { text: string; sourceIndex: number }[] = [];
+  sourceNotedTexts.forEach((texts, sourceIndex) => {
+    for (const text of texts ?? []) {
+      const needle = flat(text);
+      if (!needle) continue;
+      const held = captured.some((b) => b.whole.includes(needle) || (b.quote.length >= 24 && needle.includes(b.quote)));
+      if (!held) missed.push({ text, sourceIndex });
+    }
+  });
+  return missed;
+}
+
 /** Pure cap logic, split out from the \`add_node\` executor purely so
  * ADR-002's own "no node ends up with four links" test can exercise it
  * directly. Same-day links are kept first (see the caller's own comment
@@ -1575,7 +1606,7 @@ export async function runSyncGraph(
         } else if (candidate.folderId === seedDocumentsFolderId && candidate.name.toLowerCase().endsWith(".md")) {
           const meta = parseSeedDocument(source.content ?? "");
           const { links } = linkSeedNames(meta.author ? [meta.author] : [], seedMemberList);
-          seedSources = [buildSeedDocumentSource({ fileId: source._id, name: candidate.name, meta, links, memberNames: seedMemberNames })];
+          seedSources = [buildSeedDocumentSource({ fileId: source._id, name: candidate.name, meta, links, memberNames: seedMemberNames, fileDate: date })];
         } else {
           if (!knowledgeContent) {
             uncaptionedSkipped++;
@@ -1883,7 +1914,7 @@ export async function runSyncGraph(
       // A noted-at-seeding line is a fact somebody chose to keep, the same
       // kind of deliberate act as a mark: whatever the model passed over is
       // written by code, unhighlighted, with its provenance line.
-      const missedNoted = marksNotCaptured(sourceNotedTexts, getNodeBlocks());
+      const missedNoted = notedNotCaptured(sourceNotedTexts, getNodeBlocks());
       for (const missed of missedNoted) appendVerbatimNode({ ...missed, quoted: false });
       if (missedNoted.length > 0) {
         log(`sync-graph: ${date} — ${missedNoted.length} noted line(s) the extraction passed over were written as nodes verbatim.`);

@@ -39,6 +39,7 @@ import { findProjectGraphFolder } from "./projectN02.server";
 import { filingFileName, filingValuesHash, isCostKind, readFilingRecord, type Filing, type FilingKind, type FilingSource } from "./syncFiling.server";
 import { KNOWLEDGE_FOLDER_NAME, knowledgeFileName } from "./syncKnowledge.server";
 import { findSeedDocumentsFolder, linkSeedNames, parseSeedDocument, seedMembers } from "./seed.server";
+import { listPacketFiles } from "./seedPackets.server";
 import { getFileRefListingsByIds, getFileRefsByFolderIds, listFolderChildren, type VaultFolder } from "./vault.server";
 
 export type CardAttachment = {
@@ -115,7 +116,8 @@ export function fileMarkUnit(row: Pick<ProjectFileRow, "fileId" | "name" | "capt
     section: "",
     effort: "",
     text: row.caption || row.name,
-    refs: [{ name: row.authorName, humanId: row.authorHumanId, date: row.date, fileId: row.cardCopyFileId }],
+    // A seed document's author may be a name with no account: null, never "".
+    refs: [{ name: row.authorName, humanId: row.authorHumanId || null, date: row.date, fileId: row.cardCopyFileId }],
     attachmentId: row.fileId,
   };
 }
@@ -496,13 +498,19 @@ export async function loadProjectFiles(folder: VaultFolder): Promise<ProjectFile
     const members = metas.length > 0 ? await seedMembers(folder) : [];
     const { links } = linkSeedNames(metas.map((m) => m.meta.author ?? "").filter(Boolean), members);
     const memberName = new Map(members.map((m) => [m.humanId, m.name]));
+    // A file sown from someone's seed packet as it was (a PDF, a photo)
+    // has no front matter to name an author: its author is whoever
+    // added it.
+    const uploaderOf = new Map((await listPacketFiles(folder._id)).filter((f) => f.sown_file_id).map((f) => [f.sown_file_id!, f.human_id]));
+    const uploaderNames = await authorNames([...new Set(uploaderOf.values())]);
     for (const { file, meta } of metas) {
-      const humanId = meta.author ? links.get(meta.author) ?? null : null;
+      const uploader = uploaderOf.get(file._id) ?? null;
+      const humanId = meta.author ? links.get(meta.author) ?? null : uploader;
       seedDocuments.push({
         fileId: file._id,
         name: file.name,
         date: file.date!,
-        authorName: (humanId && memberName.get(humanId)) || meta.author || "Seed",
+        authorName: (humanId && memberName.get(humanId)) || meta.author || (uploader && uploaderNames.get(uploader)) || "Seed",
         authorHumanId: humanId,
         contentType: file.content_type,
         size: file.size,

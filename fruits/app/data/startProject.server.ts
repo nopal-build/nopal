@@ -10,6 +10,7 @@ import { canStartProject } from "robustness-core/data/projectSharing.server";
 import type { Human } from "robustness-core/data/humans.server";
 import { createVaultFolder, ensureVaultRootFolders, listFolderChildren } from "robustness-core/data/vault.server";
 import type { VaultFolder } from "robustness-core/data/vault.types";
+import { openSeedRound } from "robustness-core/data/seedPackets.server";
 
 export type StartProjectResult = { ok: true; folder: VaultFolder } | { ok: false; error: string; status: 400 | 403 | 409 | 500 };
 
@@ -26,5 +27,8 @@ export async function startProject(user: Pick<Human, "_id" | "role">, rawName: s
   }
   const folder = await createVaultFolder({ human_id: user._id, name, parent_folder_id: root._id });
   if (!folder) return { ok: false, error: "The project didn't save. Try again.", status: 500 };
+  // A new project opens with a seeding round (Austin, 2026-09-30): each
+  // person added gets a seed packet until a guide ends the round.
+  await openSeedRound(folder._id, user._id);
   return { ok: true, folder };
 }

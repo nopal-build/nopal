@@ -68,7 +68,8 @@ append-only, same as the graph it protects.
 | [0026](0026-the-maker-is-the-one-place-for-projects-and-people.md) | The Maker is the one place a project starts and its people are run. |
 | [0027](0027-seeded-history-is-its-own-kind-of-entry.md) | Seeded history is its own kind of entry, built by the same stages. |
 | [0028](0028-a-budget-line-is-a-history-of-estimates.md) | A budget line is a history of estimates, and it is the guides'. |
+| [0029](0029-a-seed-packet-is-rows-and-sowing-asks-before-it-names.md) | A seed packet is rows, not a folder, and sowing asks before it names anyone. |
 
 0001 to 0017, 0019 and 0020 are GraphLog decisions (`graphlog` skill);
-0018 and 0021 to 0028 cover the whole repo. This directory isn't GraphLog-specific and future ADRs from
+0018 and 0021 to 0029 cover the whole repo. This directory isn't GraphLog-specific and future ADRs from
 other parts of Nopal belong here too, continuing the same numbering.

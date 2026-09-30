@@ -608,6 +608,44 @@ line under each group, then `## Noted (not anyone's words)`), `documents/`
   it left on disk); a `destination:` line on a document is not read (a
   person refiles with File as).
 
+### Seed packets and Sow (ADR-029, 2026-09-30)
+
+The durable way in. While a **seeding round** is open (`seed_rounds`; a
+Maker project opens with one, a Guide opens and ends others via
+`POST /api/seed-round`), everyone on the project has a **seed packet** on
+the project page. A packet is ROWS (`seed_packet_files`,
+`seedPackets.server.ts`), never a Vault folder: anything under `Syncs/`
+is read by sync-knowledge and visible to everyone in `shared_with`.
+`POST /api/seed-packet` adds to the caller's own packet;
+`GET /api/seed-packet/:id` serves a file to its uploader and the Guides.
+
+**Sow** (`POST /api/graphlog/sow`, Guides, job `sow`, NOT part of `run`)
+runs `runSow` (`sow.server.ts`) over every unsown file, once each:
+
+- text → `sowText`, the model's half (`SOW.md`, stage `sow`, Opus 5.5
+  medium, chosen by the week grid in `webapp/scripts/_local-sow-grid.ts`
+  scored by `sowScore.ts`). Tools: `file_kind`, `add_line`, `add_noted`.
+  Code refuses a line that is not verbatim in the file, and tells the
+  model the day the file was added so "8/5" with no year is a stated date.
+  Sow only gives a file daily-log shape (who, which day, their words,
+  one message = one line, whole). It does NOT pick what matters or split
+  messages into ideas: sync-graph does that once, reading seed days like
+  any day's log (`buildSeedDaySources`). A first draft had SOW.md
+  selecting statements too; Austin caught the double judgment 2026-09-30
+  and the scorer's `extra` weight went to 0 with it.
+- a PDF or photo → a seed document as it is, authored by its uploader.
+- `planSow` places each line: already in the seed → skipped; matches a
+  Card within two days (`matchesCard`) → held out + "already logged?";
+  unsure date → held out + "when was this?"; unsure or unknown speaker →
+  Noted + "who said this?"; else under the speaker. `mergeSeedDay` adds
+  to a day, never replaces.
+- Questions (`seed_questions`) show to Guides in the Suggestions tab as a
+  third kind; `decideSeedQuestion` edits the one day's seed file, and the
+  next run re-extracts that day alone.
+
+A seed wipe deletes the questions and clears `sown_at`. The CLI push
+refuses a day a sowing wrote to.
+
 ## Reset
 
 GraphLog has three independent, narrower resets — `graphLogReset.server.ts`
@@ -889,6 +927,17 @@ with, so it does NOT pick this up on its own. Recreating interrupts any
 GraphLog job currently running — do it between runs, not mid-run.
 `make reset` also picks it up, but wipes every named volume (including
 local SurrealDB/MinIO data), so it's a much bigger hammer than needed.
+
+**Still true for the core packages (2026-09-30).** The worker container
+has its OWN `node_modules`, where `robustness-core` and `oxmarkdown-core`
+are injected copies (`.pnpm/robustness-core@file+packages+...`), not
+links. A restart re-runs `pnpm install` and does not refresh them, so a
+job can run old core code while `/app/packages/...` is current: the first
+live Sow ran a day-old skill this way. Check with
+`docker compose exec worker sh -c 'grep -c <new string> $(readlink -f /app/packages/worker/node_modules/robustness-core)/src/data/<file>'`,
+and refresh by copying `/app/packages/robustness-core/src/.` over that
+path inside the container, then restarting the worker. `_local-run.ts`
+runs in-process from the checkout and never has this problem.
 
 ## Vault UI, scheduling, and live run status
 
