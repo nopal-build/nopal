@@ -566,6 +566,48 @@ code; the model reads marks the way it reads any other input.
   disappear from the project it left, and it also stops a blank entry
   costing a call on every run.
 
+## Seeding: a project's history before it logged here
+
+ADR-027 (2026-09-29). A project that starts logging months in has a backlog;
+Campbell's is six months of threads, notes and documents, compiled by hand
+in the vault as a seed folder: day files `YYYY-MM-DD.md` (`kind: seed`, one
+`## <Name>` section per person with their words verbatim and a `- src:`
+line under each group, then `## Noted (not anyone's words)`), `documents/`
+(`kind: seed-document`, dated, `author:`), `_people.md` (a role per name),
+`_attachments.md`. `_review*` and `_to_delete/` never come in.
+
+- **Push:** `nopal graphlog seed --project <path> --dir <folder> [--from D]
+  [--to D]` → `POST /api/graphlog/seed` (a Guide) writes `Syncs/Seed/`, a
+  system folder like `Syncs/Marks/`: each file stamped `date` and
+  `content_hash`, replaced by name, so a second push changes nothing.
+  Never `Daily Logs/`, a Card or a mark. Documents dated in range go to
+  `Syncs/Seed/documents/`. `seed.server.ts`.
+- **How sync-graph reads it:** by folder id, before file-name attribution.
+  Code splits a day into one source per section; a spoken section is cited
+  under the person with `origin="seed"` (and their human id when
+  `linkSeedNames` matches the name to a project member by first name); the
+  noted section is cited as "Seed" with `origin="seed-noted"`, never
+  highlighted, with a provenance line, and every noted bullet the model
+  passes over is written verbatim by code (the marks rule). The links a day
+  was written with are in its source hash, so adding someone to the project
+  re-extracts only the days they speak in. sync-knowledge skips the day
+  files and underscored files, describes and files the documents.
+- **Downstream:** `GraphLogNode.origin`; the readings leave seed nodes out
+  of "arrived since", say once how many seeded entries there are, count a
+  noted line as a node never a writer, and list only linked seed speakers in
+  the load picture. The rendered `:ref` says "seeded"; the Logbook pins a
+  seed day under "Seed"; a seed document is a row in the files projection
+  (its own copy, one id).
+- **Wipe:** `nopal graphlog seed-wipe --yes` → `POST /api/graphlog/seed-wipe`
+  (Admin/Super on the project): deletes the Seed folder, the graph days only
+  the seed fed, drops `sourceHash` on days it shared with live entries, and
+  prunes every seed date's lines from `graph-structure.md` so the next run
+  finds nothing missing. The Efforts page keeps the words until the next
+  run. Never the Budget (`budget_changes`, ADR-028).
+- **Not yet:** attachments named in `_attachments.md` (the CLI prints what
+  it left on disk); a `destination:` line on a document is not read (a
+  person refiles with File as).
+
 ## Reset
 
 GraphLog has three independent, narrower resets — `graphLogReset.server.ts`

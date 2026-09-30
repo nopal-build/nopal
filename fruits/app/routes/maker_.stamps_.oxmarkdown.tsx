@@ -886,6 +886,10 @@ Decided to use cedar for the fence :ref{name="Jane Doe" human-id="h_demo" dateti
 non-verbose — click the asterisk.
 
 Decided to use cedar for the fence :ref{name="Jane Doe" human-id="h_demo" datetime="2026-08-17T14:30:00Z" location="/h_demo:personal/syncs/Daily Logs/2026-08-17.md" verbose="true"}
+
+The floor may be acting as sheathing :ref{name="Beaudy" datetime="2026-07-20T12:00:00Z" location="/vault?file=seed_demo" verbose="true" origin="seed"}
+
+Ceiling demo priced at $11,700 :ref{name="Seed" datetime="2026-07-20T12:00:00Z" location="/vault?file=seed_demo" verbose="true" origin="seed-noted"}
 verbose — always fully spelled out, no popover.
 `;
 

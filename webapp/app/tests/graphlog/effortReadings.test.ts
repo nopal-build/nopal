@@ -501,3 +501,50 @@ describe("round 5: size in words on the heading, and the mechanical voice rules 
     expect(sectionShapeNotes("Ready next", "- a\n- **b**\n- c")).toEqual([]);
   });
 });
+
+describe("seeded history in the readings (2026-09-29)", () => {
+  // Beaudy spoke in the seed and has no account; the $11,700 line is
+  // noted at seeding and nobody's words; Austin's seed line links to his
+  // account. None of it is news to a page written after it.
+  const seedOf = (n: GraphLogNode, origin: "seed" | "seed-noted", humanId: string | null): GraphLogNode => ({
+    ...n,
+    origin,
+    authorHumanId: humanId,
+    refLine: `:ref{name="${n.authorName}"${humanId ? ` human-id="${humanId}"` : ""} datetime="${n.date}T12:00:00Z" origin="${origin}"}`,
+  });
+  const beaudy = seedOf(node("2026-07-20", 1, { name: "Beaudy", id: "" }, "==keep an 18 inch perimeter of floor=="), "seed", null);
+  const noted = seedOf(node("2026-07-20", 2, { name: "Seed", id: "" }, "Ceiling demo priced at $11,700."), "seed-noted", null);
+  const austinSeed = seedOf(node("2026-07-20", 3, { name: "Austin Trautman", id: "" }, "==sign the engineers' contracts today=="), "seed", "h-austin");
+  const demo: ReadmeSection[] = [
+    { heading: "", content: "intro" },
+    {
+      heading: "Demo",
+      content: ["Weight: 1 · Status: active", "- 2026-07-20 Node 1 (Beaudy) — floor", "- 2026-07-20 Node 2 (Seed) — price", "- 2026-07-20 Node 3 (Austin Trautman) — contracts", "- 2026-09-10 Node 1 (Lucas) — slipped?"].join("\n"),
+    },
+  ];
+  const all = [beaudy, noted, austinSeed, B];
+  const readings = computeEffortReadings(demo, all, TODAY);
+  const thread = readings.threads[0];
+
+  it("a noted line is a node, never a writer; a seed speaker is a writer of the thread", () => {
+    expect(thread.nodeCount).toBe(4);
+    expect(thread.writers.map((w) => w.name).sort()).toEqual(["Austin Trautman", "Beaudy", "Lucas"]);
+  });
+
+  it("the load picture lists only people who log here: a linked seed speaker, never an unlinked one or Seed", () => {
+    expect(readings.load.map((p) => p.name).sort()).toEqual(["Austin Trautman", "Lucas"]);
+    expect(buildReadingsBlock(readings)).toMatch(/as first names: Austin, Lucas\./);
+  });
+
+  it("seeded history is counted and named once, and never arrives as news", () => {
+    expect(readings.seeded).toEqual({ count: 3, firstDate: "2026-07-20", lastDate: "2026-07-20" });
+    expect(buildReadingsBlock(readings)).toMatch(/Seeded history: 3 entries dated 2026-07-20 to 2026-07-20/);
+    expect(arrivedSince(demo, all, "2026-07-01")).toEqual([{ heading: "Demo", count: 1 }]);
+  });
+
+  it("a graph with no seed reads exactly as before", () => {
+    const plain = computeEffortReadings(sections, [A, B, C, D], TODAY);
+    expect(plain.seeded).toBeNull();
+    expect(buildReadingsBlock(plain)).not.toMatch(/Seeded history/);
+  });
+});

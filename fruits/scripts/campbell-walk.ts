@@ -382,6 +382,31 @@ if (creator !== guide.id) {
   check("the creator is back", (await roleOf(creator)) === creatorBefore);
 }
 
+// ── Seeding (2026-09-29): a Guide pushes, an admin wipes, nobody else ───
+const SEED_DAY = `---\ndate: 2020-01-01\nproject: walk\nkind: seed\n---\n\n## Walker\n\n- The walk seeded a line.\n  - src: the walk\n\n## Noted (not anyone's words)\n\n- The walk noted a fact.\n`;
+const seedBody = { projectFolderId: ownId, days: [{ date: "2020-01-01", content: SEED_DAY }], documents: [] };
+await hit(crafter.cookie, "seed: a crafter can't push a seed", "POST", "/api/graphlog/seed", 404, seedBody);
+await hit(client.cookie, "seed: a client can't push a seed", "POST", "/api/graphlog/seed", 404, seedBody);
+await hit(guide.cookie, "seed: the guide pushes one day", "POST", "/api/graphlog/seed", 200, seedBody);
+await hit(guide.cookie, "seed: the guide reads it in the Logbook", "GET", `/newspaper/${ownId}?tab=logbook`, 200);
+await hit(client.cookie, "seed: no Logbook for a client", "GET", `/newspaper/${ownId}?tab=logbook`, 404);
+await hit(guide.cookie, "seed: the guide can't wipe it", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
+await hit(crafter.cookie, "seed: nor a crafter", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
+await hit(admin.cookie, "seed: the admin wipes it", "POST", "/api/graphlog/seed-wipe", 200, { projectFolderId: ownId });
+
+// ── The Budget (2026-09-29): a view under Costs for Guides alone ────────
+// The project may already have a budget (a start is refused twice), so
+// the walk asserts the doors and never writes a line.
+await hit(guide.cookie, "budget: the guide opens the view", "GET", `/newspaper/${ownId}?tab=costs&view=budget`, 200);
+for (const [who, label] of [[crafter, "a crafter"], [client, "a client"]] as const) {
+  await hit(who.cookie, `budget: ${label} typing the URL`, "GET", `/newspaper/${ownId}?tab=costs&view=budget`, 404);
+  // Both are on the project, so the API says 403, not 404 (a 404 is for
+  // someone with no role at all).
+  await hit(who.cookie, `budget: ${label} on the API`, "POST", "/api/budget", 403, { act: "change", projectFolderId: ownId, key: "hvac", estimate: 1 });
+}
+await hit(guide.cookie, "budget: a line nobody started", "POST", "/api/budget", 404, { act: "change", projectFolderId: ownId, key: "no-such-line", estimate: 1 });
+await hit(guide.cookie, "budget: a table that doesn't fit is refused", "POST", "/api/budget", 400, { act: "start", projectFolderId: ownId, asOf: "2026-04-22", table: "| line item | cost estimate | confidence |\n|---|---|---|\n| solar | $1 | 0.5 |\n" });
+
 // ── Put everything back ──────────────────────────────────────────────────
 const guideBefore = before.find((e) => e.human === guide.id)?.role ?? "";
 await setGroup(admin, guide.id, guideBefore, "put the guide back");

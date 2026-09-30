@@ -47,6 +47,11 @@ export const FEATURE_NAMES = [
   "feeds",
   /** Taking or passing what someone without `feeds` suggests. */
   "suggestions",
+  /** The Budget under Costs: the estimate by line with its confidence,
+   * low, high and totals, and changing a line (Austin, 2026-09-29: "only
+   * visible to the guide"). A project shows it only once a budget has
+   * been started on it. */
+  "budget",
 ] as const;
 export type Feature = (typeof FEATURE_NAMES)[number];
 
@@ -60,7 +65,7 @@ const READING: Feature[] = ["efforts", "photos", "files", "costs", "logbook"];
  * their own log (Austin, 2026-09-28: "clients should be able to mark
  * with the annotation"; moving, filing and confirming stay `edit`). */
 export const GROUP_FEATURES: Record<Group, readonly Feature[]> = {
-  Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people", "feeds", "suggestions"],
+  Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people", "feeds", "suggestions", "budget"],
   Crafter: [...READING, "marks", "steepTap", "dailyLog", "edit", "feeds"],
   Observer: [...READING, "marks", "steepTap", "dailyLog"],
   Client: ["efforts", "photos", "marks", "steepTap", "dailyLog", "feeds"],

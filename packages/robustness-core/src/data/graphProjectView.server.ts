@@ -1322,6 +1322,8 @@ function describeWriters(allNodes: GraphLogNode[]): string {
   // and be told, wrongly, that convergence was unclaimable here.
   const byId = new Map<string, string | null>();
   for (const node of allNodes) {
+    // A line noted at seeding is nobody's words (`seed.server.ts`).
+    if (node.origin === "seed-noted") continue;
     // Same identity ladder as `computeBacklinkIndex` -- see ADR-015. A
     // node with no id at all is still a person; falling back to the name
     // (then to the node's own id) keeps a pre-ADR-015 graph counting the

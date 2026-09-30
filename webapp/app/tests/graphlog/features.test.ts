@@ -57,6 +57,11 @@ describe("the groups", () => {
     for (const f of ["edit", "feeds", "suggestions"] as Feature[]) expect(observer.features).not.toContain(f);
   });
 
+  it("only a Guide reaches the Budget (2026-09-29), and it is a view under Costs, not a tab", () => {
+    expect(GROUPS.filter((g) => featuresOf(g).includes("budget"))).toEqual(["Guide"]);
+    expect(tabsFor(featuresOf("Guide"))).not.toContain("budget");
+  });
+
   it("only a Guide takes suggestions; everyone but an Observer feeds the project", () => {
     for (const g of ["Guide", "Crafter", "Client"] as Group[]) expect(featuresOf(g)).toContain("feeds");
     expect(GROUPS.filter((g) => featuresOf(g).includes("suggestions"))).toEqual(["Guide"]);
