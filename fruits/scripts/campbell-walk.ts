@@ -18,7 +18,8 @@
 // nothing can't start a project; a Client leaves a note with the pen.
 // While the client is an Observer: they read the Costs tab; their Card and
 // note wait for a Guide, who takes the Card and passes the note; they
-// don't move an entry or file a file.
+// don't move an entry or file a file. A photo on the waiting Card opens
+// for the Guide who decides on it and for nobody else until it is taken.
 // Taking the client off the project empties the Card they wrote today,
 // and they can't write to it again.
 //
@@ -31,7 +32,11 @@
 //   source ../webapp/.env; unset SESSION_SECRET
 //   npx vite-node scripts/campbell-walk.ts <client> <crafter> <guide> <admin> <ownProjectId> <otherProjectId>
 // <guide> must not be an admin; the walk makes them Guide on the project
-// through the Maker and puts their old role back.
+// through the Maker and puts their old role back. Use someone who already
+// has a role on the project: putting back "no role" takes them off, and
+// an invited account that is then on no project is deleted with its
+// invite (`withdrawInvite`), which is how a local test account was lost
+// on 2026-10-01.
 import { query } from "robustness-core/data/generic.server";
 import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { getHumanByEmail } from "robustness-core/data/humans.server";
@@ -189,13 +194,45 @@ await hit(client.cookie, "a Card on the project", "POST", "/daily-log", 200, { d
 const suggested = (await getDailyLogCards(client.id, day)).find((c) => c.projectFolderId === ownId) ?? null;
 check("the Card is a suggestion", !!suggested?.suggestion);
 if (suggested) {
-  await hit(client.cookie, "write in it", "POST", "/daily-log", 200, { date: day, content: WORDS, cardFileId: suggested.fileId });
+  // With a photo on it: a Guide has to see what they are deciding on.
+  const shot = new FormData();
+  shot.set("date", day);
+  shot.set("file", new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "campbell-suggests.png", { type: "image/png" }));
+  const shotAnswer = await hit(client.cookie, "a photo for the Card", "POST", "/api/daily-log/upload", 201, shot);
+  let photo: string | null = null;
+  try {
+    photo = (JSON.parse(shotAnswer) as { fileId?: string }).fileId ?? null;
+  } catch {
+    // The 201 above already failed.
+  }
+  check("the photo uploaded", !!photo);
+  const CARD = photo ? `${WORDS}\n\n::file{name="campbell-suggests.png" caption fileId="${photo}" contentType="image/png"}\n` : WORDS;
+  await hit(client.cookie, "write in it", "POST", "/daily-log", 200, { date: day, content: CARD, cardFileId: suggested.fileId });
   check("the project doesn't get it yet", (await fed()) === "");
   await hit(crafter.cookie, "a crafter takes it", "POST", "/api/graphlog/suggestions", 404, { projectFolderId: ownId, kind: "card", id: suggested.fileId, verdict: "take" });
   const tab = await hit(guide.cookie, "the guide's Suggestions tab", "GET", `/newspaper/${ownId}?tab=suggestions`, 200);
   check("the guide sees it", tab.includes(WORDS));
+  if (photo) {
+    // Served by redirect to storage (ADR-021), so the 302 is the success.
+    await hit(guide.cookie, "the waiting Card's photo, for the guide", "GET", `/api/vault/rendition/${photo}?size=thumb`, 302);
+    await hit(guide.cookie, "the waiting Card's photo, enlarged", "GET", `/api/vault/view/${photo}`, 302);
+    await hit(crafter.cookie, "the waiting Card's photo, for a crafter", "GET", `/api/vault/rendition/${photo}?size=thumb`, 404);
+  }
   await hit(guide.cookie, "the guide takes it", "POST", "/api/graphlog/suggestions", 200, { projectFolderId: ownId, kind: "card", id: suggested.fileId, verdict: "take" });
-  check("the project gets it, as written", (await fed()) === WORDS);
+  check("the project gets it, as written", (await fed()) === CARD);
+  // Taken, it is the project's, and the take's own sync copies it in.
+  // The Card still names the writer's original, which is what the Logbook
+  // and the Card's synced copy print: anyone on the project who asks for
+  // that id is served the copy (`readableFile`).
+  if (photo) {
+    const copied = (await loadProjectFiles(own)).find((r) => r.fileId === photo);
+    check("the take copied the photo into the project", !!copied && copied.serveId !== photo);
+    // The crafter was refused a moment ago, and a refusal is reused for
+    // five seconds (`REFUSAL_MS`, `featureAccess.server.ts`).
+    await new Promise((r) => setTimeout(r, 5500));
+    await hit(crafter.cookie, "the taken Card's photo, by the id the Card names, for a crafter", "GET", `/api/vault/rendition/${photo}?size=thumb`, 302);
+    await hit(crafter.cookie, "the same, but the record stays its writer's", "GET", `/api/vault/${photo}`, 404);
+  }
 }
 const readme = (await getReadmeFileForFolder(own.human_id, own._id))?.content ?? "";
 const passage = pageMarkUnits(readme)[0];

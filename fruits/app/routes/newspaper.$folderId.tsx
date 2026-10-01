@@ -44,6 +44,7 @@ import {
   TAB_FOLDERS,
   resolveProjectTab,
   rowsForReader,
+  servedFileIds,
   tabsFor,
 } from "robustness-core/data/projectView.server";
 import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
@@ -102,6 +103,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const files: ProjectFileRow[] | null =
     tabFolders && folder.folder_type === "project-n02" ? rowsForReader(await loadProjectFiles(folder), features) : null;
   const logbook = tab === "logbook" ? await projectLogbook(folder) : null;
+  // A Card names its writer's originals; a reader opens the project's
+  // copies, by the same rows the file tabs are built from.
+  const logbookFileIds = logbook ? servedFileIds(await loadProjectFiles(folder), features) : null;
   // Seeding (`seedPackets.server.ts`): while a round is open, everyone
   // with a role on the project has their own seed packet here; Guides
   // also get Sow, the round's two ends, and everyone's packets. Someone
@@ -220,6 +224,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // the component, which would pull a `.server` module into the bundle).
     fileKinds: FILING_KINDS.filter((k) => k !== "video"),
     logbook,
+    logbookFileIds,
     seeding,
     budgetView,
     budget,
@@ -448,7 +453,15 @@ function ProjectStatusControl({
 /** The Logbook: what each person wrote about this project, one card per
  * person per day, pinned into a scrapbook. Read-only; each person edits
  * their own on the Daily Log. */
-function Logbook({ cards }: { cards: { fileId: string; who: string; date: string; content: string; seeded: boolean }[] }) {
+function Logbook({
+  cards,
+  fileIds,
+}: {
+  cards: { fileId: string; who: string; date: string; content: string; seeded: boolean }[];
+  /** The id each Card attachment loads by (`servedFileIds`,
+   * `projectView.server.ts`). */
+  fileIds: Record<string, string>;
+}) {
   if (cards.length === 0) {
     return (
       <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
@@ -460,7 +473,8 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
     <PinnedCardWall>
       {cards.map((c) => (
         <PinnedCard key={c.fileId} title={c.who} label={c.seeded ? `${longDate(c.date)} · seeded history` : longDate(c.date)} data-logbook-card data-seeded={c.seeded || undefined}>
-          <OxRenderer markdown={c.seeded ? seedDayBody(c.content) : c.content} />
+          {/* A seed day is the project's own file: it names no one's originals. */}
+          {c.seeded ? <OxRenderer markdown={seedDayBody(c.content)} /> : <OxRenderer markdown={c.content} servedFileIds={fileIds} />}
         </PinnedCard>
       ))}
     </PinnedCardWall>
@@ -468,7 +482,7 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, seeding, budgetView, budget, budgetNames, canBudget } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, seeding, budgetView, budget, budgetNames, canBudget } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -697,7 +711,7 @@ export default function NewspaperRoute() {
               canFile={canEdit}
             />
           )}
-          {logbook && <Logbook cards={logbook} />}
+          {logbook && <Logbook cards={logbook} fileIds={logbookFileIds ?? {}} />}
           {suggestions && (
             <SuggestionsView
               projectFolderId={folder._id}

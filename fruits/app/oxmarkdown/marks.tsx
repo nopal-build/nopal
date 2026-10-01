@@ -4,9 +4,12 @@
  *
  * A reader points at a thought (a heading, a bullet, a sentence, a photo;
  * see `oxmarkdown-core/src/markUnits.ts` for exactly what counts and why
- * nothing smaller does), writes what they think in a small box, and sends.
- * The words move out to the margin in the handwritten font, the way you
- * would write on paper.
+ * nothing smaller does), writes what they think in a small box, and shares
+ * it. The words move out to the margin in the handwritten font, the way
+ * you would write on paper, with an arrow back to what they are about
+ * (`MarkMargin.tsx`); where there is no margin they wait behind a small
+ * mark at the end of the thought (`MarkNotes`). Either way a note is
+ * never in the text's own flow, so it never makes the page taller.
  *
  * Plain on purpose. The visual belongs to Gerald; what this owes him is
  * the unit, the mark's fields, and a page that leaves room for a margin.
@@ -492,7 +495,7 @@ function MarkComposer({
           Cancel
         </button>
         <button type="button" className={ACT} disabled={sending || !text.trim()} onClick={() => void send()}>
-          {sending ? "Saving" : mine ? "Save" : "Send"}
+          {sending ? "Saving" : mine ? "Save" : "Share"}
         </button>
       </div>
       )}
@@ -502,16 +505,29 @@ function MarkComposer({
   );
 }
 
-/** The margin: every mark on the given units, stacked in the order they
- * were written. Renders nothing when there are none, so an unmarked page
- * has no margin elements at all. */
-export function MarkNotes({ ctx, unitKeys }: { ctx: AnnotationCtx; unitKeys: string[] }) {
-  const notes = unitKeys.flatMap((k) => ctx.marksFor(k));
-  if (notes.length === 0) return null;
+/** The words of the notes on one thought, and nothing else: no name and
+ * no date (Austin, 2026-10-01: "we want only the words of the
+ * annotation"). What a note is waiting on, and the one thing to do about
+ * a move, stay: they are the page talking, not a byline. Your own note is
+ * drawn a little heavier, which is how you know which one the pen opens.
+ *
+ * Shown in two places and never in the text itself, so a note cannot
+ * make the page taller: in the margin on a screen with room for one
+ * (`MarkMargin.tsx`), and behind a small mark at the end of the thought
+ * where there is none (`MarkNotes`, below). */
+export function MarkNoteList({
+  notes,
+  viewerId,
+  onMoveAction,
+}: {
+  notes: OxMarkNote[];
+  viewerId: string;
+  onMoveAction?: OxAnnotations["onMoveAction"];
+}) {
   return (
-    <span className="ox-mark-notes" role="note">
+    <>
       {notes.map((n) => (
-        <span key={n.id} className={`ox-mark-note${n.authorHumanId === ctx.viewerId ? " ox-mark-note--mine" : ""}`}>
+        <span key={n.id} className={`ox-mark-note${n.authorHumanId === viewerId ? " ox-mark-note--mine" : ""}`}>
           <span className="ox-mark-note__text">{n.text}</span>
           {n.suggestion ? (
             <span className="ox-mark-note__waiting">a suggestion, waiting for a Guide</span>
@@ -522,13 +538,61 @@ export function MarkNotes({ ctx, unitKeys }: { ctx: AnnotationCtx; unitKeys: str
           {n.move?.status === "requested" && (
             <span className="ox-mark-note__moved">asks to file this under another project</span>
           )}
-          {n.move && ctx.onMoveAction && <MoveAction move={n.move} onMoveAction={ctx.onMoveAction} />}
-          <span className="ox-mark-note__by">
-            {firstName(n.authorName)}, {shortDate(n.date)}
-          </span>
+          {n.move && onMoveAction && <MoveAction move={n.move} onMoveAction={onMoveAction} />}
         </span>
       ))}
-    </span>
+    </>
+  );
+}
+
+/**
+ * The notes on a thought, where the screen has no margin: a small mark at
+ * the end of the thought that opens them, the way a citation's `*` opens
+ * its source (`RefDirectiveMarker`, `OxRenderer.tsx`). Same component
+ * underneath, `OxPopover`: beside the mark on a tablet, a sheet from the
+ * bottom on a phone.
+ *
+ * The notes used to sit under their line here, in the flow, which made
+ * the text taller by every note on it. Now the only thing in the flow is
+ * the mark. On a screen with a margin the stylesheet takes the mark away
+ * and `MarkMargin.tsx` shows the same words beside the text.
+ *
+ * Renders nothing when the units have no marks, so an unmarked page has
+ * nothing of the pen's in it at all.
+ */
+export function MarkNotes({ ctx, unitKeys }: { ctx: AnnotationCtx; unitKeys: string[] }) {
+  const notes = unitKeys.flatMap((k) => ctx.marksFor(k));
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [open, setOpen] = useState(false);
+  if (notes.length === 0) return null;
+  return (
+    <>
+      <button
+        ref={setAnchorEl}
+        type="button"
+        className="ox-mark-handle"
+        aria-expanded={open}
+        aria-label={notes.length === 1 ? "Read the note on this" : `Read the ${notes.length} notes on this`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <NoteGlyph />
+      </button>
+      <OxPopover anchorEl={anchorEl} open={open} onDismiss={() => setOpen(false)} className="ox-mark-notes-popover">
+        <div className="ox-mark-notes" role="note">
+          <MarkNoteList notes={notes} viewerId={ctx.viewerId} onMoveAction={ctx.onMoveAction} />
+        </div>
+      </OxPopover>
+    </>
+  );
+}
+
+/** The mark: the margin's arrow, small, pointing back at the words. */
+function NoteGlyph() {
+  return (
+    <svg width="14" height="12" viewBox="0 0 14 12" fill="none" aria-hidden="true">
+      <path d="M13 2.5C8.5 1.5 4.5 3.5 2.5 8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M1 4.5L2.5 8.8L6.5 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -562,17 +626,4 @@ function MoveAction({
       {error && <span className="ox-mark-error">{error}</span>}
     </span>
   );
-}
-
-function firstName(name: string): string {
-  const first = name.trim().split(/[\s@]+/)[0] ?? name;
-  return first ? first.charAt(0).toUpperCase() + first.slice(1) : name;
-}
-
-/** "Sep 18" from `2026-09-18`, formatted by hand so server and client
- * render the same text (no locale or time zone involved). */
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function shortDate(date: string): string {
-  const [, m, d] = date.split("-").map(Number);
-  return m && d ? `${MONTHS[m - 1]} ${d}` : date;
 }

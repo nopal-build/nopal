@@ -5,7 +5,7 @@
 // uses the Vault's own gallery grid; a video is a real player with its
 // poster, never a link that downloads.
 import { Link, useSearchParams } from "react-router";
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type { FileFolder, ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import type { FilingKind } from "robustness-core/data/syncFiling.server";
 import { Badge } from "stamps/Badge";
@@ -16,6 +16,7 @@ import { button } from "stamps/button.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
+import { useLoadFailed } from "../oxmarkdown/useLoadFailed";
 
 const FOLDER_TITLES: Record<FileFolder, string> = {
   gallery: "Gallery",
@@ -135,13 +136,24 @@ function GalleryGrid({ rows, onOpen }: { rows: ProjectFileRow[]; onOpen: (row: P
           </figure>
         ) : (
           <button key={row.fileId} type="button" className="vault-gallery-item" onClick={() => onOpen(row)} style={{ background: "none", border: 0, padding: 0, textAlign: "left", cursor: "pointer" }}>
-            <img src={row.urls.thumb} alt={row.caption || row.name} loading="lazy" />
+            <Thumb src={row.urls.thumb} alt={row.caption || row.name} missingStyle={{ width: "100%", aspectRatio: "1 / 1", borderRadius: 4 }} />
             <span className="vault-gallery-item-name">{row.caption || row.name}</span>
           </button>
         ),
       )}
     </div>
   );
+}
+
+const ROW_THUMB = { width: 96, height: 96, objectFit: "cover", borderRadius: 8, display: "block" } as const;
+
+/** A thumbnail, or a plain tile of the same size when it will not load
+ * (`useLoadFailed`): a video's poster before the worker has made it, a
+ * file gone since. Never the browser's broken-image icon. */
+function Thumb({ src, alt, style, missingStyle }: { src: string | undefined; alt: string; style?: CSSProperties; missingStyle: CSSProperties }) {
+  const load = useLoadFailed(src);
+  if (!src || load.failed) return <div role="img" aria-label={alt} style={{ ...missingStyle, background: semanticColors.surfaceInset }} />;
+  return <img ref={load.ref} onError={load.onError} src={src} alt={alt} loading="lazy" style={style} />;
 }
 
 function FileRow({
@@ -199,9 +211,9 @@ function FileRow({
     <li className={sprinkles({ display: "flex", gap: 4, alignItems: "flex-start" })}>
       <button type="button" onClick={() => onOpen(row)} style={{ flexShrink: 0, background: "none", border: 0, padding: 0, cursor: "pointer" }} aria-label={`Open ${row.name}`}>
         {isImage ? (
-          <img src={row.urls.thumb} alt={row.caption || row.name} loading="lazy" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, display: "block" }} />
+          <Thumb src={row.urls.thumb} alt={row.caption || row.name} style={ROW_THUMB} missingStyle={ROW_THUMB} />
         ) : isVideo ? (
-          <img src={row.urls.poster ?? ""} alt={row.caption || row.name} loading="lazy" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, display: "block", background: semanticColors.surfaceInset }} />
+          <Thumb src={row.urls.poster ?? undefined} alt={row.caption || row.name} style={{ ...ROW_THUMB, background: semanticColors.surfaceInset }} missingStyle={ROW_THUMB} />
         ) : (
           <div
             className={`${textSize.xs} ${sprinkles({ display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "mono" })}`}
