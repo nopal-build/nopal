@@ -20,9 +20,12 @@ import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import {
+  getGraphLogRunSpends,
   getGraphLogUsageSummary,
+  type GraphLogRunSpend,
   type GraphLogStage,
 } from "robustness-core/data/graphLogMetrics.server";
+import { RunCost } from "../components/RunSpend";
 import { listRecentGraphLogRuns, type GraphLogRun } from "robustness-core/data/graphLogPerf.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
@@ -48,6 +51,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const usage = await getGraphLogUsageSummary(days);
 
   const recentRuns = await listRecentGraphLogRuns(RECENT_RUNS_LIMIT);
+  const spendByRunId = await getGraphLogRunSpends(recentRuns);
 
   const projectFolderIds = new Set([
     ...usage.byProject.map((p) => p.projectFolderId),
@@ -71,7 +75,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     humanById[h._id] = { name: h.name, email: h.email };
   });
 
-  return { user, days, usage, recentRuns, projectNameById, humanById };
+  return { user, days, usage, recentRuns, spendByRunId, projectNameById, humanById };
 }
 
 export function ErrorBoundary() {
@@ -239,10 +243,12 @@ function RunStatusBadge({ run }: { run: GraphLogRun }) {
 
 function RecentRunsSection({
   runs,
+  spendByRunId,
   projectNameById,
   humanNameById,
 }: {
   runs: GraphLogRun[];
+  spendByRunId: Record<string, GraphLogRunSpend>;
   projectNameById: Record<string, string>;
   humanNameById: Record<string, string>;
 }) {
@@ -286,6 +292,7 @@ function RecentRunsSection({
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-mono subtle-text">{formatRunDatetime(run.started_at)}</span>
                 <span className="text-xs font-mono subtle-text">{formatRunDuration(run.duration_ms)}</span>
+                <RunCost spend={spendByRunId[run._id]} />
                 <RunStatusBadge run={run} />
               </div>
             </Link>
@@ -299,7 +306,7 @@ function RecentRunsSection({
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 export default function FruitsMakerGraphLog() {
-  const { days, usage, recentRuns, projectNameById, humanById } = useLoaderData<typeof loader>();
+  const { days, usage, recentRuns, spendByRunId, projectNameById, humanById } = useLoaderData<typeof loader>();
   const humanNameById: Record<string, string> = Object.fromEntries(
     Object.entries(humanById).map(([id, h]) => [id, h.name]),
   );
@@ -338,6 +345,7 @@ export default function FruitsMakerGraphLog() {
 
         <RecentRunsSection
           runs={recentRuns}
+          spendByRunId={spendByRunId}
           projectNameById={projectNameById}
           humanNameById={humanNameById}
         />

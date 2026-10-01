@@ -23,6 +23,7 @@ import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import {
+  effortsDecisionFromEvents,
   getGraphLogRun,
   type GraphLogPerfEventType,
   type GraphLogRun,
@@ -30,6 +31,8 @@ import {
 } from "robustness-core/data/graphLogPerf.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { getGraphLogRunSpend } from "robustness-core/data/graphLogMetrics.server";
+import { RunSpendSection } from "../components/RunSpend";
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -48,14 +51,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const found = await getGraphLogRun(runId);
   if (!found) throw data("Run not found", { status: 404 });
 
-  const [projectFolder, [human]] = await Promise.all([
+  const [projectFolder, [human], spend] = await Promise.all([
     getFolderById(found.run.project_folder_id),
     getHumansById([found.run.human_id]),
+    getGraphLogRunSpend(found.run),
   ]);
 
   return {
     run: found.run,
     events: found.events,
+    spend,
+    effortsDecision: effortsDecisionFromEvents(found.events),
     projectName: projectFolder?.name ?? "(deleted project)",
     humanName: human?.name ?? found.run.human_id,
   };
@@ -393,7 +399,7 @@ function EventRow({
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 export default function FruitsMakerGraphLogRun() {
-  const { run, events, projectName, humanName } = useLoaderData<typeof loader>();
+  const { run, events, spend, effortsDecision, projectName, humanName } = useLoaderData<typeof loader>();
 
   const maxDurationMs = Math.max(1, ...events.map((e) => e.duration_ms));
 
@@ -462,6 +468,7 @@ export default function FruitsMakerGraphLogRun() {
             </div>
           )}
           <CoverageSection jobName={run.job_name} coverage={run.coverage ?? null} readmeChanged={run.readme_changed ?? null} />
+          <RunSpendSection spend={spend} decision={effortsDecision} />
         </div>
 
         <div className="flex items-center gap-3 mb-3 flex-wrap">

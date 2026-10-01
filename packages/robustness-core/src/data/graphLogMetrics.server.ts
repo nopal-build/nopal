@@ -60,6 +60,10 @@ async function ensureTables(): Promise<void> {
 
 export type GraphLogUsageEvent = Data & {
   date: string; // YYYY-MM-DD
+  /** The worker run (`graphlog_runs` id) this call happened in. Absent on
+   * rows written before 2026-10-01 and on calls made outside a run (a
+   * script, a test). See `getGraphLogRunSpend` for how those are read. */
+  run_id?: string | null;
   human_id: string;
   project_folder_id: string;
   stage: GraphLogStage;
@@ -111,6 +115,8 @@ function dailyBucketId(
 }
 
 export type RecordGraphLogUsageInput = {
+  /** `perf.runId` from the stage's recorder; `null` outside a run. */
+  runId?: string | null;
   humanId: string;
   projectFolderId: string;
   stage: GraphLogStage;
@@ -141,6 +147,7 @@ export async function recordGraphLogUsage(input: RecordGraphLogUsageInput): Prom
 
     await upsert("graphlog_usage_events", {
       date,
+      run_id: input.runId ?? null,
       human_id: input.humanId,
       project_folder_id: input.projectFolderId,
       stage: input.stage,
@@ -488,4 +495,192 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
     .sort((a, b) => a.date.localeCompare(b.date));
 
   return summary;
+}
+
+// ---------------------------------------------------------------------------
+// Spend per run
+// ---------------------------------------------------------------------------
+
+/** The run fields attribution needs. Structural, so this file does not
+ * import `graphLogPerf.server.ts` for one type. */
+export type RunWindow = {
+  _id: string;
+  project_folder_id: string;
+  started_at: string;
+  finished_at: string | null;
+};
+
+/** How a run's usage rows were found. `run` is exact. `time-window` is
+ * for rows written before usage carried `run_id` (2026-10-01): the
+ * project's untagged rows between the run's start and finish. That is
+ * exact only while the worker runs one job at a time (`CONCURRENCY = 1`,
+ * `packages/worker/worker.ts`), and it is never used for a run that has
+ * a tagged row, so raising concurrency can't misattribute new rows.
+ * `none`: no model call found, which is what a run with nothing new
+ * looks like. */
+export type RunSpendAttribution = "run" | "time-window" | "none";
+
+export type RunStageSpend = {
+  stage: GraphLogStage;
+  models: string[];
+  callCount: number;
+  skippedCount: number;
+  errorCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  durationMs: number;
+  estimatedCostUsd: number;
+};
+
+export type GraphLogRunSpend = {
+  runId: string;
+  attribution: RunSpendAttribution;
+  /** In pipeline order; a stage with no rows is absent. */
+  byStage: RunStageSpend[];
+  callCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  estimatedCostUsd: number;
+  /** Calls whose model has no price in `llmPricing.ts`. Their cost is
+   * not in `estimatedCostUsd`, so a nonzero count means the total is low. */
+  unpricedCallCount: number;
+  pricingStale: boolean;
+  pricingAgeDays: number;
+};
+
+const STAGE_ORDER: GraphLogStage[] = ["sow", "sync-knowledge", "sync-graph", "graph-structure", "graph-project-view"];
+
+/** Picks one run's rows out of a candidate set. Pure, see
+ * `RunSpendAttribution` for the rule. */
+export function usageRowsForRun(
+  run: RunWindow,
+  candidates: GraphLogUsageEvent[],
+): { attribution: RunSpendAttribution; rows: GraphLogUsageEvent[] } {
+  const tagged = candidates.filter((e) => e.run_id === run._id);
+  if (tagged.length > 0) return { attribution: "run", rows: tagged };
+  const start = run.started_at;
+  const end = run.finished_at ?? new Date().toISOString();
+  const windowed = candidates.filter(
+    (e) =>
+      !e.run_id &&
+      e.project_folder_id === run.project_folder_id &&
+      e.created_at >= start &&
+      e.created_at <= end,
+  );
+  return windowed.length > 0 ? { attribution: "time-window", rows: windowed } : { attribution: "none", rows: [] };
+}
+
+/** Totals one run's rows by stage, pricing each row by its own model. Pure. */
+export function summarizeRunSpend(
+  runId: string,
+  attribution: RunSpendAttribution,
+  rows: GraphLogUsageEvent[],
+): GraphLogRunSpend {
+  const stages = new Map<GraphLogStage, RunStageSpend>();
+  const spend: GraphLogRunSpend = {
+    runId,
+    attribution,
+    byStage: [],
+    callCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    estimatedCostUsd: 0,
+    unpricedCallCount: 0,
+    pricingStale: isPricingStale(),
+    pricingAgeDays: pricingAgeDays(),
+  };
+  for (const row of rows) {
+    let s = stages.get(row.stage);
+    if (!s) {
+      s = {
+        stage: row.stage,
+        models: [],
+        callCount: 0,
+        skippedCount: 0,
+        errorCount: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        durationMs: 0,
+        estimatedCostUsd: 0,
+      };
+      stages.set(row.stage, s);
+    }
+    if (row.model && !s.models.includes(row.model)) s.models.push(row.model);
+    s.callCount++;
+    if (row.outcome === "skipped") s.skippedCount++;
+    if (row.outcome === "error") s.errorCount++;
+    s.inputTokens += row.input_tokens;
+    s.outputTokens += row.output_tokens;
+    s.cacheReadTokens += row.cache_read_tokens;
+    s.cacheWriteTokens += row.cache_write_tokens;
+    s.durationMs += row.duration_ms;
+    const spentTokens = row.input_tokens + row.output_tokens + row.cache_read_tokens + row.cache_write_tokens;
+    const cost = estimateCostUsd(
+      row.model,
+      row.input_tokens,
+      row.output_tokens,
+      row.cache_read_tokens,
+      row.cache_write_tokens,
+    );
+    // A failed call with no model and no tokens cost nothing; only a call
+    // that spent tokens at an unknown price makes the total a floor.
+    if (cost === null) {
+      if (spentTokens > 0) spend.unpricedCallCount++;
+    } else {
+      s.estimatedCostUsd += cost;
+    }
+  }
+  spend.byStage = STAGE_ORDER.flatMap((stage) => {
+    const s = stages.get(stage);
+    return s ? [s] : [];
+  });
+  for (const s of spend.byStage) {
+    spend.callCount += s.callCount;
+    spend.inputTokens += s.inputTokens;
+    spend.outputTokens += s.outputTokens;
+    spend.cacheReadTokens += s.cacheReadTokens;
+    spend.cacheWriteTokens += s.cacheWriteTokens;
+    spend.estimatedCostUsd += s.estimatedCostUsd;
+  }
+  return spend;
+}
+
+/** Spend for several runs in two queries: the rows tagged with any of
+ * their ids, and the untagged rows of their projects since the earliest
+ * start (the `time-window` fallback). Keyed by run id. */
+export async function getGraphLogRunSpends(runs: RunWindow[]): Promise<Record<string, GraphLogRunSpend>> {
+  const out: Record<string, GraphLogRunSpend> = {};
+  if (runs.length === 0) return out;
+  await ensureTables();
+  const runIds = runs.map((r) => r._id);
+  const projectIds = [...new Set(runs.map((r) => r.project_folder_id))];
+  const since = runs.reduce((min, r) => (r.started_at < min ? r.started_at : min), runs[0].started_at);
+  const [taggedResult, untaggedResult] = await Promise.all([
+    query<[GraphLogUsageEvent[]]>(`SELECT * FROM graphlog_usage_events WHERE run_id IN $runIds`, { runIds }),
+    query<[GraphLogUsageEvent[]]>(
+      `SELECT * FROM graphlog_usage_events
+       WHERE (run_id = NONE OR run_id = null)
+         AND project_folder_id IN $projectIds
+         AND created_at >= $since`,
+      { projectIds, since },
+    ),
+  ]);
+  const candidates = [...(taggedResult?.[0] ?? []), ...(untaggedResult?.[0] ?? [])].map(formatRecord);
+  for (const run of runs) {
+    const { attribution, rows } = usageRowsForRun(run, candidates);
+    out[run._id] = summarizeRunSpend(run._id, attribution, rows);
+  }
+  return out;
+}
+
+export async function getGraphLogRunSpend(run: RunWindow): Promise<GraphLogRunSpend> {
+  return (await getGraphLogRunSpends([run]))[run._id];
 }

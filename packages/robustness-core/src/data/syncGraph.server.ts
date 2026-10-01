@@ -1882,6 +1882,7 @@ export async function runSyncGraph(
 
       const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
+        runId: perf.runId,
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
         stage: "sync-graph",
@@ -2014,6 +2015,7 @@ export async function runSyncGraph(
       incomplete.push(`${date} stopped on an error: ${message}`);
       const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
+        runId: perf.runId,
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
         stage: "sync-graph",

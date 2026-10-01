@@ -1792,6 +1792,12 @@ export async function runGraphProjectView(
   // appear on this page: a reader here may not be able to see them, and
   // may not be allowed to learn they exist (Austin, 2026-09-21).
   const moveDestNames = await listDestinationNames(projectFolder._id);
+  // Why this run reaches the model, recorded as a run event so the run
+  // page can say it. Each rebuild is a near-flat cost, so the reason is
+  // the number a cadence decision is made from.
+  let rebuildReason: "graph-changed" | "skill-rewrite" | "names-another-project" | "unread-notes" | "unread-marks" =
+    rewrite ? "skill-rewrite" : "graph-changed";
+  let unreadNotes = 0;
   if (applied && !rewrite) {
     // A reader correction is new input even when the graph is not: a
     // person wrote in "Notes on this view" and the page has not read it.
@@ -1801,14 +1807,18 @@ export async function runGraphProjectView(
     const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
     const readmeBody = stripIncompleteBanner(splitFrontmatter(readme?.content ?? "").body);
     const unread = extractReaderComments(splitReadmeSections(readmeBody)).unstamped.length;
+    unreadNotes = unread;
     const named = namesAnotherProject(readmeBody, moveDestNames);
     if (named) {
+      rebuildReason = "names-another-project";
       // Not a report this time: the page can fix itself, and a check that
       // only ever says the same thing every run is a check nobody reads.
       log(`graph-project-view: the graph is unchanged, but the page names another project ("${named}"); reconciling to take the name out.`);
     } else if (unread > 0) {
+      rebuildReason = "unread-notes";
       log(`graph-project-view: the graph is unchanged, but ${unread} unread reader correction(s) are waiting in "Notes on this view"; reconciling the page against them.`);
     } else if (readerMarks.length > 0) {
+      rebuildReason = "unread-marks";
       log(`graph-project-view: the graph is unchanged, but ${readerMarks.length} unread mark(s) are waiting; reconciling the page against them.`);
     } else {
       // The README is not rewritten, but it still exists and the graph is
@@ -1819,6 +1829,13 @@ export async function runGraphProjectView(
       // is training to ignore the warning; the no-op run on production
       // read that way the first time anyone did one.
       log("graph-project-view: up to date, nothing changed since last run.");
+      await perf.event({
+        process: "graph-project-view",
+        type: "fn",
+        name: "rebuildDecision",
+        params: { reason: "up-to-date", rebuilt: false },
+        durationMs: 0,
+      });
       const { allNodes } = await loadGraphNodes(files);
       const coverage = readme
         ? computeCoverageReport(
@@ -1831,6 +1848,13 @@ export async function runGraphProjectView(
         staleSkill, summary: [], coverage, incomplete: [] };
     }
   }
+  await perf.event({
+    process: "graph-project-view",
+    type: "fn",
+    name: "rebuildDecision",
+    params: { reason: rebuildReason, rebuilt: true, unreadNotes, unreadMarks: readerMarks.length },
+    durationMs: 0,
+  });
 
   // 1.1's own floor+ceiling (ADR-006): read every graph-log file's real
   // node text, not just graph-structure.md's own glosses, so the model
@@ -2178,6 +2202,7 @@ export async function runGraphProjectView(
     const durationMs = Date.now() - callStart;
     const failed = shortfall !== null || refusedInFinalPass > 0;
     await recordGraphLogUsage({
+      runId: perf.runId,
       humanId: actingHumanId,
       projectFolderId: projectFolder._id,
       stage: "graph-project-view",
@@ -2334,6 +2359,7 @@ export async function runGraphProjectView(
     log(`graph-project-view: couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
     const durationMs = Date.now() - callStart;
     await recordGraphLogUsage({
+      runId: perf.runId,
       humanId: actingHumanId,
       projectFolderId: projectFolder._id,
       stage: "graph-project-view",
