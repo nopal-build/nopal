@@ -39,6 +39,7 @@ import OxPopover from "../oxmarkdown/OxPopover";
 import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { posterUrl, renditionUrl } from "../oxmarkdown/mediaUrls";
+import { useLoadFailed } from "../oxmarkdown/useLoadFailed";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import {
   buildAnnotationCtx,
@@ -78,6 +79,13 @@ export interface OxRendererProps {
    * in the margin. See `oxmarkdown/marks.tsx`. Omitted, nothing about the
    * output changes. */
   annotations?: OxAnnotations;
+  /** The id each `::file{...}` is loaded by, keyed by the id the markdown
+   * names (`servedFileIds`, `projectView.server.ts`): for a page that
+   * shows someone else's Card, whose files a reader opens by the
+   * project's copy, not the writer's original. A file with no entry is
+   * drawn without its picture. The markdown is untouched. Omitted, every
+   * file loads by the id it names. */
+  servedFileIds?: Record<string, string>;
   className?: string;
 }
 
@@ -89,6 +97,7 @@ export default function OxRenderer({
   resolveCard,
   resolveGalleryFolder,
   annotations,
+  servedFileIds,
   className,
 }: OxRendererProps) {
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
@@ -107,6 +116,7 @@ export default function OxRenderer({
           resolveCard={resolveCard}
           resolveGalleryFolder={resolveGalleryFolder}
           annotations={annotations}
+          servedFileIds={servedFileIds}
         />
       </div>
     </div>
@@ -163,11 +173,12 @@ export interface OxTreeRendererProps {
   resolveCard?: CardResolver;
   resolveGalleryFolder?: GalleryFolderResolver;
   annotations?: OxAnnotations;
+  servedFileIds?: Record<string, string>;
 }
 
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
-export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, annotations }: OxTreeRendererProps) {
+export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, annotations, servedFileIds }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
   const ambiguousRefFirstNames = useMemo(() => collectAmbiguousRefFirstNames(doc), [doc]);
   const annotationCtx = useMemo(
@@ -184,6 +195,7 @@ export function OxTreeRenderer({ doc, directives, interactive, resolveCard, reso
         resolveGalleryFolder,
         ambiguousRefFirstNames,
         annotations: annotationCtx,
+        servedFileIds,
       })}
     </>
   );
@@ -203,6 +215,8 @@ interface RenderCtx {
   ambiguousRefFirstNames?: Set<string>;
   /** The pen, when the caller turned it on. See `oxmarkdown/marks.tsx`. */
   annotations?: AnnotationCtx;
+  /** See `OxRendererProps.servedFileIds`. */
+  servedFileIds?: Record<string, string>;
 }
 
 /** Which first names are shared by two or more cited people in this
@@ -773,7 +787,7 @@ function renderGalleryGrid(
                 preload="metadata"
               />
             ) : (
-              <img src={renditionUrl(img.url, "display")} alt={img.alt ?? ""} title={img.title ?? undefined} loading="lazy" />
+              <GalleryPhoto src={renditionUrl(img.url, "display")} alt={img.alt ?? ""} title={img.title ?? undefined} />
             )}
             {img.alt && <figcaption>{img.alt}</figcaption>}
           </>
@@ -807,13 +821,21 @@ function renderGalleryGrid(
   );
 }
 
+/** A gallery's photo, or its empty frame when it will not load
+ * (`useLoadFailed`): never the browser's broken-image icon. */
+function GalleryPhoto({ src, alt, title }: { src: string; alt: string; title?: string }) {
+  const load = useLoadFailed(src);
+  if (load.failed) return <div className="ox-photo-missing" role="img" aria-label={alt || "A photo that didn't load"} title={title} />;
+  return <img ref={load.ref} onError={load.onError} src={src} alt={alt} title={title} loading="lazy" />;
+}
+
 function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): ReactNode {
   // `::file{...}` is a BUILT-IN interactable, not a caller-registered
   // directive (same category as task checkboxes, not "gallery"/"csv-table")
   // — see `oxmarkdown/fileDirective.ts`'s header. Handled before the
   // registry lookup so it can't be shadowed by a caller's own "file" entry.
   if (node.type === "leafDirective" && node.name === "file") {
-    return <FileDirectiveStatic key={key} node={node} directives={ctx.directives} />;
+    return <FileDirectiveStatic key={key} node={node} directives={ctx.directives} servedFileIds={ctx.servedFileIds} />;
   }
 
   // `:ref{...}` — same built-in category, see
@@ -1068,12 +1090,18 @@ export function FileDirectiveLayout({
   // typing cursor mid-caption resets), an acceptable trade-off for reusing
   // the one real editor instance instead of running two.
   const [zoomed, setZoomed] = useState(false);
+  // A picture that will not load is drawn as a file, like one that is not
+  // a picture (`useLoadFailed`).
+  const thumbSrc = isImage ? renditionUrl(`/api/vault/view/${fileId}`, "thumb") : undefined;
+  const thumb = useLoadFailed(thumbSrc);
   return (
     <div className="ox-file-directive" contentEditable={false}>
-      {isImage ? (
+      {isImage && !thumb.failed ? (
         <img
+          ref={thumb.ref}
+          onError={thumb.onError}
           className="ox-file-thumb"
-          src={renditionUrl(`/api/vault/view/${fileId}`, "thumb")}
+          src={thumbSrc}
           alt={name}
           title={name}
           draggable={false}
@@ -1112,7 +1140,7 @@ export function FileDirectiveLayout({
           </CircleButton>
         </div>
       )}
-      {zoomed && isImage && fileId && (
+      {zoomed && isImage && !thumb.failed && fileId && (
         <FileImageModal
           name={name}
           fileId={fileId}
@@ -1226,16 +1254,25 @@ function FileImageModal({
 function FileDirectiveStatic({
   node,
   directives,
+  servedFileIds,
 }: {
   node: DirectiveNode;
   directives?: DirectiveRegistry;
+  servedFileIds?: Record<string, string>;
 }) {
   const attrs = directiveAttrs(node);
+  // Own-key lookup: the id is text a writer can type.
+  const fileId =
+    servedFileIds && attrs.fileId
+      ? Object.hasOwn(servedFileIds, attrs.fileId)
+        ? servedFileIds[attrs.fileId]
+        : undefined
+      : attrs.fileId;
   const captionDoc = attrs.caption ? parseOxDocument(attrs.caption) : null;
   return (
     <FileDirectiveLayout
       name={attrs.name ?? "file"}
-      fileId={attrs.fileId}
+      fileId={fileId}
       contentType={attrs.contentType}
       uploadError={attrs.uploadError === "1"}
       caption={

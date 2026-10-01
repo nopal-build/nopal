@@ -1644,7 +1644,8 @@ img.ox-file-thumb {
    row's height, and left roughly a column's worth of dead space beside it
    on a real README. Uniform cells are what keep a grid a grid. */
 .ox-gallery-item img,
-.ox-gallery-item video {
+.ox-gallery-item video,
+.ox-gallery-item .ox-photo-missing {
   display: block;
   width: 100%;
   aspect-ratio: 1 / 1;

@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { canReadFile } from "robustness-core/data/featureAccess.server";
+import { readableFile } from "robustness-core/data/featureAccess.server";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { getFileRefById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
 import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
@@ -18,7 +18,7 @@ import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
  *     itself (see `triggerFileDownload` in `vault.tsx`).
  *
  * The file's owner, or anyone granted view access through a shared
- * folder, may download via this endpoint (`canReadFile`).
+ * folder, may download via this endpoint (`readableFile`).
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const scoped = await getScopedUserFromRequest(request);
@@ -32,8 +32,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return Response.json({ error: "fileId required" }, { status: 400 });
   }
 
-  const file = await getFileRefById(fileId);
-  if (!file) {
+  const asked = await getFileRefById(fileId);
+  if (!asked) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -44,10 +44,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // but not save it, and `pull-daily-logs.ts` could never copy the bytes
   // of a shared project's attachments locally. Sync-scoped tokens stay
   // owner-only.
-  const permitted = syncScoped
-    ? file.human_id === user._id
-    : await canReadFile(user._id, file);
-  if (!permitted) {
+  // And, as there, a writer's original the reader can't open is answered
+  // with the project's copy of it (`readableFile`).
+  const file = syncScoped ? (asked.human_id === user._id ? asked : null) : await readableFile(user._id, asked);
+  if (!file) {
     // The same 404 as a file that doesn't exist (ADR-023): a refusal
     // says nothing about what was there.
     return Response.json({ error: "Not found" }, { status: 404 });
