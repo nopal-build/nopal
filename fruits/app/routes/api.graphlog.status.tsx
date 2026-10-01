@@ -2,6 +2,8 @@ import type { LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getGraphLogProjectStatus } from "robustness-core/data/graphLogQueue.server";
+import { findProjectGraphFolder } from "robustness-core/data/projectN02.server";
+import { isNightly } from "robustness-core/data/effortsPrint.server";
 
 /**
  * GET /api/graphlog/status?projectFolderId=...
@@ -37,5 +39,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!folder) return Response.json({ error: "Project not found" }, { status: 404 });
 
   const status = await getGraphLogProjectStatus(projectFolderId);
-  return Response.json({ ...status, scheduled: folder.graphlog_scheduled === true });
+  // On unless turned off, and only once the project has a graph (ADR-030).
+  const scheduled = isNightly(folder, (await findProjectGraphFolder(folder)) !== null);
+  return Response.json({ ...status, scheduled });
 }

@@ -369,10 +369,11 @@ pub fn graph_project_view(project_path: &str) -> Result<(), Box<dyn Error + Send
     Ok(())
 }
 
-/// Runs GraphLog's full pipeline for `project_path`, in order:
-/// daily-log-sync -> sync-knowledge -> sync-graph -> graph-structure ->
-/// graph-project-view. See the `graphlog` skill. Enqueues one job
-/// covering all five stages and polls it — the individual stage commands
+/// Builds `project_path`'s graph, in order: daily-log-sync ->
+/// sync-knowledge -> sync-graph -> graph-structure, with the Efforts page
+/// held for a print (ADR-030; graph-project-view only records what is
+/// waiting). The same `"run"` job the nightly enqueues. See the `graphlog`
+/// skill. Enqueues one job and polls it — the individual stage commands
 /// above remain useful for iterating on one project's own skill files
 /// without paying for the others every time.
 pub fn run(project_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -607,8 +608,9 @@ pub fn reset_knowledge(
 }
 
 // ─── Schedule (Admin/Super only) ──────────────────────────
-// `nopal graphlog schedule enable/disable/status` — enrolls/removes a
-// project from GraphLog's nightly automatic run, or reads back its own
+// `nopal graphlog schedule enable/disable/status` — turns a project's
+// nightly run back on or off (on by default once it has a graph,
+// ADR-030), or reads back its own
 // current schedule/run status. Thin clients over `api.graphlog.schedule`
 // (enable/disable) and the same `api.graphlog.status` the Vault UI's own
 // permanent status line polls (status) — see the `graphlog` skill. The

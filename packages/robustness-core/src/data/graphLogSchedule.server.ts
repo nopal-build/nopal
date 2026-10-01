@@ -1,6 +1,8 @@
 /**
- * GraphLog's daily automatic run — an Admin/Super-only opt-in per
- * `project-n02` folder (a project OR a `personal` space), mirroring
+ * GraphLog's daily automatic run: on by default for every `project-n02`
+ * folder (a project OR a `personal` space) that already has a graph, off
+ * only where an Admin/Super turned it off (ADR-030; it was opt-in until
+ * 2026-10-01). Mirrors
  * `projectStatus.server.ts`'s architecture: a denormalized boolean flag on
  * `vault_folders` (`graphlog_scheduled`/`graphlog_scheduled_at`) is the
  * source of truth, set only through `setGraphLogScheduled` below.
@@ -9,7 +11,8 @@
  * `POST /api/graphlog/scheduled-run` once, anchored to local midnight
  * (not just "once every 24h from server start" like the other crons),
  * which calls `getGraphLogScheduledFolders` here and enqueues a normal
- * `"run"` job (`graphLogQueue.server.ts`) for each. `runGraphLogPipeline`
+ * `"run"` job (`graphLogQueue.server.ts`) for each. A `"run"` builds the
+ * graph and holds the Efforts page for a print (ADR-030). `runGraphLogPipeline`
  * itself needs no separate "fresh vs incremental" mode for this — every
  * stage already decides that on its own from what's already on disk (a
  * brand new or just-`reset` project has no `Graph` folder / no synced
@@ -19,12 +22,8 @@
 
 import { formatRecord, query } from "./generic.server";
 import { updateVaultFolder, type VaultFolder } from "./vault.server";
-
-/** Whether `folder` is currently enrolled in GraphLog's daily automatic
- * run. Reads the denormalized cache directly (see module doc). */
-export function isGraphLogScheduled(folder: VaultFolder): boolean {
-  return folder.graphlog_scheduled === true;
-}
+import { findProjectGraphFolder } from "./projectN02.server";
+import { isNightly } from "./effortsPrint.server";
 
 export type SetGraphLogScheduledResult =
   | { ok: true; scheduled: boolean }
@@ -54,18 +53,20 @@ export async function setGraphLogScheduled(
 }
 
 /**
- * Every `project-n02` root folder currently enrolled in the daily
- * automatic run — what `api.graphlog.scheduled-run.tsx`'s midnight cron
- * enqueues a `"run"` job for. A direct query against the denormalized
- * cache (same trick `getTrashedProjectFoldersForCleanup` uses for
- * `project_status`) rather than a per-human scan across every vault.
+ * Every `project-n02` root folder the nightly runs for, which is what
+ * `api.graphlog.scheduled-run.tsx`'s midnight cron enqueues a `"run"`
+ * job for. Not turned off (`!= false`, so a folder that never set the
+ * flag is on), and already holding a graph (`isNightly`): a project that
+ * was never run does not pay its whole backlog on the first night.
  */
 export async function getGraphLogScheduledFolders(): Promise<VaultFolder[]> {
   const result = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders
      WHERE folder_type = 'project-n02'
        AND is_folder_type_root = true
-       AND graphlog_scheduled = true`,
+       AND (graphlog_scheduled = NONE OR graphlog_scheduled != false)`,
   );
-  return (result?.[0] ?? []).map(formatRecord);
+  const folders = (result?.[0] ?? []).map(formatRecord);
+  const withGraph = await Promise.all(folders.map(async (f) => isNightly(f, (await findProjectGraphFolder(f)) !== null)));
+  return folders.filter((_, i) => withGraph[i]);
 }

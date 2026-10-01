@@ -37,7 +37,12 @@ export function getGraphLogQueue(): Queue<GraphLogJobData, unknown, GraphLogJobN
 }
 
 export type GraphLogJobName =
+  /** The graph, with the Efforts page held for a print (ADR-030): the
+   * nightly, the Vault's Run, `nopal graphlog run`. */
   | "run"
+  /** The graph, then the Efforts page: "Print an update" on the page
+   * (`api.graphlog.print.tsx`). ADR-030. */
+  | "print"
   | "sync-knowledge"
   | "sync-graph"
   | "graph-structure"

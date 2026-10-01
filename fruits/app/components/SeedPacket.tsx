@@ -192,7 +192,7 @@ function sowSentence(r: SowResult): string {
   const q = r.questions ?? 0;
   const questions = q === 0 ? " No questions." : q > QUESTION_NOTICE ? ` ${q} questions, which is a lot. They're in Suggestions.` : ` ${q} ${q === 1 ? "question" : "questions"} in Suggestions.`;
   const left = r.incomplete?.length ? ` ${r.incomplete.length} didn't finish and ${r.incomplete.length === 1 ? "is" : "are"} still waiting.` : "";
-  return `Sowed ${files}${days}${docs}.${questions}${left} Run GraphLog to build from it.`;
+  return `Sowed ${files}${days}${docs}.${questions}${left} Print an update on the Efforts tab to build the page from it.`;
 }
 
 export function SeedRoundControls({ projectFolderId, seeding, onChanged }: { projectFolderId: string; seeding: SeedingForPage; onChanged: () => void }) {

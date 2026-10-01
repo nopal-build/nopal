@@ -5,8 +5,11 @@
  *   daily-log-sync -> sync-knowledge -> sync-graph -> graph-structure
  *     -> graph-project-view
  *
- * One job (`nopal graphlog run` / `POST /api/graphlog/run`) runs all five
- * stages sequentially, sharing one progress log. Each stage is ALSO
+ * Two jobs share this function (ADR-030). The `"print"` job runs all five
+ * stages. The `"run"` job (the nightly, the Vault's Run, `nopal graphlog
+ * run`) builds the graph and HOLDS the page: graph-project-view only
+ * decides and records what is waiting, and rebuilds only to take another
+ * project's name off the page. Either way one progress log. Each stage is ALSO
  * independently runnable (its own CLI subcommand/API route) for iterating
  * on one project's own skill files without paying for the others every
  * time — this is purely a convenience composition, no new logic of its
@@ -53,6 +56,9 @@ export type GraphLogPipelineResult =
       syncGraph: SyncGraphResult;
       graphStructure: GraphStructureResult;
       graphProjectView: GraphProjectViewResult;
+      /** Which mode ran: `"print"` rebuilds the page when anything is new;
+       * `"hold"` builds the graph and leaves the page for a print. */
+      view: "print" | "hold";
       /** Every reason a stage finished without doing its whole job,
        * prefixed with the stage it came from. Empty on a fully clean run.
        *
@@ -82,6 +88,9 @@ export type GraphLogPipelineResult =
        * say whether a coverage figure was measured against a README this
        * run wrote or one it left alone. */
       readmeChanged: boolean;
+      /** True when the page had something new and the run held it for a
+       * print. */
+      held: boolean;
       /** 1.7's denominators, so cost becomes a RATE rather than a total.
        *
        * The per-run and per-stage cost was already recorded; what was
@@ -127,6 +136,9 @@ export interface RunGraphLogPipelineOptions {
    * the stamp says an older skill wrote it. Never set by a normal run;
    * the `rerun-outputs` job sets it. See `composeStageSkill`. */
   rebuildStale?: boolean;
+  /** `"print"` (default) rebuilds the Efforts page when anything is new;
+   * `"hold"` is the nightly's mode, see this file's module doc. */
+  view?: "print" | "hold";
 }
 
 export async function runGraphLogPipeline(
@@ -137,6 +149,7 @@ export async function runGraphLogPipeline(
 ): Promise<GraphLogPipelineResult> {
   const log = onProgress ?? (() => {});
   const perf = opts.perf ?? noopGraphLogRunRecorder;
+  const view = opts.view ?? "print";
 
   const projectFolder: VaultFolder | undefined = await getFolderById(projectFolderId);
   if (!projectFolder) return { ok: false, error: "Project not found" };
@@ -201,6 +214,7 @@ export async function runGraphLogPipeline(
       log,
       perf,
       rebuildStale: opts.rebuildStale,
+      hold: view === "hold",
     }),
   );
   if (!graphProjectView.ok) return { ok: false, error: graphProjectView.error };
@@ -250,7 +264,13 @@ export async function runGraphLogPipeline(
   // the README looks fine. This puts it where a reader of the PROJECT sees
   // it, in bold, on the first line. Deliberately last: it needs the whole
   // run's outcome, and a clean run clears any banner an earlier one left.
-  const bannerChanged = await syncReadmeIncompleteBanner(projectFolder, incomplete);
+  //
+  // Only when the page stage actually wrote the page (ADR-030). A held
+  // night leaves README.md exactly as the last print left it; its own
+  // incomplete reasons are on the run page, and the next print re-judges
+  // the banner from scratch.
+  const pageWritten = view === "print" || (graphProjectView.held !== true && graphProjectView.changed);
+  const bannerChanged = pageWritten ? await syncReadmeIncompleteBanner(projectFolder, incomplete) : false;
   if (bannerChanged) {
     log(
       incomplete.length > 0
@@ -266,12 +286,14 @@ export async function runGraphLogPipeline(
     syncGraph,
     graphStructure,
     graphProjectView,
+    view,
     incomplete,
     // Straight through from the stage. Null whenever the view stage did
     // not reach a clean finish, which is most of the runs worth looking
     // at -- the reader has to say "not measured", never "clean".
     coverage: graphProjectView.coverage,
     readmeChanged: graphProjectView.changed,
+    held: graphProjectView.held === true,
     stats,
   };
 }

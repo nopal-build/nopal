@@ -8,10 +8,11 @@ import { enqueueGraphLogJob, getGraphLogProjectStatus } from "robustness-core/da
 /**
  * POST /api/graphlog/run
  *
- * Enqueues GraphLog's full pipeline for one project, in order:
- * daily-log-sync -> sync-knowledge -> sync-graph -> graph-project-view
- * (`graphLogAgent.server.ts`'s `runGraphLogPipeline`) — see the
- * `graphlog` skill. Thin client: `nopal graphlog run`.
+ * Enqueues a `"run"` for one project: the graph (daily-log-sync ->
+ * sync-knowledge -> sync-graph -> graph-structure), with the Efforts page
+ * held for a print (ADR-030, `runGraphLogPipeline`). The same job the
+ * nightly enqueues. Thin client: `nopal graphlog run`. The page itself is
+ * `api.graphlog.print.tsx`.
  *
  * Body:
  *   projectFolderId — required.

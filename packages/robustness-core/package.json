@@ -31,6 +31,7 @@
     "./data/graphLogMoves.server": "./src/data/graphLogMoves.server.ts",
     "./data/pageBody.server": "./src/data/pageBody.server.ts",
     "./data/graphLogSchedule.server": "./src/data/graphLogSchedule.server.ts",
+    "./data/effortsPrint.server": "./src/data/effortsPrint.server.ts",
     "./data/graphNodeIndex.server": "./src/data/graphNodeIndex.server.ts",
     "./data/effortReadings.server": "./src/data/effortReadings.server.ts",
     "./data/graphProjectView.server": "./src/data/graphProjectView.server.ts",

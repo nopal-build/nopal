@@ -122,7 +122,7 @@ describe("what the run decided about Efforts", () => {
         ev({ process: "sync-graph", name: "complete" }),
         ev({ params: { reason: "unread-marks", rebuilt: true, unreadNotes: 0, unreadMarks: 2 } }),
       ]),
-    ).toEqual({ rebuilt: true, reason: "unread-marks", unreadNotes: 0, unreadMarks: 2 });
+    ).toEqual({ rebuilt: true, reason: "unread-marks", unreadNotes: 0, unreadMarks: 2, waiting: [] });
   });
 
   it("is null when the stage never reached the decision", () => {

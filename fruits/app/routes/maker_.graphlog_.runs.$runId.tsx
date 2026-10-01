@@ -215,7 +215,7 @@ const TYPE_LABEL: Record<GraphLogPerfEventType, string> = {
 // check that never ran, which is the same class of quiet failure the
 // banner exists to stop.
 
-const COVERAGE_JOB_NAMES = new Set(["run", "graph-project-view"]);
+const COVERAGE_JOB_NAMES = new Set(["run", "print", "graph-project-view"]);
 
 function CoverageList({ label, items }: { label: string; items: string[] }) {
   if (items.length === 0) return null;
@@ -239,14 +239,17 @@ function CoverageSection({
   jobName,
   coverage,
   readmeChanged,
+  held,
 }: {
   jobName: string;
   coverage: GraphLogRun["coverage"];
   readmeChanged: boolean | null;
+  held: boolean;
 }) {
   // A reset or a sync-only job never had a README to measure. Saying
-  // "not measured" there would be noise, not signal.
-  if (!COVERAGE_JOB_NAMES.has(jobName)) return null;
+  // "not measured" there would be noise, not signal. Neither would it on
+  // a night that held the page for a print: the Spend line says so.
+  if (!COVERAGE_JOB_NAMES.has(jobName) || held) return null;
 
   if (!coverage) {
     return (
@@ -467,7 +470,7 @@ export default function FruitsMakerGraphLogRun() {
               </ul>
             </div>
           )}
-          <CoverageSection jobName={run.job_name} coverage={run.coverage ?? null} readmeChanged={run.readme_changed ?? null} />
+          <CoverageSection jobName={run.job_name} coverage={run.coverage ?? null} readmeChanged={run.readme_changed ?? null} held={effortsDecision?.reason === "held-for-print"} />
           <RunSpendSection spend={spend} decision={effortsDecision} />
         </div>
 

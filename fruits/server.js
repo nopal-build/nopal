@@ -196,9 +196,9 @@ httpServer.listen(3000, () => {
     }
 
     // ── GraphLog scheduled run ─────────────────────────────────────────────
-    // Runs GraphLog's full pipeline for every project/personal space an
-    // Admin/Super has enrolled ("More Actions" → Enable GraphLog Schedule
-    // in the Vault — see `graphLogSchedule.server.ts`). Same CRON_SECRET,
+    // Builds the graph for every project/personal space that has one and
+    // that staff haven't turned off, holding the Efforts page for a print
+    // (ADR-030, `graphLogSchedule.server.ts`). Same CRON_SECRET,
     // but anchored to actual local midnight rather than "once every 24h
     // from server start" like the crons above — the whole point of this
     // one is running overnight.

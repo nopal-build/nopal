@@ -37,7 +37,9 @@ import { loadBudget } from "robustness-core/data/budget.server";
 import { currentSeedRound, listPacketFiles, listSeedQuestions } from "robustness-core/data/seedPackets.server";
 import { SeedPacket, SeedRoundQuiet, type SeedingForPage } from "../components/SeedPacket";
 import { BudgetView, type BudgetNames } from "../components/BudgetView";
-import { getHumansById } from "robustness-core/data/humans.server";
+import { getHumansById, isStaff } from "robustness-core/data/humans.server";
+import { getEffortsPrintedAt, printAllowance } from "robustness-core/data/effortsPrint.server";
+import { PrintUpdate, type PrintForPage } from "../components/PrintUpdate";
 import { firstName } from "robustness-core/data/humanNames";
 import {
   PROJECT_TAB_LABELS,
@@ -183,6 +185,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }),
   );
 
+  // "Print an update" (ADR-030): the date for everyone who reads the page,
+  // the button for a role on the list or staff. The allowance reads the
+  // role's own features, never the Observer fallback above: a share from
+  // before roles reads the page and doesn't print.
+  const print: PrintForPage | null = tab === "efforts"
+    ? await (async () => {
+        const printedAt = await getEffortsPrintedAt(folder);
+        return { printedAt, allowance: printAllowance({ features: role?.features ?? [], isStaff: isStaff(user), printedAt, now: new Date() }) };
+      })()
+    : null;
+
   return {
     // Every other route surfaces `user` in its own loader data for
     // `useUser()`/`permissions.isAdmin()` to find via `useMatches()` --
@@ -229,6 +242,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     budgetView,
     budget,
     budgetNames,
+    print,
     canBudget: features.includes("budget"),
   };
 }
@@ -482,7 +496,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, seeding, budgetView, budget, budgetNames, canBudget } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -683,6 +697,9 @@ export default function NewspaperRoute() {
           </Cluster>
         </Stack>
         <CardTabs tabs={tabs} active={tab} label="Project">
+          {tab === "efforts" && print && (
+            <PrintUpdate projectFolderId={folder._id} print={print} onPrinted={() => revalidator.revalidate()} />
+          )}
           {tab === "efforts" && (
             <ProjectView body={body} galleryFolders={galleryFolders} annotations={annotations} />
           )}
