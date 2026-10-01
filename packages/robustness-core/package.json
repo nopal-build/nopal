@@ -15,6 +15,7 @@
     "./data/anthropicProvider.server": "./src/data/anthropicProvider.server.ts",
     "./data/apiTokens.server": "./src/data/apiTokens.server.ts",
     "./data/attachmentFrames.server": "./src/data/attachmentFrames.server.ts",
+    "./data/citedLogs.server": "./src/data/citedLogs.server.ts",
     "./data/dailyLog.server": "./src/data/dailyLog.server.ts",
     "./data/dailyLogSync.server": "./src/data/dailyLogSync.server.ts",
     "./data/db.server": "./src/data/db.server.ts",

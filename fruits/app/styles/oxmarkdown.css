@@ -1925,6 +1925,11 @@ div.ox-markable {
   font-size: inherit;
   line-height: inherit;
 }
+/* Reading a Card in the pen ("Read the full log"): a log wants a page's
+   width, not a mark's. The sheet on a phone is full width either way. */
+.ox-mark-popover.ox-mark-popover--reading {
+  width: min(560px, calc(100vw - 16px));
+}
 .ox-mark-popover.ox-popover--sheet {
   width: 100%;
 }
@@ -1937,8 +1942,9 @@ div.ox-markable {
   min-height: 96px;
   background: var(--color-surface-card);
 }
-/* The pen's footer: the move link on the left, the actions on the right,
-   one line; the move form, when open, takes the whole width. */
+/* The pen's footer: the log and move links stacked on the left, the
+   actions on the right; the move form or the log, when open, takes the
+   whole width. */
 .ox-mark-footer {
   display: flex;
   flex-wrap: wrap;
@@ -1946,8 +1952,28 @@ div.ox-markable {
   justify-content: space-between;
   gap: 8px;
 }
-.ox-mark-footer > .ox-mark-move {
+.ox-mark-footer__links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ox-mark-footer__links--open,
+.ox-mark-footer > .ox-mark-log {
   flex-basis: 100%;
+}
+/* Each Card the line came from, under the Logbook's own label. */
+.ox-mark-log__entry + .ox-mark-log__entry {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ox-color-border);
+}
+.ox-mark-log__label {
+  margin-bottom: 4px;
+  font-size: 0.78rem;
+  color: var(--ox-color-subtle);
+}
+.ox-mark-log > .ox-mark-actions {
+  margin-top: 8px;
 }
 .ox-mark-actions {
   display: flex;

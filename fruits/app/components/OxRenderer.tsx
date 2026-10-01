@@ -178,13 +178,19 @@ export interface OxTreeRendererProps {
   servedFileIds?: Record<string, string>;
 }
 
+/** How the pen draws a Card for "Read the full log" (`marks.tsx`, which
+ * can't import this file): plainly, with no pen of its own. */
+const renderCardInPen = (markdown: string, servedFileIds?: Record<string, string>) => (
+  <OxRenderer markdown={markdown} servedFileIds={servedFileIds} />
+);
+
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
 export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, annotations, servedFileIds }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
   const ambiguousRefFirstNames = useMemo(() => collectAmbiguousRefFirstNames(doc), [doc]);
   const annotationCtx = useMemo(
-    () => (annotations ? buildAnnotationCtx(doc, annotations) : undefined),
+    () => (annotations ? buildAnnotationCtx(doc, annotations, renderCardInPen) : undefined),
     [doc, annotations],
   );
   return (

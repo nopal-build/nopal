@@ -6,8 +6,10 @@ import { pageHash } from "robustness-core/data/pageBody.server";
 import { pageMarkUnits } from "robustness-core/data/graphLogMarks.server";
 import { cardChunks } from "robustness-core/data/graphLogMoves.server";
 import { getDailyLogCards } from "robustness-core/data/dailyLog.server";
-import { parseSyncedCardFileName } from "robustness-core/data/dailyLogSync.server";
+import { DAILY_LOGS_SYNC_FOLDER_NAME, parseSyncedCardFileName } from "robustness-core/data/dailyLogSync.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
+import { projectSyncFolderNames } from "robustness-core/data/citedLogs.server";
 
 /**
  * GET /api/graphlog/move-options?projectFolderId=&pageHash=&unitKey=
@@ -34,6 +36,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!folder || !canViewFolder(user._id, folder)) {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
+  // The same `edit` the move itself asks for (`api.graphlog.moves.tsx`):
+  // an Observer marks and doesn't move, so isn't shown what could move.
+  if (!(await getProjectRole(folder, user._id))?.features.includes("edit")) {
+    return Response.json({ error: "You can mark this project, not move its entries." }, { status: 403 });
+  }
   const raw = (await getReadmeFileForFolder(folder.human_id, folder._id))?.content ?? "";
   if (pageHash(raw) !== hash) {
     return Response.json({ error: "This page has been rewritten. Reload it." }, { status: 409 });
@@ -41,11 +48,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const unit = pageMarkUnits(raw).find((u) => u.key === unitKey);
   if (!unit) return Response.json({ error: "That passage isn't on this page." }, { status: 400 });
 
+  // Only a Card's copy in the project's `Daily Logs` is an entry: a mark's
+  // file has a Card's name one folder over (`Marks`), and offering it
+  // would offer that person's Card for a line that never cited it.
+  const syncFolders = await projectSyncFolderNames(folder);
   const entries = [];
   for (const ref of unit.refs) {
     if (!ref.fileId) continue;
     const synced = await getFileRefById(ref.fileId);
-    const parsed = synced ? parseSyncedCardFileName(synced.name) : null;
+    if (!synced?.folder_id || syncFolders.get(synced.folder_id) !== DAILY_LOGS_SYNC_FOLDER_NAME) continue;
+    const parsed = parseSyncedCardFileName(synced.name);
     if (!parsed) continue;
     const card = (await getDailyLogCards(parsed.humanId, parsed.date)).find(
       (c) => c.projectFolderId === folder._id,

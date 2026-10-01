@@ -81,6 +81,10 @@ describe("the groups", () => {
     expect(client.features).toContain("marks");
     for (const f of ["edit", "files", "costs", "people", "suggestions"] as Feature[]) expect(client.features).not.toContain(f);
   });
+
+  it("the pen's \"Read the full log\" is the Logbook's: every group that marks but a Client (2026-10-01)", () => {
+    expect(GROUPS.filter((g) => featuresOf(g).includes("marks") && featuresOf(g).includes("logbook"))).toEqual(["Guide", "Crafter", "Observer"]);
+  });
 });
 
 describe("test 1: what a Client is sent", () => {
