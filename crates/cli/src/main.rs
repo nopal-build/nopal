@@ -618,24 +618,6 @@ enum GraphlogCommand {
         #[command(subcommand)]
         command: GraphlogScheduleCommand,
     },
-    /// Pushes a project's seed (its history before it logged here: day
-    /// files `YYYY-MM-DD.md` with `kind: seed`, `documents/`, `_people.md`)
-    /// into `Syncs/Seed/`. A second push of the same files changes nothing.
-    /// Run `nopal graphlog run` afterwards to build the graph from it.
-    Seed {
-        /// Vault path of the project, e.g. `projects/sunny`.
-        #[arg(long)]
-        project: String,
-        /// The seed folder on disk.
-        #[arg(long)]
-        dir: std::path::PathBuf,
-        /// Only days on or after this date, YYYY-MM-DD.
-        #[arg(long)]
-        from: Option<String>,
-        /// Only days on or before this date, YYYY-MM-DD.
-        #[arg(long)]
-        to: Option<String>,
-    },
     /// Removes what the seed alone added: the Seed folder, the graph days
     /// only it fed, and the up-to-date stamp on days it shared with live
     /// entries (rebuilt from those on the next run). Never a Card, a
@@ -962,12 +944,6 @@ fn main() {
                 GraphlogCommand::ResetKnowledge { project, yes } => {
                     graphlog::reset_knowledge(&project, yes)
                 }
-                GraphlogCommand::Seed {
-                    project,
-                    dir,
-                    from,
-                    to,
-                } => graphlog::seed(&project, &dir, from.as_deref(), to.as_deref()),
                 GraphlogCommand::SeedWipe { project, yes } => graphlog::seed_wipe(&project, yes),
                 GraphlogCommand::Schedule { command } => match command {
                     GraphlogScheduleCommand::Enable { project } => {

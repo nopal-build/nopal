@@ -576,12 +576,32 @@ line under each group, then `## Noted (not anyone's words)`), `documents/`
 (`kind: seed-document`, dated, `author:`), `_people.md` (a role per name),
 `_attachments.md`. `_review*` and `_to_delete/` never come in.
 
-- **Push:** `nopal graphlog seed --project <path> --dir <folder> [--from D]
-  [--to D]` → `POST /api/graphlog/seed` (a Guide) writes `Syncs/Seed/`, a
-  system folder like `Syncs/Marks/`: each file stamped `date` and
-  `content_hash`, replaced by name, so a second push changes nothing.
-  Never `Daily Logs/`, a Card or a mark. Documents dated in range go to
-  `Syncs/Seed/documents/`. `seed.server.ts`.
+- **The one door is the seed packet (fold of 2026-10-01).** The CLI push
+  (`nopal graphlog seed`, `POST /api/graphlog/seed`, `applySeed`) is gone.
+  A prepared seed file goes into a packet on the project page like any
+  other file, and Sow places it BY CODE, never through the model
+  (`classifyPreparedSeedFile`, `mergePreparedSeedDay`, `seed.server.ts`).
+  Code decides which files are prepared, by three signals:
+  1. `kind: seed` in the front matter = a day, dated by its name
+     (`YYYY-MM-DD.md`) or its `date:`; `kind: seed-document` + `date:` = a
+     document; `kind: seed-people` or the name `_people.md` = the roles
+     file. Any other `kind: seed-*` (`seed-attachments`, a review file) is
+     REFUSED with a reason and stays in the packet: a helper file is not a
+     thread.
+  2. Shape: no `kind` at all, but named `YYYY-MM-DD.md` AND parsing into
+     `## Name` sections or a Noted section = a prepared day "by its shape";
+     the run log says so. A forgotten front matter is a logged line, not a
+     page that reads wrong.
+  3. Anything else is raw and goes to the model (SOW.md).
+  A prepared day ADDS to the day already in the seed, keeping its own
+  `- src:` lines; a bullet already there is not written twice. A file
+  whose front matter says `kind: seed` but does not parse is refused, not
+  modelled. `Syncs/Seed/` is a system folder like `Syncs/Marks/`: each
+  file stamped `date` and `content_hash`. Never `Daily Logs/`, a Card or
+  a mark. How to prepare a folder: the seeding guide in Austin's vault
+  (`Zed efforts/2026-09-29 Seeding Campbell guide (gardener).md`); the
+  shape is the one in the paragraph above. Drop the whole folder's files
+  into your own packet (multi-select), press Sow.
 - **How sync-graph reads it:** by folder id, before file-name attribution.
   Code splits a day into one source per section; a spoken section is cited
   under the person with `origin="seed"` (and their human id when
@@ -643,8 +663,8 @@ runs `runSow` (`sow.server.ts`) over every unsown file, once each:
   third kind; `decideSeedQuestion` edits the one day's seed file, and the
   next run re-extracts that day alone.
 
-A seed wipe deletes the questions and clears `sown_at`. The CLI push
-refuses a day a sowing wrote to.
+A seed wipe deletes the questions and clears `sown_at`, so Sow rebuilds
+the seed from the packets (prepared files included).
 
 ## Reset
 

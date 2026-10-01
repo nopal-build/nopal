@@ -41,6 +41,7 @@ import { loadProjectFiles } from "robustness-core/data/fileFolders.server";
 import { getDailyLogCards, listCardsForProject } from "robustness-core/data/dailyLog.server";
 import { listSuggestionMarks, listUnreadMarks, pageMarkUnits } from "robustness-core/data/graphLogMarks.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
+import { listPacketFiles, removePacketFile } from "robustness-core/data/seedPackets.server";
 import { sessionStorage } from "../app/modules/auth/session.server";
 
 const [clientEmail, crafterEmail, guideEmail, adminEmail, ownId, otherId] = process.argv.slice(2);
@@ -382,17 +383,10 @@ if (creator !== guide.id) {
   check("the creator is back", (await roleOf(creator)) === creatorBefore);
 }
 
-// ── Seeding (2026-09-29): a Guide pushes, an admin wipes, nobody else ───
-const SEED_DAY = `---\ndate: 2020-01-01\nproject: walk\nkind: seed\n---\n\n## Walker\n\n- The walk seeded a line.\n  - src: the walk\n\n## Noted (not anyone's words)\n\n- The walk noted a fact.\n`;
-const seedBody = { projectFolderId: ownId, days: [{ date: "2020-01-01", content: SEED_DAY }], documents: [] };
-await hit(crafter.cookie, "seed: a crafter can't push a seed", "POST", "/api/graphlog/seed", 404, seedBody);
-await hit(client.cookie, "seed: a client can't push a seed", "POST", "/api/graphlog/seed", 404, seedBody);
-await hit(guide.cookie, "seed: the guide pushes one day", "POST", "/api/graphlog/seed", 200, seedBody);
-await hit(guide.cookie, "seed: the guide reads it in the Logbook", "GET", `/newspaper/${ownId}?tab=logbook`, 200);
-await hit(client.cookie, "seed: no Logbook for a client", "GET", `/newspaper/${ownId}?tab=logbook`, 404);
-await hit(guide.cookie, "seed: the guide can't wipe it", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
-await hit(crafter.cookie, "seed: nor a crafter", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
-await hit(admin.cookie, "seed: the admin wipes it", "POST", "/api/graphlog/seed-wipe", 200, { projectFolderId: ownId });
+// ── Seeding (2026-09-29, folded 2026-10-01): the push route is gone ──────
+// The seed packet is the one door; a prepared day goes through it below.
+// An admin wipes; a guide and a crafter cannot.
+await hit(guide.cookie, "seed: the push route is gone, even for a guide", "POST", "/api/graphlog/seed", 404, { projectFolderId: ownId, days: [] });
 
 // ── The Budget (2026-09-29): a view under Costs for Guides alone ────────
 // The project may already have a budget (a start is refused twice), so
@@ -412,6 +406,33 @@ await hit(guide.cookie, "budget: a table that doesn't fit is refused", "POST", "
 // and the guides can open it; only a guide sows or ends the round.
 await hit(crafter.cookie, "packets: a crafter can't open a round", "POST", "/api/seed-round", 404, { projectFolderId: ownId, act: "open" });
 await hit(guide.cookie, "packets: the guide opens a round", "POST", "/api/seed-round", 200, { projectFolderId: ownId, act: "open" });
+// A prepared day (seed shape, `kind: seed`) in the guide's packet is placed
+// by code, no model: the seed day exists after Sow, and only an admin can
+// wipe it. The job is followed through its id like any GraphLog job.
+const SEED_DAY = `---\ndate: 2020-01-01\nproject: walk\nkind: seed\n---\n\n## Walker\n\n- The walk seeded a line.\n  - src: the walk\n\n## Noted (not anyone's words)\n\n- The walk noted a fact.\n`;
+const preparedForm = new FormData();
+preparedForm.append("projectFolderId", ownId);
+preparedForm.append("file", new File([SEED_DAY], "2020-01-01.md", { type: "text/markdown" }));
+await hit(guide.cookie, "seed: the guide adds a prepared day to their packet", "POST", "/api/seed-packet", 201, preparedForm);
+const sowStarted = await hit(guide.cookie, "seed: the guide sows", "POST", "/api/graphlog/sow", 202, { projectFolderId: ownId });
+const sowJobId = (() => { try { return (JSON.parse(sowStarted) as { jobId?: string }).jobId ?? null; } catch { return null; } })();
+let sowDone: { state?: string; result?: { lines?: number; days?: string[] } } = {};
+if (sowJobId) {
+  for (let i = 0; i < 60 && sowDone.state !== "completed" && sowDone.state !== "failed"; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    sowDone = JSON.parse(await hit(guide.cookie, "seed: following the sow job", "GET", `/api/graphlog/jobs/${sowJobId}`, 200)) as typeof sowDone;
+    lines.pop();
+  }
+}
+check("seed: the prepared day was placed by code (2 lines, one day)", sowDone.state === "completed" && sowDone.result?.lines === 2 && (sowDone.result?.days ?? []).includes("2020-01-01"));
+await hit(guide.cookie, "seed: the guide reads it in the Logbook", "GET", `/newspaper/${ownId}?tab=logbook`, 200);
+await hit(client.cookie, "seed: no Logbook for a client", "GET", `/newspaper/${ownId}?tab=logbook`, 404);
+await hit(guide.cookie, "seed: the guide can't wipe it", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
+await hit(crafter.cookie, "seed: nor a crafter", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
+await hit(admin.cookie, "seed: the admin wipes it", "POST", "/api/graphlog/seed-wipe", 200, { projectFolderId: ownId });
+// The wipe put the prepared file back to waiting; take it out so the round can end clean.
+for (const f of await listPacketFiles(ownId)) if (f.name === "2020-01-01.md") await removePacketFile(f._id);
+
 const packetForm = new FormData();
 packetForm.append("projectFolderId", ownId);
 packetForm.append("file", new File(["8/2 Walker: the walk added a line.\n"], "walk-thread.txt", { type: "text/plain" }));
