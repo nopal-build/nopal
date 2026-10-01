@@ -155,6 +155,11 @@ async function ensureTables(): Promise<void> {
  * makes the no-op substitution possible without every call site needing
  * its own `if (perf) ...` branch. */
 export interface GraphLogPerfRecorder {
+  /** The run this recorder writes to, `null` for the no-op recorder.
+   * Usage rows carry it (`recordGraphLogUsage`'s `runId`) so a run can
+   * say what it cost. */
+  readonly runId: string | null;
+
   event(input: {
     process: string;
     type: GraphLogPerfEventType;
@@ -181,7 +186,7 @@ export interface GraphLogPerfRecorder {
 class GraphLogRunRecorder implements GraphLogPerfRecorder {
   private seq = 0;
 
-  constructor(private readonly runId: string) {}
+  constructor(readonly runId: string) {}
 
   async event(input: {
     process: string;
@@ -236,6 +241,7 @@ class GraphLogRunRecorder implements GraphLogPerfRecorder {
  * run/job to attach a timeline to. `time()` still just runs `fn` and
  * returns its result unchanged. */
 export const noopGraphLogRunRecorder: GraphLogPerfRecorder = {
+  runId: null,
   async event() {},
   async time(_process, _type, _name, _params, fn) {
     return fn();
@@ -457,4 +463,27 @@ export async function pruneOldGraphLogRuns(
     await remove("graphlog_runs", run._id);
   }
   return { deletedRuns: runs.length, deletedEvents };
+}
+
+/** What graph-project-view decided about the Efforts page on one run,
+ * read back from its `rebuildDecision` event. `null` when the stage never
+ * reached the decision (it skipped earlier, or the run predates the event,
+ * 2026-10-01). */
+export type EffortsDecision = {
+  rebuilt: boolean;
+  reason: "up-to-date" | "graph-changed" | "skill-rewrite" | "names-another-project" | "unread-notes" | "unread-marks";
+  unreadNotes: number;
+  unreadMarks: number;
+};
+
+export function effortsDecisionFromEvents(events: GraphLogRunEvent[]): EffortsDecision | null {
+  const ev = [...events].reverse().find((e) => e.process === "graph-project-view" && e.name === "rebuildDecision");
+  if (!ev?.params) return null;
+  const p = ev.params as Record<string, unknown>;
+  return {
+    rebuilt: p.rebuilt === true,
+    reason: (p.reason as EffortsDecision["reason"]) ?? "graph-changed",
+    unreadNotes: typeof p.unreadNotes === "number" ? p.unreadNotes : 0,
+    unreadMarks: typeof p.unreadMarks === "number" ? p.unreadMarks : 0,
+  };
 }

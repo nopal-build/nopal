@@ -543,6 +543,8 @@ export type SowRunResult =
 
 export interface RunSowOptions {
   provider?: LlmProvider;
+  /** The worker run this sow belongs to, stamped on its usage rows. */
+  runId?: string | null;
   log?: (line: string) => void;
 }
 
@@ -679,6 +681,7 @@ export async function runSow(projectFolder: VaultFolder, actingHumanId: string, 
       const known = [...new Set([...memberNames, ...(await seedSpeakerNames(projectFolder))])];
       const result = await sowText({ text, fileName: file.name, uploaderName: uploader, knownNames: known, skill, addedOn, provider: opts.provider });
       await recordGraphLogUsage({
+        runId: opts.runId,
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
         stage: "sow",
@@ -773,7 +776,7 @@ export async function runSow(projectFolder: VaultFolder, actingHumanId: string, 
       const message = err instanceof Error ? err.message : "unknown error";
       incomplete.push(`"${file.name}" from ${uploader} could not be sown: ${message}`);
       log(`sow: "${file.name}" from ${uploader} could not be sown (${message}); it stays in the packet.`);
-      await recordGraphLogUsage({ humanId: actingHumanId, projectFolderId: projectFolder._id, stage: "sow", kind: "sow", durationMs: Date.now() - started, outcome: "error", errorKind: classifyGraphLogError(err) });
+      await recordGraphLogUsage({ runId: opts.runId, humanId: actingHumanId, projectFolderId: projectFolder._id, stage: "sow", kind: "sow", durationMs: Date.now() - started, outcome: "error", errorKind: classifyGraphLogError(err) });
     }
   }
 

@@ -522,6 +522,7 @@ export async function runSyncKnowledge(
           }
           const durationMs = Date.now() - callStart;
           await recordGraphLogUsage({
+            runId: perf.runId,
             humanId: actingHumanId,
             projectFolderId: projectFolder._id,
             stage: "sync-knowledge",
@@ -560,6 +561,7 @@ export async function runSyncKnowledge(
             log(`sync-knowledge: "${source.name}"'s output was cut off by the model's own output limit — skipped, will retry next run.`);
             const durationMs = Date.now() - callStart;
             await recordGraphLogUsage({
+              runId: perf.runId,
               humanId: actingHumanId,
               projectFolderId: projectFolder._id,
               stage: "sync-knowledge",
@@ -592,6 +594,7 @@ export async function runSyncKnowledge(
           body = response.text?.trim() || null;
           const durationMs = Date.now() - callStart;
           await recordGraphLogUsage({
+            runId: perf.runId,
             humanId: actingHumanId,
             projectFolderId: projectFolder._id,
             stage: "sync-knowledge",
@@ -629,6 +632,7 @@ export async function runSyncKnowledge(
         );
         const durationMs = Date.now() - callStart;
         await recordGraphLogUsage({
+          runId: perf.runId,
           humanId: actingHumanId,
           projectFolderId: projectFolder._id,
           stage: "sync-knowledge",
@@ -850,6 +854,7 @@ async function fileAttachment(args: {
       }
       const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
+        runId: args.perf.runId,
         humanId: args.actingHumanId,
         projectFolderId: args.projectFolderId,
         stage: "sync-knowledge",
@@ -869,6 +874,7 @@ async function fileAttachment(args: {
     } catch (err) {
       log(`sync-knowledge: "${source.name}" could not be filed (${err instanceof Error ? err.message : "unknown error"}); will retry next run.`);
       await recordGraphLogUsage({
+        runId: args.perf.runId,
         humanId: args.actingHumanId,
         projectFolderId: args.projectFolderId,
         stage: "sync-knowledge",

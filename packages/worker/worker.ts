@@ -108,7 +108,7 @@ async function runGraphLogJob(
       return result;
     }
     case "sow": {
-      const result = await perf.time("sow", "fn", "runSow", null, () => runSow(projectFolder, job.data.actingHumanId, { log: onProgress }));
+      const result = await perf.time("sow", "fn", "runSow", null, () => runSow(projectFolder, job.data.actingHumanId, { log: onProgress, runId: perf.runId }));
       if (!result.ok) throw new Error(result.error);
       return result;
     }
