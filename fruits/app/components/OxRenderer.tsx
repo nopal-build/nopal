@@ -39,6 +39,7 @@ import OxPopover from "../oxmarkdown/OxPopover";
 import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { posterUrl, renditionUrl } from "../oxmarkdown/mediaUrls";
+import { MarkMargin } from "../oxmarkdown/MarkMargin";
 import { useLoadFailed } from "../oxmarkdown/useLoadFailed";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import {
@@ -119,6 +120,7 @@ export default function OxRenderer({
           servedFileIds={servedFileIds}
         />
       </div>
+      {annotations && <MarkMargin annotations={annotations} />}
     </div>
   );
 }
