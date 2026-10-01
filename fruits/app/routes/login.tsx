@@ -14,6 +14,7 @@ import {
   LoaderFunctionArgs,
 } from "react-router";
 import { startAuthentication } from "@simplewebauthn/browser";
+import { AFTER_LOGIN_PATH } from "robustness-core/auth/landing";
 import {
   authenticateWithRedirect,
   getUser,
@@ -28,7 +29,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const redirectTo = isSafeRedirectPath(redirectToParam) ? redirectToParam : null;
 
   const user = await getUser(request);
-  if (user) return redirect(redirectTo ?? "/");
+  if (user) return redirect(redirectTo ?? AFTER_LOGIN_PATH);
 
   const authError = getAuthError(request);
   const prefillEmail = url.searchParams.get("email") ?? "";
@@ -90,7 +91,7 @@ export default function Login() {
         throw new Error(verifyData.error ?? "Could not verify passkey.");
       }
 
-      navigate(redirectTo ?? "/");
+      navigate(redirectTo ?? AFTER_LOGIN_PATH);
     } catch (err) {
       if (err instanceof Error && err.name === "NotAllowedError") {
         // User cancelled the browser's passkey prompt — not a real error.

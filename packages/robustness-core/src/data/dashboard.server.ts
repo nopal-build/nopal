@@ -16,8 +16,10 @@ import { firstName } from "./humanNames";
  *
  * Nothing here orders by importance. The Efforts sidecar carries no
  * blocking, due or "what this feeds" field, and the guide's rule is that
- * a wrong order is worse than none, so projects keep the order they came
- * in and nothing says otherwise.
+ * a wrong order is worse than none. Projects are ordered by a fact
+ * instead: the one most recently added to first, meaning the newest Card
+ * written to it (Austin, 2026-10-01). A project nobody has logged to
+ * goes after the rest, in the order it came in.
  */
 
 import { query } from "./generic.server";
@@ -41,6 +43,8 @@ export type DashboardProjectInput = {
   name: string;
   status: ProjectStatus;
   statusAt: string | null;
+  /** When a Card was last written to the project; null if none ever was. */
+  lastAddedAt: string | null;
   sharing: ProjectSharingEntry[];
   /** The Efforts page's opening, in its own words. */
   read: string | null;
@@ -112,6 +116,9 @@ export function buildDashboard(input: {
   const rows: DashboardRow[] = held
     // The client view only ever holds active projects: no tabs, no counts.
     .filter((x) => (view === "client" ? x.project.status === "active" : x.project.status === status))
+    // Most recently added to first; never-logged last, in arrival order
+    // (the sort is stable).
+    .sort((a, b) => (b.project.lastAddedAt ?? "").localeCompare(a.project.lastAddedAt ?? ""))
     .map(({ project, role }) => {
       const onProject = readings.filter((r) => r.project_folder_id === project.id);
       const mineAll = onProject.filter((r) => r.human_id === viewerId);
@@ -182,6 +189,24 @@ function daysAgo(days: number): string {
 
 /** Each project's Efforts sidecar, found through its Graph folder: two
  * queries in all, whatever the number of projects. */
+/** The newest Card's `updated_at` per project. Reduced here rather than
+ * in the query: SurrealDB's grouped max over these strings returned
+ * nothing usable (2026-10-01). */
+async function lastAddedTo(projectIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (projectIds.length === 0) return out;
+  const result = await query<[{ project_folder_id: string; updated_at: string | null }[]]>(
+    `SELECT project_folder_id, updated_at FROM file_refs WHERE source = 'daily_log_card' AND project_folder_id IN $projectIds`,
+    { projectIds },
+  );
+  for (const row of result?.[0] ?? []) {
+    if (!row.updated_at) continue;
+    const seen = out.get(row.project_folder_id);
+    if (!seen || row.updated_at > seen) out.set(row.project_folder_id, row.updated_at);
+  }
+  return out;
+}
+
 async function sidecarsFor(projects: VaultFolder[]): Promise<Map<string, string>> {
   const ids = projects.map((p) => p._id);
   if (ids.length === 0) return new Map();
@@ -239,12 +264,13 @@ export async function loadDashboard(
 ): Promise<Dashboard> {
   memberships ??= await listProjectsFor(viewerId);
   const folders = memberships.map((m) => m.folder);
-  const [sidecars, readings] = await Promise.all([
+  const [sidecars, readings, lastAdded] = await Promise.all([
     sidecarsFor(folders),
     listSteepReadings(
       folders.map((f) => f._id),
       daysAgo(STEEP_NOTE_DAYS),
     ),
+    lastAddedTo(folders.map((f) => f._id)),
   ]);
   const names = new Map(
     (await getHumansById([...new Set(readings.map((r) => r.human_id))])).map((h) => [h._id, firstName(h)]),
@@ -254,6 +280,7 @@ export async function loadDashboard(
     name: f.name,
     status: getProjectStatus(f),
     statusAt: f.project_status_at ?? null,
+    lastAddedAt: lastAdded.get(f._id) ?? null,
     sharing,
     ...readSidecarReadAndAsk(sidecars.get(f._id)),
   }));

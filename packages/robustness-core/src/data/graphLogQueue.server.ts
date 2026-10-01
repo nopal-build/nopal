@@ -72,8 +72,18 @@ const JOB_OPTIONS = {
   removeOnFail: { age: 7 * 24 * 60 * 60 },
 };
 
+/** Which job the worker takes next when several wait (lower first).
+ * The worker runs one GraphLog job at a time for every project, so at
+ * midnight a print pressed after the nightly queued would otherwise wait
+ * behind every project's run (Austin, 2026-10-01). A print and a sow have
+ * a person watching; everything else is background. Every job carries a
+ * priority because BullMQ takes a job with none before any job with one. */
+export function graphLogJobPriority(name: GraphLogJobName): number {
+  return name === "print" || name === "sow" ? 1 : 10;
+}
+
 export async function enqueueGraphLogJob(name: GraphLogJobName, data: GraphLogJobData): Promise<string> {
-  const job = await getGraphLogQueue().add(name, data, JOB_OPTIONS);
+  const job = await getGraphLogQueue().add(name, data, { ...JOB_OPTIONS, priority: graphLogJobPriority(name) });
   if (!job.id) throw new Error("Failed to enqueue GraphLog job");
   return job.id;
 }

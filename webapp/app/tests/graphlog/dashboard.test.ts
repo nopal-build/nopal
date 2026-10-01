@@ -24,6 +24,7 @@ function project(id: string, name: string, sharing: DashboardProjectInput["shari
     name,
     status: "active",
     statusAt: null,
+    lastAddedAt: null,
     sharing,
     read: `${name} is at the end of the climb.`,
     ask: `Pick the ${name} window supplier this week.`,
@@ -141,6 +142,19 @@ describe("a steep reading is a quiet note for the guides (test 3, server half)",
       expect(imports).not.toMatch(/email\.server|realtime\.server/);
       expect(src).not.toMatch(/\b(createFileRef|createMark|sendMail|sendEmail)\(/);
     }
+  });
+});
+
+describe("my projects, most recently added to first", () => {
+  const sharing = [{ human: GUIDE, role: "Owner" }];
+  const at = (p: DashboardProjectInput, lastAddedAt: string | null) => ({ ...p, lastAddedAt });
+  it("the newest Card puts a project on top; never-logged projects follow in the order they came", () => {
+    const quiet = project("aaaaaaaaaaaaaaaaaaa1", "Quiet", sharing);
+    const older = at(project("aaaaaaaaaaaaaaaaaaa2", "Older", sharing), "2026-09-20T10:00:00.000Z");
+    const silent = project("aaaaaaaaaaaaaaaaaaa3", "Silent", sharing);
+    const newest = at(project("aaaaaaaaaaaaaaaaaaa4", "Newest", sharing), "2026-10-01T09:00:00.000Z");
+    const d = buildDashboard({ viewerId: GUIDE, projects: [quiet, older, silent, newest], readings: [], names: new Map(), status: "active" });
+    expect(d.rows.map((r) => r.name)).toEqual(["Newest", "Older", "Quiet", "Silent"]);
   });
 });
 

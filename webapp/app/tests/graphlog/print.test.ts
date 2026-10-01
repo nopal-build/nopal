@@ -5,7 +5,7 @@
  * the Efforts page at all (`decideEffortsRebuild`).
  */
 import { describe, expect, it } from "vitest";
-import { PRINT_INTERVAL_DAYS, isNightly, printAllowance } from "robustness-core/data/effortsPrint.server";
+import { PRINT_INTERVAL_DAYS, PRINT_STAGES, isNightly, printAllowance, printStagesStarted } from "robustness-core/data/effortsPrint.server";
 import { GROUPS, featuresOf } from "robustness-core/data/features";
 import { decideEffortsRebuild } from "robustness-core/data/graphProjectView.server";
 
@@ -71,5 +71,23 @@ describe("when a night may touch the Efforts page", () => {
   it("nothing new is nothing to do, held or not", () => {
     expect(decideEffortsRebuild({ ...base, hold: true })).toEqual({ reason: "up-to-date", rebuild: false, waiting: [] });
     expect(decideEffortsRebuild({ ...base, hold: false })).toEqual({ reason: "up-to-date", rebuild: false, waiting: [] });
+  });
+});
+
+describe("how far a print has got", () => {
+  it("counts the stages the job log says have started, one pad each", () => {
+    expect(printStagesStarted([])).toBe(0);
+    expect(printStagesStarted(["run: starting daily-log-sync...", "run: daily-log-sync done (3 synced)."])).toBe(1);
+    expect(printStagesStarted(["run: starting daily-log-sync...", "run: starting sync-knowledge...", "sync-graph: 2026-09-11 ...", "run: starting sync-graph..."])).toBe(3);
+    expect(printStagesStarted(PRINT_STAGES.map((s) => `run: starting ${s}...`))).toBe(5);
+  });
+});
+
+describe("a print goes ahead of background work", () => {
+  it("print and sow outrank every other job, and every job has a priority", async () => {
+    const { graphLogJobPriority } = await import("robustness-core/data/graphLogQueue.server");
+    const background = ["run", "sync-knowledge", "sync-graph", "graph-structure", "graph-project-view", "rerun-outputs", "reset", "reset-project-view", "reset-graph", "reset-knowledge"] as const;
+    for (const name of background) expect(graphLogJobPriority(name)).toBeGreaterThan(graphLogJobPriority("print"));
+    expect(graphLogJobPriority("sow")).toBe(graphLogJobPriority("print"));
   });
 });

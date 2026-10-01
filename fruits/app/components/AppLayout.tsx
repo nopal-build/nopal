@@ -1,6 +1,6 @@
 // app/components/AppLayout.tsx
 import { Link, NavLink, useLocation } from "react-router";
-import { ReactNode, useState, useCallback, useEffect } from "react";
+import { ReactNode, useState, useCallback, useEffect, useRef } from "react";
 import { useHome, useMaker, useUser, useVaultHidden, permissions } from "../hooks/useUser";
 import { displayName } from "robustness-core/data/humanNames";
 import noLogoColor from "../images/no-logo-color.svg";
@@ -143,13 +143,65 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
 
+  // Words when they fit the window, the menu only when they don't
+  // (Austin, 2026-10-01): a hidden copy of the topbar is measured at its
+  // natural width on mount and on every resize, and the shell's
+  // `data-nav` picks the bar (`appLayoutShell.css.ts`). Before the first
+  // measurement the breakpoint decides.
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [nav, setNav] = useState<"words" | "menu" | null>(null);
+  useEffect(() => {
+    const el = measureRef.current;
+    if (!el) return;
+    const decide = () => setNav(el.scrollWidth <= window.innerWidth ? "words" : "menu");
+    decide();
+    window.addEventListener("resize", decide);
+    return () => window.removeEventListener("resize", decide);
+  }, [showVault, showMaker, homeLabel]);
+  useEffect(() => {
+    if (nav === "words") setMenuOpen(false);
+  }, [nav]);
+
   return (
     <div
       className={sprinkles({ display: "flex", flexDirection: "column" })}
       style={{ height: "100vh" }}
     >
       {user && <ImpersonationBanner targetName={displayName(user)} />}
-      <div className={shellClass} style={{ height: "auto", flex: 1, minHeight: 0 }}>
+      <div className={shellClass} style={{ height: "auto", flex: 1, minHeight: 0 }} data-nav={nav ?? undefined}>
+        {/* The topbar's natural width, measured to choose words or menu.
+            Same pieces and spacing as the narrow topbar, never seen. */}
+        <div
+          ref={measureRef}
+          aria-hidden="true"
+          style={{
+            // Fixed and zero-height so a phone never scrolls sideways to it;
+            // scrollWidth still reports the row's full width.
+            position: "fixed",
+            top: 0,
+            left: 0,
+            height: 0,
+            overflow: "hidden",
+            visibility: "hidden",
+            pointerEvents: "none",
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            padding: "10px 16px",
+            width: "max-content",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <img src={noLogoColor} alt="" className={topbarLogoImg} />
+          <span className={topbarNav} style={{ margin: 0 }}>
+            {["Daily Log", homeLabel, ...(showVault ? ["Vault"] : []), ...(showMaker ? ["Maker"] : [])].map((label) => (
+              <span key={label} className={`${navLink({ context: "topbar" })} ${navLinkFontClass}`}>
+                {label}
+              </span>
+            ))}
+          </span>
+          <span className={`${navLink({ context: "topbar" })} ${navLinkFontClass}`}>Profile</span>
+        </div>
         {/* ===== TOP NAV BAR (desktop ≥860px) ===== */}
         <header className={topbar}>
           <Link to="/" prefetch="intent" className={topbarLogo}>
@@ -162,6 +214,15 @@ export function AppLayout({ children }: { children?: ReactNode }) {
 
           <nav className={topbarNav}>
             <NavLink
+              to="/daily-log"
+              prefetch="intent"
+              className={({ isActive }) =>
+                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+              }
+            >
+              Daily Log
+            </NavLink>
+            <NavLink
               to={homeTo}
               prefetch="intent"
               end
@@ -170,15 +231,6 @@ export function AppLayout({ children }: { children?: ReactNode }) {
               }
             >
               {homeLabel}
-            </NavLink>
-            <NavLink
-              to="/daily-log"
-              prefetch="intent"
-              className={({ isActive }) =>
-                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
-              }
-            >
-              Daily Log
             </NavLink>
             {showVault && (
               <NavLink
@@ -246,6 +298,16 @@ export function AppLayout({ children }: { children?: ReactNode }) {
           {menuOpen && (
             <div className={topnavMenu}>
               <NavLink
+                to="/daily-log"
+                prefetch="intent"
+                className={({ isActive }) =>
+                  `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                }
+                onClick={closeMenu}
+              >
+                Daily Log
+              </NavLink>
+              <NavLink
                 to={homeTo}
                 prefetch="intent"
                 end
@@ -255,16 +317,6 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 onClick={closeMenu}
               >
                 {homeLabel}
-              </NavLink>
-              <NavLink
-                to="/daily-log"
-                prefetch="intent"
-                className={({ isActive }) =>
-                  `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
-                }
-                onClick={closeMenu}
-              >
-                Daily Log
               </NavLink>
               {showVault && (
                 <NavLink

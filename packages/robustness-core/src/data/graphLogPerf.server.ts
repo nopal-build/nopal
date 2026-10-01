@@ -414,6 +414,33 @@ export async function getLatestPageRebuildAt(projectFolderId: string): Promise<s
   return row?.finished_at ?? null;
 }
 
+/** When a run started, without its timeline: what a progress poll needs. */
+export async function getGraphLogRunStartedAt(runId: string): Promise<string | null> {
+  await ensureTables();
+  const result = await query<[{ started_at: string }[]]>(`SELECT started_at FROM graphlog_runs WHERE id = $rid`, {
+    rid: new RecordId("graphlog_runs", runId),
+  });
+  return result?.[0]?.[0]?.started_at ?? null;
+}
+
+/** How long this project's last finished print took, for "usually about
+ * N min" while the next one runs. Null before its first print. */
+export async function getLastPrintDurationMs(projectFolderId: string): Promise<number | null> {
+  await ensureTables();
+  const result = await query<[GraphLogRun[]]>(
+    `SELECT * FROM graphlog_runs
+     WHERE project_folder_id = $projectFolderId
+       AND job_name = 'print'
+       AND ok = true
+       AND readme_changed = true
+     ORDER BY finished_at DESC
+     LIMIT 1`,
+    { projectFolderId },
+  );
+  const row = result?.[0]?.[0] ? formatRecord(result[0][0]) : null;
+  return row?.duration_ms ?? null;
+}
+
 /** Most recent runs, newest first — powers the "Recent Runs" list on
  * `/maker/graphlog`. */
 export async function listRecentGraphLogRuns(limit = 20): Promise<GraphLogRun[]> {

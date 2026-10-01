@@ -7,6 +7,7 @@
     "./auth/auth.server": "./src/auth/auth.server.ts",
     "./auth/session.server": "./src/auth/session.server.ts",
     "./auth/webauthn.server": "./src/auth/webauthn.server.ts",
+    "./auth/landing": "./src/auth/landing.ts",
 
     "./data/adminScriptRuns.server": "./src/data/adminScriptRuns.server.ts",
     "./data/adminScriptsQueue.server": "./src/data/adminScriptsQueue.server.ts",
