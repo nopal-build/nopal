@@ -6,6 +6,7 @@
 // again on the server (`api.graphlog.print.tsx`).
 import { useEffect, useState } from "react";
 import { Cluster } from "stamps/Cluster";
+import { CactusProgress } from "./CactusProgress";
 import { button } from "stamps/button.css";
 import { textSize } from "stamps/typography.css";
 
@@ -25,6 +26,46 @@ function useShortDate(iso: string | null): string | null {
   return label;
 }
 
+/** What each stage is doing, in the reader's words, by stages started
+ * (`printStagesStarted`). */
+const STAGE_WORDS = [
+  "Waiting its turn",
+  "Gathering the logs",
+  "Reading what was attached",
+  "Filing new entries",
+  "Sorting the threads",
+  "Writing the page",
+];
+
+type Progress = { stagesStarted: number; startedAt: string | null; lastPrintMs: number | null };
+
+function clock(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** The cactus, the stage in words, and a clock that only counts what has
+ * happened. "Usually" is this project's last print, never a promise. */
+function PrintProgress({ progress }: { progress: Progress }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const elapsed = progress.startedAt ? clock(now - new Date(progress.startedAt).getTime()) : null;
+  const usually = progress.lastPrintMs ? Math.max(1, Math.round(progress.lastPrintMs / 60000)) : null;
+  return (
+    <Cluster gap={2} align="center" data-print-progress>
+      <CactusProgress started={progress.stagesStarted} />
+      <span className={textSize.xs}>
+        {STAGE_WORDS[Math.min(progress.stagesStarted, STAGE_WORDS.length - 1)]}
+        {elapsed ? ` · ${elapsed}` : ""}
+        {usually ? ` · usually about ${usually} min` : ""}
+      </span>
+    </Cluster>
+  );
+}
+
 async function readError(res: Response, fallback: string): Promise<string> {
   const data = (await res.json().catch(() => ({}))) as { error?: string };
   return data.error ?? fallback;
@@ -41,6 +82,7 @@ export function PrintUpdate({
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [progress, setProgress] = useState<Progress | null>(null);
   const printed = useShortDate(print.printedAt);
   const next = useShortDate(print.allowance.nextAt);
 
@@ -50,7 +92,10 @@ export function PrintUpdate({
       await new Promise((r) => setTimeout(r, 3000));
       const res = await fetch(url);
       if (!res.ok) throw new Error(await readError(res, "Couldn't follow the print."));
-      const data = (await res.json()) as { job: { state: string; readmeChanged: boolean | null; error: string | null } | null };
+      const data = (await res.json()) as {
+        job: ({ state: string; readmeChanged: boolean | null; error: string | null } & Progress) | null;
+      };
+      if (data.job) setProgress({ stagesStarted: data.job.stagesStarted, startedAt: data.job.startedAt, lastPrintMs: data.job.lastPrintMs });
       if (data.job?.state === "failed") throw new Error(data.job.error ?? "The print stopped on an error.");
       if (data.job?.state === "completed") {
         return data.job.readmeChanged ? "Printed." : "Nothing new since the last print.";
@@ -60,7 +105,8 @@ export function PrintUpdate({
 
   const press = async () => {
     setBusy(true);
-    setMessage("Printing. This takes a few minutes.");
+    setMessage(null);
+    setProgress({ stagesStarted: 0, startedAt: null, lastPrintMs: null });
     try {
       const res = await fetch("/api/graphlog/print", {
         method: "POST",
@@ -82,6 +128,7 @@ export function PrintUpdate({
       setMessage(err instanceof Error ? err.message : "That didn't go through. Try again.");
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
@@ -94,7 +141,14 @@ export function PrintUpdate({
           type="button"
           className={button({ variant: "secondary", size: "compact" })}
           disabled={busy || !print.allowance.may}
-          onClick={() => void press()}
+          onClick={() => {
+            // Not a button to click on a whim: a print runs the model, and
+            // most people get one a week (Austin, 2026-10-01).
+            const ask = print.allowance.anytime
+              ? "Print a new Efforts page? It rebuilds the page from everything logged since the last print, and each print costs a model run."
+              : "Print a new Efforts page? It rebuilds the page from everything logged since the last print. You can print once a week, so the next one opens seven days from now.";
+            if (window.confirm(ask)) void press();
+          }}
         >
           {busy ? "Printing…" : "Print an update"}
         </button>
@@ -102,6 +156,7 @@ export function PrintUpdate({
       {!print.allowance.may && next && !message && (
         <span className={textSize.xs}>Next print opens {next}.</span>
       )}
+      {busy && progress && <PrintProgress progress={progress} />}
       {message && <span className={textSize.xs}>{message}</span>}
     </Cluster>
   );

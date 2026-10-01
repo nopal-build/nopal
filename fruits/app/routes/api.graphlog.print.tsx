@@ -9,7 +9,8 @@ import {
   getGraphLogJobStatus,
   getGraphLogProjectStatus,
 } from "robustness-core/data/graphLogQueue.server";
-import { getEffortsPrintedAt, printAllowance } from "robustness-core/data/effortsPrint.server";
+import { getEffortsPrintedAt, printAllowance, printStagesStarted } from "robustness-core/data/effortsPrint.server";
+import { getGraphLogRunStartedAt, getLastPrintDurationMs } from "robustness-core/data/graphLogPerf.server";
 import type { Feature } from "robustness-core/data/features";
 
 /**
@@ -61,7 +62,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     allowanceFor(reader),
   ]);
 
-  let job: { state: string; readmeChanged: boolean | null; error: string | null } | null = null;
+  let job: {
+    state: string;
+    readmeChanged: boolean | null;
+    error: string | null;
+    /** Stages started, 0 to 5 (`printStagesStarted`). */
+    stagesStarted: number;
+    /** When the worker picked the print up; null while it waits. */
+    startedAt: string | null;
+    /** How long this project's last print took, for "usually about". */
+    lastPrintMs: number | null;
+  } | null = null;
   const jobId = url.searchParams.get("jobId");
   if (jobId) {
     const owner = await getGraphLogJobOwner(jobId);
@@ -69,10 +80,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const s = await getGraphLogJobStatus(jobId);
       if (s.ok) {
         const result = (s.result ?? null) as { readmeChanged?: unknown } | null;
+        const [startedAt, lastPrintMs] = await Promise.all([getGraphLogRunStartedAt(jobId), getLastPrintDurationMs(reader.folder._id)]);
         job = {
           state: s.state,
           readmeChanged: typeof result?.readmeChanged === "boolean" ? result.readmeChanged : null,
           error: s.state === "failed" ? (s.error ?? "The print stopped on an error.") : null,
+          stagesStarted: printStagesStarted(s.log ?? []),
+          startedAt,
+          lastPrintMs,
         };
       }
     }

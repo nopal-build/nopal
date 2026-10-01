@@ -107,8 +107,12 @@ export function SeedPacket({
         </p>
         <input ref={input} type="file" multiple hidden aria-label="Add files to your seed packet" onChange={(e) => add(e.target.files)} />
         {files.length > 0 && (
-          <ul className={textSize.xs} style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {files.map((f) => (
+          // Ten lines, then the list scrolls inside the tile rather than
+          // pushing the page down (Austin, 2026-10-01). Waiting files sit
+          // on top: they are the ones with something to do (Take out), and
+          // a scrolled list would otherwise bury them under what is sown.
+          <ul className={textSize.xs} style={{ listStyle: "none", padding: 0, margin: 0, maxHeight: "10lh", overflowY: "auto" }}>
+            {[...files.filter((f) => !f.sown), ...files.filter((f) => f.sown)].map((f) => (
               <li key={f.id} className={sprinkles({ display: "flex", alignItems: "baseline", gap: 2 })}>
                 <a href={`/api/seed-packet/${f.id}`} target="_blank" rel="noreferrer" style={{ overflowWrap: "anywhere" }}>
                   {f.name}

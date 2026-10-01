@@ -62,3 +62,25 @@ export async function getEffortsPrintedAt(
 ): Promise<string | null> {
   return folder.efforts_printed_at ?? (await getLatestPageRebuildAt(folder._id));
 }
+
+/** The stages a print walks, in order, as the pipeline names them in its
+ * log ("run: starting <stage>..."). Five stages, five pads on the
+ * progress cactus. */
+export const PRINT_STAGES = [
+  "daily-log-sync",
+  "sync-knowledge",
+  "sync-graph",
+  "graph-structure",
+  "graph-project-view",
+] as const;
+
+/** How many stages a print has started, read off its job log: 0 before
+ * the first, 5 once the page is being written. Pure. */
+export function printStagesStarted(log: readonly string[]): number {
+  let started = 0;
+  for (const line of log) {
+    const i = PRINT_STAGES.findIndex((stage) => line.startsWith(`run: starting ${stage}`));
+    if (i + 1 > started) started = i + 1;
+  }
+  return started;
+}
