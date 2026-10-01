@@ -61,10 +61,11 @@
  *   ::icon{name="..." size="sm|md|lg" id="..." position="x,y"} — a bare
  *     named illustration, for inline glyphs or standalone floating
  *     shapes. `position` is optional -- omit it and the icon renders
- *     inline exactly as it always has; give it an `"x,y"` pair (the
- *     SAME normalized coordinate system `::line{points="..."}` resolves
- *     its own points against, below -- anchors and deltas both work
- *     identically) to absolutely position it INSTEAD, relative to
+ *     inline exactly as it always has; give it an `"x,y"` pair (its OWN
+ *     normalized-percentage coordinate system -- see `parseIconPosition`'s
+ *     own comment for why this is deliberately DIFFERENT from
+ *     `::line{points="..."}`'s literal-pixel one below -- anchors and
+ *     deltas both work) to absolutely position it INSTEAD, relative to
  *     whatever element it's rendered inside (today: `.website-section-
  *     inner`, for `:::section{...}` -- see `parseIconPosition`'s own
  *     comment for why other containers need the same `position:
@@ -86,33 +87,56 @@
  *     — the shared wavy-line primitive (`WavyLine.tsx` +
  *     `oxmarkdown-core`'s `buildSplinePath`/`resolveLinePoints`),
  *     fixed-points mode: "a line is drawn from one end to the other" — a
- *     cursor starts at the box's own top-left corner (normalized to a
- *     `0-100` (x) / `0-40` (y) box local to whatever `::line` is nested
- *     inside) and walks forward, per-axis, per point. EACH half of a
- *     pair is independently either:
- *       - a plain number — a DELTA: moves the cursor BY that amount from
- *         wherever it already was (cumulative), same as before.
+ *     cursor starts at the line's own top-left corner and walks forward,
+ *     per-axis, per point, in LITERAL PIXELS (see `oxmarkdown-core`'s
+ *     `wavyLine.ts` header for why -- a REVERSED design from an earlier
+ *     normalized-then-rescaled-to-container version, which made the same
+ *     numbers look different, often distorted, depending on the
+ *     container they rendered inside). EACH half of a pair is
+ *     independently either:
+ *       - a plain number — a DELTA: moves the cursor BY that amount, in
+ *         real px, from wherever it already was (cumulative) -- NEVER
+ *         rescaled by the container's own size.
  *       - a reference letter + optional number (default offset `0`) —
- *         an ANCHOR, pixel-referenceable to the box's own known geometry
- *         instead of the previous point: `L`/`C`/`R` (left/center/right)
- *         for x, `T`/`C`/`B` (top/center/bottom) for y. Case-insensitive.
- *         Same "inset" convention as CSS's own `top`/`right`/`bottom`/
- *         `left`: `T`/`L` add AWAY from that edge, `B`/`R` subtract
- *         INWARD from that edge, `C` adds in the ordinary positive-axis
- *         direction. E.g. `R0` = exactly the right edge, `B1` = 1 unit
- *         up from the bottom, `C5` = 5 past center.
+ *         an ANCHOR, referenced to the container's own REAL measured
+ *         edge instead of the previous point (this IS container-size-
+ *         dependent, on purpose -- that's what "anchor to an edge"
+ *         means): `L`/`C`/`R` (left/center/right) for x, `T`/`C`/`B`
+ *         (top/center/bottom) for y. Case-insensitive. Same "inset"
+ *         convention as CSS's own `top`/`right`/`bottom`/`left`: `T`/`L`
+ *         add AWAY from that edge, `B`/`R` subtract INWARD from that
+ *         edge, `C` adds in the ordinary positive-axis direction -- the
+ *         offset itself is a literal pixel inset, not a percentage of
+ *         the container. E.g. `R0` = exactly the right edge, `B10` = 10
+ *         real px up from the bottom, `C5` = 5 real px past center.
  *     Anchors and deltas mix freely, per-axis, at any point (including
- *     the first) — e.g. `points="L0,B1 C5,B4 R0,B0"` is three fully-
+ *     the first) — e.g. `points="L0,B10 C5,B40 R0,B0"` is three fully-
  *     anchored points (bottom-left, up near center, exactly bottom-
- *     right); `points="0,41 c,38"` anchors point 2's x to dead-center
- *     while its y still continues normally as a delta (`41 + 38`). Pure-
- *     delta strings like `points="3,42 58,35 100,42"` behave exactly as
- *     before — the cursor simply starts at `(0,0)`, so point 1's plain
- *     numbers already come out absolute with no special-casing needed.
- *     The line's own element is sized to exactly fit the resulting
- *     path's bounding box (not the whole containing box), recomputed to
- *     real pixels on every resize (not just stretched via
- *     `preserveAspectRatio`). `color` (same named vocabulary as
+ *     right); `points="0,T0 c,38"` anchors point 2's x to dead-center
+ *     while its y still continues normally as a delta (`0 + 38` real px
+ *     down). Pure-delta strings like `points="3,10 58,-8 100,10"` behave
+ *     exactly as before — the cursor simply starts at `(0,0)`, so point
+ *     1's plain numbers already come out absolute with no special-casing
+ *     needed. A literal, standalone `|` is a pen-up BREAK -- the next
+ *     point starts a brand-new, visually DISCONNECTED stroke, the same
+ *     thing a real SVG `M` (moveto) command means: no line/curve segment
+ *     connects the point before a `|` to the point after it. The cursor
+ *     does NOT reset at a break (matching SVG's own relative `m dx,dy`)
+ *     -- a delta/anchor right after one resolves exactly like it always
+ *     would; only whether a segment gets DRAWN changes. E.g.
+ *     `points="0,0 40,0 | 0,0 0,40"` draws two separate strokes -- a
+ *     horizontal line, then (pen lifted, cursor still at `40,0`) a
+ *     vertical one starting from there. Built for tracing real, organic
+ *     multi-subpath artwork (a branching illustration, a signature, a
+ *     multi-stroke logo, ...) where flattening every subpath into one
+ *     continuous curve would draw bogus connecting segments straight
+ *     across what should be real gaps -- see `oxmarkdown-core`'s
+ *     `wavyLine.ts` header and `buildMultiSplinePath`. The line's own
+ *     element is sized to exactly fit the resulting (possibly
+ *     multi-stroke) path's bounding box (not the whole containing box),
+ *     recomputed on every resize ONLY to re-resolve any anchor letters
+ *     against the container's new real size -- plain deltas never
+ *     change. `color` (same named vocabulary as
  *     `accent`/`section-title`'s `color`) sets the stroke directly via
  *     `WavyLine`'s own `color` prop — omit it and the line just inherits
  *     whatever `currentColor` resolves to (`WavyLine`'s default). The
@@ -121,6 +145,52 @@
  *     absolute — anchor/delta semantics don't apply there) is built in
  *     `WavyLine.tsx` but not wired to a directive yet — reserved for the
  *     Home template's page-spanning connector.
+ *   ::path{points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
+ *     — the SAME wavy-line primitive as `::line` above, `points` parsed
+ *     with the EXACT SAME delta/anchor grammar, but DECOUPLES the traced
+ *     shape's own natural proportions from how big it renders and where
+ *     it sits, which `::line` bakes directly into the points themselves
+ *     instead. Built for tracing a real, complex SVG shape (see the
+ *     "SVG → Points" Scratchpad tool) once, then resizing/repositioning
+ *     it freely without re-baking any numbers:
+ *       - `width`/`height` (optional, independent of each other) — a
+ *         plain number is literal px; a trailing `%` is a percentage of
+ *         `::path`'s own real measured container size, resolved fresh on
+ *         every real resize (so a `%` value stays genuinely responsive,
+ *         unlike anything `::line` can express). ALWAYS a uniform scale
+ *         -- the shape's own natural proportions are never independently
+ *         stretched per axis. Giving only ONE axis scales the shape so
+ *         THAT axis matches the target, with the other following
+ *         proportionally; giving BOTH fits inside whichever constrains
+ *         more (`object-fit: contain`). Omit both entirely and `points`
+ *         renders at its own literal, unscaled size -- identical to
+ *         `::line`.
+ *       - `start="x,y"` (optional) — the SAME anchor/delta vocabulary as
+ *         a single `points="..."` pair, positioning the (possibly-scaled)
+ *         shape's own bounding-box top-left corner. Omit it and the shape
+ *         renders at wherever its own resolved `points` naturally placed
+ *         it (scaling aside).
+ *     `points`/`curve`/`tension`/`color` all behave exactly as they do on
+ *     `::line` -- see that entry above for the full grammar. See
+ *     `oxmarkdown-core`'s `fitAndPositionPoints` for the underlying math.
+ *   :line-word{text="..." points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
+ *     — a TEXT directive (single colon, inline -- sits mid-sentence in
+ *     ordinary prose, e.g. `Take the early :line-word{text="waterproof
+ *     jacket" points="..."}.`, the SAME tier as the built-in `:ref{...}`
+ *     citation mark in `OxRenderer.tsx`/`refDirective.ts`) -- NOT a leaf/
+ *     container directive, so it never opens a fence and never needs its
+ *     own line. Wraps `text` in an inline-block, `position: relative` span
+ *     and draws the SAME `WavyLine` primitive as `::line`/`::path` behind
+ *     it (`z-index: -1`, `website.css`) -- a hand-drawn squiggle/circle
+ *     decorating ONE word or short phrase, sized to that word's own real
+ *     rendered box. `points`/`width`/`height`/`start`/`curve`/`tension`/
+ *     `color` all behave EXACTLY like `::path{...}` above (same optional
+ *     decoupled-scale/position knobs, same grammar) -- see that entry for
+ *     the full details; the only new attribute is `text`, the literal
+ *     word/phrase to render (a plain attribute, not bracket-label content,
+ *     matching how `::button{text="..."}`/`::badge{text="..."}` already
+ *     do it elsewhere in this same registry). Renders nothing at all if
+ *     either `text` or a usable `points` is missing.
  *   :::pricing-card{name="..." price="..." cta="..." cta-href="..." cta-variant="primary|purple|secondary|yellow|outline"} —
  *     body is an ordinary bullet list of features; `cta-variant` -- see
  *     `::button`'s own entry below -- defaults to `primary`.
@@ -152,7 +222,7 @@ import { WavyLine } from "./WavyLine";
 import OxRenderer from "../components/OxRenderer";
 import { Badge } from "stamps/Badge";
 import { button as stampsButton } from "stamps/button.css";
-import { parseLinePoints, resolveLinePoints, type LineCurveKind } from "oxmarkdown-core";
+import { parseLinePoints, resolveNormalizedLinePoint, type LineCurveKind, type LineSizeSpec } from "oxmarkdown-core";
 import "../styles/website.css";
 
 const LINE_CURVE_KINDS = ["smooth", "straight", "bezier"] as const;
@@ -180,6 +250,25 @@ function toLineCurveKind(v: string | undefined): LineCurveKind {
   return (LINE_CURVE_KINDS as readonly string[]).includes(v ?? "") ? (v as LineCurveKind) : "smooth";
 }
 
+const SIZE_ATTR_PATTERN = /^(-?\d*\.?\d+)(%)?$/;
+
+/** `::path{width="..."}`/`::path{height="..."}` -- a plain number is
+ * literal px, a trailing `%` is a percentage of `::path`'s own real
+ * measured container size (`WavyLine.tsx`'s `resolveLineSize` resolves
+ * the actual number against that real size, on every resize). Returns
+ * `undefined` for an absent/unparseable attribute -- `::path` with no
+ * `width`/`height` given at all renders `points` at its own literal,
+ * unscaled size, identical to `::line` (see `oxmarkdown-core`'s
+ * `fitAndPositionPoints`). */
+function parseSizeAttr(raw: string | undefined): LineSizeSpec | undefined {
+  if (!raw) return undefined;
+  const match = SIZE_ATTR_PATTERN.exec(raw.trim());
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return undefined;
+  return match[2] ? { kind: "percent", value } : { kind: "px", value };
+}
+
 /** Same named-color vocabulary `:::section-title{color="..."}` already
  * uses -- shared here so `::line{color="..."}` resolves to the exact
  * same CSS variable a `color="..."` there would (that one goes through
@@ -200,29 +289,35 @@ function toAccentColorVar(name: string | undefined): string | undefined {
   return name ? ACCENT_COLOR_VARS[name] : undefined;
 }
 
-/** `::icon{position="x,y"}` -- reuses the EXACT SAME coordinate system
- * `::line{points="x,y x,y ..."}` resolves its own points against
- * (`parseLinePoints`/`resolveLinePoints`, `oxmarkdown-core`'s
- * `wavyLine.ts`): `x` normalized 0-100, `y` normalized 0-40 (the same
- * fixed `viewBoxHeight` `::line{...}` itself still defaults to, since
- * neither directive exposes that as its own attribute today), each half
- * either a plain delta number or an `L`/`C`/`R` (x) / `T`/`C`/`B` (y)
- * anchor letter. A single point's "delta" already resolves as absolute
- * (the cursor starts at `(0, 0)`), so anchors and deltas both work here
- * exactly like they do in a real multi-point `points="..."` list.
+/** `::icon{position="x,y"}` -- reuses `::line{points="x,y x,y ..."}`'s
+ * PARSING grammar (`parseLinePoints`, `oxmarkdown-core`'s `wavyLine.ts`:
+ * each half a plain delta number or an `L`/`C`/`R` (x) / `T`/`C`/`B` (y)
+ * anchor letter) but DELIBERATELY NOT its resolved coordinate SYSTEM --
+ * `::line{...}`'s points are literal, stable pixels (see `wavyLine.ts`'s
+ * own header for why), while this resolves against a fixed nominal
+ * `0-100` (x) / `0-40` (y) box instead (`resolveNormalizedLinePoint`),
+ * turned directly into a plain CSS PERCENTAGE. A single point's "delta"
+ * already resolves as absolute (the cursor starts at `(0, 0)`), so
+ * anchors and deltas both work here exactly like they do in a real
+ * multi-point `points="..."` list.
  *
- * Unlike `::line{...}` (which needs real measured PIXELS to draw an SVG
- * path through multiple points), positioning exactly ONE element can
- * just use plain CSS `left`/`top` PERCENTAGES on an absolutely-
- * positioned box -- the browser already resolves those against the
- * nearest POSITIONED ancestor's own measured size on every layout/
- * resize, for free, with no `ResizeObserver`/`getBoundingClientRect`
+ * Unlike `::line{...}` (which needs a real DOM measurement to resolve
+ * literal pixels against the container's real edges), positioning
+ * exactly ONE element can just use plain CSS `left`/`top` PERCENTAGES on
+ * an absolutely-positioned box -- the browser already resolves those
+ * against the nearest POSITIONED ancestor's own measured size on every
+ * layout/resize, for free, with no `ResizeObserver`/`getBoundingClientRect`
  * measurement dance the way `WavyLine.tsx` needs. That positioned
  * ancestor is whatever element the `::icon{...}` happens to render
  * inside -- today that's `.website-section-inner` (website.css), for
  * the first real use inside `:::section{...}`. Placing one inside some
  * OTHER container needs that container to be `position: relative` too,
- * the same way, before this has any visible effect there.
+ * the same way, before this has any visible effect there. Placing a
+ * SINGLE point has no "shape" for x/y to distort by scaling independently
+ * with the container the way a multi-point line would, so there's no
+ * "funky at different sizes" problem here to fix the same way `::line`
+ * needed -- percentage placement is the right, simpler choice for this
+ * directive specifically, not a lingering inconsistency.
  *
  * Represents the icon's TOP-LEFT corner, not its center (simplest to
  * reason about, and consistent with what `left`/`top` mean everywhere
@@ -230,12 +325,15 @@ function toAccentColorVar(name: string | undefined): string | undefined {
  * size for a visually "centered on this point" placement instead.
  * Returns `undefined` for an absent/unparseable `position` -- the caller
  * then renders exactly as it always did (ordinary inline flow), matching
- * `::icon{...}`'s own "no position given = unchanged" contract. */
+ * `::icon{...}`'s own "no position given = unchanged" contract. A bare
+ * `|` (pen-up BREAK -- see `oxmarkdown-core`'s `LinePointsEntry`) makes
+ * no sense for a SINGLE point, so it's rejected the same as any other
+ * unparseable input. */
 const ICON_POSITION_VIEWBOX_HEIGHT = 40;
 function parseIconPosition(raw: string | undefined): CSSProperties | undefined {
   const tokens = parseLinePoints(raw);
-  if (tokens.length !== 1) return undefined;
-  const [point] = resolveLinePoints(tokens, ICON_POSITION_VIEWBOX_HEIGHT);
+  if (tokens.length !== 1 || tokens[0] === "break") return undefined;
+  const point = resolveNormalizedLinePoint(tokens[0], ICON_POSITION_VIEWBOX_HEIGHT);
   return { position: "absolute", left: `${point.x}%`, top: `${(point.y / ICON_POSITION_VIEWBOX_HEIGHT) * 100}%` };
 }
 
@@ -371,6 +469,66 @@ export function buildWebsiteDirectiveRegistry(opts: {
           color={toAccentColorVar(attrs.color)}
           className="website-line"
         />
+      );
+    },
+
+    path({ attrs }) {
+      const points = parseLinePoints(attrs.points);
+      if (points.length < 2) return null;
+      const tension = attrs.tension ? Number(attrs.tension) : undefined;
+      // `start` is always exactly ONE point -- a bare `|` (pen-up BREAK)
+      // makes no sense there, so it's rejected the same as any other
+      // unparseable value.
+      const startToken = parseLinePoints(attrs.start)[0];
+      const start = startToken && startToken !== "break" ? startToken : undefined;
+      return (
+        <WavyLine
+          mode="points"
+          points={points}
+          targetWidth={parseSizeAttr(attrs.width)}
+          targetHeight={parseSizeAttr(attrs.height)}
+          start={start}
+          curve={toLineCurveKind(attrs.curve)}
+          tension={Number.isFinite(tension) ? tension : undefined}
+          color={toAccentColorVar(attrs.color)}
+          className="website-path"
+        />
+      );
+    },
+
+    "line-word"({ attrs }) {
+      const points = parseLinePoints(attrs.points);
+      if (points.length < 2 || !attrs.text) return null;
+      const tension = attrs.tension ? Number(attrs.tension) : undefined;
+      const startToken = parseLinePoints(attrs.start)[0];
+      const start = startToken && startToken !== "break" ? startToken : undefined;
+      return (
+        // `zIndex: 0` (NOT just `position: relative`) is load-bearing --
+        // it's what makes THIS span its own stacking context. Without it,
+        // `.website-line-word`'s own `z-index: -1` (see `website.css`) has
+        // no local context to sink behind and instead escapes all the way
+        // up to the nearest ANCESTOR that does establish one -- which for
+        // an inline word sitting mid-paragraph is arbitrarily far up the
+        // tree, painting the line below that far-away ancestor's own
+        // opaque background (i.e. fully invisible) rather than just
+        // behind this word's own text. Confirmed by direct pixel sampling:
+        // the DOM/layout was already 100% correct (real path `d`, real
+        // position, real resolved stroke color) but literally zero pixels
+        // painted on screen until this was added.
+        <span style={{ position: "relative", zIndex: 0, display: "inline-block" }}>
+          {attrs.text}
+          <WavyLine
+            mode="points"
+            points={points}
+            targetWidth={parseSizeAttr(attrs.width)}
+            targetHeight={parseSizeAttr(attrs.height)}
+            start={start}
+            curve={toLineCurveKind(attrs.curve)}
+            tension={Number.isFinite(tension) ? tension : undefined}
+            color={toAccentColorVar(attrs.color)}
+            className="website-line-word"
+          />
+        </span>
       );
     },
 

@@ -31,7 +31,7 @@
 // `attributes`/`buildMarkdown` when its render implementation changes --
 // keep this in sync with the real `buildWebsiteDirectiveRegistry`
 // vocabulary, don't let it drift into its own separate list.
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Link, data, redirect, useFetcher, useLoaderData, useRouteError, useSearchParams, isRouteErrorResponse } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
@@ -62,6 +62,14 @@ import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { WEBSITE_ICON_FILE_NAMES, WEBSITE_ICON_PLACEHOLDER_NAMES } from "../oxmarkdown/websiteIcons";
 import { WEBSITE_STAMP_NAMES } from "../oxmarkdown/websiteStamps";
+import {
+  extractSvgGeometry,
+  fitSvgPointsToLineBox,
+  formatLinePointsAttr,
+  reverseSvgGeometry,
+  type LineAnchorX,
+  type LineAnchorY,
+} from "oxmarkdown-core";
 import "../styles/scratch.css";
 
 async function requireMakerAccess(request: Request) {
@@ -383,7 +391,7 @@ const TRACING_PAPERS: TracingPaper[] = [
     id: "icon",
     name: "Icon",
     directive: '::icon{name="..." size="sm|md|lg" id="..." position="x,y"}',
-    note: 'Leaf. Checks real file-based assets first (**Files**, below), then a small set of inline-drawn placeholder shapes (**Placeholders**), then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** drop a new SVG under `public/guides/`, then add one `{name: path}` entry to `WEBSITE_ICON_FILES` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.\n\n**`position="x,y"` (optional):** absolutely positions the icon instead of leaving it inline -- the SAME normalized coordinate system (`x` 0-100, `y` 0-40) and anchor-letter (`L`/`C`/`R`/`T`/`C`/`B`) + plain-delta vocabulary `::line{points="..."}` uses for its own points, just resolved to a single CSS `left`/`top` percentage pair instead of an SVG path. Only has a visible effect when its container is `position: relative` -- `:::section{...}`\'s own body (`.website-section-inner`) already is, for its first real use; try e.g. `R4,T4` to tuck it into a section\'s own top-right corner.',
+    note: 'Leaf. Checks real file-based assets first (**Files**, below), then a small set of inline-drawn placeholder shapes (**Placeholders**), then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** drop a new SVG under `public/guides/`, then add one `{name: path}` entry to `WEBSITE_ICON_FILES` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.\n\n**`position="x,y"` (optional):** absolutely positions the icon instead of leaving it inline -- its OWN normalized `x` 0-100 / `y` 0-40 coordinate box (deliberately DIFFERENT from `::line{points="..."}`\'s own literal-pixel one, below -- placing a single point has no "shape" for x/y to distort the way a multi-point line does, so a plain percentage is still the simpler, right choice here), same anchor-letter (`L`/`C`/`R`/`T`/`C`/`B`) + plain-delta vocabulary, resolved to a single CSS `left`/`top` percentage pair instead of an SVG path. Only has a visible effect when its container is `position: relative` -- `:::section{...}`\'s own body (`.website-section-inner`) already is, for its first real use; try e.g. `R4,T4` to tuck it into a section\'s own top-right corner (4% in from each edge).',
     attributes: [
       { key: "name", label: "name", kind: "select", default: "sun-home", options: ICON_NAME_OPTIONS },
       {
@@ -420,10 +428,10 @@ const TRACING_PAPERS: TracingPaper[] = [
     id: "line",
     name: "Line",
     directive: '::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
-    note: 'Leaf. The shared wavy-line primitive (`WavyLine.tsx` + `oxmarkdown-core`\'s `buildSplinePath`) in its fixed-points mode. "A line is drawn from one end to the other": a cursor starts at the box\'s own top-left corner (normalized to a `0-100` (x) / `0-40` (y) box) and walks forward, per-axis, per point. Each half of a pair is either a plain number (a DELTA -- moves the cursor by that amount, cumulative) or a reference letter plus optional offset (an ANCHOR, pixel-referenceable to the box\'s own geometry instead of the previous point): `L`/`C`/`R` for x, `T`/`C`/`B` for y (same CSS-inset convention as `top`/`right`/`bottom`/`left` -- `T`/`L` add away from that edge, `B`/`R` subtract inward from it, `C` adds past center). Anchors and deltas mix freely, per axis, at any point. Sized to exactly fit the resulting path\'s own bounding box, recomputed to real pixels on every real resize (`ResizeObserver`, not a passive `preserveAspectRatio` stretch). `color` sets the stroke directly; omit it and the line inherits `currentColor` instead. Needs a positioned ancestor with real height to draw into -- this row\'s own preview box supplies that; `:::section-title{...}` supplies it for the paper below.',
+    note: 'Leaf. The shared wavy-line primitive (`WavyLine.tsx` + `oxmarkdown-core`\'s `buildSplinePath`) in its fixed-points mode. "A line is drawn from one end to the other": a cursor starts at the line\'s own top-left corner and walks forward, per-axis, per point, in LITERAL PIXELS -- a REVERSED design from an earlier normalized-then-rescaled-to-container version, which made the same numbers look different (often distorted) depending on the container they rendered inside; see `oxmarkdown-core`\'s `wavyLine.ts` header for the full reasoning. Each half of a pair is either a plain number (a DELTA -- moves the cursor by that amount, in real px, cumulative, NEVER rescaled by the container) or a reference letter plus optional offset (an ANCHOR, referenced to the container\'s own REAL measured edge instead of the previous point -- this one IS container-size-dependent, on purpose): `L`/`C`/`R` for x, `T`/`C`/`B` for y (same CSS-inset convention as `top`/`right`/`bottom`/`left` -- `T`/`L` add away from that edge, `B`/`R` subtract inward from it, `C` adds past center -- the offset itself is a literal pixel inset, not a percentage). Anchors and deltas mix freely, per axis, at any point. Sized to exactly fit the resulting path\'s own bounding box, recomputed on every real resize ONLY to re-resolve any anchor letters against the container\'s new real size (`ResizeObserver`, not a passive `preserveAspectRatio` stretch) -- plain deltas never change. `color` sets the stroke directly; omit it and the line inherits `currentColor` instead. Needs a positioned ancestor with real height to draw into -- this row\'s own preview box supplies that; `:::section-title{...}` supplies it for the paper below. Try the "SVG \u2192 Points" tool (see the sidebar\'s own "Tools" section) to trace a real shape into this syntax instead of hand-guessing numbers.',
     previewMinHeight: 100,
     attributes: [
-      { key: "points", label: "points", kind: "text", default: "L0,B1 C5,B4 R0,B0", placeholder: "x,y x,y ..." },
+      { key: "points", label: "points", kind: "text", default: "L0,B4 C5,B16 R0,B4", placeholder: "x,y x,y ..." },
       {
         key: "curve",
         label: "curve",
@@ -438,6 +446,51 @@ const TRACING_PAPERS: TracingPaper[] = [
       `::line{points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
   },
   {
+    id: "path",
+    name: "Path",
+    directive: '::path{points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
+    note: 'Leaf. The SAME wavy-line primitive as `::line`, `points` parsed with the exact same delta/anchor grammar -- but DECOUPLES the traced shape\'s own natural proportions from how big it renders and where it sits, which `::line` bakes directly into the points themselves. Built for tracing a real, complex SVG shape (try the "SVG \u2192 Points" tool, in the sidebar\'s own "Tools" section) once, then resizing/repositioning it freely without re-baking numbers. `width`/`height` (each optional, independent) -- a plain number is literal px, a trailing `%` is a percentage of `::path`\'s own real measured container size, resolved fresh on every real resize (try dragging this browser window narrower with `width="40%"` set below -- the shape genuinely rescales, unlike anything `::line` can do). ALWAYS a uniform scale (the shape\'s own proportions are never independently stretched) -- give only one axis and the other follows proportionally; give both and it fits inside whichever constrains more. `start="x,y"` positions the (possibly-scaled) shape\'s own bounding-box top-left corner, using the SAME anchor/delta vocabulary as a single `points="..."` pair -- omit it and the shape renders at wherever its own resolved `points` naturally placed it.',
+    previewMinHeight: 120,
+    attributes: [
+      { key: "points", label: "points", kind: "text", default: "0,0 10,-15 22,4 34,-18 46,0", placeholder: "x,y x,y ..." },
+      { key: "width", label: "width (#|#%)", kind: "text", default: "40%" },
+      { key: "height", label: "height (#|#%)", kind: "text", default: "" },
+      { key: "start", label: "start (x,y)", kind: "text", default: "C0,T10", placeholder: "x,y" },
+      {
+        key: "curve",
+        label: "curve",
+        kind: "select",
+        default: "smooth",
+        options: [{ value: "smooth" }, { value: "straight" }, { value: "bezier" }],
+      },
+      { key: "tension", label: "tension (0-1)", kind: "text", default: "0.5" },
+      { key: "color", label: "color", kind: "select", default: "purple", options: ACCENT_COLOR_OPTIONS },
+    ],
+    buildMarkdown: (v) =>
+      `::path{points="${v.points}"${v.width ? ` width="${v.width}"` : ""}${v.height ? ` height="${v.height}"` : ""}${v.start ? ` start="${v.start}"` : ""} curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
+  },
+  {
+    id: "line-word",
+    name: "Line word",
+    directive: ':line-word{text="..." points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
+    note: 'A TEXT directive (single colon) -- sits INLINE, mid-sentence, unlike every leaf/container directive above. Wraps `text` in an inline-block, `position: relative` span and draws the SAME `WavyLine` primitive as `::line`/`::path` BEHIND it (`z-index: -1`, `website.css`) -- a hand-drawn squiggle/underline decorating one word or short phrase, sized to that word\'s own real rendered box. `points`/`width`/`height`/`start`/`curve`/`tension`/`color` all behave EXACTLY like `::path{...}` -- see that entry above for the full grammar; the only new attribute is `text`, the literal word/phrase to render (a plain attribute, not bracket-label content). Try editing `text` to something longer/shorter -- the default `points` uses `L`/`R` anchors, so the underline automatically re-spans the word\'s own new width, no manual re-tracing needed. NOTE on the default `points` own `T` values: this preview\'s own paragraph line-height (`--ox-grid`, 41px) is taller than the actual glyphs (measured ~21px, roughly centered inside it), so `T33`/`T39` were tuned by DIRECTLY measuring where the visible text really sits here, not guessed from the line-height alone -- expect to retune both numbers by hand for a real page with different type/line-height.',
+    attributes: [
+      { key: "text", label: "text", kind: "text", default: "waterproof jacket" },
+      { key: "points", label: "points", kind: "text", default: "L0,T33 C0,T39 R0,T33", placeholder: "x,y x,y ..." },
+      {
+        key: "curve",
+        label: "curve",
+        kind: "select",
+        default: "smooth",
+        options: [{ value: "smooth" }, { value: "straight" }, { value: "bezier" }],
+      },
+      { key: "tension", label: "tension (0-1)", kind: "text", default: "0.5" },
+      { key: "color", label: "color", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
+    ],
+    buildMarkdown: (v) =>
+      `Take the early :line-word{text="${v.text}" points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}.`,
+  },
+  {
     id: "section-title",
     name: "Section title",
     directive: ':::section-title{icon="..." color="red|green|purple"}',
@@ -449,7 +502,7 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "heading", label: "heading text", kind: "text", default: "At a Cost" },
     ],
     buildMarkdown: (v) => `:::section-title{icon="${v.icon}"${v.color ? ` color="${v.color}"` : ""}}
-::line{points="L1,B0 R16,B4 R0,B0" curve="smooth" tension="0.4" color="green"}
+::line{points="L1,B0 R16,B10 R0,B0" curve="smooth" tension="0.4" color="green"}
 ## ${v.heading}
 :::`,
   },
@@ -595,9 +648,21 @@ type ResolvedPad = { id: string; name: string; scratchIds: string[] };
 
 /** Which single thing Focus mode is currently dominant-displaying -- a
  * Scratch (`FocusedEntryView`, editable), a Pad (`FocusedPadView`, a
- * combined preview + ordering/membership editor), or a Tracing Paper
- * (`FocusedTracingPaperView`, fixed + attribute-driven, never editable). */
-type FocusTarget = { kind: "scratch"; id: string } | { kind: "pad"; id: string } | { kind: "paper"; id: string };
+ * combined preview + ordering/membership editor), a Tracing Paper
+ * (`FocusedTracingPaperView`, fixed + attribute-driven, never editable),
+ * or a Tool (`SvgToPointsTool` today -- the only one; a genuinely
+ * different KIND of thing from all three above, since it has no fixed
+ * directive/attributes of its own to preview -- it's a one-time
+ * conversion utility, not a markdown example). `id` is a fixed,
+ * hardcoded single value for a Tool today (`"svg-points"`) since there's
+ * only one -- kept as a real `id` field (not a bare `{kind: "tool"}`) so
+ * adding a second tool later doesn't need this union's own shape to
+ * change. */
+type FocusTarget =
+  | { kind: "scratch"; id: string }
+  | { kind: "pad"; id: string }
+  | { kind: "paper"; id: string }
+  | { kind: "tool"; id: "svg-points" };
 
 /** Mirrors `ViewMode` (declared further below, with the rest of the
  * layout types) -- spelled out as a literal union here instead of
@@ -624,7 +689,7 @@ function readRememberedScratchpadState(): RememberedScratchpadState | null {
     const focus = parsed?.focus;
     if (
       !focus ||
-      (focus.kind !== "scratch" && focus.kind !== "pad" && focus.kind !== "paper") ||
+      (focus.kind !== "scratch" && focus.kind !== "pad" && focus.kind !== "paper" && focus.kind !== "tool") ||
       typeof focus.id !== "string"
     ) {
       return null;
@@ -651,10 +716,11 @@ function rememberScratchpadState(state: RememberedScratchpadState): void {
 }
 
 /** Builds the next `URLSearchParams` for a given focus/view -- `scratch`/
- * `pad`/`paper` are mutually exclusive (whichever's relevant is set, the
- * other two removed), `view` is omitted entirely in the (default) "focus"
- * mode rather than written as `view=focus`, so the common case keeps a
- * clean URL like `?scratch=my-scratch` or `?paper=icon`. */
+ * `pad`/`paper`/`tool` are mutually exclusive (whichever's relevant is
+ * set, the other three removed), `view` is omitted entirely in the
+ * (default) "focus" mode rather than written as `view=focus`, so the
+ * common case keeps a clean URL like `?scratch=my-scratch` or
+ * `?paper=icon`. */
 function buildFocusSearchParams(
   current: URLSearchParams,
   focus: FocusTarget,
@@ -664,8 +730,10 @@ function buildFocusSearchParams(
   next.delete("scratch");
   next.delete("pad");
   next.delete("paper");
+  next.delete("tool");
   if (focus.kind === "pad") next.set("pad", focus.id);
   else if (focus.kind === "paper") next.set("paper", focus.id);
+  else if (focus.kind === "tool") next.set("tool", focus.id);
   else next.set("scratch", focus.id);
   if (viewMode === "list") next.set("view", "list");
   else next.delete("view");
@@ -792,6 +860,7 @@ function ScratchNav({
   onFocusScratch,
   onFocusPad,
   onFocusPaper,
+  onFocusTool,
 }: {
   pads: ResolvedPad[];
   scratchById: Map<string, Scratch>;
@@ -800,6 +869,7 @@ function ScratchNav({
   onFocusScratch: (id: string) => void;
   onFocusPad: (id: string) => void;
   onFocusPaper: (id: string) => void;
+  onFocusTool: () => void;
 }) {
 
   const createPadFetcher = useFetcher<{ ok: boolean; id?: string }>();
@@ -848,6 +918,10 @@ function ScratchNav({
             onClick={() => onFocusPaper(paper.id)}
           />
         ))}
+      </Stack>
+      <Stack gap={1}>
+        <DrawerLabel label="Tools" />
+        <NavButton label="SVG → Points" isFocused={focus.kind === "tool"} onClick={onFocusTool} />
       </Stack>
     </Stack>
   );
@@ -979,6 +1053,373 @@ function PreviewBoxPair({
       <div style={{ flex: "1 1 0", minWidth: 0 }}>
         <ColumnLabel>Dark</ColumnLabel>
         <PreviewBox fullBleed={fullBleed} markdown={markdown} minHeight={minHeight} previewScheme="dark" />
+      </div>
+    </div>
+  );
+}
+
+const SVG_ANCHOR_X_OPTIONS: { value: LineAnchorX["ref"]; label: string }[] = [
+  { value: "L", label: "Left" },
+  { value: "C", label: "Center" },
+  { value: "R", label: "Right" },
+];
+const SVG_ANCHOR_Y_OPTIONS: { value: LineAnchorY["ref"]; label: string }[] = [
+  { value: "T", label: "Top" },
+  { value: "C", label: "Center" },
+  { value: "B", label: "Bottom" },
+];
+
+type SvgConversionResult =
+  | {
+      ok: true;
+      pointsAttr: string;
+      lineDirective: string;
+      pathDirective: string;
+      pointCount: number;
+      subpathCount: number;
+      kind: "path" | "polyline" | "polygon";
+      sourceWidth: number;
+      sourceHeight: number;
+      originalSvgMarkup: string;
+    }
+  | { ok: false; error: string };
+
+const SVG_TO_POINTS_DEFAULT =
+  '<svg viewBox="0 0 100 40"><path d="M0,20 C25,0 75,40 100,20" fill="none" stroke="currentColor"/></svg>';
+
+/** Converts real SVG geometry into EITHER `::line{points="..."}`'s own
+ * LITERAL-PIXEL coordinate vocabulary (see `oxmarkdown-core`'s
+ * `wavyLine.ts` for why those are real, stable pixels rather than a
+ * normalized-then-rescaled box) OR `::path{points="..." width="..."
+ * height="..." start="..."}`'s decoupled shape/size/position one -- the
+ * practical way to trace a hand-drawn squiggle (or a genuinely complex,
+ * many-segment scribble -- multiple chained curves parse/sample fine, not
+ * just a single simple arc) from Figma/Illustrator/a scanned sketch
+ * instead of hand-guessing anchor/delta numbers one at a time. All the
+ * actual parse/fit/format math is pure and lives in `oxmarkdown-core/src/
+ * svgToLinePoints.ts` (zero React, independently testable/reusable) --
+ * this component is purely the paste-in/configure/preview/copy UI wrapped
+ * around it.
+ *
+ * Both outputs share the SAME paste/anchor/target-size inputs, used two
+ * different ways:
+ *   - `::line{...}`'s points get PRE-FIT into the target width/height and
+ *     the anchor gets BAKED into the very first point (`formatLinePointsAttr`'s
+ *     `firstPointAnchor`) -- a fully self-contained, one-time computation,
+ *     matching `::line`'s own literal/static design.
+ *   - `::path{...}`'s points are the RAW extracted deltas, completely
+ *     UNSCALED -- the same target width/height and anchor instead become
+ *     `::path`'s own live `width`/`height`/`start` attributes verbatim,
+ *     so `::path`'s own render-time math (`fitAndPositionPoints`) does the
+ *     actual fitting -- genuinely responsive if a `%` is used, unlike
+ *     `::line`'s baked-in numbers.
+ *
+ * Lives as its OWN section (not folded into the "Line"/"Path" Tracing
+ * Papers' own attribute controls above) since it's a fundamentally
+ * different KIND of tool -- a one-time conversion utility you paste
+ * something into and copy a result out of, not a live attribute editor
+ * cycling through a fixed example. ALSO surfaced directly inside both
+ * Tracing Papers' own Focus views (`FocusedTracingPaperView`, below)
+ * since that's where an author is most likely to actually reach for it.
+ *
+ * The "anchor this shape at a position + offset" mental model reuses the
+ * EXACT SAME `L`/`C`/`R` (x) + `T`/`C`/`B` (y) + numeric-offset vocabulary
+ * both directives already use -- picking WHICH point of the traced shape
+ * that anchor applies to (`referenceMode`) is one extra knob this needs
+ * that a hand-typed `points="..."`/`start="..."` attribute doesn't, since
+ * a real SVG's own "first drawn point" isn't always the most meaningful
+ * anchor (a closed loop's bounding-box corner often reads more
+ * predictably). `targetWidth`/`targetHeight` (px, typed as a plain
+ * number here) is the other -- passed through VERBATIM as `::path`'s own
+ * `width`/`height` (hand-edit the copied result to add a trailing `%`
+ * for `::path`'s genuinely-responsive sizing; this tool's own inputs
+ * only ever produce a plain px number, since `::line`'s OWN fit
+ * computation needs one regardless). */
+function SvgToPointsTool() {
+  const [svgInput, setSvgInput] = useState(SVG_TO_POINTS_DEFAULT);
+  const [targetWidth, setTargetWidth] = useState("100");
+  const [targetHeight, setTargetHeight] = useState("40");
+  const [anchorXRef, setAnchorXRef] = useState<LineAnchorX["ref"]>("C");
+  const [anchorXOffset, setAnchorXOffset] = useState("0");
+  const [anchorYRef, setAnchorYRef] = useState<LineAnchorY["ref"]>("C");
+  const [anchorYOffset, setAnchorYOffset] = useState("0");
+  const [scaleMode, setScaleMode] = useState<"fit" | "stretch">("fit");
+  const [referenceMode, setReferenceMode] = useState<"first-point" | "bounding-box">("first-point");
+  const [reverse, setReverse] = useState(false);
+
+  const result: SvgConversionResult = useMemo(() => {
+    const geometry = extractSvgGeometry(svgInput);
+    if (!geometry) {
+      return { ok: false, error: "Couldn't find any usable <path>/<polyline>/<polygon> data (or a bare point list) in that paste." };
+    }
+    // Reversed BEFORE anything else touches it -- fitting/anchoring/point-
+    // counting all then naturally treat whichever end the trace happened
+    // to end on as the shape's own "first" point instead, exactly as if
+    // the SVG had been drawn in that direction to begin with.
+    const orderedPoints = reverse ? reverseSvgGeometry(geometry.points) : geometry.points;
+    const anchorX: LineAnchorX = { ref: anchorXRef, offset: Number(anchorXOffset) || 0 };
+    const anchorY: LineAnchorY = { ref: anchorYRef, offset: Number(anchorYOffset) || 0 };
+    const targetWidthPx = Number(targetWidth) || 100;
+    const targetHeightPx = Number(targetHeight) || 40;
+
+    // `::line{...}`: pre-fit into the target box, anchor baked into the
+    // very first point -- fully self-contained, matching `::line`'s own
+    // literal/static design.
+    const fitted = fitSvgPointsToLineBox(orderedPoints, geometry.width, geometry.height, {
+      targetWidth: targetWidthPx,
+      targetHeight: targetHeightPx,
+      referenceIndex: referenceMode === "bounding-box" ? "bounding-box" : 0,
+      anchorX,
+      anchorY,
+      scaleMode,
+    });
+    const linePointsAttr = formatLinePointsAttr(fitted, { x: anchorX, y: anchorY });
+    const lineDirective = `::line{points="${linePointsAttr}" curve="smooth" tension="0.5"}`;
+
+    // `::path{...}`: the RAW extracted deltas, completely unscaled --
+    // `width`/`height`/`start` carry the SAME target size/anchor instead,
+    // as `::path`'s own live attributes, so ITS render-time math does the
+    // actual fitting (see `fitAndPositionPoints`). `pointsAttr` (bare, no
+    // directive wrapper) is exactly this same raw value -- the shape
+    // itself, independent of which directive it ends up pasted into.
+    const pointsAttr = formatLinePointsAttr(orderedPoints);
+    const startAttr = `${anchorX.ref}${anchorXOffset || 0},${anchorY.ref}${anchorYOffset || 0}`;
+    const pathDirective = `::path{points="${pointsAttr}" width="${targetWidthPx}" height="${targetHeightPx}" start="${startAttr}" curve="smooth" tension="0.5"}`;
+
+    // A quick visual reference back to what was actually pasted -- a whole
+    // `<svg>` renders as-is; a bare shape tag or plain point list gets
+    // wrapped in a synthetic `<svg>` (using the extracted geometry's own
+    // natural width/height as its `viewBox`) so there's still something to
+    // look at either way.
+    const trimmedInput = svgInput.trim();
+    const originalSvgMarkup = /^<svg[\s>]/i.test(trimmedInput)
+      ? trimmedInput
+      : (() => {
+          const shapeMatch = /<(path|polyline|polygon)\b[^>]*>/i.exec(trimmedInput);
+          const inner = shapeMatch ? shapeMatch[0] : `<polyline points="${trimmedInput}" fill="none" stroke="currentColor" />`;
+          return `<svg viewBox="0 0 ${geometry.width} ${geometry.height}">${inner}</svg>`;
+        })();
+
+    return {
+      ok: true,
+      pointsAttr,
+      lineDirective,
+      pathDirective,
+      pointCount: geometry.points.reduce((n, group) => n + group.length, 0),
+      subpathCount: geometry.points.length,
+      kind: geometry.kind,
+      sourceWidth: geometry.width,
+      sourceHeight: geometry.height,
+      originalSvgMarkup,
+    };
+  }, [svgInput, targetWidth, targetHeight, anchorXRef, anchorXOffset, anchorYRef, anchorYOffset, scaleMode, referenceMode, reverse]);
+
+  const fieldClassName = `${textSize.sm} ${sprinkles({ p: 2, fontFamily: "mono" })}`;
+  const fieldStyle: CSSProperties = {
+    display: "block",
+    width: "100%",
+    background: semanticColors.surfaceInset,
+    color: "inherit",
+    border: "1px solid transparent",
+    borderRadius: 6,
+  };
+
+  return (
+    <div
+      className={sprinkles({ display: "flex", gap: 5, flexWrap: "wrap" })}
+      style={{ alignItems: "flex-start", border: `1px solid ${semanticColors.surfaceBorder}`, borderRadius: 8, padding: 16 }}
+    >
+      <div style={{ flex: "1 1 420px", minWidth: 0 }}>
+        <ColumnLabel>Paste SVG (or a bare "x,y x,y ..." list)</ColumnLabel>
+        <textarea
+          value={svgInput}
+          onChange={(e) => setSvgInput(e.target.value)}
+          spellCheck={false}
+          rows={4}
+          className={`${textSize.sm} ${sprinkles({ p: 3, fontFamily: "mono" })}`}
+          style={textAreaStyle(svgInput !== SVG_TO_POINTS_DEFAULT)}
+        />
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, marginTop: 8, lineHeight: 1.5 }}>
+          Reads the FIRST <code>path</code>/<code>polyline</code>/<code>polygon</code> found -- a whole copied{" "}
+          <code>{"<svg>"}</code>, a bare shape tag, or just a plain point list all work. Curves (<code>C</code>/
+          <code>S</code>/<code>Q</code>/<code>T</code>) are sampled into a smooth polyline; elliptical arcs (
+          <code>A</code>) aren't supported.
+        </p>
+
+        <div className={sprinkles({ display: "flex", gap: 4, flexWrap: "wrap", mt: 4 })}>
+          <div style={{ flex: "1 1 100px" }}>
+            <ColumnLabel>Target width (px)</ColumnLabel>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={targetWidth}
+              onChange={(e) => setTargetWidth(e.target.value)}
+              className={fieldClassName}
+              style={fieldStyle}
+            />
+          </div>
+          <div style={{ flex: "1 1 100px" }}>
+            <ColumnLabel>Target height (px)</ColumnLabel>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={targetHeight}
+              onChange={(e) => setTargetHeight(e.target.value)}
+              className={fieldClassName}
+              style={fieldStyle}
+            />
+          </div>
+        </div>
+
+        <div className={sprinkles({ display: "flex", gap: 4, flexWrap: "wrap", mt: 4 })}>
+          <div style={{ flex: "1 1 160px" }}>
+            <ColumnLabel>Anchor the {referenceMode === "bounding-box" ? "bounding box's top-left" : "first point"} at</ColumnLabel>
+            <div className={sprinkles({ display: "flex", gap: 2 })}>
+              <select
+                value={anchorXRef}
+                onChange={(e) => setAnchorXRef(e.target.value as LineAnchorX["ref"])}
+                className={fieldClassName}
+                style={fieldStyle}
+              >
+                {SVG_ANCHOR_X_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={anchorYRef}
+                onChange={(e) => setAnchorYRef(e.target.value as LineAnchorY["ref"])}
+                className={fieldClassName}
+                style={fieldStyle}
+              >
+                {SVG_ANCHOR_Y_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={{ flex: "1 1 100px" }}>
+            <ColumnLabel>X offset</ColumnLabel>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={anchorXOffset}
+              onChange={(e) => setAnchorXOffset(e.target.value)}
+              className={fieldClassName}
+              style={fieldStyle}
+            />
+          </div>
+          <div style={{ flex: "1 1 100px" }}>
+            <ColumnLabel>Y offset</ColumnLabel>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={anchorYOffset}
+              onChange={(e) => setAnchorYOffset(e.target.value)}
+              className={fieldClassName}
+              style={fieldStyle}
+            />
+          </div>
+        </div>
+
+        <div className={sprinkles({ display: "flex", gap: 4, flexWrap: "wrap", mt: 4 })}>
+          <div style={{ flex: "1 1 160px" }}>
+            <ColumnLabel>Reference point</ColumnLabel>
+            <select
+              value={referenceMode}
+              onChange={(e) => setReferenceMode(e.target.value as "first-point" | "bounding-box")}
+              className={fieldClassName}
+              style={fieldStyle}
+            >
+              <option value="first-point">Shape's first point</option>
+              <option value="bounding-box">Shape's bounding-box corner</option>
+            </select>
+          </div>
+          <div style={{ flex: "1 1 160px" }}>
+            <ColumnLabel>Scale</ColumnLabel>
+            <select
+              value={scaleMode}
+              onChange={(e) => setScaleMode(e.target.value as "fit" | "stretch")}
+              className={fieldClassName}
+              style={fieldStyle}
+            >
+              <option value="fit">Fit (keep proportions)</option>
+              <option value="stretch">Stretch to fill</option>
+            </select>
+          </div>
+          <div style={{ flex: "1 1 160px" }}>
+            <ColumnLabel>Direction</ColumnLabel>
+            <label
+              className={`${textSize.sm} ${sprinkles({ display: "flex", alignItems: "center", gap: 2, p: 2, fontFamily: "mono" })}`}
+              style={{ ...fieldStyle, cursor: "pointer" }}
+            >
+              <input type="checkbox" checked={reverse} onChange={(e) => setReverse(e.target.checked)} />
+              Reverse (flip start/end)
+            </label>
+          </div>
+        </div>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, marginTop: 8, lineHeight: 1.5 }}>
+          A traced SVG's own end point isn't always the one you actually want to build onto --
+          "Reverse" swaps which end is first/last (the shape looks identical) so the point you
+          want to extend from lands at the very END of <code>points="..."</code>, ready to keep
+          typing deltas (or a <code>|</code> break) straight after it.
+        </p>
+
+        {!result.ok ? (
+          <p className={textSize.sm} style={{ color: semanticColors.textDanger, marginTop: 12 }}>
+            {result.error}
+          </p>
+        ) : (
+          <>
+            <div className={sprinkles({ mt: 4 })}>
+              <ColumnLabel>
+                {result.pointCount} point{result.pointCount === 1 ? "" : "s"}
+                {result.subpathCount > 1 ? ` across ${result.subpathCount} disconnected strokes` : ""} parsed from a {result.kind} (
+                {Math.round(result.sourceWidth)}×{Math.round(result.sourceHeight)} source)
+              </ColumnLabel>
+            </div>
+            <div className={sprinkles({ display: "flex", gap: 2, flexWrap: "wrap", mt: 3 })}>
+              <CopyButton label="Copy points" value={result.pointsAttr} />
+              <CopyButton label="Copy line" value={result.lineDirective} />
+              <CopyButton label="Copy path" value={result.pathDirective} />
+            </div>
+          </>
+        )}
+      </div>
+      <div style={{ flex: "1 1 340px", minWidth: 280 }}>
+        {result.ok && (
+          <>
+            <ColumnLabel>Original (as pasted)</ColumnLabel>
+            <div
+              className={`svg-original-preview ${sprinkles({ p: 3 })}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                height: 120,
+                border: `1px solid ${semanticColors.surfaceBorder}`,
+                borderRadius: 6,
+                background: "var(--website-bg-page)",
+                color: semanticColors.textPrimary,
+              }}
+              // Safe here -- this whole route is Admin/Super-gated, and the
+              // markup is the author's own paste, not untrusted user
+              // content (see `scratch.css`'s own comment on this class).
+              dangerouslySetInnerHTML={{ __html: result.originalSvgMarkup }}
+            />
+            <div className={sprinkles({ mt: 4 })}>
+              <ColumnLabel>::line{"{...}"} preview</ColumnLabel>
+              <PreviewBoxPair fullBleed markdown={result.lineDirective} minHeight={160} />
+            </div>
+            <div className={sprinkles({ mt: 4 })}>
+              <ColumnLabel>::path{"{...}"} preview</ColumnLabel>
+              <PreviewBoxPair fullBleed markdown={result.pathDirective} minHeight={160} />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1397,6 +1838,44 @@ function CopyableMarkdown({ value }: { value: string }) {
         {copied ? "Copied!" : "Copy"}
       </button>
     </div>
+  );
+}
+
+/** A bare copy-to-clipboard button with no visible text preview alongside
+ * it -- `SvgToPointsTool`'s own "Copy points"/"Copy line"/"Copy path"
+ * trio, where showing the full generated string isn't needed (unlike
+ * `CopyableMarkdown` above, a Tracing Paper's own live-rebuilt source,
+ * which IS meant to be read/eyeballed) -- the live preview already
+ * confirms correctness visually. */
+function CopyButton({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API can be unavailable -- nothing else to fall back to
+      // here, since there's no visible text to select by hand.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className={`${textSize.xs} ${sprinkles({ fontWeight: "bold", fontFamily: "mono", px: 3, py: 2 })}`}
+      style={{
+        border: `1px solid ${semanticColors.textBrand}`,
+        borderRadius: 6,
+        background: "none",
+        cursor: "pointer",
+        color: semanticColors.textBrand,
+      }}
+    >
+      {copied ? "Copied!" : label}
+    </button>
   );
 }
 
@@ -2040,11 +2519,14 @@ export default function StampsScratch() {
   const padParam = searchParams.get("pad");
   const scratchParam = searchParams.get("scratch");
   const paperParam = searchParams.get("paper");
+  const toolParam = searchParams.get("tool");
   const focus: FocusTarget = padParam
     ? { kind: "pad", id: padParam }
     : scratchParam
       ? { kind: "scratch", id: scratchParam }
-      : { kind: "paper", id: paperParam ?? DEFAULT_FOCUS_ID };
+      : toolParam
+        ? { kind: "tool", id: "svg-points" }
+        : { kind: "paper", id: paperParam ?? DEFAULT_FOCUS_ID };
 
   // Independent of `viewMode` -- which scheme every "Rendered (static)"
   // preview box shows, regardless of the browser's own OS-level
@@ -2061,7 +2543,7 @@ export default function StampsScratch() {
   // instead of reading `previewScheme` -- the page-level Light/Dark
   // toggle has nothing to drive there anymore, so it's hidden rather than
   // left sitting around looking like it still does something.
-  const isTracingPaperView = viewMode === "list" || focus.kind === "paper";
+  const isTracingPaperView = viewMode === "list" || focus.kind === "paper" || focus.kind === "tool";
 
   const focusedEntry = focus.kind === "scratch" ? (resolvedEntries.find((e) => e.id === focus.id) ?? resolvedEntries[0]) : undefined;
   const focusedPad = focus.kind === "pad" ? (pads.find((p) => p.id === focus.id) ?? pads[0]) : undefined;
@@ -2080,7 +2562,7 @@ export default function StampsScratch() {
   // the already-defaulted `focus` above) for presence, and re-validates
   // the remembered id still exists (it may have been deleted since).
   useEffect(() => {
-    if (searchParams.has("scratch") || searchParams.has("pad") || searchParams.has("paper")) return;
+    if (searchParams.has("scratch") || searchParams.has("pad") || searchParams.has("paper") || searchParams.has("tool")) return;
     const remembered = readRememberedScratchpadState();
     if (!remembered) return;
     const stillExists =
@@ -2088,7 +2570,9 @@ export default function StampsScratch() {
         ? pads.some((p) => p.id === remembered.focus.id)
         : remembered.focus.kind === "paper"
           ? TRACING_PAPERS.some((p) => p.id === remembered.focus.id)
-          : resolvedEntries.some((s) => s.id === remembered.focus.id);
+          : remembered.focus.kind === "tool"
+            ? true
+            : resolvedEntries.some((s) => s.id === remembered.focus.id);
     if (!stillExists) return;
     setSearchParams(buildFocusSearchParams(searchParams, remembered.focus, remembered.viewMode), { replace: true });
     // Mount-only, deliberately -- this is a ONE-TIME hydration step, not a
@@ -2115,6 +2599,9 @@ export default function StampsScratch() {
   }
   function focusOnPaper(id: string) {
     navigateFocus({ kind: "paper", id }, "focus");
+  }
+  function focusOnTool() {
+    navigateFocus({ kind: "tool", id: "svg-points" }, "focus");
   }
   function changeViewMode(nextViewMode: ViewMode) {
     navigateFocus(focus, nextViewMode);
@@ -2155,6 +2642,7 @@ export default function StampsScratch() {
             onFocusScratch={focusOnScratch}
             onFocusPad={focusOnPad}
             onFocusPaper={focusOnPaper}
+            onFocusTool={focusOnTool}
           />
         }
         title="Scratches"
@@ -2206,7 +2694,9 @@ export default function StampsScratch() {
                     ? (focusedPad?.name ?? "Pad")
                     : focus.kind === "paper"
                       ? (focusedPaper?.name ?? "Tracing Paper")
-                      : (focusedEntry?.name ?? "Scratch")}
+                      : focus.kind === "tool"
+                        ? "SVG \u2192 Points"
+                        : (focusedEntry?.name ?? "Scratch")}
               </h1>
               <div className={sprinkles({ display: "flex", gap: 2 })}>
                 {!isTracingPaperView && (
@@ -2244,6 +2734,8 @@ export default function StampsScratch() {
               pads={pads}
               onFocusScratch={focusOnScratch}
             />
+          ) : viewMode === "focus" && focus.kind === "tool" ? (
+            <SvgToPointsTool />
           ) : viewMode === "focus" && focusedEntry ? (
             <FocusedEntryView
               key={focusedEntry.id}
@@ -2254,10 +2746,24 @@ export default function StampsScratch() {
               previewScheme={previewScheme}
             />
           ) : (
-            <Stack gap={4}>
-              {TRACING_PAPERS.map((paper) => (
-                <TracingPaperRow key={paper.id} paper={paper} onFocus={() => focusOnPaper(paper.id)} />
-              ))}
+            <Stack gap={8}>
+              <div>
+                <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold", mb: 2 })}`} style={{ color: semanticColors.textPrimary }}>
+                  SVG → Points
+                </h2>
+                <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: 640, lineHeight: 1.5, marginBottom: 12 }}>
+                  Paste real SVG geometry (a <code>{"<path>"}</code>, <code>{"<polyline>"}</code>/
+                  <code>{"<polygon>"}</code>, or a bare point list) and trace it straight into either
+                  a <code>::line{"{...}"}</code> or a <code>::path{"{...}"}</code> -- anchored to a
+                  position + offset instead of hand-computed deltas.
+                </p>
+                <SvgToPointsTool />
+              </div>
+              <Stack gap={4}>
+                {TRACING_PAPERS.map((paper) => (
+                  <TracingPaperRow key={paper.id} paper={paper} onFocus={() => focusOnPaper(paper.id)} />
+                ))}
+              </Stack>
             </Stack>
           )}
         </CenterContent>

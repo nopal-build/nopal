@@ -462,6 +462,20 @@
   z-index: 0;
 }
 
+/* `:line-word{text="..." points="..."}` -- the inline, wrap-one-word-in-a-
+   squiggle TEXT directive (`websiteDirectives.tsx`). Its own wrapper span
+   (inline styles: `position: relative; display: inline-block`) has no
+   OTHER positioned descendant to layer against -- just the plain text
+   node sitting right next to this `WavyLine` overlay in the DOM -- so a
+   negative z-index is enough on its own to push the decoration BEHIND
+   that text (plain in-flow content always renders above a negatively-
+   z-indexed sibling within the same containing block), keeping the word
+   itself fully legible with the squiggle reading as a background
+   decoration around/under it, not a strikethrough on top of it. */
+.website-line-word {
+  z-index: -1;
+}
+
 .website-section-title :is(h1, h2, h3, h4, h5, h6) {
   position: relative;
   z-index: 1;
