@@ -572,38 +572,118 @@ export async function findSeedDocumentsFolder(projectFolder: VaultFolder): Promi
   return folders.find((f) => f.name === SEED_DOCUMENTS_FOLDER_NAME) ?? null;
 }
 
-// ─── The push ───────────────────────────────────────────────────────────
+// ─── A prepared seed file ───────────────────────────────────────────────
+//
+// The seed packet is the one door (ADR-029, the fold of 2026-10-01). A
+// file somebody prepared in seed shape (a day, a document, the people
+// file) is placed by code and never read by the model: the judgment in
+// it is already somebody's. Code decides which files those are, by three
+// signals, and says so in the run log.
 
-export type SeedPayload = {
-  days: { date: string; content: string }[];
-  documents: { name: string; content: string }[];
-  people?: string | null;
-};
+export type PreparedSeedFile =
+  | { kind: "day"; date: string; byShape: boolean }
+  | { kind: "document"; date: string }
+  | { kind: "people" }
+  | { kind: "refused"; reason: string };
+
+const DAY_FILE_RE = /^(\d{4}-\d{2}-\d{2})\.md$/i;
+
+/**
+ * Whether a text packet file is a prepared seed file, and which. Pure.
+ *
+ * - `kind: seed` in the front matter is the contract: a day, dated by its
+ *   name (`YYYY-MM-DD.md`) or its `date:`. Refused with the reason when it
+ *   has neither or does not parse into sections, never sent to the model
+ *   quietly.
+ * - `kind: seed-document` with a `date:` is a document; `kind: seed-people`
+ *   (or the name `_people.md`) is the roles file.
+ * - Any other `kind: seed-*` (`seed-attachments`, a review file) is
+ *   refused: a helper file is not a thread.
+ * - No `kind` at all, but named for a day AND parsing into sections: a
+ *   prepared day by its shape. The run log says so, so a forgotten front
+ *   matter is a line to read, not a wrong page.
+ * - Everything else is raw and goes to the model: null.
+ */
+export function classifyPreparedSeedFile(name: string, text: string): PreparedSeedFile | null {
+  const base = name.split("/").pop() ?? name;
+  const day = parseSeedDay(text);
+  const kind = day.kind;
+  const named = DAY_FILE_RE.exec(base)?.[1] ?? null;
+  const hasBody = day.sections.length > 0 || day.noted !== null;
+  if (kind === "seed") {
+    const { data } = readFrontmatter(text);
+    const fmDate = data.date instanceof Date ? data.date.toISOString().slice(0, 10) : typeof data.date === "string" ? data.date : null;
+    const date = named ?? (fmDate && DATE_RE.test(fmDate) ? fmDate : null);
+    if (!date) return { kind: "refused", reason: "a prepared seed day needs its date in its name (YYYY-MM-DD.md) or its front matter" };
+    if (!hasBody) return { kind: "refused", reason: "a prepared seed day with no `## Name` or Noted section" };
+    return { kind: "day", date, byShape: false };
+  }
+  if (kind === "seed-document") {
+    const meta = parseSeedDocument(text);
+    if (!meta.date) return { kind: "refused", reason: "a prepared seed document needs a `date:` in its front matter" };
+    return { kind: "document", date: meta.date };
+  }
+  if (kind === "seed-people" || base === SEED_PEOPLE_FILE_NAME) return { kind: "people" };
+  if (kind && kind.startsWith("seed")) return { kind: "refused", reason: `\`kind: ${kind}\` is a seed helper file, not something Sow reads` };
+  if (!kind && named && hasBody) return { kind: "day", date: named, byShape: true };
+  return null;
+}
+
+/**
+ * Adds a prepared day to the day already in the seed, keeping the
+ * prepared file's own `- src:` lines: a bullet already there (under
+ * anyone, or noted) is not written twice. With no existing day the
+ * prepared file is written as it is. Pure.
+ */
+export function mergePreparedSeedDay(existing: string | null, incoming: string): { content: string; added: number; skipped: number } {
+  if (!existing) {
+    const doc = parseSeedDayDoc(incoming);
+    const count = doc.sections.reduce((n, s) => n + s.groups.reduce((m, g) => m + g.bullets.length, 0), 0) + doc.noted.length;
+    return { content: incoming, added: count, skipped: 0 };
+  }
+  const doc = parseSeedDayDoc(existing);
+  const add = parseSeedDayDoc(incoming);
+  const present = new Set<string>([
+    ...doc.sections.flatMap((s) => s.groups.flatMap((g) => g.bullets.map(seedBulletKey))),
+    ...doc.noted.map(seedBulletKey),
+  ]);
+  let added = 0;
+  let skipped = 0;
+  for (const sec of add.sections) {
+    let section = doc.sections.find((s) => s.speaker.toLowerCase() === sec.speaker.toLowerCase());
+    for (const g of sec.groups) {
+      const fresh = g.bullets.filter((b) => {
+        const key = seedBulletKey(b);
+        if (!key || present.has(key)) {
+          skipped += 1;
+          return false;
+        }
+        present.add(key);
+        return true;
+      });
+      if (fresh.length === 0) continue;
+      if (!section) {
+        section = { speaker: sec.speaker, groups: [] };
+        doc.sections.push(section);
+      }
+      section.groups.push({ bullets: fresh, src: g.src });
+      added += fresh.length;
+    }
+  }
+  for (const b of add.noted) {
+    const key = seedBulletKey(b);
+    if (!key || present.has(key)) {
+      skipped += 1;
+      continue;
+    }
+    present.add(key);
+    doc.noted.push(b);
+    added += 1;
+  }
+  return { content: renderSeedDayDoc(doc), added, skipped };
+}
 
 export type SeedFileOutcome = "written" | "updated" | "unchanged";
-
-export type SeedApplyReport = {
-  days: { written: string[]; updated: string[]; unchanged: string[]; skipped: { name: string; reason: string }[] };
-  documents: { written: string[]; updated: string[]; unchanged: string[]; skipped: { name: string; reason: string }[] };
-  people: SeedFileOutcome | "none";
-  /** Every name the pushed days speak under, and who it links to. */
-  links: { name: string; humanId: string | null; linkedName: string | null }[];
-  ambiguous: string[];
-  /** Pushed dates that already have live synced entries: the check for
-   * "the seed repeats what someone logged" starts here. */
-  liveOnSameDay: { date: string; sources: number }[];
-};
-
-function inRange(date: string, from?: string | null, to?: string | null): boolean {
-  if (from && date < from) return false;
-  if (to && date > to) return false;
-  return true;
-}
-
-/** Which of the payload's days a push with this range takes. Pure. */
-export function selectSeedDays<T extends { date: string }>(days: readonly T[], range: { from?: string | null; to?: string | null }): T[] {
-  return days.filter((d) => DATE_RE.test(d.date) && inRange(d.date, range.from, range.to)).sort((a, b) => a.date.localeCompare(b.date));
-}
 
 async function writeSeedFile(input: {
   humanId: string;
@@ -642,96 +722,11 @@ async function listingByName(humanId: string, folderId: string) {
   return new Map(files.map((f) => [f.name, { _id: f._id, content_hash: f.content_hash, date: f.date }]));
 }
 
-/** Takes a seed payload into `Syncs/Seed/`. Only the days and documents
- * dated in range are written ("7/20 alone" means 7/20 alone); the people
- * file always is. Never writes under `Daily Logs/` or `Marks/`. */
-export async function applySeed(
-  projectFolder: VaultFolder,
-  payload: SeedPayload,
-  range: { from?: string | null; to?: string | null } = {},
-): Promise<SeedApplyReport> {
-  const humanId = projectFolder.human_id;
-  const report: SeedApplyReport = {
-    days: { written: [], updated: [], unchanged: [], skipped: [] },
-    documents: { written: [], updated: [], unchanged: [], skipped: [] },
-    people: "none",
-    links: [],
-    ambiguous: [],
-    liveOnSameDay: [],
-  };
-
+/** Writes the seed's people file (`_people.md`, a role per name). */
+export async function writeSeedPeopleFile(projectFolder: VaultFolder, content: string): Promise<SeedFileOutcome> {
   const seedFolder = await ensureSeedSyncFolder(projectFolder);
-  const seedFiles = await listingByName(humanId, seedFolder._id);
-
-  const spoken = new Set<string>();
-  const days = selectSeedDays(payload.days, range);
-  // A push replaces a day by name. A day a seed packet has written to
-  // holds lines the pushed file does not have, so replacing it would
-  // erase them without a word: that day is refused and named.
-  const sown = await sownSeedDays(projectFolder._id);
-  for (const day of days) {
-    if (sown.has(day.date) && seedFiles.get(`${day.date}.md`)?.content_hash !== contentHash(day.content)) {
-      report.days.skipped.push({ name: `${day.date}.md`, reason: "a seed packet has added to this day; a push would replace those lines" });
-      continue;
-    }
-    const parsed = parseSeedDay(day.content);
-    if (parsed.kind !== "seed") {
-      report.days.skipped.push({ name: `${day.date}.md`, reason: "front matter is not `kind: seed`" });
-      continue;
-    }
-    if (parsed.sections.length === 0 && !parsed.noted) {
-      report.days.skipped.push({ name: `${day.date}.md`, reason: "no sections" });
-      continue;
-    }
-    for (const s of parsed.sections) spoken.add(s.speaker);
-    const outcome = await writeSeedFile({ humanId, folder: seedFolder, existing: seedFiles, name: `${day.date}.md`, content: day.content, date: day.date });
-    report.days[outcome].push(day.date);
-  }
-
-  if (payload.documents.length > 0) {
-    const docsFolder = await ensureChildFolder(humanId, seedFolder, SEED_DOCUMENTS_FOLDER_NAME);
-    const docFiles = await listingByName(humanId, docsFolder._id);
-    for (const doc of payload.documents) {
-      const meta = parseSeedDocument(doc.content);
-      if (meta.kind !== "seed-document") {
-        report.documents.skipped.push({ name: doc.name, reason: "front matter is not `kind: seed-document`" });
-        continue;
-      }
-      if (!meta.date) {
-        report.documents.skipped.push({ name: doc.name, reason: "no `date:` in its front matter" });
-        continue;
-      }
-      if (!inRange(meta.date, range.from, range.to)) {
-        report.documents.skipped.push({ name: doc.name, reason: `dated ${meta.date}, outside the range` });
-        continue;
-      }
-      if (meta.author) spoken.add(meta.author);
-      const outcome = await writeSeedFile({ humanId, folder: docsFolder, existing: docFiles, name: doc.name, content: doc.content, date: meta.date });
-      report.documents[outcome].push(doc.name);
-    }
-  }
-
-  if (payload.people && payload.people.trim()) {
-    report.people = await writeSeedFile({ humanId, folder: seedFolder, existing: seedFiles, name: SEED_PEOPLE_FILE_NAME, content: payload.people, date: null });
-  }
-
-  const members = await seedMembers(projectFolder);
-  const { links, ambiguous } = linkSeedNames(spoken, members);
-  const nameById = new Map(members.map((m) => [m.humanId, m.name]));
-  report.links = [...links.entries()].map(([name, id]) => ({ name, humanId: id, linkedName: id ? nameById.get(id) ?? null : null }));
-  report.ambiguous = ambiguous;
-
-  // Live entries on the same dates: one listing of `Daily Logs/`.
-  const { folders: syncFolders } = await listFolderChildren(humanId, seedFolder.parent_folder_id!);
-  const daily = syncFolders.find((f) => f.name === DAILY_LOGS_SYNC_FOLDER_NAME);
-  if (daily) {
-    const { files } = await listFolderChildren(humanId, daily._id);
-    const pushed = new Set(days.map((d) => d.date));
-    const counts = new Map<string, number>();
-    for (const f of files) if (f.date && pushed.has(f.date)) counts.set(f.date, (counts.get(f.date) ?? 0) + 1);
-    report.liveOnSameDay = [...counts.entries()].sort().map(([date, sources]) => ({ date, sources }));
-  }
-  return report;
+  const existing = await listingByName(projectFolder.human_id, seedFolder._id);
+  return writeSeedFile({ humanId: projectFolder.human_id, folder: seedFolder, existing, name: SEED_PEOPLE_FILE_NAME, content, date: null });
 }
 
 // ─── One day, one document: what the sow stage writes through ───────────
