@@ -31,8 +31,7 @@ import { isIncompleteBannerText, splitFrontmatter, type ProjectStatus } from "ro
 import { getProjectSharing, resolveRole } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
-import { listCardsForProject } from "robustness-core/data/dailyLog.server";
-import { listSeedDays } from "robustness-core/data/seed.server";
+import { projectLogbook } from "robustness-core/data/citedLogs.server";
 import { loadBudget } from "robustness-core/data/budget.server";
 import { currentSeedRound, listPacketFiles, listSeedQuestions } from "robustness-core/data/seedPackets.server";
 import { SeedPacket, SeedRoundQuiet, type SeedingForPage } from "../components/SeedPacket";
@@ -59,7 +58,7 @@ import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/Pinn
 import OxRenderer from "../components/OxRenderer";
 import { ProjectFilesView } from "../components/ProjectFilesView";
 import { ProjectView } from "../components/ProjectView";
-import type { MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
+import type { CitedLogsForPen, MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
 import { sprinkles } from "stamps/sprinkles.css";
 import { button } from "stamps/button.css";
 import { CenterContent } from "stamps/CenterContent";
@@ -157,6 +156,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const people = await projectPeople(sharing);
   // Moving a passage, filing a file, confirming a cost (`features.ts`).
   const canEdit = features.includes("edit");
+  // "Read the full log" in the pen: the Logbook's words, so the Logbook's
+  // feature, on the role's own list as /api/graphlog/cited-logs checks it.
+  const canReadLog = !!role?.features.includes("logbook");
   // What someone without `feeds` writes waits for a Guide
   // (`suggestions.server.ts`): a Guide sees every one, the writer their own.
   const decides = features.includes("suggestions");
@@ -213,6 +215,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     canEditStatus: !!role?.guiding,
     canMark,
     canEdit,
+    canReadLog,
     decides,
     suggestions,
     people,
@@ -370,23 +373,6 @@ async function projectPeople(sharing: { human: string; role: string }[]) {
     .sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || a.name.localeCompare(b.name));
 }
 
-/** Every Card written to the project, one per person per day, newest
- * day first. */
-/** The Cards, and the seed days beside them: a seed day is nobody's Card
- * (Austin, 2026-09-29: "never as someone's daily log"), so it is pinned
- * under "Seed" with its own badge, where the groups that see logs see it. */
-async function projectLogbook(folder: Parameters<typeof listSeedDays>[0]) {
-  const cards = (await listCardsForProject(folder._id)).filter((c) => c.content.trim());
-  const names = new Map(
-    (await getHumansById([...new Set(cards.map((c) => c.humanId))])).map((h) => [h._id, firstName(h)]),
-  );
-  const seed = (await listSeedDays(folder)).map((s) => ({ fileId: s.fileId, who: "Seed", date: s.date, content: s.content, seeded: true }));
-  return [
-    ...cards.map((c) => ({ fileId: c.fileId, who: names.get(c.humanId) ?? "Someone", date: c.date, content: c.content, seeded: false })),
-    ...seed,
-  ].sort((a, b) => b.date.localeCompare(a.date) || Number(a.seeded) - Number(b.seeded) || a.who.localeCompare(b.who));
-}
-
 /** A seed day without its front matter: the sections as the seeder wrote
  * them, headings and all, so a reader sees whose words each group is. */
 function seedDayBody(markdown: string): string {
@@ -496,7 +482,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -562,6 +548,21 @@ export default function NewspaperRoute() {
         return data;
       } catch {
         return "Couldn't look that up. Check your connection and try again.";
+      }
+    },
+    [folder._id, livePageHash],
+  );
+
+  const loadLog = useCallback(
+    async (unitKey: string): Promise<CitedLogsForPen | string> => {
+      try {
+        const params = new URLSearchParams({ projectFolderId: folder._id, pageHash: livePageHash, unitKey });
+        const res = await fetch(`/api/graphlog/cited-logs?${params}`);
+        const data = (await res.json().catch(() => ({}))) as CitedLogsForPen & { error?: string };
+        if (!res.ok) return data.error ?? "Couldn't open the log. Try again.";
+        return data;
+      } catch {
+        return "Couldn't open the log. Check your connection and try again.";
       }
     },
     [folder._id, livePageHash],
@@ -646,9 +647,11 @@ export default function NewspaperRoute() {
       loadMoveOptions: canEdit ? loadMoveOptions : undefined,
       onMove: canEdit ? onMove : undefined,
       onMoveAction,
+      // No log for someone whose group has no Logbook (a Client).
+      loadLog: canReadLog ? loadLog : undefined,
       skipParagraph: isIncompleteBannerText,
     }),
-    [marks, canMark, canEdit, onSend, onErase, loadMoveOptions, onMove, onMoveAction, viewerId],
+    [marks, canMark, canEdit, canReadLog, onSend, onErase, loadMoveOptions, onMove, onMoveAction, loadLog, viewerId],
   );
 
   return (
