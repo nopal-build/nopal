@@ -1,0 +1,15 @@
+/* The Budget's rows (BudgetView.tsx): one grid for the header, each line
+   and the totals, so the columns line up without a table. On a phone the
+   name takes the first row and the numbers wrap under it. */
+.budget-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  width: 100%;
+}
+.budget-row > span { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .budget-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .budget-row > span:first-child { grid-column: 1 / -1; }
+}

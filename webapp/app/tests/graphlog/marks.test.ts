@@ -38,7 +38,7 @@ import {
   viewTools,
   type PromptMark,
 } from "robustness-core/data/graphProjectView.server";
-import { marksNotCaptured, renderQuoteBlocks } from "robustness-core/data/syncGraph.server";
+import { marksNotCaptured, notedNotCaptured, renderQuoteBlocks } from "robustness-core/data/syncGraph.server";
 
 // The local Crouch Card for 2026-09-11, as synced: the HVAC spec that
 // belongs to the Coronado ADU. One `##` section with a `###` inside it.
@@ -206,6 +206,16 @@ describe("a mark always becomes a node", () => {
       '### Node 1\nAustin, on the page:\n\n==Do we have the birch\nplywood on site yet?==\n:ref{name="James W"}',
     ];
     expect(marksNotCaptured([["Do we have the birch plywood on site yet?"]], captured)).toEqual([]);
+  });
+
+  it("a noted line the model kept in part, or split, is captured and not written twice", () => {
+    const noted = ["Ceiling demo finished Saturday 7/25. Beaudy walks it this afternoon."];
+    // Whole bullet inside a node: captured, as for a mark.
+    expect(notedNotCaptured([noted], ["### Node 1\nCeiling demo finished Saturday 7/25. Beaudy walks it this afternoon.\n:ref{name=\"Seed\"}"])).toEqual([]);
+    // The node holds a sentence of the bullet: captured too.
+    expect(notedNotCaptured([noted], ["### Node 1\nCeiling demo finished Saturday 7/25.\n:ref{name=\"Seed\"}"])).toEqual([]);
+    // A few shared words are not a capture.
+    expect(notedNotCaptured([noted], ["### Node 1\nCeiling demo.\n:ref{name=\"Seed\"}"])).toEqual([{ text: noted[0], sourceIndex: 0 }]);
   });
 
   it("says nothing about a source that is not a marks file", () => {

@@ -10,7 +10,7 @@ import type { FileFolder, ProjectFileRow } from "robustness-core/data/fileFolder
 import type { FilingKind } from "robustness-core/data/syncFiling.server";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
-import { Input } from "stamps/Input";
+import { SearchField } from "stamps/SearchField";
 import { MoreMenu } from "stamps/MoreMenu";
 import { button } from "stamps/button.css";
 import { sprinkles } from "stamps/sprinkles.css";
@@ -22,6 +22,15 @@ const FOLDER_TITLES: Record<FileFolder, string> = {
   documents: "Documents",
   costs: "Costs",
   unsorted: "Unsorted",
+};
+
+/** What a person is looking for on each tab (Austin, 2026-09-29): the
+ * search and the empty state say "photo", not "file", on the Gallery. */
+const FOLDER_WORDS: Record<FileFolder, { find: string; none: string; noMatch: string }> = {
+  gallery: { find: "Find a photo…", none: "No photos yet.", noMatch: "No photo matches" },
+  documents: { find: "Find a document…", none: "No documents yet.", noMatch: "No document matches" },
+  costs: { find: "Find a receipt…", none: "No costs yet.", noMatch: "No receipt matches" },
+  unsorted: { find: "Find a file…", none: "Nothing unsorted.", noMatch: "Nothing unsorted matches" },
 };
 
 /** URL state: `files=<folder>` and `q=<search>`, kept beside whatever
@@ -36,6 +45,7 @@ export function ProjectFilesView({
   kinds,
   onOpen,
   onChanged,
+  canFile = true,
 }: {
   projectFolderId: string;
   rows: ProjectFileRow[];
@@ -45,10 +55,15 @@ export function ProjectFilesView({
   onOpen: (row: ProjectFileRow) => void;
   /** Reload after a tap wrote a mark. */
   onChanged: () => void;
+  /** The viewer's group gets `edit`: without it, no File as, Correct or
+   * Accepted (the server refuses them anyway). */
+  canFile?: boolean;
 }) {
   const [params, setParams] = useSearchParams();
   const requested = params.get(FILES_PARAM);
-  const active: FileFolder = folders.includes(requested as FileFolder) ? (requested as FileFolder) : "gallery";
+  // The first folder given is the default (the Vault gives all four,
+  // Gallery first; a project tab may give only Documents and Unsorted).
+  const active: FileFolder = folders.includes(requested as FileFolder) ? (requested as FileFolder) : folders[0];
   const q = params.get(QUERY_PARAM) ?? "";
   const counts = Object.fromEntries(folders.map((f) => [f, rows.filter((r) => r.folders.includes(f)).length])) as Record<FileFolder, number>;
   const shown = rows.filter((r) => r.folders.includes(active) && matches(r, q)).sort((a, b) => b.date.localeCompare(a.date));
@@ -63,7 +78,7 @@ export function ProjectFilesView({
   return (
     <section className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 })} aria-label="Files by kind">
       <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 })}>
-        {folders.map((f) => (
+        {folders.length > 1 && folders.map((f) => (
           <Link key={f} to={hrefFor(f)} style={{ textDecoration: "none" }}>
             <Chip active={f === active}>
               {FOLDER_TITLES[f]} · {counts[f]}
@@ -85,27 +100,21 @@ export function ProjectFilesView({
             });
           }}
         >
-          <Input name={QUERY_PARAM} label="Search files" hideLabel placeholder="Find a file by what it is about…" defaultValue={q} />
-          <button type="submit" className={button({ variant: "outline" })}>
-            Search
-          </button>
+          {/* The stamp search bar; Enter searches. */}
+          <SearchField name={QUERY_PARAM} label={FOLDER_WORDS[active].find} placeholder={FOLDER_WORDS[active].find} defaultValue={q} />
         </form>
       </div>
 
       {shown.length === 0 ? (
         <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-          {rows.length === 0
-            ? "No files have been attached to this project's daily logs yet."
-            : q
-              ? `Nothing in ${FOLDER_TITLES[active]} matches “${q}”.`
-              : `Nothing in ${FOLDER_TITLES[active]} yet.`}
+          {q ? `${FOLDER_WORDS[active].noMatch} “${q}”.` : FOLDER_WORDS[active].none}
         </p>
       ) : active === "gallery" ? (
         <GalleryGrid rows={shown} onOpen={onOpen} />
       ) : (
         <ul className={sprinkles({ display: "flex", flexDirection: "column", gap: 6 })} style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {shown.map((row) => (
-            <FileRow key={row.fileId} row={row} projectFolderId={projectFolderId} kinds={kinds} onOpen={onOpen} onChanged={onChanged} />
+            <FileRow key={row.fileId} row={row} projectFolderId={projectFolderId} kinds={kinds} onOpen={onOpen} onChanged={onChanged} canFile={canFile} />
           ))}
         </ul>
       )}
@@ -141,12 +150,14 @@ function FileRow({
   kinds,
   onOpen,
   onChanged,
+  canFile,
 }: {
   row: ProjectFileRow;
   projectFolderId: string;
   kinds: readonly FilingKind[];
   onOpen: (row: ProjectFileRow) => void;
   onChanged: () => void;
+  canFile: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -247,7 +258,7 @@ function FileRow({
                 ))}
               </ul>
             )}
-            {row.cost.status === "unconfirmed" && row.cost.amount && (
+            {canFile && row.cost.status === "unconfirmed" && row.cost.amount && (
               <div className={sprinkles({ display: "flex", gap: 2, marginTop: 1 })}>
                 <button type="button" disabled={busy} className={button({ variant: "outline" })} onClick={() => act({ act: { kind: "confirm-cost", verdict: "correct" } })}>
                   Correct
@@ -276,7 +287,7 @@ function FileRow({
           </ul>
         )}
 
-        <div className={sprinkles({ display: "flex", alignItems: "center", gap: 2, marginTop: 1 })}>
+        {canFile && <div className={sprinkles({ display: "flex", alignItems: "center", gap: 2, marginTop: 1 })}>
           <MoreMenu
             label="File as"
             trigger={({ toggle, open }) => (
@@ -291,7 +302,7 @@ function FileRow({
               {error}
             </span>
           )}
-        </div>
+        </div>}
       </div>
     </li>
   );

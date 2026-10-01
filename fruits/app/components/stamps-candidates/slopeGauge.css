@@ -1,0 +1,26 @@
+/* A slope you set with a word (`SlopeGauge.tsx`). One ink colour for the
+   slope and every word; nothing changes colour at the steep end. On
+   stamps' semantic variables only. */
+.slope-gauge { display: flex; flex-direction: column; gap: 4px; }
+.slope-gauge__caption { font-size: 0.875rem; line-height: 1.25rem; color: var(--color-text-subtle); }
+.slope-gauge__dial { position: relative; width: 100%; max-width: 360px; aspect-ratio: 360 / 276; }
+.slope-gauge--compact .slope-gauge__dial { max-width: 260px; }
+.slope-gauge__svg { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--color-text-brand); overflow: visible; }
+.slope-gauge__trail { transform-origin: 44px 252px; transition: transform 500ms cubic-bezier(.3, 1.3, .5, 1), opacity 200ms ease; }
+@media (prefers-reduced-motion: reduce) { .slope-gauge__trail { transition: none; } }
+.slope-gauge__word {
+  position: absolute; transform: translate(-50%, -50%);
+  min-height: 44px; min-width: 44px; padding: 0 6px;
+  border: none; background: transparent; border-radius: 9999px; cursor: pointer;
+  font-family: inherit; font-size: 0.95rem; font-weight: 500; letter-spacing: 0.01em;
+  color: var(--color-text-subtle); white-space: nowrap;
+}
+.slope-gauge--compact .slope-gauge__word { font-size: 0.8125rem; }
+.slope-gauge__word:hover { color: var(--color-text-brand); }
+.slope-gauge__word:focus-visible { outline: 2px solid var(--color-text-brand); outline-offset: 2px; }
+/* The chosen word is marked by weight and an underline, never by colour. */
+.slope-gauge__word[aria-pressed="true"] {
+  color: var(--color-text-primary); font-weight: 700;
+  text-decoration: underline; text-underline-offset: 4px;
+}
+.slope-gauge__note { font-size: 0.75rem; line-height: 1rem; color: var(--color-text-subtle); }

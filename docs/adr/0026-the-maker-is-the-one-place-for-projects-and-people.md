@@ -1,0 +1,22 @@
+# ADR-026 — The Maker is the one place a project starts and its people are run.
+
+**Status:** Accepted, 2026-09-28. Builds on ADR-023, ADR-024 and ADR-025.
+
+**Context.** People got onto a project from three screens (the Vault's share modal, the admins' Humans page, invite by email) and were regrouped in two, and anyone with a Vault could start a project with "+ New folder". Each worked; together nobody knew where to go, and the Humans page listed every membership twice with a control on each. Clients arrive 2026-09-30.
+
+**Decision.**
+- **One place.** `/maker` opens on a Projects and humans tile; `/maker/projects` starts a project above two tabs, Projects (each linking to its page) and Humans (admins only: everyone, once, with their group on each project); `/maker/projects/:id` is a project's people: add someone already here, invite someone new by email, each in a group chosen as they're added; later regroup, remove, or withdraw a pending invite. Every change goes through `setProjectSharing` or `inviteToProject`, the paths ADR-023 and ADR-024 checked. The Vault's Share modal is gone; its menu says "People…" and goes to the Maker. The old Humans page is the Humans tab; adding anyone is the project's page.
+- **Who starts a project.** An admin, or someone already guiding one (`canStartProject`), refused in the folder API for every caller (the Vault, the CLI, a typed request), not just hidden. Whoever starts it is its Guide, as a creator always was (`withCreator`); nothing is written to the README. A brand-new guide's first project comes from an admin, who starts it and makes them its Guide. The Vault's "+ New folder" at the projects root is a pointer to the Maker; a Super still makes a website there.
+- **Who reaches the Maker.** Admins, and anyone guiding at least one project (`navFor` says so; `/maker` refuses everyone else). A Guide sees the projects they guide and nothing the Maker holds for admins: no stats, usage, scripts or all-humans list. A Guide who isn't an admin is offered Client, Crafter and Observer; only an admin gives Guide (`promotionRefusal`).
+- **A pending invite is a person on the list.** There is no invite object: an invite is a `humans` row with a token plus a role on the project. It shows on the project's page marked Invited, can be regrouped like anyone, and can be withdrawn: off the project, and when no project names them any more, the placeholder account and its relationship rows go, so the emailed link finds nothing. Someone who has joined is a member; take them off instead.
+- **Clients mark.** `marks` is on the Client row: a note with the pen on Efforts or a photo. The two mark routes admit by role, not by the `shared_with` cache, since a Client is never in it (ADR-023); the file route looks a file up through `rowsForReader`, so a Client's note can't land on a receipt. Moving, filing and confirming stay `edit`. A Client has `feeds`, so their note lands as written.
+- **The CLI and the API are the admins'** (Austin, 2026-09-29). Only an Admin or Super mints a token: `/cli-login` and the profile's token form refuse everyone else, and their profile shows neither section. A token a regular already holds stays valid until revoked; nothing walks the table. The profile's Relationships is a list; adding and inviting left it for the Maker.
+- **A guide searches the people they know** (`getRelatedHumans`, what the share modal offered); an admin searches everyone. A whole email typed finds anyone with an account, or invites someone new.
+
+**Why it looks removable.** The sharing API (`/api/vault/projects/:id/sharing`, `/invite`) still exists and still accepts a Guide's PUT. It is what the CLI uses; "one place" is about screens, and the routes carry the same checks.
+
+**Limits.** Starting a project is the only lifecycle move in the Maker; rename, status and delete stay where they were (Austin's call). `deleteHuman` leaves a placeholder's vault roots behind, as the welcome merge already did. A removed creator still owns the folders (ADR-023). Nothing in the Maker proposes anything; a person does every move.
+
+**How you'd know.** A screen outside the Maker adds someone to a project or changes a group; a regular who guides nothing starts a project; a Guide sees stats in the Maker; a Client's note on Efforts gets a 404; the Humans page shows a person twice.
+
+**Test.** `webapp/app/tests/graphlog/maker.test.ts`, `features.test.ts`, and `fruits/scripts/campbell-walk.ts` (the Maker section and the Client's note) against a running stack.

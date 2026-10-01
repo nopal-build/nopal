@@ -193,6 +193,24 @@
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { buildRefDirectiveMarkdown } from "oxmarkdown-core";
+import {
+  buildSeedDaySources,
+  buildSeedDocumentSource,
+  findSeedSyncFolder,
+  isSeedDayFileName,
+  isSeedInstructionFileName,
+  linkSeedNames,
+  parseSeedDay,
+  parseSeedDocument,
+  parseSeedPeople,
+  SEED_DOCUMENTS_FOLDER_NAME,
+  SEED_NOTED_NAME,
+  SEED_NOTED_PROVENANCE,
+  SEED_PEOPLE_FILE_NAME,
+  seedMembers,
+  type SeedMember,
+  type SeedSource,
+} from "./seed.server";
 import { splitFrontmatter } from "./project.types";
 import { isInsideMarkText, MARKS_SYNC_FOLDER_NAME, parseMarkTexts } from "./graphLogMarks.server";
 import {
@@ -746,6 +764,37 @@ export function marksNotCaptured(
   return missed;
 }
 
+/**
+ * The noted-at-seeding lines this day's extraction left out. Like
+ * `marksNotCaptured`, but a noted bullet is several sentences where a
+ * mark is one, and the model often keeps part of it or splits it. A
+ * bullet counts as captured when a node block holds the whole bullet OR
+ * the bullet holds a node's whole quote (a sentence or more of it), so
+ * the fallback never writes a fact a second time beside the model's take.
+ * Pure.
+ */
+export function notedNotCaptured(
+  sourceNotedTexts: readonly (readonly string[] | null)[],
+  nodeBlocks: readonly string[],
+): { text: string; sourceIndex: number }[] {
+  const flat = (v: string) => v.replace(/==/g, "").replace(/\s+/g, " ").trim();
+  const captured = nodeBlocks.map((block) => ({
+    whole: flat(block),
+    // The quote lines only: no heading, ref directive, link list or origin note.
+    quote: flat(block.split("\n").filter((l) => !/^(#{1,6} |:ref\{|- \[|\*Noted)/.test(l.trim())).join(" ")),
+  }));
+  const missed: { text: string; sourceIndex: number }[] = [];
+  sourceNotedTexts.forEach((texts, sourceIndex) => {
+    for (const text of texts ?? []) {
+      const needle = flat(text);
+      if (!needle) continue;
+      const held = captured.some((b) => b.whole.includes(needle) || (b.quote.length >= 24 && needle.includes(b.quote)));
+      if (!held) missed.push({ text, sourceIndex });
+    }
+  });
+  return missed;
+}
+
 /** Pure cap logic, split out from the \`add_node\` executor purely so
  * ADR-002's own "no node ends up with four links" test can exercise it
  * directly. Same-day links are kept first (see the caller's own comment
@@ -769,13 +818,19 @@ function createSyncGraphExecutors(input: {
    * marker's own words, the only part of it that may be highlighted.
    * Null for every other source. */
   sourceMarkTexts?: (string[] | null)[];
+  /** Parallel to `sourceFiles`: for a source that came from seeded
+   * history (`seed.server.ts`), whether its words are a person's own. A
+   * noted-at-seeding source is nobody's words and is never highlighted,
+   * the same way a description-only file node is. Null for every other
+   * source. */
+  sourceSeed?: ({ humanAuthored: boolean } | null)[];
   knownBackwardIds: Map<string, string>;
 }): {
   executors: Record<string, (toolInput: Record<string, unknown>) => Promise<string>>;
   getNodeBlocks: () => string[];
   /** Writes one node from words code already knows are a person's own,
    * with no model call and no links. See `marksNotCaptured`. */
-  appendVerbatimNode: (input: { text: string; sourceIndex: number }) => number;
+  appendVerbatimNode: (input: { text: string; sourceIndex: number; quoted?: boolean }) => number;
   /** One short line per node captured for this day SO FAR, across every
    * pass. Fed back into the next pass's own prompt so it can see what
    * today already holds and not re-capture it -- the mechanism that makes
@@ -815,7 +870,8 @@ function createSyncGraphExecutors(input: {
       // HERE, from the source, before the model's blocks are rendered.
       // The model is never asked to know or remember it.
       const fileInfo = input.sourceFiles[sourceIndex];
-      const humanAuthored = isHumanAuthoredSource(fileInfo);
+      const seed = input.sourceSeed?.[sourceIndex] ?? null;
+      const humanAuthored = seed ? seed.humanAuthored : isHumanAuthoredSource(fileInfo);
       // A marks file quotes the page it was written on (code-written
       // context) beside the marker's words; only the words are theirs.
       const markTexts = input.sourceMarkTexts?.[sourceIndex] ?? null;
@@ -839,7 +895,7 @@ function createSyncGraphExecutors(input: {
       const quote = [
         setup || null,
         quoteBody,
-        humanAuthored ? null : DESCRIPTION_ONLY_PROVENANCE,
+        humanAuthored ? null : seed ? SEED_NOTED_PROVENANCE : DESCRIPTION_ONLY_PROVENANCE,
         attachedMedia,
       ]
         .filter(Boolean)
@@ -895,15 +951,18 @@ function createSyncGraphExecutors(input: {
       capturedSummaries.push(`Node ${number} (from Source ${sourceIndex}): "${preview}"`);
       nextNumber++;
 
-      return `Added Node ${number}.${humanAuthored ? "" : " (written UNHIGHLIGHTED and marked as description-grounded -- this source has no human caption, so its text is not anyone's words and must never be quoted or attributed to a person)"}${droppedCount > 0 ? ` (dropped ${droppedCount} link id(s) -- invalid, or over the ${MAX_LINKS_PER_NODE}-link cap)` : ""}`;
+      return `Added Node ${number}.${humanAuthored ? "" : seed ? " (written UNHIGHLIGHTED and marked as noted at seeding -- these are facts nobody said in these words, never to be quoted or attributed to a person)" : " (written UNHIGHLIGHTED and marked as description-grounded -- this source has no human caption, so its text is not anyone's words and must never be quoted or attributed to a person)"}${droppedCount > 0 ? ` (dropped ${droppedCount} link id(s) -- invalid, or over the ${MAX_LINKS_PER_NODE}-link cap)` : ""}`;
     },
   };
 
   return {
     executors,
-    appendVerbatimNode: ({ text, sourceIndex }) => {
+    appendVerbatimNode: ({ text, sourceIndex, quoted = true }) => {
       const number = nextNumber;
-      nodeBlocks.push([`### Node ${number}`, `==${text.trim()}==`, input.sourceCitations[sourceIndex]].join("\n"));
+      // A mark is a person's words and is highlighted; a noted-at-seeding
+      // line is nobody's and never is (ADR-012).
+      const body = quoted ? `==${text.trim()}==` : `${text.trim()}\n\n${SEED_NOTED_PROVENANCE}`;
+      nodeBlocks.push([`### Node ${number}`, body, input.sourceCitations[sourceIndex]].join("\n"));
       capturedSummaries.push(`Node ${number} (from Source ${sourceIndex}): "${text.replace(/\s+/g, " ").trim().slice(0, 160)}"`);
       nextNumber++;
       return number;
@@ -1340,6 +1399,28 @@ export async function runSyncGraph(
     return { ok: true, skipped: false, days: [], nodesWritten: 0, incomplete: [] };
   }
 
+  // Seeded history (`seed.server.ts`): the Seed folder and its
+  // `documents/` child are read by a branch of their own below, one
+  // source per section, never through the file-name attribution the
+  // daily-log copies use. Absent on a project nobody has seeded.
+  const seedFolder = await findSeedSyncFolder(projectFolder);
+  const seedFolderIds = new Set<string>();
+  let seedDocumentsFolderId: string | null = null;
+  let seedMemberList: SeedMember[] = [];
+  const seedMemberNames = new Map<string, string>();
+  let seedRoles = new Map<string, string>();
+  if (seedFolder) {
+    seedFolderIds.add(seedFolder._id);
+    const seedChildren = await listFolderChildren(projectFolder.human_id, seedFolder._id);
+    seedDocumentsFolderId = seedChildren.folders.find((f) => f.name === SEED_DOCUMENTS_FOLDER_NAME)?._id ?? null;
+    if (seedDocumentsFolderId) seedFolderIds.add(seedDocumentsFolderId);
+    const peopleListing = seedChildren.files.find((f) => f.name === SEED_PEOPLE_FILE_NAME);
+    const peopleFile = peopleListing ? await getFileRefById(peopleListing._id) : undefined;
+    seedRoles = parseSeedPeople(peopleFile?.content ?? "");
+    seedMemberList = await seedMembers(projectFolder);
+    for (const m of seedMemberList) seedMemberNames.set(m.humanId, m.name);
+  }
+
   const byDate = new Map<string, GraphCandidate[]>();
   for (const c of candidates) {
     const list = byDate.get(c.date) ?? [];
@@ -1355,6 +1436,7 @@ export async function runSyncGraph(
   // available for it below.
   const contributorIds = new Set<string>();
   for (const c of candidates) {
+    if (seedFolderIds.has(c.folderId)) continue;
     const attribution = resolveCandidateAttribution(c.name);
     if (attribution.humanId) contributorIds.add(attribution.humanId);
   }
@@ -1483,6 +1565,11 @@ export async function runSyncGraph(
     // carried a `date` and was never offered as a source here).
     const sourceFiles: (SourceFileInfo | null)[] = [];
     const sourceMarkTexts: (string[] | null)[] = [];
+    // Parallel too: seed sources (see `seed.server.ts`), and for a
+    // noted-at-seeding source its bullets, each written verbatim by code
+    // if the model passes it over, the rule marks already follow.
+    const sourceSeed: ({ humanAuthored: boolean } | null)[] = [];
+    const sourceNotedTexts: (string[] | null)[] = [];
     let uncaptionedSkipped = 0;
     // Whether any source this day holds anything at all. A day whose only
     // entry was moved to another project keeps an empty synced copy (see
@@ -1501,6 +1588,59 @@ export async function runSyncGraph(
       if (sidecar) {
         const sidecarFile = await getFileRefById(sidecar.fileId);
         knowledgeContent = sidecarFile?.content ?? null;
+      }
+
+      if (seedFolderIds.has(candidate.folderId)) {
+        // Seeded history. A day file is split into one source per
+        // section by code; a document is one source under its author;
+        // anything else in the folder (a photo, a PDF) is a description-
+        // only source that names nobody. Never through the file-name
+        // attribution above: a seed file is nobody's daily log.
+        if (isSeedInstructionFileName(candidate.name)) continue;
+        let seedSources: SeedSource[] = [];
+        let seedFileInfo: SourceFileInfo | null = null;
+        if (candidate.folderId === seedFolder?._id && isSeedDayFileName(candidate.name)) {
+          const day = parseSeedDay(source.content ?? "");
+          const { links } = linkSeedNames(day.sections.map((sec) => sec.speaker), seedMemberList);
+          seedSources = buildSeedDaySources({ date, fileId: source._id, day, links, memberNames: seedMemberNames, roles: seedRoles });
+        } else if (candidate.folderId === seedDocumentsFolderId && candidate.name.toLowerCase().endsWith(".md")) {
+          const meta = parseSeedDocument(source.content ?? "");
+          const { links } = linkSeedNames(meta.author ? [meta.author] : [], seedMemberList);
+          seedSources = [buildSeedDocumentSource({ fileId: source._id, name: candidate.name, meta, links, memberNames: seedMemberNames, fileDate: date })];
+        } else {
+          if (!knowledgeContent) {
+            uncaptionedSkipped++;
+            continue;
+          }
+          seedFileInfo = { fileId: source._id, name: candidate.name, contentType: source.content_type };
+          seedSources = [
+            {
+              label: `"${candidate.name}" (a file seeded with the project's history -- an ATTACHED FILE (photo/PDF/etc); its own bytes aren't shown to you, only what's below)`,
+              content: `AI-generated description:\n${knowledgeContent}`,
+              ref: { name: SEED_NOTED_NAME, datetime: `${date}T12:00:00Z`, location: `/vault?file=${source._id}`, verbose: true, origin: "seed-noted" },
+              humanAuthored: false,
+              verbatimFallback: null,
+              hashPart: "seedfile",
+            },
+          ];
+          if (sidecar) hashParts.push(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
+        }
+        if (seedSources.length === 0) continue;
+        hashParts.push(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
+        for (const seedSource of seedSources) {
+          if (seedSource.content.trim()) anyContent = true;
+          hashParts.push(seedSource.hashPart);
+          const sourceIndex = sourceBlocks.length;
+          sourceCitations.push(buildRefDirectiveMarkdown(seedSource.ref));
+          sourceMarkTexts.push(null);
+          sourceFiles.push(seedFileInfo);
+          sourceSeed.push({ humanAuthored: seedSource.humanAuthored });
+          sourceNotedTexts.push(seedSource.verbatimFallback);
+          sourceBlocks.push(
+            [`Source ${sourceIndex}: ${seedSource.label}`, seedFileInfo ? seedSource.content : `Content:\n${seedSource.content || "(no readable text content)"}`].join("\n\n"),
+          );
+        }
+        continue;
       }
 
       const attribution = resolveCandidateAttribution(candidate.name);
@@ -1555,6 +1695,8 @@ export async function runSyncGraph(
           ? { fileId: source._id, name: displayName, caption: caption ?? undefined, contentType: source.content_type }
           : null,
       );
+      sourceSeed.push(null);
+      sourceNotedTexts.push(null);
       sourceBlocks.push(
         [
           `Source ${sourceIndex}: "${displayName}" (by ${contributorName})${attribution.isAttachment ? " -- an ATTACHED FILE (photo/PDF/etc); its own bytes aren't shown to you, only what's below" : ""}`,
@@ -1654,6 +1796,7 @@ export async function runSyncGraph(
       sourceCitations,
       sourceFiles,
       sourceMarkTexts,
+      sourceSeed,
       knownBackwardIds,
     });
 
@@ -1767,6 +1910,14 @@ export async function runSyncGraph(
         log(
           `sync-graph: ${date} — ${missedMarks.length} mark(s) the extraction passed over were written as nodes verbatim.`,
         );
+      }
+      // A noted-at-seeding line is a fact somebody chose to keep, the same
+      // kind of deliberate act as a mark: whatever the model passed over is
+      // written by code, unhighlighted, with its provenance line.
+      const missedNoted = notedNotCaptured(sourceNotedTexts, getNodeBlocks());
+      for (const missed of missedNoted) appendVerbatimNode({ ...missed, quoted: false });
+      if (missedNoted.length > 0) {
+        log(`sync-graph: ${date} — ${missedNoted.length} noted line(s) the extraction passed over were written as nodes verbatim.`);
       }
 
       const nodeBlocks = getNodeBlocks();

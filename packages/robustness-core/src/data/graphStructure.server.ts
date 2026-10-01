@@ -255,7 +255,9 @@ function buildNodeBlock(node: GraphLogNode, backlinks: Map<string, BacklinkInfo>
     ? `Outbound links: ${node.links.map((l) => `-> ${l.date} Node ${l.number}`).join(", ")}`
     : null;
   return [
-    `${node.date} Node ${node.number} (${node.authorName ?? "Unknown"}) [id: ${node.id}]:`,
+    // The origin note the read gets too: seeded history says so here, or
+    // six months of it threads as this week's work.
+    `${node.date} Node ${node.number} (${node.authorName ?? "Unknown"}${node.origin === "seed" ? ", seeded history" : node.origin === "seed-noted" ? ", noted at seeding, nobody's words" : ""}) [id: ${node.id}]:`,
     node.quote,
     inbound,
     outbound,

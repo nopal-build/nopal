@@ -1,23 +1,19 @@
 // app/routes/vault.tsx
 // The Vault — GitHub-style file browser with a cached folder tree.
 // URL state: ?folder=<folderId> OR ?file=<fileId>; neither → root view.
-import { ProjectFilesView } from "../components/ProjectFilesView";
 // Value imports from `.server` modules are used in the loader only, which
 // React Router strips from the client bundle. Anything the component
 // needs from them (the folder names, the kinds) comes back as loader
 // data: a `.server` value referenced in the component is "Server-only
 // module referenced by client", a 404 on the route's client bundle, and
 // a page that renders but whose buttons are dead (2026-09-22, twice).
-import type { FileFolder, ProjectFileRow } from "robustness-core/data/fileFolders.server";
-import type { FilingKind } from "robustness-core/data/syncFiling.server";
-import { FILE_FOLDERS, loadProjectFiles } from "robustness-core/data/fileFolders.server";
-import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import type { LoaderFunctionArgs } from "react-router";
 import {
   Link,
   isRouteErrorResponse,
   redirect,
   useLoaderData,
+  useNavigate,
   useRevalidator,
   useRouteError,
   useSearchParams,
@@ -64,7 +60,9 @@ import {
   getSharedFoldersForHuman,
   listFolderChildren,
 } from "robustness-core/data/vault.server";
-import { getProjectRoleForFolderId } from "robustness-core/data/projectSharing.server";
+import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { navFor } from "../data/nav.server";
+import { displayName } from "robustness-core/data/humanNames";
 import { getRelatedHumans } from "robustness-core/data/relationships.server";
 import { resolveProjectManifest, type ResolvedProject } from "robustness-core/data/project.server";
 import {
@@ -78,7 +76,10 @@ import {
 // Pure, server-free helpers (no `.server` suffix) — safe to import into
 // client-rendered code, unlike everything from `website.server`/
 // `vault.server` above (loader-only, stripped from the client bundle).
-import { splitFrontmatter, withReadmeBody } from "robustness-core/data/project.types";
+import {
+  splitFrontmatter,
+  withReadmeBody,
+} from "robustness-core/data/project.types";
 import { Badge } from "stamps/Badge";
 import { Surface } from "stamps/Surface";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
@@ -153,14 +154,6 @@ type Current =
       /** This folder's own `readme`'s `title`/`description`/`publish` —
        * only meaningful alongside a non-null `websiteAnchor`. */
       websitePageMeta: WebsitePageMeta | null;
-      /** Non-null exactly when `folder` is a project: every file attached
-       * to its daily logs, as the four folders (`fileFolders.server.ts`). */
-      projectFiles: ProjectFileRow[] | null;
-      /** The folder names and the kinds a person may file as, handed to
-       * the component as data: a `.server` value referenced in the
-       * component would be pulled into the client bundle and refused. */
-      fileFolders: readonly FileFolder[];
-      personKinds: readonly FilingKind[];
     }
   | {
       kind: "file";
@@ -194,6 +187,12 @@ type GraphLogProjectStatus = {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
+  // A client never gets the Vault (ADR-023): the same bare 404 as a page
+  // that doesn't exist.
+  const memberships = await listProjectsFor(user._id);
+  if (isClientEverywhere(memberships)) {
+    throw new Response("Not found", { status: 404 });
+  }
 
   const [roots, ownFolders, sharedFolders, relatedHumansRaw] =
     await Promise.all([
@@ -214,7 +213,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // longer, scrollable list.
   const relatedHumans: HumanEntry[] = relatedHumansRaw
     .map((h) => ({ _id: h._id, name: h.name, email: h.email }))
-    .sort((x, y) => (x.name || x.email).localeCompare(y.name || y.email));
+    .sort((x, y) => displayName(x).localeCompare(displayName(y)));
 
   // The left tree's folder skeleton needs BOTH the human's own folders and
   // every folder shared with them, so shared subtrees render/expand the same
@@ -247,6 +246,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // file/folder outright but holds an owner-tier Sharing Role on the
   // project it lives under.
   let viewerIsOwnerTierOnProject = false;
+  // Runs its people (`people`, a Guide): the "People…" item goes to the Maker.
+  let viewerGuidesProject = false;
 
   if (fileParam) {
     const file = await getFileRefById(fileParam);
@@ -279,6 +280,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (file.human_id !== user._id && file.folder_id) {
       const role = await getProjectRoleForFolderId(file.folder_id, user._id);
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
+      viewerGuidesProject = Boolean(role?.guiding);
     }
     const websiteAnchorForFile = findWebsiteAnchor(ancestry);
     const websitePageMetaForFile =
@@ -324,14 +326,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (folder.human_id !== user._id) {
       const role = await getProjectRoleForFolderId(folder._id, user._id);
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
+      viewerGuidesProject = Boolean(role?.guiding);
     }
     const websiteAnchorForFolder = findWebsiteAnchor(ancestry);
     const websitePageMetaForFolder =
       websiteAnchorForFolder && readme ? parseWebsitePageMeta(readme.content ?? "") : null;
-    // A project's files by kind, on the project folder only (a person
-    // looking for a file comes here; Austin, 2026-09-22). Request time,
-    // about ten round trips whatever the file count.
-    const projectFiles = isProjectAnchor(folder) && folder.vault_root_key !== "personal" ? await loadProjectFiles(folder) : null;
+    // The Vault is a file system (Austin, 2026-09-28): a project's files
+    // by kind (Photos, Files, Costs) are its project page's tabs, not here.
     current = {
       kind: "folder",
       folder,
@@ -340,9 +341,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       projectManifest: projectManifestForFolder,
       websiteAnchor: websiteAnchorForFolder,
       websitePageMeta: websitePageMetaForFolder,
-      projectFiles,
-      fileFolders: FILE_FOLDERS,
-      personKinds: FILING_KINDS.filter((k) => k !== "video"),
     };
   }
 
@@ -355,6 +353,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     relatedHumans,
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
+    viewerGuidesProject,
+    // The nav: a Guide's Maker tab stays lit while they're in here.
+    ...(await navFor(user._id, memberships)),
   };
 }
 
@@ -596,7 +597,7 @@ function CsvTableView({ content }: { content: string }) {
         {body.length} row{body.length === 1 ? "" : "s"} · {header.length} column
         {header.length === 1 ? "" : "s"}
         {truncated &&
-          ` — showing first ${CSV_TABLE_MAX_ROWS}, download the file to see the rest`}
+          `, showing the first ${CSV_TABLE_MAX_ROWS}. Download the file for the rest`}
       </div>
     </div>
   );
@@ -694,176 +695,6 @@ function CopyLinkButton({ path }: { path: string }) {
 
 type ProjectSharingRole = { name: string; is_owner: boolean };
 type ProjectSharingEntry = { human: string; role: string };
-
-/**
- * A project's Sharing Roles — supersedes the old "private / everyone /
- * specific people" modal entirely (see `projectSharing.server.ts`).
- * "Everyone in the app" is gone; every collaborator now gets an explicit
- * named Role (Owner/Crafter/Observer by default — see
- * `sharingRoles.server.ts`), stored directly in the project's own
- * README.md front matter. Loads/saves via
- * `/api/vault/projects/:folderId/sharing` rather than the generic folder
- * PATCH endpoint.
- */
-function ShareModal({
-  folder,
-  allHumans,
-  onClose,
-  apiJson,
-}: {
-  folder: VaultFolder;
-  allHumans: HumanEntry[];
-  onClose: () => void;
-  apiJson: (url: string, options?: RequestInit) => Promise<any>;
-}) {
-  const [loading, setLoading] = useState(true);
-  const [roles, setRoles] = useState<ProjectSharingRole[]>([]);
-  // human id -> role name; absent = not shared with this human at all.
-  const [assignments, setAssignments] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const data = await apiJson(`/api/vault/projects/${folder._id}/sharing`);
-      if (cancelled || !data) return;
-      setRoles(data.roles ?? []);
-      const next: Record<string, string> = {};
-      for (const entry of (data.sharing ?? []) as ProjectSharingEntry[]) {
-        next[entry.human] = entry.role;
-      }
-      setAssignments(next);
-      setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [folder._id, apiJson]);
-
-  const defaultRole = roles.find((r) => !r.is_owner)?.name ?? roles[0]?.name ?? "";
-
-  const setRoleFor = (humanId: string, role: string | null) => {
-    setAssignments((prev) => {
-      const next = { ...prev };
-      if (role) next[humanId] = role;
-      else delete next[humanId];
-      return next;
-    });
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    const sharing: ProjectSharingEntry[] = Object.entries(assignments).map(
-      ([human, role]) => ({ human, role }),
-    );
-    const data = await apiJson(`/api/vault/projects/${folder._id}/sharing`, {
-      method: "PUT",
-      body: JSON.stringify({ sharing }),
-    });
-    setSaving(false);
-    if (data) onClose();
-  };
-
-  const selectStyle: React.CSSProperties = {
-    fontFamily: "monospace",
-    fontSize: "12px",
-    padding: "2px 6px",
-  };
-
-  return (
-    <div className="vault-modal-backdrop" onClick={onClose}>
-      <div className="vault-modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="vault-modal-title">Share "{folder.name}"</h3>
-        <p
-          className="text-xs font-mono"
-          style={{ color: "var(--text-subtle)", marginTop: "-8px", marginBottom: "16px" }}
-        >
-          Give a collaborator a Role on this project. There's no "everyone"
-          option — pick people explicitly.
-        </p>
-
-        {loading ? (
-          <p className="text-xs font-mono" style={{ padding: "12px" }}>
-            Loading…
-          </p>
-        ) : (
-          <div className="vault-human-list">
-            {allHumans.length === 0 ? (
-              <p
-                className="text-xs font-mono"
-                style={{ color: "var(--text-subtle)", padding: "12px" }}
-              >
-                No other humans found.
-              </p>
-            ) : (
-              allHumans.map((h) => {
-                const role = assignments[h._id];
-                return (
-                  <label
-                    key={h._id}
-                    className={`vault-human-row ${role ? "vault-human-row--checked" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={!!role}
-                      onChange={() =>
-                        setRoleFor(h._id, role ? null : defaultRole)
-                      }
-                      style={{ accentColor: "var(--purple)", cursor: "pointer", flexShrink: 0 }}
-                    />
-                    <span
-                      className="text-sm font-mono"
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {h.name || h.email}
-                    </span>
-                    {role && (
-                      <select
-                        value={role}
-                        onChange={(e) => setRoleFor(h._id, e.target.value)}
-                        style={selectStyle}
-                      >
-                        {roles.map((r) => (
-                          <option key={r.name} value={r.name}>
-                            {r.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </label>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        <div
-          style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}
-        >
-          <button
-            onClick={onClose}
-            className="btn-outline text-xs font-mono px-3 py-1.5 rounded"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || loading}
-            className="btn-purple text-xs font-mono px-3 py-1.5 rounded"
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Project role banner (debug aid) ─────────────────────────────
 
@@ -1033,6 +864,7 @@ function NewFolderPanel({
   parentFolder,
   isSpaceTypeEligible,
   canCreateWebsite,
+  websiteOnly = false,
   existingChildren,
   onCreate,
 }: {
@@ -1050,6 +882,9 @@ function NewFolderPanel({
    * `validateFolderTypeForParent`; this only controls whether the choice is
    * even offered. */
   canCreateWebsite: boolean;
+  /** At the `projects` root a project starts in the Maker (ADR-026), so
+   * the only thing this panel makes there is a website, for a Super. */
+  websiteOnly?: boolean;
   existingChildren: VaultFolder[];
   onCreate: (name: string, folderType: string | null) => void;
 }) {
@@ -1078,7 +913,7 @@ function NewFolderPanel({
 
   const [name, setName] = useState("");
   const [containerType, setContainerType] = useState<"project" | "website">(
-    "project",
+    websiteOnly ? "website" : "project",
   );
   const [syncType, setSyncType] = useState<SyncFolderTypeKey | null>(null);
   const canSubmit = name.trim().length > 0;
@@ -1096,7 +931,7 @@ function NewFolderPanel({
 
   return (
     <div style={{ width: "230px" }}>
-      {canCreateWebsite && (
+      {canCreateWebsite && !websiteOnly && (
         <div style={{ display: "flex", gap: "4px", padding: "2px 2px 6px" }}>
           {(
             [
@@ -1358,7 +1193,7 @@ function WebsitePublishToggle({
       onClick={handleClick}
       disabled={saving}
       style={{ border: "none", background: "none", padding: 0, cursor: saving ? "default" : "pointer" }}
-      title={isPublished ? "Published — click to unpublish" : "Draft — click to publish"}
+      title={isPublished ? "Published. Click to unpublish" : "Draft. Click to publish"}
     >
       <Badge variant={isPublished ? "success" : "neutral"}>
         {saving ? "…" : isPublished ? "Published" : "Draft"}
@@ -2117,9 +1952,11 @@ export default function VaultV2Page() {
     relatedHumans,
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
+    viewerGuidesProject,
   } = useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
+  const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
 
   // ─── Sidebar (mobile drawer) ────────────────────────────────────────────────
@@ -2394,7 +2231,6 @@ export default function VaultV2Page() {
   const [graphLogBusy, setGraphLogBusy] = useState<"run" | "rerun-outputs" | "reset" | "cancel" | "reseed-skills" | null>(null);
   const [graphLogScheduleBusy, setGraphLogScheduleBusy] = useState(false);
   const [graphLogStatus, setGraphLogStatus] = useState<GraphLogProjectStatus | null>(null);
-  const [shareOpen, setShareOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [siteSettingsOpen, setSiteSettingsOpen] = useState(false);
 
@@ -2613,7 +2449,7 @@ export default function VaultV2Page() {
 
       xhr.onerror = () => {
         activeUploadIds.current.delete(id);
-        failUpload(id, "Network error — check your connection and retry.");
+        failUpload(id, "Network error. Check your connection and try again.");
       };
 
       xhr.ontimeout = () => {
@@ -3302,6 +3138,10 @@ export default function VaultV2Page() {
     isTopLevelProject &&
     isRootShareable(current.folder.vault_root_key) &&
     isFolderTypeShareable(currentFolderType);
+  // The people page in the Maker is a Guide's or an admin's (`runsPeople`);
+  // a Crafter edits content and isn't sent to a page that refuses them.
+  const canOpenPeople =
+    canShareCurrent && (isOwnedByViewer || viewerGuidesProject || user.role === "Admin" || user.role === "Super");
   const canPublishCurrent =
     isEffectiveOwner &&
     canManageAnchorLifecycle &&
@@ -3395,8 +3235,11 @@ export default function VaultV2Page() {
     if (canMoveCurrent) {
       moreActions.push({ label: "Move", onClick: () => setMoveOpen(true) });
     }
-    if (canShareCurrent) {
-      moreActions.push({ label: "Share", onClick: () => setShareOpen(true) });
+    // People come and go on the project's page in the Maker (ADR-026), the
+    // one place for it; this only gets you there.
+    if (canOpenPeople && current.kind === "folder") {
+      const id = current.folder._id;
+      moreActions.push({ label: "People…", onClick: () => navigate(`/maker/projects/${id}`) });
     }
     if (canPublishCurrent) {
       if (folderOwnPublic) {
@@ -3686,16 +3529,21 @@ export default function VaultV2Page() {
                     className="vault-toolbar-btn"
                     disabled={!!downloadAllProgress}
                     onClick={handleDownloadAll}
-                    title="Downloads each file in this folder individually (not a zip) — sub-folders aren't included"
+                    title="Downloads each file here, not the sub-folders"
                   >
                     {downloadAllProgress
                       ? `↓ Downloading ${downloadAllProgress.done}/${downloadAllProgress.total}…`
                       : "↓ Download all"}
                   </button>
                 )}
-                {canWriteCurrent && (
+                {canWriteCurrent && current.folder._id === projectsRootId && user.role !== "Super" && (
+                  <Link to="/maker/projects" className="vault-toolbar-btn" data-start-in-maker>
+                    Start a project in the Maker →
+                  </Link>
+                )}
+                {canWriteCurrent && (current.folder._id !== projectsRootId || user.role === "Super") && (
                   <MoreMenu
-                    label="New folder"
+                    label={current.folder._id === projectsRootId ? "New website" : "New folder"}
                     align="left"
                     trigger={({ toggle, open, label }) => (
                       <button
@@ -3706,7 +3554,7 @@ export default function VaultV2Page() {
                         aria-expanded={open}
                         onClick={toggle}
                       >
-                        + New folder
+                        + {label}
                       </button>
                     )}
                   >
@@ -3722,6 +3570,7 @@ export default function VaultV2Page() {
                           current.folder._id === projectsRootId &&
                           user.role === "Super"
                         }
+                        websiteOnly={current.folder._id === projectsRootId}
                         existingChildren={
                           foldersByParent[current.folder._id] ?? []
                         }
@@ -3860,17 +3709,6 @@ export default function VaultV2Page() {
             </div>
           )}
 
-          {/* ── A project's files by kind: Gallery, Documents, Costs, Unsorted ── */}
-          {current.kind === "folder" && current.projectFiles && (
-            <ProjectFilesView
-              projectFolderId={current.folder._id}
-              rows={current.projectFiles}
-              folders={current.fileFolders}
-              kinds={current.personKinds}
-              onOpen={(row) => setSearchParams({ file: row.serveId })}
-              onChanged={() => revalidator.revalidate()}
-            />
-          )}
           {/* ── Folder view — GitHub-style table + optional readme ───────── */}
           {current.kind === "folder" && folderChildren && (
             <>
@@ -3968,7 +3806,7 @@ export default function VaultV2Page() {
                         {row.upload.name}
                         {row.upload.status === "error" && (
                           <span className="vault-v2-upload-error">
-                            {" — "}
+                            {": "}
                             {row.upload.error}
                           </span>
                         )}
@@ -4144,19 +3982,6 @@ export default function VaultV2Page() {
             ))}
         </div>
       </div>
-
-      {/* Share modal */}
-      {shareOpen && current.kind === "folder" && (
-        <ShareModal
-          folder={current.folder}
-          allHumans={relatedHumans}
-          onClose={() => {
-            setShareOpen(false);
-            invalidateAndRevalidate([current.folder._id, current.folder.parent_folder_id]);
-          }}
-          apiJson={apiJson}
-        />
-      )}
 
       {/* Move modal */}
       {moveOpen && current.kind === "folder" && (

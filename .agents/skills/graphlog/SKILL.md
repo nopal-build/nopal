@@ -566,6 +566,86 @@ code; the model reads marks the way it reads any other input.
   disappear from the project it left, and it also stops a blank entry
   costing a call on every run.
 
+## Seeding: a project's history before it logged here
+
+ADR-027 (2026-09-29). A project that starts logging months in has a backlog;
+Campbell's is six months of threads, notes and documents, compiled by hand
+in the vault as a seed folder: day files `YYYY-MM-DD.md` (`kind: seed`, one
+`## <Name>` section per person with their words verbatim and a `- src:`
+line under each group, then `## Noted (not anyone's words)`), `documents/`
+(`kind: seed-document`, dated, `author:`), `_people.md` (a role per name),
+`_attachments.md`. `_review*` and `_to_delete/` never come in.
+
+- **Push:** `nopal graphlog seed --project <path> --dir <folder> [--from D]
+  [--to D]` → `POST /api/graphlog/seed` (a Guide) writes `Syncs/Seed/`, a
+  system folder like `Syncs/Marks/`: each file stamped `date` and
+  `content_hash`, replaced by name, so a second push changes nothing.
+  Never `Daily Logs/`, a Card or a mark. Documents dated in range go to
+  `Syncs/Seed/documents/`. `seed.server.ts`.
+- **How sync-graph reads it:** by folder id, before file-name attribution.
+  Code splits a day into one source per section; a spoken section is cited
+  under the person with `origin="seed"` (and their human id when
+  `linkSeedNames` matches the name to a project member by first name); the
+  noted section is cited as "Seed" with `origin="seed-noted"`, never
+  highlighted, with a provenance line, and every noted bullet the model
+  passes over is written verbatim by code (the marks rule). The links a day
+  was written with are in its source hash, so adding someone to the project
+  re-extracts only the days they speak in. sync-knowledge skips the day
+  files and underscored files, describes and files the documents.
+- **Downstream:** `GraphLogNode.origin`; the readings leave seed nodes out
+  of "arrived since", say once how many seeded entries there are, count a
+  noted line as a node never a writer, and list only linked seed speakers in
+  the load picture. The rendered `:ref` says "seeded"; the Logbook pins a
+  seed day under "Seed"; a seed document is a row in the files projection
+  (its own copy, one id).
+- **Wipe:** `nopal graphlog seed-wipe --yes` → `POST /api/graphlog/seed-wipe`
+  (Admin/Super on the project): deletes the Seed folder, the graph days only
+  the seed fed, drops `sourceHash` on days it shared with live entries, and
+  prunes every seed date's lines from `graph-structure.md` so the next run
+  finds nothing missing. The Efforts page keeps the words until the next
+  run. Never the Budget (`budget_changes`, ADR-028).
+- **Not yet:** attachments named in `_attachments.md` (the CLI prints what
+  it left on disk); a `destination:` line on a document is not read (a
+  person refiles with File as).
+
+### Seed packets and Sow (ADR-029, 2026-09-30)
+
+The durable way in. While a **seeding round** is open (`seed_rounds`; a
+Maker project opens with one, a Guide opens and ends others via
+`POST /api/seed-round`), everyone on the project has a **seed packet** on
+the project page. A packet is ROWS (`seed_packet_files`,
+`seedPackets.server.ts`), never a Vault folder: anything under `Syncs/`
+is read by sync-knowledge and visible to everyone in `shared_with`.
+`POST /api/seed-packet` adds to the caller's own packet;
+`GET /api/seed-packet/:id` serves a file to its uploader and the Guides.
+
+**Sow** (`POST /api/graphlog/sow`, Guides, job `sow`, NOT part of `run`)
+runs `runSow` (`sow.server.ts`) over every unsown file, once each:
+
+- text → `sowText`, the model's half (`SOW.md`, stage `sow`, Opus 5.5
+  medium, chosen by the week grid in `webapp/scripts/_local-sow-grid.ts`
+  scored by `sowScore.ts`). Tools: `file_kind`, `add_line`, `add_noted`.
+  Code refuses a line that is not verbatim in the file, and tells the
+  model the day the file was added so "8/5" with no year is a stated date.
+  Sow only gives a file daily-log shape (who, which day, their words,
+  one message = one line, whole). It does NOT pick what matters or split
+  messages into ideas: sync-graph does that once, reading seed days like
+  any day's log (`buildSeedDaySources`). A first draft had SOW.md
+  selecting statements too; Austin caught the double judgment 2026-09-30
+  and the scorer's `extra` weight went to 0 with it.
+- a PDF or photo → a seed document as it is, authored by its uploader.
+- `planSow` places each line: already in the seed → skipped; matches a
+  Card within two days (`matchesCard`) → held out + "already logged?";
+  unsure date → held out + "when was this?"; unsure or unknown speaker →
+  Noted + "who said this?"; else under the speaker. `mergeSeedDay` adds
+  to a day, never replaces.
+- Questions (`seed_questions`) show to Guides in the Suggestions tab as a
+  third kind; `decideSeedQuestion` edits the one day's seed file, and the
+  next run re-extracts that day alone.
+
+A seed wipe deletes the questions and clears `sown_at`. The CLI push
+refuses a day a sowing wrote to.
+
 ## Reset
 
 GraphLog has three independent, narrower resets — `graphLogReset.server.ts`
@@ -847,6 +927,17 @@ with, so it does NOT pick this up on its own. Recreating interrupts any
 GraphLog job currently running — do it between runs, not mid-run.
 `make reset` also picks it up, but wipes every named volume (including
 local SurrealDB/MinIO data), so it's a much bigger hammer than needed.
+
+**Still true for the core packages (2026-09-30).** The worker container
+has its OWN `node_modules`, where `robustness-core` and `oxmarkdown-core`
+are injected copies (`.pnpm/robustness-core@file+packages+...`), not
+links. A restart re-runs `pnpm install` and does not refresh them, so a
+job can run old core code while `/app/packages/...` is current: the first
+live Sow ran a day-old skill this way. Check with
+`docker compose exec worker sh -c 'grep -c <new string> $(readlink -f /app/packages/worker/node_modules/robustness-core)/src/data/<file>'`,
+and refresh by copying `/app/packages/robustness-core/src/.` over that
+path inside the container, then restarting the worker. `_local-run.ts`
+runs in-process from the checkout and never has this problem.
 
 ## Vault UI, scheduling, and live run status
 

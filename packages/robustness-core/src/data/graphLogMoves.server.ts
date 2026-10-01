@@ -530,7 +530,7 @@ async function mountCardOnDay(humanId: string, date: string, projectFolderId: st
  * synced copy goes, or sync-graph keeps making nodes of it here. The
  * original in the person's own day is untouched, and the destination
  * copies it in on its next sync. */
-async function dropSyncedAttachments(
+export async function dropSyncedAttachments(
   sourceProjectFolderId: string,
   humanId: string,
   date: string,

@@ -16,20 +16,52 @@
 // anyone who can view this folder always sees this route; there's no
 // redirect-to-vault fallback to worry about missing here.
 import type { LoaderFunctionArgs } from "react-router";
-import { Link, redirect, useLoaderData, useRevalidator } from "react-router";
+import { Link, redirect, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { useCallback, useMemo, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
 import { canViewFolder } from "robustness-core/data/vault.types";
 import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
 import { listMarksOnPage, readableMark } from "robustness-core/data/graphLogMarks.server";
+import { listSuggestions } from "robustness-core/data/suggestions.server";
+import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { resolveProjectManifest } from "robustness-core/data/project.server";
 import { getProjectStatus } from "robustness-core/data/projectStatus.server";
-import { isIncompleteBannerText, type ProjectStatus } from "robustness-core/data/project.types";
+import { isIncompleteBannerText, splitFrontmatter, type ProjectStatus } from "robustness-core/data/project.types";
+import { getProjectSharing, resolveRole } from "robustness-core/data/projectSharing.server";
+import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
+import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
+import { listCardsForProject } from "robustness-core/data/dailyLog.server";
+import { listSeedDays } from "robustness-core/data/seed.server";
+import { loadBudget } from "robustness-core/data/budget.server";
+import { currentSeedRound, listPacketFiles, listSeedQuestions } from "robustness-core/data/seedPackets.server";
+import { SeedPacket, SeedRoundQuiet, type SeedingForPage } from "../components/SeedPacket";
+import { BudgetView, type BudgetNames } from "../components/BudgetView";
+import { getHumansById } from "robustness-core/data/humans.server";
+import { firstName } from "robustness-core/data/humanNames";
+import {
+  PROJECT_TAB_LABELS,
+  TAB_FOLDERS,
+  resolveProjectTab,
+  rowsForReader,
+  tabsFor,
+} from "robustness-core/data/projectView.server";
+import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
+import { ownLatestReading } from "robustness-core/data/dashboard.server";
+import { navFor } from "../data/nav.server";
+import { SteepGauge } from "../components/SteepGauge";
 import { AppLayout } from "../components/AppLayout";
+import { CardTabs } from "../components/stamps-candidates/CardTabs";
+import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
+import OxRenderer from "../components/OxRenderer";
+import { ProjectFilesView } from "../components/ProjectFilesView";
 import { ProjectView } from "../components/ProjectView";
 import type { MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
 import { sprinkles } from "stamps/sprinkles.css";
+import { button } from "stamps/button.css";
+import { CenterContent } from "stamps/CenterContent";
+import { Cluster } from "stamps/Cluster";
+import { Stack } from "stamps/Stack";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 
@@ -41,9 +73,89 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!folderId) throw new Response("Not found", { status: 404 });
 
   const folder = await getFolderById(folderId);
-  if (!folder || !canViewFolder(user._id, folder)) {
-    throw new Response("Not found", { status: 404 });
+  if (!folder) throw new Response("Not found", { status: 404 });
+  // A website is its markdown files, edited in the Vault; it has no
+  // Efforts, graph or log (Austin, 2026-09-28).
+  if (isWebsiteFolder(folder)) return redirect(`/vault?folder=${folder._id}`);
+
+  // What this page shows is the viewer's group's features (`features.ts`).
+  // Someone in the cache with no role on the list (a share from before
+  // roles) reads as an Observer, as they did; a Client is never in the
+  // cache and reaches the page through their features alone.
+  const sharing = await getProjectSharing(folder);
+  const own = sharing.find((e) => e.human === user._id);
+  const role = own && groupOf(own.role) ? resolveRole(own.role) : null;
+  const inCache = canViewFolder(user._id, folder);
+  const features = role ? role.features : inCache ? featuresOf("Observer") : [];
+  const allowed = tabsFor(features);
+  const tab = resolveProjectTab(new URL(request.url).searchParams.get("tab"), allowed);
+  if (!tab) throw new Response("Not found", { status: 404 });
+  const base = `/newspaper/${folder._id}`;
+  const tabs = allowed.map((key) => ({
+    key,
+    label: PROJECT_TAB_LABELS[key],
+    to: key === allowed[0] ? base : `${base}?tab=${key}`,
+  }));
+
+  // Only the open tab's data: the files are about ten queries.
+  const tabFolders = TAB_FOLDERS[tab] ?? null;
+  const files: ProjectFileRow[] | null =
+    tabFolders && folder.folder_type === "project-n02" ? rowsForReader(await loadProjectFiles(folder), features) : null;
+  const logbook = tab === "logbook" ? await projectLogbook(folder) : null;
+  // Seeding (`seedPackets.server.ts`): while a round is open, everyone
+  // with a role on the project has their own seed packet here; Guides
+  // also get Sow, the round's two ends, and everyone's packets. Someone
+  // in the cache with no role has none of it, and neither does anyone
+  // once the round is ended.
+  let seeding: SeedingForPage | null = null;
+  if (role) {
+    const round = await currentSeedRound(folder._id);
+    const guiding = role.guiding;
+    const packetFiles = round || guiding ? await listPacketFiles(folder._id, guiding ? undefined : user._id) : [];
+    const row = (f: (typeof packetFiles)[number]) => ({ id: f._id, name: f.name, sown: !!f.sown_at });
+    let guide: SeedingForPage["guide"] = null;
+    if (guiding) {
+      const owners = new Map((await getHumansById([...new Set(packetFiles.map((f) => f.human_id))])).map((h) => [h._id, firstName(h)]));
+      const byPerson = new Map<string, ReturnType<typeof row>[]>();
+      for (const f of packetFiles) {
+        const person = owners.get(f.human_id) ?? "Someone";
+        byPerson.set(person, [...(byPerson.get(person) ?? []), row(f)]);
+      }
+      guide = {
+        waiting: packetFiles.filter((f) => !f.sown_at).length,
+        questions: (await listSeedQuestions(folder._id, "pending")).length,
+        packets: [...byPerson.entries()].map(([person, files]) => ({ person, files })).sort((a, b) => a.person.localeCompare(b.person)),
+      };
+    }
+    if (round || guide) {
+      seeding = { open: !!round, mine: round ? packetFiles.filter((f) => f.human_id === user._id).map(row) : null, guide };
+    }
   }
+
+  // The Budget: a view under Costs for the `budget` feature (Guides).
+  // A typed URL without the feature is refused like a tab; the link only
+  // shows once a budget has been started (features.ts, `budget`).
+  const budgetView = tab === "costs" && new URL(request.url).searchParams.get("view") === "budget";
+  if (budgetView && !features.includes("budget")) throw new Response("Not found", { status: 404 });
+  const budget = tab === "costs" && features.includes("budget") ? await loadBudget(folder._id) : null;
+  const budgetNames: BudgetNames = {};
+  if (budget) {
+    const ids = [...new Set(budget.lines.flatMap((l) => l.history.map((h) => h.author_human_id)))];
+    for (const h of await getHumansById(ids)) budgetNames[h._id] = firstName(h);
+  }
+  // Only a role on the list marks: /api/graphlog/marks refuses a share
+  // from before roles, which reads as an Observer here (same as Steep).
+  const canMark = !!role?.features.includes("marks");
+  // Everyone on the project sees who else is on it, Clients included
+  // (Austin, 2026-09-27). Changing it stays the Guide's.
+  const people = await projectPeople(sharing);
+  // Moving a passage, filing a file, confirming a cost (`features.ts`).
+  const canEdit = features.includes("edit");
+  // What someone without `feeds` writes waits for a Guide
+  // (`suggestions.server.ts`): a Guide sees every one, the writer their own.
+  const decides = features.includes("suggestions");
+  const suggestionsFor = decides ? ("all" as const) : !features.includes("feeds") ? { authorHumanId: user._id } : undefined;
+  const suggestions = tab === "suggestions" ? await listSuggestions(folder._id, decides ? undefined : user._id) : null;
 
   // Children/README belong to the folder's OWNER, not necessarily the viewer
   // (this folder may only be reachable because it's shared with them).
@@ -60,8 +172,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // written; to everyone else the project's existence is not theirs to
   // learn (Austin, 2026-09-21), so they get the same placeholder the
   // graph gets. `moveDestFolderId` never leaves the server.
-  const marks = await Promise.all(
-    (await listMarksOnPage(folder._id, readme?.content ?? "")).map(async (mark) => {
+  const marks = !canMark ? [] : await Promise.all(
+    (await listMarksOnPage(folder._id, readme?.content ?? "", suggestionsFor)).map(async (mark) => {
       const dest = mark.moveDestFolderId ? await getFolderById(mark.moveDestFolderId) : null;
       return readableMark(mark, !!dest && canViewFolder(user._id, dest));
     }),
@@ -80,13 +192,191 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     folder,
     project,
     status: getProjectStatus(folder),
-    // Status is a personal organizational tool, not a Sharing Role -- only
-    // the project's own creator may change it (see `projectStatus.server.ts`).
-    canEditStatus: folder.human_id === user._id,
+    // Status is the Guide's (see `projectStatus.server.ts`).
+    canEditStatus: !!role?.guiding,
+    canMark,
+    canEdit,
+    decides,
+    suggestions,
+    people,
+    // The meter sits top left on the project, with the viewer's own
+    // reading only (Austin, 2026-09-25).
+    // Only a role on the list taps: /api/steep refuses a share from before
+    // roles, which reads as an Observer here.
+    steep: role?.features.includes("steepTap") && getProjectStatus(folder) === "active"
+      ? { mine: await ownLatestReading(user._id, folder._id) }
+      : null,
+    // A client has no Vault: a photo opens as itself.
+    openInVault: inCache,
+    ...(await navFor(user._id)),
     livePageHash,
     viewerId: user._id,
     marks,
+    tab,
+    tabs,
+    tabFolders,
+    files,
+    // Server values the files view needs, as data (never imported into
+    // the component, which would pull a `.server` module into the bundle).
+    fileKinds: FILING_KINDS.filter((k) => k !== "video"),
+    logbook,
+    seeding,
+    budgetView,
+    budget,
+    budgetNames,
+    canBudget: features.includes("budget"),
   };
+}
+
+type SuggestionRow = NonNullable<Awaited<ReturnType<typeof listSuggestions>>>[number];
+
+const SUGGESTION_STATUS_WORDS: Record<SuggestionRow["status"], string> = {
+  pending: "waiting for a Guide",
+  taken: "taken into the project",
+  passed: "passed",
+};
+
+/** What someone without `feeds` wrote, waiting for a Guide. A Guide sees
+ * every one waiting and takes it (in as written, credited) or passes it;
+ * the writer sees their own and where each stands. */
+function SuggestionsView({
+  projectFolderId,
+  suggestions,
+  decides,
+  onChanged,
+}: {
+  projectFolderId: string;
+  suggestions: SuggestionRow[];
+  decides: boolean;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const decide = async (s: SuggestionRow, verdict: "take" | "pass") => {
+    setBusy(s.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/graphlog/suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectFolderId, kind: s.kind, id: s.id, verdict }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "That didn't go through. Try again.");
+        return;
+      }
+      onChanged();
+    } catch {
+      setError("That didn't go through. Check your connection and try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (suggestions.length === 0) {
+    return (
+      <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+        {decides ? "Nothing waiting." : "Nothing yet. What you write waits here for a Guide."}
+      </p>
+    );
+  }
+  return (
+    <Stack gap={4}>
+      {error && (
+        <p className={textSize.sm} style={{ color: semanticColors.textDanger }}>
+          {error}
+        </p>
+      )}
+      {suggestions.map((s) => (
+        <PinnedCard key={`${s.kind}:${s.id}`} title={s.authorName} label={`${longDate(s.date)} · ${s.kind === "card" ? "Card" : s.kind === "note" ? "Note" : "Question"}`} data-suggestion data-question={s.kind === "question" || undefined}>
+          <Stack gap={2}>
+            {s.context && (
+              <p className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+                {s.context}
+              </p>
+            )}
+            {s.kind === "card" ? <OxRenderer markdown={s.text} /> : <p className={textSize.sm}>{s.text}</p>}
+            {decides && s.status === "pending" && s.kind === "question" ? (
+              // A question from sowing: the sentence above it asks, and
+              // each answer says what it does (`seedQuestionMeaning`).
+              <Stack gap={1}>
+                <Cluster gap={3} align="center">
+                  <button type="button" disabled={busy === s.id} className={button({ variant: "secondary", size: "compact" })} onClick={() => decide(s, "take")}>
+                    Yes
+                  </button>
+                  <button type="button" disabled={busy === s.id} className={`${button({ variant: "quiet" })} ${textSize.xs}`} onClick={() => decide(s, "pass")}>
+                    No
+                  </button>
+                </Cluster>
+                {s.answers && (
+                  <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+                    {s.answers.yes} {s.answers.no}
+                  </span>
+                )}
+              </Stack>
+            ) : decides && s.status === "pending" ? (
+              <Cluster gap={3} align="center">
+                <button type="button" disabled={busy === s.id} className={button({ variant: "secondary", size: "compact" })} onClick={() => decide(s, "take")}>
+                  Take it
+                </button>
+                <button type="button" disabled={busy === s.id} className={`${button({ variant: "quiet" })} ${textSize.xs}`} onClick={() => decide(s, "pass")}>
+                  Pass
+                </button>
+              </Cluster>
+            ) : (
+              <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+                {SUGGESTION_STATUS_WORDS[s.status]}
+              </span>
+            )}
+          </Stack>
+        </PinnedCard>
+      ))}
+    </Stack>
+  );
+}
+
+/** The project's people by name, Guides first, then by the features
+ * list's order. A role name that isn't a group is nobody here. */
+async function projectPeople(sharing: { human: string; role: string }[]) {
+  const members = sharing.flatMap((e) => {
+    const group = groupOf(e.role);
+    return group ? [{ human: e.human, group }] : [];
+  });
+  const names = new Map(
+    (await getHumansById(members.map((m) => m.human))).map((h) => [h._id, firstName(h)]),
+  );
+  return members
+    .map((m) => ({ name: names.get(m.human) ?? "Someone", group: m.group }))
+    .sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || a.name.localeCompare(b.name));
+}
+
+/** Every Card written to the project, one per person per day, newest
+ * day first. */
+/** The Cards, and the seed days beside them: a seed day is nobody's Card
+ * (Austin, 2026-09-29: "never as someone's daily log"), so it is pinned
+ * under "Seed" with its own badge, where the groups that see logs see it. */
+async function projectLogbook(folder: Parameters<typeof listSeedDays>[0]) {
+  const cards = (await listCardsForProject(folder._id)).filter((c) => c.content.trim());
+  const names = new Map(
+    (await getHumansById([...new Set(cards.map((c) => c.humanId))])).map((h) => [h._id, firstName(h)]),
+  );
+  const seed = (await listSeedDays(folder)).map((s) => ({ fileId: s.fileId, who: "Seed", date: s.date, content: s.content, seeded: true }));
+  return [
+    ...cards.map((c) => ({ fileId: c.fileId, who: names.get(c.humanId) ?? "Someone", date: c.date, content: c.content, seeded: false })),
+    ...seed,
+  ].sort((a, b) => b.date.localeCompare(a.date) || Number(a.seeded) - Number(b.seeded) || a.who.localeCompare(b.who));
+}
+
+/** A seed day without its front matter: the sections as the seeder wrote
+ * them, headings and all, so a reader sees whose words each group is. */
+function seedDayBody(markdown: string): string {
+  return splitFrontmatter(markdown).body.trim();
+}
+
+function longDate(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 /** The writer's own calendar day, which is what a mark is dated with. */
@@ -108,6 +398,16 @@ function ProjectStatusControl({
 
   const changeStatus = async (next: ProjectStatus) => {
     if (next === status) return;
+    // Leaving Active is asked first (Austin, 2026-09-30): the control
+    // writes on a single pick, and a trashed project is deleted for good
+    // by the daily cleanup after 30 days. Coming back to Active is not.
+    const ask =
+      next === "trashed"
+        ? "Move this project to the trash? It's deleted for good after 30 days. Until then you can set it back to Active."
+        : next === "completed"
+          ? "Mark this project completed? It leaves everyone's active projects. You can set it back to Active."
+          : null;
+    if (ask && !window.confirm(ask)) return;
     setUpdating(true);
     try {
       await fetch(`/api/vault/projects/${folderId}/status`, {
@@ -127,13 +427,15 @@ function ProjectStatusControl({
       value={status}
       disabled={updating}
       onChange={(e) => changeStatus(e.target.value as ProjectStatus)}
-      className="text-xs font-mono"
+      // Quiet on purpose: it is a Guide's occasional control, not part of
+      // the page's headline.
+      className={textSize.xs}
       style={{
-        background: "var(--farground)",
-        border: "1px solid var(--midground)",
-        color: "inherit",
-        borderRadius: "6px",
-        padding: "3px 6px",
+        background: "transparent",
+        border: "none",
+        color: semanticColors.textSubtle,
+        padding: 0,
+        cursor: "pointer",
       }}
     >
       <option value="active">Active</option>
@@ -143,9 +445,32 @@ function ProjectStatusControl({
   );
 }
 
+/** The Logbook: what each person wrote about this project, one card per
+ * person per day, pinned into a scrapbook. Read-only; each person edits
+ * their own on the Daily Log. */
+function Logbook({ cards }: { cards: { fileId: string; who: string; date: string; content: string; seeded: boolean }[] }) {
+  if (cards.length === 0) {
+    return (
+      <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+        No cards yet.
+      </p>
+    );
+  }
+  return (
+    <PinnedCardWall>
+      {cards.map((c) => (
+        <PinnedCard key={c.fileId} title={c.who} label={c.seeded ? `${longDate(c.date)} · seeded history` : longDate(c.date)} data-logbook-card data-seeded={c.seeded || undefined}>
+          <OxRenderer markdown={c.seeded ? seedDayBody(c.content) : c.content} />
+        </PinnedCard>
+      ))}
+    </PinnedCardWall>
+  );
+}
+
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, livePageHash, viewerId, marks } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, seeding, budgetView, budget, budgetNames, canBudget } =
     useLoaderData<typeof loader>();
+  const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
   const revalidator = useRevalidator();
 
@@ -274,6 +599,7 @@ export default function NewspaperRoute() {
         date: m.date,
         text: m.text,
         waiting: m.waiting,
+        suggestion: m.suggestion,
         moved: m.moved,
         move:
           m.moveId && m.moveStatus
@@ -285,51 +611,103 @@ export default function NewspaperRoute() {
               }
             : undefined,
       })),
-      canMark: true,
+      canMark,
       onSend: onSend,
       onErase: onErase,
-      loadMoveOptions: loadMoveOptions,
-      onMove: onMove,
+      // No move for someone who marks and doesn't edit (an Observer).
+      loadMoveOptions: canEdit ? loadMoveOptions : undefined,
+      onMove: canEdit ? onMove : undefined,
       onMoveAction,
       skipParagraph: isIncompleteBannerText,
     }),
-    [marks, onSend, onErase, loadMoveOptions, onMove, onMoveAction, viewerId],
+    [marks, canMark, canEdit, onSend, onErase, loadMoveOptions, onMove, onMoveAction, viewerId],
   );
 
   return (
     <AppLayout>
-      <div className="container mx-auto px-4 py-12">
-        <div className="mb-8">
-          <Link
-            to="/"
-            className="text-xs subtle-text hover:opacity-80"
-            style={{ textDecoration: "none" }}
-          >
-            ← Dashboard
-          </Link>
-          <div className="flex items-baseline justify-between gap-4 mt-2">
-            <h1 className="font-bold text-2xl mb-1">
-              {manifest.title ?? folder.name}
-            </h1>
-            <div className="flex items-center gap-3 shrink-0">
+      <CenterContent maxWidth={1280}>
+        <Stack gap={2} className={sprinkles({ mb: 8 })} data-project-header>
+          {home.plural && (
+            <Link to="/" className={textSize.xs} style={{ color: semanticColors.textSubtle, textDecoration: "none" }}>
+              ← My Projects
+            </Link>
+          )}
+          {(steep || seeding?.mine) && (
+            <Cluster gap={6} align="flex-start" style={{ justifyContent: "space-between" }}>
+              {steep && <SteepGauge projectFolderId={folder._id} mine={steep.mine} size="compact" />}
+              {/* The seeding tile, only while a round is open. */}
+              {seeding?.mine && <SeedPacket projectFolderId={folder._id} files={seeding.mine} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
+            </Cluster>
+          )}
+          <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>
+            {manifest.title ?? folder.name}
+          </h1>
+          <Cluster gap={4} align="baseline" style={{ justifyContent: "space-between" }}>
+            <p className={textSize.sm} data-project-people>
+              {people.map((p, i) => (
+                <span key={i}>
+                  {i > 0 && " · "}
+                  {p.name} <span style={{ color: semanticColors.textSubtle }}>{p.group}</span>
+                </span>
+              ))}
+            </p>
+            {/* The project's status, small, at the end of the people line:
+                a Guide changes it here; everyone else reads it. Beside it,
+                Beside it, for a Guide with no round open, the one compact
+                button that opens one: the durable spot when no seeding is
+                happening (Austin, 2026-09-30). */}
+            <Cluster gap={4} align="center">
+              {seeding?.guide && !seeding.open && <SeedRoundQuiet projectFolderId={folder._id} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
               {canEditStatus ? (
                 <ProjectStatusControl folderId={folder._id} status={status} />
               ) : (
-                <span className="text-xs subtle-text capitalize">{status}</span>
+              <span className={`${textSize.xs} ${sprinkles({ textTransform: "capitalize" })}`} style={{ color: semanticColors.textSubtle }}>
+                {status}
+              </span>
               )}
-              <Link
-                to={`/vault?folder=${folder._id}`}
-                className="text-xs subtle-text hover:opacity-80 whitespace-nowrap"
-                style={{ textDecoration: "none" }}
-              >
-                Files →
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        <ProjectView body={body} galleryFolders={galleryFolders} annotations={annotations} />
-      </div>
+            </Cluster>
+          </Cluster>
+        </Stack>
+        <CardTabs tabs={tabs} active={tab} label="Project">
+          {tab === "efforts" && (
+            <ProjectView body={body} galleryFolders={galleryFolders} annotations={annotations} />
+          )}
+          {tab === "costs" && canBudget && (
+            <p className={textSize.sm} style={{ marginBottom: 12 }}>
+              {budgetView ? (
+                <Link to={`/newspaper/${folder._id}?tab=costs`}>Receipts</Link>
+              ) : budget ? (
+                <Link to={`/newspaper/${folder._id}?tab=costs&view=budget`}>Budget</Link>
+              ) : (
+                <Link to={`/newspaper/${folder._id}?tab=costs&view=budget`}>Start a budget</Link>
+              )}
+            </p>
+          )}
+          {budgetView && (
+            <BudgetView projectFolderId={folder._id} budget={budget} names={budgetNames} onChanged={() => revalidator.revalidate()} />
+          )}
+          {files && tabFolders && !budgetView && (
+            <ProjectFilesView
+              projectFolderId={folder._id}
+              rows={files}
+              folders={tabFolders}
+              kinds={fileKinds}
+              onOpen={(row) => (openInVault ? navigate(`/vault?file=${row.serveId}`) : window.open(row.urls.display, "_blank"))}
+              onChanged={() => revalidator.revalidate()}
+              canFile={canEdit}
+            />
+          )}
+          {logbook && <Logbook cards={logbook} />}
+          {suggestions && (
+            <SuggestionsView
+              projectFolderId={folder._id}
+              suggestions={suggestions}
+              decides={decides}
+              onChanged={() => revalidator.revalidate()}
+            />
+          )}
+        </CardTabs>
+      </CenterContent>
     </AppLayout>
   );
 }

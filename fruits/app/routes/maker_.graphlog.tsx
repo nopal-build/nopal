@@ -103,7 +103,7 @@ export function ErrorBoundary() {
           <h1 className="font-bold text-xl">Something went wrong</h1>
           <p className="text-sm subtle-text">
             {isRouteErrorResponse(error)
-              ? `${error.status} — ${error.statusText}`
+              ? `${error.status}: ${error.statusText}`
               : error instanceof Error
                 ? error.message
                 : "An unexpected error occurred."}
@@ -161,6 +161,7 @@ const STAGE_LABELS: Record<GraphLogStage, string> = {
   "sync-graph": "Sync Graph",
   "graph-structure": "Graph Structure",
   "graph-project-view": "Graph Project View",
+  sow: "Sow",
 };
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -348,7 +349,7 @@ export default function FruitsMakerGraphLog() {
           {usage.pricingStale && (
             <div className="mb-3">
               <Badge variant="warning">
-                Pricing table is {usage.pricingAgeDays} days old — verify against
+                Pricing table is {usage.pricingAgeDays} days old: verify against
                 platform.claude.com/docs/en/about-claude/pricing and bump PRICING_AS_OF in llmPricing.ts
               </Badge>
             </div>

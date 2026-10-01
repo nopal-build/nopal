@@ -144,8 +144,7 @@ function ExistingSessionChoice({
 
         {aliasSuccess ? (
           <div className={textSize.sm} style={{ color: colors.green }}>
-            Done — {aliasSuccess.email} now signs in to this same
-            account.
+            Done. {aliasSuccess.email} now signs in to this account.
           </div>
         ) : (
           <div
@@ -170,7 +169,7 @@ function ExistingSessionChoice({
                 style={{ width: "100%" }}
                 type="submit"
               >
-                That's me — add {invitedEmail} as an alias
+                That's me, add {invitedEmail} as an alias
               </button>
             </Form>
 
@@ -269,8 +268,7 @@ function PasskeySetup({
         })}`}
       >
         <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-          Set up a passkey so you can sign in instantly with your
-          fingerprint, face, or PIN — no email codes to wait for.
+          Set up a passkey and sign in with your fingerprint, face or PIN.
         </p>
         {error && (
           <div className={textSize.sm}>
@@ -293,7 +291,7 @@ function PasskeySetup({
           to={`/login?email=${encodeURIComponent(invitedEmail)}`}
           className={link}
         >
-          Skip for now — I'll use an email code
+          Skip for now, I'll use an email code
         </Link>
       </div>
     </AuthShell>

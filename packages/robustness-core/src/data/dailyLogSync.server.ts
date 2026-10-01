@@ -19,6 +19,7 @@ import {
   createFileRef,
   createVaultFolder,
   getFolderById,
+  getFileRefById,
   listFolderChildren,
   updateFileRef,
   copyFileIntoFolder,
@@ -26,6 +27,7 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import { getDailyLogCards, listCardEntriesForProject } from "./dailyLog.server";
+import { isWebsiteFolder } from "./vaultFolderTypes";
 import { extractFileAttachments } from "./sorter.server";
 import {
   authorNames,
@@ -49,7 +51,9 @@ function contentHash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-async function ensureProjectSyncsFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
+export async function ensureProjectSyncsFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
+  // A website has no syncs (`isWebsiteFolder`): whatever got here is a bug.
+  if (isWebsiteFolder(projectFolder)) throw new Error("A website has no syncs");
   const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
   // Same deterministic-pick + deterministic-id fix as `ensureProjectN01`'s
   // own Skills-folder bug (see the `graphlog` skill's write-up) — this
@@ -196,6 +200,7 @@ async function ensureMarksSyncFolder(projectFolder: VaultFolder): Promise<VaultF
  * exactly as it was until somebody marks something.
  */
 export async function syncMarksProjection(projectFolder: VaultFolder): Promise<{ written: number }> {
+  if (isWebsiteFolder(projectFolder)) return { written: 0 };
   const marks = await listMarksForProject(projectFolder._id);
   // A project that has never been marked keeps the folder it never had.
   // One that has must be swept even when its last mark is gone, or a file
@@ -323,6 +328,8 @@ export async function runDailyLogSync(
 ): Promise<DailyLogSyncResult> {
   const projectFolder = await getFolderById(projectFolderId);
   if (!projectFolder) throw new Error("Project folder not found");
+  // A website takes no Cards and has no syncs.
+  if (isWebsiteFolder(projectFolder)) return { synced: [], unchanged: [], attachmentsCopied: [], incomplete: [] };
 
   const dailyLogsFolder = await ensureDailyLogsSyncFolder(projectFolder);
   const { files: existingFiles } = await listFolderChildren(
@@ -357,8 +364,9 @@ export async function runDailyLogSync(
 
     // A Card emptied by a move (`graphLogMoves.server.ts`) syncs as an
     // empty copy rather than being left behind: that is what takes the
-    // day out of this project's graph.
-    const content = card.content;
+    // day out of this project's graph. A suggestion gives only what a
+    // Guide took (`suggestions.server.ts`).
+    const content = card.suggestion ? (card.takenContent ?? "") : card.content;
     const targetName = syncedCardFileName(entryDate, humanId);
     const hash = contentHash(content);
     const existingFile = existingFileByName.get(targetName);
@@ -406,6 +414,11 @@ export async function runDailyLogSync(
         }
         continue;
       }
+
+      // Only the Card author's own files: the id comes from text they can
+      // type, and copying someone else's file would hand it to everyone
+      // on the project (see `fileCardAttachments`).
+      if ((await getFileRefById(attachment.fileId))?.human_id !== humanId) continue;
 
       const copied = await copyFileIntoFolder(attachment.fileId, dailyLogsFolder._id);
       if (!copied) {

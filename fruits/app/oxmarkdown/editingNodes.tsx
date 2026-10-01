@@ -406,7 +406,7 @@ function OxOpaqueDecorator({
   return (
     <span
       className={`ox-opaque${block ? " ox-opaque--block" : ""}${isSelected ? " ox-selected" : ""}`}
-      title={`Not yet editable here — raw: ${mdastNode.type}`}
+      title={`Not editable here yet (${mdastNode.type})`}
     >
       <OxStaticNodes nodes={[mdastNode]} />
     </span>

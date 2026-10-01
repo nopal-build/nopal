@@ -40,6 +40,7 @@
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { ResolvedGalleryImage } from "oxmarkdown-core";
+import { groupOf } from "./features";
 
 /**
  * "document": single column, always — the blog/docs feel. This is just the
@@ -86,13 +87,11 @@ export type ProjectManifest = {
   sharing?: ProjectSharingEntry[];
 };
 
-/** One collaborator's role assignment on a project — PhyLog's Sharing
- * Roles, stored as the `sharing` list in a project's own README.md front
- * matter (never in a separate database table — see `projectSharing.server.ts`
- * for why, and `sharingRoles.server.ts` for where the role NAME itself is
- * defined/validated). The project's own creator is never listed here —
- * they're always an implicit "Owner", resolved from the folder's own
- * `human_id` instead. */
+/** One person's role on a project, stored as the `sharing` list in the
+ * project's own README.md front matter (never in a separate table; see
+ * `projectSharing.server.ts`, and `sharingRoles.server.ts` for the role
+ * names). The creator is listed too, as Owner (ADR-023): there is no
+ * implicit owner. */
 export type ProjectSharingEntry = { human: string; role: string };
 
 /** The payload a project view needs to render. Built server-side by
@@ -159,7 +158,9 @@ function parseSharingList(raw: unknown): ProjectSharingEntry[] {
     const human = (entry as Record<string, unknown>).human;
     const role = (entry as Record<string, unknown>).role;
     if (typeof human === "string" && human && typeof role === "string" && role) {
-      out.push({ human, role });
+      // An old name reads as the group it became (Owner is Guide); a
+      // name nobody knows is kept as written and reaches nothing.
+      out.push({ human, role: groupOf(role) ?? role });
     }
   }
   return out;
@@ -181,6 +182,20 @@ export function parseProjectSharing(markdown: string): ProjectSharingEntry[] {
     return parseSharingList((data as Record<string, unknown>).sharing);
   } catch {
     return [];
+  }
+}
+
+/** Whether the README says its creator was taken off the project
+ * (`creator_removed: true`, written by `withProjectSharing`). Without it
+ * a creator the list doesn't name is its Guide (`withCreator`). */
+export function parseCreatorRemoved(markdown: string): boolean {
+  const { frontmatter } = splitFrontmatter(markdown);
+  if (!frontmatter) return false;
+  try {
+    const data = parseYaml(frontmatter);
+    return !!data && typeof data === "object" && (data as Record<string, unknown>).creator_removed === true;
+  } catch {
+    return false;
   }
 }
 
@@ -212,6 +227,7 @@ export function parseProjectStatus(markdown: string): ProjectStatus {
 export function withProjectSharing(
   markdown: string,
   entries: ProjectSharingEntry[],
+  creatorRemoved = false,
 ): string {
   const { frontmatter, body } = splitFrontmatter(markdown);
   let data: Record<string, unknown> = {};
@@ -230,6 +246,8 @@ export function withProjectSharing(
   }
   if (entries.length > 0) data.sharing = entries;
   else delete data.sharing;
+  if (creatorRemoved) data.creator_removed = true;
+  else delete data.creator_removed;
 
   if (Object.keys(data).length === 0) return body;
   const yamlText = stringifyYaml(data).trimEnd();

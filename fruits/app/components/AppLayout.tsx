@@ -1,7 +1,8 @@
 // app/components/AppLayout.tsx
 import { Link, NavLink, useLocation } from "react-router";
 import { ReactNode, useState, useCallback, useEffect } from "react";
-import { useUser, permissions } from "../hooks/useUser";
+import { useHome, useMaker, useUser, useVaultHidden, permissions } from "../hooks/useUser";
+import { displayName } from "robustness-core/data/humanNames";
 import noLogoColor from "../images/no-logo-color.svg";
 import noLogoWhite from "../images/no-logo-white.svg";
 import { useSchemePref } from "../hooks/useSchemePref";
@@ -89,7 +90,7 @@ function ImpersonationBanner({ targetName }: { targetName: string }) {
       }}
     >
       <span>
-        Viewing as <strong>{targetName}</strong> — signed in as{" "}
+        Viewing as <strong>{targetName}</strong>, signed in as{" "}
         {status.adminName ?? status.adminEmail}
       </span>
       <button
@@ -112,12 +113,12 @@ function ImpersonationBanner({ targetName }: { targetName: string }) {
   );
 }
 
-function getCurrentSectionLabel(pathname: string): string {
+function getCurrentSectionLabel(pathname: string, homeLabel: string): string {
   if (pathname.startsWith("/daily-log")) return "Daily Log";
   if (pathname.startsWith("/vault")) return "Vault";
   if (pathname.startsWith("/profile")) return "Profile";
   if (pathname.startsWith("/maker")) return "Maker";
-  return "Dashboard";
+  return homeLabel;
 }
 
 const navLinkFontClass = `${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`;
@@ -126,9 +127,18 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const schemePref = useSchemePref();
   const isDark = schemePref === "dark";
   const user = useUser();
-  const isAdmin = permissions.isAdmin(user);
+  // The Maker is for admins and for anyone guiding a project (ADR-026);
+  // `/maker` refuses everyone else on the server too.
+  const guidesAProject = useMaker();
+  const showMaker = permissions.isAdmin(user) || guidesAProject;
+  // A client gets their project, the Daily Log and their account, nothing
+  // else (ADR-023); `/vault` refuses them on the server too.
+  const showVault = !useVaultHidden();
+  const home = useHome();
+  const homeTo = home.projectId ? `/newspaper/${home.projectId}` : "/";
+  const homeLabel = home.plural ? "My Projects" : "My Project";
   const location = useLocation();
-  const currentSectionLabel = getCurrentSectionLabel(location.pathname);
+  const currentSectionLabel = getCurrentSectionLabel(location.pathname, homeLabel);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
@@ -138,7 +148,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
       className={sprinkles({ display: "flex", flexDirection: "column" })}
       style={{ height: "100vh" }}
     >
-      {user && <ImpersonationBanner targetName={user.name || user.email} />}
+      {user && <ImpersonationBanner targetName={displayName(user)} />}
       <div className={shellClass} style={{ height: "auto", flex: 1, minHeight: 0 }}>
         {/* ===== TOP NAV BAR (desktop ≥860px) ===== */}
         <header className={topbar}>
@@ -152,14 +162,14 @@ export function AppLayout({ children }: { children?: ReactNode }) {
 
           <nav className={topbarNav}>
             <NavLink
-              to="/"
+              to={homeTo}
               prefetch="intent"
               end
               className={({ isActive }) =>
                 `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
               }
             >
-              Dashboard
+              {homeLabel}
             </NavLink>
             <NavLink
               to="/daily-log"
@@ -170,16 +180,18 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             >
               Daily Log
             </NavLink>
-            <NavLink
-              to="/vault"
-              prefetch="intent"
-              className={({ isActive }) =>
-                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
-              }
-            >
-              Vault
-            </NavLink>
-            {isAdmin && (
+            {showVault && (
+              <NavLink
+                to="/vault"
+                prefetch="intent"
+                className={({ isActive }) =>
+                  `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+                }
+              >
+                Vault
+              </NavLink>
+            )}
+            {showMaker && (
               <NavLink
                 to="/maker"
                 prefetch="intent"
@@ -234,7 +246,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
           {menuOpen && (
             <div className={topnavMenu}>
               <NavLink
-                to="/"
+                to={homeTo}
                 prefetch="intent"
                 end
                 className={({ isActive }) =>
@@ -242,7 +254,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 }
                 onClick={closeMenu}
               >
-                Dashboard
+                {homeLabel}
               </NavLink>
               <NavLink
                 to="/daily-log"
@@ -254,17 +266,19 @@ export function AppLayout({ children }: { children?: ReactNode }) {
               >
                 Daily Log
               </NavLink>
-              <NavLink
-                to="/vault"
-                prefetch="intent"
-                className={({ isActive }) =>
-                  `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
-                }
-                onClick={closeMenu}
-              >
-                Vault
-              </NavLink>
-              {isAdmin && (
+              {showVault && (
+                <NavLink
+                  to="/vault"
+                  prefetch="intent"
+                  className={({ isActive }) =>
+                    `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                  }
+                  onClick={closeMenu}
+                >
+                  Vault
+                </NavLink>
+              )}
+              {showMaker && (
                 <NavLink
                   to="/maker"
                   prefetch="intent"

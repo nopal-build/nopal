@@ -12,7 +12,7 @@ import {
   moveVaultFolder,
 } from "robustness-core/data/vault.server";
 import { canWriteToRoot } from "robustness-core/data/vaultRoots";
-import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
+import { canActAsProjectOwner, getProjectRole } from "robustness-core/data/projectSharing.server";
 import { isFileRefLocked, isVaultRootFolder } from "robustness-core/data/vault.types";
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -42,18 +42,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // not the (necessarily stricter) folder-type content policy.
   const isProjectAnchor = folder.is_folder_type_root && folder.folder_type === "project-n02";
 
-  // The project ANCHOR's own object-level lifecycle (rename/delete/publish
-  // the WHOLE project) stays creator-only — same precedent
-  // `projectStatus.server.ts` already set for project status ("a personal
-  // organizational tool", unlike the collaborator-facing actions Sharing
-  // Roles govern). Every ORDINARY folder inside a shared project extends
-  // to an owner-tier collaborator (Owner/Crafter) exactly like real
-  // ownership — see `canActAsProjectOwner`.
-  const ownershipOk = isProjectAnchor
-    ? folder.human_id === user._id
-    : await canActAsProjectOwner(user._id, folder.human_id, folder._id);
+  // Renaming, deleting or publishing a whole project is its Owner's
+  // (ADR-023); being the folder's creator decides nothing. Everything
+  // inside it is Owner or Crafter (`canActAsProjectOwner`). 404 either
+  // way, so a refusal says nothing about what's here.
+  const ownershipOk =
+    isProjectAnchor && folder.vault_root_key === "projects"
+      ? !!(await getProjectRole(folder, user._id))?.guiding
+      : await canActAsProjectOwner(user._id, folder.human_id, folder._id);
   if (!ownershipOk) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+    return Response.json({ error: "Not found" }, { status: 404 });
   }
 
   const permitted = isProjectAnchor
@@ -117,7 +115,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return Response.json(
         {
           error:
-            "Sharing is managed via PUT /api/vault/projects/:folderId/sharing now — see the vault skill's Sharing Roles section.",
+            "Sharing is managed via PUT /api/vault/projects/:folderId/sharing. See the vault skill's Sharing Roles section.",
         },
         { status: 400 },
       );
@@ -144,13 +142,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
       // time without needing to re-validate them on every move).
       if (folder.is_folder_type_root) {
         return Response.json(
-          { error: "This folder's type is pinned — it cannot be moved" },
+          { error: "This folder's type is pinned, so it can't be moved" },
           { status: 403 },
         );
       }
       if (isFolderShared(folder)) {
         return Response.json(
-          { error: "Shared folders cannot be moved — unshare it first" },
+          { error: "Unshare this folder before moving it" },
           { status: 403 },
         );
       }
@@ -196,7 +194,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         return Response.json(
           {
             error:
-              "This folder contains shared folders and cannot be moved — unshare them first",
+              "Unshare the folders inside before moving this one",
           },
           { status: 403 },
         );

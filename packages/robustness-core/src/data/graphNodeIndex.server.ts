@@ -16,6 +16,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { parseRefOrigin, type RefOrigin } from "oxmarkdown-core";
 
 export type NodeLink = { date: string; number: number };
 
@@ -30,6 +31,11 @@ export type GraphLogNode = {
   quote: string;
   authorName: string | null;
   authorHumanId: string | null;
+  /** `seed` when the node came from seeded history, `seed-noted` when it
+   * is a fact noted at seeding and nobody's words; null for a live entry
+   * (`refDirective.ts`, `RefOrigin`). Optional so a node built by hand
+   * (tests, older fixtures) reads as live. */
+  origin?: RefOrigin | null;
   /** The exact, unmodified `:ref{...}` line as it appears in the
    * graph-log file — kept verbatim (not just the name/humanId parsed out
    * of it below) so a later stage that needs to COPY a citation (see
@@ -50,14 +56,16 @@ const REF_LINE_RE = /^:ref\{(.*)\}[ \t]*$/;
 const LINK_LINE_RE = /^-\s*\[(\d{4}-\d{2}-\d{2})\s+Node\s+(\d+)\]/;
 const ATTR_RE = /([\w-]+)="([^"]*)"/g;
 
-function parseRefLineAttrs(raw: string): { name: string | null; humanId: string | null } {
+function parseRefLineAttrs(raw: string): { name: string | null; humanId: string | null; origin: RefOrigin | null } {
   let name: string | null = null;
   let humanId: string | null = null;
+  let origin: RefOrigin | null = null;
   for (const match of raw.matchAll(ATTR_RE)) {
     if (match[1] === "name") name = match[2];
     if (match[1] === "human-id") humanId = match[2];
+    if (match[1] === "origin") origin = parseRefOrigin(match[2]) ?? null;
   }
-  return { name, humanId };
+  return { name, humanId, origin };
 }
 
 /**
@@ -107,7 +115,7 @@ export function parseGraphLogNodes(
       continue;
     }
     const refMatch = REF_LINE_RE.exec(block[refIndex].trim())!;
-    const { name, humanId } = parseRefLineAttrs(refMatch[1]);
+    const { name, humanId, origin } = parseRefLineAttrs(refMatch[1]);
 
     const quote = block.slice(1, refIndex).join("\n").trim();
 
@@ -124,6 +132,7 @@ export function parseGraphLogNodes(
       quote,
       authorName: name,
       authorHumanId: humanId,
+      origin,
       refLine: block[refIndex].trim(),
       links,
     });
@@ -169,6 +178,10 @@ export function formatNodeVerbatim(node: GraphLogNode, today?: string): string {
   // get a confidently wrong number into a README.
   const age = today ? daysBetweenIso(node.date, today) : null;
   const ageNote = age === null ? "" : ` [${age} day(s) ago]`;
+  // Seeded history says so on every line the model reads from it, the
+  // same way the age does: a fact code holds, never one the model has to
+  // remember from a rule.
+  const originNote = node.origin === "seed" ? ", seeded history" : node.origin === "seed-noted" ? ", noted at seeding, nobody's words" : "";
   // VIEW MODE CITATION. `verbose="true"` is right in a graph-log file and
   // wrong everywhere else -- `refDirective.ts` says so outright: verbose
   // is for graph-log entries, every other use omits it. Verbose renders a
@@ -188,7 +201,7 @@ export function formatNodeVerbatim(node: GraphLogNode, today?: string): string {
   // normalizes through the same function. Render a view citation any other
   // way and every node silently reports as dropped.
   return [
-    `${node.date}${ageNote} Node ${node.number} (${node.authorName ?? "Unknown"}) [id: ${node.id}]:`,
+    `${node.date}${ageNote} Node ${node.number} (${node.authorName ?? "Unknown"}${originNote}) [id: ${node.id}]:`,
     node.quote,
     node.refLine ? stripRefVerbose(node.refLine) : "",
   ]

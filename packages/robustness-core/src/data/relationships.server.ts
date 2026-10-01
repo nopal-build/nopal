@@ -124,6 +124,14 @@ export async function repointRelationshipsToHuman(
   await query(`DELETE relationships WHERE humanAId = humanBId;`);
 }
 
+/** Every relationship row naming `humanId`, gone. For a placeholder
+ * account being deleted: an invite withdrawn before it was accepted
+ * (ADR-026). Not `revokeRelationship`, which keeps the row and strips
+ * folder sharing. */
+export async function deleteRelationshipsForHuman(humanId: string): Promise<void> {
+  await query(`DELETE relationships WHERE humanAId = $id OR humanBId = $id;`, { id: humanId });
+}
+
 export async function getRelationshipsForHuman(
   humanId: string,
 ): Promise<Relationship[]> {

@@ -36,6 +36,8 @@ export function ProjectView({ body, galleryFolders, annotations }: ProjectViewPr
   return (
     <OxRenderer
       markdown={body}
+      // Written by the skills, not by a person: plain paper (`ox-plain`).
+      className="ox-plain"
       annotations={annotations}
       resolveGalleryFolder={
         galleryFolders ? (folderName) => galleryFolders[folderName] : undefined

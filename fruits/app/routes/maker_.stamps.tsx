@@ -21,10 +21,14 @@ import {
   data,
   redirect,
   useRouteError,
+  useSearchParams,
   isRouteErrorResponse,
 } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
+import { CardTabs } from "../components/stamps-candidates/CardTabs";
+import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
+import { SlopeGauge } from "../components/stamps-candidates/SlopeGauge";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { Surface } from "stamps/Surface";
 import { surfaceBorderOnly } from "stamps/surface.css";
@@ -45,6 +49,9 @@ import { ActionBar, ActionBarGroup, ActionBarButton } from "stamps/ActionBar";
 import { Modal } from "stamps/Modal";
 import { MoreMenu, MoreIcon } from "stamps/MoreMenu";
 import { SearchCollection } from "stamps/SearchCollection";
+import { SearchField } from "stamps/SearchField";
+import { Disclosure } from "stamps/Disclosure";
+import { Select } from "stamps/Select";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
 import { Grid } from "stamps/Grid";
@@ -227,6 +234,7 @@ const NAV: NavCategory[] = [
     ],
   },
   { label: "Patterns", sections: [{ id: "collections", label: "Collections" }] },
+  { label: "Candidates", sections: [{ id: "candidates", label: "Stamps Candidates" }] },
 ];
 
 // Stable (module-level, never re-created) so `useScrollSpy` doesn't tear
@@ -1131,7 +1139,35 @@ const BUTTON_VARIANTS: ButtonExample[] = [
     note: "No padding or display baked in at all — bring both.",
     style: { padding: "8px 16px", display: "inline-flex" },
   },
+  {
+    variant: "quiet",
+    label: "Keep them on",
+    code: 'button({ variant: "quiet" })',
+    note: "The quiet choice beside an action: reads as a link, never competes with the button next to it.",
+  },
 ];
+
+/** A row's action and its quiet alternative, at the size a list or a
+ * card wants. The pair every in-page yes-or-no uses (Suggestions, the
+ * Maker's people rows, a seed packet). */
+function CompactPairSpecimen() {
+  return (
+    <Stack gap={2} align="flex-start" style={{ maxWidth: "320px" }}>
+      <Cluster gap={3} align="center">
+        <button type="button" className={button({ variant: "secondary", size: "compact" })}>
+          Take it
+        </button>
+        <button type="button" className={button({ variant: "quiet" })}>
+          Pass
+        </button>
+      </Cluster>
+      <SpecimenCaption>{'button({ variant: "secondary", size: "compact" })  +  button({ variant: "quiet" })'}</SpecimenCaption>
+      <p className={textSize.xs} style={{ color: semanticColors.textSubtle, margin: 0 }}>
+        primary is the page's one big call; secondary at compact is a row's. Any variant with padding takes size: "compact".
+      </p>
+    </Stack>
+  );
+}
 
 /** One button, rendered for real (not a swatch standing in for it) —
  * captioned with the exact `button(...)` call that produced it. */
@@ -1182,6 +1218,12 @@ function ButtonsSection() {
           </Cluster>
         </Stack>
 
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Compact, and the quiet choice beside it
+          </div>
+          <CompactPairSpecimen />
+        </Stack>
         <Stack gap={3}>
           <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
             Danger tint
@@ -1391,9 +1433,41 @@ function FormInputsSection() {
             the DOM for screen readers.
           </p>
           <div style={{ maxWidth: "260px" }}>
-            <Input label="Search" name="search-demo" placeholder="Search…" hideLabel />
+            <Input label="Name" name="hide-label-demo" placeholder="Name" hideLabel />
           </div>
-          <SpecimenCaption>{'<Input label="Search" hideLabel />'}</SpecimenCaption>
+          <SpecimenCaption>{'<Input label="Name" hideLabel />'}</SpecimenCaption>
+        </Stack>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Select
+          </div>
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            <Code>Select</Code> from <Code>stamps/Select</Code>: the dropdown,
+            a native <Code>select</Code> drawn as the stamp field with its own
+            chevron. <Code>normal</Code> sits beside an <Code>Input</Code>;{" "}
+            <Code>small</Code> sits in a row of text, like a person's group on
+            the Humans page.
+          </p>
+          <Cluster gap={4} align="flex-end">
+            <div style={{ width: "220px" }}>
+              <Select
+                label="Group"
+                name="select-demo"
+                placeholder="Pick a group"
+                options={["Guide", "Crafter", "Observer", "Client"].map((g) => ({ value: g, label: g }))}
+              />
+            </div>
+            <Select
+              label="Group, small"
+              hideLabel
+              size="small"
+              name="select-demo-small"
+              defaultValue="Client"
+              options={["Guide", "Crafter", "Observer", "Client"].map((g) => ({ value: g, label: g }))}
+            />
+          </Cluster>
+          <SpecimenCaption>{'<Select label="Group" name="group" size="small" options={[...]} />'}</SpecimenCaption>
         </Stack>
       </Stack>
     </Section>
@@ -1620,7 +1694,6 @@ function SearchCollectionDemo() {
         }
         searchInputProps={{
           label: "Search fruits",
-          hideLabel: true,
           name: "fruit-search",
           value: query,
           onChange: (e) => setQuery(e.target.value),
@@ -1645,6 +1718,112 @@ function CollectionsSection() {
           the demo below) or submit-to-create.
         </p>
         <SearchCollectionDemo />
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>SearchField</Code> from <Code>stamps/SearchField</Code>: the
+          search bar on its own, the same one <Code>SearchCollection</Code>{" "}
+          uses. Every search bar in the app is this.
+        </p>
+        <div style={{ maxWidth: "320px" }}>
+          <SearchField label="Search" name="search-field-demo" placeholder="Search…" />
+        </div>
+        <SpecimenCaption>{'<SearchField label="Search" name="q" placeholder="Search…" />'}</SpecimenCaption>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+          <Code>Disclosure</Code> from <Code>stamps/Disclosure</Code>: the
+          twirl-down. A row in a list that opens in place to show more and
+          closes again, without leaving the page. A native{" "}
+          <Code>{"<details>"}</Code>, so it works with the keyboard and
+          without JavaScript. Stack them for a list that expands one row at
+          a time (the Maker's projects and humans).
+        </p>
+        <Surface className={sprinkles({ px: 3 })} style={{ maxWidth: "480px" }}>
+          <Disclosure summary={<span className={textSize.sm}>Crouch Casita <span style={{ color: semanticColors.textSubtle }}>· 7 people</span></span>}>
+            <p className={textSize.sm} style={{ margin: 0 }}>Who's on it, and the controls to change that, twirl down here.</p>
+          </Disclosure>
+          <Disclosure summary={<span className={textSize.sm}>Coronado ADU <span style={{ color: semanticColors.textSubtle }}>· 1 person</span></span>}>
+            <p className={textSize.sm} style={{ margin: 0 }}>Each row opens on its own; the others stay put.</p>
+          </Disclosure>
+        </Surface>
+        <SpecimenCaption>{'<Disclosure summary={<span>Crouch Casita</span>}>…</Disclosure>'}</SpecimenCaption>
+      </Stack>
+    </Section>
+  );
+}
+
+// ─── Candidates ──────────────────────────────────────────────────────────────
+// Components built in the app that may move into stamps: generic, no app
+// code, plain CSS on stamps' semantic variables until one graduates
+// (`fruits/app/tests/stampsCandidates.test.ts` holds them to that).
+
+const DEMO_SLOPE = [
+  { key: "flat", label: "Flat" },
+  { key: "rolling", label: "Rolling" },
+  { key: "uphill", label: "Uphill" },
+  { key: "steep", label: "Steep" },
+  { key: "oh-crap", label: "Oh crap" },
+] as const;
+type DemoSlopeKey = (typeof DEMO_SLOPE)[number]["key"];
+
+const DEMO_TABS = ["efforts", "photos", "files", "costs", "logbook"] as const;
+
+function CandidatesSection() {
+  const [full, setFull] = useState<DemoSlopeKey | null>(null);
+  const [compact, setCompact] = useState<DemoSlopeKey | null>("uphill");
+  const [params] = useSearchParams();
+  const requested = params.get("demoTab");
+  const tab = DEMO_TABS.find((t) => t === requested) ?? "efforts";
+
+  return (
+    <Section id="candidates" title="Stamps Candidates">
+      <Stack gap={10}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "560px" }}>
+          In <Code>fruits/app/components/stamps-candidates</Code>: built for
+          the dashboard and the project page, kept free of app code so one
+          that earns its place moves into <Code>packages/stamps</Code> with
+          its CSS rewritten in vanilla-extract, and one that doesn't is
+          deleted.
+        </p>
+
+        <Stack gap={3}>
+          <SpecimenCaption>SlopeGauge: a slope set by tapping a word (the Steep-o-meter wraps it)</SpecimenCaption>
+          <Cluster gap={8} align="flex-end">
+            <div style={{ width: 360, maxWidth: "100%" }}>
+              <SlopeGauge options={DEMO_SLOPE} chosen={full} onChoose={setFull} caption="How steep is this stretch?" />
+            </div>
+            <div style={{ width: 260, maxWidth: "100%" }}>
+              <SlopeGauge options={DEMO_SLOPE} chosen={compact} onChoose={setCompact} caption="Compact" size="compact" />
+            </div>
+          </Cluster>
+        </Stack>
+
+        <Stack gap={3}>
+          <SpecimenCaption>CardTabs: recipe cards in a box, one link per tab</SpecimenCaption>
+          <CardTabs
+            label="Demo"
+            active={tab}
+            tabs={DEMO_TABS.map((t) => ({
+              key: t,
+              label: t[0].toUpperCase() + t.slice(1),
+              to: `?demoTab=${t}#candidates`,
+            }))}
+          >
+            <p className={textSize.sm}>The {tab} card is open.</p>
+          </CardTabs>
+        </Stack>
+
+        <Stack gap={3}>
+          <SpecimenCaption>PinnedCard in a PinnedCardWall: the Logbook's cards</SpecimenCaption>
+          <PinnedCardWall>
+            <PinnedCard title="Lucas J" label="Wed, Aug 26">
+              <p className={textSize.sm}>Working with Beaudy and Gerald on site today.</p>
+            </PinnedCard>
+            <PinnedCard title="James W" label="Thu, Sep 24">
+              <p className={textSize.sm}>Windows arrived.</p>
+            </PinnedCard>
+            <PinnedCard title="Austin" label="Tue, Sep 22">
+              <p className={textSize.sm}>The sheet metal shop sent the invoice for the eave flashing and drip edge today. Net 30.</p>
+            </PinnedCard>
+          </PinnedCardWall>
+        </Stack>
       </Stack>
     </Section>
   );
@@ -1691,6 +1870,8 @@ export default function MakerStamps() {
             <OverlaysSection />
             <MenusSection />
             <CollectionsSection />
+
+            <CandidatesSection />
           </Stack>
         </CenterContent>
       </DrawerContent>

@@ -210,7 +210,7 @@ describe("the report: a watched file that changed, and nothing else", () => {
 
   it("reads each seeded skill out of the defaults file, under the name people know it by", () => {
     const skills = extractRuntimeSkills(source("graphLogDefaults.server.ts"));
-    expect([...skills.keys()].sort()).toEqual(["EFFORTS.md", "FILING.md", "GRAPH.md", "GRAPH_STRUCTURE.md", "KNOWLEDGE.md", "VOICE.md"]);
+    expect([...skills.keys()].sort()).toEqual(["EFFORTS.md", "FILING.md", "GRAPH.md", "GRAPH_STRUCTURE.md", "KNOWLEDGE.md", "SOW.md", "VOICE.md"]);
     expect(skills.get("GRAPH.md")?.startsWith("Your job is to read this project's synced content")).toBe(true);
   });
 });

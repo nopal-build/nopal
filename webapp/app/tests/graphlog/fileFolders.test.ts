@@ -257,3 +257,54 @@ describe("ADR-019: a folder is a projection; a file never moves", () => {
     }
   });
 });
+
+describe("a document seeded with the project's history is a row (2026-09-29)", () => {
+  const estimateFiling: Filing = {
+    kind: "estimate",
+    reason: "A line-item build estimate with confidence per line.",
+    cost: { vendor: "Nopal", amount: "825000", currency: "USD", date: "2026-04-22", readFrom: ["total"] },
+  };
+  const rows = projectFileRows(
+    input({
+      seedDocuments: [
+        { fileId: "seeddoc", name: "2026-04-22 Expedition planning.md", date: "2026-04-22", authorName: "Austin", authorHumanId: "admin_1", contentType: "text/markdown", size: 900 },
+        { fileId: "seedq", name: "2026-05-07 Questionnaire.md", date: "2026-05-07", authorName: "Paul and Erica", authorHumanId: null, contentType: "text/markdown", size: 400 },
+      ],
+      knowledgeFiles: [
+        ...input().knowledgeFiles,
+        filingFile("2026-04-22 Expedition planning.filing.md", estimateFiling, "text" as never),
+      ],
+    }),
+  );
+
+  it("is its own copy: one id serves, cites and is marked on", () => {
+    const doc = rows.find((r) => r.fileId === "seeddoc")!;
+    expect(doc.serveId).toBe("seeddoc");
+    expect(doc.cardCopyFileId).toBe("seeddoc");
+    expect(doc.cardFileId).toBe("");
+    expect(doc.authorName).toBe("Austin");
+    expect(doc.authorHumanId).toBe("admin_1");
+    expect(doc.date).toBe("2026-04-22");
+    expect(doc.context).toMatch(/Seeded/);
+  });
+
+  it("lands where its filing says: the estimate in Costs, unconfirmed", () => {
+    const doc = rows.find((r) => r.fileId === "seeddoc")!;
+    expect(doc.kind).toBe("estimate");
+    expect(doc.folders).toEqual(["costs"]);
+    expect(doc.cost?.status).toBe("unconfirmed");
+    expect(confirmedCosts(rows).map((r) => r.fileId)).not.toContain("seeddoc");
+  });
+
+  it("an unfiled one is Unsorted, under the seed's author name with no account", () => {
+    const q = rows.find((r) => r.fileId === "seedq")!;
+    expect(q.kind).toBe("unfiled");
+    expect(q.folders).toEqual(["unsorted"]);
+    expect(q.authorName).toBe("Paul and Erica");
+    expect(q.authorHumanId).toBe("");
+  });
+
+  it("the Card rows are exactly as before", () => {
+    expect(rows.filter((r) => r.cardFileId === "card1").map((r) => r.fileId)).toEqual(["origplan", "origreceipt", "orignew"]);
+  });
+});

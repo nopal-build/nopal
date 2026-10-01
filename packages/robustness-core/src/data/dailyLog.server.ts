@@ -281,7 +281,24 @@ export type DailyLogCard = {
    * reflected immediately without touching every past card. */
   projectName: string;
   content: string;
+  /** A suggestion Card (`FileRef.suggestion`): the project gets
+   * `takenContent`, not `content`. */
+  suggestion?: boolean;
+  takenContent?: string;
 };
+
+/** The words a Card gives its project: all of them, or for a suggestion
+ * only what a Guide took. */
+/** Turns a Card into a suggestion (`suggestions.server.ts`), keeping
+ * `fedSoFar` as what a Guide took: the words it already gave the project
+ * stay, anything after waits. */
+export async function holdCardForGuide(fileId: string, fedSoFar: string): Promise<void> {
+  await merge("file_refs", fileId, { suggestion: true, taken_content: fedSoFar });
+}
+
+export function fedContent(card: Pick<FileRef, "content" | "suggestion" | "taken_content">): string {
+  return card.suggestion ? (card.taken_content ?? "") : (card.content ?? "");
+}
 
 // `cardFileName` itself now lives in `oxmarkdown/cardDirective.ts` (an
 // isomorphic module, unlike this `.server.ts` file) — deterministic from
@@ -335,14 +352,16 @@ export async function getDailyLogCards(
       projectFolderId: file.project_folder_id,
       projectName: projectNameById.get(file.project_folder_id) ?? "Unknown project",
       content: file.content ?? "",
+      ...(file.suggestion ? { suggestion: true, takenContent: file.taken_content ?? "" } : {}),
     });
   }
   return cards;
 }
 
 /**
- * Every Card written for `projectFolderId`, by anyone, with its content:
- * one query, the record itself. The files view and the file-marks route
+ * Every Card written for `projectFolderId`, by anyone, with the content it
+ * feeds the project (`fedContent`: a suggestion's untaken words aren't
+ * here): one query, the record itself. The files view and the file-marks route
  * read attachments out of these (`extractFileAttachments`), because a
  * Card's `::file{...}` directive is the only place a file is tied to the
  * entry it came with. Sorted by date then writer, same as
@@ -358,7 +377,7 @@ export async function listCardsForProject(
   return (result?.[0] ?? [])
     .map((r) => formatRecord(r as unknown as FileRef))
     .filter((f) => !!f.date && !!f.human_id)
-    .map((f) => ({ fileId: f._id, humanId: f.human_id, date: f.date!, content: f.content ?? "" }));
+    .map((f) => ({ fileId: f._id, humanId: f.human_id, date: f.date!, content: fedContent(f) }));
 }
 
 /**
@@ -414,6 +433,8 @@ export async function createDailyLogCard(
   humanId: string,
   date: string,
   projectFolderId: string,
+  /** The writer's group has no `feeds`: the Card waits for a Guide. */
+  { suggestion = false }: { suggestion?: boolean } = {},
 ): Promise<DailyLogCard> {
   const rootFolder = await resolveDailyLogsFolder(humanId);
   const dateFolder = await getOrCreateVaultFolder(humanId, date, rootFolder._id);
@@ -433,6 +454,9 @@ export async function createDailyLogCard(
     : null;
 
   if (existing) {
+    // Written before its writer lost `feeds`: from now on it waits, and
+    // what it already fed stays taken.
+    if (suggestion && !existing.suggestion) await holdCardForGuide(existing._id, existing.content ?? "");
     return {
       fileId: existing._id,
       fileName: existing.name,
@@ -453,6 +477,7 @@ export async function createDailyLogCard(
     project_folder_id: projectFolderId,
   });
   if (!created) throw new Error("Failed to create daily log card");
+  if (suggestion) await merge("file_refs", created._id, { suggestion: true });
 
   return {
     fileId: created._id,
@@ -460,6 +485,7 @@ export async function createDailyLogCard(
     projectFolderId,
     projectName,
     content: created.content ?? "",
+    ...(suggestion ? { suggestion: true, takenContent: "" } : {}),
   };
 }
 
@@ -467,13 +493,20 @@ export async function createDailyLogCard(
  * md_version snapshotting; it's a much smaller, single-project scope, and
  * per-day granularity already gives it a natural history via the day
  * itself. */
+/** Whether a Card save names one of the saver's own Cards for that day
+ * (`getDailyLogCards(humanId, date)`). `saveDailyLogCard` writes by file
+ * id alone, so the caller checks this first. */
+export function isOwnCard(cards: Pick<DailyLogCard, "fileId">[], cardFileId: string): boolean {
+  return cards.some((c) => c.fileId === cardFileId);
+}
+
 export async function saveDailyLogCard(fileId: string, content: string): Promise<void> {
   await updateFileRef(fileId, { content });
 }
 
 const SAMPLE_LOG_MARKDOWN = `# Welcome to your Daily Log
 
-This is a sample entry so you can see all the markdown you can use. Delete it whenever — your real entries will live right alongside it.
+A sample entry to show what the markdown can do. Delete it whenever you like.
 
 ---
 

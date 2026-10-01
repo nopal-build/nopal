@@ -308,6 +308,19 @@
   content: none;
 }
 
+/* General modifier: plain paper, for pages the skills write (the Efforts
+   page, via `ProjectView`), as against what a person writes (a daily log,
+   a Card, the Logbook), which keeps the dot grid and the heading markers
+   (Austin, 2026-09-28). No dot grid and no # / ## / ### / > glyphs in the
+   gutter; list markers stay, since a list still needs them. Apply via the
+   `className` prop (`className="ox-plain"`), like `ox-no-gutter`. */
+.ox-content.ox-plain .ox-dot-grid {
+  background-image: none;
+}
+.ox-content.ox-plain :is(h1, h2, h3, blockquote)::before {
+  content: none;
+}
+
 /* ── Gutter markers (# / ## / ### / >) ──────────────────────────── */
 
 .ox-content :is(h1, h2, h3, blockquote) {
@@ -442,7 +455,21 @@
    comes entirely from the file.") This also means Editing mode and the
    static renderer now agree EXACTLY on how many grid units a given
    blank-line count is worth (both read `countBlankLines` directly) --
-   they always should have. */
+   they always should have.
+
+   NOTE (merge of `main`, 2026-10-01): `main` had independently reintroduced
+   the exact baseline-margin + `.ox-no-gap-before` system this reversal
+   removed, PLUS a new "headings and lists keep one fixed rhythm regardless
+   of blank lines" rule layered on top of it (Austin, 2026-09-28). Dropped
+   here rather than kept alongside this reversal -- it depends on
+   `.ox-no-gap-before` ever being applied by `renderBlockNodes`, which this
+   reversal removed from `OxRenderer.tsx` entirely, so keeping main's CSS
+   verbatim would silently reintroduce the exact over-eager baseline gap
+   this reversal fixed for every non-heading, non-list block. If the
+   headings/lists rhythm behavior is still wanted, it needs re-expressing
+   in terms of THIS file's literal `.ox-blank-line-spacer` model (e.g.
+   collapsing/forcing specific spacer counts around a heading or list),
+   not the baseline-margin model it was originally written against. */
 .ox-blank-line-spacer {
   height: var(--ox-grid);
 }

@@ -160,7 +160,7 @@ pub fn resolve_space(client: &Client, project: Option<&str>) -> Result<Folder> {
     match project {
         Some(name) => vault::resolve_folder(client, &format!("projects/{name}"))?.ok_or_else(|| {
             format!(
-                "No project named '{name}' — create it first (e.g. `nopal vault mkdir projects/{name}`)"
+                "No project named '{name}'. Start it in the Maker first (o.nopal.build/maker)"
             )
             .into()
         }),

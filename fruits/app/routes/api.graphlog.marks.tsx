@@ -1,4 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { canViewFolder } from "robustness-core/data/vault.types";
@@ -15,9 +16,9 @@ import {
  * POST /api/graphlog/marks
  *
  * Writes a mark: a person's own words on one thought on a project's
- * Efforts page. Anyone who can view the project can mark it, clients
- * included; there is one kind of mark and it behaves the same whoever
- * writes it.
+ * Efforts page. Anyone whose group has `marks` writes one, Clients
+ * included (ADR-026); there is one kind of mark and it behaves the same
+ * whoever writes it.
  *
  * The mark lands on the page version the writer was looking at. If the
  * page changed under them (a run finished while they were writing), the
@@ -52,9 +53,20 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: `Keep a mark under ${MARK_TEXT_LIMIT} characters.` }, { status: 400 });
   }
 
+  // Admitted by role, not by the cache: a Client is never in `shared_with`
+  // (ADR-023) and marks all the same. Someone in the cache with no role (a
+  // share from before roles) reads the project and is refused below;
+  // anyone else gets the same 404 as a project that doesn't exist.
   const folder = await getFolderById(body.projectFolderId);
-  if (!folder || !canViewFolder(user._id, folder)) {
+  const role = folder ? await getProjectRole(folder, user._id) : null;
+  if (!folder || (!role && !canViewFolder(user._id, folder))) {
     return Response.json({ error: "Project not found" }, { status: 404 });
+  }
+  // Marking is a feature (`features.ts`). Without `feeds` (an Observer)
+  // the note waits for a Guide (`suggestions.server.ts`).
+  const features = role?.features ?? [];
+  if (!features.includes("marks")) {
+    return Response.json({ error: "You can read this project, not mark it." }, { status: 403 });
   }
 
   const readme = await getReadmeFileForFolder(folder.human_id, folder._id);
@@ -75,6 +87,7 @@ export async function action({ request }: ActionFunctionArgs) {
     text,
     pageHash: body.pageHash,
     unit: snapshotUnit(unit),
+    suggestion: !features.includes("feeds"),
   });
   if (!mark) return Response.json({ error: "The mark didn't save. Try again." }, { status: 500 });
   return Response.json({ id: mark._id }, { status: 201 });

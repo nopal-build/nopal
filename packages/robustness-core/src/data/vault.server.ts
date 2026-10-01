@@ -37,11 +37,12 @@ import {
   isSpaceFolderTypeKey,
   isSyncFamilyFolderType,
   isSyncFolderTypeKey,
+  isWebsiteFolder,
   SPACE_FOLDER_TYPES,
   SYNC_FOLDER_TYPES,
   type VaultFolderTypeKey,
 } from "./vaultFolderTypes";
-import { isVaultRootFolder } from "./vault.types";
+import { isVaultRootFolder, canViewFolder } from "./vault.types";
 import type { Role } from "./humans.server";
 // File Referencing & Renaming (`fileReferences.server.ts`), `project-n02`
 // seeding (`projectN02.server.ts`), and `website` seeding/publish/settings
@@ -178,9 +179,7 @@ export async function canViewFileRef(
   if (!file.folder_id) return false;
   const folder = await getFolderById(file.folder_id);
   if (!folder) return false;
-  return (
-    Array.isArray(folder.shared_with) && folder.shared_with.includes(humanId)
-  );
+  return canViewFolder(humanId, folder);
 }
 
 export async function updateFileRef(
@@ -662,7 +661,11 @@ async function getAllNestedFolderIds(parentId: string): Promise<string[]> {
   return ids;
 }
 
-/** Strip `removedHumanId` out of every folder `ownerId` owns that lists it in `shared_with`. */
+/** Strip `removedHumanId` out of every folder `ownerId` owns that lists it
+ * in `shared_with`, outside projects. A project's cache is its people
+ * list's (`writeProjectSharing`); a relationship never decides who is on a
+ * project (2026-09-25), and stripping it here left the list saying one
+ * thing and the cache another. */
 async function unshareFolderFromHuman(
   ownerId: string,
   removedHumanId: string,
@@ -670,6 +673,7 @@ async function unshareFolderFromHuman(
   const folders = await getFoldersByHuman(ownerId);
   for (const folder of folders) {
     if (
+      folder.vault_root_key !== "projects" &&
       Array.isArray(folder.shared_with) &&
       folder.shared_with.includes(removedHumanId)
     ) {
@@ -1095,14 +1099,21 @@ export async function ensureVaultRootFolders(
   // predates this type, same convention as the `vault_root_key` backfill
   // above (see the top-of-file import comment for why a static import
   // of `projectN02.server`'s mutual dependency on this file is safe).
+  // Once per root per server process: the seeding is about twenty
+  // queries and this runs on most page loads (2026-09-27). A deleted
+  // skill file comes back on the next restart instead of the next load.
   const personalIndex = roots.findIndex((r) => r.vault_root_key === "personal");
-  if (personalIndex !== -1) {
+  if (personalIndex !== -1 && !shapedPersonalRoots.has(roots[personalIndex]._id)) {
     const { ensureProjectN02 } = await getProjectN02Module();
     roots[personalIndex] = await ensureProjectN02(roots[personalIndex]);
+    shapedPersonalRoots.add(roots[personalIndex]._id);
   }
 
   return roots;
 }
+
+/** `personal` roots already stamped and seeded by this process. */
+const shapedPersonalRoots = new Set<string>();
 
 // Same literal `dailyLogSync.server.ts`'s `DAILY_LOGS_SYNC_FOLDER_NAME`
 // uses for every OTHER project's synced-in copy of a Card — duplicated
@@ -1310,28 +1321,25 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
 }
 
 /**
- * Every project folder `humanId` can target for a daily-log Card — their
- * OWN projects, plus any project someone else has shared a Sharing Role
- * with them on (see `projectSharing.server.ts`). Cards are the one place
- * this app lets ANY role (including Observer) "contribute" to a project it
- * doesn't own — see the vault skill's Daily Log/Cards section.
- *
- * `getTopLevelSharedFolders` already returns exactly the top of each
- * shared subtree (a folder whose parent isn't itself shared) — since a
- * project is only ever shared as a whole via `setProjectSharing` (never a
- * nested subfolder individually), that top is always the project folder
- * itself; the `vault_root_key === "projects"` filter is just defensive
- * (excludes anything unexpected, e.g. a future shareable root).
+ * Every project whose work `humanId` reaches: their id is in its
+ * `shared_with` cache, which holds everyone on it but a Client (ADR-023).
+ * Owning the folder adds nothing. Used for move and refile destinations;
+ * the projects someone holds any role on, Client included, are
+ * `listProjectsFor` (`projectSharing.server.ts`).
  */
 export async function getAccessibleProjectFolders(
   humanId: string,
 ): Promise<VaultFolder[]> {
-  const [owned, sharedTop] = await Promise.all([
-    getProjectFolders(humanId),
-    getTopLevelSharedFolders(humanId),
-  ]);
-  const sharedProjects = sharedTop.filter((f) => f.vault_root_key === "projects");
-  return [...owned, ...sharedProjects];
+  const result = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders
+     WHERE vault_root_key = "projects" AND $humanId IN shared_with
+     ORDER BY name ASC`,
+    { humanId },
+  );
+  const reached = (result?.[0] ?? []).map(formatRecord);
+  const ids = new Set(reached.map((f) => f._id));
+  // A website is no place to move an entry to (`isWebsiteFolder`).
+  return reached.filter((f) => !!f.parent_folder_id && !ids.has(f.parent_folder_id) && !isWebsiteFolder(f));
 }
 
 /** Finds a folder's own `README.md` (case-insensitive), owned by `ownerId`

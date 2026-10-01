@@ -331,10 +331,11 @@ enum VaultCommand {
         /// Stop sharing — clears the whole collaborator list.
         #[arg(long, conflicts_with = "with")]
         private: bool,
-        /// Share with a person and assign their role, as EMAIL:ROLE
+        /// Share with a person and assign their role, as EMAIL:ROLE, or
+        /// EMAIL:ROLE:SEAT where SEAT is guide, client or observer
         /// (repeatable). Replaces the current collaborator list rather
-        /// than adding to it.
-        #[arg(long = "with", value_name = "EMAIL:ROLE")]
+        /// than adding to it; a person named without a seat keeps theirs.
+        #[arg(long = "with", value_name = "EMAIL:ROLE[:SEAT]")]
         with: Vec<String>,
     },
     /// Publish a folder to a public URL — no login required to view it.
@@ -616,6 +617,37 @@ enum GraphlogCommand {
     Schedule {
         #[command(subcommand)]
         command: GraphlogScheduleCommand,
+    },
+    /// Pushes a project's seed (its history before it logged here: day
+    /// files `YYYY-MM-DD.md` with `kind: seed`, `documents/`, `_people.md`)
+    /// into `Syncs/Seed/`. A second push of the same files changes nothing.
+    /// Run `nopal graphlog run` afterwards to build the graph from it.
+    Seed {
+        /// Vault path of the project, e.g. `projects/sunny`.
+        #[arg(long)]
+        project: String,
+        /// The seed folder on disk.
+        #[arg(long)]
+        dir: std::path::PathBuf,
+        /// Only days on or after this date, YYYY-MM-DD.
+        #[arg(long)]
+        from: Option<String>,
+        /// Only days on or before this date, YYYY-MM-DD.
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Removes what the seed alone added: the Seed folder, the graph days
+    /// only it fed, and the up-to-date stamp on days it shared with live
+    /// entries (rebuilt from those on the next run). Never a Card, a
+    /// synced daily log, a mark or the Budget. Admin/Super only.
+    /// DESTRUCTIVE — requires --yes.
+    SeedWipe {
+        /// Vault path of the project, e.g. `projects/sunny`.
+        #[arg(long)]
+        project: String,
+        /// Required to actually run — this is destructive.
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -930,6 +962,13 @@ fn main() {
                 GraphlogCommand::ResetKnowledge { project, yes } => {
                     graphlog::reset_knowledge(&project, yes)
                 }
+                GraphlogCommand::Seed {
+                    project,
+                    dir,
+                    from,
+                    to,
+                } => graphlog::seed(&project, &dir, from.as_deref(), to.as_deref()),
+                GraphlogCommand::SeedWipe { project, yes } => graphlog::seed_wipe(&project, yes),
                 GraphlogCommand::Schedule { command } => match command {
                     GraphlogScheduleCommand::Enable { project } => {
                         graphlog::schedule_enable(&project)

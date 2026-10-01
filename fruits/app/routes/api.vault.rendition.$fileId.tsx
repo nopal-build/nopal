@@ -1,7 +1,8 @@
 import type { LoaderFunctionArgs } from "react-router";
+import { canReadFile } from "robustness-core/data/featureAccess.server";
 import { redirect } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFileRefById, canViewFileRef } from "robustness-core/data/vault.server";
+import { getFileRefById } from "robustness-core/data/vault.server";
 import { getPresignedViewUrl, objectExists } from "robustness-core/data/file.server";
 import { isImageRenditionSize, renditionContentType, renditionKey } from "robustness-core/data/mediaKeys";
 
@@ -36,8 +37,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!file) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
-  if (!(await canViewFileRef(user._id, file))) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canReadFile(user._id, file))) {
+    // The same 404 as a file that doesn't exist (ADR-023): a refusal
+    // says nothing about what was there.
+    return Response.json({ error: "Not found" }, { status: 404 });
   }
   if (!file.s3_key) {
     return Response.json({ error: "No viewable file attached" }, { status: 400 });

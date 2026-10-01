@@ -54,9 +54,7 @@ export function EmailChangeNotice({
           {reason === "primary-changed" ? (
             <>
               Your Nopal account's primary email was changed to{" "}
-              <strong>{changedEmail}</strong>. This address (the one you're
-              reading this on) still works too — it was kept as a backup
-              login.
+              <strong>{changedEmail}</strong>. This address still works as a backup login.
             </>
           ) : (
             <>

@@ -329,6 +329,28 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
     bullet used to document doesn't exist anymore either; that was a
     symptom of the `countExtraBlankLines` mistake above, not a real,
     separate design tradeoff worth keeping.
+  - **NOTE (merge of `main`, 2026-10-01):** `main` had independently found
+    and fixed the same missing-baseline-margin bug this REVERSED POLICY
+    bullet above describes abandoning — reintroducing
+    `.ox-dot-grid > *:not(:first-child) { margin-top: var(--ox-grid) }` +
+    `ox-no-gap-before`, plus a further "headings and lists keep one fixed
+    rhythm regardless of the source's blank lines" rule layered on top of
+    it (Austin, 2026-09-28). None of that was kept here — it's the exact
+    three-part system the REVERSED POLICY bullet above deliberately tore
+    out, and `OxRenderer.tsx` no longer applies `ox-no-gap-before` at all,
+    so keeping main's CSS verbatim would have silently reintroduced the
+    over-eager baseline gap for every non-heading, non-list block while
+    leaving the CommonMark-interrupt case with no way back to zero. If the
+    headings/lists fixed-rhythm behavior is still wanted, it needs
+    re-expressing in terms of the literal `.ox-blank-line-spacer` model
+    above instead (e.g. collapsing/forcing specific spacer counts around a
+    heading or list) — see the matching NOTE in both `oxmarkdown.css`
+    copies.
+  - **`ox-plain` (2026-09-28): pages the skills write render on plain
+    paper.** No dot grid and no heading/blockquote gutter glyphs; list
+    markers stay. `ProjectView` (the Efforts page) passes it; a daily log,
+    a Card and the Logbook don't, and keep the dot grid. Same modifier
+    pattern as `ox-no-gutter`, in both `oxmarkdown.css` copies.
   - **Nested (2nd-order+) list indentation was ALSO only ever applied
     editor-only** (`.ox-editing-surface li > ul`/`ol`) — the static/
     Interacting renderer relied solely on a bullet-glyph change (`—` vs

@@ -232,8 +232,16 @@ export async function fileCardAttachments(
 ): Promise<{ filed: FiledAttachment[]; pending: FiledAttachment[] }> {
   const filed: FiledAttachment[] = [];
   const pending: FiledAttachment[] = [];
+  // A Card names its attachments by file id, in text its author can type.
+  // Only the author's own files are filed: without this, anyone who can
+  // write a Card could name someone else's private file and have the
+  // system copy it into the project for everyone there to read.
+  const author = (await getFileRefById(card.fileId))?.human_id;
 
   for (const attachment of extractFileAttachments(card.content)) {
+    const source = await getFileRefById(attachment.fileId);
+    if (!author || source?.human_id !== author) continue;
+
     // Checked BEFORE copying — idempotency has to guard the actual
     // file-copy mutation itself, not just the log entry, or a forced
     // re-run would add a second copy of the same attachment to the

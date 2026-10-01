@@ -82,6 +82,9 @@ export type EffortReadings = {
   threads: ThreadReading[];
   load: PersonLoad[];
   openQuestions: OpenQuestion[];
+  /** Nodes that came in as seeded history (`seed.server.ts`): how many,
+   * and the dates they span. Null on a project nobody has seeded. */
+  seeded?: { count: number; firstDate: string; lastDate: string } | null;
 };
 
 /** Same identity ladder as `computeBacklinkIndex` and `describeWriters`
@@ -193,6 +196,9 @@ export function computeEffortReadings(
       const age = daysBetween(node.date, today);
       if (age < RECENT_WINDOW_DAYS) recent += 1;
       else if (age < RECENT_WINDOW_DAYS * 2) before += 1;
+      // A line noted at seeding is nobody's words, so it is nobody's
+      // writing: counted as a node, never as a writer.
+      if (node.origin === "seed-noted") continue;
       const id = writerId(node);
       const entry = writerCounts.get(id) ?? { name: writerName(node), count: 0 };
       entry.count += 1;
@@ -242,6 +248,12 @@ export function computeEffortReadings(
   // empty list on purpose: "quiet" is a reading the page may need.
   const loadById = new Map<string, { name: string; threads: Map<string, number> }>();
   for (const node of allNodes) {
+    // Seeded history names people who may not log here (a client, a sub,
+    // an engineer, or "Seed" for a noted line). Only a seed speaker the
+    // graph could link to an account is someone who logs and reads this
+    // page; the rest are named in the threads above and nowhere a bench
+    // heading could carry them.
+    if (node.origin && !node.authorHumanId) continue;
     const id = writerId(node);
     const entry = loadById.get(id) ?? { name: writerName(node), threads: new Map<string, number>() };
     loadById.set(id, entry);
@@ -258,6 +270,15 @@ export function computeEffortReadings(
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  let seeded: EffortReadings["seeded"] = null;
+  for (const node of allNodes) {
+    if (!node.origin) continue;
+    if (!seeded) seeded = { count: 0, firstDate: node.date, lastDate: node.date };
+    seeded.count += 1;
+    if (node.date < seeded.firstDate) seeded.firstDate = node.date;
+    if (node.date > seeded.lastDate) seeded.lastDate = node.date;
+  }
+
   const openQuestions: OpenQuestion[] = [];
   for (const node of [...allNodes].sort((a, b) => a.date.localeCompare(b.date) || a.number - b.number)) {
     if (backlinks.has(node.id)) continue;
@@ -266,7 +287,7 @@ export function computeEffortReadings(
     openQuestions.push({ id: node.id, author: writerName(node), date: node.date, line });
   }
 
-  return { today, threads, load, openQuestions };
+  return { today, threads, load, openQuestions, seeded };
 }
 
 function plural(n: number, one: string, many = `${one}s`): string {
@@ -299,6 +320,9 @@ export function arrivedSince(sections: readonly ReadmeSection[], allNodes: reado
   const counts = new Map<string, number>();
   for (const node of allNodes) {
     if (node.date <= sinceDate) continue;
+    // Seeded history arrived in the record, not in the project: a push
+    // of six months of it is not six months of news.
+    if (node.origin) continue;
     const home = homeOf.get(node.id);
     if (home) counts.set(home, (counts.get(home) ?? 0) + 1);
   }
@@ -347,6 +371,12 @@ export function buildReadingsBlock(readings: EffortReadings, context?: ReadingsC
           : `- ${firstName(p.name)}: ${p.threads.map((t) => `"${t.heading}" ${t.count}`).join(", ")}`,
       );
     }
+  }
+  if (readings.seeded) {
+    lines.push("");
+    lines.push(
+      `Seeded history: ${plural(readings.seeded.count, "entry", "entries")} dated ${readings.seeded.firstDate} to ${readings.seeded.lastDate} were taken in from records of the project before it logged here (each is marked "seeded history" or "noted at seeding" where you read it). They are the project's past, not news, and a name in them is not someone who logs here unless the load picture lists them.`,
+    );
   }
   if (readings.openQuestions.length > 0) {
     lines.push("");
@@ -846,6 +876,24 @@ export function readSidecarMeta(content: string | null | undefined): { today: st
     };
   } catch {
     return null;
+  }
+}
+
+/** The page's read (its intro's first paragraph) and its one ask, from a
+ * written `Graph/efforts.md`: what the dashboard shows for a project
+ * without deciding anything again. Either is null when absent. */
+export function readSidecarReadAndAsk(content: string | null | undefined): { read: string | null; ask: string | null } {
+  const none = { read: null, ask: null };
+  if (!content) return none;
+  const start = content.indexOf("```json\n");
+  const end = content.lastIndexOf("\n```");
+  if (start === -1 || end === -1 || end <= start) return none;
+  try {
+    const data = JSON.parse(content.slice(start + 8, end)) as { read?: unknown; ask?: unknown };
+    const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+    return { read: text(data.read), ask: text(data.ask) };
+  } catch {
+    return none;
   }
 }
 

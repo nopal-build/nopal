@@ -8,7 +8,7 @@ import {
   setProjectSharing,
   type ProjectSharingEntry,
 } from "robustness-core/data/projectSharing.server";
-import { getSharingRoles } from "robustness-core/data/sharingRoles.server";
+import { GROUPS, featuresOf } from "robustness-core/data/features";
 
 /**
  * GET/PUT /api/vault/projects/:folderId/sharing — this app's own project
@@ -22,23 +22,17 @@ async function loadContext(folderId: string, request: Request) {
   const user = await getUserFromRequest(request);
   if (!user) return { error: Response.json({ error: "Not authenticated" }, { status: 401 }) };
 
+  // The people side is the Guide's. An admin may open it on any project,
+  // including one they're on in another role or not on at all: the
+  // deliberate way an admin gives themselves a role, and the way back
+  // after setting themselves to Client. Everyone else gets the same 404
+  // as a project that doesn't exist.
+  const notFound = { error: Response.json({ error: "Not found" }, { status: 404 }) };
   const folder = await getFolderById(folderId);
-  if (!folder) return { error: Response.json({ error: "Not found" }, { status: 404 }) };
-
+  if (!folder || !(await isProjectFolder(folder))) return notFound;
   const role = await getProjectRole(folder, user._id);
-  if (!role) {
-    // 404 (not 403) so a non-collaborator can't probe which project ids exist.
-    return { error: Response.json({ error: "Not found" }, { status: 404 }) };
-  }
-
-  if (!(await isProjectFolder(folder))) {
-    return {
-      error: Response.json(
-        { error: "Sharing roles only apply to project folders" },
-        { status: 400 },
-      ),
-    };
-  }
+  const isAdmin = user.role === "Admin" || user.role === "Super";
+  if (!role?.guiding && !isAdmin) return notFound;
 
   return { user, folder, role };
 }
@@ -50,14 +44,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const ctx = await loadContext(folderId, request);
   if ("error" in ctx) return ctx.error;
 
-  const [sharing, roles] = await Promise.all([
-    getProjectSharing(ctx.folder),
-    getSharingRoles(),
-  ]);
+  const sharing = await getProjectSharing(ctx.folder);
 
+  // The groups on the features list are the only choices.
   return Response.json({
     sharing,
-    roles: roles.map((r) => ({ name: r.name, is_owner: r.is_owner })),
+    roles: GROUPS.map((name) => ({ name, is_owner: featuresOf(name).includes("edit") })),
     yourRole: ctx.role,
   });
 }
@@ -77,10 +69,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!Array.isArray(body.sharing)) {
     return Response.json({ error: "sharing must be an array" }, { status: 400 });
   }
-  const entries = body.sharing.filter(
-    (e): e is ProjectSharingEntry =>
-      !!e && typeof e.human === "string" && typeof e.role === "string",
-  );
+  const entries = body.sharing
+    .filter(
+      (e): e is ProjectSharingEntry =>
+        !!e && typeof e.human === "string" && typeof e.role === "string",
+    )
+    .map(({ human, role }) => ({ human, role }));
 
   const result = await setProjectSharing(ctx.user._id, ctx.folder, entries);
   if (!result.ok) {

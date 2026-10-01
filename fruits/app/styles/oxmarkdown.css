@@ -41,9 +41,12 @@
    happen — it defines variables only, no visual styles of its own, so it's
    safe to stack onto something that already has its own look. */
 .ox-tokens {
-  --ox-font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  /* The app's one font family (stamps' `fonts.sans`), with the system
+     font behind it for any glyph it lacks. 1px of letter spacing: at 0
+     the font reads cramped in longer writing (Austin, 2026-09-24). */
+  --ox-font-family: "OT L22 Variable", -apple-system, BlinkMacSystemFont, sans-serif;
   --ox-font-weight: 267;
-  --ox-letter-spacing: 0.5px;
+  --ox-letter-spacing: 1px;
   --ox-grid: 41px;
 
   --ox-color-text: var(--purple, #3f2b46);
@@ -301,6 +304,19 @@
   content: none;
 }
 
+/* General modifier: plain paper, for pages the skills write (the Efforts
+   page, via `ProjectView`), as against what a person writes (a daily log,
+   a Card, the Logbook), which keeps the dot grid and the heading markers
+   (Austin, 2026-09-28). No dot grid and no # / ## / ### / > glyphs in the
+   gutter; list markers stay, since a list still needs them. Apply via the
+   `className` prop (`className="ox-plain"`), like `ox-no-gutter`. */
+.ox-content.ox-plain .ox-dot-grid {
+  background-image: none;
+}
+.ox-content.ox-plain :is(h1, h2, h3, blockquote)::before {
+  content: none;
+}
+
 /* ── Gutter markers (# / ## / ### / >) ──────────────────────────── */
 
 .ox-content :is(h1, h2, h3, blockquote) {
@@ -435,7 +451,21 @@
    comes entirely from the file.") This also means Editing mode and the
    static renderer now agree EXACTLY on how many grid units a given
    blank-line count is worth (both read `countBlankLines` directly) --
-   they always should have. */
+   they always should have.
+
+   NOTE (merge of `main`, 2026-10-01): `main` had independently reintroduced
+   the exact baseline-margin + `.ox-no-gap-before` system this reversal
+   removed, PLUS a new "headings and lists keep one fixed rhythm regardless
+   of blank lines" rule layered on top of it (Austin, 2026-09-28). Dropped
+   here rather than kept alongside this reversal -- it depends on
+   `.ox-no-gap-before` ever being applied by `renderBlockNodes`, which this
+   reversal removed from `OxRenderer.tsx` entirely, so keeping main's CSS
+   verbatim would silently reintroduce the exact over-eager baseline gap
+   this reversal fixed for every non-heading, non-list block. If the
+   headings/lists rhythm behavior is still wanted, it needs re-expressing
+   in terms of THIS file's literal `.ox-blank-line-spacer` model (e.g.
+   collapsing/forcing specific spacer counts around a heading or list),
+   not the baseline-margin model it was originally written against. */
 .ox-blank-line-spacer {
   height: var(--ox-grid);
 }
@@ -1831,30 +1861,64 @@ div.ox-markable {
   opacity: 0.8;
 }
 
+/* The pen's popover is only a position: the stamp `Surface` inside it
+   (`MarkComposer`) is the card, so none of the popover's own chrome. */
 .ox-mark-popover {
   width: 320px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
 }
 .ox-mark-popover.ox-popover--sheet {
   width: 100%;
 }
+/* The writing sits on the card's own off-white, like the footer under
+   it, not on the collection well's page white (Austin, 2026-09-28). */
+.ox-mark-composer > div:first-child {
+  background: transparent;
+}
 .ox-mark-composer textarea {
   min-height: 96px;
+  background: var(--color-surface-card);
+}
+/* The pen's footer: the move link on the left, the actions on the right,
+   one line; the move form, when open, takes the whole width. */
+.ox-mark-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ox-mark-footer > .ox-mark-move {
+  flex-basis: 100%;
 }
 .ox-mark-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 12px;
+  margin-left: auto;
 }
-.ox-mark-actions button {
-  padding: 6px 14px;
+/* A quiet action (Cancel, Back, Take it back): the stamp `link`, small,
+   with the button's own chrome unset. */
+.ox-mark-quiet {
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
 .ox-mark-actions button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 .ox-mark-error {
-  margin-top: 6px;
   font-size: 0.85rem;
   color: var(--ox-mark-color);
 }
@@ -1863,9 +1927,6 @@ div.ox-markable {
   font-family: var(--ox-font-family);
   font-size: 0.8rem;
 }
-.ox-mark-note__action button {
-  padding: 2px 10px;
-}
 
 /* The refile control under the pen. */
 .ox-mark-move__note {
@@ -1873,14 +1934,13 @@ div.ox-markable {
   font-size: 0.78rem;
   color: var(--ox-color-subtle);
 }
+/* Looks like the stamp `link` it carries; this only unsets the button. */
 .ox-mark-move__open {
   display: block;
-  margin-top: 8px;
   padding: 0;
+  text-align: left;
+  font: inherit;
   font-size: 0.8rem;
-  color: var(--ox-color-link);
-  text-decoration: underline;
-  text-underline-offset: 3px;
   background: none;
   border: 0;
   cursor: pointer;

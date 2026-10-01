@@ -1,4 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
+import { getProjectRole } from "robustness-core/data/projectSharing.server";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { canViewFolder } from "robustness-core/data/vault.types";
@@ -44,6 +45,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const folder = await getFolderById(body.projectFolderId);
   if (!folder || !canViewFolder(user._id, folder)) {
     return Response.json({ error: "Project not found" }, { status: 404 });
+  }
+  // Moving someone's words to another project changes the content: `edit`
+  // (`features.ts`). An Observer marks, and doesn't move.
+  if (!(await getProjectRole(folder, user._id))?.features.includes("edit")) {
+    return Response.json({ error: "You can mark this project, not move its entries." }, { status: 403 });
   }
   const raw = (await getReadmeFileForFolder(folder.human_id, folder._id))?.content ?? "";
   if (pageHash(raw) !== body.pageHash) {

@@ -1,0 +1,33 @@
+/* A card pinned into a scrapbook (`PinnedCard.tsx`): a stamps Surface
+   that leans a little, each one a different way, with a strip of tape at
+   the top. `PinnedCardWall` lays them out two across on a wide screen,
+   read left to right in order, the right-hand card of each pair dropped a
+   little so the pairs stagger; one stack on a phone. On stamps' semantic
+   variables only. */
+.pinned-wall {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px; align-items: start; padding-top: 8px;
+}
+.pinned-wall > .pinned-card:nth-child(2n) { margin-top: 36px; }
+@media (max-width: 720px) {
+  .pinned-wall { grid-template-columns: minmax(0, 1fr); }
+  .pinned-wall > .pinned-card:nth-child(2n) { margin-top: 0; }
+}
+.pinned-card {
+  margin: 0; padding: 22px 18px 14px;
+  position: relative; transform: rotate(-0.8deg);
+  box-shadow: 0 1px 0 var(--color-surface-border), 0 6px 14px -10px rgba(0, 0, 0, 0.25);
+}
+.pinned-card:nth-child(2n) { transform: rotate(0.7deg); }
+.pinned-card:nth-child(3n) { transform: rotate(-0.3deg); }
+.pinned-card:nth-child(5n) { transform: rotate(1.1deg); }
+.pinned-card::before {
+  content: ""; position: absolute; top: -9px; left: 50%;
+  width: 84px; height: 20px; transform: translateX(-50%) rotate(-2deg);
+  background: var(--color-surface-inset); opacity: 0.85;
+  border: 1px solid var(--color-surface-border);
+}
+.pinned-card:nth-child(2n)::before { left: 30%; transform: translateX(-50%) rotate(3deg); }
+.pinned-card__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.pinned-card__title { font-weight: 700; font-size: 0.95rem; color: var(--color-text-primary); }
+@media (prefers-reduced-motion: reduce) { .pinned-card, .pinned-card:nth-child(n) { transform: none; } }

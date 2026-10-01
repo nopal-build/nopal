@@ -256,7 +256,7 @@ export default function PublicFolderPage() {
             className="vault-toolbar-btn"
             disabled={zipBusy}
             onClick={handleDownloadAll}
-            title="Downloads every file in this folder as one .zip — sub-folders aren't included"
+            title="Downloads this folder as a zip, without its sub-folders"
           >
             {zipButtonLabel}
           </button>

@@ -14,19 +14,17 @@
  * visible/portable/diffable just by reading the file, not hidden in a row
  * only the app can see.
  *
- * `vault_folders.shared_with` (still a plain array of human ids — see
- * `vault.types.ts`) is kept as a DERIVED, DENORMALIZED CACHE of this list,
- * recomputed and cascaded to every descendant folder on every change via
- * the existing `cascadeShareVaultFolder` — purely so the pre-existing
- * O(1) view-access plumbing (`canViewFileRef`, `getSharedFoldersForHuman`,
- * the Vault sidebar's "Shared with me") keeps working unchanged. Never
- * write `shared_with` directly for a project folder — always go through
- * `setProjectSharing` here, or the two will drift apart.
+ * `vault_folders.shared_with` (a plain array of human ids, see
+ * `vault.types.ts`) is a DERIVED CACHE of this list: everyone on it but a
+ * Client (ADR-023), cascaded to every descendant folder by
+ * `writeProjectSharing`, its only writer. The O(1) view checks
+ * (`canViewFolder`, `canViewFileRef`, the Vault's "Shared with me") read
+ * it, which is what refuses a client every Vault folder, file and project
+ * page. Never write `shared_with` directly for a project folder.
  */
 
 import {
   cascadeShareVaultFolder,
-  ensureVaultRootFolders,
   createFileRef,
   getFolderAncestry,
   getFolderById,
@@ -35,12 +33,12 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import type { FileRef } from "./vault.types";
-import {
-  parseProjectSharing,
-  withProjectSharing,
-  type ProjectSharingEntry,
-} from "./project.types";
-import { getSharingRoleByName, isOwnerTierRole } from "./sharingRoles.server";
+import { parseCreatorRemoved, parseProjectSharing, withProjectSharing, type ProjectSharingEntry } from "./project.types";
+import { CLIENT_ROLE, GUIDING_ROLE, reachesProjectWork } from "./sharingRoles.server";
+import { featuresOf, groupOf, type Feature } from "./features";
+import { isWebsiteFolder } from "./vaultFolderTypes";
+import { query, formatRecord } from "./generic.server";
+import { getHumanById, getHumansById, isStaff, type Human } from "./humans.server";
 
 export type { ProjectSharingEntry };
 
@@ -66,11 +64,19 @@ async function getOrCreateReadme(
  * role is a project-wide grant); a plain subfolder deep inside a project
  * is never independently shareable/role-bearing. */
 export async function isProjectFolder(folder: VaultFolder): Promise<boolean> {
-  if (folder.vault_root_key !== "projects") return false;
-  const roots = await ensureVaultRootFolders(folder.human_id);
-  const projectsRoot = roots.find((r) => r.vault_root_key === "projects");
-  return !!projectsRoot && folder.parent_folder_id === projectsRoot._id;
+  if (folder.vault_root_key !== "projects" || !folder.parent_folder_id) return false;
+  if (projectsRoots.has(folder.parent_folder_id)) return true;
+  // A read, never `ensureVaultRootFolders`: this runs on every access
+  // check, and that one re-seeds the owner's Vault (about twenty queries)
+  // each time it's called.
+  const parent = await getFolderById(folder.parent_folder_id);
+  const isRoot = !!parent && !parent.parent_folder_id && parent.vault_root_key === "projects";
+  if (isRoot) projectsRoots.add(parent._id);
+  return isRoot;
 }
+
+/** `projects` root folder ids seen so far. A root stays a root. */
+const projectsRoots = new Set<string>();
 
 /** Walks up from any folder to the top-level PROJECT folder that owns it
  * (e.g. resolves a project's `skills` subfolder, or a file's containing
@@ -89,39 +95,66 @@ export async function findOwningProjectFolder(
   return ancestry.length > 1 ? ancestry[1] : null;
 }
 
-/** A project's current collaborator list, read straight from its
- * README.md front matter — `[]` for a project with no README yet, no
- * front matter, or no `sharing` key (nobody but its own owner has
- * access). */
+/** A project's people: its README.md `sharing` list, with the creator as
+ * Guide when the list doesn't name them (`withCreator`). */
 export async function getProjectSharing(
   projectFolder: VaultFolder,
 ): Promise<ProjectSharingEntry[]> {
   const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
-  if (!readme?.content) return [];
-  return parseProjectSharing(readme.content);
+  const content = readme?.content ?? "";
+  return withCreator(projectFolder, parseProjectSharing(content), parseCreatorRemoved(content));
 }
 
-export type ResolvedProjectRole = { role: string; isOwner: boolean };
+/** The list overrides the assumption (Austin, 2026-09-24): a creator the
+ * list doesn't name is the project's Guide, as always; a creator the list
+ * does name holds the role it gives them, so an admin can be an Observer
+ * on a project they made. Nothing has to be written for existing
+ * projects. A creator taken off (`creatorRemoved`, only once someone
+ * else is its Guide: `setProjectSharing`) holds nothing. */
+export function withCreator(
+  projectFolder: Pick<VaultFolder, "human_id">,
+  sharing: ProjectSharingEntry[],
+  creatorRemoved = false,
+): ProjectSharingEntry[] {
+  if (creatorRemoved || sharing.some((e) => e.human === projectFolder.human_id)) return sharing;
+  return [{ human: projectFolder.human_id, role: GUIDING_ROLE }, ...sharing];
+}
+
+export type ResolvedProjectRole = {
+  role: string;
+  /** What the group gets, from the features list (`features.ts`). The
+   * two flags below are read from it, so the ~60 checks that read them
+   * read the list. */
+  features: Feature[];
+  /** Writes the project's content: `edit` (Guide and Crafter). */
+  isOwner: boolean;
+  /** Runs its people side, name, status and deletion: `people` (Guide). */
+  guiding: boolean;
+};
+
+/** A role name resolved against the features list. */
+export function resolveRole(role: string): ResolvedProjectRole {
+  const features = featuresOf(role);
+  return { role, features, isOwner: features.includes("edit"), guiding: features.includes("people") };
+}
 
 /**
- * Resolves `humanId`'s role on `projectFolder`. The folder's own creator
- * is always an implicit "Owner" — never needs (or gets) a README entry of
- * their own. Anyone else is looked up in the README's `sharing` list;
- * `null` means `humanId` has no role on this project at all (not
- * necessarily "can't view anything" — that's still governed by the
- * denormalized `shared_with` cache, kept in sync with this list).
+ * Resolves `humanId`'s role on `projectFolder` from the README's `sharing`
+ * list, or `null` when they hold none. A creator the list doesn't name is
+ * Owner (`withCreator`).
  */
 export async function getProjectRole(
   projectFolder: VaultFolder,
   humanId: string,
 ): Promise<ResolvedProjectRole | null> {
-  if (projectFolder.human_id === humanId) {
-    return { role: "Owner", isOwner: true };
-  }
-  const sharing = await getProjectSharing(projectFolder);
-  const entry = sharing.find((e) => e.human === humanId);
-  if (!entry) return null;
-  return { role: entry.role, isOwner: await isOwnerTierRole(entry.role) };
+  const entry = (await getProjectSharing(projectFolder)).find((e) => e.human === humanId);
+  // A name that isn't a group is no role at all.
+  return entry && groupOf(entry.role) ? resolveRole(entry.role) : null;
+}
+
+/** The role name `humanId` holds in a sharing list already in hand. */
+export function roleIn(sharing: ProjectSharingEntry[], humanId: string): string | null {
+  return sharing.find((e) => e.human === humanId)?.role ?? null;
 }
 
 /** Convenience wrapper for callers that only have a folder ID (e.g. a
@@ -140,32 +173,44 @@ export async function getProjectRoleForFolderId(
 }
 
 /**
- * Whether `actingHumanId` may act with full owner-level privileges on
- * something owned by `ownerHumanId`, living in `folderId` — true when they
- * genuinely ARE that owner, or when they hold an owner-tier Sharing Role
- * (Owner/Crafter) on the project `folderId` lives under. This is what
- * makes an owner-tier collaborator behave like a co-owner for everyday
- * CONTENT actions on a shared project — upload, create folder, rename,
- * move, delete, replace, publish — the same broadening `setProjectSharing`
- * already applies to changing sharing itself.
+ * Whether `actingHumanId` may change content (upload, create, rename,
+ * move, delete, replace, publish) living in `folderId`, owned by
+ * `ownerHumanId`. Inside a project it is the role: Owner or Crafter.
+ * Outside any project (someone's own `personal`, the `projects` root
+ * itself) it is ownership.
  *
- * Deliberately NOT used for the project ANCHOR folder's own object-level
- * lifecycle (renaming/deleting/publishing the whole project) — that stays
- * creator-only, the same precedent `projectStatus.server.ts` already set
- * for project status ("a personal organizational tool", unlike the
- * collaborator-facing actions this function gates). Callers operating on
- * an anchor folder should keep checking `folder.human_id === actingHumanId`
- * directly instead.
+ * Not used for the project ANCHOR's own lifecycle (renaming, deleting,
+ * publishing the whole project): that is the Owner role alone, like
+ * status (see `api.vault.folders.$folderId.tsx`).
  */
 export async function canActAsProjectOwner(
   actingHumanId: string,
   ownerHumanId: string,
   folderId: string | null | undefined,
 ): Promise<boolean> {
-  if (actingHumanId === ownerHumanId) return true;
-  if (!folderId) return false;
-  const role = await getProjectRoleForFolderId(folderId, actingHumanId);
-  return !!role?.isOwner;
+  if (folderId) {
+    const folder = await getFolderById(folderId);
+    const project = folder ? await findOwningProjectFolder(folder) : null;
+    if (project) return !!(await getProjectRole(project, actingHumanId))?.isOwner;
+  }
+  return actingHumanId === ownerHumanId;
+}
+
+/** Writes a project's list and rebuilds `shared_with` from it: everyone
+ * but a Client, on the project folder and every folder under it. The
+ * only writer of a project's cache. Checks nothing; `setProjectSharing`
+ * is the checked path. */
+export async function writeProjectSharing(
+  projectFolder: VaultFolder,
+  entries: ProjectSharingEntry[],
+  creatorRemoved = false,
+): Promise<void> {
+  const readme = await getOrCreateReadme(projectFolder.human_id, projectFolder._id);
+  await updateFileRef(readme._id, { content: withProjectSharing(readme.content ?? "", entries, creatorRemoved) });
+  await cascadeShareVaultFolder(
+    projectFolder._id,
+    withCreator(projectFolder, entries, creatorRemoved).filter((e) => reachesProjectWork(e.role)).map((e) => e.human),
+  );
 }
 
 export type SetProjectSharingResult =
@@ -173,17 +218,21 @@ export type SetProjectSharingResult =
   | { ok: false; error: string };
 
 /**
- * Replaces a project's ENTIRE collaborator list — the only intended writer
- * of a project's `sharing` front matter. Rewrites the README (creating one
- * if the project doesn't have one yet, preserving every other front-matter
- * field untouched), then recomputes and cascades `vault_folders.shared_with`
- * to match, so the pre-existing view-access plumbing keeps working.
+ * Replaces a project's whole list of people. The acting person must be
+ * its Guide, or an admin (the deliberate way an admin gives themselves a
+ * role on a project they aren't on). Every role must be a group on the
+ * features list, and the project keeps at least one Guide, so nobody can
+ * lock a project out of its own people list. A name already on the list
+ * that isn't a group (an old role) is kept as written and reaches
+ * nothing; only a new or changed one is refused.
  *
- * `actingHumanId` must currently hold an owner-tier role on this project
- * (the creator, or an existing Owner/Crafter) — Observers may not change
- * sharing. Every entry's `role` must name a role that exists in
- * `sharing_roles`. The project's own creator is stripped out if present
- * (always implicit — see `getProjectRole`).
+ * A list without the creator takes them off (every caller starts from
+ * `getProjectSharing`, which names them). That is refused until someone
+ * else is the project's Guide (Austin, 2026-09-27).
+ *
+ * Only an admin makes a Guide (Austin, 2026-09-24/25): a Guide who isn't
+ * an admin changes nobody who is or becomes a Guide, and nobody whose
+ * human role is Admin or Super (`promotionRefusal`).
  */
 export async function setProjectSharing(
   actingHumanId: string,
@@ -194,29 +243,179 @@ export async function setProjectSharing(
     return { ok: false, error: "Sharing roles only apply to project folders" };
   }
 
+  const actor = await getHumanById(actingHumanId);
   const actingRole = await getProjectRole(projectFolder, actingHumanId);
-  if (!actingRole?.isOwner) {
+  const isAdmin = isStaff(actor);
+  if (!actingRole?.guiding && !isAdmin) {
+    return { ok: false, error: "You don't have permission to change sharing on this project" };
+  }
+
+  const before = await getProjectSharing(projectFolder);
+  const stored = new Map(before.map((e) => [e.human, e.role]));
+  const seen = new Set<string>();
+  const cleaned: ProjectSharingEntry[] = [];
+  for (const entry of entries) {
+    if (seen.has(entry.human)) continue;
+    seen.add(entry.human);
+    const group = groupOf(entry.role);
+    if (!group && stored.get(entry.human) !== entry.role) return { ok: false, error: `Unknown role "${entry.role}"` };
+    cleaned.push({ human: entry.human, role: group ?? entry.role });
+  }
+  const creatorRemoved = !cleaned.some((e) => e.human === projectFolder.human_id);
+  const after = withCreator(projectFolder, cleaned, creatorRemoved);
+  if (!after.some((e) => e.role === GUIDING_ROLE)) {
     return {
       ok: false,
-      error: "You don't have permission to change sharing on this project",
+      error: creatorRemoved
+        ? "Make someone else the Guide before taking the project's creator off."
+        : "A project needs at least one Guide",
     };
   }
-
-  const cleaned = entries.filter((e) => e.human !== projectFolder.human_id);
-  for (const entry of cleaned) {
-    if (!(await getSharingRoleByName(entry.role))) {
-      return { ok: false, error: `Unknown role "${entry.role}"` };
-    }
+  if (!isAdmin) {
+    const changed = changedHumans(before, after);
+    const staff = new Set(
+      (await getHumansById(changed.map((c) => c.human)))
+        .filter((h) => h.role === "Admin" || h.role === "Super")
+        .map((h) => h._id),
+    );
+    const refusal = promotionRefusal(changed, staff);
+    if (refusal) return { ok: false, error: refusal };
   }
 
-  const readme = await getOrCreateReadme(projectFolder.human_id, projectFolder._id);
-  const updatedContent = withProjectSharing(readme.content ?? "", cleaned);
-  await updateFileRef(readme._id, { content: updatedContent });
-
-  await cascadeShareVaultFolder(
-    projectFolder._id,
-    cleaned.map((e) => e.human),
-  );
-
+  await writeProjectSharing(projectFolder, cleaned, creatorRemoved);
+  // Whoever came off loses what they wrote on it in the last day
+  // (`removalScrap.server.ts`). Imported here, not at the top: it reaches
+  // the daily log and the moves, which reach this file.
+  const removed = changedHumans(before, after).filter((c) => c.to === null);
+  if (removed.length > 0) {
+    const { scrapRecentWriting } = await import("./removalScrap.server");
+    for (const { human } of removed) await scrapRecentWriting(projectFolder._id, human);
+  }
   return { ok: true, sharing: cleaned };
+}
+
+export type SharingChange = { human: string; from: string | null; to: string | null };
+
+/** Everyone whose group differs between two lists, added and removed
+ * included. */
+export function changedHumans(before: ProjectSharingEntry[], after: ProjectSharingEntry[]): SharingChange[] {
+  const was = new Map(before.map((e) => [e.human, e.role]));
+  const now = new Map(after.map((e) => [e.human, e.role]));
+  const out: SharingChange[] = [];
+  for (const human of new Set([...was.keys(), ...now.keys()])) {
+    const from = was.get(human) ?? null;
+    const to = now.get(human) ?? null;
+    if (from !== to) out.push({ human, from, to });
+  }
+  return out;
+}
+
+/** Why a Guide who isn't an admin can't make these changes, or null when
+ * they can: nobody is made a Guide or taken off Guide, and nobody whose
+ * human role is Admin or Super (`staff`) is touched. */
+export function promotionRefusal(changes: SharingChange[], staff: Set<string>): string | null {
+  for (const c of changes) {
+    if (c.to === GUIDING_ROLE) return "Only an admin can make someone a Guide";
+    if (c.from === GUIDING_ROLE) return "Only an admin can change a Guide";
+    if (staff.has(c.human)) return "Only an admin can change an admin";
+  }
+  return null;
+}
+
+// ─── Reads across projects ────────────────────────────────────────────────────
+
+export type ProjectMembership = { folder: VaultFolder; sharing: ProjectSharingEntry[]; role: string };
+
+/** Every project `humanId` holds a role on, Client included, in name
+ * order: what the dashboard, the Daily Log's "Add a card" and the
+ * Steep-o-meter work from. A project they created is theirs as Guide
+ * unless its list says otherwise, README or not. A role name that isn't a
+ * group is no membership. */
+export async function listProjectsFor(humanId: string): Promise<ProjectMembership[]> {
+  const out: ProjectMembership[] = [];
+  for (const { folder, sharing } of await readProjectLists(humanId)) {
+    // A website is shared like a project but isn't one to anyone's
+    // dashboard, nav or daily log (Austin, 2026-09-28). The Maker's list
+    // (`listEveryProject`) keeps it, so people can be given access.
+    if (isWebsiteFolder(folder)) continue;
+    const role = roleIn(sharing, humanId);
+    if (role && groupOf(role)) out.push({ folder, sharing, role });
+  }
+  return out;
+}
+
+/** Every project and its people, for the Maker's list of everyone. */
+export async function listEveryProject(): Promise<{ folder: VaultFolder; sharing: ProjectSharingEntry[] }[]> {
+  return readProjectLists();
+}
+
+/** Projects and their lists in three queries whatever the count: the
+ * roots, the projects, their READMEs. Membership lives in each README, so
+ * there is no index to ask. Given `humanId`, only the READMEs that
+ * mention them or belong to their own projects are read, and only those
+ * projects come back. */
+async function readProjectLists(
+  humanId?: string,
+): Promise<{ folder: VaultFolder; sharing: ProjectSharingEntry[] }[]> {
+  const roots = await query<[{ id: unknown }[]]>(
+    `SELECT id FROM vault_folders WHERE vault_root_key = "projects" AND (parent_folder_id = NONE OR parent_folder_id = NULL)`,
+  );
+  const rootIds = (roots?.[0] ?? []).map((r) => recordKey(r.id));
+  if (rootIds.length === 0) return [];
+  const folders = (
+    (await query<[VaultFolder[]]>(`SELECT * FROM vault_folders WHERE parent_folder_id IN $rootIds`, { rootIds }))?.[0] ?? []
+  ).map(formatRecord);
+  if (folders.length === 0) return [];
+  const readmes = await query<[{ folder_id: string; human_id: string; content?: string }[]]>(
+    `SELECT folder_id, human_id, content FROM file_refs
+     WHERE folder_id IN $ids AND string::lowercase(name) = "readme.md"
+       ${humanId ? `AND (human_id = $humanId OR string::contains(content ?? "", $humanId))` : ""}`,
+    { ids: folders.map((f) => f._id), humanId },
+  );
+  const byFolder = new Map(folders.map((f) => [f._id, f]));
+  const lists = new Map<string, { sharing: ProjectSharingEntry[]; creatorRemoved: boolean }>();
+  for (const row of readmes?.[0] ?? []) {
+    const folder = byFolder.get(row.folder_id);
+    const content = row.content ?? "";
+    if (folder && folder.human_id === row.human_id) {
+      lists.set(folder._id, { sharing: parseProjectSharing(content), creatorRemoved: parseCreatorRemoved(content) });
+    }
+  }
+  return folders
+    .filter((folder) => !humanId || lists.has(folder._id) || folder.human_id === humanId)
+    .map((folder) => {
+      const list = lists.get(folder._id);
+      return { folder, sharing: withCreator(folder, list?.sharing ?? [], list?.creatorRemoved) };
+    })
+    .sort((x, y) => x.folder.name.localeCompare(y.folder.name));
+}
+
+/** Whether every role this person holds is Client: they get the client
+ * screen and no Vault. Someone on no project isn't a client anywhere. */
+export function isClientEverywhere(memberships: ProjectMembership[]): boolean {
+  return memberships.length > 0 && memberships.every((m) => m.role === CLIENT_ROLE);
+}
+
+/** Whether any of these memberships guides its project (`people`). */
+export function guidesAny(memberships: readonly Pick<ProjectMembership, "role">[]): boolean {
+  return memberships.some((m) => resolveRole(m.role).guiding);
+}
+
+/** Who may start a project (Austin, 2026-09-28, ADR-026): an admin, or
+ * someone already guiding one. A brand-new guide gets their first project
+ * from an admin, who starts it and makes them its Guide. The Maker is the
+ * place; the Vault's "+ New folder" at the projects root points there. */
+export async function canStartProject(
+  human: Pick<Human, "_id" | "role">,
+  memberships?: ProjectMembership[],
+): Promise<boolean> {
+  if (isStaff(human)) return true;
+  return guidesAny(memberships ?? (await listProjectsFor(human._id)));
+}
+
+/** A SurrealDB record id as the bare key the rest of the app stores. */
+function recordKey(id: unknown): string {
+  if (id && typeof id === "object" && "id" in id) return String((id as { id: unknown }).id);
+  const s = String(id);
+  return s.includes(":") ? s.slice(s.indexOf(":") + 1) : s;
 }

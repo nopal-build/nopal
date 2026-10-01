@@ -44,6 +44,16 @@ export type FileRef = {
    * if the project folder is later renamed; the CURRENT display name is
    * always resolved fresh from this id, never cached on the card itself. */
   project_folder_id?: string | null;
+  /** A Card from someone whose group has no `feeds` (an Observer): it
+   * feeds the project only with `taken_content`, the words a Guide last
+   * took (`suggestions.server.ts`). */
+  suggestion?: boolean;
+  /** What a Guide last took from this Card, fed as written. */
+  taken_content?: string | null;
+  /** What a Guide last passed on. Later words wait again. */
+  passed_content?: string | null;
+  /** The Guide who last took or passed it. */
+  decided_by?: string | null;
   created_at: string;
   updated_at: string;
   /** How the file is shared when accessed via a shared folder. Defaults to "view". */
@@ -188,6 +198,12 @@ export function isFolderShared(folder: VaultFolder): boolean {
  * with them. Mirrors `canViewFileRef` in vault.server.ts.
  */
 export function canViewFolder(humanId: string, folder: VaultFolder): boolean {
+  // The creator reaches everything in their own project, whatever role
+  // its list gives them: project caches don't hold creators, and nothing
+  // rebuilt them when the list started to override the assumption
+  // (ADR-023). To see a project as a client sees it, use a test client
+  // account, not your own role.
   if (folder.human_id === humanId) return true;
   return Array.isArray(folder.shared_with) && folder.shared_with.includes(humanId);
 }
+
