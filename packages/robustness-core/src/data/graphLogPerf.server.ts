@@ -394,6 +394,26 @@ export async function getLatestCompletedGraphLogRun(projectFolderId: string): Pr
   return result?.[0]?.[0] ? formatRecord(result[0][0]) : null;
 }
 
+/** When the project's Efforts page was last rebuilt, read off the run
+ * history: the newest finished job that wrote the README. The fallback
+ * for projects with no `efforts_printed_at` stamp yet (ADR-030); runs are
+ * never pruned today, so this reaches back to the first run. */
+export async function getLatestPageRebuildAt(projectFolderId: string): Promise<string | null> {
+  await ensureTables();
+  const result = await query<[GraphLogRun[]]>(
+    `SELECT * FROM graphlog_runs
+     WHERE project_folder_id = $projectFolderId
+       AND readme_changed = true
+       AND finished_at != NONE
+       AND finished_at != null
+     ORDER BY finished_at DESC
+     LIMIT 1`,
+    { projectFolderId },
+  );
+  const row = result?.[0]?.[0] ? formatRecord(result[0][0]) : null;
+  return row?.finished_at ?? null;
+}
+
 /** Most recent runs, newest first — powers the "Recent Runs" list on
  * `/maker/graphlog`. */
 export async function listRecentGraphLogRuns(limit = 20): Promise<GraphLogRun[]> {
@@ -471,9 +491,18 @@ export async function pruneOldGraphLogRuns(
  * 2026-10-01). */
 export type EffortsDecision = {
   rebuilt: boolean;
-  reason: "up-to-date" | "graph-changed" | "skill-rewrite" | "names-another-project" | "unread-notes" | "unread-marks";
+  reason:
+    | "up-to-date"
+    | "held-for-print"
+    | "graph-changed"
+    | "skill-rewrite"
+    | "names-another-project"
+    | "unread-notes"
+    | "unread-marks";
   unreadNotes: number;
   unreadMarks: number;
+  /** For `held-for-print`: what the next print will pick up. */
+  waiting: string[];
 };
 
 export function effortsDecisionFromEvents(events: GraphLogRunEvent[]): EffortsDecision | null {
@@ -485,5 +514,6 @@ export function effortsDecisionFromEvents(events: GraphLogRunEvent[]): EffortsDe
     reason: (p.reason as EffortsDecision["reason"]) ?? "graph-changed",
     unreadNotes: typeof p.unreadNotes === "number" ? p.unreadNotes : 0,
     unreadMarks: typeof p.unreadMarks === "number" ? p.unreadMarks : 0,
+    waiting: Array.isArray(p.waiting) ? p.waiting.filter((w): w is string => typeof w === "string") : [],
   };
 }

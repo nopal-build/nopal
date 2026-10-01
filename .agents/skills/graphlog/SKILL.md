@@ -51,9 +51,21 @@ fourth PhyLog stage.
 
 ## The pipeline
 
-`nopal graphlog run --project <path>` runs all five stages in order, in
-one job (`graphLogAgent.server.ts`'s `runGraphLogPipeline`); each stage
-below is also independently runnable via its own CLI subcommand/API route.
+Two jobs run the stages in order through one function
+(`graphLogAgent.server.ts`'s `runGraphLogPipeline`), ADR-030:
+- **`"run"`** (the nightly, the Vault's Run, `nopal graphlog run`) builds
+  the graph (stages 1 to 4) and HOLDS the page: stage 5 only decides
+  (`decideEffortsRebuild`) and records `held-for-print` with what is
+  waiting. It rebuilds only to take another project's name off the page,
+  and it never touches README.md otherwise, banner included.
+- **`"print"`** ("Print an update" on the Efforts tab,
+  `api.graphlog.print.tsx`) runs all five, so a mark made just before it
+  is on the page it prints. Anyone with a role prints once a week, a Guide
+  or staff any time (`effortsPrint.server.ts`'s `printAllowance`). A clean
+  rebuild stamps `efforts_printed_at` on the project folder.
+
+Each stage below is also independently runnable via its own CLI
+subcommand/API route.
 
 ```
 personal/syncs/Daily Logs (real Cards, one per project per day)
@@ -971,12 +983,14 @@ runs in-process from the checkout and never has this problem.
   `api.graphlog.jobs.$jobId.tsx`) accept `role?.isOwner || isStaff`. The
   UI enqueues, then polls `GET /api/graphlog/jobs/:jobId` every 3s.
   "Reset" additionally requires a confirm dialog.
-- **A nightly automatic run, opt-in per project**
-  (`graphLogSchedule.server.ts`). The same dropdown gains an "Enable
-  GraphLog Schedule"/"Disable GraphLog Schedule" toggle — **Admin/Super
-  ONLY, no owner fallback** (enrolling something in an unattended
-  nightly run is a more consequential call than triggering one run by
-  hand). Backed by a denormalized `graphlog_scheduled`/
+- **A nightly automatic run, on by default for every project that has a
+  graph** (`graphLogSchedule.server.ts`, ADR-030; opt-in until
+  2026-10-01). Off only where staff turned it off (`graphlog_scheduled =
+  false`); a project that never ran joins after its first run, so it does
+  not pay its backlog on the first night (`isNightly`). The nightly's
+  `"run"` builds the graph and holds the Efforts page for a print. The
+  same dropdown has an "Enable GraphLog Schedule"/"Disable GraphLog
+  Schedule" toggle — **Admin/Super ONLY, no owner fallback**. Backed by a denormalized `graphlog_scheduled`/
   `graphlog_scheduled_at` pair on `vault_folders`, written only by
   `setGraphLogScheduled`, read by `getGraphLogScheduledFolders`. The
   midnight trigger lives in `fruits/server.js` (all session-gated routes

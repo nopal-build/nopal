@@ -5,8 +5,9 @@ import { enqueueGraphLogJob, getGraphLogProjectStatus } from "robustness-core/da
 /**
  * POST /api/graphlog/scheduled-run
  *
- * Enqueues a normal GraphLog `"run"` job for every `project-n02` folder
- * currently enrolled in the daily automatic run (see
+ * Enqueues a normal GraphLog `"run"` job (the graph, page held for a
+ * print, ADR-030) for every `project-n02` folder the nightly covers: on
+ * unless staff turned it off, once it has a graph (see
  * `graphLogSchedule.server.ts`). Protected by the same CRON_SECRET
  * environment variable as `api.vault.trash-cleanup.tsx`/
  * `api.vault.archive-cleanup.tsx` — wired into the server's own daily

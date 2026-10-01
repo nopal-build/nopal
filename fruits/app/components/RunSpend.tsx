@@ -32,6 +32,8 @@ function decisionSentence(d: EffortsDecision): string {
   switch (d.reason) {
     case "up-to-date":
       return "Efforts was not rebuilt. Nothing changed since the last run.";
+    case "held-for-print":
+      return `Efforts held for a print: ${d.waiting.join(", ") || "something new"} waiting.`;
     case "graph-changed":
       return "Efforts was rebuilt because the graph changed.";
     case "skill-rewrite":

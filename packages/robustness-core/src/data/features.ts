@@ -52,6 +52,10 @@ export const FEATURE_NAMES = [
    * visible to the guide"). A project shows it only once a budget has
    * been started on it. */
   "budget",
+  /** Pressing "Print an update" on the Efforts page, once a week (Austin,
+   * 2026-10-01). A Guide (`people`) prints any time. See
+   * `effortsPrint.server.ts`, ADR-030. */
+  "print",
 ] as const;
 export type Feature = (typeof FEATURE_NAMES)[number];
 
@@ -65,10 +69,10 @@ const READING: Feature[] = ["efforts", "photos", "files", "costs", "logbook"];
  * their own log (Austin, 2026-09-28: "clients should be able to mark
  * with the annotation"; moving, filing and confirming stay `edit`). */
 export const GROUP_FEATURES: Record<Group, readonly Feature[]> = {
-  Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people", "feeds", "suggestions", "budget"],
-  Crafter: [...READING, "marks", "steepTap", "dailyLog", "edit", "feeds"],
-  Observer: [...READING, "marks", "steepTap", "dailyLog"],
-  Client: ["efforts", "photos", "marks", "steepTap", "dailyLog", "feeds"],
+  Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people", "feeds", "suggestions", "budget", "print"],
+  Crafter: [...READING, "marks", "steepTap", "dailyLog", "edit", "feeds", "print"],
+  Observer: [...READING, "marks", "steepTap", "dailyLog", "print"],
+  Client: ["efforts", "photos", "marks", "steepTap", "dailyLog", "feeds", "print"],
 };
 
 /** The groups someone may give: every group for an admin; a Guide who

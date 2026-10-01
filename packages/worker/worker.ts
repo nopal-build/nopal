@@ -126,7 +126,8 @@ async function runGraphLogJob(
       // of the "stale banner is the safe direction" its doc assumed. A
       // lone stage can only vouch for itself, so this raises or clears
       // from its own reasons, prefixed the way the pipeline prefixes
-      // them; the next nightly run re-judges the whole. ADR-016.
+      // them; the next print re-judges the whole (a nightly holds the
+      // page and leaves the banner alone, ADR-030). ADR-016.
       const changed = await syncReadmeIncompleteBanner(
         projectFolder,
         result.incomplete.map((r) => `graph-project-view: ${r}`),
@@ -173,11 +174,12 @@ async function runGraphLogJob(
         readmeChanged: view.changed,
       };
     }
-    case "run": {
+    case "run":
+    case "print": {
       const result = await runGraphLogPipeline(
         job.data.actingHumanId,
         job.data.projectFolderId,
-        { perf },
+        { perf, view: job.name === "print" ? "print" : "hold" },
         onProgress,
       );
       if (!result.ok) throw new Error(result.error);
@@ -222,7 +224,7 @@ async function runGraphLogJob(
  * shape-check covers all of them without the switch above having to
  * report its own outcome a second time. */
 /** Pulls the full-pipeline run's own 1.7 denominators off whatever a job
- * returned. Only a `"run"` job carries these (a single-stage or reset job
+ * returned. Only a `"run"` or `"print"` job carries these (a single-stage or reset job
  * has no whole-run picture to report), so the shape check doubles as the
  * "does this job have stats" test. */
 function collectRunStats(result: unknown): {
