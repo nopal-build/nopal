@@ -22,7 +22,7 @@ import {
   useRouteError,
   useSearchParams,
 } from "react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getUser } from "../modules/auth/auth.server";
 // Types + shared utils live in a server-free file — safe on client and server.
 import {
@@ -1537,21 +1537,26 @@ function SiteSettingsModal({
   );
 }
 
-// ─── Website page split editor (Markdown + Preview) ────────────────────
-// A markdown file inside a `website` project (see the `vault` skill's
-// "website projects" section) -- raw markdown source on one side, a real
-// `OxRenderer` preview on the other, rather than the WYSIWYG `OxEditor`
-// every other kind of vault markdown file gets (`SkillFileEditor`, below).
-// Front matter is stripped via `splitFrontmatter`/rejoined via
-// `withReadmeBody` on save, same as the editor this replaced. EXPLICIT
-// save (a real button, disabled until dirty), not the debounced-auto-save
-// every other editor here uses -- a deliberate difference for a raw-
-// markdown surface, where a human editing literal syntax expects to
-// control exactly when it's written, not have it silently committed
-// mid-sentence. `key` at the call site includes `updated_at` (not just
-// the file id) so a publish-toggle's own write (a DIFFERENT mutation path
-// on the same file) always forces a clean remount with fresh front
-// matter, rather than risking a stale save clobbering it back.
+// ─── Markdown split editor (Markdown + Preview) ─────────────────────────
+// Generic raw-Markdown/live-Preview split editor -- raw markdown source on
+// one side, a real `OxRenderer` preview on the other, rather than the
+// WYSIWYG `OxEditor` every other kind of vault markdown file gets
+// (`SkillFileEditor`, below). Originally built for website pages only
+// (hence the `website`-flavored CSS class names/localStorage key below,
+// left as-is rather than churned) -- now shared by `WebsitePageSplitEditor`
+// and `SyncApiRunEditor` (both further below), which supply the
+// website-specific publish toggle / directive-aware preview or omit them
+// entirely via `toolbarLeft`/`renderPreview`/`showScratchPadLink`. Front
+// matter is stripped via `splitFrontmatter`/rejoined via `withReadmeBody`
+// on save, same as the WYSIWYG editor this replaced. EXPLICIT save (a real
+// button, disabled until dirty), not the debounced-auto-save every other
+// editor here uses -- a deliberate difference for a raw-markdown surface,
+// where a human editing literal syntax expects to control exactly when
+// it's written, not have it silently committed mid-sentence. `key` at each
+// call site includes `updated_at` (not just the file id) so a DIFFERENT
+// mutation path on the same file (e.g. the website publish toggle) always
+// forces a clean remount with fresh front matter, rather than risking a
+// stale save clobbering it back.
 const WEBSITE_EDITOR_MD_SIDE_KEY = "nopal:vault:website-split-editor:md-side";
 
 function readStoredMdSide(): "left" | "right" {
@@ -1581,20 +1586,30 @@ function useIsMobileWebsiteEditor(): boolean {
   return isMobile;
 }
 
-function WebsitePageSplitEditor({
+function MarkdownSplitEditor({
   fileId,
   initialContent,
   editable,
   onSave,
-  publish,
-  onPublishToggled,
+  toolbarLeft,
+  renderPreview,
+  showScratchPadLink = false,
 }: {
   fileId: string;
   initialContent: string;
   editable: boolean;
   onSave: (fileId: string, content: string) => Promise<unknown>;
-  publish: WebsitePublishStatus;
-  onPublishToggled: () => void;
+  /** Rendered at the left of the toolbar, before the light/dark/scratch-
+   * pad/flip/expand `ActionBar` -- the website editor's own
+   * `WebsitePublishToggle`; omitted entirely for anything with no
+   * draft/published concept (e.g. a sync-api run's notes). */
+  toolbarLeft?: ReactNode;
+  /** Renders the live-preview pane's own body from the current raw
+   * Markdown `body` -- the website editor wraps it in `WebsitePageContent`
+   * with the full website directive registry so it matches the real
+   * published page exactly; anything else gets a bare `OxRenderer`. */
+  renderPreview: (body: string, previewScheme: "light" | "dark") => ReactNode;
+  showScratchPadLink?: boolean;
 }) {
   const initialBody = useMemo(() => splitFrontmatter(initialContent).body, [initialContent]);
   const [body, setBody] = useState(initialBody);
@@ -1707,12 +1722,7 @@ function WebsitePageSplitEditor({
   return (
     <div className={`vault-website-editor${expanded ? " vault-website-editor--expanded" : ""}`}>
       <div className="vault-website-editor-toolbar">
-        <WebsitePublishToggle
-          fileId={fileId}
-          publish={publish}
-          editable={editable}
-          onToggled={onPublishToggled}
-        />
+        {toolbarLeft}
         <ActionBar>
           <ActionBarGroup>
             <ActionBarButton
@@ -1730,25 +1740,29 @@ function WebsitePageSplitEditor({
               Dark
             </ActionBarButton>
           </ActionBarGroup>
-          <ActionBarGroup>
-            {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
-                itself uses (`stamps/actionBar.css`), rather than extending
-                that shared component with an `href` variant -- matches this
-                codebase's own established convention (`button.css`'s own
-                recipe, `link.css`, `surfaceBase`, ...) of applying a
-                recipe's className polymorphically at each call site instead
-                of baking router-awareness into a router-agnostic `stamps`
-                component. Opens in a new tab -- this is a REFERENCE jump
-                (going to look up/try a directive's own vocabulary), not a
-                navigation away from the file currently being edited here. */}
-            <Link
-              to="/maker/stamps/scratch"
-              className={actionBarButtonClass({ active: false })}
-              aria-label="Open the website directives scratch pad in a new tab"
-            >
-              Scratch pad
-            </Link>
-          </ActionBarGroup>
+          {showScratchPadLink && (
+            <ActionBarGroup>
+              {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
+                  itself uses (`stamps/actionBar.css`), rather than extending
+                  that shared component with an `href` variant -- matches this
+                  codebase's own established convention (`button.css`'s own
+                  recipe, `link.css`, `surfaceBase`, ...) of applying a
+                  recipe's className polymorphically at each call site instead
+                  of baking router-awareness into a router-agnostic `stamps`
+                  component. Opens in a new tab -- this is a REFERENCE jump
+                  (going to look up/try a directive's own vocabulary), not a
+                  navigation away from the file currently being edited here.
+                  Website pages only -- not relevant to a non-website
+                  markdown editor like `SyncApiRunEditor`. */}
+              <Link
+                to="/maker/stamps/scratch"
+                className={actionBarButtonClass({ active: false })}
+                aria-label="Open the website directives scratch pad in a new tab"
+              >
+                Scratch pad
+              </Link>
+            </ActionBarGroup>
+          )}
           <ActionBarGroup>
             <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">
               <LayoutFlipIcon mdSide={mdSide} />
@@ -1809,28 +1823,13 @@ function WebsitePageSplitEditor({
               // leaving this pane showing `Surface`'s own neutral app-panel
               // background) makes the preview's own resting background
               // actually flip with the toggle too, not just section/accent
-              // colors inside it.
+              // colors inside it. A non-website consumer (e.g.
+              // `SyncApiRunEditor`) never opts into the `--website-*` tokens
+              // at all in its own `renderPreview`, so this is simply inert
+              // for it.
               style={{ background: "var(--website-bg-page)" }}
             >
-              {/* `dailyLogEntries: {}` -- an unresolved `::daily-log{...}`
-                  renders nothing here, same documented fail-soft behavior
-                  the `/maker/stamps/scratch` playground's own preview
-                  already accepts (real resolution needs server-side vault
-                  access this client component doesn't have). Every other
-                  website directive (`:::section`, `::stamp`, ...) renders
-                  for real. `WebsitePageContent` (stamps) + the
-                  `website-page-ox` className below are the SAME shared
-                  wrapper/class the public `/v2` renderer uses
-                  (`WebsitePageView`) -- see `website.css` -- so this
-                  preview stays visually and functionally identical to the
-                  real published page. */}
-              <WebsitePageContent>
-                <OxRenderer
-                  markdown={body}
-                  directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme: previewScheme })}
-                  className="ox-no-dots ox-no-heading-marks website-page-ox"
-                />
-              </WebsitePageContent>
+              {renderPreview(body, previewScheme)}
             </div>
           </Surface>
         </div>
@@ -1863,6 +1862,87 @@ function WebsitePageSplitEditor({
         </button>
       </div>
     </div>
+  );
+}
+
+// A page inside a `website` project (see the `vault` skill's "website
+// projects" section) -- thin wrapper around `MarkdownSplitEditor` above,
+// supplying the website-specific publish toggle and a preview pane that
+// renders through the real website directive registry
+// (`buildWebsiteDirectiveRegistry`) wrapped in `WebsitePageContent`, so it
+// stays visually and functionally identical to the real published `/v2`
+// page (`WebsitePageView`).
+function WebsitePageSplitEditor({
+  fileId,
+  initialContent,
+  editable,
+  onSave,
+  publish,
+  onPublishToggled,
+}: {
+  fileId: string;
+  initialContent: string;
+  editable: boolean;
+  onSave: (fileId: string, content: string) => Promise<unknown>;
+  publish: WebsitePublishStatus;
+  onPublishToggled: () => void;
+}) {
+  return (
+    <MarkdownSplitEditor
+      fileId={fileId}
+      initialContent={initialContent}
+      editable={editable}
+      onSave={onSave}
+      showScratchPadLink
+      toolbarLeft={
+        <WebsitePublishToggle
+          fileId={fileId}
+          publish={publish}
+          editable={editable}
+          onToggled={onPublishToggled}
+        />
+      }
+      renderPreview={(body, previewScheme) => (
+        <WebsitePageContent>
+          <OxRenderer
+            markdown={body}
+            directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme: previewScheme })}
+            className="ox-no-dots ox-no-heading-marks website-page-ox"
+          />
+        </WebsitePageContent>
+      )}
+    />
+  );
+}
+
+// A `sync-api` analysis run's own `<run>.md` (title/notes -- see the
+// `vault` skill's "Sync types" section; the run's actual DATA lives in the
+// sibling `<run>.csv`, rendered read-only by `CsvTableView`) -- same
+// `MarkdownSplitEditor` chrome as a website page, minus anything
+// website-specific: no publish toggle (a run has no draft/published
+// concept), a plain `OxRenderer` preview with no website directive
+// registry (the same bare rendering every other non-website markdown file
+// in the vault gets), and no "Scratch pad" link (that references website
+// directive syntax, not relevant to a run's own notes).
+function SyncApiRunEditor({
+  fileId,
+  initialContent,
+  editable,
+  onSave,
+}: {
+  fileId: string;
+  initialContent: string;
+  editable: boolean;
+  onSave: (fileId: string, content: string) => Promise<unknown>;
+}) {
+  return (
+    <MarkdownSplitEditor
+      fileId={fileId}
+      initialContent={initialContent}
+      editable={editable}
+      onSave={onSave}
+      renderPreview={(body) => <OxRenderer markdown={body} />}
+    />
   );
 }
 
@@ -3102,6 +3182,22 @@ export default function VaultV2Page() {
     [apiJson],
   );
 
+  // A sync-api run's own `.md` notes save (see `SyncApiRunEditor` above) --
+  // identical shape/behavior to `handleSaveWebsitePage` (returns the
+  // promise so the shared `MarkdownSplitEditor` Save button can await it),
+  // just named/commented separately since it's a conceptually different
+  // file kind.
+  const handleSaveSyncApiRunFile = useCallback(
+    (fileId: string, content: string) => {
+      markOwnMutation(fileId);
+      return apiJson(`/api/vault/${fileId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content }),
+      });
+    },
+    [apiJson],
+  );
+
   // A website page's `publish` toggle (see `WebsitePublishToggle`) DOES
   // revalidate — unlike a content save, this changes the front matter
   // `WebsitePageEditor` itself needs fresh (see its own `key` comment at
@@ -3962,6 +4058,19 @@ export default function VaultV2Page() {
                 onPublishToggled={() =>
                   handleWebsitePublishToggled(current.file._id, current.file.folder_id)
                 }
+              />
+            ) : fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (
+              // A sync-api analysis run's own `<run>.md` (see the `vault`
+              // skill's "Sync types" section) -- same reasoning as the
+              // website branch above for rendering OUTSIDE
+              // `.vault-readme-section`: `SyncApiRunEditor` draws its own
+              // panes/borders already.
+              <SyncApiRunEditor
+                key={current.file._id}
+                fileId={current.file._id}
+                initialContent={current.file.content ?? ""}
+                editable={canWriteCurrentFile}
+                onSave={handleSaveSyncApiRunFile}
               />
             ) : isMarkdownFile(current.file) ? (
               <div className="vault-readme-section">

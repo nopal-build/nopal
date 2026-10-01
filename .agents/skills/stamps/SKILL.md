@@ -92,12 +92,19 @@ component gets a sibling `name.css.ts` file; shared tokens live in
 
 ## Case study: Vault's website-file split editor
 
-`fruits/app/routes/vault.tsx`'s `WebsitePageSplitEditor` is the fullest
+`fruits/app/routes/vault.tsx`'s `MarkdownSplitEditor` is the fullest
 real-world consumer of `stamps` so far, and a good reference for how these
-pieces compose. It replaces the plain WYSIWYG editor for markdown files
-where `current.websiteAnchor && current.websitePageMeta` is set (other
-markdown files still render inside the shared `.vault-readme-section` box;
-this component intentionally renders outside it).
+pieces compose. It's the shared raw-Markdown/live-Preview chrome behind two
+thin wrappers: `WebsitePageSplitEditor` (website pages — `publish` toggle +
+the real website directive-aware preview) and `SyncApiRunEditor` (a
+sync-api analysis run's own `<run>.md` notes — see the `vault` skill's
+"Sync types" section — no publish toggle, plain `OxRenderer` preview, no
+website directives). `toolbarLeft`/`renderPreview`/`showScratchPadLink`
+are how each wrapper opts in or out of the website-specific pieces. Used
+where `current.websiteAnchor && current.websitePageMeta` is set (website
+pages) or `fileFolderType === "sync-api"` (run notes) — every other
+markdown file still renders inside the shared `.vault-readme-section` box;
+this component intentionally renders outside it.
 
 - Renders a raw-Markdown pane and a live-Preview pane side by side on
   desktop, one-at-a-time on mobile (`≤859px`), and must render the Preview
