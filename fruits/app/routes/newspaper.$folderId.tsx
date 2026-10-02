@@ -22,7 +22,7 @@ import { getUser } from "../modules/auth/auth.server";
 import { canViewFolder } from "robustness-core/data/vault.types";
 import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
-import { listMarksOnPage, readableMark } from "robustness-core/data/graphLogMarks.server";
+import { listMarksOnPage, pageMarkUnits, readableMark } from "robustness-core/data/graphLogMarks.server";
 import { listSuggestions } from "robustness-core/data/suggestions.server";
 import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { resolveProjectManifest } from "robustness-core/data/project.server";
@@ -31,7 +31,7 @@ import { isIncompleteBannerText, splitFrontmatter, type ProjectStatus } from "ro
 import { getProjectSharing, resolveRole } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
-import { projectLogbook } from "robustness-core/data/citedLogs.server";
+import { pageLogs, projectLogbook } from "robustness-core/data/citedLogs.server";
 import { loadBudget } from "robustness-core/data/budget.server";
 import { currentSeedRound, listPacketFiles, listSeedQuestions } from "robustness-core/data/seedPackets.server";
 import { SeedPacket, SeedRoundQuiet, type SeedingForPage } from "../components/SeedPacket";
@@ -202,6 +202,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return readableMark(mark, !!dest && canViewFolder(user._id, dest));
     }),
   );
+  // Where "Read the full log" is offered (the pen, a citation's `*`):
+  // only where there is a daily log behind it, as the reader would find it.
+  const logs =
+    canReadLog && tab === "efforts" ? await pageLogs(folder, pageMarkUnits(readme?.content ?? "")) : { unitKeys: [], fileIds: [] };
 
   // "Print an update" (ADR-030): the date for everyone who reads the page,
   // the button for a role on the list or staff. The allowance reads the
@@ -248,6 +252,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     livePageHash,
     viewerId: user._id,
     marks,
+    logs,
     tab,
     tabs,
     tabFolders,
@@ -499,7 +504,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -570,10 +575,11 @@ export default function NewspaperRoute() {
     [folder._id, livePageHash],
   );
 
-  const loadLog = useCallback(
-    async (unitKey: string): Promise<CitedLogsForPen | string> => {
+  // By passage (the pen) or by the one file a citation names (its `*`).
+  const fetchLog = useCallback(
+    async (by: { unitKey: string } | { fileId: string }): Promise<CitedLogsForPen | string> => {
       try {
-        const params = new URLSearchParams({ projectFolderId: folder._id, pageHash: livePageHash, unitKey });
+        const params = new URLSearchParams({ projectFolderId: folder._id, pageHash: livePageHash, ...by });
         const res = await fetch(`/api/graphlog/cited-logs?${params}`);
         const data = (await res.json().catch(() => ({}))) as CitedLogsForPen & { error?: string };
         if (!res.ok) return data.error ?? "Couldn't open the log. Try again.";
@@ -584,6 +590,8 @@ export default function NewspaperRoute() {
     },
     [folder._id, livePageHash],
   );
+  const loadLog = useCallback((unitKey: string) => fetchLog({ unitKey }), [fetchLog]);
+  const loadRefLog = useCallback((fileId: string) => fetchLog({ fileId }), [fetchLog]);
 
   const onMove = useCallback(
     async (input: {
@@ -666,9 +674,12 @@ export default function NewspaperRoute() {
       onMoveAction,
       // No log for someone whose group has no Logbook (a Client).
       loadLog: canReadLog ? loadLog : undefined,
+      logUnitKeys: logs.unitKeys,
+      loadRefLog: canReadLog ? loadRefLog : undefined,
+      logFileIds: logs.fileIds,
       skipParagraph: isIncompleteBannerText,
     }),
-    [marks, canMark, canEdit, canReadLog, onSend, onErase, loadMoveOptions, onMove, onMoveAction, loadLog, viewerId],
+    [marks, canMark, canEdit, canReadLog, onSend, onErase, loadMoveOptions, onMove, onMoveAction, loadLog, loadRefLog, logs, viewerId],
   );
 
   return (

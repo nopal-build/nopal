@@ -54,7 +54,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   try {
     const results = await reseedProjectN02Skills(folder);
-    return Response.json({ results });
+    return Response.json({ results: results.map(({ file, outcome }) => ({ file, outcome })) });
   } catch (err) {
     console.error("GraphLog reseed-skills error:", err);
     return Response.json(

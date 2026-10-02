@@ -6,7 +6,8 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import OxRenderer from "../components/OxRenderer";
-import { LogEntries, type CitedLogsForPen, type RenderCard } from "../oxmarkdown/marks";
+import { parseOxDocument } from "oxmarkdown-core";
+import { buildAnnotationCtx, LogEntries, type CitedLogsForPen, type RenderCard } from "../oxmarkdown/marks";
 
 const renderCard: RenderCard = (markdown, servedFileIds) => <OxRenderer markdown={markdown} servedFileIds={servedFileIds} />;
 
@@ -62,5 +63,34 @@ describe("the log in the pen", () => {
       <LogEntries logs={logs({ entries: [{ fileId: "c1", who: "Gerald", date: "2026-09-09", seeded: false, markdown: "A day." }] })} renderCard={renderCard} />,
     );
     expect(html).not.toContain("data-mark-unit");
+  });
+});
+
+describe("where the link is offered (2026-10-02)", () => {
+  const load = async () => logs({});
+  const ctx = buildAnnotationCtx(parseOxDocument("A line."), {
+    marks: [],
+    viewerId: "v",
+    canMark: true,
+    loadLog: load,
+    logUnitKeys: ["with-log"],
+    loadRefLog: load,
+    logFileIds: ["card-copy"],
+  });
+
+  it("the pen only on a passage with a log behind it", () => {
+    expect(ctx.hasLog("with-log")).toBe(true);
+    expect(ctx.hasLog("note-only")).toBe(false);
+  });
+
+  it("a citation's `*` only for a file with a log behind it", () => {
+    expect(ctx.refLog("card-copy")).toBeTypeOf("function");
+    expect(ctx.refLog("a-margin-note")).toBeUndefined();
+    expect(ctx.refLog(null)).toBeUndefined();
+  });
+
+  it("nothing at all for a reader without the Logbook", () => {
+    const client = buildAnnotationCtx(parseOxDocument("A line."), { marks: [], viewerId: "v", canMark: true, logFileIds: ["card-copy"] });
+    expect(client.refLog("card-copy")).toBeUndefined();
   });
 });

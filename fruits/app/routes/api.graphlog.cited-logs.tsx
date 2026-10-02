@@ -12,6 +12,7 @@ import { splitFrontmatter } from "robustness-core/data/project.types";
 
 /**
  * GET /api/graphlog/cited-logs?projectFolderId=&pageHash=&unitKey=
+ * GET /api/graphlog/cited-logs?projectFolderId=&pageHash=&fileId=
  *
  * The daily logs a passage on the Efforts page came from, for the pen's
  * "Read the full log": each Card (or seed day) its citations name, as the
@@ -23,7 +24,9 @@ import { splitFrontmatter } from "robustness-core/data/project.types";
  * like a project that isn't there, the same as a typed tab.
  *
  * The passage is found again here from the page as it is; nothing about
- * which files to read comes from the browser.
+ * which files to read comes from the browser. A citation's `*` asks by the
+ * one file it names (2026-10-02), which is read only if the page as it is
+ * cites it.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -32,6 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const projectFolderId = url.searchParams.get("projectFolderId") ?? "";
   const unitKey = url.searchParams.get("unitKey") ?? "";
+  const fileId = url.searchParams.get("fileId") ?? "";
   const hash = url.searchParams.get("pageHash") ?? "";
 
   const folder = projectFolderId ? await getFolderById(projectFolderId) : null;
@@ -43,10 +47,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (pageHash(raw) !== hash) {
     return Response.json({ error: "This page has been rewritten. Reload it." }, { status: 409 });
   }
-  const unit = pageMarkUnits(raw).find((u) => u.key === unitKey);
-  if (!unit) return Response.json({ error: "That passage isn't on this page." }, { status: 400 });
+  const units = pageMarkUnits(raw);
+  const refs = fileId
+    ? units.some((u) => u.refs.some((r) => r.fileId === fileId)) ? [{ fileId }] : null
+    : units.find((u) => u.key === unitKey)?.refs;
+  if (!refs) return Response.json({ error: "That passage isn't on this page." }, { status: 400 });
 
-  const { entries, other } = await loadCitedLogs(folder, unit.refs);
+  const { entries, other } = await loadCitedLogs(folder, refs);
 
   // A Card names its writer's originals; the reader loads what the file
   // tabs load (`servedFileIds`), only for the files these Cards name.

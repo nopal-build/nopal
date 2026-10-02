@@ -61,7 +61,7 @@ import { imageRenditionsExist, renditionKey, writeImageRenditions, writeVideoPos
 import { objectExists } from "./file.server";
 import { parseSyncedCardFileName } from "./dailyLogSync.server";
 import { isSeedDayFileName, isSeedInstructionFileName, SEED_SYNC_FOLDER_NAME } from "./seed.server";
-import { formatSeconds, hasFfmpeg, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
+import { fitImageForVision, formatSeconds, hasFfmpeg, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
 import {
   FILING_FRAMING,
   buildFilingContent,
@@ -517,7 +517,8 @@ export async function runSyncKnowledge(
             // here once; see `mediaRenditions.server.ts`. Never fails the
             // description: a rendition is only what a browser shows.
             await writeRenditionsQuietly(source, Buffer.from(image.base64, "base64"), log);
-            result = await photoLlm.describePhoto({ imageBase64: image.base64, mediaType: image.mediaType, context });
+            const forModel = await fitImageForVision(image);
+            result = await photoLlm.describePhoto({ imageBase64: forModel.base64, mediaType: forModel.mediaType, context });
             body = result.description;
           }
           const durationMs = Date.now() - callStart;
@@ -820,7 +821,7 @@ async function fileAttachment(args: {
     let usage: PhotoDescriptionResult["usage"];
     try {
       if (isImageContentType(source.content_type) && source.s3_key) {
-        const image = await normalizeImageForVision(await args.getBytes(), source.content_type);
+        const image = await fitImageForVision(await normalizeImageForVision(await args.getBytes(), source.content_type));
         const result = await args.photoLlm.describeImages({
           images: [{ imageBase64: image.base64, mediaType: image.mediaType, label: "" }],
           context,

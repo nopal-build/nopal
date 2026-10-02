@@ -19,7 +19,7 @@
  * output is exactly what it was.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   computeMarkUnits,
   markUnitLocator,
@@ -95,6 +95,15 @@ export interface OxAnnotations {
   /** The daily logs a passage came from, for "Read the full log". Only
    * passed for a reader whose group has the Logbook. */
   loadLog?: (unitKey: string) => Promise<CitedLogsForPen | string>;
+  /** The passages with a daily log behind them (`unitKeysWithLogs`). The
+   * pen offers "Read the full log" only on these (Austin, 2026-10-02). */
+  logUnitKeys?: readonly string[];
+  /** The same for one cited file, from a citation's `*`: its Source row
+   * opens the reader instead of the Vault (2026-10-02). */
+  loadRefLog?: (fileId: string) => Promise<CitedLogsForPen | string>;
+  /** The cited files with a daily log behind them; only their `*` offers
+   * the reader. */
+  logFileIds?: readonly string[];
   /** Paragraphs that are not thoughts (a system banner). Must match what
    * the server uses to validate a mark, or keys will disagree. */
   skipParagraph?: (text: string) => boolean;
@@ -144,6 +153,11 @@ export interface AnnotationCtx {
   onMove?: OxAnnotations["onMove"];
   onMoveAction?: OxAnnotations["onMoveAction"];
   loadLog?: OxAnnotations["loadLog"];
+  /** Whether this passage has a daily log to read. */
+  hasLog: (unitKey: string) => boolean;
+  loadRefLog?: OxAnnotations["loadRefLog"];
+  /** The reader for one cited file, when it has a log behind it. */
+  refLog: (fileId: string | null) => (() => Promise<CitedLogsForPen | string>) | undefined;
   renderCard?: RenderCard;
 }
 
@@ -157,6 +171,9 @@ export function buildAnnotationCtx(doc: OxDocument, annotations: OxAnnotations, 
     marksByKey.set(mark.unitKey, list);
   }
   const marksFor = (key: string) => marksByKey.get(key) ?? [];
+  const logKeys = new Set(annotations.logUnitKeys ?? []);
+  const logFiles = new Set(annotations.logFileIds ?? []);
+  const loadRefLog = annotations.loadRefLog;
   return {
     unitAt: (node, sentence) => {
       const offset = node.position?.start.offset;
@@ -172,6 +189,9 @@ export function buildAnnotationCtx(doc: OxDocument, annotations: OxAnnotations, 
     onMove: annotations.onMove,
     onMoveAction: annotations.onMoveAction,
     loadLog: annotations.loadLog,
+    hasLog: (key) => logKeys.has(key),
+    loadRefLog,
+    refLog: (fileId) => (loadRefLog && fileId && logFiles.has(fileId) ? () => loadRefLog(fileId) : undefined),
     renderCard,
   };
 }
@@ -286,26 +306,38 @@ function MarkPen({
  *
  * Each Card is the whole day as the Logbook shows it. A citation names a
  * person's day, not a sentence, so this never claims to show "the line".
+ *
+ * Also what a citation's `*` opens from its Source row (2026-10-02), in
+ * its own popover the same way.
  */
-function LogReader({ unit, ctx, onBack }: { unit: MarkUnit; ctx: AnnotationCtx; onBack: () => void }) {
+export function LogReader({
+  load,
+  renderCard,
+  onBack,
+}: {
+  load: () => Promise<CitedLogsForPen | string>;
+  renderCard?: RenderCard;
+  onBack: () => void;
+}) {
   const [loaded, setLoaded] = useState<CitedLogsForPen | string | null>(null);
-  const loadLog = ctx.loadLog;
+  // Loaded once, when the reader opens; `load` is a fresh closure on
+  // every render of whoever holds it.
+  const loadOnce = useRef(load);
   useEffect(() => {
-    if (!loadLog) return;
     let live = true;
-    void loadLog(unit.key).then((result) => {
+    void loadOnce.current().then((result) => {
       if (live) setLoaded(result);
     });
     return () => {
       live = false;
     };
-  }, [loadLog, unit.key]);
+  }, []);
 
   return (
     <div className="ox-mark-log">
       {loaded === null && <div className="ox-mark-move__row">Looking…</div>}
       {typeof loaded === "string" && <div className="ox-mark-error">{loaded}</div>}
-      {loaded && typeof loaded !== "string" && <LogEntries logs={loaded} renderCard={ctx.renderCard} />}
+      {loaded && typeof loaded !== "string" && <LogEntries logs={loaded} renderCard={renderCard} />}
       <div className="ox-mark-actions">
         <button type="button" className={QUIET} onClick={onBack}>
           Back
@@ -614,10 +646,10 @@ function MarkComposer({
           stamp's small copy action on the right. */}
       <div className="ox-mark-footer">
       {reading ? (
-        <LogReader unit={unit} ctx={ctx} onBack={() => setReading(false)} />
+        <LogReader load={() => ctx.loadLog!(unit.key)} renderCard={ctx.renderCard} onBack={() => setReading(false)} />
       ) : (
         <div className={`ox-mark-footer__links${moving ? " ox-mark-footer__links--open" : ""}`}>
-          {!moving && ctx.loadLog && (
+          {!moving && ctx.loadLog && ctx.hasLog(unit.key) && (
             <button type="button" className={`${link} ox-mark-move__open`} onClick={() => setReading(true)}>
               Read the full log
             </button>
