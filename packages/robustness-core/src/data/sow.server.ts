@@ -39,6 +39,8 @@ import { getHumansById } from "./humans.server";
 import { composeStageSkill, getProjectStageSkill, isSkipInstruction, listExtraSkillFiles } from "./projectN02.server";
 import {
   addSeedDocumentObject,
+  classifyPreparedSeedFile,
+  mergePreparedSeedDay,
   mergeSeedDay,
   moveNotedToSpeaker,
   parseSeedDayDoc,
@@ -48,6 +50,7 @@ import {
   seedSpeakerNames,
   writeSeedDayFile,
   writeSeedDocumentFile,
+  writeSeedPeopleFile,
   type SeedAddition,
 } from "./seed.server";
 import {
@@ -540,6 +543,8 @@ export type SowRunResult =
 
 export interface RunSowOptions {
   provider?: LlmProvider;
+  /** The worker run this sow belongs to, stamped on its usage rows. */
+  runId?: string | null;
   log?: (line: string) => void;
 }
 
@@ -631,11 +636,52 @@ export async function runSow(projectFolder: VaultFolder, actingHumanId: string, 
         continue;
       }
 
+      // A file somebody prepared in seed shape is placed by code and never
+      // read by the model: the judgment in it is already somebody's. Code
+      // decides which files those are (`classifyPreparedSeedFile`).
+      const prepared = classifyPreparedSeedFile(file.name, text);
+      if (prepared) {
+        if (prepared.kind === "refused") {
+          incomplete.push(`"${file.name}" from ${uploader}: ${prepared.reason}`);
+          log(`sow: "${file.name}" from ${uploader} was not read: ${prepared.reason}. It stays in the packet.`);
+          continue;
+        }
+        if (prepared.kind === "people") {
+          await writeSeedPeopleFile(projectFolder, text);
+          await markPacketSown(file._id, { days: [] });
+          files += 1;
+          log(`sow: "${file.name}" from ${uploader} is the seed's people file.`);
+          continue;
+        }
+        if (prepared.kind === "document") {
+          await writeSeedDocumentFile(projectFolder, file.name.split("/").pop() ?? file.name, text, prepared.date);
+          await markPacketSown(file._id, { days: [] });
+          documents += 1;
+          files += 1;
+          log(`sow: "${file.name}" from ${uploader} is a prepared document dated ${prepared.date}.`);
+          continue;
+        }
+        const existing = await readSeedDayFile(projectFolder, prepared.date);
+        const merged = mergePreparedSeedDay(existing?.content ?? null, text);
+        if (merged.added > 0) {
+          await writeSeedDayFile(projectFolder, prepared.date, merged.content);
+          daysWritten.add(prepared.date);
+        }
+        lines += merged.added;
+        await markPacketSown(file._id, { days: merged.added > 0 ? [prepared.date] : [] });
+        files += 1;
+        log(
+          `sow: "${file.name}" from ${uploader} is a prepared day for ${prepared.date}${prepared.byShape ? " (read as prepared by its shape; no `kind: seed` in its front matter)" : ""}: ${merged.added} line(s) in${merged.skipped > 0 ? `, ${merged.skipped} already there` : ""}.`,
+        );
+        continue;
+      }
+
       // Known now, not at the start: a name an earlier file in this same
       // run put into the seed is known to the next one.
       const known = [...new Set([...memberNames, ...(await seedSpeakerNames(projectFolder))])];
       const result = await sowText({ text, fileName: file.name, uploaderName: uploader, knownNames: known, skill, addedOn, provider: opts.provider });
       await recordGraphLogUsage({
+        runId: opts.runId,
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
         stage: "sow",
@@ -730,7 +776,7 @@ export async function runSow(projectFolder: VaultFolder, actingHumanId: string, 
       const message = err instanceof Error ? err.message : "unknown error";
       incomplete.push(`"${file.name}" from ${uploader} could not be sown: ${message}`);
       log(`sow: "${file.name}" from ${uploader} could not be sown (${message}); it stays in the packet.`);
-      await recordGraphLogUsage({ humanId: actingHumanId, projectFolderId: projectFolder._id, stage: "sow", kind: "sow", durationMs: Date.now() - started, outcome: "error", errorKind: classifyGraphLogError(err) });
+      await recordGraphLogUsage({ runId: opts.runId, humanId: actingHumanId, projectFolderId: projectFolder._id, stage: "sow", kind: "sow", durationMs: Date.now() - started, outcome: "error", errorKind: classifyGraphLogError(err) });
     }
   }
 

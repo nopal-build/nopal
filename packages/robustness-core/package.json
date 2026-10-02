@@ -7,6 +7,7 @@
     "./auth/auth.server": "./src/auth/auth.server.ts",
     "./auth/session.server": "./src/auth/session.server.ts",
     "./auth/webauthn.server": "./src/auth/webauthn.server.ts",
+    "./auth/landing": "./src/auth/landing.ts",
 
     "./data/adminScriptRuns.server": "./src/data/adminScriptRuns.server.ts",
     "./data/adminScriptsQueue.server": "./src/data/adminScriptsQueue.server.ts",
@@ -14,6 +15,7 @@
     "./data/anthropicProvider.server": "./src/data/anthropicProvider.server.ts",
     "./data/apiTokens.server": "./src/data/apiTokens.server.ts",
     "./data/attachmentFrames.server": "./src/data/attachmentFrames.server.ts",
+    "./data/citedLogs.server": "./src/data/citedLogs.server.ts",
     "./data/dailyLog.server": "./src/data/dailyLog.server.ts",
     "./data/dailyLogSync.server": "./src/data/dailyLogSync.server.ts",
     "./data/db.server": "./src/data/db.server.ts",
@@ -31,6 +33,7 @@
     "./data/graphLogMoves.server": "./src/data/graphLogMoves.server.ts",
     "./data/pageBody.server": "./src/data/pageBody.server.ts",
     "./data/graphLogSchedule.server": "./src/data/graphLogSchedule.server.ts",
+    "./data/effortsPrint.server": "./src/data/effortsPrint.server.ts",
     "./data/graphNodeIndex.server": "./src/data/graphNodeIndex.server.ts",
     "./data/effortReadings.server": "./src/data/effortReadings.server.ts",
     "./data/graphProjectView.server": "./src/data/graphProjectView.server.ts",

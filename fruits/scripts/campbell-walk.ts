@@ -18,7 +18,8 @@
 // nothing can't start a project; a Client leaves a note with the pen.
 // While the client is an Observer: they read the Costs tab; their Card and
 // note wait for a Guide, who takes the Card and passes the note; they
-// don't move an entry or file a file.
+// don't move an entry or file a file. A photo on the waiting Card opens
+// for the Guide who decides on it and for nobody else until it is taken.
 // Taking the client off the project empties the Card they wrote today,
 // and they can't write to it again.
 //
@@ -31,7 +32,11 @@
 //   source ../webapp/.env; unset SESSION_SECRET
 //   npx vite-node scripts/campbell-walk.ts <client> <crafter> <guide> <admin> <ownProjectId> <otherProjectId>
 // <guide> must not be an admin; the walk makes them Guide on the project
-// through the Maker and puts their old role back.
+// through the Maker and puts their old role back. Use someone who already
+// has a role on the project: putting back "no role" takes them off, and
+// an invited account that is then on no project is deleted with its
+// invite (`withdrawInvite`), which is how a local test account was lost
+// on 2026-10-01.
 import { query } from "robustness-core/data/generic.server";
 import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { getHumanByEmail } from "robustness-core/data/humans.server";
@@ -41,6 +46,7 @@ import { loadProjectFiles } from "robustness-core/data/fileFolders.server";
 import { getDailyLogCards, listCardsForProject } from "robustness-core/data/dailyLog.server";
 import { listSuggestionMarks, listUnreadMarks, pageMarkUnits } from "robustness-core/data/graphLogMarks.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
+import { listPacketFiles, removePacketFile } from "robustness-core/data/seedPackets.server";
 import { sessionStorage } from "../app/modules/auth/session.server";
 
 const [clientEmail, crafterEmail, guideEmail, adminEmail, ownId, otherId] = process.argv.slice(2);
@@ -189,13 +195,45 @@ await hit(client.cookie, "a Card on the project", "POST", "/daily-log", 200, { d
 const suggested = (await getDailyLogCards(client.id, day)).find((c) => c.projectFolderId === ownId) ?? null;
 check("the Card is a suggestion", !!suggested?.suggestion);
 if (suggested) {
-  await hit(client.cookie, "write in it", "POST", "/daily-log", 200, { date: day, content: WORDS, cardFileId: suggested.fileId });
+  // With a photo on it: a Guide has to see what they are deciding on.
+  const shot = new FormData();
+  shot.set("date", day);
+  shot.set("file", new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "campbell-suggests.png", { type: "image/png" }));
+  const shotAnswer = await hit(client.cookie, "a photo for the Card", "POST", "/api/daily-log/upload", 201, shot);
+  let photo: string | null = null;
+  try {
+    photo = (JSON.parse(shotAnswer) as { fileId?: string }).fileId ?? null;
+  } catch {
+    // The 201 above already failed.
+  }
+  check("the photo uploaded", !!photo);
+  const CARD = photo ? `${WORDS}\n\n::file{name="campbell-suggests.png" caption fileId="${photo}" contentType="image/png"}\n` : WORDS;
+  await hit(client.cookie, "write in it", "POST", "/daily-log", 200, { date: day, content: CARD, cardFileId: suggested.fileId });
   check("the project doesn't get it yet", (await fed()) === "");
   await hit(crafter.cookie, "a crafter takes it", "POST", "/api/graphlog/suggestions", 404, { projectFolderId: ownId, kind: "card", id: suggested.fileId, verdict: "take" });
   const tab = await hit(guide.cookie, "the guide's Suggestions tab", "GET", `/newspaper/${ownId}?tab=suggestions`, 200);
   check("the guide sees it", tab.includes(WORDS));
+  if (photo) {
+    // Served by redirect to storage (ADR-021), so the 302 is the success.
+    await hit(guide.cookie, "the waiting Card's photo, for the guide", "GET", `/api/vault/rendition/${photo}?size=thumb`, 302);
+    await hit(guide.cookie, "the waiting Card's photo, enlarged", "GET", `/api/vault/view/${photo}`, 302);
+    await hit(crafter.cookie, "the waiting Card's photo, for a crafter", "GET", `/api/vault/rendition/${photo}?size=thumb`, 404);
+  }
   await hit(guide.cookie, "the guide takes it", "POST", "/api/graphlog/suggestions", 200, { projectFolderId: ownId, kind: "card", id: suggested.fileId, verdict: "take" });
-  check("the project gets it, as written", (await fed()) === WORDS);
+  check("the project gets it, as written", (await fed()) === CARD);
+  // Taken, it is the project's, and the take's own sync copies it in.
+  // The Card still names the writer's original, which is what the Logbook
+  // and the Card's synced copy print: anyone on the project who asks for
+  // that id is served the copy (`readableFile`).
+  if (photo) {
+    const copied = (await loadProjectFiles(own)).find((r) => r.fileId === photo);
+    check("the take copied the photo into the project", !!copied && copied.serveId !== photo);
+    // The crafter was refused a moment ago, and a refusal is reused for
+    // five seconds (`REFUSAL_MS`, `featureAccess.server.ts`).
+    await new Promise((r) => setTimeout(r, 5500));
+    await hit(crafter.cookie, "the taken Card's photo, by the id the Card names, for a crafter", "GET", `/api/vault/rendition/${photo}?size=thumb`, 302);
+    await hit(crafter.cookie, "the same, but the record stays its writer's", "GET", `/api/vault/${photo}`, 404);
+  }
 }
 const readme = (await getReadmeFileForFolder(own.human_id, own._id))?.content ?? "";
 const passage = pageMarkUnits(readme)[0];
@@ -382,17 +420,10 @@ if (creator !== guide.id) {
   check("the creator is back", (await roleOf(creator)) === creatorBefore);
 }
 
-// ── Seeding (2026-09-29): a Guide pushes, an admin wipes, nobody else ───
-const SEED_DAY = `---\ndate: 2020-01-01\nproject: walk\nkind: seed\n---\n\n## Walker\n\n- The walk seeded a line.\n  - src: the walk\n\n## Noted (not anyone's words)\n\n- The walk noted a fact.\n`;
-const seedBody = { projectFolderId: ownId, days: [{ date: "2020-01-01", content: SEED_DAY }], documents: [] };
-await hit(crafter.cookie, "seed: a crafter can't push a seed", "POST", "/api/graphlog/seed", 404, seedBody);
-await hit(client.cookie, "seed: a client can't push a seed", "POST", "/api/graphlog/seed", 404, seedBody);
-await hit(guide.cookie, "seed: the guide pushes one day", "POST", "/api/graphlog/seed", 200, seedBody);
-await hit(guide.cookie, "seed: the guide reads it in the Logbook", "GET", `/newspaper/${ownId}?tab=logbook`, 200);
-await hit(client.cookie, "seed: no Logbook for a client", "GET", `/newspaper/${ownId}?tab=logbook`, 404);
-await hit(guide.cookie, "seed: the guide can't wipe it", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
-await hit(crafter.cookie, "seed: nor a crafter", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
-await hit(admin.cookie, "seed: the admin wipes it", "POST", "/api/graphlog/seed-wipe", 200, { projectFolderId: ownId });
+// ── Seeding (2026-09-29, folded 2026-10-01): the push route is gone ──────
+// The seed packet is the one door; a prepared day goes through it below.
+// An admin wipes; a guide and a crafter cannot.
+await hit(guide.cookie, "seed: the push route is gone, even for a guide", "POST", "/api/graphlog/seed", 404, { projectFolderId: ownId, days: [] });
 
 // ── The Budget (2026-09-29): a view under Costs for Guides alone ────────
 // The project may already have a budget (a start is refused twice), so
@@ -412,6 +443,33 @@ await hit(guide.cookie, "budget: a table that doesn't fit is refused", "POST", "
 // and the guides can open it; only a guide sows or ends the round.
 await hit(crafter.cookie, "packets: a crafter can't open a round", "POST", "/api/seed-round", 404, { projectFolderId: ownId, act: "open" });
 await hit(guide.cookie, "packets: the guide opens a round", "POST", "/api/seed-round", 200, { projectFolderId: ownId, act: "open" });
+// A prepared day (seed shape, `kind: seed`) in the guide's packet is placed
+// by code, no model: the seed day exists after Sow, and only an admin can
+// wipe it. The job is followed through its id like any GraphLog job.
+const SEED_DAY = `---\ndate: 2020-01-01\nproject: walk\nkind: seed\n---\n\n## Walker\n\n- The walk seeded a line.\n  - src: the walk\n\n## Noted (not anyone's words)\n\n- The walk noted a fact.\n`;
+const preparedForm = new FormData();
+preparedForm.append("projectFolderId", ownId);
+preparedForm.append("file", new File([SEED_DAY], "2020-01-01.md", { type: "text/markdown" }));
+await hit(guide.cookie, "seed: the guide adds a prepared day to their packet", "POST", "/api/seed-packet", 201, preparedForm);
+const sowStarted = await hit(guide.cookie, "seed: the guide sows", "POST", "/api/graphlog/sow", 202, { projectFolderId: ownId });
+const sowJobId = (() => { try { return (JSON.parse(sowStarted) as { jobId?: string }).jobId ?? null; } catch { return null; } })();
+let sowDone: { state?: string; result?: { lines?: number; days?: string[] } } = {};
+if (sowJobId) {
+  for (let i = 0; i < 60 && sowDone.state !== "completed" && sowDone.state !== "failed"; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    sowDone = JSON.parse(await hit(guide.cookie, "seed: following the sow job", "GET", `/api/graphlog/jobs/${sowJobId}`, 200)) as typeof sowDone;
+    lines.pop();
+  }
+}
+check("seed: the prepared day was placed by code (2 lines, one day)", sowDone.state === "completed" && sowDone.result?.lines === 2 && (sowDone.result?.days ?? []).includes("2020-01-01"));
+await hit(guide.cookie, "seed: the guide reads it in the Logbook", "GET", `/newspaper/${ownId}?tab=logbook`, 200);
+await hit(client.cookie, "seed: no Logbook for a client", "GET", `/newspaper/${ownId}?tab=logbook`, 404);
+await hit(guide.cookie, "seed: the guide can't wipe it", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
+await hit(crafter.cookie, "seed: nor a crafter", "POST", "/api/graphlog/seed-wipe", 404, { projectFolderId: ownId });
+await hit(admin.cookie, "seed: the admin wipes it", "POST", "/api/graphlog/seed-wipe", 200, { projectFolderId: ownId });
+// The wipe put the prepared file back to waiting; take it out so the round can end clean.
+for (const f of await listPacketFiles(ownId)) if (f.name === "2020-01-01.md") await removePacketFile(f._id);
+
 const packetForm = new FormData();
 packetForm.append("projectFolderId", ownId);
 packetForm.append("file", new File(["8/2 Walker: the walk added a line.\n"], "walk-thread.txt", { type: "text/plain" }));

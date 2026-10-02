@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { AFTER_LOGIN_PATH } from "./landing";
 import { Authenticator } from "remix-auth";
 import { TOTPStrategy } from "remix-auth-totp";
 import { redirect } from "react-router";
@@ -92,7 +93,7 @@ authenticator.use(
       secret: process.env.ENCRYPTION_SECRET || "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       magicLinkPath: "/magic-link",
       emailSentRedirect: "/verify",
-      successRedirect: "/",
+      successRedirect: AFTER_LOGIN_PATH,
       failureRedirect: "/verify",
       sendTOTP: async ({ email, code, magicLink }) => {
         if (!sendTotpEmailImpl) {
@@ -133,13 +134,13 @@ authenticator.use(
 
       // If `/login` was reached via a `redirectTo` (e.g. from `/cli-login`),
       // it stashed the target in its own short-lived cookie — honor it here
-      // instead of the default `/` (the app's dashboard), then clear that cookie.
+      // instead of the default (`AFTER_LOGIN_PATH`, the Daily Log), then clear that cookie.
       const redirectTo = getRedirectToCookie(request);
       const headers = new Headers();
       headers.append("Set-Cookie", await sessionStorage.commitSession(session));
       if (redirectTo) headers.append("Set-Cookie", buildRedirectCookie(null));
 
-      throw redirect(redirectTo ?? "/", { headers });
+      throw redirect(redirectTo ?? AFTER_LOGIN_PATH, { headers });
     },
   ),
   "TOTP",

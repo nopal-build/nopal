@@ -24,7 +24,8 @@ import {
   parseSeedDocument,
   parseSeedPeople,
   SEED_NOTED_NAME,
-  selectSeedDays,
+  classifyPreparedSeedFile,
+  mergePreparedSeedDay,
   wipeDecisions,
   withoutDatesInStructure,
   withoutSourceHash,
@@ -250,13 +251,48 @@ author: Austin
   });
 });
 
-describe("a push takes a range, and a wipe removes only what the seed alone fed", () => {
-  it("only days in range, oldest first", () => {
-    const days = [{ date: "2026-07-29" }, { date: "2026-07-20" }, { date: "2026-08-04" }, { date: "nope" }];
-    expect(selectSeedDays(days, { from: "2026-07-20", to: "2026-07-29" }).map((d) => d.date)).toEqual(["2026-07-20", "2026-07-29"]);
-    expect(selectSeedDays(days, {}).map((d) => d.date)).toEqual(["2026-07-20", "2026-07-29", "2026-08-04"]);
+describe("a prepared seed file in a packet is placed by code, never read by the model (the fold, 2026-10-01)", () => {
+  it("`kind: seed` is a day, dated by its name or its front matter", () => {
+    expect(classifyPreparedSeedFile("2026-07-20.md", DAY)).toEqual({ kind: "day", date: "2026-07-20", byShape: false });
+    expect(classifyPreparedSeedFile("campbell week.md", DAY)).toEqual({ kind: "day", date: "2026-07-20", byShape: false });
+    const undated = DAY.replace("date: 2026-07-20\n", "");
+    expect(classifyPreparedSeedFile("week.md", undated)).toMatchObject({ kind: "refused" });
+    expect(classifyPreparedSeedFile("2026-07-20.md", "---\nkind: seed\n---\n\nnothing here\n")).toMatchObject({ kind: "refused" });
   });
 
+  it("a day named for its date and shaped like one is prepared even with no front matter, and says so", () => {
+    const bare = DAY.replace(/^---\n[\s\S]*?\n---\n/, "");
+    expect(classifyPreparedSeedFile("2026-07-20.md", bare)).toEqual({ kind: "day", date: "2026-07-20", byShape: true });
+    // A raw thread is neither named for a day nor shaped: the model's.
+    expect(classifyPreparedSeedFile("campbell-attic-thread.txt", "8/5 Erica: Do the beams have to come down?\n8/5 Austin: Yes.\n")).toBeNull();
+    expect(classifyPreparedSeedFile("2026-07-20.md", "8/5 Erica: Do the beams have to come down?\n")).toBeNull();
+  });
+
+  it("a document needs its date; the people file is the people file; a helper file is refused", () => {
+    expect(classifyPreparedSeedFile("Estimate.md", "---\nkind: seed-document\ndate: 2026-04-22\nauthor: Austin\n---\n\nHVAC $40k\n")).toEqual({ kind: "document", date: "2026-04-22" });
+    expect(classifyPreparedSeedFile("Estimate.md", "---\nkind: seed-document\n---\n\nHVAC $40k\n")).toMatchObject({ kind: "refused" });
+    expect(classifyPreparedSeedFile("_people.md", "---\nkind: seed-people\n---\n\n- Beaudy — GC\n")).toEqual({ kind: "people" });
+    expect(classifyPreparedSeedFile("_people.md", "- Beaudy — GC\n")).toEqual({ kind: "people" });
+    expect(classifyPreparedSeedFile("_attachments.md", "---\nkind: seed-attachments\n---\n\n- a list\n")).toMatchObject({ kind: "refused", reason: expect.stringContaining("seed-attachments") });
+  });
+
+  it("a prepared day adds to the day already there, keeping its own src lines, and never writes a line twice", () => {
+    const first = mergePreparedSeedDay(null, DAY);
+    expect(first.content).toBe(DAY);
+    expect(first.added).toBeGreaterThan(0);
+    const again = mergePreparedSeedDay(DAY, DAY);
+    expect(again.added).toBe(0);
+    expect(again.skipped).toBe(first.added);
+    const more = `---\ndate: 2026-07-20\nkind: seed\n---\n\n## Erica\n\n- Arthur c Roger house. Maybe it's new name.\n  - src: the client thread\n\n## Austin\n\n- A brand new line from a second file.\n  - src: the second file\n`;
+    const merged = mergePreparedSeedDay(DAY, more);
+    expect(merged.added).toBe(2);
+    expect(merged.content).toMatch(/## Erica\n\n- Arthur c Roger house/);
+    expect(merged.content).toMatch(/- src: the second file/);
+    expect(parseSeedDay(merged.content).sections.map((s) => s.speaker)).toEqual([...parseSeedDay(DAY).sections.map((s) => s.speaker), "Erica"]);
+  });
+});
+
+describe("a wipe removes only what the seed alone fed", () => {
   it("a date only the seed fed is removed; a date live entries also fed is re-extracted", () => {
     expect(wipeDecisions(["2026-07-20", "2026-09-14", "2026-07-20"], new Set(["2026-09-14", "2026-09-15"]))).toEqual({
       remove: ["2026-07-20"],

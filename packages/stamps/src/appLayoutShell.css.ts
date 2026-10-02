@@ -53,97 +53,95 @@ export const main = style({
   overflowY: "auto",
 });
 
-// ── Desktop topbar (≥ breakpoints.navMin) ───────────────────────────────────
+// ── The two bars, and which one shows ─────────────────────────────────────
+//
+// The topbar (words) shows above `breakpoints.navMin` and the mobile bar
+// (a menu) below it, by default. `AppLayout` then measures whether the
+// words fit the window and sets `data-nav` on the shell: "words" shows
+// the topbar at any width it fits, "menu" shows the menu. So a tablet or
+// a wide phone gets words, and the menu is only for when there is no room
+// (Austin, 2026-10-01). Until the first measurement the media query
+// decides, so the server render matches what most widths end up with.
+const WORDS = '[data-nav="words"] &';
+const MENU = '[data-nav="menu"] &';
 
 export const topbar = style({
   display: "none",
+  alignItems: "center",
+  gap: "32px",
+  padding: "10px 24px",
+  borderBottom: `1px solid ${semanticColors.surfaceBorder}`,
+  background: semanticColors.surfaceCard,
+  flexShrink: 0,
+  selectors: {
+    [WORDS]: { display: "flex" },
+  },
   "@media": {
     [`screen and (min-width: ${breakpoints.navMin})`]: {
       display: "flex",
-      alignItems: "center",
-      gap: "32px",
-      padding: "10px 24px",
-      borderBottom: `1px solid ${semanticColors.surfaceBorder}`,
-      background: semanticColors.surfaceCard,
-      flexShrink: 0,
+      selectors: { [MENU]: { display: "none" } },
+    },
+    // Words on a narrow screen: the same bar, tighter.
+    [`screen and (max-width: ${breakpoints.navMax})`]: {
+      selectors: { [WORDS]: { gap: "12px", padding: "10px 16px" } },
     },
   },
 });
 
 export const topbarLogo = style({
-  "@media": {
-    [`screen and (min-width: ${breakpoints.navMin})`]: {
-      display: "flex",
-      alignItems: "center",
-      flexShrink: 0,
-    },
-  },
+  display: "flex",
+  alignItems: "center",
+  flexShrink: 0,
 });
 
 export const topbarLogoImg = style({
-  "@media": {
-    [`screen and (min-width: ${breakpoints.navMin})`]: {
-      height: "22px",
-      width: "auto",
-      display: "block",
-    },
-  },
+  height: "22px",
+  width: "auto",
+  display: "block",
 });
 
 export const topbarNav = style({
-  "@media": {
-    [`screen and (min-width: ${breakpoints.navMin})`]: {
-      display: "flex",
-      alignItems: "center",
-      gap: "4px",
-      margin: "0 auto",
-    },
-  },
+  display: "flex",
+  alignItems: "center",
+  gap: "4px",
+  margin: "0 auto",
 });
 
 export const topbarProfile = style({
-  "@media": {
-    [`screen and (min-width: ${breakpoints.navMin})`]: {
-      flexShrink: 0,
-    },
-  },
+  flexShrink: 0,
 });
 
 // ── Mobile top nav (≤ breakpoints.navMax) ───────────────────────────────────
 
 export const topnav = style({
   display: "none",
+  background: semanticColors.surfaceCard,
+  borderBottom: `1px solid ${semanticColors.surfaceBorder}`,
+  position: "sticky",
+  top: 0,
+  zIndex: 100,
+  selectors: {
+    [MENU]: { display: "block" },
+  },
   "@media": {
     [`screen and (max-width: ${breakpoints.navMax})`]: {
       display: "block",
-      background: semanticColors.surfaceCard,
-      borderBottom: `1px solid ${semanticColors.surfaceBorder}`,
-      position: "sticky",
-      top: 0,
-      zIndex: 100,
+      selectors: { [WORDS]: { display: "none" } },
     },
   },
 });
 
 export const topnavBar = style({
-  "@media": {
-    [`screen and (max-width: ${breakpoints.navMax})`]: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      padding: "12px 16px",
-    },
-  },
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "12px 16px",
 });
 
 export const topnavMenu = style({
-  "@media": {
-    [`screen and (max-width: ${breakpoints.navMax})`]: {
-      borderTop: `1px solid ${semanticColors.surfaceBorder}`,
-      padding: "8px 16px 16px",
-      display: "flex",
-      flexDirection: "column",
-      gap: "2px",
-    },
-  },
+  borderTop: `1px solid ${semanticColors.surfaceBorder}`,
+  padding: "8px 16px 16px",
+  display: "flex",
+  flexDirection: "column",
+  gap: "2px",
 });

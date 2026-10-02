@@ -1441,6 +1441,7 @@ export async function runGraphStructure(
 
       const durationMs = Date.now() - callStart;
       await recordGraphLogUsage({
+        runId: perf.runId,
         humanId: actingHumanId,
         projectFolderId: projectFolder._id,
         stage: "graph-structure",
@@ -1561,6 +1562,7 @@ export async function runGraphStructure(
     log(`graph-structure: couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
     const durationMs = Date.now() - runCallStart;
     await recordGraphLogUsage({
+      runId: perf.runId,
       humanId: actingHumanId,
       projectFolderId: projectFolder._id,
       stage: "graph-structure",

@@ -23,6 +23,7 @@ import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import {
+  effortsDecisionFromEvents,
   getGraphLogRun,
   type GraphLogPerfEventType,
   type GraphLogRun,
@@ -30,6 +31,8 @@ import {
 } from "robustness-core/data/graphLogPerf.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { getGraphLogRunSpend } from "robustness-core/data/graphLogMetrics.server";
+import { RunSpendSection } from "../components/RunSpend";
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -48,14 +51,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const found = await getGraphLogRun(runId);
   if (!found) throw data("Run not found", { status: 404 });
 
-  const [projectFolder, [human]] = await Promise.all([
+  const [projectFolder, [human], spend] = await Promise.all([
     getFolderById(found.run.project_folder_id),
     getHumansById([found.run.human_id]),
+    getGraphLogRunSpend(found.run),
   ]);
 
   return {
     run: found.run,
     events: found.events,
+    spend,
+    effortsDecision: effortsDecisionFromEvents(found.events),
     projectName: projectFolder?.name ?? "(deleted project)",
     humanName: human?.name ?? found.run.human_id,
   };
@@ -209,7 +215,7 @@ const TYPE_LABEL: Record<GraphLogPerfEventType, string> = {
 // check that never ran, which is the same class of quiet failure the
 // banner exists to stop.
 
-const COVERAGE_JOB_NAMES = new Set(["run", "graph-project-view"]);
+const COVERAGE_JOB_NAMES = new Set(["run", "print", "graph-project-view"]);
 
 function CoverageList({ label, items }: { label: string; items: string[] }) {
   if (items.length === 0) return null;
@@ -233,14 +239,17 @@ function CoverageSection({
   jobName,
   coverage,
   readmeChanged,
+  held,
 }: {
   jobName: string;
   coverage: GraphLogRun["coverage"];
   readmeChanged: boolean | null;
+  held: boolean;
 }) {
   // A reset or a sync-only job never had a README to measure. Saying
-  // "not measured" there would be noise, not signal.
-  if (!COVERAGE_JOB_NAMES.has(jobName)) return null;
+  // "not measured" there would be noise, not signal. Neither would it on
+  // a night that held the page for a print: the Spend line says so.
+  if (!COVERAGE_JOB_NAMES.has(jobName) || held) return null;
 
   if (!coverage) {
     return (
@@ -393,7 +402,7 @@ function EventRow({
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 export default function FruitsMakerGraphLogRun() {
-  const { run, events, projectName, humanName } = useLoaderData<typeof loader>();
+  const { run, events, spend, effortsDecision, projectName, humanName } = useLoaderData<typeof loader>();
 
   const maxDurationMs = Math.max(1, ...events.map((e) => e.duration_ms));
 
@@ -461,7 +470,8 @@ export default function FruitsMakerGraphLogRun() {
               </ul>
             </div>
           )}
-          <CoverageSection jobName={run.job_name} coverage={run.coverage ?? null} readmeChanged={run.readme_changed ?? null} />
+          <CoverageSection jobName={run.job_name} coverage={run.coverage ?? null} readmeChanged={run.readme_changed ?? null} held={effortsDecision?.reason === "held-for-print"} />
+          <RunSpendSection spend={spend} decision={effortsDecision} />
         </div>
 
         <div className="flex items-center gap-3 mb-3 flex-wrap">

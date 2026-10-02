@@ -31,19 +31,21 @@ import { isIncompleteBannerText, splitFrontmatter, type ProjectStatus } from "ro
 import { getProjectSharing, resolveRole } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
-import { listCardsForProject } from "robustness-core/data/dailyLog.server";
-import { listSeedDays } from "robustness-core/data/seed.server";
+import { projectLogbook } from "robustness-core/data/citedLogs.server";
 import { loadBudget } from "robustness-core/data/budget.server";
 import { currentSeedRound, listPacketFiles, listSeedQuestions } from "robustness-core/data/seedPackets.server";
 import { SeedPacket, SeedRoundQuiet, type SeedingForPage } from "../components/SeedPacket";
 import { BudgetView, type BudgetNames } from "../components/BudgetView";
-import { getHumansById } from "robustness-core/data/humans.server";
+import { getHumansById, isStaff } from "robustness-core/data/humans.server";
+import { getEffortsPrintedAt, printAllowance } from "robustness-core/data/effortsPrint.server";
+import { PrintUpdate, type PrintForPage } from "../components/PrintUpdate";
 import { firstName } from "robustness-core/data/humanNames";
 import {
   PROJECT_TAB_LABELS,
   TAB_FOLDERS,
   resolveProjectTab,
   rowsForReader,
+  servedFileIds,
   tabsFor,
 } from "robustness-core/data/projectView.server";
 import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
@@ -56,7 +58,7 @@ import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/Pinn
 import OxRenderer from "../components/OxRenderer";
 import { ProjectFilesView } from "../components/ProjectFilesView";
 import { ProjectView } from "../components/ProjectView";
-import type { MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
+import type { CitedLogsForPen, MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
 import { sprinkles } from "stamps/sprinkles.css";
 import { button } from "stamps/button.css";
 import { CenterContent } from "stamps/CenterContent";
@@ -102,6 +104,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const files: ProjectFileRow[] | null =
     tabFolders && folder.folder_type === "project-n02" ? rowsForReader(await loadProjectFiles(folder), features) : null;
   const logbook = tab === "logbook" ? await projectLogbook(folder) : null;
+  // A Card names its writer's originals; a reader opens the project's
+  // copies, by the same rows the file tabs are built from.
+  const logbookFileIds = logbook ? servedFileIds(await loadProjectFiles(folder), features) : null;
   // Seeding (`seedPackets.server.ts`): while a round is open, everyone
   // with a role on the project has their own seed packet here; Guides
   // also get Sow, the round's two ends, and everyone's packets. Someone
@@ -151,6 +156,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const people = await projectPeople(sharing);
   // Moving a passage, filing a file, confirming a cost (`features.ts`).
   const canEdit = features.includes("edit");
+  // "Read the full log" in the pen: the Logbook's words, so the Logbook's
+  // feature, on the role's own list as /api/graphlog/cited-logs checks it.
+  const canReadLog = !!role?.features.includes("logbook");
   // What someone without `feeds` writes waits for a Guide
   // (`suggestions.server.ts`): a Guide sees every one, the writer their own.
   const decides = features.includes("suggestions");
@@ -179,6 +187,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }),
   );
 
+  // "Print an update" (ADR-030): the date for everyone who reads the page,
+  // the button for a role on the list or staff. The allowance reads the
+  // role's own features, never the Observer fallback above: a share from
+  // before roles reads the page and doesn't print.
+  const print: PrintForPage | null = tab === "efforts"
+    ? await (async () => {
+        const printedAt = await getEffortsPrintedAt(folder);
+        return { printedAt, allowance: printAllowance({ features: role?.features ?? [], isStaff: isStaff(user), printedAt, now: new Date() }) };
+      })()
+    : null;
+
   return {
     // Every other route surfaces `user` in its own loader data for
     // `useUser()`/`permissions.isAdmin()` to find via `useMatches()` --
@@ -196,6 +215,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     canEditStatus: !!role?.guiding,
     canMark,
     canEdit,
+    canReadLog,
     decides,
     suggestions,
     people,
@@ -220,10 +240,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // the component, which would pull a `.server` module into the bundle).
     fileKinds: FILING_KINDS.filter((k) => k !== "video"),
     logbook,
+    logbookFileIds,
     seeding,
     budgetView,
     budget,
     budgetNames,
+    print,
     canBudget: features.includes("budget"),
   };
 }
@@ -351,23 +373,6 @@ async function projectPeople(sharing: { human: string; role: string }[]) {
     .sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || a.name.localeCompare(b.name));
 }
 
-/** Every Card written to the project, one per person per day, newest
- * day first. */
-/** The Cards, and the seed days beside them: a seed day is nobody's Card
- * (Austin, 2026-09-29: "never as someone's daily log"), so it is pinned
- * under "Seed" with its own badge, where the groups that see logs see it. */
-async function projectLogbook(folder: Parameters<typeof listSeedDays>[0]) {
-  const cards = (await listCardsForProject(folder._id)).filter((c) => c.content.trim());
-  const names = new Map(
-    (await getHumansById([...new Set(cards.map((c) => c.humanId))])).map((h) => [h._id, firstName(h)]),
-  );
-  const seed = (await listSeedDays(folder)).map((s) => ({ fileId: s.fileId, who: "Seed", date: s.date, content: s.content, seeded: true }));
-  return [
-    ...cards.map((c) => ({ fileId: c.fileId, who: names.get(c.humanId) ?? "Someone", date: c.date, content: c.content, seeded: false })),
-    ...seed,
-  ].sort((a, b) => b.date.localeCompare(a.date) || Number(a.seeded) - Number(b.seeded) || a.who.localeCompare(b.who));
-}
-
 /** A seed day without its front matter: the sections as the seeder wrote
  * them, headings and all, so a reader sees whose words each group is. */
 function seedDayBody(markdown: string): string {
@@ -448,7 +453,15 @@ function ProjectStatusControl({
 /** The Logbook: what each person wrote about this project, one card per
  * person per day, pinned into a scrapbook. Read-only; each person edits
  * their own on the Daily Log. */
-function Logbook({ cards }: { cards: { fileId: string; who: string; date: string; content: string; seeded: boolean }[] }) {
+function Logbook({
+  cards,
+  fileIds,
+}: {
+  cards: { fileId: string; who: string; date: string; content: string; seeded: boolean }[];
+  /** The id each Card attachment loads by (`servedFileIds`,
+   * `projectView.server.ts`). */
+  fileIds: Record<string, string>;
+}) {
   if (cards.length === 0) {
     return (
       <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
@@ -460,7 +473,8 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
     <PinnedCardWall>
       {cards.map((c) => (
         <PinnedCard key={c.fileId} title={c.who} label={c.seeded ? `${longDate(c.date)} · seeded history` : longDate(c.date)} data-logbook-card data-seeded={c.seeded || undefined}>
-          <OxRenderer markdown={c.seeded ? seedDayBody(c.content) : c.content} />
+          {/* A seed day is the project's own file: it names no one's originals. */}
+          {c.seeded ? <OxRenderer markdown={seedDayBody(c.content)} /> : <OxRenderer markdown={c.content} servedFileIds={fileIds} />}
         </PinnedCard>
       ))}
     </PinnedCardWall>
@@ -468,7 +482,7 @@ function Logbook({ cards }: { cards: { fileId: string; who: string; date: string
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, seeding, budgetView, budget, budgetNames, canBudget } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -534,6 +548,21 @@ export default function NewspaperRoute() {
         return data;
       } catch {
         return "Couldn't look that up. Check your connection and try again.";
+      }
+    },
+    [folder._id, livePageHash],
+  );
+
+  const loadLog = useCallback(
+    async (unitKey: string): Promise<CitedLogsForPen | string> => {
+      try {
+        const params = new URLSearchParams({ projectFolderId: folder._id, pageHash: livePageHash, unitKey });
+        const res = await fetch(`/api/graphlog/cited-logs?${params}`);
+        const data = (await res.json().catch(() => ({}))) as CitedLogsForPen & { error?: string };
+        if (!res.ok) return data.error ?? "Couldn't open the log. Try again.";
+        return data;
+      } catch {
+        return "Couldn't open the log. Check your connection and try again.";
       }
     },
     [folder._id, livePageHash],
@@ -618,9 +647,11 @@ export default function NewspaperRoute() {
       loadMoveOptions: canEdit ? loadMoveOptions : undefined,
       onMove: canEdit ? onMove : undefined,
       onMoveAction,
+      // No log for someone whose group has no Logbook (a Client).
+      loadLog: canReadLog ? loadLog : undefined,
       skipParagraph: isIncompleteBannerText,
     }),
-    [marks, canMark, canEdit, onSend, onErase, loadMoveOptions, onMove, onMoveAction, viewerId],
+    [marks, canMark, canEdit, canReadLog, onSend, onErase, loadMoveOptions, onMove, onMoveAction, loadLog, viewerId],
   );
 
   return (
@@ -669,6 +700,9 @@ export default function NewspaperRoute() {
           </Cluster>
         </Stack>
         <CardTabs tabs={tabs} active={tab} label="Project">
+          {tab === "efforts" && print && (
+            <PrintUpdate projectFolderId={folder._id} print={print} onPrinted={() => revalidator.revalidate()} />
+          )}
           {tab === "efforts" && (
             <ProjectView body={body} galleryFolders={galleryFolders} annotations={annotations} />
           )}
@@ -697,7 +731,7 @@ export default function NewspaperRoute() {
               canFile={canEdit}
             />
           )}
-          {logbook && <Logbook cards={logbook} />}
+          {logbook && <Logbook cards={logbook} fileIds={logbookFileIds ?? {}} />}
           {suggestions && (
             <SuggestionsView
               projectFolderId={folder._id}

@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { canReadFile } from "robustness-core/data/featureAccess.server";
+import { readableFile } from "robustness-core/data/featureAccess.server";
 import { redirect } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFileRefById } from "robustness-core/data/vault.server";
@@ -29,7 +29,7 @@ import { getPresignedViewUrl } from "robustness-core/data/file.server";
  * this too, same as `/api/vault/download/:fileId` already could; this used
  * to be session-only, a real inconsistency found while pulling production
  * files down for local dev). Owners and anyone with view access via a
- * shared folder may use this; see `canReadFile`.
+ * shared folder may use this; see `readableFile`.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getUserFromRequest(request);
@@ -42,12 +42,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return Response.json({ error: "fileId required" }, { status: 400 });
   }
 
-  const file = await getFileRefById(fileId);
-  if (!file) {
+  const asked = await getFileRefById(fileId);
+  if (!asked) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  if (!(await canReadFile(user._id, file))) {
+  // The file asked for, or the project's copy of it when it is a writer's
+  // original the reader can't open (`readableFile`).
+  const file = await readableFile(user._id, asked);
+  if (!file) {
     // The same 404 as a file that doesn't exist (ADR-023): a refusal
     // says nothing about what was there.
     return Response.json({ error: "Not found" }, { status: 404 });

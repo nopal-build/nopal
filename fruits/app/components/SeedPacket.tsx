@@ -107,8 +107,12 @@ export function SeedPacket({
         </p>
         <input ref={input} type="file" multiple hidden aria-label="Add files to your seed packet" onChange={(e) => add(e.target.files)} />
         {files.length > 0 && (
-          <ul className={textSize.xs} style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {files.map((f) => (
+          // Ten lines, then the list scrolls inside the tile rather than
+          // pushing the page down (Austin, 2026-10-01). Waiting files sit
+          // on top: they are the ones with something to do (Take out), and
+          // a scrolled list would otherwise bury them under what is sown.
+          <ul className={textSize.xs} style={{ listStyle: "none", padding: 0, margin: 0, maxHeight: "10lh", overflowY: "auto" }}>
+            {[...files.filter((f) => !f.sown), ...files.filter((f) => f.sown)].map((f) => (
               <li key={f.id} className={sprinkles({ display: "flex", alignItems: "baseline", gap: 2 })}>
                 <a href={`/api/seed-packet/${f.id}`} target="_blank" rel="noreferrer" style={{ overflowWrap: "anywhere" }}>
                   {f.name}
@@ -192,7 +196,7 @@ function sowSentence(r: SowResult): string {
   const q = r.questions ?? 0;
   const questions = q === 0 ? " No questions." : q > QUESTION_NOTICE ? ` ${q} questions, which is a lot. They're in Suggestions.` : ` ${q} ${q === 1 ? "question" : "questions"} in Suggestions.`;
   const left = r.incomplete?.length ? ` ${r.incomplete.length} didn't finish and ${r.incomplete.length === 1 ? "is" : "are"} still waiting.` : "";
-  return `Sowed ${files}${days}${docs}.${questions}${left} Run GraphLog to build from it.`;
+  return `Sowed ${files}${days}${docs}.${questions}${left} Print an update on the Efforts tab to build the page from it.`;
 }
 
 export function SeedRoundControls({ projectFolderId, seeding, onChanged }: { projectFolderId: string; seeding: SeedingForPage; onChanged: () => void }) {

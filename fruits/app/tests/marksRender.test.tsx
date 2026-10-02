@@ -52,10 +52,10 @@ describe("the pen", () => {
     expect(html).not.toContain("ox-mark-notes");
   });
 
-  it("writes each sentence's notes right after that sentence, not at the end of the paragraph", () => {
-    // The notes float into the margin, so where they sit in the flow is
-    // where they land beside the prose. Pooling them at the end put a
-    // note about the last sentence level with the first.
+  it("puts no note in the text: a mark after each marked sentence, the words in the margin's own layer", () => {
+    // A note in the flow makes the page taller by its own height. Nothing
+    // of a note is in the text but the small mark that opens it where
+    // there is no margin; the words are rendered once, in the layer.
     const two = computeMarkUnitsFromMarkdown(PAGE).filter((u) => u.kind === "sentence").slice(0, 2);
     const annotations: OxAnnotations = {
       canMark: false,
@@ -66,17 +66,26 @@ describe("the pen", () => {
       ],
     };
     const html = renderToStaticMarkup(<OxRenderer markdown={PAGE} annotations={annotations} />);
-    // Each note follows the words it is about, so the first note lands
-    // before the second sentence's own text begins.
-    const firstNote = html.indexOf("FIRST NOTE");
-    const secondSentence = html.indexOf("Nobody is logging");
-    const secondNote = html.indexOf("SECOND NOTE");
-    expect(firstNote).toBeGreaterThan(-1);
-    expect(firstNote).toBeLessThan(secondSentence);
-    expect(secondSentence).toBeLessThan(secondNote);
+    const layer = html.indexOf('class="ox-mark-margin"');
+    const text = html.slice(0, layer);
+    expect(layer).toBeGreaterThan(-1);
+    expect(text).not.toContain("FIRST NOTE");
+    expect(text).not.toContain("SECOND NOTE");
+    expect(text).not.toContain("ox-mark-notes");
+    // Each marked sentence is followed by its own mark, before the next
+    // sentence begins.
+    const handles = [...text.matchAll(/class="ox-mark-handle"/g)].map((m) => m.index!);
+    expect(handles.length).toBe(2);
+    const secondSentence = text.indexOf("Nobody is logging");
+    expect(handles[0]).toBeLessThan(secondSentence);
+    expect(secondSentence).toBeLessThan(handles[1]);
+    // In the layer, each group says which thought it belongs to.
+    const margin = html.slice(layer);
+    expect(margin).toContain(`data-notes-for="${two[0].key}"`);
+    expect(margin.indexOf("FIRST NOTE")).toBeLessThan(margin.indexOf("SECOND NOTE"));
   });
 
-  it("puts marks in the margin beside their unit, stacked", () => {
+  it("shows only the words of a note: no name, no date", () => {
     const annotations: OxAnnotations = {
       canMark: false,
       viewerId: "admin_1",
@@ -87,9 +96,19 @@ describe("the pen", () => {
     };
     const html = renderToStaticMarkup(<OxRenderer markdown={PAGE} annotations={annotations} />);
     expect(html).toContain("Eaves started Monday.");
-    expect(html).toContain("Lucas, Sep 18");
-    expect(html).toContain("James, Sep 19");
+    expect(html).toContain("Plywood on site?");
+    for (const gone of ["Lucas", "James", "james@", "Sep 18", "Sep 19", "2026-09-18"]) expect(html).not.toContain(gone);
+    // Two notes on one thought: one group in the margin, one mark in the text.
     expect(html.match(/class="ox-mark-note"/g)?.length).toBe(2);
+    expect(html.match(/class="ox-mark-notes"/g)?.length).toBe(1);
+    expect(html.match(/class="ox-mark-handle"/g)?.length).toBe(1);
     expect(html).toContain("ox-markable--marked");
+  });
+
+  it("has nothing of the margin on a page with no marks", () => {
+    const annotations: OxAnnotations = { marks: [], viewerId: "admin_1", canMark: true, onSend: async () => null };
+    const html = renderToStaticMarkup(<OxRenderer markdown={PAGE} annotations={annotations} />);
+    expect(html).not.toContain("ox-mark-margin");
+    expect(html).not.toContain("ox-mark-handle");
   });
 });

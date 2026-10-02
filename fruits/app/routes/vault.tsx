@@ -2902,7 +2902,8 @@ export default function VaultV2Page() {
   const handleToggleGraphLogSchedule = async () => {
     if (current.kind !== "folder") return;
     const folder = current.folder;
-    const nextScheduled = folder.graphlog_scheduled !== true;
+    // On unless an admin turned it off (ADR-030), so the flip reads `false`.
+    const nextScheduled = folder.graphlog_scheduled === false;
     setGraphLogScheduleBusy(true);
     try {
       const data = await apiJson("/api/graphlog/schedule", {
@@ -3286,7 +3287,7 @@ export default function VaultV2Page() {
     currentFolderType === "project-n02" &&
     permissions.isAdmin(user)
   ) {
-    const graphLogScheduled = current.folder.graphlog_scheduled === true;
+    const graphLogScheduled = current.folder.graphlog_scheduled !== false;
     const graphLogRunning = graphLogStatus?.running === true;
     moreActions.push({
       label: graphLogScheduled ? "Disable GraphLog Schedule" : "Enable GraphLog Schedule",

@@ -4,9 +4,12 @@
  *
  * A reader points at a thought (a heading, a bullet, a sentence, a photo;
  * see `oxmarkdown-core/src/markUnits.ts` for exactly what counts and why
- * nothing smaller does), writes what they think in a small box, and sends.
- * The words move out to the margin in the handwritten font, the way you
- * would write on paper.
+ * nothing smaller does), writes what they think in a small box, and shares
+ * it. The words move out to the margin in the handwritten font, the way
+ * you would write on paper, with an arrow back to what they are about
+ * (`MarkMargin.tsx`); where there is no margin they wait behind a small
+ * mark at the end of the thought (`MarkNotes`). Either way a note is
+ * never in the text's own flow, so it never makes the page taller.
  *
  * Plain on purpose. The visual belongs to Gerald; what this owes him is
  * the unit, the mark's fields, and a page that leaves room for a margin.
@@ -16,7 +19,7 @@
  * output is exactly what it was.
  */
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   computeMarkUnits,
   markUnitLocator,
@@ -89,6 +92,9 @@ export interface OxAnnotations {
   /** Confirms or undoes a move a mark asked for. Resolves to an error
    * message, or null once done. */
   onMoveAction?: (moveId: string, action: "confirm" | "undo") => Promise<string | null>;
+  /** The daily logs a passage came from, for "Read the full log". Only
+   * passed for a reader whose group has the Logbook. */
+  loadLog?: (unitKey: string) => Promise<CitedLogsForPen | string>;
   /** Paragraphs that are not thoughts (a system banner). Must match what
    * the server uses to validate a mark, or keys will disagree. */
   skipParagraph?: (text: string) => boolean;
@@ -108,6 +114,20 @@ export interface MoveOptions {
   projects: { id: string; name: string }[];
 }
 
+/** The logs a passage came from, as the Logbook shows them
+ * (`api.graphlog.cited-logs.tsx`). */
+export interface CitedLogsForPen {
+  entries: { fileId: string; who: string; date: string; seeded: boolean; markdown: string }[];
+  /** Something it cites is not a daily log (a note, a seeded document). */
+  other: boolean;
+  /** The id each Card attachment loads by (`servedFileIds`). */
+  fileIds: Record<string, string>;
+}
+
+/** Draws a Card. The pen sits inside `OxRenderer` and can't import it, so
+ * the renderer hands this over when it builds the pen's context. */
+export type RenderCard = (markdown: string, servedFileIds?: Record<string, string>) => ReactNode;
+
 /** What the tree walk carries: the page's units, found by the offset of
  * the node being rendered, and the marks on each. */
 export interface AnnotationCtx {
@@ -123,9 +143,11 @@ export interface AnnotationCtx {
   loadMoveOptions?: OxAnnotations["loadMoveOptions"];
   onMove?: OxAnnotations["onMove"];
   onMoveAction?: OxAnnotations["onMoveAction"];
+  loadLog?: OxAnnotations["loadLog"];
+  renderCard?: RenderCard;
 }
 
-export function buildAnnotationCtx(doc: OxDocument, annotations: OxAnnotations): AnnotationCtx {
+export function buildAnnotationCtx(doc: OxDocument, annotations: OxAnnotations, renderCard?: RenderCard): AnnotationCtx {
   const units = computeMarkUnits(doc, { skipParagraph: annotations.skipParagraph });
   const byLocator = new Map(units.map((u) => [markUnitLocator(u.offset, u.sentence), u]));
   const marksByKey = new Map<string, OxMarkNote[]>();
@@ -149,6 +171,8 @@ export function buildAnnotationCtx(doc: OxDocument, annotations: OxAnnotations):
     loadMoveOptions: annotations.loadMoveOptions,
     onMove: annotations.onMove,
     onMoveAction: annotations.onMoveAction,
+    loadLog: annotations.loadLog,
+    renderCard,
   };
 }
 
@@ -172,6 +196,8 @@ export function MarkableUnit({
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
+  // A Card wants more room than a mark does.
+  const [reading, setReading] = useState(false);
   const marked = ctx.marksFor(unit.key).length > 0;
   const Tag = as;
   const className = `ox-markable${ctx.canMark ? " ox-markable--pen" : ""}${marked ? " ox-markable--marked" : ""}${open ? " ox-markable--open" : ""}`;
@@ -195,9 +221,25 @@ export function MarkableUnit({
       }}
     >
       {children}
-      <OxPopover anchorEl={anchorEl} open={open} onDismiss={() => setOpen(false)} className="ox-mark-popover">
+      <OxPopover
+        anchorEl={anchorEl}
+        open={open}
+        onDismiss={() => {
+          setOpen(false);
+          setReading(false);
+        }}
+        className={`ox-mark-popover${reading ? " ox-mark-popover--reading" : ""}`}
+      >
         {/* Only ever the reader's own words: see `MarkPen`. */}
-        <MarkPen unit={unit} ctx={ctx} onDone={() => setOpen(false)} />
+        <MarkPen
+          unit={unit}
+          ctx={ctx}
+          onDone={() => {
+            setOpen(false);
+            setReading(false);
+          }}
+          onReadingChange={setReading}
+        />
       </OxPopover>
     </Tag>
   );
@@ -218,8 +260,90 @@ export function MarkableUnit({
  * graph and a line in the project's `Syncs/Marks/` record), so the box
  * opens blank again and what you write is a new one.
  */
-function MarkPen({ unit, ctx, onDone }: { unit: MarkUnit; ctx: AnnotationCtx; onDone: () => void }) {
-  return <MarkComposer unit={unit} ctx={ctx} onDone={onDone} mine={ctx.mineOn(unit.key)} />;
+function MarkPen({
+  unit,
+  ctx,
+  onDone,
+  onReadingChange,
+}: {
+  unit: MarkUnit;
+  ctx: AnnotationCtx;
+  onDone: () => void;
+  onReadingChange: (reading: boolean) => void;
+}) {
+  return <MarkComposer unit={unit} ctx={ctx} onDone={onDone} onReadingChange={onReadingChange} mine={ctx.mineOn(unit.key)} />;
+}
+
+/**
+ * "Read the full log": the daily logs a passage came from, read in the
+ * pen's own box (Austin, 2026-10-01).
+ *
+ * In place of the writing, the way the move form is, and not a second
+ * popover: `OxPopover` closes on any press outside itself, so a popover
+ * opened from the pen would close the pen. Back returns to whatever was
+ * typed. Others' words are never stacked over your box (the pen is not a
+ * thread); while you read, there is no box.
+ *
+ * Each Card is the whole day as the Logbook shows it. A citation names a
+ * person's day, not a sentence, so this never claims to show "the line".
+ */
+function LogReader({ unit, ctx, onBack }: { unit: MarkUnit; ctx: AnnotationCtx; onBack: () => void }) {
+  const [loaded, setLoaded] = useState<CitedLogsForPen | string | null>(null);
+  const loadLog = ctx.loadLog;
+  useEffect(() => {
+    if (!loadLog) return;
+    let live = true;
+    void loadLog(unit.key).then((result) => {
+      if (live) setLoaded(result);
+    });
+    return () => {
+      live = false;
+    };
+  }, [loadLog, unit.key]);
+
+  return (
+    <div className="ox-mark-log">
+      {loaded === null && <div className="ox-mark-move__row">Looking…</div>}
+      {typeof loaded === "string" && <div className="ox-mark-error">{loaded}</div>}
+      {loaded && typeof loaded !== "string" && <LogEntries logs={loaded} renderCard={ctx.renderCard} />}
+      <div className="ox-mark-actions">
+        <button type="button" className={QUIET} onClick={onBack}>
+          Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The logs themselves, labelled the way the Logbook labels its cards.
+ * Exported so a test can draw it without the pen around it. */
+export function LogEntries({ logs, renderCard }: { logs: CitedLogsForPen; renderCard?: RenderCard }) {
+  if (logs.entries.length === 0) {
+    return <div className="ox-mark-move__note">There's no daily log to show for this line.</div>;
+  }
+  return (
+    <>
+      {logs.entries.map((e) => (
+        <section key={e.fileId} className="ox-mark-log__entry" data-cited-log>
+          <div className="ox-mark-log__label">
+            {e.who} · {longDate(e.date)}
+            {e.seeded ? " · seeded history" : ""}
+          </div>
+          {/* A seed day is the project's own file: it names no one's originals. */}
+          {renderCard?.(e.markdown, e.seeded ? undefined : logs.fileIds)}
+        </section>
+      ))}
+      {logs.other && (
+        <div className="ox-mark-move__note">Part of this line comes from a note or a seeded document, not a daily log.</div>
+      )}
+    </>
+  );
+}
+
+/** "Tue, Sep 9", as the Logbook writes a day. */
+function longDate(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 /**
@@ -406,11 +530,13 @@ function MarkComposer({
   unit,
   ctx,
   onDone,
+  onReadingChange,
   mine,
 }: {
   unit: MarkUnit;
   ctx: AnnotationCtx;
   onDone: () => void;
+  onReadingChange: (reading: boolean) => void;
   /** The reader's own unread mark on this thought, which this is then an
    * edit of rather than a new one. */
   mine?: OxMarkNote;
@@ -419,6 +545,13 @@ function MarkComposer({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
+  const [reading, setReadingState] = useState(false);
+  const setReading = (next: boolean) => {
+    setReadingState(next);
+    onReadingChange(next);
+  };
+  // The writing steps out of the way while either is open.
+  const away = moving || reading;
 
   const send = async () => {
     if (!text.trim() || !ctx.onSend) return;
@@ -454,13 +587,13 @@ function MarkComposer({
     <Surface
       className={`${box} ox-mark-composer`}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !reading) {
           e.preventDefault();
           void send();
         }
       }}
     >
-      {!moving && (
+      {!away && (
         <div className={well}>
           <Input
             type="textarea"
@@ -474,14 +607,25 @@ function MarkComposer({
           />
         </div>
       )}
-      {!moving && <hr className={divider} />}
+      {!away && <hr className={divider} />}
       <div className={footerArea}>
-      {error && !moving && <div className="ox-mark-error">{error}</div>}
-      {/* One quiet row: the other thing you can do on the left, the
+      {error && !away && <div className="ox-mark-error">{error}</div>}
+      {/* One quiet row: the other things you can do on the left, the
           stamp's small copy action on the right. */}
       <div className="ox-mark-footer">
-      <MoveControl unit={unit} ctx={ctx} text={text} onDone={onDone} onOpenChange={setMoving} />
-      {!moving && (
+      {reading ? (
+        <LogReader unit={unit} ctx={ctx} onBack={() => setReading(false)} />
+      ) : (
+        <div className={`ox-mark-footer__links${moving ? " ox-mark-footer__links--open" : ""}`}>
+          {!moving && ctx.loadLog && (
+            <button type="button" className={`${link} ox-mark-move__open`} onClick={() => setReading(true)}>
+              Read the full log
+            </button>
+          )}
+          <MoveControl unit={unit} ctx={ctx} text={text} onDone={onDone} onOpenChange={setMoving} />
+        </div>
+      )}
+      {!away && (
       <div className="ox-mark-actions">
         {mine && ctx.onErase && (
           <button type="button" className={`${QUIET} ox-mark-actions__erase`} disabled={sending} onClick={() => void erase()}>
@@ -492,7 +636,7 @@ function MarkComposer({
           Cancel
         </button>
         <button type="button" className={ACT} disabled={sending || !text.trim()} onClick={() => void send()}>
-          {sending ? "Saving" : mine ? "Save" : "Send"}
+          {sending ? "Saving" : mine ? "Save" : "Share"}
         </button>
       </div>
       )}
@@ -502,16 +646,29 @@ function MarkComposer({
   );
 }
 
-/** The margin: every mark on the given units, stacked in the order they
- * were written. Renders nothing when there are none, so an unmarked page
- * has no margin elements at all. */
-export function MarkNotes({ ctx, unitKeys }: { ctx: AnnotationCtx; unitKeys: string[] }) {
-  const notes = unitKeys.flatMap((k) => ctx.marksFor(k));
-  if (notes.length === 0) return null;
+/** The words of the notes on one thought, and nothing else: no name and
+ * no date (Austin, 2026-10-01: "we want only the words of the
+ * annotation"). What a note is waiting on, and the one thing to do about
+ * a move, stay: they are the page talking, not a byline. Your own note is
+ * drawn a little heavier, which is how you know which one the pen opens.
+ *
+ * Shown in two places and never in the text itself, so a note cannot
+ * make the page taller: in the margin on a screen with room for one
+ * (`MarkMargin.tsx`), and behind a small mark at the end of the thought
+ * where there is none (`MarkNotes`, below). */
+export function MarkNoteList({
+  notes,
+  viewerId,
+  onMoveAction,
+}: {
+  notes: OxMarkNote[];
+  viewerId: string;
+  onMoveAction?: OxAnnotations["onMoveAction"];
+}) {
   return (
-    <span className="ox-mark-notes" role="note">
+    <>
       {notes.map((n) => (
-        <span key={n.id} className={`ox-mark-note${n.authorHumanId === ctx.viewerId ? " ox-mark-note--mine" : ""}`}>
+        <span key={n.id} className={`ox-mark-note${n.authorHumanId === viewerId ? " ox-mark-note--mine" : ""}`}>
           <span className="ox-mark-note__text">{n.text}</span>
           {n.suggestion ? (
             <span className="ox-mark-note__waiting">a suggestion, waiting for a Guide</span>
@@ -522,13 +679,61 @@ export function MarkNotes({ ctx, unitKeys }: { ctx: AnnotationCtx; unitKeys: str
           {n.move?.status === "requested" && (
             <span className="ox-mark-note__moved">asks to file this under another project</span>
           )}
-          {n.move && ctx.onMoveAction && <MoveAction move={n.move} onMoveAction={ctx.onMoveAction} />}
-          <span className="ox-mark-note__by">
-            {firstName(n.authorName)}, {shortDate(n.date)}
-          </span>
+          {n.move && onMoveAction && <MoveAction move={n.move} onMoveAction={onMoveAction} />}
         </span>
       ))}
-    </span>
+    </>
+  );
+}
+
+/**
+ * The notes on a thought, where the screen has no margin: a small mark at
+ * the end of the thought that opens them, the way a citation's `*` opens
+ * its source (`RefDirectiveMarker`, `OxRenderer.tsx`). Same component
+ * underneath, `OxPopover`: beside the mark on a tablet, a sheet from the
+ * bottom on a phone.
+ *
+ * The notes used to sit under their line here, in the flow, which made
+ * the text taller by every note on it. Now the only thing in the flow is
+ * the mark. On a screen with a margin the stylesheet takes the mark away
+ * and `MarkMargin.tsx` shows the same words beside the text.
+ *
+ * Renders nothing when the units have no marks, so an unmarked page has
+ * nothing of the pen's in it at all.
+ */
+export function MarkNotes({ ctx, unitKeys }: { ctx: AnnotationCtx; unitKeys: string[] }) {
+  const notes = unitKeys.flatMap((k) => ctx.marksFor(k));
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [open, setOpen] = useState(false);
+  if (notes.length === 0) return null;
+  return (
+    <>
+      <button
+        ref={setAnchorEl}
+        type="button"
+        className="ox-mark-handle"
+        aria-expanded={open}
+        aria-label={notes.length === 1 ? "Read the note on this" : `Read the ${notes.length} notes on this`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <NoteGlyph />
+      </button>
+      <OxPopover anchorEl={anchorEl} open={open} onDismiss={() => setOpen(false)} className="ox-mark-notes-popover">
+        <div className="ox-mark-notes" role="note">
+          <MarkNoteList notes={notes} viewerId={ctx.viewerId} onMoveAction={ctx.onMoveAction} />
+        </div>
+      </OxPopover>
+    </>
+  );
+}
+
+/** The mark: the margin's arrow, small, pointing back at the words. */
+function NoteGlyph() {
+  return (
+    <svg width="14" height="12" viewBox="0 0 14 12" fill="none" aria-hidden="true">
+      <path d="M13 2.5C8.5 1.5 4.5 3.5 2.5 8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M1 4.5L2.5 8.8L6.5 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -562,17 +767,4 @@ function MoveAction({
       {error && <span className="ox-mark-error">{error}</span>}
     </span>
   );
-}
-
-function firstName(name: string): string {
-  const first = name.trim().split(/[\s@]+/)[0] ?? name;
-  return first ? first.charAt(0).toUpperCase() + first.slice(1) : name;
-}
-
-/** "Sep 18" from `2026-09-18`, formatted by hand so server and client
- * render the same text (no locale or time zone involved). */
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function shortDate(date: string): string {
-  const [, m, d] = date.split("-").map(Number);
-  return m && d ? `${MONTHS[m - 1]} ${d}` : date;
 }

@@ -86,6 +86,7 @@ import {
   getReadmeFileForFolder,
   listFolderChildren,
   updateFileRef,
+  updateVaultFolder,
   type VaultFolder,
 } from "./vault.server";
 import {
@@ -489,6 +490,49 @@ export function buildMarksBlock(marks: readonly PromptMark[]): string {
 /** The first forbidden project name this content says, or null. Whole
  * words, so a project called "Garage" is caught in "the Garage" and not
  * in "garages". */
+export type EffortsRebuildReason =
+  | "up-to-date"
+  | "graph-changed"
+  | "skill-rewrite"
+  | "names-another-project"
+  | "unread-notes"
+  | "unread-marks";
+
+/** Whether this run rebuilds the Efforts page, and why. Pure.
+ *
+ * The reason is the first that applies: a skill rewrite (rerun-outputs),
+ * the page naming another project, the graph having changed, unread
+ * notes, unread marks. Under `hold` (the nightly, ADR-030) only the
+ * privacy reason rebuilds; the rest wait for a print, and `waiting` says
+ * what the print will pick up. */
+export function decideEffortsRebuild(input: {
+  applied: boolean;
+  rewrite: boolean;
+  namesAnotherProject: boolean;
+  unreadNotes: number;
+  unreadMarks: number;
+  hold: boolean;
+}): { reason: EffortsRebuildReason; rebuild: boolean; waiting: string[] } {
+  const reason: EffortsRebuildReason = input.rewrite
+    ? "skill-rewrite"
+    : input.namesAnotherProject
+      ? "names-another-project"
+      : !input.applied
+        ? "graph-changed"
+        : input.unreadNotes > 0
+          ? "unread-notes"
+          : input.unreadMarks > 0
+            ? "unread-marks"
+            : "up-to-date";
+  const waiting: string[] = [];
+  if (!input.applied) waiting.push("graph changed");
+  if (input.unreadNotes > 0) waiting.push(`${input.unreadNotes} note(s)`);
+  if (input.unreadMarks > 0) waiting.push(`${input.unreadMarks} mark(s)`);
+  if (reason === "up-to-date") return { reason, rebuild: false, waiting: [] };
+  const rebuild = !input.hold || reason === "names-another-project";
+  return { reason, rebuild, waiting };
+}
+
 export function namesAnotherProject(content: string, names: readonly string[]): string | null {
   const haystack = content.toLowerCase();
   const isWordChar = (c: string | undefined) => !!c && /[\p{L}\p{N}]/u.test(c);
@@ -1167,6 +1211,9 @@ export type GraphProjectViewResult =
        * run FOUND it. Reported on every run; acted on only under
        * `rebuildStale`. Absent on the early-return paths. */
       staleSkill?: boolean;
+      /** True when the run had a reason to rebuild and held it for a
+       * print (`hold`, ADR-030). The page was left as it was. */
+      held?: boolean;
       summary: string[];
       /** Null whenever this run didn't get far enough to check (skipped,
        * no graph yet, truncated, refused, errored, ...) — only a CLEAN
@@ -1203,6 +1250,11 @@ export interface RunGraphProjectViewOptions {
    * changed. Off by default: a normal run only reports the drift. Set by
    * the `rerun-outputs` job. See `composeStageSkill`. */
   rebuildStale?: boolean;
+  /** The nightly's mode (ADR-030): decide, record the decision, and
+   * rebuild only to take another project's name off the page. Everything
+   * else waits for a print. Set by the `"run"` job; a `"print"` leaves it
+   * off. */
+  hold?: boolean;
 }
 
 /** Everything that does not change between passes within one run. It
@@ -1652,7 +1704,7 @@ export function coverageFromJobResult(result: unknown): {
 export function readmeChangedFromJobResult(jobName: string, result: unknown): boolean | null {
   if (!result || typeof result !== "object") return null;
   const r = result as Record<string, unknown>;
-  if (jobName === "run" || jobName === "rerun-outputs") return typeof r.readmeChanged === "boolean" ? r.readmeChanged : null;
+  if (jobName === "run" || jobName === "print" || jobName === "rerun-outputs") return typeof r.readmeChanged === "boolean" ? r.readmeChanged : null;
   if (jobName === "graph-project-view") return typeof r.changed === "boolean" ? r.changed : null;
   return null;
 }
@@ -1792,45 +1844,85 @@ export async function runGraphProjectView(
   // appear on this page: a reader here may not be able to see them, and
   // may not be allowed to learn they exist (Austin, 2026-09-21).
   const moveDestNames = await listDestinationNames(projectFolder._id);
-  if (applied && !rewrite) {
+  // Why this run reaches the model, recorded as a run event so the run
+  // page can say it. Each rebuild is a near-flat cost, so the reason is
+  // the number a cadence decision is made from. Read every run, held or
+  // not: a held night still has to know whether the page names another
+  // project, the one reason it may not wait for a print (ADR-030).
+  const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
+  const readmeBody = stripIncompleteBanner(splitFrontmatter(readme?.content ?? "").body);
+  const unreadNotes = extractReaderComments(splitReadmeSections(readmeBody)).unstamped.length;
+  const named = namesAnotherProject(readmeBody, moveDestNames);
+  const decision = decideEffortsRebuild({
+    applied,
+    rewrite,
+    namesAnotherProject: named !== null,
+    unreadNotes,
+    unreadMarks: readerMarks.length,
+    hold: opts.hold === true,
+  });
+  if (decision.reason === "names-another-project") {
+    // Not a report this time: the page can fix itself, and a check that
+    // only ever says the same thing every run is a check nobody reads.
+    log(`graph-project-view: the page names another project ("${named}"); reconciling to take the name out.`);
+  } else if (decision.reason === "unread-notes") {
     // A reader correction is new input even when the graph is not: a
     // person wrote in "Notes on this view" and the page has not read it.
-    // Found 2026-09-17 by the Coronado test (a correction alone never
-    // reached the model until the next content change). Unread notes
-    // make the run reconcile; otherwise the up-to-date path below.
-    const readme = await getReadmeFileForFolder(projectFolder.human_id, projectFolder._id);
-    const readmeBody = stripIncompleteBanner(splitFrontmatter(readme?.content ?? "").body);
-    const unread = extractReaderComments(splitReadmeSections(readmeBody)).unstamped.length;
-    const named = namesAnotherProject(readmeBody, moveDestNames);
-    if (named) {
-      // Not a report this time: the page can fix itself, and a check that
-      // only ever says the same thing every run is a check nobody reads.
-      log(`graph-project-view: the graph is unchanged, but the page names another project ("${named}"); reconciling to take the name out.`);
-    } else if (unread > 0) {
-      log(`graph-project-view: the graph is unchanged, but ${unread} unread reader correction(s) are waiting in "Notes on this view"; reconciling the page against them.`);
-    } else if (readerMarks.length > 0) {
-      log(`graph-project-view: the graph is unchanged, but ${readerMarks.length} unread mark(s) are waiting; reconciling the page against them.`);
-    } else {
-      // The README is not rewritten, but it still exists and the graph is
-      // still the graph, so coverage is measurable and gets measured. This
-      // used to return `coverage: null`, which the run page reads (correctly)
-      // as "graph-project-view never reached a clean finish" -- on a run
-      // where nothing was wrong. A warning that fires on the normal state
-      // is training to ignore the warning; the no-op run on production
-      // read that way the first time anyone did one.
-      log("graph-project-view: up to date, nothing changed since last run.");
-      const { allNodes } = await loadGraphNodes(files);
-      const coverage = readme
-        ? computeCoverageReport(
-            splitFrontmatter(structureFile.content).body,
-            readmeBody,
-            new Map(allNodes.map((n) => [n.id, n])),
-          )
-        : null;
-      return { ok: true, skipped: false, changed: false,
-        staleSkill, summary: [], coverage, incomplete: [] };
-    }
+    // Found 2026-09-17 by the Coronado test.
+    log(`graph-project-view: the graph is unchanged, but ${unreadNotes} unread reader correction(s) are waiting in "Notes on this view".`);
+  } else if (decision.reason === "unread-marks") {
+    log(`graph-project-view: the graph is unchanged, but ${readerMarks.length} unread mark(s) are waiting.`);
   }
+  if (decision.reason === "up-to-date") {
+    // The README is not rewritten, but it still exists and the graph is
+    // still the graph, so coverage is measurable and gets measured. This
+    // used to return `coverage: null`, which the run page reads (correctly)
+    // as "graph-project-view never reached a clean finish" -- on a run
+    // where nothing was wrong. A warning that fires on the normal state
+    // is training to ignore the warning; the no-op run on production
+    // read that way the first time anyone did one.
+    log("graph-project-view: up to date, nothing changed since last run.");
+    await perf.event({
+      process: "graph-project-view",
+      type: "fn",
+      name: "rebuildDecision",
+      params: { reason: "up-to-date", rebuilt: false },
+      durationMs: 0,
+    });
+    const { allNodes } = await loadGraphNodes(files);
+    const coverage = readme
+      ? computeCoverageReport(
+          splitFrontmatter(structureFile.content).body,
+          readmeBody,
+          new Map(allNodes.map((n) => [n.id, n])),
+        )
+      : null;
+    return { ok: true, skipped: false, changed: false,
+      staleSkill, summary: [], coverage, incomplete: [] };
+  }
+  if (!decision.rebuild) {
+    // Held for a print (ADR-030): the nightly builds the graph and leaves
+    // the page alone. What is waiting is recorded so the run page can say
+    // what the next print will pick up. No coverage: the page was not
+    // read against the graph this run.
+    log(`graph-project-view: held for a print (${decision.waiting.join("; ")}).`);
+    await perf.event({
+      process: "graph-project-view",
+      type: "fn",
+      name: "rebuildDecision",
+      params: { reason: "held-for-print", rebuilt: false, waiting: decision.waiting, unreadNotes, unreadMarks: readerMarks.length },
+      durationMs: 0,
+    });
+    return { ok: true, skipped: false, changed: false, held: true,
+      staleSkill, summary: [], coverage: null, incomplete: [] };
+  }
+  await perf.event({
+    process: "graph-project-view",
+    type: "fn",
+    name: "rebuildDecision",
+    params: { reason: decision.reason, rebuilt: true, unreadNotes, unreadMarks: readerMarks.length },
+    durationMs: 0,
+  });
 
   // 1.1's own floor+ceiling (ADR-006): read every graph-log file's real
   // node text, not just graph-structure.md's own glosses, so the model
@@ -2178,6 +2270,7 @@ export async function runGraphProjectView(
     const durationMs = Date.now() - callStart;
     const failed = shortfall !== null || refusedInFinalPass > 0;
     await recordGraphLogUsage({
+      runId: perf.runId,
       humanId: actingHumanId,
       projectFolderId: projectFolder._id,
       stage: "graph-project-view",
@@ -2295,6 +2388,11 @@ export async function runGraphProjectView(
         folder_id: graphFolder._id,
       });
     }
+    // The date the page shows as "Printed", and what a weekly print is
+    // measured from (ADR-030). Only here, on a clean finish that reached
+    // the model: a print that found nothing new returned earlier and
+    // spends nobody's week.
+    await updateVaultFolder(projectFolder._id, { efforts_printed_at: new Date().toISOString() });
     // Last line of defence on the rule a page can never break: if the
     // words still name another project, the run says so rather than
     // leaving a quiet leak (the turn-back above only sees writes this run
@@ -2334,6 +2432,7 @@ export async function runGraphProjectView(
     log(`graph-project-view: couldn't be processed (${err instanceof Error ? err.message : "unknown error"}).`);
     const durationMs = Date.now() - callStart;
     await recordGraphLogUsage({
+      runId: perf.runId,
       humanId: actingHumanId,
       projectFolderId: projectFolder._id,
       stage: "graph-project-view",

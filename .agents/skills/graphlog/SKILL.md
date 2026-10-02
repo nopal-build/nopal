@@ -51,9 +51,21 @@ fourth PhyLog stage.
 
 ## The pipeline
 
-`nopal graphlog run --project <path>` runs all five stages in order, in
-one job (`graphLogAgent.server.ts`'s `runGraphLogPipeline`); each stage
-below is also independently runnable via its own CLI subcommand/API route.
+Two jobs run the stages in order through one function
+(`graphLogAgent.server.ts`'s `runGraphLogPipeline`), ADR-030:
+- **`"run"`** (the nightly, the Vault's Run, `nopal graphlog run`) builds
+  the graph (stages 1 to 4) and HOLDS the page: stage 5 only decides
+  (`decideEffortsRebuild`) and records `held-for-print` with what is
+  waiting. It rebuilds only to take another project's name off the page,
+  and it never touches README.md otherwise, banner included.
+- **`"print"`** ("Print an update" on the Efforts tab,
+  `api.graphlog.print.tsx`) runs all five, so a mark made just before it
+  is on the page it prints. Anyone with a role prints once a week, a Guide
+  or staff any time (`effortsPrint.server.ts`'s `printAllowance`). A clean
+  rebuild stamps `efforts_printed_at` on the project folder.
+
+Each stage below is also independently runnable via its own CLI
+subcommand/API route.
 
 ```
 personal/syncs/Daily Logs (real Cards, one per project per day)
@@ -576,12 +588,32 @@ line under each group, then `## Noted (not anyone's words)`), `documents/`
 (`kind: seed-document`, dated, `author:`), `_people.md` (a role per name),
 `_attachments.md`. `_review*` and `_to_delete/` never come in.
 
-- **Push:** `nopal graphlog seed --project <path> --dir <folder> [--from D]
-  [--to D]` → `POST /api/graphlog/seed` (a Guide) writes `Syncs/Seed/`, a
-  system folder like `Syncs/Marks/`: each file stamped `date` and
-  `content_hash`, replaced by name, so a second push changes nothing.
-  Never `Daily Logs/`, a Card or a mark. Documents dated in range go to
-  `Syncs/Seed/documents/`. `seed.server.ts`.
+- **The one door is the seed packet (fold of 2026-10-01).** The CLI push
+  (`nopal graphlog seed`, `POST /api/graphlog/seed`, `applySeed`) is gone.
+  A prepared seed file goes into a packet on the project page like any
+  other file, and Sow places it BY CODE, never through the model
+  (`classifyPreparedSeedFile`, `mergePreparedSeedDay`, `seed.server.ts`).
+  Code decides which files are prepared, by three signals:
+  1. `kind: seed` in the front matter = a day, dated by its name
+     (`YYYY-MM-DD.md`) or its `date:`; `kind: seed-document` + `date:` = a
+     document; `kind: seed-people` or the name `_people.md` = the roles
+     file. Any other `kind: seed-*` (`seed-attachments`, a review file) is
+     REFUSED with a reason and stays in the packet: a helper file is not a
+     thread.
+  2. Shape: no `kind` at all, but named `YYYY-MM-DD.md` AND parsing into
+     `## Name` sections or a Noted section = a prepared day "by its shape";
+     the run log says so. A forgotten front matter is a logged line, not a
+     page that reads wrong.
+  3. Anything else is raw and goes to the model (SOW.md).
+  A prepared day ADDS to the day already in the seed, keeping its own
+  `- src:` lines; a bullet already there is not written twice. A file
+  whose front matter says `kind: seed` but does not parse is refused, not
+  modelled. `Syncs/Seed/` is a system folder like `Syncs/Marks/`: each
+  file stamped `date` and `content_hash`. Never `Daily Logs/`, a Card or
+  a mark. How to prepare a folder: the seeding guide in Austin's vault
+  (`Zed efforts/2026-09-29 Seeding Campbell guide (gardener).md`); the
+  shape is the one in the paragraph above. Drop the whole folder's files
+  into your own packet (multi-select), press Sow.
 - **How sync-graph reads it:** by folder id, before file-name attribution.
   Code splits a day into one source per section; a spoken section is cited
   under the person with `origin="seed"` (and their human id when
@@ -643,8 +675,8 @@ runs `runSow` (`sow.server.ts`) over every unsown file, once each:
   third kind; `decideSeedQuestion` edits the one day's seed file, and the
   next run re-extracts that day alone.
 
-A seed wipe deletes the questions and clears `sown_at`. The CLI push
-refuses a day a sowing wrote to.
+A seed wipe deletes the questions and clears `sown_at`, so Sow rebuilds
+the seed from the packets (prepared files included).
 
 ## Reset
 
@@ -951,12 +983,14 @@ runs in-process from the checkout and never has this problem.
   `api.graphlog.jobs.$jobId.tsx`) accept `role?.isOwner || isStaff`. The
   UI enqueues, then polls `GET /api/graphlog/jobs/:jobId` every 3s.
   "Reset" additionally requires a confirm dialog.
-- **A nightly automatic run, opt-in per project**
-  (`graphLogSchedule.server.ts`). The same dropdown gains an "Enable
-  GraphLog Schedule"/"Disable GraphLog Schedule" toggle — **Admin/Super
-  ONLY, no owner fallback** (enrolling something in an unattended
-  nightly run is a more consequential call than triggering one run by
-  hand). Backed by a denormalized `graphlog_scheduled`/
+- **A nightly automatic run, on by default for every project that has a
+  graph** (`graphLogSchedule.server.ts`, ADR-030; opt-in until
+  2026-10-01). Off only where staff turned it off (`graphlog_scheduled =
+  false`); a project that never ran joins after its first run, so it does
+  not pay its backlog on the first night (`isNightly`). The nightly's
+  `"run"` builds the graph and holds the Efforts page for a print. The
+  same dropdown has an "Enable GraphLog Schedule"/"Disable GraphLog
+  Schedule" toggle — **Admin/Super ONLY, no owner fallback**. Backed by a denormalized `graphlog_scheduled`/
   `graphlog_scheduled_at` pair on `vault_folders`, written only by
   `setGraphLogScheduled`, read by `getGraphLogScheduledFolders`. The
   midnight trigger lives in `fruits/server.js` (all session-gated routes

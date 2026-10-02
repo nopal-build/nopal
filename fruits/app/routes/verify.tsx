@@ -16,10 +16,11 @@ import { button } from "stamps/button.css";
 import { link } from "stamps/link.css";
 import { AuthShell, AuthErrorText } from "../components/AuthShell";
 import { Link } from "react-router";
+import { AFTER_LOGIN_PATH } from "robustness-core/auth/landing";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
-  if (user) return redirect("/");
+  if (user) return redirect(AFTER_LOGIN_PATH);
 
   const authEmail = getAuthEmail(request);
   const authError = getAuthError(request);

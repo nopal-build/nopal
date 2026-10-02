@@ -167,15 +167,20 @@ export type VaultFolder = {
   project_status_at?: string | null;
   /**
    * Whether this `project-n02` root folder (a project OR a `personal`
-   * space) is enrolled in GraphLog's automatic daily run — see
-   * `graphLogSchedule.server.ts`. Only meaningful on such a root folder;
-   * null/absent (and on every non-`project-n02` folder) means "not
-   * scheduled". Toggled only by an Admin/Super, from the Vault UI's "More
-   * Actions" menu — never cascaded to descendants.
+   * space) runs GraphLog's nightly — see `graphLogSchedule.server.ts`.
+   * On by default since 2026-10-01 (ADR-030): null/absent means on, once
+   * the project has a graph; only an explicit `false` turns it off.
+   * Toggled only by an Admin/Super, from the Vault UI's "More Actions"
+   * menu — never cascaded to descendants.
    */
   graphlog_scheduled?: boolean | null;
   /** ISO timestamp of the last `setGraphLogScheduled` call. */
   graphlog_scheduled_at?: string | null;
+  /** When graph-project-view last rebuilt this project's Efforts page:
+   * the "Printed" date on the page and what the weekly print cap counts
+   * from (ADR-030). Absent on projects not printed since 2026-10-01;
+   * `getEffortsPrintedAt` falls back to the run history. */
+  efforts_printed_at?: string | null;
   created_at: string;
   updated_at: string;
 };

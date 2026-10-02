@@ -71,6 +71,16 @@ export function rowsForReader(rows: readonly ProjectFileRow[], features: readonl
     .map((r) => (costs && logbook ? r : { ...r, cost: costs ? r.cost : null, context: logbook ? r.context : "" }));
 }
 
+/** The id each Card attachment is served by, keyed by the id the Card
+ * names, for a member with these features. The Logbook draws a Card's
+ * files through this, so it loads what the file tabs load (the project's
+ * copy once a sync has made one, the writer's original until then) and
+ * nothing a tab would not send. A Card's markdown names the writer's
+ * original, which only the writer can open once the copy exists. */
+export function servedFileIds(rows: readonly ProjectFileRow[], features: readonly Feature[]): Record<string, string> {
+  return Object.fromEntries(rowsForReader(rows, features).map((r) => [r.fileId, r.serveId]));
+}
+
 /** Whether a member with these features may open this file as a photo:
  * the Photos rule, the same one the tab shows. */
 export function isReachablePhoto(row: Pick<ProjectFileRow, "folders">, features: readonly Feature[]): boolean {

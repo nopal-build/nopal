@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { GROUPS, GROUP_FEATURES, featuresOf, groupOf, type Feature, type Group } from "robustness-core/data/features";
 import { changedHumans, promotionRefusal, resolveRole } from "robustness-core/data/projectSharing.server";
-import { isReachablePhoto, resolveProjectTab, rowsForReader, seesSuggestions, tabsFor } from "robustness-core/data/projectView.server";
+import { isReachablePhoto, resolveProjectTab, rowsForReader, seesSuggestions, servedFileIds, tabsFor } from "robustness-core/data/projectView.server";
 import type { ProjectFileRow } from "robustness-core/data/fileFolders.server";
 
 const row = (id: string, folders: ProjectFileRow["folders"], cost: ProjectFileRow["cost"] = null): ProjectFileRow =>
@@ -81,6 +81,10 @@ describe("the groups", () => {
     expect(client.features).toContain("marks");
     for (const f of ["edit", "files", "costs", "people", "suggestions"] as Feature[]) expect(client.features).not.toContain(f);
   });
+
+  it("the pen's \"Read the full log\" is the Logbook's: every group that marks but a Client (2026-10-01)", () => {
+    expect(GROUPS.filter((g) => featuresOf(g).includes("marks") && featuresOf(g).includes("logbook"))).toEqual(["Guide", "Crafter", "Observer"]);
+  });
 });
 
 describe("test 1: what a Client is sent", () => {
@@ -110,6 +114,28 @@ describe("test 1: what a Client is sent", () => {
 
   it("a Guide is sent every row as it was", () => {
     expect(rowsForReader(rows, featuresOf("Guide"))).toEqual(rows);
+  });
+});
+
+describe("the Logbook's files", () => {
+  // A Card names the writer's original; the sync copies it into the
+  // project under a new id, and only the copy opens for anyone else.
+  const synced = { ...photo, fileId: "original", serveId: "copy" } as ProjectFileRow;
+  const fresh = { ...photo, fileId: "posted", serveId: "posted" } as ProjectFileRow;
+
+  it("loads each by the id its file tab loads: the copy once synced, the original until then", () => {
+    expect(servedFileIds([synced, fresh, receiptPhoto, drawing], featuresOf("Crafter"))).toEqual({
+      original: "copy",
+      posted: "posted",
+      receipt: "receipt",
+      drawing: "drawing",
+    });
+  });
+
+  it("has no id for a file the reader's tabs would not send", () => {
+    const noCosts = featuresOf("Crafter").filter((f) => f !== "costs");
+    expect(servedFileIds([synced, receiptPhoto], noCosts)).toEqual({ original: "copy" });
+    expect(servedFileIds([synced, receiptPhoto], featuresOf("Client"))).toEqual({ original: "copy" });
   });
 });
 
