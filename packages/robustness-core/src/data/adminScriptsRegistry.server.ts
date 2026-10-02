@@ -124,10 +124,10 @@ const REGISTRY: AdminScriptDefinition[] = [
   },
   {
     name: "reseed-graphlog-skills",
-    label: "Reseed GraphLog skill files",
+    label: "Reset GraphLog skills to current",
     description:
-      "Overwrites a project's skills/GRAPH.md, GRAPH_STRUCTURE.md, PROJECT_VIEW.md with the current defaults, but only when the existing file still matches a known previous default (never clobbers a hand-edited file). Idempotent.",
-    argLabel: 'Project name (optional — defaults to "Nopal O.")',
+      "Sets every GraphLog project's skill files (not websites, not personal) to the current defaults from /maker/graphlog/defaults: creates missing ones, overwrites ones that differ (hand edits included; the replaced text is kept in this run's log), deletes legacy names. Skips a project while it runs. Try a dry run first. Idempotent.",
+    argLabel: "Project name (optional — blank for every project)",
     run: runReseedGraphlogSkills,
   },
   {
