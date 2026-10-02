@@ -16,7 +16,19 @@
  * page, it just looks obviously unfinished.
  */
 import type { CSSProperties, FC } from "react";
-import "../styles/website.css";
+// No `import "../styles/website.css"` here (unlike fruits' copy) --
+// this module is ONLY ever reached via `WebsitePageView`, which is ONLY
+// ever reached under `/v2/*` -- `routes/v2.tsx`'s own `links()` already
+// guarantees `website.css` is loaded (as a real render-blocking `<link>`,
+// not a JS-injected dev-mode `<style>` tag) before this ever renders. A
+// second, redundant plain import here doesn't just duplicate bytes -- it
+// re-introduces a SECOND, later-arriving copy of the same rules via
+// Vite's dev-mode CSS-injection path, competing with the first and
+// producing an extra flash/jump right after the blocking `<link>` had
+// already settled (found via a real repro: sampling a live
+// `:::section-title{...}` heading's position every 50ms after
+// navigation showed a clean single jump with only the `?url` link, and
+// an extra SECOND jump once this import was still also present).
 
 type IconComponent = FC<{ className?: string }>;
 
@@ -80,11 +92,20 @@ export function WebsiteIcon({
    * here. See `websiteDirectives.tsx`'s `waypoint` entry for the
    * standalone-marker sibling of this. */
   waypointId,
+  /** `::icon{position="x,y"}` -- already resolved to a real CSS
+   * `position: absolute; left: ...%; top: ...%` object by
+   * `websiteDirectives.tsx`'s `parseIconPosition` (see its own comment
+   * for the full coordinate-system explanation), or `undefined` for an
+   * icon with no `position` at all. Merged in AFTER each branch's own
+   * base `style` below so it can override `position` (`static` by
+   * default) without needing three separate conditional spreads. */
+  positionStyle,
 }: {
   name: string;
   size?: "sm" | "md" | "lg";
   className?: string;
   waypointId?: string;
+  positionStyle?: CSSProperties;
 }) {
   const px = SIZE_PX[size];
 
@@ -98,13 +119,13 @@ export function WebsiteIcon({
         src={fileSrc}
         alt=""
         className={`website-icon website-icon-file ${className ?? ""}`}
-        style={{ width: px, height: "auto" }}
+        style={{ width: px, height: "auto", ...positionStyle }}
         data-waypoint-id={waypointId || undefined}
       />
     );
   }
 
-  const style: CSSProperties = { width: px, height: px };
+  const style: CSSProperties = { width: px, height: px, ...positionStyle };
   const Placeholder = WEBSITE_ICON_PLACEHOLDERS[name];
   if (Placeholder) {
     return (

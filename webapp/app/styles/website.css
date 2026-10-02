@@ -20,19 +20,32 @@
    (only the semantic tier does that in root.css); this variable is what
    actually does the swapping here. Applied to `V2Layout`'s outer wrapper
    (`routes/v2.tsx`) so it shows through anywhere a `:::section{...}` band
-   doesn't cover (header, footer, gaps) -- and reused by `.website-bg-cream`
-   below, so a `bg="cream"` section is just an explicit way of asking for
-   this same default, not a second, independently-maintained color. */
+   doesn't cover (header, footer, gaps), and anywhere no `bg="..."` is
+   given at all (a section with no explicit background just shows this
+   default through). */
 :root {
   --website-bg-page: var(--surface-day-100);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --website-bg-page: var(--surface-night-100);
+    --website-bg-page: var(--purple);
   }
 }
 .website-page-bg {
   background: var(--website-bg-page);
+}
+
+/* The single source of truth for the reading column's own width -- used
+   directly by `.website-page-content` below, and mirrored (as a literal,
+   since a custom property can't be read inside an `@media`/`@container`
+   condition in any shipping browser today) by the `@container` breakpoint
+   on `.website-section` further down. If this number ever changes, that
+   breakpoint's own literal `720px` needs updating by hand right alongside
+   it -- same "keep two numbers in sync by hand" precedent as this file's
+   `.website-section-inner` (below) and `vault.css`'s own list-indent
+   comment. */
+:root {
+  --website-content-max-width: 720px;
 }
 
 /* ── Accent colors that DO swap by scheme (green/red only) ─────────────── */
@@ -57,18 +70,25 @@
   }
 }
 
-/* Manual override for the `/maker/stamps/scratch` guide's own light/dark
-   PREVIEW toggle (`maker_.stamps_.scratch.tsx`) -- lets it show either
-   scheme's colors regardless of the browser's actual OS-level
-   `prefers-color-scheme`. Plain descendant custom-property declarations
-   like these always win over whatever an ancestor's `@media` block
-   resolved to (ordinary CSS inheritance: the nearest declared value
-   wins, regardless of specificity) -- no exotic `light-dark()`/
-   `color-scheme` mechanism needed. Deliberately narrow: only the tokens
-   THIS file actually makes scheme-aware today (the two accents above,
-   plus the page background) -- NOT a general reproduction of
-   `.ox-tokens`'s own (much larger) dark-mode block, which is a separate,
-   unrelated concern from today's ask. */
+/* Manual override for the `/maker/stamps/scratch` guide's / Vault website
+   editor's (`WebsitePageSplitEditor` in `vault.tsx`) own light/dark
+   PREVIEW toggle -- lets either show either scheme's colors regardless
+   of the browser's actual OS-level `prefers-color-scheme`. Plain
+   descendant custom-property declarations like these always win over
+   whatever an ancestor's `@media` block resolved to (ordinary CSS
+   inheritance: the nearest declared value wins, regardless of
+   specificity) -- no exotic `light-dark()`/`color-scheme` mechanism
+   needed. Only covers the tokens THIS file makes scheme-aware (the 2
+   accents, the page background) -- `oxmarkdown.css`'s OWN much larger
+   `.ox-tokens` dark-mode block (actual TEXT colors: headings, links,
+   code background, etc.) is handled separately, right there in that
+   file, because that block sets those properties directly on the SAME
+   element rather than an ancestor -- plain inheritance can't reach it,
+   so it needs its own `.website-preview-force-{light,dark} .ox-tokens`
+   selector instead of this simpler trick. `bg="mint"`'s own dark-mode
+   swap (above) needs that SAME `.ox-tokens`-style selector too, further
+   below -- `background` on `.website-bg-mint` is likewise a direct
+   declaration on that same class, not an ancestor's custom property. */
 .website-preview-force-light {
   --website-accent-green: var(--green);
   --website-accent-red: var(--red);
@@ -77,45 +97,258 @@
 .website-preview-force-dark {
   --website-accent-green: var(--green-light);
   --website-accent-red: var(--red-light);
-  --website-bg-page: var(--surface-night-100);
+  --website-bg-page: var(--purple);
 }
 
-/* ── Section (`:::section{bg="..."}`) ──────────────────────────────────── */
-
-.website-section {
-  padding: 48px 0;
+/* `bg="mint"`/`bg="white"`'s own dark-mode swaps (`.website-bg-mint`/
+   `.website-bg-white`, above) need their OWN pairs of overrides here
+   too, separate from the two plain `.website-preview-force-{light,dark}`
+   blocks above -- `background` is declared directly on each class
+   itself (by both the plain rule AND its `@media` variant), not read
+   from an ancestor's custom property, so plain inheritance can't reach
+   it the way it does for `--website-accent-*`/`--website-bg-page`. Two
+   classes' worth of specificity here reliably beats the one-class
+   `@media` rule above in EITHER direction, the exact same trick
+   `oxmarkdown.css`'s own `.website-preview-force-{light,dark} .ox-tokens`
+   already uses. */
+.website-preview-force-light .website-bg-mint {
+  background: var(--cactus-100);
+}
+.website-preview-force-dark .website-bg-mint {
+  background: var(--cactus-800);
+}
+.website-preview-force-light .website-bg-white {
+  background: var(--white);
+}
+.website-preview-force-dark .website-bg-white {
+  background: var(--purple-light);
 }
 
-.website-section-inner {
-  max-width: 720px;
+/* ── Content shell (`WebsitePageContent`, packages/stamps) ──────────────── */
+/* The max-width "reading column" both a published `/v2` page
+   (`WebsitePageView`) and the Vault website-page editor's own live preview
+   (`WebsitePageSplitEditor`) render their body into -- the ONE shared React
+   component both use (`packages/stamps/src/WebsitePageContent.tsx`) so the
+   two never drift apart, even though the CSS backing its className here is
+   still duplicated by hand into each app's own copy of this file, like
+   everything else in it (see this file's own header comment).
+
+   `container-type: inline-size` turns this element into a CONTAINER QUERY
+   context for `.website-section`'s own breakpoint below -- deliberately
+   NOT a `@media` viewport query: the Vault editor's own preview pane can
+   be much narrower than the browser's actual viewport (a split Markdown/
+   Preview layout, or just a narrower window than the published page would
+   assume), and a `@media` query would key off the whole window's width
+   instead of THIS element's own actual rendered width -- exactly the
+   mismatch that would make the Vault preview stop looking "identical" to
+   the real public page the instant the browser window is wide but the
+   preview PANE isn't.
+
+   `box-sizing: border-box` is explicit here -- this codebase has no global
+   border-box reset, and `width: 100%` combined with non-zero padding under
+   the default `content-box` would add that padding ON TOP of 100%,
+   overflowing whatever this sits inside. With border-box, `max-width`
+   below caps this element's own OUTER (border) box at content-max-width +
+   48px (24px padding, both sides) -- 768px at the default 720px. */
+.website-page-content {
+  container-type: inline-size;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(var(--website-content-max-width, 720px) + 48px);
   margin: 0 auto;
   padding: 0 24px;
 }
 
-.website-bg-cream {
-  background: var(--website-bg-page);
+/* The `OxRenderer` rendering a website page's body should contribute NO
+   horizontal padding/gutter of its own -- `.website-page-content` above is
+   the only inset, on both apps' pages alike. Pass this alongside
+   `ox-no-heading-marks ox-no-dots` on the SAME `<OxRenderer
+   className="...">` in both `WebsitePageView` and `WebsitePageSplitEditor`.
+   `ul`/`ol` still need SOME of their own padding regardless of this
+   element's own zero -- `overflow-x: clip` on `.ox-content` (oxmarkdown.css)
+   clips relative to ITS OWN box, so a bullet dash (hangs at `-18px`) or an
+   ordered-list number (hangs at `-1.8em`, the wider of the two) needs room
+   inside `.ox-content` itself; the ancestor `.website-page-content`'s own
+   24px padding doesn't help with that at all, since it lives on a
+   different element's box. 26px matches this exact math (`-1.8em` at
+   `oxmarkdown.css`'s default type scale is ~23px; 26px leaves a few
+   pixels' breathing room past that). */
+.ox-content.website-page-ox {
+  padding-left: 0;
+  padding-right: 0;
+  /* The base `.ox-content` rule (oxmarkdown.css) sets `overflow-x: clip`
+     to contain gutter-marker overflow -- this class already zeroes that
+     gutter out, so there's nothing left needing containment, and the
+     clip actively breaks `.website-section`'s own intentional negative-
+     margin bleed below: `.ox-content`'s own box is exactly this shell's
+     CONTENT width (narrower than its padded box), so the clip cut the
+     bleed off right at that boundary -- a real, confirmed bug (found via
+     a direct repro, not just CSS-reading), not merely a theoretical risk.
+     `overflow-y` stays whatever the base rule already set (`visible`) --
+     setting ONLY `overflow-x` here keeps both axes still matching
+     (`visible`/`visible`), which matters: per the CSS Overflow spec, a
+     MISMATCHED pair (one `visible`, the other anything but `visible`/
+     `clip`) silently forces the `visible` one to compute as `auto`
+     instead -- oxmarkdown.css's own `.ox-content` comment documents this
+     exact gotcha already. */
+  overflow-x: visible;
 }
-.website-bg-peach {
-  background: var(--clay-300);
-}
-.website-bg-mint {
-  background: var(--cactus-300);
-}
-.website-bg-lavender {
-  background: var(--moonlight-500);
+.ox-content.website-page-ox :is(ul, ol) {
+  padding-left: 26px;
 }
 
-/* Optional heading-color override (`accent="red"|"green"|"purple"`) for a
-   section whose body text should read as an emphasized color, independent
-   of its background — e.g. a closing CTA's red heading on a peach band. */
-.website-section[data-website-accent="red"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--red);
+/* ── Section (`:::section{bg="..."}`) ──────────────────────────────────── */
+
+/* `margin-left`/`margin-right: -24px` exactly cancels `.website-page-content`'s
+   own horizontal padding above, so this band always exactly fills that
+   shell's own box -- nothing more exotic (no `100vw`/`calc(50% - 50vw)`
+   viewport-breakout hack) is needed, because the shell ITSELF already does
+   all the work of being "100% width, up to a cap, centered": a plain
+   child that fills its own direct parent's box automatically inherits
+   BOTH of the shell's own regimes for free --
+     - shell narrower than its cap (any viewport under ~768px): the shell
+       already spans the full available width, so this band does too --
+       edge to edge with the real viewport.
+     - shell AT its cap (~768px, `--website-content-max-width` + 48px): the
+       shell stops growing, so this band does too, automatically -- it
+       just keeps exactly matching its own (now-fixed-width) parent.
+   See `.website-page-content` above for why this needs no ancestor to
+   actually BE the viewport width -- unlike the classic breakout hack, this
+   works identically no matter how wide the surrounding chrome (`<main>`
+   on the public site, a much narrower split-editor PANE in the Vault) is. */
+.website-section {
+  padding: 48px 0;
+  margin-left: -24px;
+  margin-right: -24px;
+  /* `margin-top`/`margin-bottom` deliberately NOT set here -- `:::section
+     {margin="N"}` (websiteDirectives.tsx's `parseSectionMarginStyle`)
+     sets those as an INLINE style instead (a `calc(N * var(--ox-grid))`
+     formula), since the multiplier is a free-form per-instance number,
+     not a small fixed vocabulary a CSS class could represent the way
+     `bg`/`list` do above. */
 }
-.website-section[data-website-accent="green"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--green);
+
+/* Once the content shell itself is no longer edge-to-edge (its own
+   container inline-size has hit its cap, so there's now real page
+   background visible on either side of it), a section reads as a
+   floating "card," not a physical edge of the page -- gains rounded
+   corners to match. `720px`, not `768px`: a container query's `width`/
+   `min-width` always measures the container's own CONTENT box, which
+   excludes `.website-page-content`'s own 24px-a-side padding regardless of
+   its `box-sizing` -- so this fires exactly when THAT content box (capped
+   at `--website-content-max-width`) hits its own limit, not the shell's
+   padded outer box. Keep this literal in sync with that variable by hand
+   -- see `.website-page-content`'s own comment for why it can't just read
+   the variable directly. */
+@container (min-width: 720px) {
+  .website-section {
+    border-radius: 4px;
+  }
 }
-.website-section[data-website-accent="purple"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--purple);
+
+.website-section-inner {
+  max-width: var(--website-content-max-width, 720px);
+  margin: 0 auto;
+  padding: 0 24px;
+  /* The positioned ancestor an `::icon{position="x,y"}` (websiteDirectives.tsx's
+     `parseIconPosition`) resolves its own `left`/`top` PERCENTAGES against,
+     for its first real use: one rendered directly inside `:::section{...}`'s
+     own body. A DIFFERENT container (a pricing-card body, a toggle body, ...)
+     would need this exact same treatment before a positioned icon inside IT
+     had any visible effect -- not added preemptively anywhere else until an
+     actual use needs it there too. */
+  position: relative;
+}
+
+/* Suppress oxmarkdown's own `#`/`##`/`###` gutter-marker glyph on a
+   section's own headings -- they read as bespoke graphic titles, not
+   embedded prose echoing their raw markdown syntax next to them. Same
+   reasoning/technique as `:::section-title{...}`'s own suppression below
+   (which ALSO already carries a text-shadow -- a section's own heading
+   deliberately does NOT get one here, that treatment stays specific to
+   `:::section-title{...}`). */
+.website-section :is(h1, h2, h3)::before {
+  content: none;
+}
+
+.website-bg-mint {
+  background: var(--cactus-100);
+}
+/* `--cactus-100` (a pale mint) reads as a bright, washed-out patch
+   against the dark scene, so `mint` gets a real dark-mode counterpart:
+   `--cactus-800`, deep enough to read as a distinct tinted band rather
+   than fighting the page's own dark background. */
+@media (prefers-color-scheme: dark) {
+  .website-bg-mint {
+    background: var(--cactus-800);
+  }
+}
+/* `white` is for a section that should actually stand OUT against the
+   page -- reading fine as a real, bright white against the light scene,
+   but a jarring, near-blinding slab against the dark one, so it gets a
+   real dark-mode counterpart too: `--purple-light`, a lighter purple
+   that still reads as a distinct "raised" band without clashing with
+   the page's own dark background. */
+.website-bg-white {
+  background: var(--white);
+}
+@media (prefers-color-scheme: dark) {
+  .website-bg-white {
+    background: var(--purple-light);
+  }
+}
+
+/* Optional list-style override (`list="timeline"`) -- a NAMED bullet
+   style, same "small fixed vocabulary of pre-designed looks" spirit as
+   `bg="mint|white"` above, not a raw color knob (a section theme's
+   bullet is a whole little graphic, not just a tint). Swaps the visible
+   bullet itself, not just its color -- overrides `content` on the SAME
+   `::before` `oxmarkdown.css`'s own `.ox-content ul > li:not(.ox-task-item)::before`
+   already draws its plain —/– dash with (`list-style: none` means there's
+   no real native `::marker` box here to swap instead), at higher
+   specificity (two class-level selectors here vs. `.ox-content`'s one).
+   `fill`/`stroke` are literal hex (`--cactus-500`/`--cactus-300`) baked
+   into the SVG data URI itself, same convention
+   `.ox-task-checkbox.checked::after`'s checkmark SVG (`oxmarkdown.css`)
+   already uses -- a custom property can't be referenced from inside one.
+   The connector line below deliberately reads `--cactus-500` (the dot's
+   own darker fill), NOT `--cactus-300` (the dot's own stroke ring) --
+   `--cactus-500` reads reliably against both `bg="..."` options above,
+   including `bg="mint"` itself (`--cactus-100`, much lighter than either
+   green rung) -- an earlier version of `bg="mint"` was ITSELF
+   `--cactus-300`, which made `--cactus-300` collide/disappear against it;
+   kept reading `--cactus-500` after lightening `mint` since it's still
+   the better/darker choice for legibility on `white`/the unset default
+   too. */
+.website-section[data-website-list="timeline"] li:not(.ox-task-item)::before {
+  content: "";
+  top: 15px;
+  left: -20px;
+  width: 11px;
+  height: 11px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 11 11'%3E%3Ccircle cx='5.5' cy='5.5' r='5' fill='%235DA06D' stroke='%2386CB97'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+}
+.website-section[data-website-list="timeline"] li:not(.ox-task-item)::after {
+  /* A vertical connector line threading through each dot, top to bottom
+     of the list -- the actual "timeline" part of the name. Drawn from
+     THIS item's own dot down into the gap before the next one
+     (`:not(:last-child)`, below, extends it past this li's own bottom
+     edge) -- a single-item list has no `:last-child`-excluded sibling, so
+     it draws no stray line at all. */
+  content: "";
+  position: absolute;
+  left: -15.5px;
+  top: 15px;
+  width: 1px;
+  background: var(--cactus-500);
+  pointer-events: none;
+}
+.website-section[data-website-list="timeline"] li:not(.ox-task-item):not(:last-child)::after {
+  bottom: -1.3em;
+}
+.website-section[data-website-list="timeline"] li:not(.ox-task-item):last-child::after {
+  display: none;
 }
 
 /* ── Stamp illustrations (`::stamp{...}`) ──────────────────────────────── */
@@ -226,6 +459,20 @@
   z-index: 0;
 }
 
+/* `:line-word{text="..." points="..."}` -- the inline, wrap-one-word-in-a-
+   squiggle TEXT directive (`websiteDirectives.tsx`). Its own wrapper span
+   (inline styles: `position: relative; display: inline-block`) has no
+   OTHER positioned descendant to layer against -- just the plain text
+   node sitting right next to this `WavyLine` overlay in the DOM -- so a
+   negative z-index is enough on its own to push the decoration BEHIND
+   that text (plain in-flow content always renders above a negatively-
+   z-indexed sibling within the same containing block), keeping the word
+   itself fully legible with the squiggle reading as a background
+   decoration around/under it, not a strikethrough on top of it. */
+.website-line-word {
+  z-index: -1;
+}
+
 .website-section-title :is(h1, h2, h3, h4, h5, h6) {
   position: relative;
   z-index: 1;
@@ -256,14 +503,14 @@
 }
 
 /* Optional heading-color override (`color="red"|"green"|"purple"`) --
-   same named-color vocabulary and technique as `:::section{accent="..."}`
-   above. Deliberately a SEPARATE attribute/rule from that one (not
-   reused) -- `:::section-title{...}` and `:::section{...}` are two
-   different directives that happen to both want a named accent color.
-   `red`/`green` read the SCHEME-AWARE `--website-accent-*` tokens
-   (above), not the raw `--red`/`--green` aliases directly -- `purple`
-   stays literal, see this rule block's own text-shadow comment below
-   for why. */
+   same named-color vocabulary and technique `::line{color="..."}`
+   (`websiteDirectives.tsx`) also reads. `:::section{...}` deliberately
+   has NO equivalent of its own -- a section's own headings just read
+   the ordinary default text color; this is the one place a heading
+   inside a themed section can still stand out on purpose. `red`/`green`
+   read the SCHEME-AWARE `--website-accent-*` tokens (above), not the
+   raw `--red`/`--green` aliases directly -- `purple` stays literal, see
+   this rule block's own text-shadow comment below for why. */
 .website-section-title[data-website-color="red"] :is(h1, h2, h3, h4, h5, h6) {
   color: var(--website-accent-red);
 }
@@ -309,15 +556,24 @@
 
 /* ── Buttons (`::button{...}`, pricing card's own cta) ─────────────────── */
 
-.website-button {
-  display: inline-block;
-  padding: 10px 20px;
-  background: var(--purple);
-  color: var(--white);
-  border-radius: 999px;
-  text-decoration: none;
-  font-weight: bold;
-}
+/* The look itself is `stamps/button.css`'s own `button({ variant: "..." })`
+   recipe now (`websiteDirectives.tsx`) -- no bespoke `.website-button`
+   class anymore, so a `/v2` CTA matches every other button in the app
+   instead of drifting into its own pill-shaped look. `variant` on the
+   `::button{...}` directive picks any of the recipe's own variants
+   (`primary` default, `purple`/`secondary`/`yellow`/`outline`).
+
+   `.website-button-link` (applied alongside the recipe class at every
+   call site, see `websiteDirectives.tsx`) is a marker class ONLY --
+   carries no rules of its own here. `oxmarkdown.css`'s `.ox-content a`
+   rule excludes it (`:not(.website-button-link)`) instead of this file
+   re-declaring a color override -- a real, confirmed bug once this
+   directive supported more than one variant: re-declaring a fixed color
+   here could only ever match ONE variant's own intended text color,
+   fighting (and winning against) every other variant's own correct one
+   sitting right there in the recipe. Excluding the marker class from the
+   competing rule instead lets the recipe's own plain class win outright,
+   for any variant, unimpeded. */
 
 .website-pricing-card-cta {
   margin-top: 12px;

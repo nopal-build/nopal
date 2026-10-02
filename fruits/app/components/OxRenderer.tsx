@@ -24,7 +24,6 @@ import type { Definition, RootContent } from "mdast";
 import {
   parseOxDocument,
   countBlankLines,
-  countExtraBlankLines,
   directiveAttrs,
   isDirectiveNode,
   parseRefAttrs,
@@ -290,21 +289,44 @@ function renderNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode {
 }
 
 /** Same as `renderNodes`, but for BLOCK-level sibling lists specifically —
- * inserts a spacer for each blank line beyond the one CommonMark already
- * requires to separate two blocks (`countExtraBlankLines`, shared with
- * `OxEditor`'s Editing-mode import so both surfaces agree). Without this,
- * "1 blank line" and "5 blank lines" between two paragraphs render byte-
- * identically — confirmed regression, see the oxmarkdown skill's TODO 10.
+ * inserts ONE spacer per literal blank line in the source between two
+ * blocks (`countBlankLines`, the SAME function `OxEditor`'s Editing-mode
+ * import uses for its own literal "one blank line = one empty row" — see
+ * the oxmarkdown skill's "Between blocks" section for the full reasoning
+ * this file only summarizes).
  *
- * Also handles the ZERO-blank-line case: CommonMark lets several block
- * types (a list, an ATX heading, a blockquote, a thematic break, ...)
- * "interrupt" a paragraph with no blank line at all between them in the
- * source (e.g. `"Definitions:\n- Dogma: ..."` parses as a paragraph
- * immediately followed by a list, not one merged block). The default
- * `.ox-content` rhythm CSS assumes the ordinary "exactly one blank line
- * apart" case and would otherwise draw a gap the source never had — tagged
- * `ox-no-gap-before` here so the CSS can zero its margin for exactly this
- * case, keeping the render faithful to the actual source line breaks.
+ * REVERSED DECISION, read this before ever reaching for `margin-top:
+ * var(--ox-grid)` (or any per-class equivalent) as a DEFAULT/baseline
+ * rule again: static rendering used to ALSO add one implied grid unit of
+ * margin for the ordinary "exactly one blank line apart" case via a bare
+ * CSS rule (`.ox-dot-grid > *:not(:first-child) { margin-top: var(--ox-
+ * grid) }` and friends) applied UNCONDITIONALLY, on top of which this
+ * function only ever added MORE spacers for blank lines BEYOND that
+ * first one (`countExtraBlankLines`), plus a `cloneElement`-based
+ * `ox-no-gap-before` override to claw the baseline back to zero for the
+ * zero-blank-line CommonMark-interrupt case. That whole three-part
+ * system is GONE now: it kept silently reappearing (a class-based
+ * default plus an exception-class override is easy to half-reintroduce
+ * on some new container without noticing the DEFAULT itself was the
+ * actual problem) and, in its OWN right, a real page author's REAL blank
+ * line was worth ZERO visible space under it (the "beyond the first one"
+ * framing) — the opposite of "spacing comes entirely from the file."
+ *
+ * The current rule is the simplest one that actually satisfies that goal
+ * literally: this function is the ONLY thing that ever adds vertical
+ * space between sibling blocks, and it does so via ONE
+ * `.ox-blank-line-spacer` per literal blank line, full stop — zero blank
+ * lines (an ordinary CommonMark interrupt, e.g. a list directly after a
+ * paragraph) means zero spacers, one blank line means one grid unit,
+ * two means two, and so on, with NO reduction for "the first one is
+ * free." This also means Editing mode and the static renderer now agree
+ * EXACTLY on how many grid units a given blank-line count is worth —
+ * they always should have, since both ultimately read `countBlankLines`
+ * directly. No `cloneElement` class injection is needed anymore either,
+ * so this can never again silently fail to reach whatever a block's own
+ * renderer happened to return (a Fragment, an array, ...), which is
+ * exactly how the old zero-gap mechanism kept quietly breaking for new
+ * container types.
  *
  * Only meaningful for block content (root children, a blockquote's/
  * container directive's children, ...) — inline phrasing content (a
@@ -327,24 +349,9 @@ function renderBlockNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode 
       rendered = renderNode(node, i, ctx);
     }
     if (i > 0) {
-      const gap = countBlankLines(list[i - 1], node);
-      if (gap === 0) {
-        // No blank line at all separated these two blocks in the source (e.g. a
-        // list/heading/blockquote interrupting a paragraph per CommonMark's own
-        // interrupt rules) — the default `margin-top: var(--ox-grid)` rhythm
-        // rule assumes the ordinary "exactly one blank line apart" case and
-        // would otherwise draw a gap the source never had. See the oxmarkdown
-        // skill: "must render lines as they exist."
-        rendered = isValidElement<{ className?: string }>(rendered)
-          ? cloneElement(rendered, {
-              className: [rendered.props.className, "ox-no-gap-before"].filter(Boolean).join(" "),
-            })
-          : rendered;
-      } else {
-        const extra = countExtraBlankLines(list[i - 1], node);
-        for (let s = 0; s < extra; s++) {
-          out.push(<div key={`spacer-${i}-${s}`} className="ox-blank-line-spacer" aria-hidden="true" />);
-        }
+      const units = countBlankLines(list[i - 1], node);
+      for (let s = 0; s < units; s++) {
+        out.push(<div key={`spacer-${i}-${s}`} className="ox-blank-line-spacer" aria-hidden="true" />);
       }
     }
     out.push(rendered);
@@ -1015,7 +1022,22 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     // Not interactive yet — nested-interactable selection inside a container
     // is TODO 5 in the oxmarkdown skill, deferred until Editing mode exists.
     if (!renderer) return <Fragment key={key}>{rendered}</Fragment>;
-    return <Fragment key={key}>{renderer({ attrs, label: null, children: rendered })}</Fragment>;
+    const registered = renderer({ attrs, label: null, children: rendered });
+    // Attach `key` directly onto the registry's OWN returned element via
+    // `cloneElement`, rather than wrapping it in another `<Fragment
+    // key={key}>` (as this used to, unconditionally) — a `<Fragment>` can't
+    // carry a `className`/`style`/any other DOM prop, so wrapping one
+    // around whatever a registered container directive returns silently
+    // drops any prop THIS renderer might ever need to reach that real host
+    // element directly (previously: the old blank-line-driven margin
+    // mechanism's `ox-no-gap-before` class, now removed entirely — see
+    // `renderBlockNodes`'s own comment; kept this `cloneElement` regardless,
+    // since some future need to reach a container directive's real DOM
+    // node directly is entirely plausible again). Falls back to the old
+    // Fragment-wrapping only if a registry entry doesn't return a single
+    // real element (an array, a string, ...), which `cloneElement` can't
+    // attach a key to directly.
+    return isValidElement(registered) ? cloneElement(registered, { key }) : <Fragment key={key}>{registered}</Fragment>;
   }
 
   const content = renderer ? (

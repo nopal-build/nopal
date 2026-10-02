@@ -18,7 +18,7 @@ import {
   useRouteError,
   useSearchParams,
 } from "react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getUser } from "../modules/auth/auth.server";
 // Types + shared utils live in a server-free file — safe on client and server.
 import {
@@ -81,11 +81,19 @@ import {
   withReadmeBody,
 } from "robustness-core/data/project.types";
 import { Badge } from "stamps/Badge";
+import { Surface } from "stamps/Surface";
+import { WebsitePageContent } from "stamps/WebsitePageContent";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "stamps/MoreMenu";
+import { ActionBar, ActionBarButton, ActionBarGroup } from "stamps/ActionBar";
+import { button as actionBarButtonClass } from "stamps/actionBar.css";
+import { ExpandIcon } from "stamps/ExpandIcon";
+import { LayoutFlipIcon } from "stamps/LayoutFlipIcon";
+import { useStickyPaneMaxHeight } from "stamps/useStickyPaneMaxHeight";
 import OxEditor from "../components/OxEditor";
 import OxRenderer from "../components/OxRenderer";
 import { ProjectView } from "../components/ProjectView";
+import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
 import { permissions } from "../hooks/useUser";
 import "../styles/vault.css";
@@ -1364,17 +1372,394 @@ function SiteSettingsModal({
   );
 }
 
-// ─── Website page editor ────────────────────────────────────────────────
-// A markdown file inside a `website` project (see the `vault` skill's
-// "website projects" section) gets a real, editable `OxEditor` bound to
-// just its BODY (front matter stripped via `splitFrontmatter`/rejoined via
-// `withReadmeBody` on save) — both pure, server-free helpers from
-// `project.types.ts`, safe to run client-side. Mirrors `SkillFileEditor`'s
-// debounced-save shape; `key` at the call site includes `updated_at` (not
-// just the file id) so a publish-toggle's own write (a DIFFERENT mutation
-// path on the same file) always forces a clean remount with fresh front
-// matter, rather than risking a stale save clobbering it back.
-function WebsitePageEditor({
+// ─── Markdown split editor (Markdown + Preview) ─────────────────────────
+// Generic raw-Markdown/live-Preview split editor -- raw markdown source on
+// one side, a real `OxRenderer` preview on the other, rather than the
+// WYSIWYG `OxEditor` every other kind of vault markdown file gets
+// (`SkillFileEditor`, below). Originally built for website pages only
+// (hence the `website`-flavored CSS class names/localStorage key below,
+// left as-is rather than churned) -- now shared by `WebsitePageSplitEditor`
+// and `SyncApiRunEditor` (both further below), which supply the
+// website-specific publish toggle / directive-aware preview or omit them
+// entirely via `toolbarLeft`/`renderPreview`/`showScratchPadLink`. Front
+// matter is stripped via `splitFrontmatter`/rejoined via `withReadmeBody`
+// on save, same as the WYSIWYG editor this replaced. EXPLICIT save (a real
+// button, disabled until dirty), not the debounced-auto-save every other
+// editor here uses -- a deliberate difference for a raw-markdown surface,
+// where a human editing literal syntax expects to control exactly when
+// it's written, not have it silently committed mid-sentence. `key` at each
+// call site includes `updated_at` (not just the file id) so a DIFFERENT
+// mutation path on the same file (e.g. the website publish toggle) always
+// forces a clean remount with fresh front matter, rather than risking a
+// stale save clobbering it back.
+const WEBSITE_EDITOR_MD_SIDE_KEY = "nopal:vault:website-split-editor:md-side";
+
+function readStoredMdSide(): "left" | "right" {
+  if (typeof window === "undefined") return "left";
+  return window.localStorage.getItem(WEBSITE_EDITOR_MD_SIDE_KEY) === "right" ? "right" : "left";
+}
+
+// Same 859px the rest of this file's own `vault.css` breakpoint uses
+// (the sidebar drawer, etc.) -- literal here rather than importing
+// `stamps/tokens`' `breakpoints.navMax` (numerically identical today,
+// but that one's conceptually about `AppLayout`'s own top nav; this is
+// Vault's own, separate breakpoint that just happens to match). Reactive
+// to the window crossing it, not just a one-time check at mount --
+// `useStickyPaneMaxHeight` must be DISABLED below this width, where
+// `.vault-website-editor-markdown` is `position: static` (not sticky) and
+// `max-height: none` in CSS -- an inline `maxHeight` from that hook would
+// otherwise override that and wrongly cap the pane on mobile too.
+function useIsMobileWebsiteEditor(): boolean {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 859px)");
+    const recompute = () => setIsMobile(mql.matches);
+    recompute();
+    mql.addEventListener("change", recompute);
+    return () => mql.removeEventListener("change", recompute);
+  }, []);
+  return isMobile;
+}
+
+function MarkdownSplitEditor({
+  fileId,
+  initialContent,
+  editable,
+  onSave,
+  toolbarLeft,
+  renderPreview,
+  showScratchPadLink = false,
+}: {
+  fileId: string;
+  initialContent: string;
+  editable: boolean;
+  onSave: (fileId: string, content: string) => Promise<unknown>;
+  /** Rendered at the left of the toolbar, before the light/dark/scratch-
+   * pad/flip/expand `ActionBar` -- the website editor's own
+   * `WebsitePublishToggle`; omitted entirely for anything with no
+   * draft/published concept (e.g. a sync-api run's notes). */
+  toolbarLeft?: ReactNode;
+  /** Renders the live-preview pane's own body from the current raw
+   * Markdown `body` -- the website editor wraps it in `WebsitePageContent`
+   * with the full website directive registry so it matches the real
+   * published page exactly; anything else gets a bare `OxRenderer`. */
+  renderPreview: (body: string, previewScheme: "light" | "dark") => ReactNode;
+  showScratchPadLink?: boolean;
+}) {
+  const initialBody = useMemo(() => splitFrontmatter(initialContent).body, [initialContent]);
+  const [body, setBody] = useState(initialBody);
+  const [isSaving, setIsSaving] = useState(false);
+  const lastSavedBodyRef = useRef(initialBody);
+  const isDirty = body !== lastSavedBodyRef.current;
+
+  // Persisted globally (not per-file) -- "which side do I like Markdown
+  // on" is a human's own standing preference, the same way an editor's
+  // remembered panel layout usually is, not something worth re-deciding
+  // per page.
+  const [mdSide, setMdSide] = useState<"left" | "right">(readStoredMdSide);
+  const toggleMdSide = useCallback(() => {
+    setMdSide((prev) => {
+      const next = prev === "left" ? "right" : "left";
+      try {
+        window.localStorage.setItem(WEBSITE_EDITOR_MD_SIDE_KEY, next);
+      } catch {
+        // Ignore -- e.g. storage disabled/full; not worth surfacing over.
+      }
+      return next;
+    });
+  }, []);
+
+  // Mobile-only: which single pane is showing right now -- NOT persisted,
+  // always starts on Preview (matches the mockup's own "(default)" note).
+  const [mobileView, setMobileView] = useState<"preview" | "markdown">("preview");
+
+  // Forces the Preview pane's own `--website-bg-page`/`--website-accent-*`
+  // tokens (website.css) to a specific scheme, regardless of this browser's
+  // actual `prefers-color-scheme` -- same mechanism (and same default,
+  // "light") as the `/maker/stamps/scratch` guide's own preview toggle
+  // (`PreviewBox`'s `previewScheme` there). NOT persisted -- a per-session
+  // preview aid, not a real setting. Desktop-only, same as "Flip layout"
+  // right alongside it below -- the whole toolbar this lives in is hidden
+  // on mobile (`.vault-website-editor-toolbar`'s own `@media` rule).
+  const [previewScheme, setPreviewScheme] = useState<"light" | "dark">("light");
+
+  // Self-contained fullscreen takeover -- see `.vault-website-editor--
+  // expanded`'s own CSS comment for why this doesn't need to reach into
+  // Vault's own sidebar/topbar state to hide them.
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (!expanded) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setExpanded(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [expanded]);
+
+  const isMobile = useIsMobileWebsiteEditor();
+  const markdownPaneRef = useRef<HTMLDivElement | null>(null);
+  // A real `height` (below), not a `max-height` -- the pane should always
+  // FILL the available space (per this feature's own "go full height"
+  // note), not just be capped at it, so a short document doesn't leave
+  // the pane's own box shorter than Preview alongside it.
+  const measuredHeight = useStickyPaneMaxHeight(markdownPaneRef, isMobile);
+
+  // Mobile: the textarea grows to fit ALL of its own content instead of
+  // scrolling internally -- the whole page scrolls instead, same as
+  // Preview already does on every breakpoint. Desktop is unaffected
+  // (CSS's own `overflow-y: auto` + the measured `height` above still
+  // apply there -- this effect is a no-op off mobile).
+  //
+  // Gated on `mobileView === "markdown"`, not just `isMobile` -- REAL BUG
+  // fixed here: Preview shows by default, so the textarea starts
+  // `display: none`, and a hidden element's `scrollHeight` is always 0 --
+  // measuring on mount alone permanently stuck the height at `0px`, never
+  // recovering even after switching to Markdown (nothing re-ran this
+  // effect on THAT change). Depending on `mobileView` makes switching TO
+  // Markdown itself trigger a fresh, correct measurement every time.
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    if (!isMobile || mobileView !== "markdown") return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [isMobile, mobileView, body]);
+
+  const handleSave = useCallback(() => {
+    if (!editable || !isDirty) return;
+    setIsSaving(true);
+    const toSave = body;
+    void onSave(fileId, withReadmeBody(initialContent, toSave)).finally(() => {
+      lastSavedBodyRef.current = toSave;
+      setIsSaving(false);
+    });
+  }, [body, editable, fileId, initialContent, isDirty, onSave]);
+
+  const expandButton = (
+    <ActionBarButton
+      onClick={() => setExpanded((v) => !v)}
+      aria-label={expanded ? "Exit fullscreen" : "Expand"}
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          transform: expanded ? "rotate(180deg)" : undefined,
+        }}
+      >
+        <ExpandIcon />
+      </span>
+    </ActionBarButton>
+  );
+
+  const saveButtonLabel = isSaving ? "Saving\u2026" : "Save";
+
+  return (
+    <div className={`vault-website-editor${expanded ? " vault-website-editor--expanded" : ""}`}>
+      <div className="vault-website-editor-toolbar">
+        {toolbarLeft}
+        <ActionBar>
+          <ActionBarGroup>
+            <ActionBarButton
+              active={previewScheme === "light"}
+              onClick={() => setPreviewScheme("light")}
+              aria-label="Preview in light mode"
+            >
+              Light
+            </ActionBarButton>
+            <ActionBarButton
+              active={previewScheme === "dark"}
+              onClick={() => setPreviewScheme("dark")}
+              aria-label="Preview in dark mode"
+            >
+              Dark
+            </ActionBarButton>
+          </ActionBarGroup>
+          {showScratchPadLink && (
+            <ActionBarGroup>
+              {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
+                  itself uses (`stamps/actionBar.css`), rather than extending
+                  that shared component with an `href` variant -- matches this
+                  codebase's own established convention (`button.css`'s own
+                  recipe, `link.css`, `surfaceBase`, ...) of applying a
+                  recipe's className polymorphically at each call site instead
+                  of baking router-awareness into a router-agnostic `stamps`
+                  component. Opens in a new tab -- this is a REFERENCE jump
+                  (going to look up/try a directive's own vocabulary), not a
+                  navigation away from the file currently being edited here.
+                  Website pages only -- not relevant to a non-website
+                  markdown editor like `SyncApiRunEditor`. */}
+              <Link
+                to="/maker/stamps/scratch"
+                className={actionBarButtonClass({ active: false })}
+                aria-label="Open the website directives scratch pad in a new tab"
+              >
+                Scratch pad
+              </Link>
+            </ActionBarGroup>
+          )}
+          <ActionBarGroup>
+            <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">
+              <LayoutFlipIcon mdSide={mdSide} />
+            </ActionBarButton>
+            {expandButton}
+          </ActionBarGroup>
+        </ActionBar>
+      </div>
+
+      <div
+        className="vault-website-editor-panes"
+        data-mobile-view={mobileView}
+        style={{ flexDirection: mdSide === "left" ? "row" : "row-reverse" }}
+      >
+        <div
+          ref={markdownPaneRef}
+          className="vault-website-editor-markdown"
+          style={measuredHeight != null ? { height: measuredHeight } : undefined}
+        >
+          <div className="vault-website-editor-pane-label">
+            <span>Markdown</span>
+            <span className="vault-website-editor-mobile-expand">{expandButton}</span>
+          </div>
+          <textarea
+            ref={textareaRef}
+            className="vault-website-editor-textarea"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            readOnly={!editable}
+            spellCheck={false}
+            placeholder="Write this page..."
+          />
+          <div className="vault-website-editor-save-row">
+            <button
+              type="button"
+              className="vault-website-editor-save-btn"
+              onClick={handleSave}
+              disabled={!editable || !isDirty || isSaving}
+            >
+              {saveButtonLabel}
+            </button>
+          </div>
+        </div>
+
+        <div className="vault-website-editor-preview">
+          <Surface className="vault-website-editor-preview-surface">
+            <div className="vault-website-editor-pane-label">
+              <span>Preview</span>
+              <span className="vault-website-editor-mobile-expand">{expandButton}</span>
+            </div>
+            <div
+              className={`vault-website-editor-preview-body ${
+                previewScheme === "dark" ? "website-preview-force-dark" : "website-preview-force-light"
+              }`}
+              // Same technique the scratch guide's own `PreviewBox` uses --
+              // `--website-bg-page` is exactly the token the two force-scheme
+              // classes above override, so painting it here (rather than
+              // leaving this pane showing `Surface`'s own neutral app-panel
+              // background) makes the preview's own resting background
+              // actually flip with the toggle too, not just section/accent
+              // colors inside it. A non-website consumer (e.g.
+              // `SyncApiRunEditor`) never opts into the `--website-*` tokens
+              // at all in its own `renderPreview`, so this is simply inert
+              // for it.
+              style={{ background: "var(--website-bg-page)" }}
+            >
+              {renderPreview(body, previewScheme)}
+            </div>
+          </Surface>
+        </div>
+      </div>
+
+      <div className="vault-website-editor-mobile-bar">
+        <ActionBarGroup>
+          <ActionBarButton
+            active={mobileView === "preview"}
+            onClick={() => setMobileView("preview")}
+            aria-label="Show preview"
+          >
+            Preview
+          </ActionBarButton>
+          <ActionBarButton
+            active={mobileView === "markdown"}
+            onClick={() => setMobileView("markdown")}
+            aria-label="Show markdown"
+          >
+            Markdown
+          </ActionBarButton>
+        </ActionBarGroup>
+        <button
+          type="button"
+          className="vault-website-editor-mobile-save"
+          onClick={handleSave}
+          disabled={!editable || !isDirty || isSaving}
+        >
+          {saveButtonLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// A page inside a `website` project (see the `vault` skill's "website
+// projects" section) -- thin wrapper around `MarkdownSplitEditor` above,
+// supplying the website-specific publish toggle and a preview pane that
+// renders through the real website directive registry
+// (`buildWebsiteDirectiveRegistry`) wrapped in `WebsitePageContent`, so it
+// stays visually and functionally identical to the real published `/v2`
+// page (`WebsitePageView`).
+function WebsitePageSplitEditor({
+  fileId,
+  initialContent,
+  editable,
+  onSave,
+  publish,
+  onPublishToggled,
+}: {
+  fileId: string;
+  initialContent: string;
+  editable: boolean;
+  onSave: (fileId: string, content: string) => Promise<unknown>;
+  publish: WebsitePublishStatus;
+  onPublishToggled: () => void;
+}) {
+  return (
+    <MarkdownSplitEditor
+      fileId={fileId}
+      initialContent={initialContent}
+      editable={editable}
+      onSave={onSave}
+      showScratchPadLink
+      toolbarLeft={
+        <WebsitePublishToggle
+          fileId={fileId}
+          publish={publish}
+          editable={editable}
+          onToggled={onPublishToggled}
+        />
+      }
+      renderPreview={(body, previewScheme) => (
+        <WebsitePageContent>
+          <OxRenderer
+            markdown={body}
+            directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme: previewScheme })}
+            className="ox-no-dots ox-no-heading-marks website-page-ox"
+          />
+        </WebsitePageContent>
+      )}
+    />
+  );
+}
+
+// A `sync-api` analysis run's own `<run>.md` (title/notes -- see the
+// `vault` skill's "Sync types" section; the run's actual DATA lives in the
+// sibling `<run>.csv`, rendered read-only by `CsvTableView`) -- same
+// `MarkdownSplitEditor` chrome as a website page, minus anything
+// website-specific: no publish toggle (a run has no draft/published
+// concept), a plain `OxRenderer` preview with no website directive
+// registry (the same bare rendering every other non-website markdown file
+// in the vault gets), and no "Scratch pad" link (that references website
+// directive syntax, not relevant to a run's own notes).
+function SyncApiRunEditor({
   fileId,
   initialContent,
   editable,
@@ -1383,40 +1768,15 @@ function WebsitePageEditor({
   fileId: string;
   initialContent: string;
   editable: boolean;
-  onSave: (fileId: string, content: string) => void;
+  onSave: (fileId: string, content: string) => Promise<unknown>;
 }) {
-  const initialBody = useMemo(() => splitFrontmatter(initialContent).body, [initialContent]);
-  const [body, setBody] = useState(initialBody);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedBodyRef = useRef(initialBody);
-
-  useEffect(
-    () => () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    },
-    [],
-  );
-
-  const handleChange = useCallback(
-    (nextBody: string) => {
-      setBody(nextBody);
-      if (!editable) return;
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        if (nextBody === lastSavedBodyRef.current) return;
-        lastSavedBodyRef.current = nextBody;
-        onSave(fileId, withReadmeBody(initialContent, nextBody));
-      }, 2000);
-    },
-    [editable, fileId, initialContent, onSave],
-  );
-
   return (
-    <OxEditor
-      mode={editable ? "editing" : "interacting"}
-      markdown={body}
-      onChange={handleChange}
-      placeholder="Write this page..."
+    <MarkdownSplitEditor
+      fileId={fileId}
+      initialContent={initialContent}
+      editable={editable}
+      onSave={onSave}
+      renderPreview={(body) => <OxRenderer markdown={body} />}
     />
   );
 }
@@ -2646,7 +3006,28 @@ export default function VaultV2Page() {
   const handleSaveWebsitePage = useCallback(
     (fileId: string, content: string) => {
       markOwnMutation(fileId);
-      void apiJson(`/api/vault/${fileId}`, {
+      // Returns the promise (unlike `handleSaveSkillFile`'s fire-and-forget
+      // `void`) -- `WebsitePageSplitEditor`'s explicit Save button awaits
+      // this to know when to clear its own "Saving\u2026" state and advance
+      // `lastSavedBodyRef`, so a failed save (network error, etc.) leaves
+      // the button re-enabled rather than silently believing it succeeded.
+      return apiJson(`/api/vault/${fileId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content }),
+      });
+    },
+    [apiJson],
+  );
+
+  // A sync-api run's own `.md` notes save (see `SyncApiRunEditor` above) --
+  // identical shape/behavior to `handleSaveWebsitePage` (returns the
+  // promise so the shared `MarkdownSplitEditor` Save button can await it),
+  // just named/commented separately since it's a conceptually different
+  // file kind.
+  const handleSaveSyncApiRunFile = useCallback(
+    (fileId: string, content: string) => {
+      markOwnMutation(fileId);
+      return apiJson(`/api/vault/${fileId}`, {
         method: "PATCH",
         body: JSON.stringify({ content }),
       });
@@ -3499,32 +3880,40 @@ export default function VaultV2Page() {
 
           {/* ── File view ─ render by content type ──────────────────── */}
           {current.kind === "file" &&
-            (isMarkdownFile(current.file) ? (
+            (current.websiteAnchor && current.websitePageMeta && isMarkdownFile(current.file) ? (
+              // A page inside a `website` project (see the `vault` skill) --
+              // own split Markdown/Preview layout (`WebsitePageSplitEditor`),
+              // NOT wrapped in the shared `.vault-readme-section` box every
+              // other markdown file view below gets -- it draws its own
+              // panes/borders, an outer box around THAT would just be a
+              // redundant second frame.
+              <WebsitePageSplitEditor
+                key={`${current.file._id}-${current.file.updated_at}`}
+                fileId={current.file._id}
+                initialContent={current.file.content ?? ""}
+                editable={canWriteCurrentFile}
+                onSave={handleSaveWebsitePage}
+                publish={current.websitePageMeta.publish}
+                onPublishToggled={() =>
+                  handleWebsitePublishToggled(current.file._id, current.file.folder_id)
+                }
+              />
+            ) : fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (
+              // A sync-api analysis run's own `<run>.md` (see the `vault`
+              // skill's "Sync types" section) -- same reasoning as the
+              // website branch above for rendering OUTSIDE
+              // `.vault-readme-section`: `SyncApiRunEditor` draws its own
+              // panes/borders already.
+              <SyncApiRunEditor
+                key={current.file._id}
+                fileId={current.file._id}
+                initialContent={current.file.content ?? ""}
+                editable={canWriteCurrentFile}
+                onSave={handleSaveSyncApiRunFile}
+              />
+            ) : isMarkdownFile(current.file) ? (
               <div className="vault-readme-section">
-                {current.websiteAnchor && current.websitePageMeta ? (
-                  // A page inside a `website` project (see the `vault`
-                  // skill) — real editable OxEditor bound to just the
-                  // body, plus a Draft/Published toggle above it.
-                  <>
-                    <div style={{ marginBottom: "12px" }}>
-                      <WebsitePublishToggle
-                        fileId={current.file._id}
-                        publish={current.websitePageMeta.publish}
-                        editable={canWriteCurrentFile}
-                        onToggled={() =>
-                          handleWebsitePublishToggled(current.file._id, current.file.folder_id)
-                        }
-                      />
-                    </div>
-                    <WebsitePageEditor
-                      key={`${current.file._id}-${current.file.updated_at}`}
-                      fileId={current.file._id}
-                      initialContent={current.file.content ?? ""}
-                      editable={canWriteCurrentFile}
-                      onSave={handleSaveWebsitePage}
-                    />
-                  </>
-                ) : fileFolderType === "skills" ? (
+                {fileFolderType === "skills" ? (
                   // A project's own skills/KNOWLEDGE.md, GRAPH.md,
                   // GRAPH_STRUCTURE.md, EFFORTS.md (see the
                   // graphlog/vault skills) are themselves OxMarkdown

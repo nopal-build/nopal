@@ -27,6 +27,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   createFileRef,
   getFileRefById,
+  getFolderAncestry,
   getFolderById,
   listFolderChildren,
   updateFileRef,
@@ -37,6 +38,11 @@ import { splitFrontmatter } from "./project.types";
 import { canActAsProjectOwner } from "./projectSharing.server";
 import { getDailyLogCards } from "./dailyLog.server";
 import { findLeafDirectiveOccurrences } from "../util/nopalDirectives";
+import {
+  getCachedWebsitePage,
+  setCachedWebsitePage,
+  invalidateWebsiteCache,
+} from "./websiteCache.server";
 
 const README_NAME = "README.md";
 const SITE_SETTINGS_NAME = "_site-settings.json";
@@ -230,13 +236,43 @@ function stripMdExtension(name: string): string {
  * for a folder's own index doc). The LAST segment may instead match a
  * plain markdown FILE (by name, minus `.md`) when no folder matches — e.g.
  * `about` → `about.md`. Returns `null` on no match (a real 404).
+ *
+ * Cached (`websiteCache.server.ts`) — a hit skips every DB round trip
+ * below entirely. See that module's header for the invalidation scheme
+ * (a per-site version bump, triggered by `invalidateWebsiteCacheForFile`
+ * below whenever a `website`-project file changes) that keeps this from
+ * ever serving stale content after a save.
  */
 export async function resolveWebsitePageByPath(
   siteFolder: VaultFolder,
   segments: string[],
 ): Promise<ResolvedWebsitePage | null> {
-  let currentFolder = siteFolder;
   const cleanSegments = segments.map((s) => s.trim()).filter(Boolean);
+  // Lowercased -- every segment match below is already case-insensitive
+  // (`.toLowerCase()` on both sides), so two requests differing only in
+  // casing must land on the exact same cache entry rather than each
+  // populating their own redundant copy.
+  const pathKey = cleanSegments.join("/").toLowerCase();
+
+  const cached = await getCachedWebsitePage<ResolvedWebsitePage>(siteFolder._id, pathKey);
+  if (cached) return cached;
+
+  const resolved = await resolveWebsitePageByPathUncached(siteFolder, cleanSegments);
+  // Only a REAL resolved page is cached -- caching a miss (`null`) would
+  // mean a page that doesn't exist YET (e.g. mid-creation, or simply not
+  // published) keeps 404ing from cache for up to the TTL even after it's
+  // created/published, instead of picking it up on the very next request
+  // the way `invalidateWebsiteCache`'s version bump already guarantees for
+  // an EXISTING page's own edits.
+  if (resolved) await setCachedWebsitePage(siteFolder._id, pathKey, resolved);
+  return resolved;
+}
+
+async function resolveWebsitePageByPathUncached(
+  siteFolder: VaultFolder,
+  cleanSegments: string[],
+): Promise<ResolvedWebsitePage | null> {
+  let currentFolder = siteFolder;
 
   for (let i = 0; i < cleanSegments.length; i++) {
     const segment = cleanSegments[i];
@@ -435,4 +471,42 @@ export async function getPrimaryWebsiteFolder(): Promise<VaultFolder | null> {
   const folder = await getFolderById(folderId);
   if (!folder || folder.folder_type !== "website" || !folder.is_folder_type_root) return null;
   return folder;
+}
+
+/**
+ * `vault.server.ts`'s `updateFileRef` calls this after EVERY file update
+ * (whenever `content`/`name`/`folder_id` is part of it) via the lazy
+ * `getWebsiteModule()` import there — a no-op for the overwhelming
+ * majority of vault writes, which have nothing to do with a `website`
+ * project at all. Only does real work when the edited file's own folder
+ * is actually `folder_type: "website"` (denormalized onto every
+ * descendant of a website anchor, so THIS part needs no ancestry walk).
+ *
+ * Resolves the file's OWN website anchor via its ancestry
+ * (`getFolderAncestry` + `findWebsiteAnchor`, above) rather than reaching
+ * for `getPrimaryWebsiteFolder()` (which reads `WEBSITE_PROJECT_FOLDER_ID`)
+ * — a REAL BUG this fixes, not just a multi-site nicety: this function
+ * runs inside `vault.server.ts`'s `updateFileRef`, i.e. inside WHICHEVER
+ * app's process actually saved the file (in practice, `fruits`, since
+ * that's where the Vault UI lives) — and `WEBSITE_PROJECT_FOLDER_ID` has
+ * never been configured for `fruits` (see
+ * `fruits/scripts/copy-secrets-from-webapp.sh`'s own comment: "fruits has
+ * no use for" it — true until this cache existed). Reaching for it here
+ * meant `getPrimaryWebsiteFolder()` always returned `null` in the process
+ * that actually needed to invalidate, so a saved edit never bumped the
+ * version at all — confirmed directly (a real repro: patching this exact
+ * file's content through the real API and checking Redis showed the
+ * version never moved), not just reasoned about. The only reason an edit
+ * ever became visible was this cache's own 1-hour TTL backstop expiring.
+ * Resolving the file's own anchor instead needs no cross-app env var at
+ * all, and is correct for a future multi-site world too (bumps the
+ * SPECIFIC site the file belongs to, not always "the primary one").
+ */
+export async function invalidateWebsiteCacheForFile(file: FileRef): Promise<void> {
+  if (!file.folder_id) return;
+  const folder = await getFolderById(file.folder_id);
+  if (folder?.folder_type !== "website") return;
+  const ancestry = await getFolderAncestry(file.folder_id);
+  const anchor = findWebsiteAnchor(ancestry);
+  if (anchor) await invalidateWebsiteCache(anchor._id);
 }

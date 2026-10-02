@@ -88,11 +88,20 @@ export function WebsiteIcon({
    * here. See `websiteDirectives.tsx`'s `waypoint` entry for the
    * standalone-marker sibling of this. */
   waypointId,
+  /** `::icon{position="x,y"}` -- already resolved to a real CSS
+   * `position: absolute; left: ...%; top: ...%` object by
+   * `websiteDirectives.tsx`'s `parseIconPosition` (see its own comment
+   * for the full coordinate-system explanation), or `undefined` for an
+   * icon with no `position` at all. Merged in AFTER each branch's own
+   * base `style` below so it can override `position` (`static` by
+   * default) without needing three separate conditional spreads. */
+  positionStyle,
 }: {
   name: string;
   size?: "sm" | "md" | "lg";
   className?: string;
   waypointId?: string;
+  positionStyle?: CSSProperties;
 }) {
   const px = SIZE_PX[size];
 
@@ -106,13 +115,13 @@ export function WebsiteIcon({
         src={fileSrc}
         alt=""
         className={`website-icon website-icon-file ${className ?? ""}`}
-        style={{ width: px, height: "auto" }}
+        style={{ width: px, height: "auto", ...positionStyle }}
         data-waypoint-id={waypointId || undefined}
       />
     );
   }
 
-  const style: CSSProperties = { width: px, height: px };
+  const style: CSSProperties = { width: px, height: px, ...positionStyle };
   const Placeholder = WEBSITE_ICON_PLACEHOLDERS[name];
   if (Placeholder) {
     return (

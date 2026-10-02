@@ -26,7 +26,31 @@ export const main = style({
   minWidth: 0,
   minHeight: 0,
   overflowX: "auto",
-  overflowY: "scroll",
+  // `auto`, not `scroll` -- `scroll` forces this scrollbar's OWN track to
+  // render even when there's genuinely nothing to scroll (its content
+  // fits exactly), which is harmless for a page that scrolls directly
+  // via THIS element, but becomes a real, visible bug for Vault (and any
+  // future page shaped the same way): Vault's own top-level layout
+  // already constrains itself to fit exactly within `<main>`'s own
+  // height, doing all of ITS OWN scrolling through a SEPARATE, nested
+  // container (`.vault-main`) -- so `<main>` here never actually needs
+  // to scroll, yet `overflow-y: scroll` painted a second, permanently-
+  // empty scrollbar track right alongside Vault's own real one (found
+  // via a direct repro: `<main>`'s own `scrollHeight === clientHeight`,
+  // confirming it never truly overflows, while still forcing that track
+  // to show).
+  //
+  // `scrollbar-gutter: stable` was tried next (reserving this element's
+  // scrollbar space PERMANENTLY, so a page that DOES scroll directly
+  // through it wouldn't reflow when a real scrollbar appears) and then
+  // reverted -- it reserves that space unconditionally, which for Vault
+  // just relocated the same visible bug one layer out: an empty gutter-
+  // shaped gap, still sitting outside `.vault-main`'s own real scrollbar,
+  // where the phantom track used to be. No prior comment ever documented
+  // an actual reflow problem `scroll` was fixing in the first place, so
+  // there's no confirmed real regression from leaving this unreserved --
+  // plain `auto`, nothing else.
+  overflowY: "auto",
 });
 
 // ── The two bars, and which one shows ─────────────────────────────────────

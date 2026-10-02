@@ -13,11 +13,12 @@
 // it becomes a fixed overlay that slides in/out: a backdrop click, the
 // close button inside the drawer, or Escape all close it; a mobile-only
 // toggle bar (hidden on desktop) drawn above `children` opens it.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SidebarToggleIcon } from "./SidebarToggleIcon";
 import { sprinkles } from "./sprinkles.css";
 import { textSize } from "./typography.css";
-import { semanticColors } from "./tokens";
+import { breakpoints, semanticColors } from "./tokens";
+import { useStickyPaneMaxHeight } from "./useStickyPaneMaxHeight";
 import {
   backdrop,
   backdropVisible,
@@ -29,6 +30,23 @@ import {
   shell,
   toggleButton,
 } from "./drawerContent.css";
+
+/** True below `breakpoints.navMax`, where the drawer becomes a full-height
+ * fixed overlay instead of a sticky sidebar and doesn't need the
+ * measured-max-height fix at all (see the `useStickyPaneMaxHeight` call
+ * below) -- reactive to the window crossing that breakpoint, not just a
+ * one-time check at mount. */
+function useIsMobileDrawer(): boolean {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${breakpoints.navMax})`);
+    const recompute = () => setIsMobile(mql.matches);
+    recompute();
+    mql.addEventListener("change", recompute);
+    return () => mql.removeEventListener("change", recompute);
+  }, []);
+  return isMobile;
+}
 
 type DrawerContentProps = {
   /** Rendered inside the drawer — nav links, a folder tree, filters, … */
@@ -42,6 +60,14 @@ type DrawerContentProps = {
 
 export function DrawerContent({ drawer, children, title = "Menu" }: DrawerContentProps) {
   const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLElement | null>(null);
+  // See `useStickyPaneMaxHeight`'s own header for the full "why" -- this
+  // is the fix for `panel`'s CSS `max-height: 100vh` (drawerContent.css.ts)
+  // overshooting the real available height. Disabled on mobile, where the
+  // drawer is a full-height fixed overlay (`max-height: none`) that
+  // doesn't need it.
+  const isMobile = useIsMobileDrawer();
+  const measuredMaxHeight = useStickyPaneMaxHeight(panelRef, isMobile);
 
   useEffect(() => {
     if (!open) return;
@@ -58,7 +84,11 @@ export function DrawerContent({ drawer, children, title = "Menu" }: DrawerConten
         className={`${backdrop} ${open ? backdropVisible : ""}`.trim()}
         onClick={() => setOpen(false)}
       />
-      <aside className={`${panel} ${open ? panelOpen : ""}`.trim()}>
+      <aside
+        ref={panelRef}
+        className={`${panel} ${open ? panelOpen : ""}`.trim()}
+        style={measuredMaxHeight != null ? { maxHeight: measuredMaxHeight } : undefined}
+      >
         <div className={closeRow}>
           <button
             type="button"

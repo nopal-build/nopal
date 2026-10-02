@@ -1,43 +1,104 @@
-html {
-  overflow-y: scroll;
-}
+/* `html { overflow-y: scroll; }` used to live here -- removed as dead
+   CSS. Every authenticated page in this app renders inside `AppLayout`,
+   whose OWN `<main>` (`appLayoutShell.css.ts`) is the real, nested
+   scrolling container (`overflow-y: auto`) -- `<html>`/`<body>` never
+   actually scroll, so forcing a permanently-reserved scrollbar gutter on
+   `<html>` did nothing but reserve dead space and (per the `stamps`
+   skill's own already-documented "scrollbar-gutter" pitfall) risks
+   exactly the class of bug that pitfall describes: an outer container
+   flagged as a scroll container that never shows a real scrollbar, while
+   the ACTUAL scrolling happens on a nested one. The few routes that don't
+   use `AppLayout` (`login.tsx`, the public card view, ...) still scroll
+   correctly via the browser's own default `overflow-y: auto` on `html` --
+   removing the forced `scroll` value only drops the ALWAYS-reserved
+   gutter on those, a cosmetic trade-off, not a functional one. */
 
-/* ── Palette (Tier 1) ─────────────────────────────────────────────────────
+/* ── Palette (Tier 1) ────────────────────────────────────────────
    Raw color values, grouped into nature-themed families (on brand for a
-   company named after the prickly pear cactus) on a 100–900 scale,
-   populated lazily — only the rungs an existing color actually needs
-   exist today; the rest are free to add later without a naming debate.
+   company named after the prickly pear cactus), on a full 100–900 scale.
    Literal color names (`--purple`, `--green`, …) are kept as plain
    aliases right below: faster to say/remember than "plum-700", and
    nothing already using them needs to change. Prefer the semantic
    tokens (Tier 2, further down) in new component code — reach for a
    palette/literal name directly only when a semantic role doesn't exist
    yet. See the `stamps` package for the typed JS equivalents of all of
-   this (`palette`, `colors`, `semanticColors` in `tokens.ts`). */
+   this (`palette`, `colors`, `semanticColors` in `tokens.ts`).
+
+   The 100/200/300/400/500/700 rungs actually referenced by an alias or
+   semantic token below (see each family's comment) are real, designed
+   colors — don't change them without checking what breaks. Every OTHER
+   rung is generated: linearly interpolated/extrapolated in HSL through
+   those real anchors (see `/maker/stamps#colors`'s "Extended palette"
+   note for the exact method) purely to give development a broader,
+   coherent set of tints/shades to pick from — they're not meant to be
+   reached for over a semantic token, and safe to regenerate/replace
+   wholesale if a real color ever gets added at one of these rungs. */
 :root {
-  /* Plum (brand primary / purple) */
+  /* Plum (brand primary / purple) — 200/300/400/700 are real (real anchors: --text-subtle-dark/--purple-light/--text-subtle/--purple) */
+  --plum-100: #f3f0f5;
   --plum-200: #c8b8ce;
   --plum-300: #7f5b8b;
   --plum-400: #817186;
+  --plum-500: #6c5773;
+  --plum-600: #56405e;
   --plum-700: #3f2b46;
+  --plum-800: #35243b;
+  --plum-900: #2b1d2f;
 
-  /* Cactus (green) */
+  /* Cactus (green) — 100/300/500 are real (real anchors: website's "mint" bg/--green-light/--green) */
+  --cactus-100: #e3f5d9;
+  --cactus-200: #b0e3ad;
   --cactus-300: #86cb97;
+  --cactus-400: #70b781;
   --cactus-500: #5da06d;
+  --cactus-600: #4d845a;
+  --cactus-700: #3d6847;
+  --cactus-800: #2c4c34;
+  --cactus-900: #1c3021;
 
-  /* Clay (red / terracotta) */
+  /* Clay (red / terracotta) — 300/500 are real (real anchors: --red-light/--red) */
+  --clay-100: #fcebe9;
+  --clay-200: #f9d9d6;
   --clay-300: #f6c8c3;
+  --clay-400: #de746a;
   --clay-500: #a63b31;
+  --clay-600: #8b3129;
+  --clay-700: #712821;
+  --clay-800: #561e19;
+  --clay-900: #3b1511;
 
-  /* Dune (yellow) */
+  /* Dune (yellow) — 300/500 are real (real anchors: --yellow-light/--yellow) */
+  --dune-100: #fef9e7;
+  --dune-200: #fdf4d5;
   --dune-300: #fcf0c4;
+  --dune-400: #fdedb4;
   --dune-500: #ffeaa4;
+  --dune-600: #ffd64e;
+  --dune-700: #f8bf00;
+  --dune-800: #a27d00;
+  --dune-900: #4c3b00;
 
-  /* Bloom (pink — cactus flower) */
+  /* Bloom (pink — cactus flower) — 500 is real (real anchor: --pink) */
+  --bloom-100: #f6ebfa;
+  --bloom-200: #edd8f4;
+  --bloom-300: #e4c5ef;
+  --bloom-400: #dcb3ea;
   --bloom-500: #d3a0e5;
+  --bloom-600: #b763d4;
+  --bloom-700: #9432b7;
+  --bloom-800: #622179;
+  --bloom-900: #31103c;
 
-  /* Moonlight (pale accent blue/lavender) */
+  /* Moonlight (pale accent blue/lavender) — 500 is real (real anchor: --moon) */
+  --moonlight-100: #e7e8fe;
+  --moonlight-200: #dedffd;
+  --moonlight-300: #d5d7fd;
+  --moonlight-400: #cdcefc;
   --moonlight-500: #c4c6fc;
+  --moonlight-600: #6c71f8;
+  --moonlight-700: #131bf3;
+  --moonlight-800: #080ea1;
+  --moonlight-900: #040649;
 
   /* Surface (neutral scene backdrop) — day is the warm, sunlit scene;
      night is the same scene after dark. Was farground/midground/

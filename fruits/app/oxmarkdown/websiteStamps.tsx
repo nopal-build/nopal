@@ -39,6 +39,7 @@ export function WebsiteStamp({
   rotate = 0,
   float = "inline",
   waypointId,
+  forcedScheme,
 }: {
   name: string;
   /** Degrees — matches the mockups' slightly-tilted stamp cards. The
@@ -47,6 +48,21 @@ export function WebsiteStamp({
   rotate?: number;
   float?: "left" | "right" | "inline";
   waypointId?: string;
+  /** Forces which asset of the light/dark pair renders, bypassing the
+   * `<picture>`/`<source media="...">` selection below entirely -- for the
+   * Vault website editor's / `/maker/stamps/scratch` guide's own preview
+   * toggle (`.website-preview-force-{light,dark}`). That toggle is a pure
+   * CSS trick (an ancestor class + higher-specificity overrides), and
+   * `<source media="(prefers-color-scheme: dark)">` is NOT a CSS rule at
+   * all -- it's resolved by the browser's own media-query engine against
+   * the ACTUAL OS/browser scheme at parse time, completely outside the
+   * page's CSS cascade. No selector, however specific, can override which
+   * `<source>` a `<picture>` picked -- so previewing the opposite scheme
+   * needs this explicit prop instead, which swaps the rendered `<img>`
+   * directly in JS/markup rather than relying on the browser to re-decide.
+   * Leave undefined for the real public `/v2` page -- that's the one place
+   * this SHOULD keep following the visitor's actual OS setting. */
+  forcedScheme?: "light" | "dark";
 }) {
   const asset = WEBSITE_STAMPS[name];
   const style = { "--stamp-rotate": `${rotate}deg` } as CSSProperties;
@@ -63,6 +79,32 @@ export function WebsiteStamp({
         data-waypoint-id={waypointId || undefined}
       >
         stamp: {name || "?"}
+      </span>
+    );
+  }
+
+  if (forcedScheme) {
+    // Same TWO-element contract as the `<picture>` case below (an outer
+    // sizing wrapper + an inner filling `<img>`), NOT one element wearing
+    // both classes -- REAL BUG found here: `.ox-content img { max-width:
+    // 100% }` (oxmarkdown.css) is a descendant selector (one class + one
+    // element, more specific than `.website-stamp`'s own plain class), so
+    // it silently wins over `.website-stamp`'s `max-width: 132px` on any
+    // element that's BOTH an `<img>` AND carries `.website-stamp` directly
+    // -- blowing the stamp up to full width. In the `<picture>` case that
+    // global reset only ever lands on the INNER `.website-stamp-img`,
+    // which is harmless (the outer `<picture>` -- not an `<img>` tag, so
+    // the reset can't touch it -- is what actually does the 132px
+    // capping). Keeping that same split here, with a plain `<span>`
+    // standing in for `<picture>` (no `<source>` needed once the asset's
+    // already resolved), avoids the collision the exact same way.
+    return (
+      <span
+        className={`website-stamp ${floatClass}`}
+        style={style}
+        data-waypoint-id={waypointId || undefined}
+      >
+        <img src={asset[forcedScheme]} alt="" className="website-stamp-img" />
       </span>
     );
   }

@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { createMultipartUpload } from "robustness-core/data/file.server";
-import { canWriteToFolderId, getFolderById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
+import { canWriteToFolderId, explainWriteRefusal, getFolderById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
 import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 
 /**
@@ -43,7 +43,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // `vaultRoots.ts` / `vaultFolderTypes.ts`.
   if (!(await canWriteToFolderId(folderId, user.role))) {
     return Response.json(
-      { error: "You don't have permission to upload files here" },
+      { error: await explainWriteRefusal(folderId, user.role) },
       { status: 403 },
     );
   }

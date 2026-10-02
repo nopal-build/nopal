@@ -18,6 +18,7 @@
 import {
   createFileRef,
   createVaultFolder,
+  ensureSyncsFolder,
   getFolderById,
   getFileRefById,
   listFolderChildren,
@@ -54,27 +55,12 @@ function contentHash(content: string): string {
 export async function ensureProjectSyncsFolder(projectFolder: VaultFolder): Promise<VaultFolder> {
   // A website has no syncs (`isWebsiteFolder`): whatever got here is a bug.
   if (isWebsiteFolder(projectFolder)) throw new Error("A website has no syncs");
-  const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
-  // Same deterministic-pick + deterministic-id fix as `ensureProjectN01`'s
-  // own Skills-folder bug (see the `graphlog` skill's write-up) — this
-  // check-then-create had the exact same unprotected race, and it's what
-  // produced real duplicate "Daily Logs" folders in production. Sorting
-  // oldest-first is a defensive belt-and-suspenders measure for any
-  // duplicates a past race already left behind; the deterministic `id`
-  // below is what actually closes the race going forward.
-  const existing = folders
-    .filter((f) => f.is_folder_type_root && f.folder_type === "syncs")
-    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
-  if (existing) return existing;
-  const created = await createVaultFolder({
-    human_id: projectFolder.human_id,
-    name: "Syncs",
-    parent_folder_id: projectFolder._id,
-    folder_type: "syncs",
-    id: systemVaultFolderKey(projectFolder.human_id, "Syncs", projectFolder._id),
-  });
-  if (!created) throw new Error("Failed to create the project's syncs folder");
-  return created;
+  // See `ensureSyncsFolder`'s own doc (vault.server.ts) for why this is
+  // shared rather than reimplemented here — this used to have its own
+  // copy of the oldest-first + deterministic-id logic, which is exactly
+  // how it and `resolveDailyLogsFolder` stayed in sync with each other
+  // while `ensureSyncApiAnalysis` quietly used a third, divergent rule.
+  return ensureSyncsFolder(projectFolder);
 }
 
 /** Idempotently ensures the project's `syncs/Daily Logs` folder exists —

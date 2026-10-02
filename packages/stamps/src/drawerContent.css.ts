@@ -16,18 +16,25 @@
 // when `children` is short, instead of shrinking to content height —
 // true of `AppLayout`'s own `<main>` (`flex: 1` in a full-height column),
 // the only real caller today.
+//
+// `panel`'s own `max-height` CANNOT be a plain CSS percentage here (see
+// its own comment) without breaking that `min-height` growth -- so
+// `DrawerContent.tsx` measures the real available height at runtime
+// (`ResizeObserver` on the nearest scrolling ancestor) and applies it as
+// an inline style, with this file's `100vh` only as the pre-measurement/
+// no-JS fallback.
 import { style } from "@vanilla-extract/css";
 import { breakpoints, semanticColors } from "./tokens";
 
 export const shell = style({
   display: "flex",
-  // Deliberately "stretch" (the flex default), not "flex-start" — that
+  // Deliberately "stretch" (the flex default), not "flex-start" -- that
   // lets `panel` (below) stretch to the row's full height (i.e. as tall
-  // as `main`'s content) before its own `maxHeight: 100vh` clamps it back
-  // down to exactly one viewport. Without the stretch, `panel` would only
-  // ever be as tall as its own (short) nav content, so its background
-  // wouldn't reach the bottom of a taller screen and `sticky` would have
-  // no room to hold it in place while `main` scrolls.
+  // as `main`'s content) before its own `maxHeight: 100%` clamps it back
+  // down to exactly this row's own height. Without the stretch, `panel`
+  // would only ever be as tall as its own (short) nav content, so its
+  // background wouldn't reach the bottom of a taller screen and `sticky`
+  // would have no room to hold it in place while `main` scrolls.
   alignItems: "stretch",
   // `alignItems: stretch` only stretches `panel`/`main` to match EACH
   // OTHER's height -- it does nothing when BOTH are shorter than the
@@ -40,11 +47,16 @@ export const shell = style({
   // `appLayoutShell.css.ts` -- so this resolves correctly, it doesn't fall
   // back to `auto`/0 the way a percentage height against an indefinite
   // ancestor would). Deliberately `min-height`, not `height`: a `height`
-  // would clip/need its own `overflow: auto` the moment content genuinely
-  // exceeds one viewport, adding a SECOND scrollbar nested inside
-  // `<main>`'s own -- `min-height` only ever raises the floor, so taller
-  // content keeps growing the row naturally and still relies on that one
-  // existing scrollbar, exactly as before this change.
+  // would CAP this row at exactly one screen tall, leaving `panel` zero
+  // room to slide within it as `main` scrolls -- `position: sticky` only
+  // has a visible "stuck" range for as long as ITS OWN containing block
+  // (this row) is taller than the sticky element itself, so capping this
+  // row's height to match `panel`'s own height breaks stickiness
+  // entirely (confirmed: it made `panel` scroll away immediately instead
+  // of staying pinned -- a real regression hit and reverted while
+  // building this). `min-height` only ever raises the floor, so taller
+  // content keeps growing the row naturally, preserving `panel`'s full
+  // stuck range, and still relies on `<main>`'s one existing scrollbar.
   minHeight: "100%",
 });
 
@@ -59,6 +71,20 @@ export const panel = style({
   background: semanticColors.surfaceCard,
   position: "sticky",
   top: 0,
+  // `100vh` is only a FALLBACK, overridden by `DrawerContent.tsx` via an
+  // inline `maxHeight` style once it measures the real number (a
+  // `ResizeObserver` on the nearest scrolling ancestor's `clientHeight`).
+  // `panel` doesn't start at the window's own top edge -- it starts
+  // wherever that scrolling ancestor's own visible viewport starts
+  // (below `AppLayout`'s topbar, and its impersonation banner when
+  // shown) -- so `100vh` alone overshoots the real available height by
+  // exactly that much, pushing the drawer's own bottom edge that far past
+  // the bottom of the actual browser window, permanently: a `position:
+  // sticky` box's own height doesn't change as you scroll, so that
+  // overshoot is never reachable no matter how far anything is scrolled.
+  // (A CSS-only `max-height: 100%` fix was tried and reverted -- see
+  // `shell`'s own comment for why that broke sticky positioning entirely
+  // instead.)
   maxHeight: "100vh",
   overflowY: "auto",
   "@media": {

@@ -27,6 +27,7 @@
 import {
   createFileRef,
   createVaultFolder,
+  ensureSyncsFolder,
   ensureVaultRootFolders,
   getFileRefById,
   getFolderById,
@@ -461,17 +462,13 @@ export async function ensureSyncApiAnalysis(
     if (!space) return { ok: false, status: 404, error: "Personal space not found" };
   }
 
-  const { folders: spaceChildren } = await listFolderChildren(humanId, space._id);
-  let syncs = spaceChildren.find((f) => f.folder_type === "syncs" && f.is_folder_type_root);
-  if (!syncs) {
-    syncs = await createVaultFolder({
-      human_id: humanId,
-      name: "syncs",
-      parent_folder_id: space._id,
-      folder_type: "syncs",
-    });
-    if (!syncs) return { ok: false, status: 500, error: "Failed to create syncs folder" };
-  }
+  // Shared with `resolveDailyLogsFolder`/`ensureProjectSyncsFolder` —
+  // see `ensureSyncsFolder`'s own doc (vault.server.ts). This used to be
+  // its own divergent, unsorted `.find()` that created a lowercase
+  // "syncs" with no deterministic id — confirmed, 2026-10-02, to be how
+  // a real account ended up with two disagreeing "syncs" folders under
+  // Personal.
+  const syncs = await ensureSyncsFolder(space);
 
   const trimmedName = name.trim();
   const { folders: syncsChildren } = await listFolderChildren(humanId, syncs._id);

@@ -5,6 +5,7 @@ import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { uploadFileToS3, deleteFromS3 } from "robustness-core/data/file.server";
 import {
   canWriteToFolderId,
+  explainWriteRefusal,
   getFileRefById,
   computeMdUpdate,
   isFolderUnderSyncs,
@@ -83,7 +84,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // `vaultRoots.ts` / `vaultFolderTypes.ts`.
   if (!(await canWriteToFolderId(existing.folder_id, user.role))) {
     return Response.json(
-      { error: "You don't have permission to modify this file" },
+      { error: await explainWriteRefusal(existing.folder_id, user.role) },
       { status: 403 },
     );
   }

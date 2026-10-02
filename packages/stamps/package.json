@@ -35,10 +35,17 @@
     "./DrawerContent": "./src/DrawerContent.tsx",
     "./drawerContent.css": "./src/drawerContent.css.ts",
     "./SidebarToggleIcon": "./src/SidebarToggleIcon.tsx",
+    "./ExpandIcon": "./src/ExpandIcon.tsx",
+    "./LayoutFlipIcon": "./src/LayoutFlipIcon.tsx",
+    "./layoutFlipIcon.css": "./src/layoutFlipIcon.css.ts",
+    "./ActionBar": "./src/ActionBar.tsx",
+    "./actionBar.css": "./src/actionBar.css.ts",
     "./Stack": "./src/Stack.tsx",
     "./Cluster": "./src/Cluster.tsx",
     "./Grid": "./src/Grid.tsx",
-    "./useScrollSpy": "./src/useScrollSpy.ts"
+    "./useScrollSpy": "./src/useScrollSpy.ts",
+    "./useStickyPaneMaxHeight": "./src/useStickyPaneMaxHeight.ts",
+    "./WebsitePageContent": "./src/WebsitePageContent.tsx"
   },
   "peerDependencies": {
     "react": "^18.3.1"

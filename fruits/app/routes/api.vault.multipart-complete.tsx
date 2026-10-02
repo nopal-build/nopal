@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { completeMultipartUpload } from "robustness-core/data/file.server";
-import { createFileRef, getFolderById, isFolderUnderSyncs, canWriteToFolderId } from "robustness-core/data/vault.server";
+import { createFileRef, explainWriteRefusal, getFolderById, isFolderUnderSyncs, canWriteToFolderId } from "robustness-core/data/vault.server";
 import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 
 /**
@@ -60,7 +60,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // with them) to register a file_refs row into.
   if (!(await canWriteToFolderId(folderId ?? null, user.role))) {
     return Response.json(
-      { error: "You don't have permission to upload files here" },
+      { error: await explainWriteRefusal(folderId ?? null, user.role) },
       { status: 403 },
     );
   }

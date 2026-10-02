@@ -784,3 +784,292 @@
     background: var(--dark-farground);
   }
 }
+
+/* ── Website page split editor (Markdown + Preview) ────────────────────────
+   A markdown file inside a `website` project (see the `vault` skill) --
+   raw markdown source on one side, a live `OxRenderer` preview on the
+   other, instead of the WYSIWYG `OxEditor` every other kind of vault
+   markdown file gets. Same breakpoint (859px) Vault's own sidebar drawer
+   already uses, for one consistent responsive story across the page. */
+
+.vault-website-editor {
+  position: relative;
+}
+
+/* Takes over the WHOLE viewport (not just widening its own box) --
+   self-contained: doesn't need to reach into Vault's own sidebar/topbar
+   state to hide them, it just paints over everything at a z-index above
+   Vault's own highest (its mobile sidebar drawer, 200). */
+.vault-website-editor--expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--farground);
+  @media (prefers-color-scheme: dark) {
+    background: var(--dark-farground);
+  }
+}
+
+.vault-website-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.vault-website-editor-panes {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+/* The sticky pane -- `height` (not `max-height`) is set INLINE by
+   `useStickyPaneMaxHeight` (see that hook's own header for why a plain
+   CSS `100vh` overshoots the real available height); this rule's own
+   `height` is only the pre-measurement/no-JS fallback, same convention
+   `DrawerContent`'s `panel` uses. A real `height`, not just a cap, so
+   this pane always FILLS the available space (matching Preview's own
+   height) rather than only being as tall as its own content when that's
+   shorter. `width` is deliberately a fixed px, not a flex fraction --
+   Preview is the one side meant to be greedy/take remaining space. */
+.vault-website-editor-markdown {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  width: 460px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--foreground);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--white);
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--dark-foreground);
+    background: var(--dark-farground);
+  }
+}
+
+.vault-website-editor-pane-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--text-subtle);
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--dark-foreground);
+    color: var(--text-subtle-dark);
+  }
+}
+
+/* Redundant with the desktop toolbar's own Expand button -- only shown on
+   mobile (below), where that toolbar is hidden entirely and each pane's
+   own label row carries its own Expand button instead, per the mockup. */
+.vault-website-editor-mobile-expand {
+  display: none;
+}
+
+/* Large, but the PANE scrolls internally (`overflow-y: auto` here) --
+   the page itself only ever scrolls because `Preview` (greedy, uncapped)
+   grows tall, never because of this textarea's own content. `min-height:
+   0` is load-bearing on a flex child that needs to actually shrink/scroll
+   instead of forcing its flex column parent to grow to fit it. */
+.vault-website-editor-textarea {
+  flex: 1 1 auto;
+  min-height: 320px;
+  overflow-y: auto;
+  resize: none;
+  border: none;
+  padding: 14px;
+  font-family: var(--font-mono, monospace);
+  font-size: 14px;
+  line-height: 1.6;
+  background: transparent;
+  color: inherit;
+}
+
+.vault-website-editor-textarea:focus {
+  outline: none;
+}
+
+/* Always visible -- the LAST child of a flex column whose own height is
+   fixed (see `.vault-website-editor-markdown`'s own `height`), so it
+   never scrolls out of view along with the textarea above it. */
+.vault-website-editor-save-row {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 14px;
+  border-top: 1px solid var(--foreground);
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--dark-foreground);
+  }
+}
+
+.vault-website-editor-save-btn {
+  background: var(--purple);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+/* Disabled reads as "the surface it's sitting on, just darker" -- NOT a
+   desaturated purple (which still looks clickable-ish) or a hardcoded
+   gray (which wouldn't adapt across light/dark) -- per this feature's
+   own design note. */
+.vault-website-editor-save-btn:disabled {
+  background: var(--midground);
+  color: var(--text-subtle);
+  cursor: not-allowed;
+  @media (prefers-color-scheme: dark) {
+    background: var(--dark-midground);
+    color: var(--text-subtle-dark);
+  }
+}
+
+.vault-website-editor-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The "GoodBox" (`stamps/Surface`) Preview sits inside -- Markdown gets
+   its own hand-rolled border/background above (a separate, pre-existing
+   treatment, not converted to `Surface` too); this is the ONE explicitly
+   requested to become a real `Surface`. */
+.vault-website-editor-preview-surface {
+  overflow: hidden;
+}
+
+.vault-website-editor-preview-body {
+  padding-top: 4px;
+}
+
+/* The reading-column max-width, the `.ox-content` padding reset, and the
+   `:::section{...}` full-bleed-until-capped/border-radius treatment all
+   moved to the SHARED `WebsitePageContent` component (`packages/stamps`)
+   + its `.website-page-content`/`.website-page-ox`/`.website-section`
+   rules in `website.css` -- this preview and the real public `/v2`
+   renderer (`WebsitePageView`) now go through the exact same wrapper and
+   className contract instead of each keeping its own hand-tuned recipe,
+   so the two can't quietly drift apart the way they had started to here
+   (this file used to carry its own, Vault-only `14px`/`26px` version of
+   the same numbers `website.css` already had). */
+
+.vault-website-editor-mobile-bar {
+  display: none;
+}
+
+@media (max-width: 859px) {
+  /* Flip Layout doesn't apply on mobile -- one pane shows at a time
+     regardless, and the bottom bar's own Preview/Markdown toggle is what
+     controls which. Expand still applies -- it moves into each pane's own
+     label row instead (below), matching the mockup this was built from. */
+  .vault-website-editor-toolbar {
+    display: none;
+  }
+
+  .vault-website-editor-mobile-expand {
+    display: inline-flex;
+  }
+
+  .vault-website-editor-panes {
+    flex-direction: column;
+  }
+
+  .vault-website-editor-markdown {
+    position: static;
+    height: auto;
+    width: 100%;
+  }
+
+  /* No internal scroll here -- `WebsitePageSplitEditor`'s own effect sets
+     an explicit inline `height` matching the textarea's real content
+     (`scrollHeight`), so it grows to fit everything and the WHOLE PAGE
+     scrolls instead, same as `Preview` already does on every breakpoint.
+     `overflow-y: hidden` (not `auto`) avoids a stray scrollbar flashing
+     before that effect runs on mount. */
+  .vault-website-editor-textarea {
+    overflow-y: hidden;
+  }
+
+  /* The bottom action bar (below) already has its own Save button --
+     showing this ONE too would be a confusing, redundant second Save
+     right below it. */
+  .vault-website-editor-save-row {
+    display: none;
+  }
+
+  /* Both panes stay mounted always (an unmounted textarea would lose
+     whatever the human already typed the moment they switch to Preview) --
+     `data-mobile-view` just hides whichever one isn't current. */
+  .vault-website-editor-panes[data-mobile-view="preview"] .vault-website-editor-markdown {
+    display: none;
+  }
+  .vault-website-editor-panes[data-mobile-view="markdown"] .vault-website-editor-preview {
+    display: none;
+  }
+
+  /* `bottom: -20px`, not `0` -- a sticky element's constraint rectangle
+     is the scrolling ancestor's own PADDING BOX (same fact behind
+     `useStickyPaneMaxHeight`'s own fix, above), so `bottom: 0` alone
+     only ever reaches `.vault-main`'s own padding edge, leaving its 20px
+     bottom padding as a visible gap below the bar no matter what margin
+     is on this element -- margin shifts a box's IN-FLOW position, it
+     doesn't change where a sticky OFFSET clamps. Shifting the offset
+     itself by the exact padding amount is what actually reaches the true
+     viewport edge. Left/right -20px margin (canceling that same padding
+     on those sides) is what makes the bar reach the screen edges. */
+  .vault-website-editor-mobile-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    position: sticky;
+    bottom: -20px;
+    margin: 16px -20px -20px;
+    padding: 10px 20px;
+    background: var(--farground);
+    border-top: 1px solid var(--foreground);
+    @media (prefers-color-scheme: dark) {
+      background: var(--dark-farground);
+      border-color: var(--dark-foreground);
+    }
+  }
+
+  /* Reads as part of the action bar itself, per this feature's own design
+     note -- not floated off to one side as its own separate button. */
+  .vault-website-editor-mobile-save {
+    background: var(--purple);
+    color: white;
+    border: none;
+    border-radius: 3px;
+    padding: 6px 14px;
+    font-family: var(--font-mono, monospace);
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  .vault-website-editor-mobile-save:disabled {
+    background: var(--midground);
+    color: var(--text-subtle);
+    cursor: not-allowed;
+    @media (prefers-color-scheme: dark) {
+      background: var(--dark-midground);
+      color: var(--text-subtle-dark);
+    }
+  }
+}

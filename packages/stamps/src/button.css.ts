@@ -20,6 +20,7 @@
 // escape hatch (only ever used on `secondary`, e.g. revoke/suspend/deny
 // actions) with a real, typed variant — the whole point of moving off a
 // bare CSS custom property nobody's typo on it would ever be caught.
+import { globalStyle } from "@vanilla-extract/css";
 import { recipe, type RecipeVariants } from "@vanilla-extract/recipes";
 import { colors, darkModeMediaQuery } from "./tokens";
 
@@ -150,3 +151,58 @@ export const button = recipe({
 });
 
 export type ButtonVariants = RecipeVariants<typeof button>;
+
+// Force-scheme override for the Vault website editor's / the
+// `/maker/stamps/scratch` guide's own light/dark PREVIEW toggle
+// (`.website-preview-force-{light,dark}`, `website.css` in both
+// `fruits`/`webapp`). That ancestor class works by plain custom-
+// property inheritance for the tokens IT owns, but can't reach into
+// each variant's `@media (prefers-color-scheme: dark)` block above --
+// those set real literal colors directly on THIS recipe's own
+// generated class, so nothing about an ancestor's override can be
+// inherited over top of them. Re-declaring each variant's own colors
+// here, scoped under the SAME force-toggle class, gives 3 classes of
+// specificity (ancestor + the recipe's own base+variant classes) --
+// enough to beat the 1-class `@media` rule above in EITHER direction,
+// regardless of which one the browser's real query currently matches.
+// `secondary` is deliberately absent -- it has no dark-mode swap above
+// to fight, so it already reads correctly under either forced scheme.
+function forceSchemeSelector(variant: "primary" | "purple" | "yellow" | "outline") {
+  return `.${button({ variant }).trim().split(/\s+/).join(".")}`;
+}
+
+globalStyle(`.website-preview-force-light ${forceSchemeSelector("primary")}`, {
+  background: colors.purple,
+  color: "white",
+});
+globalStyle(`.website-preview-force-dark ${forceSchemeSelector("primary")}`, {
+  background: "white",
+  color: colors.purple,
+});
+
+globalStyle(`.website-preview-force-light ${forceSchemeSelector("purple")}`, {
+  background: colors.purple,
+  color: "white",
+});
+globalStyle(`.website-preview-force-dark ${forceSchemeSelector("purple")}`, {
+  background: "white",
+  color: colors.purple,
+});
+
+globalStyle(`.website-preview-force-light ${forceSchemeSelector("yellow")}`, {
+  background: colors.farground,
+  borderColor: colors.foreground,
+  color: colors.purpleLight,
+});
+globalStyle(`.website-preview-force-dark ${forceSchemeSelector("yellow")}`, {
+  background: colors.darkFarground,
+  borderColor: colors.darkForeground,
+  color: "white",
+});
+
+globalStyle(`.website-preview-force-light ${forceSchemeSelector("outline")}`, {
+  borderColor: colors.midground,
+});
+globalStyle(`.website-preview-force-dark ${forceSchemeSelector("outline")}`, {
+  borderColor: colors.darkMidground,
+});

@@ -38,12 +38,12 @@ describe("the groups", () => {
   it("test 9: a Guide reaches what an Owner did, a Crafter what a Crafter did", () => {
     const guide = resolveRole("Owner");
     expect(guide).toMatchObject({ isOwner: true, guiding: true });
-    expect(tabsFor(guide.features)).toEqual(["efforts", "photos", "files", "costs", "logbook", "suggestions"]);
+    expect(tabsFor(guide.features)).toEqual(["efforts", "photos", "files", "sensorData", "costs", "logbook", "suggestions"]);
     expect(guide.features).toEqual(expect.arrayContaining(["marks", "steepTap", "steepReadings", "dailyLog"]));
 
     const crafter = resolveRole("Crafter");
     expect(crafter).toMatchObject({ isOwner: true, guiding: false });
-    expect(tabsFor(crafter.features)).toEqual(["efforts", "photos", "files", "costs", "logbook"]);
+    expect(tabsFor(crafter.features)).toEqual(["efforts", "photos", "files", "sensorData", "costs", "logbook"]);
     expect(crafter.features).not.toContain("steepReadings");
   });
 
