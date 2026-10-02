@@ -17,6 +17,11 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { useLoadFailed } from "../oxmarkdown/useLoadFailed";
+// The gallery grid's own rules. Without this import the grid only held
+// when a Vault page had loaded the sheet earlier in the visit; a fresh
+// load of the Photos tab laid each thumbnail out at its own size
+// (2026-10-02).
+import "../styles/vault.css";
 
 const FOLDER_TITLES: Record<FileFolder, string> = {
   gallery: "Gallery",

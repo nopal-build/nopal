@@ -28,6 +28,7 @@ import {
   directiveAttrs,
   isDirectiveNode,
   parseRefAttrs,
+  refFileId,
   splitSentences,
   type OxDocument,
   type DirectiveNode,
@@ -44,12 +45,14 @@ import { useLoadFailed } from "../oxmarkdown/useLoadFailed";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
 import {
   buildAnnotationCtx,
+  LogReader,
   MarkableUnit,
   MarkNotes,
   type AnnotationCtx,
   type OxAnnotations,
 } from "../oxmarkdown/marks";
 import { CircleButton } from "stamps/CircleButton";
+import { link } from "stamps/link.css";
 import { surfaceBase } from "stamps/surface.css";
 import "../styles/oxmarkdown.css";
 
@@ -179,9 +182,12 @@ export interface OxTreeRendererProps {
 }
 
 /** How the pen draws a Card for "Read the full log" (`marks.tsx`, which
- * can't import this file): plainly, with no pen of its own. */
+ * can't import this file): plainly, with no pen of its own. A person's
+ * words keep the dot grid (2026-09-28); the gutter goes, since in a box
+ * this narrow it pushed the Card a full cell off the label above it
+ * (2026-10-02). */
 const renderCardInPen = (markdown: string, servedFileIds?: Record<string, string>) => (
-  <OxRenderer markdown={markdown} servedFileIds={servedFileIds} />
+  <OxRenderer markdown={markdown} servedFileIds={servedFileIds} className="ox-no-gutter" />
 );
 
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
@@ -309,7 +315,17 @@ function renderBlockNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode 
   const out: ReactNode[] = [];
   for (let i = 0; i < list.length; i++) {
     const node = list[i];
-    let rendered = renderNode(node, i, ctx);
+    let rendered: ReactNode;
+    // Photos in a row of `::file` lines read as one grid across the text,
+    // not one small row each down the page (Austin, 2026-10-02). Only when
+    // reading; a document being edited keeps a row per file.
+    let run = 0;
+    while (!ctx.interactive && isPhotoFileNode(list[i + run])) run++;
+    if (run > 0) {
+      rendered = <FilePhotoGrid key={i} nodes={list.slice(i, i + run) as DirectiveNode[]} servedFileIds={ctx.servedFileIds} directives={ctx.directives} />;
+    } else {
+      rendered = renderNode(node, i, ctx);
+    }
     if (i > 0) {
       const gap = countBlankLines(list[i - 1], node);
       if (gap === 0) {
@@ -332,8 +348,17 @@ function renderBlockNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode 
       }
     }
     out.push(rendered);
+    if (run > 1) i += run - 1;
   }
   return out;
+}
+
+/** A `::file` line that is a picture with a file behind it. */
+function isPhotoFileNode(node: unknown): node is DirectiveNode {
+  const n = node as DirectiveNode | undefined;
+  if (!n || n.type !== "leafDirective" || n.name !== "file") return false;
+  const attrs = directiveAttrs(n);
+  return !!attrs.fileId && !!attrs.contentType?.startsWith("image/") && attrs.uploadError !== "1";
 }
 
 /** A bare single `\n` inside a paragraph's source text parses into ONE
@@ -853,7 +878,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
   // `ctx.interactive` branch at all, unlike the generic directive-attrs
   // popover other directives get further down.
   if (node.type === "textDirective" && node.name === "ref") {
-    return <RefDirectiveStatic key={key} node={node} ambiguousFirstNames={ctx.ambiguousRefFirstNames} />;
+    return <RefDirectiveStatic key={key} node={node} ambiguousFirstNames={ctx.ambiguousRefFirstNames} annotations={ctx.annotations} />;
   }
 
   // `::card{file="..."}` — same category, see `oxmarkdown/cardDirective.ts`.
@@ -1259,6 +1284,78 @@ function FileImageModal({
  * oxmarkdown skill's Interacting-vs-Editing model) — so the caption is
  * just rendered markdown, the same static way anything else here is,
  * never a live editor. */
+/** Which id a `::file` loads by: the project's copy where the caller
+ * knows one (`servedFileIds`), otherwise its own. Own-key lookup: the id
+ * is text a writer can type. */
+function servedFileId(fileId: string | undefined, servedFileIds?: Record<string, string>): string | undefined {
+  if (!servedFileIds || !fileId) return fileId;
+  return Object.hasOwn(servedFileIds, fileId) ? servedFileIds[fileId] : undefined;
+}
+
+/** Photos from `::file` lines in a grid the width of the text: three
+ * across, two on a phone, every one the same square, as on the Photos tab
+ * (2026-10-02). A click opens the same zoom a single file row does. */
+function FilePhotoGrid({
+  nodes,
+  servedFileIds,
+  directives,
+}: {
+  nodes: DirectiveNode[];
+  servedFileIds?: Record<string, string>;
+  directives?: DirectiveRegistry;
+}) {
+  return (
+    <div className="ox-gallery-directive ox-file-photos">
+      {nodes.map((node, i) => {
+        const attrs = directiveAttrs(node);
+        const captionDoc = attrs.caption ? parseOxDocument(attrs.caption) : null;
+        return (
+          <FilePhotoTile
+            key={i}
+            name={attrs.name ?? "photo"}
+            fileId={servedFileId(attrs.fileId, servedFileIds)}
+            caption={captionDoc ? <OxStaticNodes nodes={captionDoc.children} directives={directives} /> : null}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function FilePhotoTile({ name, fileId, caption }: { name: string; fileId?: string; caption: ReactNode }) {
+  const [zoomed, setZoomed] = useState(false);
+  const src = fileId ? renditionUrl(`/api/vault/view/${fileId}`, "thumb") : undefined;
+  const load = useLoadFailed(src);
+  return (
+    <figure className="ox-gallery-item" contentEditable={false}>
+      {!src || load.failed ? (
+        <div className="ox-photo-missing" role="img" aria-label={name} title={name} />
+      ) : (
+        <img
+          ref={load.ref}
+          onError={load.onError}
+          src={src}
+          alt={name}
+          title={name}
+          loading="lazy"
+          draggable={false}
+          role="button"
+          tabIndex={0}
+          onClick={() => setZoomed(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setZoomed(true);
+            }
+          }}
+        />
+      )}
+      {caption && !zoomed && <figcaption>{caption}</figcaption>}
+      {zoomed && fileId && <FileImageModal name={name} fileId={fileId} caption={caption} onClose={() => setZoomed(false)} />}
+    </figure>
+  );
+}
+
 function FileDirectiveStatic({
   node,
   directives,
@@ -1269,13 +1366,7 @@ function FileDirectiveStatic({
   servedFileIds?: Record<string, string>;
 }) {
   const attrs = directiveAttrs(node);
-  // Own-key lookup: the id is text a writer can type.
-  const fileId =
-    servedFileIds && attrs.fileId
-      ? Object.hasOwn(servedFileIds, attrs.fileId)
-        ? servedFileIds[attrs.fileId]
-        : undefined
-      : attrs.fileId;
+  const fileId = servedFileId(attrs.fileId, servedFileIds);
   const captionDoc = attrs.caption ? parseOxDocument(attrs.caption) : null;
   return (
     <FileDirectiveLayout
@@ -1515,9 +1606,12 @@ function humanProfileHref(humanId: string): string {
 function RefDirectiveStatic({
   node,
   ambiguousFirstNames,
+  annotations,
 }: {
   node: DirectiveNode;
   ambiguousFirstNames?: Set<string>;
+  /** The pen's context, for "Read the full log" from the popover. */
+  annotations?: AnnotationCtx;
 }) {
   const parsed = parseRefAttrs(node);
   if (!parsed) {
@@ -1557,6 +1651,9 @@ function RefDirectiveStatic({
       datetime={formatRefDatetime(datetime)}
       location={location}
       originWord={originWord}
+      loadLog={annotations?.refLog(refFileId(location))}
+      renderCard={annotations?.renderCard}
+      readsLogs={!!annotations}
     />
   );
 }
@@ -1568,6 +1665,9 @@ function RefDirectiveMarker({
   datetime,
   location,
   originWord,
+  loadLog,
+  renderCard,
+  readsLogs,
 }: {
   name: string;
   /** What the accessible label says. The visible glyph is always `*`; this
@@ -1579,8 +1679,17 @@ function RefDirectiveMarker({
   location: string;
   /** "seeded" or "noted at seeding" for a citation into seeded history. */
   originWord?: string | null;
+  /** Opens the daily log this cites, where there is one (the Efforts
+   * page, for a reader with the Logbook). */
+  loadLog?: () => ReturnType<NonNullable<AnnotationCtx["loadRefLog"]>>;
+  renderCard?: AnnotationCtx["renderCard"];
+  /** The page has the pen (the Efforts page). There the Source row is the
+   * reader or nothing: the Vault is going away, and a Client, who has no
+   * Logbook, can't open the Vault either. */
+  readsLogs?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [reading, setReading] = useState(false);
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const toggle = () => setOpen((o) => !o);
   return (
@@ -1599,7 +1708,23 @@ function RefDirectiveMarker({
       }}
     >
       *
-      <OxPopover anchorEl={anchorEl} open={open} onDismiss={() => setOpen(false)}>
+      <OxPopover
+        anchorEl={anchorEl}
+        open={open}
+        onDismiss={() => {
+          setOpen(false);
+          setReading(false);
+        }}
+      >
+        {/* The popover sits inside the `*` in React's tree, so a press in
+            it would reach the toggle above and close it. */}
+        <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        {reading && loadLog ? (
+          <div className="ox-ref-popover-log">
+            <LogReader load={loadLog} renderCard={renderCard} onBack={() => setReading(false)} />
+          </div>
+        ) : (
+        <>
         <div className="ox-popover-title">Reference</div>
         <div className="ox-ref-popover-row">
           <span>Name</span>
@@ -1615,9 +1740,23 @@ function RefDirectiveMarker({
             <span>{originWord === "seeded" ? "seeded history, before the project logged here" : "noted at seeding, nobody's words"}</span>
           </div>
         )}
-        <div className="ox-ref-popover-row">
-          <span>Source</span>
-          <a href={location}>{location}</a>
+        {loadLog ? (
+          <div className="ox-ref-popover-row">
+            <span>Source</span>
+            <button type="button" className={`${link} ox-ref-popover-read`} onClick={() => setReading(true)}>
+              Read the full log
+            </button>
+          </div>
+        ) : (
+          !readsLogs && (
+            <div className="ox-ref-popover-row">
+              <span>Source</span>
+              <a href={location}>{location}</a>
+            </div>
+          )
+        )}
+        </>
+        )}
         </div>
       </OxPopover>
     </span>
