@@ -28,6 +28,10 @@ export const FEATURE_NAMES = [
   "costs",
   /** The Logbook tab: every Card written to the project. */
   "logbook",
+  /** The Sensor Data tab — only ever shown on a project that actually has
+   * a recognized `load-cell` sync-api folder (`loadCellSensorData.server.ts`).
+   * Same reading tier as Files/Costs; a Client doesn't get it. */
+  "sensorData",
   /** Writing a mark: a note on a passage of the page or on a file.
    * Moving a passage, filing a file and confirming a cost are `edit`. */
   "marks",
@@ -59,7 +63,7 @@ export const FEATURE_NAMES = [
 ] as const;
 export type Feature = (typeof FEATURE_NAMES)[number];
 
-const READING: Feature[] = ["efforts", "photos", "files", "costs", "logbook"];
+const READING: Feature[] = ["efforts", "photos", "files", "costs", "logbook", "sensorData"];
 
 /** The list. Guide is what Owner reached, Crafter what Crafter reached;
  * Observer reads what a Crafter reads, writes Cards and notes, and doesn't

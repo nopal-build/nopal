@@ -55,6 +55,7 @@
     "./data/projectView.server": "./src/data/projectView.server.ts",
     "./data/impersonationEvents.server": "./src/data/impersonationEvents.server.ts",
     "./data/legalDocuments.server": "./src/data/legalDocuments.server.ts",
+    "./data/loadCellSensorData.server": "./src/data/loadCellSensorData.server.ts",
     "./data/llmPricing": "./src/data/llmPricing.ts",
     "./data/llmProvider": "./src/data/llmProvider.ts",
     "./data/makerStats.server": "./src/data/makerStats.server.ts",

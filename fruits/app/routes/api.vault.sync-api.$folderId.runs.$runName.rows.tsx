@@ -1,7 +1,8 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
-import { appendSyncApiRows, resolveSyncApiAnalysis } from "robustness-core/data/syncApi.server";
+import { appendSyncApiRows, getSyncApiSchema, listSyncApiRuns, resolveSyncApiAnalysis } from "robustness-core/data/syncApi.server";
+import { isLoadCellAnalysisFolder, refreshLoadCellCleanedRun } from "robustness-core/data/loadCellSensorData.server";
 
 /**
  * POST /api/vault/sync-api/:folderId/runs/:runName/rows — append rows to an
@@ -44,5 +45,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!result.ok) {
     return Response.json({ error: result.error }, { status: 400 });
   }
+
+  // Best-effort, and only for the one sync-api shape this feature knows
+  // (`loadCellSensorData.server.ts`) — never blocks the actual append, and
+  // a no-op for every other analysis (the Sensor Data tab also refreshes
+  // this lazily on view, so a failure here just means a stale sidecar
+  // until the next append or tab view).
+  const schema = await getSyncApiSchema(resolved.folder);
+  if (isLoadCellAnalysisFolder(resolved.folder, schema)) {
+    const run = (await listSyncApiRuns(resolved.folder)).find((r) => r.name === runName);
+    if (run) {
+      await refreshLoadCellCleanedRun(resolved.folder, run).catch((e) =>
+        console.error("load-cell cleaned-sidecar refresh failed:", e),
+      );
+    }
+  }
+
   return Response.json({ appended: result.appended });
 }

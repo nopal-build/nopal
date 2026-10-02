@@ -48,6 +48,12 @@ import {
   servedFileIds,
   tabsFor,
 } from "robustness-core/data/projectView.server";
+import {
+  findLoadCellAnalysisFolder,
+  loadSensorDataTab,
+  type SensorDataTab,
+} from "robustness-core/data/loadCellSensorData.server";
+import { SensorDataView } from "../components/SensorDataView";
 import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
 import { ownLatestReading } from "robustness-core/data/dashboard.server";
 import { navFor } from "../data/nav.server";
@@ -89,7 +95,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const role = own && groupOf(own.role) ? resolveRole(own.role) : null;
   const inCache = canViewFolder(user._id, folder);
   const features = role ? role.features : inCache ? featuresOf("Observer") : [];
-  const allowed = tabsFor(features);
+  // Sensor Data only ever shows up on a project that actually has a
+  // recognized `load-cell` sync-api folder (loadCellSensorData.server.ts,
+  // Gerald 2026-10-02: kept deliberately narrow) — filtered out of
+  // `allowed` entirely rather than shown empty.
+  const loadCellFolder = features.includes("sensorData") ? await findLoadCellAnalysisFolder(folder) : null;
+  const allowed = tabsFor(features).filter((t) => t !== "sensorData" || !!loadCellFolder);
   const tab = resolveProjectTab(new URL(request.url).searchParams.get("tab"), allowed);
   if (!tab) throw new Response("Not found", { status: 404 });
   const base = `/newspaper/${folder._id}`;
@@ -140,6 +151,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // The Budget: a view under Costs for the `budget` feature (Guides).
   // A typed URL without the feature is refused like a tab; the link only
   // shows once a budget has been started (features.ts, `budget`).
+  const sensorData: SensorDataTab | null =
+    tab === "sensorData" && loadCellFolder
+      ? await loadSensorDataTab(loadCellFolder, new URL(request.url).searchParams.get("run"))
+      : null;
+
   const budgetView = tab === "costs" && new URL(request.url).searchParams.get("view") === "budget";
   if (budgetView && !features.includes("budget")) throw new Response("Not found", { status: 404 });
   const budget = tab === "costs" && features.includes("budget") ? await loadBudget(folder._id) : null;
@@ -241,6 +257,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     fileKinds: FILING_KINDS.filter((k) => k !== "video"),
     logbook,
     logbookFileIds,
+    sensorData,
     seeding,
     budgetView,
     budget,
@@ -482,7 +499,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { folder, project, status, canEditStatus, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -730,6 +747,9 @@ export default function NewspaperRoute() {
               onChanged={() => revalidator.revalidate()}
               canFile={canEdit}
             />
+          )}
+          {tab === "sensorData" && sensorData && (
+            <SensorDataView projectFolderId={folder._id} data={sensorData} />
           )}
           {logbook && <Logbook cards={logbook} fileIds={logbookFileIds ?? {}} />}
           {suggestions && (

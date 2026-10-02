@@ -181,7 +181,7 @@ import { isOwnCard } from "robustness-core/data/dailyLog.server";
 
 describe("the project view's tabs", () => {
   it("everyone who reaches the page gets every tab; a Client never reaches it (see access.test.ts)", () => {
-    expect(PROJECT_TABS).toEqual(["efforts", "photos", "files", "costs", "logbook", "suggestions"]);
+    expect(PROJECT_TABS).toEqual(["efforts", "photos", "files", "sensorData", "costs", "logbook", "suggestions"]);
     expect(resolveProjectTab("costs")).toBe("costs");
     expect(resolveProjectTab("nonsense")).toBe("efforts");
     expect(resolveProjectTab(null)).toBe("efforts");
