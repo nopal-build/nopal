@@ -75,6 +75,20 @@ export type AdminScriptJobLog = {
   log: string[];
 };
 
+/** A job the worker has not started yet, so it has no `admin_script_runs`
+ * row (`startAdminScriptRun` writes one when the worker picks it up).
+ * The Run button redirects to the run's page at once, and a job queued
+ * behind another script showed there as "Run Not Found" (2026-10-02).
+ * Null when there is no such job either. */
+export async function getPendingAdminScriptJob(
+  jobId: string,
+): Promise<{ state: AdminScriptJobLog["state"]; data: AdminScriptJobData; enqueuedAt: string } | null> {
+  const job = await getAdminScriptsQueue().getJob(jobId);
+  if (!job) return null;
+  const state = (await job.getState()) as AdminScriptJobLog["state"];
+  return { state, data: job.data, enqueuedAt: new Date(job.timestamp).toISOString() };
+}
+
 /** Live log tailing for a run that hasn't finished yet — once
  * `admin_script_runs` has `ok !== null` the permanent row's own `log` is
  * the thing to read instead (this job may have already been pruned by
