@@ -105,7 +105,7 @@ pub fn rm(name: &str, keep_remote: bool, force: bool) -> Result<(), Box<dyn Erro
         format!("Stop syncing '{name}' AND delete syncs/{name}/ from the vault? [y/N] ")
     };
     if !force && !vault::confirm(&prompt) {
-        println!("Aborted.");
+        println!("Aborted. (pass --force to skip this prompt)");
         return Ok(());
     }
 

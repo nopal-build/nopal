@@ -49,6 +49,7 @@ import { run as runVaultRootKeys } from "./adminScripts/migrateVaultRootKeys.ser
 import { run as runBackfillSyncedDailyLogDates } from "./adminScripts/backfillSyncedDailyLogDates.server";
 import { run as runReseedGraphlogSkills } from "./adminScripts/reseedGraphlogSkills.server";
 import { run as runDedupeSummaries } from "./adminScripts/dedupeSummaries.server";
+import { run as runMergeSkillsSyncsCaseVariants } from "./adminScripts/migrateMergeSkillsSyncsCaseVariants.server";
 import type { AdminScriptDefinition } from "./adminScripts/types";
 
 export type { AdminScriptDefinition, AdminScriptRunOpts, AdminScriptResult } from "./adminScripts/types";
@@ -138,6 +139,13 @@ const REGISTRY: AdminScriptDefinition[] = [
     argLabel: "Folder id",
     argRequired: true,
     run: runDedupeSummaries,
+  },
+  {
+    name: "migrate-merge-skills-syncs-case-variants",
+    label: "Merge case-variant Skills/Syncs folders",
+    description:
+      "Merges duplicate skills/syncs space folders that differ only by capitalization (e.g. 'Syncs' and 'syncs') into one properly-capitalized survivor — content merged (file-name collisions get an auto-dedupe suffix, never silently dropped), connector folders (e.g. a published sync-one-way folder) kept at their original id so a public link survives. Idempotent.",
+    run: runMergeSkillsSyncsCaseVariants,
   },
 ];
 

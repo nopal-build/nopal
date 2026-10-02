@@ -37,9 +37,11 @@ import {
   isSpaceFolderTypeKey,
   isSyncFamilyFolderType,
   isSyncFolderTypeKey,
+  isVaultFolderTypeKey,
   isWebsiteFolder,
   SPACE_FOLDER_TYPES,
   SYNC_FOLDER_TYPES,
+  VAULT_FOLDER_TYPES,
   type VaultFolderTypeKey,
 } from "./vaultFolderTypes";
 import { isVaultRootFolder, canViewFolder } from "./vault.types";
@@ -736,6 +738,57 @@ export function systemVaultFolderKey(
   return `${humanId}_${parentFolderId ?? "root"}_${name}`;
 }
 
+/** Every `syncs`-typed, type-defining child of a parent's children list,
+ * oldest-created first — the ONE tie-break rule every "find the syncs
+ * folder" call site should share (previously `resolveDailyLogsFolder` and
+ * `ensureProjectSyncsFolder` each had their own copy of this, and
+ * `ensureSyncApiAnalysis` had a THIRD, divergent one with no sort at all
+ * — confirmed, 2026-10-02, to be how a real account ended up with two
+ * "syncs" folders under Personal that different code silently disagreed
+ * about, orphaning months of Daily Log history behind the one `resolveDailyLogsFolder`
+ * kept finding while everything else drifted onto the other). Usually
+ * zero or one; more than one means a duplicate already exists (a
+ * pre-fix leftover, or a race — see `ensureSyncsFolder` below) — callers
+ * that care can report the rest, this just hands back the canonical
+ * survivor. */
+export function pickCanonicalSyncsFolder(folders: readonly VaultFolder[]): VaultFolder | undefined {
+  return folders
+    .filter((f) => f.is_folder_type_root && f.folder_type === "syncs")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+}
+
+/** Finds (or creates) `parentFolder`'s one `syncs` space folder — the
+ * single chokepoint `resolveDailyLogsFolder`, `ensureProjectSyncsFolder`,
+ * and `ensureSyncApiAnalysis` all now share, so they can never again pick
+ * a different folder for the same parent. Deterministic id on create
+ * (`systemVaultFolderKey`) makes a genuinely concurrent double-create a
+ * no-op rather than a second row — the same fix the Skills-folder race
+ * already got. Re-checks once more before creating if the first pass
+ * found nothing: a transient read that misses an existing row is exactly
+ * how the real duplicate this function replaces was created in the first
+ * place (a single bad read is plausible; two in a row, moments apart, is
+ * not), and creating a needless duplicate is expensive to undo while a
+ * second read is nearly free. */
+export async function ensureSyncsFolder(parentFolder: VaultFolder): Promise<VaultFolder> {
+  const { folders } = await listFolderChildren(parentFolder.human_id, parentFolder._id);
+  let existing = pickCanonicalSyncsFolder(folders);
+  if (!existing) {
+    const { folders: recheck } = await listFolderChildren(parentFolder.human_id, parentFolder._id);
+    existing = pickCanonicalSyncsFolder(recheck);
+  }
+  if (existing) return existing;
+
+  const created = await createVaultFolder({
+    human_id: parentFolder.human_id,
+    name: "Syncs",
+    parent_folder_id: parentFolder._id,
+    folder_type: "syncs",
+    id: systemVaultFolderKey(parentFolder.human_id, "Syncs", parentFolder._id),
+  });
+  if (!created) throw new Error("Failed to create a Syncs folder");
+  return created;
+}
+
 export async function getOrCreateVaultFolder(
   humanId: string,
   name: string,
@@ -889,6 +942,44 @@ export async function canWriteToFolderId(
     canWriteToRoot(rootKey, role) &&
     canWriteToFolderType(folder?.folder_type ?? null, role)
   );
+}
+
+/**
+ * Why `canWriteToFolderId` would refuse, in one sentence — never used for
+ * authorization itself (that's still `canWriteToFolderId`'s own boolean),
+ * only to build a more specific `{ error }` than a bare "You don't have
+ * permission" everywhere that message was otherwise indistinguishable
+ * from an actual Sharing-Roles refusal. The single most common real cause
+ * (confirmed against a real support case, 2026-10-02): a `project-n02`
+ * container (a project, or Personal) is `writable: "system"` at its own
+ * level — true for EVERYONE, owner included, not a role/sharing issue at
+ * all. Only its `skills`/`syncs` children are ever directly writable.
+ */
+export async function explainWriteRefusal(
+  folderId: string | null | undefined,
+  role: Role,
+): Promise<string> {
+  const generic = "You don't have permission to write here";
+  if (!folderId) return generic;
+
+  const folder = await getFolderById(folderId);
+  const rootKey = folder?.vault_root_key ?? (await resolveVaultRootKey(folderId));
+  if (!canWriteToRoot(rootKey, role)) {
+    return `${generic} — this part of the vault is locked`;
+  }
+
+  const folderType = folder?.folder_type ?? null;
+  const def = folderType && isVaultFolderTypeKey(folderType) ? VAULT_FOLDER_TYPES[folderType] : null;
+  const name = folder?.name ?? "this folder";
+  if (def?.writable === "system") {
+    return folderType === "project-n02"
+      ? `'${name}' can only be written to directly inside its skills/ or syncs/ folders — everything else is managed automatically`
+      : `'${name}' is managed automatically and can't be written to directly`;
+  }
+  if (def?.writable === "admin" && role !== "Admin" && role !== "Super") {
+    return `Only an Admin or Super can write inside '${name}'`;
+  }
+  return generic;
 }
 
 /** Combined shareable check for a folder id — root policy AND folder-type
@@ -1135,7 +1226,7 @@ const PERSONAL_DAILY_LOGS_FOLDER_NAME = "Daily Logs";
  * silently losing either file over a perfectly clean result; a human can
  * manually reconcile an actual duplicate pair afterward. `source` itself
  * is left empty, never deleted here — callers decide that. */
-async function mergeFolderContentsInto(source: VaultFolder, dest: VaultFolder): Promise<void> {
+export async function mergeFolderContentsInto(source: VaultFolder, dest: VaultFolder): Promise<void> {
   const { files: sourceFiles, folders: sourceFolders } = await listFolderChildren(
     source.human_id,
     source._id,
@@ -1220,25 +1311,8 @@ export async function resolveDailyLogsFolder(humanId: string): Promise<VaultFold
   const personal = roots.find((r) => r.vault_root_key === "personal");
   if (!personal) throw new Error(`No personal root found for human ${humanId}`);
 
-  const { folders: personalChildren } = await listFolderChildren(humanId, personal._id);
-  // Oldest-first + a deterministic `id` on create — the exact same
-  // check-then-create race `ensureProjectN02`'s Skills-folder bug had (see
-  // the `graphlog` skill), confirmed to have produced real duplicate
-  // "Daily Logs" folders here too (this function's own destination-folder
-  // create below had the identical gap).
-  let syncsFolder: VaultFolder | undefined = personalChildren
-    .filter((f) => f.is_folder_type_root && f.folder_type === "syncs")
-    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
-  if (!syncsFolder) {
-    syncsFolder = await createVaultFolder({
-      human_id: humanId,
-      name: "Syncs",
-      parent_folder_id: personal._id,
-      folder_type: "syncs",
-      id: systemVaultFolderKey(humanId, "Syncs", personal._id),
-    });
-  }
-  if (!syncsFolder) throw new Error("Failed to create personal's syncs folder");
+  // See `ensureSyncsFolder`'s own doc for why this is shared, not reimplemented here.
+  const syncsFolder = await ensureSyncsFolder(personal);
 
   const legacyResult = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders

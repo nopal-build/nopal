@@ -6,6 +6,7 @@ import {
 import {
   canWriteToFolderId,
   createVaultFolder,
+  explainWriteRefusal,
   getFolderById,
   getFoldersByHuman,
   isFolderUnderSyncs,
@@ -97,7 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // `vaultRoots.ts` / `vaultFolderTypes.ts`.
   if (!(await canWriteToFolderId(parent._id, user.role))) {
     return Response.json(
-      { error: "You don't have permission to create folders here" },
+      { error: await explainWriteRefusal(parent._id, user.role) },
       { status: 403 },
     );
   }

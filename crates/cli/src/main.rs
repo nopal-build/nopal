@@ -269,7 +269,7 @@ enum VaultCommand {
         path: String,
         /// Where to write the file (defaults to the file's name in the
         /// current directory).
-        #[arg(long)]
+        #[arg(short, long)]
         output: Option<PathBuf>,
     },
     /// Show metadata for a vault folder or file.

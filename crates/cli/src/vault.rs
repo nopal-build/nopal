@@ -447,7 +447,7 @@ pub fn rm(path: &str, force: bool, recursive: bool) -> Result<(), Box<dyn Error 
         Resolved::Root => Err("Provide a folder or file path to delete".into()),
         Resolved::File { file } => {
             if !force && !confirm(&format!("Delete '{}'? [y/N] ", file.name)) {
-                println!("Aborted.");
+                println!("Aborted. (pass --force to skip this prompt)");
                 return Ok(());
             }
             let _: serde_json::Value = client.delete(&format!("/api/vault/{}", file._id))?;
@@ -471,7 +471,7 @@ pub fn rm(path: &str, force: bool, recursive: bool) -> Result<(), Box<dyn Error 
                     folder.name
                 ))
             {
-                println!("Aborted.");
+                println!("Aborted. (pass --force to skip this prompt)");
                 return Ok(());
             }
             let _: serde_json::Value =
@@ -603,7 +603,9 @@ pub fn share(
                         h.name,
                         h.email,
                         role,
-                        seat.as_deref().map(|s| format!(", {s}")).unwrap_or_default()
+                        seat.as_deref()
+                            .map(|s| format!(", {s}"))
+                            .unwrap_or_default()
                     ));
                     entries.push(SharingEntry {
                         human: h._id.clone(),

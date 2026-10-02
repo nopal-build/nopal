@@ -6,6 +6,7 @@ import { uploadFileToS3 } from "robustness-core/data/file.server";
 import {
   canWriteToFolderId,
   createFileRef,
+  explainWriteRefusal,
   getFolderById,
   isFolderUnderSyncs,
 } from "robustness-core/data/vault.server";
@@ -69,7 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // `vaultRoots.ts` / `vaultFolderTypes.ts`.
   if (!(await canWriteToFolderId(folderId, user.role))) {
     return Response.json(
-      { error: "You don't have permission to upload files here" },
+      { error: await explainWriteRefusal(folderId, user.role) },
       { status: 403 },
     );
   }

@@ -6,6 +6,7 @@ import {
 import {
   canWriteToFolderId,
   canViewFileRef,
+  explainWriteRefusal,
   getFileRefById,
   updateFileRef,
   deleteFileRef,
@@ -169,7 +170,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (request.method === "DELETE" || request.method === "PATCH") {
     if (!(await canWriteToFolderId(file.folder_id, user.role))) {
       return Response.json(
-        { error: "You don't have permission to modify this file" },
+        { error: await explainWriteRefusal(file.folder_id, user.role) },
         { status: 403 },
       );
     }
@@ -229,7 +230,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if ("folder_id" in body && body.folder_id) {
       if (!(await canWriteToFolderId(body.folder_id, user.role))) {
         return Response.json(
-          { error: "You don't have permission to move files here" },
+          { error: await explainWriteRefusal(body.folder_id, user.role) },
           { status: 403 },
         );
       }

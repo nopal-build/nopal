@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import {
   canWriteToFolderId,
+  explainWriteRefusal,
   getFolderById,
   updateVaultFolder,
   deleteVaultFolderCascade,
@@ -168,7 +169,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       // as creating directly inside it would.
       if (!(await canWriteToFolderId(newParent._id, user.role))) {
         return Response.json(
-          { error: "You don't have permission to move folders here" },
+          { error: await explainWriteRefusal(newParent._id, user.role) },
           { status: 403 },
         );
       }
