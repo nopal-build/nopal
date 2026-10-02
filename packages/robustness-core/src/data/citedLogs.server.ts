@@ -15,7 +15,7 @@
  * Logbook would not.
  */
 
-import { getFileRefById, listFolderChildren } from "./vault.server";
+import { getFileRefListingsByIds, listFolderChildren } from "./vault.server";
 import type { VaultFolder } from "./vault.types";
 import { listCardsForProject } from "./dailyLog.server";
 import { listSeedDays } from "./seed.server";
@@ -108,12 +108,47 @@ export async function projectSyncFolderNames(project: VaultFolder): Promise<Map<
 
 /** `resolveCitedLogs` against the project's files. */
 export async function loadCitedLogs(project: VaultFolder, refs: readonly { fileId: string | null }[]): Promise<CitedLogs> {
-  const [logbook, syncFolders] = await Promise.all([projectLogbook(project), projectSyncFolderNames(project)]);
-  const ids = [...new Set(refs.map((r) => r.fileId).filter((id): id is string => !!id))];
-  const files = new Map<string, CitedFile>();
-  for (const file of await Promise.all(ids.map((id) => getFileRefById(id)))) {
-    if (!file) continue;
-    files.set(file._id, { name: file.name, syncFolder: (file.folder_id && syncFolders.get(file.folder_id)) || null });
-  }
+  const [logbook, files] = await Promise.all([projectLogbook(project), loadCitedFiles(project, [refs])]);
   return resolveCitedLogs(refs, files, logbook);
+}
+
+type CitingUnit = { key: string; refs: readonly { fileId: string | null }[] };
+
+/** Where the page offers "Read the full log": the passages (unit keys,
+ * for the pen) and the cited files (for a citation's `*`) with a daily
+ * log behind them. Only there, so the link never opens onto nothing
+ * (Austin, 2026-10-02). The same answer the reader gives, worked out once
+ * for the whole page: one Logbook, one lookup for every cited file. */
+export type PageLogs = { unitKeys: string[]; fileIds: string[] };
+
+export async function pageLogs(project: VaultFolder, units: readonly CitingUnit[]): Promise<PageLogs> {
+  const citing = units.filter((u) => u.refs.length > 0);
+  if (citing.length === 0) return { unitKeys: [], fileIds: [] };
+  const [logbook, files] = await Promise.all([projectLogbook(project), loadCitedFiles(project, citing.map((u) => u.refs))]);
+  return withLogs(citing, files, logbook);
+}
+
+/** The pure half of `pageLogs`: a passage, or one cited file, has a log
+ * when the reader would show at least one entry for it. */
+export function withLogs(
+  units: readonly CitingUnit[],
+  files: ReadonlyMap<string, CitedFile>,
+  logbook: readonly LogbookEntry[],
+): PageLogs {
+  const fileIds = [...new Set(units.flatMap((u) => u.refs.map((r) => r.fileId)).filter((id): id is string => !!id))];
+  return {
+    unitKeys: units.filter((u) => resolveCitedLogs(u.refs, files, logbook).entries.length > 0).map((u) => u.key),
+    fileIds: fileIds.filter((id) => resolveCitedLogs([{ fileId: id }], files, logbook).entries.length > 0),
+  };
+}
+
+async function loadCitedFiles(
+  project: VaultFolder,
+  refLists: readonly (readonly { fileId: string | null }[])[],
+): Promise<Map<string, CitedFile>> {
+  const ids = [...new Set(refLists.flat().map((r) => r.fileId).filter((id): id is string => !!id))];
+  const [syncFolders, listings] = await Promise.all([projectSyncFolderNames(project), getFileRefListingsByIds(ids)]);
+  return new Map(
+    listings.map((f) => [f._id, { name: f.name, syncFolder: (f.folder_id && syncFolders.get(f.folder_id)) || null }]),
+  );
 }

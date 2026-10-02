@@ -5,7 +5,7 @@
  * never from its name alone.
  */
 import { describe, expect, it } from "vitest";
-import { resolveCitedLogs, type CitedFile, type LogbookEntry } from "robustness-core/data/citedLogs.server";
+import { resolveCitedLogs, withLogs, type CitedFile, type LogbookEntry } from "robustness-core/data/citedLogs.server";
 
 const card = (fileId: string, who: string, humanId: string, date: string): LogbookEntry => ({
   fileId,
@@ -79,5 +79,28 @@ describe("which log a citation means", () => {
       "Seed 2026-04-01",
     ]);
     expect(other).toBe(true);
+  });
+});
+
+describe("where the page offers \"Read the full log\" (2026-10-02)", () => {
+  it("only those the reader would show an entry for", () => {
+    const units = [
+      { key: "card", refs: cites("copy-gerald-0909") },
+      { key: "seed", refs: cites("seed-0401") },
+      { key: "note-only", refs: cites("mark-lucas-0909") },
+      { key: "document", refs: cites("seed-doc") },
+      { key: "waiting", refs: cites("copy-austin-0910") },
+      { key: "uncited", refs: [] },
+      { key: "mixed", refs: cites("seed-doc", "photo-gerald-0912") },
+    ];
+    expect(withLogs(units, FILES, LOGBOOK).unitKeys).toEqual(["card", "seed", "mixed"]);
+  });
+
+  it("and which citations (a `*` names one file)", () => {
+    const units = [
+      { key: "a", refs: cites("copy-gerald-0909", "mark-lucas-0909") },
+      { key: "b", refs: cites("photo-gerald-0912", "seed-doc", null, "copy-austin-0910") },
+    ];
+    expect(withLogs(units, FILES, LOGBOOK).fileIds).toEqual(["copy-gerald-0909", "photo-gerald-0912"]);
   });
 });

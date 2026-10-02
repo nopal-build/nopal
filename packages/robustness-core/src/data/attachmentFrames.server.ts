@@ -81,6 +81,33 @@ export async function normalizeImageForVision(
   return { base64: jpeg.toString("base64"), mediaType: "image/jpeg" };
 }
 
+/** The longest edge the vision model reads at full detail. Larger images
+ * are scaled down by the API anyway, so nothing is lost by sending this. */
+export const VISION_MAX_EDGE = 1568;
+/** Under the API's 5 MB per-image limit with room to spare. */
+const VISION_MAX_BYTES = 3_500_000;
+
+/**
+ * The copy of an image sent to the model: as it is when it is already
+ * small enough, else scaled to `VISION_MAX_EDGE` on its longest edge as a
+ * JPEG. A phone's JPEG went to the model untouched, and one over the
+ * API's 5 MB limit was refused ("oversized image"), so its photo was never
+ * described and never reached the graph, every night (2026-10-02). Only
+ * what the model reads; renditions are made from the full image.
+ */
+export async function fitImageForVision(image: { base64: string; mediaType: string }): Promise<{ base64: string; mediaType: string }> {
+  const bytes = Buffer.from(image.base64, "base64");
+  const meta = await sharp(bytes).metadata().catch(() => null);
+  const edge = Math.max(meta?.width ?? 0, meta?.height ?? 0);
+  if (bytes.length <= VISION_MAX_BYTES && edge > 0 && edge <= VISION_MAX_EDGE) return image;
+  const jpeg = await sharp(bytes)
+    .rotate()
+    .resize(VISION_MAX_EDGE, VISION_MAX_EDGE, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+  return { base64: jpeg.toString("base64"), mediaType: "image/jpeg" };
+}
+
 /** Pure: where in a clip of `durationSeconds` to take `count` frames. */
 export function frameTimestamps(durationSeconds: number, count: number): number[] {
   if (!(durationSeconds > 0) || count <= 0) return [];

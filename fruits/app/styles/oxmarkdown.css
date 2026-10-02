@@ -740,6 +740,23 @@
   opacity: 0.6;
   font-size: 0.85em;
 }
+/* The log read inside a citation's popover: a Card is as wide as the
+   room it is given, so the popover would otherwise span the window. About
+   the pen's width, and scrolls when the day is long. */
+.ox-ref-popover-log {
+  width: min(30rem, calc(100vw - 48px));
+  max-height: 60vh;
+  overflow-y: auto;
+}
+/* "Read the full log" in a citation's popover: a link, not a button. */
+.ox-ref-popover-read {
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
 
 /* ── Directive-authoring utilities ────────────────── */
 /* ── Directive-authoring utilities ────────────────────────────── */
@@ -1677,6 +1694,31 @@ img.ox-file-thumb {
 @media (max-width: 640px) {
   .ox-gallery-directive {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Photos from a run of `::file` lines (`FilePhotoGrid`): always three
+   across, two on a phone, never one, so a Card with a dozen photos is a
+   few rows, not a long column (2026-10-02). The same counts as the Photos
+   tab (`.vault-gallery-grid`). The gap is the Photos tab's too: a full
+   grid cell between tiles this small read as holes. */
+.ox-gallery-directive.ox-file-photos {
+  /* `minmax(0, 1fr)`: see `.vault-gallery-grid` on a long caption. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.ox-file-photos img {
+  cursor: zoom-in;
+}
+/* A caption is its own small document (paragraphs at the page's grid
+   leading); under a tile it reads as the gallery's caption does. */
+.ox-file-photos figcaption :is(p, li) {
+  margin: 0;
+  line-height: 1.3;
+}
+@media (max-width: 640px) {
+  .ox-gallery-directive.ox-file-photos {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

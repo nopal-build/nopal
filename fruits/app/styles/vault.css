@@ -454,13 +454,18 @@
 
 /* ── Photo gallery (public folder view, all-image folders) ──────────────── */
 
+/* `minmax(0, 1fr)`, not `1fr`: a bare `1fr` never shrinks below its
+   content, and a name that won't wrap (`.vault-gallery-item-name`) made
+   its column as wide as the name, so tiles came out different sizes and
+   the grid ran past the card it sat in (2026-10-02). */
 .vault-gallery-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
 .vault-gallery-item {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -502,7 +507,7 @@
 
 @media (max-width: 640px) {
   .vault-gallery-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

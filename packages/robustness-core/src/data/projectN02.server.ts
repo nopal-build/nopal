@@ -138,6 +138,9 @@ export type SkillReseedOutcome = "reseeded" | "unchanged" | "created" | "removed
 export type SkillReseedEntry = {
   file: string;
   outcome: SkillReseedOutcome;
+  /** What a `"reseeded"` or `"removed"` file held before, so a caller can
+   * keep a copy of a person's own edits (the admin script logs it). */
+  previous?: string;
 };
 
 /**
@@ -169,7 +172,11 @@ export type SkillReseedEntry = {
  * beside its successor is deleted (`"removed"`) so it never rides into
  * a prompt as an extra file.
  */
-export async function reseedProjectN02Skills(folder: VaultFolder): Promise<SkillReseedEntry[]> {
+export async function reseedProjectN02Skills(
+  folder: VaultFolder,
+  opts: { dryRun?: boolean } = {},
+): Promise<SkillReseedEntry[]> {
+  const write = !opts.dryRun;
   const { folders } = await listFolderChildren(folder.human_id, folder._id);
   const skillsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "skills");
   if (!skillsFolder) return [];
@@ -183,7 +190,7 @@ export async function reseedProjectN02Skills(folder: VaultFolder): Promise<Skill
     const nextContent = effective[stage].content;
     const listing = files.find((f) => f.name.toLowerCase() === file.toLowerCase());
     if (!listing) {
-      await createFileRef({
+      if (write) await createFileRef({
         human_id: folder.human_id,
         name: file,
         content: nextContent,
@@ -199,14 +206,15 @@ export async function reseedProjectN02Skills(folder: VaultFolder): Promise<Skill
       results.push({ file, outcome: "unchanged" });
       continue;
     }
-    await updateFileRef(listing._id, { content: nextContent });
-    results.push({ file, outcome: "reseeded" });
+    if (write) await updateFileRef(listing._id, { content: nextContent });
+    results.push({ file, outcome: "reseeded", previous: currentContent });
   }
   for (const legacy of Object.keys(LEGACY_SKILL_FILE_NAMES)) {
     const listing = files.find((f) => f.name.toLowerCase() === legacy.toLowerCase());
     if (!listing) continue;
-    await deleteFileRef(listing._id);
-    results.push({ file: legacy, outcome: "removed" });
+    const previous = (await getFileRefById(listing._id))?.content ?? "";
+    if (write) await deleteFileRef(listing._id);
+    results.push({ file: legacy, outcome: "removed", previous });
   }
   return results;
 }
