@@ -366,6 +366,17 @@ export type WebsiteLinkItem = { label: string; to: string };
 
 export type WebsiteSettings = {
   nav: WebsiteLinkItem[];
+  /** Optional, standalone CTA pill shown in the header (`WebsiteHeader.tsx`
+   * in `webapp`) alongside `nav`, NOT carved out of it — `nav` always
+   * renders in full (desktop inline links AND the mobile dropdown) whether
+   * or not one of its own `to`s happens to match this. Keying this off an
+   * explicit field (rather than a "last item in `nav`" positional
+   * convention `WebsiteHeader.tsx` used to use) means authoring this in
+   * the Vault's own Site Settings editor (`SiteSettingsModal` in
+   * `fruits/app/routes/vault.tsx`) is unambiguous, and reordering `nav`
+   * can never silently change which link is featured. Absent entirely
+   * when a site doesn't want a featured button (no pill renders at all). */
+  featuredButton?: WebsiteLinkItem;
   footer: {
     tagline: string;
     links: WebsiteLinkItem[];
@@ -378,16 +389,25 @@ const DEFAULT_WEBSITE_SETTINGS: WebsiteSettings = {
   footer: { tagline: "", links: [], social: [] },
 };
 
+/** Shared single-item validation `parseLinkItems` (below) also uses per
+ * entry — both a label and a `to` must be non-empty strings, or the whole
+ * item is dropped rather than persisted/rendered half-filled-in. */
+function parseLinkItem(raw: unknown): WebsiteLinkItem | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const label = (raw as Record<string, unknown>).label;
+  const to = (raw as Record<string, unknown>).to;
+  if (typeof label === "string" && label && typeof to === "string" && to) {
+    return { label, to };
+  }
+  return undefined;
+}
+
 function parseLinkItems(raw: unknown): WebsiteLinkItem[] {
   if (!Array.isArray(raw)) return [];
   const out: WebsiteLinkItem[] = [];
   for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const label = (entry as Record<string, unknown>).label;
-    const to = (entry as Record<string, unknown>).to;
-    if (typeof label === "string" && label && typeof to === "string" && to) {
-      out.push({ label, to });
-    }
+    const item = parseLinkItem(entry);
+    if (item) out.push(item);
   }
   return out;
 }
@@ -405,8 +425,10 @@ export async function getWebsiteSettings(siteFolder: VaultFolder): Promise<Websi
   try {
     const parsed = JSON.parse(settingsFile.content) as Record<string, unknown>;
     const footer = (parsed.footer ?? {}) as Record<string, unknown>;
+    const featuredButton = parseLinkItem(parsed.featuredButton);
     return {
       nav: parseLinkItems(parsed.nav),
+      ...(featuredButton ? { featuredButton } : {}),
       footer: {
         tagline: typeof footer.tagline === "string" ? footer.tagline : "",
         links: parseLinkItems(footer.links),

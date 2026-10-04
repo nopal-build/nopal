@@ -1262,6 +1262,60 @@ function LinkListEditor({
   );
 }
 
+/** `WebsiteSettings.featuredButton` — an OPTIONAL single link, not a list
+ * (`LinkListEditor`'s own +/✕ row management doesn't apply here). Typing
+ * into either field creates the item on the fly (starts as `undefined`);
+ * the ✕ button clears it back to `undefined` entirely rather than just
+ * blanking the fields, so an author can cleanly opt back out of having a
+ * featured button at all. See `WebsiteHeader.tsx` (`webapp`) for how this
+ * renders — a standalone `stamps/button.css` `callout` pill alongside
+ * (not replacing) the main navigation above. */
+function FeaturedButtonEditor({
+  item,
+  onChange,
+}: {
+  item: WebsiteLinkItem | undefined;
+  onChange: (next: WebsiteLinkItem | undefined) => void;
+}) {
+  return (
+    <div style={{ marginBottom: "12px" }}>
+      <div className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginBottom: "4px" }}>
+        Featured button (optional)
+      </div>
+      <div style={{ display: "flex", gap: "4px", marginBottom: "4px" }}>
+        <input
+          type="text"
+          value={item?.label ?? ""}
+          onChange={(e) => onChange({ label: e.target.value, to: item?.to ?? "" })}
+          placeholder="Label (e.g. Meet the Guides)"
+          className="text-xs font-mono"
+          style={{ flex: 1, minWidth: 0, padding: "4px 6px", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)" }}
+        />
+        <input
+          type="text"
+          value={item?.to ?? ""}
+          onChange={(e) => onChange({ label: item?.label ?? "", to: e.target.value })}
+          placeholder="/v2/page or https://..."
+          className="text-xs font-mono"
+          style={{ flex: 2, minWidth: 0, padding: "4px 6px", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)" }}
+        />
+        {item && (
+          <button
+            type="button"
+            onClick={() => onChange(undefined)}
+            className="btn-outline text-xs font-mono px-2 rounded"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      <p className="text-xs font-mono" style={{ color: "var(--text-subtle)" }}>
+        Shown as its own standout pill in the header, alongside the main navigation above (not instead of it) — a page listed in "Main navigation" can also be the featured button.
+      </p>
+    </div>
+  );
+}
+
 function SiteSettingsModal({
   folderId,
   onClose,
@@ -1293,9 +1347,17 @@ function SiteSettingsModal({
 
   const handleSave = async () => {
     setSaving(true);
+    // A `featuredButton` left half-filled-in (e.g. a label typed then
+    // deleted, `to` never touched) normalizes to fully absent here rather
+    // than persisting `{ label: "", to: "" }` into the JSON file --
+    // `getWebsiteSettings` would drop it right back out on the next read
+    // anyway (`parseLinkItem` requires both fields), so this just keeps
+    // the saved file itself clean.
+    const featuredButton =
+      settings.featuredButton?.label && settings.featuredButton?.to ? settings.featuredButton : undefined;
     const data = await apiJson(`/api/vault/website/${folderId}/settings`, {
       method: "PUT",
-      body: JSON.stringify({ settings }),
+      body: JSON.stringify({ settings: { ...settings, featuredButton } }),
     });
     setSaving(false);
     if (data) onClose();
@@ -1319,6 +1381,12 @@ function SiteSettingsModal({
               label="Main navigation"
               items={settings.nav}
               onChange={(nav) => setSettings((prev) => ({ ...prev, nav }))}
+            />
+            <FeaturedButtonEditor
+              item={settings.featuredButton}
+              onChange={(featuredButton) =>
+                setSettings((prev) => ({ ...prev, featuredButton }))
+              }
             />
             <div style={{ marginBottom: "12px" }}>
               <div className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginBottom: "4px" }}>

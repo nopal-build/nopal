@@ -602,3 +602,85 @@
   font-weight: bold;
   color: var(--purple);
 }
+
+/* ── Site header (`WebsiteHeader.tsx`) ───────────────────────────────────── */
+/* The ONE responsive breakpoint here matches `stamps/tokens`'s
+   `breakpoints.navMin`/`navMax` (860px/859px) -- `AppLayout`'s own, only
+   OTHER width-based nav split in the app -- kept as a literal here since a
+   plain `.css` file (unlike `appLayoutShell.css.ts`) can't import that
+   token directly. `--desktop`/`--mobile` are both always in the DOM (not
+   conditionally rendered) so a fresh SSR'd page already shows the right
+   one before any JS runs; only VISIBILITY toggles by width, exactly like
+   `stamps/appLayoutShell.css.ts`'s own `topbar`/`topnav` pair. */
+
+.website-header {
+  background: var(--color-surface-card);
+}
+
+.website-header-logo {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.website-header-logo-img {
+  display: block;
+  height: 34px;
+  width: auto;
+}
+
+.website-header-row--desktop {
+  display: none;
+  align-items: center;
+  gap: 24px;
+  padding: 16px 32px;
+}
+
+.website-header-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline: auto;
+}
+
+.website-header-row--mobile {
+  display: block;
+}
+
+.website-header-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.website-header-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--purple);
+  cursor: pointer;
+}
+
+.website-header-dropdown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 20px 16px;
+  border-bottom: 1px solid var(--color-surface-border);
+}
+
+@media screen and (min-width: 860px) {
+  .website-header-row--desktop {
+    display: flex;
+  }
+  .website-header-row--mobile {
+    display: none;
+  }
+}

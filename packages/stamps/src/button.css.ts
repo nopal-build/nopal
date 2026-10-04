@@ -102,6 +102,31 @@ export const button = recipe({
           },
         },
       },
+      // A single, prominently-featured pill CTA -- e.g. a site header's
+      // one "go here" nav item (see `webapp/app/components/
+      // WebsiteHeader.tsx`, which treats whichever nav link is listed
+      // LAST as this kind of callout). Solid, saturated yellow and fully
+      // rounded, with a real soft drop shadow -- deliberately a SEPARATE
+      // variant from the quieter, bordered `yellow` above (which reads as
+      // a secondary/soft action) rather than a prop toggle on it, since
+      // nothing else in this recipe asks for this much visual weight.
+      callout: {
+        display: "inline-flex",
+        alignItems: "center",
+        borderRadius: 9999,
+        background: colors.yellow,
+        padding: "9px 22px",
+        color: colors.purple,
+        fontWeight: 600,
+        whiteSpace: "nowrap",
+        boxShadow: "1px 1px 1px rgb(109, 110, 153)",
+        "@media": {
+          [darkModeMediaQuery]: {
+            background: colors.yellowLight,
+            boxShadow: "0 3px 12px rgba(0, 0, 0, 0.4)",
+          },
+        },
+      },
       // The quiet choice beside an action ("Pass", "No", "Keep them on"):
       // reads as a link, sits on the same baseline as the button next to
       // it, and never competes with it. The Maker's people rows built
@@ -133,6 +158,19 @@ export const button = recipe({
         fontSize: "0.75rem",
         lineHeight: 1.4,
         alignItems: "center",
+      },
+      // Shallower top/bottom padding ONLY -- left/right stays whatever
+      // the variant itself already set (e.g. `callout`'s own 22px), since
+      // this sets just `paddingTop`/`paddingBottom` (longhand), not the
+      // `padding` shorthand. Declared after `variant` so these two
+      // longhands win the cascade tie against the variant's own shorthand
+      // `padding`, exactly like `compact` above, but without touching the
+      // horizontal rhythm at all -- for a pill-shaped CTA that needs to
+      // sit inline at nav-link height (e.g. a site header's featured
+      // `callout`) without going as narrow/small-text as `compact`.
+      thin: {
+        paddingTop: 0,
+        paddingBottom: 0,
       },
     },
     // Only meaningful on `secondary` today (the only variant the old

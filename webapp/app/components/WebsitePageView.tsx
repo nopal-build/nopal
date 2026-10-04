@@ -12,20 +12,44 @@ import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 
 const navLinkFontClass = `${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`;
 
+/** The `/v2` site's own root path — shared so a "Home" nav item (`to:
+ * "/v2"`, same destination `WebsiteHeader`'s own logo link points at)
+ * doesn't fall into `NavLink`'s default PREFIX matching below (which
+ * would otherwise highlight it on every single page, since every other
+ * page's path also starts with `"/v2"`). */
+export const WEBSITE_ROOT = "/v2";
+
+/** Strips a single trailing slash (but never the root `"/"` itself) —
+ * the Vault's Site Settings editor is a free-text `to` field, and a real
+ * entry was found stored as `"/v2/"` rather than `"/v2"` (both resolve to
+ * the same route, but only ONE matches `WEBSITE_ROOT` by plain `===`). */
+function stripTrailingSlash(path: string): string {
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
 /** A nav/footer link's `to` is either an internal path (`/v2/...`) or an
  * arbitrary external URL (`https://...`, `mailto:...`) — same distinction
  * the old marketing `Layout`/`Footer` already makes by hand between
  * `<NavLink>`/`<Link>` and plain `<a>`. `variant` picks which `stamps`
  * treatment applies: `"nav"` gets the same pill/active-highlight recipe
- * (`stamps/navLink.css`) `AppLayout`'s own topbar uses; `"footer"` gets the
- * plainer `stamps/link.css` treatment, since a footer reads as quiet
- * reference links, not primary navigation. */
+ * `stamps/navLink.css`) `AppLayout`'s own topbar uses; `"mobile"` is the
+ * same recipe's `context: "mobile"` block-level treatment, for
+ * `WebsiteHeader`'s own hamburger dropdown; `"footer"` gets the plainer
+ * `stamps/link.css` treatment, since a footer reads as quiet reference
+ * links, not primary navigation. Both `"nav"`/`"mobile"` pass
+ * `tone: "website"` — the marketing site's own current-page highlight
+ * reads as a vibrant brand-blue accent, not the app's quieter neutral
+ * default (see `navLink.css.ts`'s own `tone` variant). `onClick` is
+ * optional — `WebsiteHeader` uses it to close its mobile dropdown on
+ * tap; nothing else needs it. */
 export function WebsiteLink({
   item,
   variant = "footer",
+  onClick,
 }: {
   item: WebsiteLinkItem;
-  variant?: "nav" | "footer";
+  variant?: "nav" | "mobile" | "footer";
+  onClick?: () => void;
 }) {
   if (!item.to.startsWith("/")) {
     return (
@@ -33,18 +57,28 @@ export function WebsiteLink({
         href={item.to}
         target="_blank"
         rel="noopener noreferrer"
-        className={variant === "footer" ? link : undefined}
+        onClick={onClick}
+        className={
+          variant === "footer"
+            ? link
+            : variant === "mobile"
+              ? `${navLink({ context: "mobile", tone: "website" })} ${navLinkFontClass}`
+              : undefined
+        }
       >
         {item.label}
       </a>
     );
   }
-  if (variant === "nav") {
+  if (variant === "nav" || variant === "mobile") {
+    const to = stripTrailingSlash(item.to);
     return (
       <NavLink
-        to={item.to}
+        to={to}
+        end={to === WEBSITE_ROOT}
+        onClick={onClick}
         className={({ isActive }) =>
-          `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+          `${navLink({ context: variant === "mobile" ? "mobile" : "topbar", active: isActive, tone: "website" })} ${navLinkFontClass}`
         }
       >
         {item.label}
@@ -52,7 +86,7 @@ export function WebsiteLink({
     );
   }
   return (
-    <Link to={item.to} className={link}>
+    <Link to={item.to} className={link} onClick={onClick}>
       {item.label}
     </Link>
   );
