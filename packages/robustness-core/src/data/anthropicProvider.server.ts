@@ -21,7 +21,7 @@
  * input tokens so /maker's cost estimate stays accurate.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { toFile } from "@anthropic-ai/sdk";
 import type {
   ImagesDescriptionInput,
   LlmEffort,
@@ -250,6 +250,20 @@ function withLastMessageCacheBreakpoint(messages: Anthropic.MessageParam[]): Ant
   return out;
 }
 
+/** A PDF whose base64 is longer than this goes up through the Files API
+ * and is read by its id; anything shorter goes inline. The API's 32 MB
+ * limit is on the whole request, and an inline PDF is a third bigger as
+ * base64, so a 46 MB phone scan (Sunny's bill of lading, 2026-10-03) was
+ * skipped every night. An uploaded file can be up to 500 MB
+ * (`PDF_MAX_BYTES`, `syncKnowledge.server.ts`); the 600-page limit still
+ * applies and is reported by the API as an error. */
+export const INLINE_DOCUMENT_MAX_BASE64 = 28 * 1024 * 1024;
+
+/** Whether a document goes up as a file rather than inline. */
+export function documentNeedsUpload(base64Length: number): boolean {
+  return base64Length > INLINE_DOCUMENT_MAX_BASE64;
+}
+
 function toLlmUsage(usage: Anthropic.Usage): LlmUsage {
   return {
     inputTokens: usage.input_tokens,
@@ -440,15 +454,43 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
         },
       });
     }
-    for (const document of documents) {
-      if (document.label) content.push({ type: "text", text: document.label });
-      content.push({
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: document.base64 },
-      });
+    // A document too big to send inline is uploaded, read by its id, and
+    // deleted once the call is over, whatever its outcome.
+    const uploaded: string[] = [];
+    try {
+      for (const document of documents) {
+        if (document.label) content.push({ type: "text", text: document.label });
+        if (documentNeedsUpload(document.base64.length)) {
+          const file = await this.client.beta.files.upload({
+            file: await toFile(Buffer.from(document.base64, "base64"), "attachment.pdf", { type: "application/pdf" }),
+          });
+          uploaded.push(file.id);
+          // Only the beta message types take a file source in this SDK.
+          content.push({ type: "document", source: { type: "file", file_id: file.id } } as unknown as Anthropic.ContentBlockParam);
+        } else {
+          content.push({
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: document.base64 },
+          });
+        }
+      }
+      content.push({ type: "text", text: input.context || "(no additional context provided)" });
+      return await this.sendDescription(input, content, uploaded.length > 0);
+    } finally {
+      for (const id of uploaded) {
+        await this.client.beta.files.delete(id).catch(() => {
+          // A file left behind costs nothing to keep and is not read again;
+          // a failed delete must not fail a description that worked.
+        });
+      }
     }
-    content.push({ type: "text", text: input.context || "(no additional context provided)" });
+  }
 
+  private async sendDescription(
+    input: ImagesDescriptionInput,
+    content: Anthropic.ContentBlockParam[],
+    readsUploadedFile: boolean,
+  ): Promise<PhotoDescriptionResult> {
     const baseMaxTokens = input.maxTokens ?? PHOTO_DESCRIPTION_MAX_TOKENS;
     // 512 tokens is a paragraph, and on this model family thinking is on
     // by default and counts against it -- the same latent cut as the
@@ -458,13 +500,19 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     // parameter (Haiku: no thinking; Fable: always thinks, so the limit
     // is raised instead -- see `PHOTO_DESCRIPTION_MAX_TOKENS`'s use).
     const disable = canDisableThinking(this.model);
-    const response = await this.client.messages.create({
+    const params = {
       model: this.model,
       max_tokens: disable || this.model.startsWith("claude-haiku") ? baseMaxTokens : baseMaxTokens * 8,
       system: input.framing,
-      messages: [{ role: "user", content }],
+      messages: [{ role: "user" as const, content }],
       ...(disable ? { thinking: { type: "disabled" } as Anthropic.MessageCreateParams["thinking"] } : {}),
-    });
+    };
+    const response = readsUploadedFile
+      ? ((await this.client.beta.messages.create({
+          ...(params as unknown as Anthropic.Beta.MessageCreateParamsNonStreaming),
+          betas: ["files-api-2025-04-14"],
+        })) as unknown as Anthropic.Message)
+      : await this.client.messages.create(params);
 
     const description = response.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")
