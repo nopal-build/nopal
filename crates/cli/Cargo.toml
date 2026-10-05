@@ -1,6 +1,6 @@
 [package]
 name = "nopal"
-version = "0.0.29"
+version = "0.0.30"
 edition = "2021"
 publish = false
 description = "Nopal CLI — video prep and Nopal Vault sync utilities"
