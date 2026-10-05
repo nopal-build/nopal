@@ -75,6 +75,10 @@ pub struct FileListing {
     pub updated_at: String,
     #[serde(default)]
     pub has_s3: bool,
+    /// Who wrote the Card a project's `Syncs/Daily Logs/` copy came from;
+    /// the copy's own name is `<date>-<humanId>.md`. Absent elsewhere.
+    #[serde(default)]
+    pub author_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
