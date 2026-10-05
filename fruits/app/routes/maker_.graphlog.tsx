@@ -29,6 +29,7 @@ import { RunCost } from "../components/RunSpend";
 import { listRecentGraphLogRuns, type GraphLogRun } from "robustness-core/data/graphLogPerf.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { navFor } from "../data/nav.server";
 
 const RECENT_RUNS_LIMIT = 20;
 
@@ -45,6 +46,8 @@ async function requireMakerAccess(request: Request) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
+  // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
+  const nav = await navFor(user._id);
 
   const url = new URL(request.url);
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
@@ -75,7 +78,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     humanById[h._id] = { name: h.name, email: h.email };
   });
 
-  return { user, days, usage, recentRuns, spendByRunId, projectNameById, humanById };
+  return { user, ...nav, days, usage, recentRuns, spendByRunId, projectNameById, humanById };
 }
 
 export function ErrorBoundary() {

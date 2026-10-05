@@ -33,6 +33,7 @@ import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { getGraphLogRunSpend } from "robustness-core/data/graphLogMetrics.server";
 import { RunSpendSection } from "../components/RunSpend";
+import { navFor } from "../data/nav.server";
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -44,7 +45,10 @@ async function requireMakerAccess(request: Request) {
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requireMakerAccess(request);
+  // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
+  const user = await requireMakerAccess(request);
+  // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
+  const nav = await navFor(user._id);
   const runId = params.runId;
   if (!runId) throw data("Missing run id", { status: 400 });
 
@@ -58,6 +62,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   ]);
 
   return {
+    user,
+    ...nav,
     run: found.run,
     events: found.events,
     spend,
