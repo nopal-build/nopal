@@ -20,9 +20,15 @@
  *     `data-waypoint-id` values to look up live in the DOM (elements
  *     `::stamp`/`::icon`/`::waypoint` can carry via their own `id` attr —
  *     see `websiteDirectives.tsx`), measured via `getBoundingClientRect`
- *     and converted to pixels relative to this component's own box. Not
- *     wired to a real directive yet — reserved for the Home template's
- *     page-spanning connector — but built now so both cases share the
+ *     and converted to pixels relative to this component's own box. Used
+ *     by `::trail{waypoints="..."}`. A `MutationObserver` (see
+ *     `WavyLineWaypoints`'s own comment) re-measures whenever the
+ *     document changes, not just once on mount -- a waypoint TARGET can
+ *     itself mount asynchronously, strictly later than this component's
+ *     own first render (e.g. `::icon{position="..."}` renders nothing at
+ *     all until its own real-DOM measurement resolves one tick after
+ *     mount), so a one-shot lookup would permanently miss anything not
+ *     already in the DOM the instant it ran -- built so both cases share the
  *     exact same measurement/recompute machinery and the exact same
  *     `buildSplinePath` call from `oxmarkdown-core`.
  *
@@ -109,7 +115,12 @@ export type WavyLineWaypointsProps = WavyLineBaseProps & {
 
 export type WavyLineProps = WavyLinePointsProps | WavyLineWaypointsProps;
 
-function useElementSize<T extends HTMLElement>() {
+// Exported -- `websiteIcons.tsx`'s own `::icon{position="..."}` support
+// reuses this exact measuring hook (and the SAME real-pixel-anchor
+// `resolveLinePoints` math below), so a single point positions itself
+// the same consistent way a `::line{points="..."}` multi-point shape
+// does -- no separate normalized/percentage coordinate system.
+export function useElementSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
 
@@ -278,19 +289,77 @@ function WavyLineWaypoints({
 
   useEffect(() => {
     if (!size || size.width === 0 || size.height === 0) return;
-    const wrapperRect = ref.current?.getBoundingClientRect();
-    if (!wrapperRect) return;
-    const pixelPoints: LinePoint[] = [];
-    for (const id of waypointIds) {
-      const el = document.querySelector(`[data-waypoint-id="${id}"]`);
-      if (!el) continue;
-      const rect = el.getBoundingClientRect();
-      pixelPoints.push({
-        x: rect.left + rect.width / 2 - wrapperRect.left,
-        y: rect.top + rect.height / 2 - wrapperRect.top,
-      });
+    const wrapperEl = ref.current;
+    if (!wrapperEl) return;
+
+    // Scope lookups (and the `MutationObserver` below) to the nearest
+    // `.ox-content` ancestor -- `OxRenderer.tsx`'s own always-present
+    // root class -- rather than the whole `document`. WITHOUT this, two
+    // independent `OxRenderer` instances rendering the SAME markdown side
+    // by side (the Stamps Scratchpad's own Light/Dark preview pair,
+    // `PreviewBoxPair`) cross-contaminate each other's waypoint lookups
+    // whenever they share the same `data-waypoint-id` values -- a real,
+    // reproduced bug: `document.querySelector` always matched the FIRST
+    // (light) instance's own icons, even from the SECOND (dark)
+    // instance's own trail, which then computed its path relative to the
+    // dark box's own wrapper offset using the LIGHT box's screen
+    // coordinates -- the two errors canceled out into painting the dark
+    // trail at the exact same ABSOLUTE screen position as the light one,
+    // so the dark preview looked completely empty. Falls back to
+    // `document` if no `.ox-content` ancestor exists (shouldn't happen in
+    // practice -- every `OxRenderer` output has one).
+    const scope: Document | Element = wrapperEl.closest(".ox-content") ?? document;
+
+    function measure() {
+      if (!wrapperEl) return;
+      const wrapperRect = wrapperEl.getBoundingClientRect();
+      const pixelPoints: LinePoint[] = [];
+      for (const id of waypointIds) {
+        const el = scope.querySelector(`[data-waypoint-id="${id}"]`);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        pixelPoints.push({
+          x: rect.left + rect.width / 2 - wrapperRect.left,
+          y: rect.top + rect.height / 2 - wrapperRect.top,
+        });
+      }
+      setPath(buildSplinePath(pixelPoints, curve, tension));
     }
-    setPath(buildSplinePath(pixelPoints, curve, tension));
+
+    measure();
+
+    // A waypoint TARGET can mount asynchronously, strictly later than
+    // this component's own first render -- e.g. `::icon{position="..."}`
+    // (`PositionedWebsiteIcon`, websiteIcons.tsx) renders NOTHING at all
+    // until its own real-DOM measurement resolves one tick after mount,
+    // so the one-shot `measure()` call above (even re-run on THIS
+    // component's own resize) would permanently miss anything not
+    // already in the DOM the instant it first ran -- a real, reproduced
+    // bug: a trail connecting positioned icons drew nothing at all,
+    // forever, even though every icon eventually appeared correctly on
+    // its own a tick later. A `MutationObserver` re-measures whenever
+    // ANYTHING in `scope` changes, not just a fixed set of known triggers
+    // -- deliberately broad (not scoped to `data-waypoint-id` mutations
+    // alone), since a target's surrounding layout shifting (new sibling
+    // content, a toggle expanding, text reflowing, ...) can move its
+    // measured center without the attribute itself ever changing.
+    // Coalesced onto `requestAnimationFrame` so a burst of unrelated DOM
+    // churn re-measures at most once per frame rather than synchronously
+    // on every single mutation.
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    });
+    observer.observe(scope, { childList: true, subtree: true, attributes: true });
+
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size, idsKey, curve, tension]);
 

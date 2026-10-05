@@ -390,17 +390,11 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "icon",
     name: "Icon",
-    directive: '::icon{name="..." size="sm|md|lg" id="..." position="x,y"}',
-    note: 'Leaf. Checks real file-based assets first (**Files**, below), then a small set of inline-drawn placeholder shapes (**Placeholders**), then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** drop a new SVG under `public/guides/`, then add one `{name: path}` entry to `WEBSITE_ICON_FILES` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.\n\n**`position="x,y"` (optional):** absolutely positions the icon instead of leaving it inline -- its OWN normalized `x` 0-100 / `y` 0-40 coordinate box (deliberately DIFFERENT from `::line{points="..."}`\'s own literal-pixel one, below -- placing a single point has no "shape" for x/y to distort the way a multi-point line does, so a plain percentage is still the simpler, right choice here), same anchor-letter (`L`/`C`/`R`/`T`/`C`/`B`) + plain-delta vocabulary, resolved to a single CSS `left`/`top` percentage pair instead of an SVG path. Only has a visible effect when its container is `position: relative` -- `:::section{...}`\'s own body (`.website-section-inner`) already is, for its first real use; try e.g. `R4,T4` to tuck it into a section\'s own top-right corner (4% in from each edge).',
+    directive: '::icon{name="..." size="sm|md|lg|#" id="..." position="x,y"}',
+    note: 'Leaf. Checks real file-based assets first (**Files**, below), then a small set of inline-drawn placeholder shapes (**Placeholders**), then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** drop a new SVG under `public/guides/`, then add one `{name: path}` entry to `WEBSITE_ICON_FILES` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.\n\n**`size`:** `sm`/`md`/`lg` are named presets (20px/32px/64px); any other plain number is a literal pixel width instead — try `48` here.\n\n**`position="x,y"` (optional):** absolutely positions the icon instead of leaving it inline -- the SAME literal-pixel, real-measured-container-edge anchor system `::line{points="..."}`/`::path{points="..."}` use below (see the Line paper\'s own note for the full grammar): a plain number is a pixel DELTA from `(0, 0)`, a reference letter (`L`/`C`/`R` for x, `T`/`C`/`B` for y) plus optional offset is an ANCHOR resolved against this icon\'s own real measured container size on every resize (`ResizeObserver`), not a fixed nominal box. Only has a visible effect when its container is `position: relative` -- `:::section{...}`\'s own body (`.website-section-inner`) already is, for its first real use; try e.g. `R4,T4` to tuck it into a section\'s own top-right corner (4px in from each edge).',
     attributes: [
       { key: "name", label: "name", kind: "select", default: "sun-home", options: ICON_NAME_OPTIONS },
-      {
-        key: "size",
-        label: "size",
-        kind: "select",
-        default: "lg",
-        options: [{ value: "sm" }, { value: "md" }, { value: "lg" }],
-      },
+      { key: "size", label: "size (sm|md|lg|#)", kind: "text", default: "lg", placeholder: "e.g. lg or 48" },
       { key: "position", label: "position (x,y)", kind: "text", default: "", placeholder: "e.g. R4,T4" },
     ],
     buildMarkdown: (v) => `::icon{name="${v.name}" size="${v.size}"${v.position ? ` position="${v.position}"` : ""}}`,
@@ -420,9 +414,30 @@ const TRACING_PAPERS: TracingPaper[] = [
     id: "waypoint",
     name: "Waypoint",
     directive: '::waypoint{id="..."}',
-    note: "Leaf, invisible on purpose — a zero-size anchor (`data-waypoint-id`) for the not-yet-built wavy connector overlay to measure. Nothing to see here today (that's the point); included so the directive's own markup is visible in the DOM. Needs its own line, same as any leaf directive — embedded mid-sentence it doesn't parse as a directive at all, just literal text.",
+    note: "Leaf, invisible on purpose — a zero-size anchor (`data-waypoint-id`) for `::trail{waypoints=\"...\"}` (see the Trail paper, next) to measure. Nothing to see here today (that's the point); included so the directive's own markup is visible in the DOM. Needs its own line, same as any leaf directive — embedded mid-sentence it doesn't parse as a directive at all, just literal text. Only needed when nothing else is already sitting at the spot a trail should pass through — `::stamp{id=\"...\"}`/`::icon{id=\"...\"}` already carry `data-waypoint-id` via their own `id`, no separate `::waypoint` needed alongside one of those (see the Trail paper's own demo, which uses `::icon{id=\"...\"}` for exactly this reason).",
     attributes: [{ key: "id", label: "id", kind: "text", default: "p1" }],
-    buildMarkdown: (v) => `Some text before.\n\n::waypoint{id="${v.id}"}\n\nAnd after.`,
+    buildMarkdown: (v) => `::waypoint{id="${v.id}"}\n\nAnd after.`,
+  },
+  {
+    id: "trail",
+    name: "Trail",
+    directive: '::trail{waypoints="p1, p2, p3" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
+    previewMinHeight: 160,
+    note: 'Leaf. The SAME wavy-line primitive as `::line`/`::path`, but its points come from LIVE DOM MEASUREMENT instead of any fixed coordinates: `waypoints` is a comma-separated list of ids, each referring to some OTHER element\'s own `data-waypoint-id` elsewhere on the page -- a bare `::waypoint{id="..."}` anchor, or `id` on a `::stamp{...}`/`::icon{...}` (which already carry `data-waypoint-id` for free). This demo uses three small `::icon{name="circle" position="..."}` placeholders (`p1`/`p2`/`p3`) as its waypoints, rather than invisible `::waypoint{...}` anchors, so there\'s something to SEE at each end of the trail, not just the connecting line itself -- `p2` is deliberately offset well clear of the straight line between `p1`/`p3` (bowed out toward the right edge, not sitting at the diagonal\'s own midpoint) so the default `curve="smooth"` has visible room to swoop through it, rather than drawing what would otherwise look like a plain straight segment. Connects them, IN THE ORDER LISTED, through each one\'s own live center point, re-measured on every real resize (drag this browser window and watch the trail follow the dots -- genuinely different from `::line`/`::path`\'s fixed points, which never look at the DOM at all). Try removing `p2` from `waypoints` (or typing in a made-up id) -- an id with no matching element on the page is silently skipped, same "missing asset doesn\'t break the page" spirit `::icon`\'s unregistered-name fallback has, though here it just means one fewer point. No anchor/delta grammar here (nothing to anchor against but the waypoints themselves); `curve`/`tension`/`color` behave exactly as they do on `::line` below.',
+    attributes: [
+      { key: "waypoints", label: "waypoints", kind: "text", default: "p1,p2,p3", placeholder: "p1, p2, p3" },
+      {
+        key: "curve",
+        label: "curve",
+        kind: "select",
+        default: "smooth",
+        options: [{ value: "smooth" }, { value: "straight" }, { value: "bezier" }],
+      },
+      { key: "tension", label: "tension (0-1)", kind: "text", default: "0.5" },
+      { key: "color", label: "color", kind: "select", default: "red", options: ACCENT_COLOR_OPTIONS },
+    ],
+    buildMarkdown: (v) =>
+      `::icon{name="circle" size="sm" id="p1" position="L4,T4"}\n::icon{name="circle" size="sm" id="p2" position="R40,C-10"}\n::icon{name="circle" size="sm" id="p3" position="R24,B24"}\n::trail{waypoints="${v.waypoints}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
   },
   {
     id: "line",

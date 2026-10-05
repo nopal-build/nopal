@@ -33,8 +33,8 @@
  * `:::toggle`/`:::section-title`/other container directive, so its own
  * closing fence can never be ambiguous with a 3-colon one nested inside
  * it. Leaf directives (`::stamp`, `::icon`, `::button`, `::badge`,
- * `::waypoint`, `::line`, `::daily-log`) never open a fence at all, so
- * they never trigger this.
+ * `::waypoint`, `::line`, `::path`, `::trail`, `::daily-log`) never open a
+ * fence at all, so they never trigger this.
  *
  * Directive vocabulary (first functional pass):
  *   :::section{bg="mint|white" list="timeline" margin="N"}
@@ -58,20 +58,26 @@
  *   ::stamp{name="coffee|mtn|nopal|quail" rotate="deg" float="left|right|inline" id="..."}
  *     — a complete, pre-designed postage-stamp graphic (see
  *     `websiteStamps.tsx`); `id` doubles as a waypoint.
- *   ::icon{name="..." size="sm|md|lg" id="..." position="x,y"} — a bare
+ *   ::icon{name="..." size="sm|md|lg|#" id="..." position="x,y"} — a bare
  *     named illustration, for inline glyphs or standalone floating
- *     shapes. `position` is optional -- omit it and the icon renders
- *     inline exactly as it always has; give it an `"x,y"` pair (its OWN
- *     normalized-percentage coordinate system -- see `parseIconPosition`'s
- *     own comment for why this is deliberately DIFFERENT from
- *     `::line{points="..."}`'s literal-pixel one below -- anchors and
+ *     shapes. `size` is one of the three named presets OR a literal pixel
+ *     width (see `parseIconSize`'s own comment, below). `position` is
+ *     optional -- omit it and the icon renders
+ *     inline exactly as it always has; give it an `"x,y"` pair (the SAME
+ *     literal-pixel, real-measured-anchor coordinate system
+ *     `::line{points="..."}`/`::path{points="..."}` use below -- see
+ *     `parseIconPosition`'s own comment for the full story -- anchors and
  *     deltas both work) to absolutely position it INSTEAD, relative to
  *     whatever element it's rendered inside (today: `.website-section-
- *     inner`, for `:::section{...}` -- see `parseIconPosition`'s own
- *     comment for why other containers need the same `position:
- *     relative` treatment before this works inside THEM too).
- *   ::waypoint{id="..."} — an invisible anchor for the (future) wavy
- *     connector overlay to measure; renders nothing visible on its own.
+ *     inner`, for `:::section{...}` -- see `PositionedWebsiteIcon`
+ *     (`websiteIcons.tsx`) for why other containers need the same
+ *     `position: relative` treatment before this works inside THEM too).
+ *   ::waypoint{id="..."} — an invisible anchor for `::trail{waypoints="..."}`
+ *     (below) to measure; renders nothing visible on its own. Only needed
+ *     when nothing else is already at the spot a trail should pass through
+ *     -- `::stamp{id="..."}`/`::icon{id="..."}` already double as waypoints
+ *     via their own `id`, no separate `::waypoint` needed alongside one of
+ *     those.
  *   :::section-title{icon="..." color="red|green|purple"} — an icon + a
  *     real heading + (usually) a `::line{...}` composed together as one
  *     titled-header unit; see `website.css`'s `.website-section-title` for
@@ -142,9 +148,8 @@
  *     whatever `currentColor` resolves to (`WavyLine`'s default). The
  *     SAME primitive's `waypoints` mode (measuring live
  *     `data-waypoint-id` positions instead of fixed points, all
- *     absolute — anchor/delta semantics don't apply there) is built in
- *     `WavyLine.tsx` but not wired to a directive yet — reserved for the
- *     Home template's page-spanning connector.
+ *     absolute — anchor/delta semantics don't apply there) is what
+ *     `::trail{waypoints="..."}` (below) uses instead of fixed `points`.
  *   ::path{points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
  *     — the SAME wavy-line primitive as `::line` above, `points` parsed
  *     with the EXACT SAME delta/anchor grammar, but DECOUPLES the traced
@@ -191,6 +196,31 @@
  *     matching how `::button{text="..."}`/`::badge{text="..."}` already
  *     do it elsewhere in this same registry). Renders nothing at all if
  *     either `text` or a usable `points` is missing.
+ *   ::trail{waypoints="p1, p2, p3" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
+ *     — the SAME wavy-line primitive as `::line`/`::path` above, but its
+ *     points come from LIVE DOM MEASUREMENT instead of any fixed
+ *     coordinates: `waypoints` is a comma-separated list of ids, each
+ *     referring to some OTHER element's own `data-waypoint-id` elsewhere
+ *     on the same page -- a bare `::waypoint{id="..."}` anchor, or `id`
+ *     on a `::stamp{...}`/`::icon{...}` (which already carry
+ *     `data-waypoint-id` for free -- no separate `::waypoint` needed
+ *     alongside one of those). Connects them, IN THE ORDER LISTED, through
+ *     each one's own live center point (`getBoundingClientRect`),
+ *     re-measured on every real resize -- genuinely different from
+ *     `::line`/`::path`'s fixed points, which never look at the DOM at
+ *     all. No anchor/delta grammar here (there's nothing to anchor
+ *     against but the waypoints themselves); `curve`/`tension`/`color`
+ *     behave exactly as they do on `::line` above. Needs at least two
+ *     resolvable ids to draw anything; an id with no matching element on
+ *     the page is silently skipped, same "missing asset doesn't break the
+ *     page" spirit `::icon`'s unregistered-name fallback has, though here
+ *     it just means one fewer point rather than a visible placeholder.
+ *     Like `::icon{position="..."}`, needs a `position: relative`
+ *     ancestor spanning every waypoint it connects to have any visible
+ *     effect -- `:::section{...}`'s own body (`.website-section-inner`)
+ *     already is, for its first real use; a trail meant to span MULTIPLE
+ *     sections needs its own wrapping container with that same treatment,
+ *     not yet added anywhere since nothing has needed it yet.
  *   :::pricing-card{name="..." price="..." cta="..." cta-href="..." cta-variant="primary|purple|secondary|yellow|outline"} —
  *     body is an ordinary bullet list of features; `cta-variant` -- see
  *     `::button`'s own entry below -- defaults to `primary`.
@@ -222,11 +252,14 @@
  *     walk above the website project's own root) — resolved server-side
  *     (see `robustness-core/data/website.server.ts`'s
  *     `resolveWebsiteIncludes`), since it needs real vault/DB access
- *     `OxRenderer` never has on its own -- which means, same as
- *     `::daily-log{...}` above, this ALWAYS renders nothing in the
- *     Vault's own live preview here (`opts.includes` is never passed a
- *     real resolved map from `WebsitePageSplitEditor`'s `vault.tsx` call
- *     site) -- an accepted, explicitly deferred gap, not a bug. A LEAF
+ *     `OxRenderer` never has on its own -- UNLIKE `::daily-log{...}`
+ *     above (which really does always render nothing in the Vault's own
+ *     live preview, a real, accepted, explicitly deferred gap), this one
+ *     DOES resolve live in the Vault's `WebsitePageSplitEditor` preview
+ *     too, against whatever's currently TYPED, not just what's saved --
+ *     see `vault.tsx`'s own `resolveIncludes` (debounced POST to
+ *     `/api/vault/website/:folderId/resolve-includes`, which just calls
+ *     this same `resolveWebsiteIncludes` server-side). A LEAF
  *     directive (`::`, two colons, no children) despite the author-
  *     facing name reading like it might wrap content — it never has any
  *     of its own; the included file supplies everything. Lets an author
@@ -243,7 +276,7 @@ import { WavyLine } from "./WavyLine";
 import OxRenderer from "../components/OxRenderer";
 import { Badge } from "stamps/Badge";
 import { button as stampsButton } from "stamps/button.css";
-import { parseLinePoints, resolveNormalizedLinePoint, type LineCurveKind, type LineSizeSpec } from "oxmarkdown-core";
+import { parseLinePoints, type LineCurveKind, type LinePointTokens, type LineSizeSpec } from "oxmarkdown-core";
 import "../styles/website.css";
 
 const LINE_CURVE_KINDS = ["smooth", "straight", "bezier"] as const;
@@ -310,35 +343,43 @@ function toAccentColorVar(name: string | undefined): string | undefined {
   return name ? ACCENT_COLOR_VARS[name] : undefined;
 }
 
+/** `::trail{waypoints="p1, p2, p3"}` -- splits on commas and trims each
+ * id, so both `"p1,p2,p3"` and `"p1, p2, p3"` work; drops any empty
+ * entries (a stray leading/trailing/doubled comma). Each id refers to a
+ * `data-waypoint-id` value some OTHER element in the page already carries
+ * -- `::waypoint{id="..."}` itself (an invisible anchor with no other
+ * purpose), or `id` on `::stamp{...}`/`::icon{...}` (which double as
+ * waypoints for free, no separate `::waypoint` needed alongside one of
+ * those). Order matters -- the trail connects them in the order listed
+ * here, not document/DOM order. */
+function parseWaypointIds(raw: string | undefined): string[] {
+  return (raw ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+}
+
 /** `::icon{position="x,y"}` -- reuses `::line{points="x,y x,y ..."}`'s
  * PARSING grammar (`parseLinePoints`, `oxmarkdown-core`'s `wavyLine.ts`:
  * each half a plain delta number or an `L`/`C`/`R` (x) / `T`/`C`/`B` (y)
- * anchor letter) but DELIBERATELY NOT its resolved coordinate SYSTEM --
- * `::line{...}`'s points are literal, stable pixels (see `wavyLine.ts`'s
- * own header for why), while this resolves against a fixed nominal
- * `0-100` (x) / `0-40` (y) box instead (`resolveNormalizedLinePoint`),
- * turned directly into a plain CSS PERCENTAGE. A single point's "delta"
- * already resolves as absolute (the cursor starts at `(0, 0)`), so
- * anchors and deltas both work here exactly like they do in a real
- * multi-point `points="..."` list.
+ * anchor letter) AND, now, its resolved coordinate SYSTEM too -- literal,
+ * stable PIXELS, resolved against `WebsiteIcon`'s own REAL measured
+ * container size (`websiteIcons.tsx`'s `PositionedWebsiteIcon`), exactly
+ * like `::line{points="..."}`/`::path{points="..."}` already resolve
+ * every point they're given. This file only parses+validates down to a
+ * single token here; `WebsiteIcon` does the actual real-pixel resolution
+ * itself (it's the one with a DOM node to measure).
  *
- * Unlike `::line{...}` (which needs a real DOM measurement to resolve
- * literal pixels against the container's real edges), positioning
- * exactly ONE element can just use plain CSS `left`/`top` PERCENTAGES on
- * an absolutely-positioned box -- the browser already resolves those
- * against the nearest POSITIONED ancestor's own measured size on every
- * layout/resize, for free, with no `ResizeObserver`/`getBoundingClientRect`
- * measurement dance the way `WavyLine.tsx` needs. That positioned
- * ancestor is whatever element the `::icon{...}` happens to render
- * inside -- today that's `.website-section-inner` (website.css), for
- * the first real use inside `:::section{...}`. Placing one inside some
- * OTHER container needs that container to be `position: relative` too,
- * the same way, before this has any visible effect there. Placing a
- * SINGLE point has no "shape" for x/y to distort by scaling independently
- * with the container the way a multi-point line would, so there's no
- * "funky at different sizes" problem here to fix the same way `::line`
- * needed -- percentage placement is the right, simpler choice for this
- * directive specifically, not a lingering inconsistency.
+ * USED TO resolve against a fixed nominal `0-100` (x) / `0-40` (y) box
+ * instead, turned directly into a plain CSS percentage -- the reasoning
+ * at the time was that a SINGLE point has no multi-point "shape" for x/y
+ * to distort by scaling independently the way a multi-point line would,
+ * so there seemed to be no "funky at different sizes" problem to fix the
+ * same way `::line` needed. That missed a real, reported confusion: a
+ * percentage-based single point still means "the same authored number is
+ * a different real distance in every differently-sized container" --
+ * NOT shape distortion, but the exact same "the numbers don't mean what
+ * they look like they mean" problem in spirit, and genuinely confusing
+ * for an author who'd already learned `::line`'s own literal-pixel
+ * convention and reasonably expected `::icon{position="R10,T0"}` to mean
+ * the same thing `::line{points="R10,T0"}` would.
  *
  * Represents the icon's TOP-LEFT corner, not its center (simplest to
  * reason about, and consistent with what `left`/`top` mean everywhere
@@ -350,12 +391,23 @@ function toAccentColorVar(name: string | undefined): string | undefined {
  * `|` (pen-up BREAK -- see `oxmarkdown-core`'s `LinePointsEntry`) makes
  * no sense for a SINGLE point, so it's rejected the same as any other
  * unparseable input. */
-const ICON_POSITION_VIEWBOX_HEIGHT = 40;
-function parseIconPosition(raw: string | undefined): CSSProperties | undefined {
+function parseIconPosition(raw: string | undefined): LinePointTokens | undefined {
   const tokens = parseLinePoints(raw);
   if (tokens.length !== 1 || tokens[0] === "break") return undefined;
-  const point = resolveNormalizedLinePoint(tokens[0], ICON_POSITION_VIEWBOX_HEIGHT);
-  return { position: "absolute", left: `${point.x}%`, top: `${(point.y / ICON_POSITION_VIEWBOX_HEIGHT) * 100}%` };
+  return tokens[0];
+}
+
+/** `::icon{size="sm|md|lg|#"}` -- `sm`/`md`/`lg` are the named presets
+ * (`websiteIcons.tsx`'s `SIZE_PX`); anything else that parses as a plain
+ * finite number is a literal pixel width instead, same "named preset OR a
+ * raw pixel number" shape `:::section{margin="N"}` and `::path{width="..."}`
+ * already use elsewhere in this file. Falls back to `"md"` for anything
+ * else (missing, empty, or unparseable). */
+function parseIconSize(raw: string | undefined): "sm" | "md" | "lg" | number {
+  if (raw === "sm" || raw === "lg") return raw;
+  const px = Number(raw);
+  if (raw && Number.isFinite(px)) return px;
+  return "md";
 }
 
 /** `:::section{margin="N"}` -- `N` MULTIPLIES the shared `--ox-grid`
@@ -416,9 +468,12 @@ export function buildWebsiteDirectiveRegistry(opts: {
    * `website.server.ts`'s `resolveWebsiteIncludes`. Keyed by the literal
    * `file="..."` attribute string (not an absolute path), each value the
    * included file's own already-frontmatter-stripped markdown body.
-   * Always `{}` here (the Vault preview never resolves this -- see this
-   * file's own header comment on `::include-ox`'s entry); defaults to
-   * `{}` either way so existing callers that don't pass it don't break. */
+   * `WebsitePageSplitEditor` (`vault.tsx`) resolves this live, against
+   * the CURRENTLY-typed body, via a debounced call to
+   * `/api/vault/website/:folderId/resolve-includes` -- every other
+   * caller here (the `/maker/stamps/scratch` guide, `SyncApiRunEditor`)
+   * just leaves it `{}` (defaulted below), same fail-soft rendering
+   * `::include-ox{...}` always has for an unresolved reference. */
   includes?: Record<string, string>;
   /** Forces `::stamp{...}`'s light/dark asset pick, bypassing its own
    * `<picture>`/`<source media="...">` OS-driven selection -- see
@@ -494,13 +549,13 @@ export function buildWebsiteDirectiveRegistry(opts: {
     },
 
     icon({ attrs }) {
-      const size = attrs.size === "sm" || attrs.size === "lg" ? attrs.size : "md";
+      const size = parseIconSize(attrs.size);
       return (
         <WebsiteIcon
           name={attrs.name ?? ""}
           size={size}
           waypointId={attrs.id}
-          positionStyle={parseIconPosition(attrs.position)}
+          position={parseIconPosition(attrs.position)}
         />
       );
     },
@@ -595,6 +650,22 @@ export function buildWebsiteDirectiveRegistry(opts: {
             className="website-line-word"
           />
         </span>
+      );
+    },
+
+    trail({ attrs }) {
+      const waypointIds = parseWaypointIds(attrs.waypoints);
+      if (waypointIds.length < 2) return null;
+      const tension = attrs.tension ? Number(attrs.tension) : undefined;
+      return (
+        <WavyLine
+          mode="waypoints"
+          waypointIds={waypointIds}
+          curve={toLineCurveKind(attrs.curve)}
+          tension={Number.isFinite(tension) ? tension : undefined}
+          color={toAccentColorVar(attrs.color)}
+          className="website-trail"
+        />
       );
     },
 

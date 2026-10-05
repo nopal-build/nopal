@@ -255,12 +255,16 @@
   margin: 0 auto;
   padding: 0 24px;
   /* The positioned ancestor an `::icon{position="x,y"}` (websiteDirectives.tsx's
-     `parseIconPosition`) resolves its own `left`/`top` PERCENTAGES against,
-     for its first real use: one rendered directly inside `:::section{...}`'s
-     own body. A DIFFERENT container (a pricing-card body, a toggle body, ...)
-     would need this exact same treatment before a positioned icon inside IT
-     had any visible effect -- not added preemptively anywhere else until an
-     actual use needs it there too. */
+     `parseIconPosition`) resolves its own real-pixel anchor coordinates
+     against (`PositionedWebsiteIcon`, websiteIcons.tsx), for its first real
+     use: one rendered directly inside `:::section{...}`'s own body. Also
+     the containing block a `::trail{waypoints="..."}` (WavyLine.tsx's
+     `mode="waypoints"`) sizes itself to fill, since it measures OTHER
+     elements' live positions inside this same box rather than taking any
+     fixed points of its own. A DIFFERENT container (a pricing-card body, a
+     toggle body, ...) would need this exact same treatment before either
+     one had any visible effect inside IT -- not added preemptively
+     anywhere else until an actual use needs it there too. */
   position: relative;
 }
 
