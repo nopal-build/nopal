@@ -7,7 +7,7 @@
 // data: a `.server` value referenced in the component is "Server-only
 // module referenced by client", a 404 on the route's client bundle, and
 // a page that renders but whose buttons are dead (2026-09-22, twice).
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   isRouteErrorResponse,
@@ -180,6 +180,21 @@ type GraphLogProjectStatus = {
   lastCompletedOk: boolean | null;
   lastCompletedError: string | null;
   scheduled: boolean;
+};
+
+/** `V.<Root Label>` while viewing a root container or anything directly
+ * inside one; `V.<folder name>` for a first-level folder under a root, or
+ * for anything deeper (sub-folder or file) — deeper nesting is never shown,
+ * per the "O.No" page-titles spec. */
+function vaultTitle(ancestry: VaultFolder[]): string {
+  if (ancestry.length === 0) return "Vault";
+  const anchor = ancestry.length === 1 ? ancestry[0] : ancestry[1];
+  return `V.${folderLabel(anchor)}`;
+}
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  if (!data || data.current.kind === "root") return [{ title: "O.No · Vault" }];
+  return [{ title: `O.No · ${vaultTitle(data.current.ancestry)}` }];
 };
 
 // ─── Loader ───────────────────────────────────────────────────────────────────

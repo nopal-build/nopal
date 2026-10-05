@@ -3,7 +3,7 @@
 // the stats, usage and scripts below. An admin and anyone guiding a
 // project reach it; everyone else is refused, in the nav and on the
 // server (Austin, 2026-09-28: "one place").
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -27,6 +27,8 @@ import { navFor } from "../data/nav.server";
 import { isStaff } from "../data/projectPeople.server";
 import stamp22cLight from "../images/stamps/22c-light.svg";
 import stamp22cDark from "../images/stamps/22c-dark.svg";
+
+export const meta: MetaFunction = () => [{ title: "O.No · Maker" }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);

@@ -5,7 +5,7 @@
 // reverses it), with deprecated ones broken out into their own
 // de-emphasized section rather than mixed in or hidden. Super only, same
 // gate as `maker_.scripts.tsx`.
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   Form,
@@ -25,6 +25,8 @@ import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { listAdminScripts, getAdminScript } from "robustness-core/data/adminScriptsRegistry.server";
 import { isAnyAdminScriptRunning, enqueueAdminScriptJob } from "robustness-core/data/adminScriptsQueue.server";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.Scripts" }];
 
 // Same gate as `maker_.scripts.tsx` -- duplicated rather than
 // imported, matching every other Maker sub-page's own local

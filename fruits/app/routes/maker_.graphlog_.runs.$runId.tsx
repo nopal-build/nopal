@@ -6,7 +6,7 @@
 // every other Maker page. See `graphLogPerf.server.ts` for how this data
 // is captured — every duration here is code-measured wall-clock time,
 // never a number the model itself reports.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -33,6 +33,8 @@ import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { getGraphLogRunSpend } from "robustness-core/data/graphLogMetrics.server";
 import { RunSpendSection } from "../components/RunSpend";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.GraphLog" }];
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);

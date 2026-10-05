@@ -15,7 +15,7 @@
 // with the category nav living in the drawer instead of a horizontal bar
 // up top.
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -72,6 +72,8 @@ async function requireMakerAccess(request: Request) {
   }
   return user;
 }
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.Stamps" }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);

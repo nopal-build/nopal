@@ -8,7 +8,7 @@
 // run's outcome is permanently recorded to `admin_script_runs`
 // (`adminScriptRuns.server.ts`) and viewable at
 // /maker/scripts/runs/:runId.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, data, redirect, useLoaderData, useRouteError, isRouteErrorResponse } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
@@ -25,6 +25,8 @@ import { getHumansById } from "robustness-core/data/humans.server";
 // own staff override (which only ever touches ONE project's own data),
 // these scripts can mutate arbitrary rows across the whole database in
 // production. Keep this stricter than `requireMakerAccess` elsewhere.
+export const meta: MetaFunction = () => [{ title: "O.No · M.Scripts" }];
+
 async function requireAdminScriptsAccess(request: Request) {
   const user = await getUser(request);
   if (!user) throw redirect("/login");

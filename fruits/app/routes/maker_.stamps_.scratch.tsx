@@ -32,7 +32,7 @@
 // keep this in sync with the real `buildWebsiteDirectiveRegistry`
 // vocabulary, don't let it drift into its own separate list.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, data, redirect, useFetcher, useLoaderData, useRouteError, useSearchParams, isRouteErrorResponse } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import {
@@ -80,6 +80,8 @@ async function requireMakerAccess(request: Request) {
   }
   return user;
 }
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.S.Scratch Pad" }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
@@ -315,6 +317,28 @@ const ACCENT_COLOR_OPTIONS: TracingPaperSelectOption[] = [
   { value: "purple" },
 ];
 
+/** Demo-only `::swatch{...}` definitions this guide itself prepends
+ * ahead of any paper that reads `color=`/`palette=` -- NOT a built-in
+ * default vocabulary (there isn't one anymore, by design -- round 11 of
+ * the "Oxmarkdown Colors" garden seed). This is the exact same thing any
+ * real implementer does for their own page (a shared `_theme.md`, say),
+ * just inlined here so `ACCENT_COLOR_OPTIONS`' dropdown values above
+ * continue to resolve to a real, visible color instead of nothing. */
+const DEMO_COLOR_SWATCHES = `::swatch{role="color" name="red" light="var(--red)" dark="var(--red-light)"}
+::swatch{role="color" name="green" light="var(--green)" dark="var(--green-light)"}
+::swatch{role="color" name="purple" light="var(--purple)" dark="var(--purple)"}
+`;
+
+/** Same idea as `DEMO_COLOR_SWATCHES`, for the Section paper's `surface=`
+ * dropdown below -- `mint`/`white` match this directive's own OLD,
+ * now-retired `bg=` enum exactly (identical real values -- see
+ * `website.css`'s own "RETIRED" comment for the history), so the demo
+ * looks identical to before despite the underlying mechanism changing
+ * entirely underneath it. */
+const DEMO_SURFACE_SWATCHES = `::swatch{role="surface" name="mint" light="var(--cactus-100)" dark="var(--cactus-800)"}
+::swatch{role="surface" name="white" light="var(--white)" dark="var(--purple-light)"}
+`;
+
 /** Every registered `::icon{name="..."}`/`:::section-title{icon="..."}`
  * name, grouped into a "Files" and a "Placeholders" `<optgroup>` -- see
  * `websiteIcons.tsx`'s own `WEBSITE_ICON_FILE_NAMES`/
@@ -331,13 +355,13 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "section",
     name: "Section",
-    directive: ':::section{bg="..." list="..." margin="N"}',
-    note: "Container -- a themeable area, not a fully bespoke one: a handful of independent knobs, not complete control over every style. `bg` picks a full-bleed background class (`mint`/`white`, each aliasing an existing palette token — see `website.css`; both have real dark-mode counterparts of their own, `--cactus-800`/`--purple-light` -- leaving `bg` unset shows the page's own resting background through instead, reading as blended-in/invisible rather than a distinct band); `list` optionally swaps in a NAMED bullet style for the body's own lists (`timeline` today — a small dot + connecting line, not just a tint); `margin` adds extra top/bottom breathing room around the section as a MULTIPLE of the shared `--ox-grid` unit (41px today), e.g. `margin=\"2\"` = `82px` -- negative numbers pull an adjacent section closer instead. Body renders through the ordinary OxRenderer pipeline otherwise — nothing else section-specific about the heading/paragraph/list styling itself, including heading COLOR: a section's own headings just read the ordinary default text color -- reach for the Section title paper (below) instead when a heading specifically needs to stand out.",
+    directive: ':::section{surface="..." palette="..." list="timeline" margin="N"}',
+    note: "Container -- a themeable area, not a fully bespoke one: a handful of independent knobs, not complete control over every style. `surface`/`palette` resolve against the page's own `::swatch`/`::palette` registry — an OPEN vocabulary the page/theme author defines (see the \"Oxmarkdown Colors\" garden seed), not a fixed `mint`/`white` enum anymore. THIS demo prepends two small `::swatch{role=\"surface\" ...}` definitions (`mint`/`white`, matching the old enum's own real values) ahead of the directive below, purely so the dropdown continues to show something real -- a real page does the exact same thing in its own shared theme file (e.g. `_theme.md`). Leaving `surface`/`palette` both unset shows the page's own resting background through instead, reading as blended-in/invisible rather than a distinct band. `list` optionally swaps in a NAMED bullet style for the body's own lists (`timeline` today — a small dot + connecting line, not just a tint); `margin` adds extra top/bottom breathing room around the section as a MULTIPLE of the shared `--ox-grid` unit (41px today), e.g. `margin=\"2\"` = `82px` -- negative numbers pull an adjacent section closer instead. Body renders through the ordinary OxRenderer pipeline otherwise — nothing else section-specific about the heading/paragraph/list styling itself, including heading COLOR: a section's own headings just read the ordinary default text color -- reach for the Section title paper (below) instead when a heading specifically needs to stand out.",
     fullBleed: true,
     attributes: [
       {
-        key: "bg",
-        label: "bg",
+        key: "surface",
+        label: "surface",
         kind: "select",
         default: "mint",
         options: [{ value: "", label: "(none, transparent)" }, { value: "mint" }, { value: "white" }],
@@ -352,8 +376,8 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "margin", label: "margin (x grid unit)", kind: "text", default: "", placeholder: "e.g. 2" },
     ],
     buildMarkdown: (v) => {
-      const attrs = [v.bg && `bg="${v.bg}"`, v.list && `list="${v.list}"`, v.margin && `margin="${v.margin}"`].filter(Boolean).join(" ");
-      return `:::section{${attrs}}
+      const attrs = [v.surface && `surface="${v.surface}"`, v.list && `list="${v.list}"`, v.margin && `margin="${v.margin}"`].filter(Boolean).join(" ");
+      return `${DEMO_SURFACE_SWATCHES}:::section{${attrs}}
 ## At a Cost
 
 - We favored synthetic materials for their higher performance metrics.
@@ -421,9 +445,9 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "trail",
     name: "Trail",
-    directive: '::trail{waypoints="p1, p2, p3" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
+    directive: '::trail{waypoints="p1, p2, p3" curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}',
     previewMinHeight: 160,
-    note: 'Leaf. The SAME wavy-line primitive as `::line`/`::path`, but its points come from LIVE DOM MEASUREMENT instead of any fixed coordinates: `waypoints` is a comma-separated list of ids, each referring to some OTHER element\'s own `data-waypoint-id` elsewhere on the page -- a bare `::waypoint{id="..."}` anchor, or `id` on a `::stamp{...}`/`::icon{...}` (which already carry `data-waypoint-id` for free). This demo uses three small `::icon{name="circle" position="..."}` placeholders (`p1`/`p2`/`p3`) as its waypoints, rather than invisible `::waypoint{...}` anchors, so there\'s something to SEE at each end of the trail, not just the connecting line itself -- `p2` is deliberately offset well clear of the straight line between `p1`/`p3` (bowed out toward the right edge, not sitting at the diagonal\'s own midpoint) so the default `curve="smooth"` has visible room to swoop through it, rather than drawing what would otherwise look like a plain straight segment. Connects them, IN THE ORDER LISTED, through each one\'s own live center point, re-measured on every real resize (drag this browser window and watch the trail follow the dots -- genuinely different from `::line`/`::path`\'s fixed points, which never look at the DOM at all). Try removing `p2` from `waypoints` (or typing in a made-up id) -- an id with no matching element on the page is silently skipped, same "missing asset doesn\'t break the page" spirit `::icon`\'s unregistered-name fallback has, though here it just means one fewer point. No anchor/delta grammar here (nothing to anchor against but the waypoints themselves); `curve`/`tension`/`color` behave exactly as they do on `::line` below.',
+    note: 'Leaf. The SAME wavy-line primitive as `::line`/`::path`, but its points come from LIVE DOM MEASUREMENT instead of any fixed coordinates: `waypoints` is a comma-separated list of ids, each referring to some OTHER element\'s own `data-waypoint-id` elsewhere on the page -- a bare `::waypoint{id="..."}` anchor, or `id` on a `::stamp{...}`/`::icon{...}` (which already carry `data-waypoint-id` for free). This demo uses three small `::icon{name="circle" position="..."}` placeholders (`p1`/`p2`/`p3`) as its waypoints, rather than invisible `::waypoint{...}` anchors, so there\'s something to SEE at each end of the trail, not just the connecting line itself -- `p2` is deliberately offset well clear of the straight line between `p1`/`p3` (bowed out toward the right edge, not sitting at the diagonal\'s own midpoint) so the default `curve="smooth"` has visible room to swoop through it, rather than drawing what would otherwise look like a plain straight segment. Connects them, IN THE ORDER LISTED, through each one\'s own live center point, re-measured on every real resize (drag this browser window and watch the trail follow the dots -- genuinely different from `::line`/`::path`\'s fixed points, which never look at the DOM at all). Try removing `p2` from `waypoints` (or typing in a made-up id) -- an id with no matching element on the page is silently skipped, same "missing asset doesn\'t break the page" spirit `::icon`\'s unregistered-name fallback has, though here it just means one fewer point. No anchor/delta grammar here (nothing to anchor against but the waypoints themselves); `curve`/`tension` behave exactly as they do on `::line` below. `color`/`palette` resolve against the page\'s own `::swatch`/`::palette` registry (an OPEN vocabulary -- see the "Oxmarkdown Colors" garden seed); this demo prepends its own small `::swatch{role="color" ...}` set so `red`/`green`/`purple` below still resolve to something real.',
     attributes: [
       { key: "waypoints", label: "waypoints", kind: "text", default: "p1,p2,p3", placeholder: "p1, p2, p3" },
       {
@@ -437,13 +461,13 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "color", label: "color", kind: "select", default: "red", options: ACCENT_COLOR_OPTIONS },
     ],
     buildMarkdown: (v) =>
-      `::icon{name="circle" size="sm" id="p1" position="L4,T4"}\n::icon{name="circle" size="sm" id="p2" position="R40,C-10"}\n::icon{name="circle" size="sm" id="p3" position="R24,B24"}\n::trail{waypoints="${v.waypoints}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
+      `${DEMO_COLOR_SWATCHES}::icon{name="circle" size="sm" id="p1" position="L4,T4"}\n::icon{name="circle" size="sm" id="p2" position="R40,C-10"}\n::icon{name="circle" size="sm" id="p3" position="R24,B24"}\n::trail{waypoints="${v.waypoints}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
   },
   {
     id: "line",
     name: "Line",
-    directive: '::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
-    note: 'Leaf. The shared wavy-line primitive (`WavyLine.tsx` + `oxmarkdown-core`\'s `buildSplinePath`) in its fixed-points mode. "A line is drawn from one end to the other": a cursor starts at the line\'s own top-left corner and walks forward, per-axis, per point, in LITERAL PIXELS -- a REVERSED design from an earlier normalized-then-rescaled-to-container version, which made the same numbers look different (often distorted) depending on the container they rendered inside; see `oxmarkdown-core`\'s `wavyLine.ts` header for the full reasoning. Each half of a pair is either a plain number (a DELTA -- moves the cursor by that amount, in real px, cumulative, NEVER rescaled by the container) or a reference letter plus optional offset (an ANCHOR, referenced to the container\'s own REAL measured edge instead of the previous point -- this one IS container-size-dependent, on purpose): `L`/`C`/`R` for x, `T`/`C`/`B` for y (same CSS-inset convention as `top`/`right`/`bottom`/`left` -- `T`/`L` add away from that edge, `B`/`R` subtract inward from it, `C` adds past center -- the offset itself is a literal pixel inset, not a percentage). Anchors and deltas mix freely, per axis, at any point. Sized to exactly fit the resulting path\'s own bounding box, recomputed on every real resize ONLY to re-resolve any anchor letters against the container\'s new real size (`ResizeObserver`, not a passive `preserveAspectRatio` stretch) -- plain deltas never change. `color` sets the stroke directly; omit it and the line inherits `currentColor` instead. Needs a positioned ancestor with real height to draw into -- this row\'s own preview box supplies that; `:::section-title{...}` supplies it for the paper below. Try the "SVG \u2192 Points" tool (see the sidebar\'s own "Tools" section) to trace a real shape into this syntax instead of hand-guessing numbers.',
+    directive: '::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}',
+    note: 'Leaf. The shared wavy-line primitive (`WavyLine.tsx` + `oxmarkdown-core`\'s `buildSplinePath`) in its fixed-points mode. "A line is drawn from one end to the other": a cursor starts at the line\'s own top-left corner and walks forward, per-axis, per point, in LITERAL PIXELS -- a REVERSED design from an earlier normalized-then-rescaled-to-container version, which made the same numbers look different (often distorted) depending on the container they rendered inside; see `oxmarkdown-core`\'s `wavyLine.ts` header for the full reasoning. Each half of a pair is either a plain number (a DELTA -- moves the cursor by that amount, in real px, cumulative, NEVER rescaled by the container) or a reference letter plus optional offset (an ANCHOR, referenced to the container\'s own REAL measured edge instead of the previous point -- this one IS container-size-dependent, on purpose): `L`/`C`/`R` for x, `T`/`C`/`B` for y (same CSS-inset convention as `top`/`right`/`bottom`/`left` -- `T`/`L` add away from that edge, `B`/`R` subtract inward from it, `C` adds past center -- the offset itself is a literal pixel inset, not a percentage). Anchors and deltas mix freely, per axis, at any point. Sized to exactly fit the resulting path\'s own bounding box, recomputed on every real resize ONLY to re-resolve any anchor letters against the container\'s new real size (`ResizeObserver`, not a passive `preserveAspectRatio` stretch) -- plain deltas never change. `color`/`palette` resolve against the page\'s own `::swatch`/`::palette` registry (an OPEN vocabulary the page/theme author defines -- see the "Oxmarkdown Colors" garden seed; this demo prepends its own small `::swatch{role="color" ...}` set so `red`/`green`/`purple` below still resolve to something real) and set the stroke directly; omit `color`/leave it unresolved and the line inherits `currentColor` instead. Needs a positioned ancestor with real height to draw into -- this row\'s own preview box supplies that; `:::section-title{...}` supplies it for the paper below. Try the "SVG → Points" tool (see the sidebar\'s own "Tools" section) to trace a real shape into this syntax instead of hand-guessing numbers.',
     previewMinHeight: 100,
     attributes: [
       { key: "points", label: "points", kind: "text", default: "L0,B4 C5,B16 R0,B4", placeholder: "x,y x,y ..." },
@@ -458,12 +482,12 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "color", label: "color", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
     ],
     buildMarkdown: (v) =>
-      `::line{points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
+      `${DEMO_COLOR_SWATCHES}::line{points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
   },
   {
     id: "path",
     name: "Path",
-    directive: '::path{points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
+    directive: '::path{points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}',
     note: 'Leaf. The SAME wavy-line primitive as `::line`, `points` parsed with the exact same delta/anchor grammar -- but DECOUPLES the traced shape\'s own natural proportions from how big it renders and where it sits, which `::line` bakes directly into the points themselves. Built for tracing a real, complex SVG shape (try the "SVG \u2192 Points" tool, in the sidebar\'s own "Tools" section) once, then resizing/repositioning it freely without re-baking numbers. `width`/`height` (each optional, independent) -- a plain number is literal px, a trailing `%` is a percentage of `::path`\'s own real measured container size, resolved fresh on every real resize (try dragging this browser window narrower with `width="40%"` set below -- the shape genuinely rescales, unlike anything `::line` can do). ALWAYS a uniform scale (the shape\'s own proportions are never independently stretched) -- give only one axis and the other follows proportionally; give both and it fits inside whichever constrains more. `start="x,y"` positions the (possibly-scaled) shape\'s own bounding-box top-left corner, using the SAME anchor/delta vocabulary as a single `points="..."` pair -- omit it and the shape renders at wherever its own resolved `points` naturally placed it.',
     previewMinHeight: 120,
     attributes: [
@@ -482,13 +506,13 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "color", label: "color", kind: "select", default: "purple", options: ACCENT_COLOR_OPTIONS },
     ],
     buildMarkdown: (v) =>
-      `::path{points="${v.points}"${v.width ? ` width="${v.width}"` : ""}${v.height ? ` height="${v.height}"` : ""}${v.start ? ` start="${v.start}"` : ""} curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
+      `${DEMO_COLOR_SWATCHES}::path{points="${v.points}"${v.width ? ` width="${v.width}"` : ""}${v.height ? ` height="${v.height}"` : ""}${v.start ? ` start="${v.start}"` : ""} curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
   },
   {
     id: "line-word",
     name: "Line word",
-    directive: ':line-word{text="..." points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
-    note: 'A TEXT directive (single colon) -- sits INLINE, mid-sentence, unlike every leaf/container directive above. Wraps `text` in an inline-block, `position: relative` span and draws the SAME `WavyLine` primitive as `::line`/`::path` BEHIND it (`z-index: -1`, `website.css`) -- a hand-drawn squiggle/underline decorating one word or short phrase, sized to that word\'s own real rendered box. `points`/`width`/`height`/`start`/`curve`/`tension`/`color` all behave EXACTLY like `::path{...}` -- see that entry above for the full grammar; the only new attribute is `text`, the literal word/phrase to render (a plain attribute, not bracket-label content). Try editing `text` to something longer/shorter -- the default `points` uses `L`/`R` anchors, so the underline automatically re-spans the word\'s own new width, no manual re-tracing needed. NOTE on the default `points` own `T` values: this preview\'s own paragraph line-height (`--ox-grid`, 41px) is taller than the actual glyphs (measured ~21px, roughly centered inside it), so `T33`/`T39` were tuned by DIRECTLY measuring where the visible text really sits here, not guessed from the line-height alone -- expect to retune both numbers by hand for a real page with different type/line-height.',
+    directive: ':line-word{text="..." points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}',
+    note: 'A TEXT directive (single colon) -- sits INLINE, mid-sentence, unlike every leaf/container directive above. Wraps `text` in an inline-block, `position: relative` span and draws the SAME `WavyLine` primitive as `::line`/`::path` BEHIND it (`z-index: -1`, `website.css`) -- a hand-drawn squiggle/underline decorating one word or short phrase, sized to that word\'s own real rendered box. `points`/`width`/`height`/`start`/`curve`/`tension`/`color`/`palette` all behave EXACTLY like `::path{...}` -- see that entry above for the full grammar (including the open `::swatch`/`::palette`-backed vocabulary `color`/`palette` now read); the only new attribute is `text`, the literal word/phrase to render (a plain attribute, not bracket-label content). Try editing `text` to something longer/shorter -- the default `points` uses `L`/`R` anchors, so the underline automatically re-spans the word\'s own new width, no manual re-tracing needed. NOTE on the default `points` own `T` values: this preview\'s own paragraph line-height (`--ox-grid`, 41px) is taller than the actual glyphs (measured ~21px, roughly centered inside it), so `T33`/`T39` were tuned by DIRECTLY measuring where the visible text really sits here, not guessed from the line-height alone -- expect to retune both numbers by hand for a real page with different type/line-height.',
     attributes: [
       { key: "text", label: "text", kind: "text", default: "waterproof jacket" },
       { key: "points", label: "points", kind: "text", default: "L0,T33 C0,T39 R0,T33", placeholder: "x,y x,y ..." },
@@ -503,20 +527,21 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "color", label: "color", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
     ],
     buildMarkdown: (v) =>
-      `Take the early :line-word{text="${v.text}" points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}.`,
+      `${DEMO_COLOR_SWATCHES}Take the early :line-word{text="${v.text}" points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}.`,
   },
   {
     id: "section-title",
     name: "Section title",
-    directive: ':::section-title{icon="..." color="red|green|purple"}',
-    note: "Container. An icon + a real heading + (usually) a `::line{...}` composed as one titled-header unit -- see `website.css`'s `.website-section-title`. The heading stays real markdown inside it, so an unaware renderer just shows a plain heading, no visible artifact. `color` recolors JUST the heading text (same named-color vocabulary as `:::section`'s `accent`) -- it does NOT also recolor a nested `::line{...}` (try changing `color` here and watch the line stay green regardless), which needs its own, independent `color` attribute since it has to work standalone too.",
+    directive: ':::section-title{icon="..." color="..." h-color="..." palette="..."}',
+    note: "Container. An icon + a real heading + (usually) a `::line{...}` composed as one titled-header unit -- see `website.css`'s `.website-section-title`. The heading stays real markdown inside it, so an unaware renderer just shows a plain heading, no visible artifact. `color` is a BASE text color that reaches everything inside (ordinary CSS inheritance, including the heading); `h-color`, when given, is a MORE SPECIFIC override that wins only for heading tags -- try setting both to different swatch names below and watch `h-color` win for the heading while `color` alone would still apply to it otherwise (same 'ancestor value vs. a more specific descendant rule' relationship CSS's own cascade already has -- see the \"Oxmarkdown Colors\" garden seed, round 13). Both resolve against the page's own `::swatch`/`::palette` registry -- the SAME registry/role `::line{color=\"...\"}` below reads, so give both the same name on purpose to keep a heading and a nearby line in sync (try it: this paper's own `::line` below is hardcoded to `color=\"green\"`). `color`/`h-color` do NOT also recolor that nested `::line{...}`; it needs its own, independent `color` attribute since it has to work standalone too.",
     fullBleed: true,
     attributes: [
       { key: "icon", label: "icon", kind: "select", default: "mountaineer-coffee", options: ICON_NAME_OPTIONS },
       { key: "color", label: "color", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
+      { key: "h-color", label: "h-color (heading override)", kind: "select", default: "", options: ACCENT_COLOR_OPTIONS },
       { key: "heading", label: "heading text", kind: "text", default: "At a Cost" },
     ],
-    buildMarkdown: (v) => `:::section-title{icon="${v.icon}"${v.color ? ` color="${v.color}"` : ""}}
+    buildMarkdown: (v) => `${DEMO_COLOR_SWATCHES}:::section-title{icon="${v.icon}"${v.color ? ` color="${v.color}"` : ""}${v["h-color"] ? ` h-color="${v["h-color"]}"` : ""}}
 ::line{points="L1,B0 R16,B10 R0,B0" curve="smooth" tension="0.4" color="green"}
 ## ${v.heading}
 :::`,

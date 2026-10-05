@@ -31,20 +31,28 @@
  * fence at all, so they never trigger this.
  *
  * Directive vocabulary (first functional pass):
- *   :::section{bg="mint|white" list="timeline" margin="N"}
+ *   :::section{surface="..." palette="..." list="timeline" margin="N"}
  *     — full-bleed colored band; body renders through the ordinary
- *     pipeline. `list` swaps in a NAMED bullet style for the body's own
- *     lists (a small dot + connecting line for `"timeline"` today) -- a
- *     whole pre-designed look, not a raw color, same "named vocabulary"
- *     spirit `bg` itself already has. `margin` adds extra top/bottom
- *     breathing room around the section, as a MULTIPLE of the shared
- *     `--ox-grid` unit (41px today) rather than a raw pixel count --
- *     `margin="2"` means `2 * 41px` = `82px` (see `parseSectionMarginStyle`,
- *     below, for why that stays token-driven instead of a hardcoded
- *     number); negative values pull an adjacent section closer instead.
+ *     pipeline. `surface`/`palette` resolve against the page's own
+ *     `::swatch`/`::palette` registry (`oxmarkdown-core`'s
+ *     `resolveSwatchRole` — see the "Oxmarkdown Colors" garden seed) --
+ *     an OPEN vocabulary the page/theme author defines, not a closed
+ *     `mint`/`white` enum anymore (that enum, and the `bg=` spelling, are
+ *     retired — a real migration, not a silent compatibility shim; see
+ *     the garden seed's round 11). Leaving `surface`/`palette` both unset
+ *     shows the page's own resting background through instead, reading
+ *     as blended-in/invisible rather than a distinct band. `list` swaps
+ *     in a NAMED bullet style for the body's own lists (a small dot +
+ *     connecting line for `"timeline"` today) -- a whole pre-designed
+ *     look, not a raw color. `margin` adds extra top/bottom breathing
+ *     room around the section, as a MULTIPLE of the shared `--ox-grid`
+ *     unit (41px today) rather than a raw pixel count -- `margin="2"`
+ *     means `2 * 41px` = `82px` (see `parseSectionMarginStyle`, below,
+ *     for why that stays token-driven instead of a hardcoded number);
+ *     negative values pull an adjacent section closer instead.
  *     Deliberately a themeable-area directive, not a fully bespoke-per-
- *     section one: bg/list/margin are the handful of knobs worth
- *     exposing, not every possible CSS property. Heading COLOR is
+ *     section one: surface/palette/list/margin are the handful of knobs
+ *     worth exposing, not every possible CSS property. Heading COLOR is
  *     deliberately NOT one of them -- a section's own headings just read
  *     the ordinary default text color; reach for `:::section-
  *     title{color="..."}` (below) instead when a heading specifically
@@ -72,18 +80,30 @@
  *     -- `::stamp{id="..."}`/`::icon{id="..."}` already double as waypoints
  *     via their own `id`, no separate `::waypoint` needed alongside one of
  *     those.
- *   :::section-title{icon="..." color="red|green|purple"} — an icon + a
- *     real heading + (usually) a `::line{...}` composed together as one
- *     titled-header unit; see `website.css`'s `.website-section-title` for
- *     the layout. The heading stays real markdown inside it, so an
- *     unaware renderer just shows a plain heading, no visible artifact.
- *     `color` recolors JUST the heading text (same named-color vocabulary
- *     `::line{color="..."}` below also reads, via the same
- *     `data-website-color`-attribute-selector technique) — it does NOT
- *     also recolor a `::line{...}` nested alongside it; that's `::line`'s
- *     own, independent `color` attribute (below), since a bare `::line`
- *     needs to work with no `:::section-title` around it at all.
- *   ::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
+ *   :::section-title{icon="..." color="..." h-color="..." palette="..."}
+ *     — an icon + a real heading + (usually) a `::line{...}` composed
+ *     together as one titled-header unit; see `website.css`'s
+ *     `.website-section-title` for the layout. The heading stays real
+ *     markdown inside it, so an unaware renderer just shows a plain
+ *     heading, no visible artifact. `color` is a BASE text color that
+ *     reaches everything inside (ordinary CSS inheritance); `h-color`,
+ *     when given, is a MORE SPECIFIC override that wins only for heading
+ *     tags — the same "ancestor value vs. a more specific descendant
+ *     rule" relationship CSS's own cascade already has, not two
+ *     unrelated color slots (see the "Oxmarkdown Colors" garden seed,
+ *     round 13). Both resolve against the page's own `::swatch`/
+ *     `::palette` registry, same open vocabulary as `:::section{surface=
+ *     "..."}` above — `::line{color="..."}` below reads the exact SAME
+ *     registry/role now too, so a themed heading and a themed line drawn
+ *     alongside it can share one real swatch name and stay in sync (the
+ *     OLD `data-website-color`-attribute-selector technique, and the
+ *     hardcoded `red`/`green`/`purple` enum both directives used to share,
+ *     are retired — see the garden seed's round 14). `color`/`h-color`
+ *     do NOT also recolor a `::line{...}` nested alongside it; that's
+ *     `::line`'s own, independent `color` attribute (below), since a
+ *     bare `::line` needs to work with no `:::section-title` around it
+ *     at all — give it the SAME swatch name to make them match on purpose.
+ *   ::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}
  *     — the shared wavy-line primitive (`WavyLine.tsx` +
  *     `oxmarkdown-core`'s `buildSplinePath`/`resolveLinePoints`),
  *     fixed-points mode: "a line is drawn from one end to the other" — a
@@ -136,15 +156,20 @@
  *     multi-stroke) path's bounding box (not the whole containing box),
  *     recomputed on every resize ONLY to re-resolve any anchor letters
  *     against the container's new real size -- plain deltas never
- *     change. `color` (same named vocabulary as
- *     `accent`/`section-title`'s `color`) sets the stroke directly via
- *     `WavyLine`'s own `color` prop — omit it and the line just inherits
- *     whatever `currentColor` resolves to (`WavyLine`'s default). The
- *     SAME primitive's `waypoints` mode (measuring live
+ *     change. `color`/`palette` resolve against the page's own
+ *     `::swatch`/`::palette` registry (round 8's cascade,
+ *     `oxmarkdown-core`'s `resolveSwatchRole`) — the SAME registry/role
+ *     `:::section-title{color="..."}`/`{h-color="..."}` above reads, so a
+ *     themed heading and a themed line drawn alongside it can share one
+ *     real swatch name and stay in sync on purpose (give both the SAME
+ *     name). Resolves to a plain CSS value, set directly via `WavyLine`'s
+ *     own `color` prop — omit `color`/leave it unresolved and the line
+ *     just inherits whatever `currentColor` resolves to (`WavyLine`'s
+ *     default). The SAME primitive's `waypoints` mode (measuring live
  *     `data-waypoint-id` positions instead of fixed points, all
  *     absolute — anchor/delta semantics don't apply there) is what
  *     `::trail{waypoints="..."}` (below) uses instead of fixed `points`.
- *   ::path{points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
+ *   ::path{points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}
  *     — the SAME wavy-line primitive as `::line` above, `points` parsed
  *     with the EXACT SAME delta/anchor grammar, but DECOUPLES the traced
  *     shape's own natural proportions from how big it renders and where
@@ -169,10 +194,11 @@
  *         shape's own bounding-box top-left corner. Omit it and the shape
  *         renders at wherever its own resolved `points` naturally placed
  *         it (scaling aside).
- *     `points`/`curve`/`tension`/`color` all behave exactly as they do on
- *     `::line` -- see that entry above for the full grammar. See
- *     `oxmarkdown-core`'s `fitAndPositionPoints` for the underlying math.
- *   :line-word{text="..." points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
+ *     `points`/`curve`/`tension`/`color`/`palette` all behave exactly as
+ *     they do on `::line` -- see that entry above for the full grammar.
+ *     See `oxmarkdown-core`'s `fitAndPositionPoints` for the underlying
+ *     math.
+ *   :line-word{text="..." points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}
  *     — a TEXT directive (single colon, inline -- sits mid-sentence in
  *     ordinary prose, e.g. `Take the early :line-word{text="waterproof
  *     jacket" points="..."}.`, the SAME tier as the built-in `:ref{...}`
@@ -183,14 +209,14 @@
  *     it (`z-index: -1`, `website.css`) -- a hand-drawn squiggle/circle
  *     decorating ONE word or short phrase, sized to that word's own real
  *     rendered box. `points`/`width`/`height`/`start`/`curve`/`tension`/
- *     `color` all behave EXACTLY like `::path{...}` above (same optional
- *     decoupled-scale/position knobs, same grammar) -- see that entry for
- *     the full details; the only new attribute is `text`, the literal
- *     word/phrase to render (a plain attribute, not bracket-label content,
- *     matching how `::button{text="..."}`/`::badge{text="..."}` already
- *     do it elsewhere in this same registry). Renders nothing at all if
- *     either `text` or a usable `points` is missing.
- *   ::trail{waypoints="p1, p2, p3" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}
+ *     `color`/`palette` all behave EXACTLY like `::path{...}` above (same
+ *     optional decoupled-scale/position knobs, same grammar) -- see that
+ *     entry for the full details; the only new attribute is `text`, the
+ *     literal word/phrase to render (a plain attribute, not bracket-label
+ *     content, matching how `::button{text="..."}`/`::badge{text="..."}`
+ *     already do it elsewhere in this same registry). Renders nothing at
+ *     all if either `text` or a usable `points` is missing.
+ *   ::trail{waypoints="p1, p2, p3" curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}
  *     — the SAME wavy-line primitive as `::line`/`::path` above, but its
  *     points come from LIVE DOM MEASUREMENT instead of any fixed
  *     coordinates: `waypoints` is a comma-separated list of ids, each
@@ -316,25 +342,15 @@ function parseSizeAttr(raw: string | undefined): LineSizeSpec | undefined {
   return match[2] ? { kind: "percent", value } : { kind: "px", value };
 }
 
-/** Same named-color vocabulary `:::section-title{color="..."}` already
- * uses -- shared here so `::line{color="..."}` resolves to the exact
- * same CSS variable a `color="..."` there would (that one goes through
- * CSS attribute selectors instead -- see `website.css` -- since it
- * targets a heading already rendered as `children`, not a prop this
- * registry can pass directly). `red`/`green` read the SAME scheme-aware
- * `--website-accent-*` tokens `:::section-title{color="..."}` reads
- * (website.css) -- a line drawn alongside a green/red heading should
- * recolor right along with it in dark mode, not go stale. `purple`
- * stays a literal, scheme-invariant token (no dark-mode counterpart
- * exists for it, by design -- see website.css). */
-const ACCENT_COLOR_VARS: Record<string, string> = {
-  red: "var(--website-accent-red)",
-  green: "var(--website-accent-green)",
-  purple: "var(--purple)",
-};
-function toAccentColorVar(name: string | undefined): string | undefined {
-  return name ? ACCENT_COLOR_VARS[name] : undefined;
-}
+// `ACCENT_COLOR_VARS`/`toAccentColorVar` (the hardcoded `red`/`green`/
+// `purple` -> `--website-accent-*`/`--purple` lookup every color-reading
+// directive here used to share) is RETIRED -- round 14 of the "Oxmarkdown
+// Colors" garden seed. `color=`/`palette=` on every directive below now
+// resolve through the same open, page-defined `::swatch`/`::palette`
+// registry instead (`resolveSwatchRole`, supplied on `DirectiveRenderProps`
+// -- see `OxRenderer.tsx`'s `boundResolveSwatchRole`), so a themed heading
+// and a themed line drawn alongside it share one real swatch name instead
+// of two independently-hardcoded enums that happened to agree.
 
 /** `::trail{waypoints="p1, p2, p3"}` -- splits on commas and trims each
  * id, so both `"p1,p2,p3"` and `"p1, p2, p3"` work; drops any empty
@@ -450,10 +466,11 @@ export function dailyLogEntryKey(date: string, project: string): string {
   return `${date}::${project.trim().toLowerCase()}`;
 }
 
-const SECTION_BG_CLASS: Record<string, string> = {
-  mint: "website-bg-mint",
-  white: "website-bg-white",
-};
+// `SECTION_BG_CLASS` (the hardcoded `mint`/`white` -> precompiled
+// className lookup `:::section{bg="..."}` used to read) is RETIRED --
+// round 14 of the "Oxmarkdown Colors" garden seed. `surface=`/`palette=`
+// now resolve through the page's own open `::swatch`/`::palette`
+// registry instead (see the `section` registry entry below).
 
 export function buildWebsiteDirectiveRegistry(opts: {
   dailyLogEntries: Record<string, WebsiteDailyLogEntry>;
@@ -545,13 +562,13 @@ export function buildWebsiteDirectiveRegistry(opts: {
   // `registry` is fully assigned below, since closures only need the
   // variable to exist by the time they're actually CALLED, not defined.
   const registry: DirectiveRegistry = {
-    section({ attrs, children }) {
-      const bgClass = SECTION_BG_CLASS[attrs.bg ?? ""] ?? "";
+    section({ attrs, children, resolveSwatchRole }) {
+      const surface = resolveSwatchRole({ role: "surface", explicit: attrs.surface, palette: attrs.palette });
       return (
         <section
-          className={`website-section ${bgClass}`}
+          className="website-section"
           data-website-list={attrs.list || undefined}
-          style={parseSectionMarginStyle(attrs.margin)}
+          style={{ ...parseSectionMarginStyle(attrs.margin), background: surface }}
         >
           <div className="website-section-inner">{children}</div>
         </section>
@@ -592,16 +609,29 @@ export function buildWebsiteDirectiveRegistry(opts: {
       return <span className="website-waypoint" aria-hidden="true" data-waypoint-id={attrs.id || undefined} />;
     },
 
-    "section-title"({ attrs, children }) {
+    "section-title"({ attrs, children, resolveSwatchRole }) {
+      // `color` is a BASE text color (ordinary CSS inheritance reaches
+      // everything inside, including the heading); `h-color`, when given,
+      // is a MORE SPECIFIC override that wins only for heading tags -- see
+      // the private `--website-section-title-h-color` custom property +
+      // `website.css`'s own `:is(h1, ..., h6)` rule reading it (round 13 of
+      // the "Oxmarkdown Colors" garden seed). Falls back to `color`'s own
+      // resolved value when `h-color` isn't given, so a bare `color="..."`
+      // alone still reaches the heading too, matching today's real default.
+      const color = resolveSwatchRole({ role: "color", explicit: attrs.color, palette: attrs.palette });
+      const hColor = resolveSwatchRole({ role: "color", explicit: attrs["h-color"], palette: attrs.palette });
       return (
-        <div className="website-section-title" data-website-color={attrs.color || undefined}>
+        <div
+          className="website-section-title"
+          style={{ color, "--website-section-title-h-color": hColor ?? color } as CSSProperties}
+        >
           {attrs.icon && <WebsiteIcon name={attrs.icon} size="md" />}
           {children}
         </div>
       );
     },
 
-    line({ attrs }) {
+    line({ attrs, resolveSwatchRole }) {
       const points = parseLinePoints(attrs.points);
       if (points.length < 2) return null;
       const tension = attrs.tension ? Number(attrs.tension) : undefined;
@@ -611,13 +641,13 @@ export function buildWebsiteDirectiveRegistry(opts: {
           points={points}
           curve={toLineCurveKind(attrs.curve)}
           tension={Number.isFinite(tension) ? tension : undefined}
-          color={toAccentColorVar(attrs.color)}
+          color={resolveSwatchRole({ role: "color", explicit: attrs.color, palette: attrs.palette })}
           className="website-line"
         />
       );
     },
 
-    path({ attrs }) {
+    path({ attrs, resolveSwatchRole }) {
       const points = parseLinePoints(attrs.points);
       if (points.length < 2) return null;
       const tension = attrs.tension ? Number(attrs.tension) : undefined;
@@ -635,13 +665,13 @@ export function buildWebsiteDirectiveRegistry(opts: {
           start={start}
           curve={toLineCurveKind(attrs.curve)}
           tension={Number.isFinite(tension) ? tension : undefined}
-          color={toAccentColorVar(attrs.color)}
+          color={resolveSwatchRole({ role: "color", explicit: attrs.color, palette: attrs.palette })}
           className="website-path"
         />
       );
     },
 
-    "line-word"({ attrs }) {
+    "line-word"({ attrs, resolveSwatchRole }) {
       const points = parseLinePoints(attrs.points);
       if (points.length < 2 || !attrs.text) return null;
       const tension = attrs.tension ? Number(attrs.tension) : undefined;
@@ -670,14 +700,14 @@ export function buildWebsiteDirectiveRegistry(opts: {
             start={start}
             curve={toLineCurveKind(attrs.curve)}
             tension={Number.isFinite(tension) ? tension : undefined}
-            color={toAccentColorVar(attrs.color)}
+            color={resolveSwatchRole({ role: "color", explicit: attrs.color, palette: attrs.palette })}
             className="website-line-word"
           />
         </span>
       );
     },
 
-    trail({ attrs }) {
+    trail({ attrs, resolveSwatchRole }) {
       const waypointIds = parseWaypointIds(attrs.waypoints);
       if (waypointIds.length < 2) return null;
       const tension = attrs.tension ? Number(attrs.tension) : undefined;
@@ -687,7 +717,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
           waypointIds={waypointIds}
           curve={toLineCurveKind(attrs.curve)}
           tension={Number.isFinite(tension) ? tension : undefined}
-          color={toAccentColorVar(attrs.color)}
+          color={resolveSwatchRole({ role: "color", explicit: attrs.color, palette: attrs.palette })}
           className="website-trail"
         />
       );

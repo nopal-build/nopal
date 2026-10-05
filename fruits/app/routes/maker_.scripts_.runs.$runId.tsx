@@ -5,7 +5,7 @@
 // (`adminScriptsQueue.server.ts`) since the audit row's own `log` isn't
 // filled in until the worker finishes. Auto-refreshes every 2s while
 // running. Admin/Super only, same gate as every other Maker page.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useEffect } from "react";
 import {
   Link,
@@ -26,6 +26,8 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { getAdminScriptRun } from "robustness-core/data/adminScriptRuns.server";
 import { getAdminScriptJobLog } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.Scripts" }];
 
 // Super only -- see `maker_.scripts.tsx`'s own doc on why this is
 // stricter than the usual Admin-or-Super Maker bar.
