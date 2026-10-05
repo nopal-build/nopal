@@ -25,6 +25,7 @@ import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { listAdminScripts, getAdminScript } from "robustness-core/data/adminScriptsRegistry.server";
 import { isAnyAdminScriptRunning, enqueueAdminScriptJob } from "robustness-core/data/adminScriptsQueue.server";
+import { navFor } from "../data/nav.server";
 
 // Same gate as `maker_.scripts.tsx` -- duplicated rather than
 // imported, matching every other Maker sub-page's own local
@@ -39,13 +40,18 @@ async function requireAdminScriptsAccess(request: Request) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAdminScriptsAccess(request);
+  // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
+  const user = await requireAdminScriptsAccess(request);
+  // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
+  const nav = await navFor(user._id);
 
   const running = await isAnyAdminScriptRunning();
   // Newest first -- see this file's own module doc.
   const scripts = [...listAdminScripts()].reverse();
 
   return {
+    user,
+    ...nav,
     scripts: scripts.map(({ name, label, description, argLabel, argRequired, deprecated }) => ({
       name,
       label,

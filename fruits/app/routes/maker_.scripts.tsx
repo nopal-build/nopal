@@ -20,6 +20,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { listRecentAdminScriptRuns } from "robustness-core/data/adminScriptRuns.server";
 import { isAnyAdminScriptRunning } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { navFor } from "../data/nav.server";
 
 // Super only, NOT the usual Admin-or-Super Maker bar -- unlike GraphLog's
 // own staff override (which only ever touches ONE project's own data),
@@ -35,7 +36,10 @@ async function requireAdminScriptsAccess(request: Request) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAdminScriptsAccess(request);
+  // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
+  const user = await requireAdminScriptsAccess(request);
+  // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
+  const nav = await navFor(user._id);
 
   const [recentRuns, running] = await Promise.all([listRecentAdminScriptRuns(20), isAnyAdminScriptRunning()]);
 
@@ -44,6 +48,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const humanNameById = new Map(humans.map((h) => [h._id, h.name]));
 
   return {
+    user,
+    ...nav,
     recentRuns,
     running,
     humanNameById: Object.fromEntries(humanNameById),
