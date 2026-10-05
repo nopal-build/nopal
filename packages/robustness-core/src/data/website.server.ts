@@ -11,7 +11,7 @@
  * This file owns the one bit of scaffolding a brand new `website` project
  * needs: a starter `README.md` (doubles as both the project's own Sharing
  * Roles doc — same as any other project's README — AND the site's
- * homepage) and an empty `_site-settings.json` (nav + footer config).
+ * homepage) and an empty `_site-settings.json` (nav config).
  *
  * Mirrors `projectN02.server.ts`'s own shape (`applyProjectN02Shape`) and
  * its mutual-import cycle with `vault.server.ts` — this file's own import
@@ -56,7 +56,6 @@ replace this placeholder. It renders as the site's homepage.
 const DEFAULT_SITE_SETTINGS = `${JSON.stringify(
   {
     nav: [],
-    footer: { tagline: "", links: [], social: [] },
   },
   null,
   2,
@@ -362,8 +361,119 @@ export async function resolveWebsiteDailyLogEntries(
   return entries;
 }
 
+/** Walks a `./`/`../`-style relative path (split on `/`, `.` segments are
+ * no-ops, `..` moves to the CURRENT folder's own parent) starting from
+ * `startFolderId`, resolving the final segment as a FILE name in whatever
+ * folder the walk lands on — the same name-based child lookup
+ * `resolveWebsitePageByPathUncached` already uses, just generalized to
+ * support stepping back up the tree too (that one only ever walks
+ * downward, URL-segment by URL-segment, so it never needed `..`).
+ *
+ * Clamped to `siteFolder` itself as a hard ceiling — `..` past the site's
+ * own root returns `null` rather than escaping into the rest of that
+ * human's vault. This matters because `/v2/*` is PUBLIC and anonymous
+ * (no session at all, see `loadWebsitePage.server.ts`'s header comment):
+ * without this, a crafted `::include-ox{file="../../../private/secret"}`
+ * on an otherwise-innocent page could walk out of the website project
+ * entirely and expose unrelated private vault content. */
+async function resolveRelativeVaultFile(
+  siteFolder: VaultFolder,
+  startFolderId: string | null,
+  relativePath: string,
+): Promise<FileRef | null> {
+  if (!startFolderId) return null;
+  const humanId = siteFolder.human_id;
+  const segments = relativePath.split("/").filter((s) => s.length > 0);
+  const fileName = segments.pop();
+  if (!fileName || fileName === "." || fileName === "..") return null;
+
+  let currentFolderId = startFolderId;
+  for (const segment of segments) {
+    if (segment === ".") continue;
+    if (segment === "..") {
+      if (currentFolderId === siteFolder._id) return null;
+      const current = await getFolderById(currentFolderId);
+      if (!current?.parent_folder_id) return null;
+      currentFolderId = current.parent_folder_id;
+      continue;
+    }
+    const { folders } = await listFolderChildren(humanId, currentFolderId);
+    const match = folders.find((f) => f.name.toLowerCase() === segment.toLowerCase());
+    if (!match) return null;
+    currentFolderId = match._id;
+  }
+
+  const { files } = await listFolderChildren(humanId, currentFolderId);
+  const match = files.find((f) => f.name.toLowerCase() === fileName.toLowerCase());
+  return match ? (await getFileRefById(match._id)) ?? null : null;
+}
+
+/**
+ * Resolves every `::include-ox{file="..."}` reference found in a website
+ * page's own body — each `file` is resolved RELATIVE TO THAT PAGE'S OWN
+ * CONTAINING FOLDER (`pageFolderId`, the resolved page's own `file.
+ * folder_id` — see `loadWebsitePage.server.ts`), via
+ * `resolveRelativeVaultFile` above. Lets an author write one shared
+ * `_footer.md` (plain oxmarkdown — any directive this registry supports,
+ * including a NESTED `::include-ox` of its own) and include it at the
+ * bottom of every page that wants one, rather than a site-wide footer
+ * baked into `_site-settings.json` and auto-rendered by every page
+ * identically (the OLD `WebsiteSettings.footer`, removed entirely).
+ *
+ * Deliberately ONE LEVEL DEEP ONLY — this scans the ENTRY page's own body
+ * for occurrences, but does NOT recursively scan whatever it resolves for
+ * FURTHER `::include-ox` references of their own (an included file's own
+ * nested includes, if any, simply won't be in the returned map, and
+ * render as unresolved/nothing — see `websiteDirectives.tsx`'s own
+ * `include-ox` handler). This happens to make a two-file MUTUAL cycle
+ * (a.md includes b.md, b.md includes a.md) harmless already — visiting
+ * a.md only ever resolves b.md's content, never b.md's OWN reference
+ * back to a.md, since that second hop is never scanned for at all. A
+ * DIRECT self-reference (a file including itself) is a real risk this
+ * shallow resolution does NOT protect against on its own though —
+ * guarded instead at render time, by `websiteDirectives.tsx`'s
+ * `includeOxHandler` tracking the chain of ancestors already being
+ * rendered and refusing to re-enter one. That render-time guard is also
+ * what would keep this correct if this function ever became recursive.
+ *
+ * Keyed by the literal, UN-resolved `file="..."` string (not an absolute
+ * path) — matches `webapp/app/oxmarkdown/websiteDirectives.tsx`'s own
+ * `include-ox` lookup, which only ever has the raw attribute value to key
+ * with at render time, the same `dailyLogEntryKey`-style convention
+ * `resolveWebsiteDailyLogEntries` (above) already follows. Front matter
+ * (if the included file happens to have any) is stripped, same as any
+ * other page body.
+ */
+export async function resolveWebsiteIncludes(
+  siteFolder: VaultFolder,
+  pageFolderId: string | null,
+  body: string,
+): Promise<Record<string, string>> {
+  const files = new Set<string>();
+  for (const directive of findLeafDirectiveOccurrences(body)) {
+    if (directive.name !== "include-ox") continue;
+    if (directive.attrs.file) files.add(directive.attrs.file);
+  }
+  if (files.size === 0) return {};
+
+  const resolved: Record<string, string> = {};
+  for (const file of files) {
+    const fileRef = await resolveRelativeVaultFile(siteFolder, pageFolderId, file);
+    if (!fileRef?.content) continue;
+    resolved[file] = splitFrontmatter(fileRef.content).body;
+  }
+  return resolved;
+}
+
 export type WebsiteLinkItem = { label: string; to: string };
 
+// `footer` (tagline + links + social) USED to live here, auto-rendered by
+// `webapp/app/routes/v2.tsx`'s own `<footer>` -- removed entirely
+// (2026-10-04) in favor of `::include-ox{file="..."}` (see
+// `resolveWebsiteIncludes` below): an author now hand-writes their own
+// `_footer.md` (any oxmarkdown, including other website directives) and
+// includes it at the bottom of each page that wants one, rather than this
+// file baking in one fixed, settings-driven footer shape for every site.
 export type WebsiteSettings = {
   nav: WebsiteLinkItem[];
   /** Optional, standalone CTA pill shown in the header (`WebsiteHeader.tsx`
@@ -377,16 +487,10 @@ export type WebsiteSettings = {
    * can never silently change which link is featured. Absent entirely
    * when a site doesn't want a featured button (no pill renders at all). */
   featuredButton?: WebsiteLinkItem;
-  footer: {
-    tagline: string;
-    links: WebsiteLinkItem[];
-    social: WebsiteLinkItem[];
-  };
 };
 
 const DEFAULT_WEBSITE_SETTINGS: WebsiteSettings = {
   nav: [],
-  footer: { tagline: "", links: [], social: [] },
 };
 
 /** Shared single-item validation `parseLinkItems` (below) also uses per
@@ -412,9 +516,9 @@ function parseLinkItems(raw: unknown): WebsiteLinkItem[] {
   return out;
 }
 
-/** Reads `_site-settings.json` (nav + footer config) — falls back to empty
- * defaults for a missing/malformed file rather than failing the whole page
- * render, same fail-soft convention `parseWebsitePageMeta` uses. */
+/** Reads `_site-settings.json` (nav config) — falls back to empty defaults
+ * for a missing/malformed file rather than failing the whole page render,
+ * same fail-soft convention `parseWebsitePageMeta` uses. */
 export async function getWebsiteSettings(siteFolder: VaultFolder): Promise<WebsiteSettings> {
   const { files } = await listFolderChildren(siteFolder.human_id, siteFolder._id);
   const settingsListing = files.find(
@@ -424,16 +528,10 @@ export async function getWebsiteSettings(siteFolder: VaultFolder): Promise<Websi
   if (!settingsFile?.content) return DEFAULT_WEBSITE_SETTINGS;
   try {
     const parsed = JSON.parse(settingsFile.content) as Record<string, unknown>;
-    const footer = (parsed.footer ?? {}) as Record<string, unknown>;
     const featuredButton = parseLinkItem(parsed.featuredButton);
     return {
       nav: parseLinkItems(parsed.nav),
       ...(featuredButton ? { featuredButton } : {}),
-      footer: {
-        tagline: typeof footer.tagline === "string" ? footer.tagline : "",
-        links: parseLinkItems(footer.links),
-        social: parseLinkItems(footer.social),
-      },
     };
   } catch {
     return DEFAULT_WEBSITE_SETTINGS;
@@ -445,10 +543,9 @@ export type SetWebsiteSettingsResult =
   | { ok: false; error: string };
 
 /** Overwrites `_site-settings.json` wholesale (creating it if somehow
- * missing) — same permission gate as `setWebsitePagePublish`. The nav/
- * footer editor always sends the FULL settings object (it's small), so
- * there's no partial-merge case to handle here, unlike a page's front
- * matter. */
+ * missing) — same permission gate as `setWebsitePagePublish`. The nav
+ * editor always sends the FULL settings object (it's small), so there's
+ * no partial-merge case to handle here, unlike a page's front matter. */
 export async function setWebsiteSettings(
   actingHumanId: string,
   siteFolder: VaultFolder,

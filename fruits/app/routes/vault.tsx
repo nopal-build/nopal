@@ -1329,7 +1329,6 @@ function SiteSettingsModal({
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<WebsiteSettings>({
     nav: [],
-    footer: { tagline: "", links: [], social: [] },
   });
 
   useEffect(() => {
@@ -1368,7 +1367,10 @@ function SiteSettingsModal({
       <div className="vault-modal" onClick={(e) => e.stopPropagation()}>
         <h3 className="vault-modal-title">Site settings</h3>
         <p className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginTop: "-8px", marginBottom: "16px" }}>
-          Configures the main nav and footer for this site's public pages.
+          Configures the main nav for this site's public pages. For a
+          footer, hand-write a shared file (e.g. <code>_footer.md</code>)
+          and end each page's own body with{" "}
+          <code>{'::include-ox{file="./_footer.md"}'}</code>.
         </p>
 
         {loading ? (
@@ -1386,38 +1388,6 @@ function SiteSettingsModal({
               item={settings.featuredButton}
               onChange={(featuredButton) =>
                 setSettings((prev) => ({ ...prev, featuredButton }))
-              }
-            />
-            <div style={{ marginBottom: "12px" }}>
-              <div className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginBottom: "4px" }}>
-                Footer tagline
-              </div>
-              <input
-                type="text"
-                value={settings.footer.tagline}
-                onChange={(e) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    footer: { ...prev.footer, tagline: e.target.value },
-                  }))
-                }
-                placeholder="A short line under the footer"
-                className="text-xs font-mono"
-                style={{ width: "100%", padding: "4px 6px", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)" }}
-              />
-            </div>
-            <LinkListEditor
-              label="Footer links"
-              items={settings.footer.links}
-              onChange={(links) =>
-                setSettings((prev) => ({ ...prev, footer: { ...prev.footer, links } }))
-              }
-            />
-            <LinkListEditor
-              label="Footer social links"
-              items={settings.footer.social}
-              onChange={(social) =>
-                setSettings((prev) => ({ ...prev, footer: { ...prev.footer, social } }))
               }
             />
           </>

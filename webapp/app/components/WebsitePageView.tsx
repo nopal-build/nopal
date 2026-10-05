@@ -103,6 +103,7 @@ export function WebsitePageView({
   body,
   isDraftPreview,
   dailyLogEntries = {},
+  includes = {},
 }: {
   body: string;
   isDraftPreview: boolean;
@@ -111,8 +112,12 @@ export function WebsitePageView({
    * needs real vault/DB access `OxRenderer` never has on its own. Optional
    * only so existing callers that don't pass it (none today) don't break. */
   dailyLogEntries?: Record<string, ResolvedWebsiteDailyLogEntry>;
+  /** See `oxmarkdown/websiteDirectives.tsx`'s `::include-ox{...}` entry --
+   * same reasoning as `dailyLogEntries` (resolved server-side, needs real
+   * vault/DB access). Optional for the same reason. */
+  includes?: Record<string, string>;
 }) {
-  const directives = buildWebsiteDirectiveRegistry({ dailyLogEntries });
+  const directives = buildWebsiteDirectiveRegistry({ dailyLogEntries, includes });
   return (
     <WebsitePageContent>
       {isDraftPreview && (

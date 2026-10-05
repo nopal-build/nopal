@@ -213,6 +213,27 @@
  *     `robustness-core/data/website.server.ts`'s
  *     `resolveWebsiteDailyLogEntries`) since it needs real vault/DB access
  *     `OxRenderer` never has on its own.
+ *   ::include-ox{file="./relative/path.md"} — inlines another file's own
+ *     markdown, rendered through this SAME directive registry (so a
+ *     nav-styled link, an icon, even a nested `::include-ox`, all work
+ *     inside the included file exactly like they would inline in the
+ *     including page). `file` is resolved RELATIVE TO THE INCLUDING
+ *     PAGE'S OWN FOLDER (`./`/`../` supported, clamped so it can never
+ *     walk above the website project's own root) — resolved server-side
+ *     (see `robustness-core/data/website.server.ts`'s
+ *     `resolveWebsiteIncludes`), since it needs real vault/DB access
+ *     `OxRenderer` never has on its own -- which means, same as
+ *     `::daily-log{...}` above, this ALWAYS renders nothing in the
+ *     Vault's own live preview here (`opts.includes` is never passed a
+ *     real resolved map from `WebsitePageSplitEditor`'s `vault.tsx` call
+ *     site) -- an accepted, explicitly deferred gap, not a bug. A LEAF
+ *     directive (`::`, two colons, no children) despite the author-
+ *     facing name reading like it might wrap content — it never has any
+ *     of its own; the included file supplies everything. Lets an author
+ *     hand-write one shared `_footer.md` and include it at the bottom of
+ *     every page that wants one, rather than one fixed, settings-driven
+ *     footer shape auto-rendered on every page (the OLD
+ *     `WebsiteSettings.footer`, removed entirely in favor of this).
  */
 import type { CSSProperties } from "react";
 import type { DirectiveRegistry } from "./directiveRegistry";
@@ -391,6 +412,14 @@ const SECTION_BG_CLASS: Record<string, string> = {
 
 export function buildWebsiteDirectiveRegistry(opts: {
   dailyLogEntries: Record<string, WebsiteDailyLogEntry>;
+  /** Resolved `::include-ox{file="..."}` references -- see
+   * `website.server.ts`'s `resolveWebsiteIncludes`. Keyed by the literal
+   * `file="..."` attribute string (not an absolute path), each value the
+   * included file's own already-frontmatter-stripped markdown body.
+   * Always `{}` here (the Vault preview never resolves this -- see this
+   * file's own header comment on `::include-ox`'s entry); defaults to
+   * `{}` either way so existing callers that don't pass it don't break. */
+  includes?: Record<string, string>;
   /** Forces `::stamp{...}`'s light/dark asset pick, bypassing its own
    * `<picture>`/`<source media="...">` OS-driven selection -- see
    * `WebsiteStamp`'s own `forcedScheme` comment (`websiteStamps.tsx`) for
@@ -399,7 +428,44 @@ export function buildWebsiteDirectiveRegistry(opts: {
    * preview toggle; leave undefined for the real public `/v2` page. */
   forcedScheme?: "light" | "dark";
 }): DirectiveRegistry {
-  return {
+  const includes = opts.includes ?? {};
+  // Real cycle detection -- `chain` is every `file` already an ancestor
+  // of this exact render (currently in the middle of being rendered,
+  // however many hops up); see webapp's identical copy of this file for
+  // the full reasoning (why a MUTUAL two-file cycle happens to be
+  // harmless today without this, why a direct self-reference genuinely
+  // isn't, and why this is scoped to one render branch rather than one
+  // Set shared across the whole page).
+  function includeOxHandler(chain: readonly string[]) {
+    return ({ attrs }: { attrs: Record<string, string> }) => {
+      const file = attrs.file;
+      if (!file) return null;
+      if (chain.includes(file)) return null;
+      const content = includes[file];
+      // Unresolved (bad/missing relative path, the referenced file no
+      // longer exists, or -- always true in the Vault preview here, see
+      // this file's own header comment -- `includes` was never given a
+      // real resolved map) renders nothing -- same fail-soft convention
+      // `::daily-log{...}`/`::gallery{folder="..."}` already use.
+      if (!content) return null;
+      // `directives={...}` -- THIS SAME registry, recursively, except
+      // `include-ox` itself is swapped for a fresh handler carrying the
+      // EXTENDED chain -- see webapp's identical copy for the full
+      // reasoning.
+      return (
+        <OxRenderer
+          markdown={content}
+          directives={{ ...registry, "include-ox": includeOxHandler([...chain, file]) }}
+          className="ox-no-heading-marks ox-no-dots website-page-ox"
+        />
+      );
+    };
+  }
+
+  // Named (not an inline `return { ... }`) so `includeOxHandler`, above
+  // (only ever INVOKED later at render time), can close over this SAME
+  // object to spread into each nested call's own registry.
+  const registry: DirectiveRegistry = {
     section({ attrs, children }) {
       const bgClass = SECTION_BG_CLASS[attrs.bg ?? ""] ?? "";
       return (
@@ -605,5 +671,8 @@ export function buildWebsiteDirectiveRegistry(opts: {
         </div>
       );
     },
+
+    "include-ox": includeOxHandler([]),
   };
+  return registry;
 }
