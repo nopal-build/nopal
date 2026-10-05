@@ -53,6 +53,12 @@ pub struct Folder {
     /// `None` for an ordinary, untyped folder.
     #[serde(default)]
     pub folder_type: Option<String>,
+    /// True only when THIS folder DEFINES `folder_type` (e.g. a project's
+    /// own "Skills" folder, or a Kanban Garden board's own anchor) rather
+    /// than merely inheriting it from an ancestor (e.g. a board's column,
+    /// or a card inside one). See the webapp's `vault.types.ts`.
+    #[serde(default)]
+    pub is_folder_type_root: Option<bool>,
     #[serde(default)]
     pub shared_with: Vec<String>,
     /// Published to a public, unauthenticated URL. Only reflects THIS
@@ -75,6 +81,10 @@ pub struct FileListing {
     pub updated_at: String,
     #[serde(default)]
     pub has_s3: bool,
+    /// Who wrote the Card a project's `Syncs/Daily Logs/` copy came from;
+    /// the copy's own name is `<date>-<humanId>.md`. Absent elsewhere.
+    #[serde(default)]
+    pub author_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -439,6 +449,61 @@ pub fn resolve(client: &Client, path: &str) -> Result<Resolved> {
     Ok(Resolved::Folder(
         current.expect("non-empty path sets current"),
     ))
+}
+
+/// Same walk as `resolve`, but keeps the WHOLE ordered ancestor chain
+/// instead of discarding everything but the last folder — needed by
+/// anything that has to reason about a resolved item's containing
+/// folders, not just its immediate parent (e.g. the CLI's `nopal garden
+/// mv`, which needs to find the nearest ancestor that DEFINES a Kanban
+/// Garden board). Only ever returns a file in `Resolved::File` — a
+/// trailing folder path still comes back as `Resolved::Folder`, with
+/// that same folder as the last entry in `ancestors`.
+pub fn resolve_with_ancestors(client: &Client, path: &str) -> Result<(Vec<Folder>, Resolved)> {
+    let segments = split_path(path);
+    if segments.is_empty() {
+        return Ok((Vec::new(), Resolved::Root));
+    }
+
+    let mut children = client.children("root")?;
+    let mut ancestors: Vec<Folder> = Vec::new();
+
+    for (i, segment) in segments.iter().enumerate() {
+        let is_last = i == segments.len() - 1;
+
+        if let Some(folder) = children
+            .folders
+            .iter()
+            .find(|f| segment_matches(segment, &f.name))
+            .cloned()
+        {
+            children = client.children(&folder._id)?;
+            ancestors.push(folder.clone());
+            if is_last {
+                return Ok((ancestors, Resolved::Folder(folder)));
+            }
+            continue;
+        }
+
+        if is_last && !ancestors.is_empty() {
+            if let Some(file) = children
+                .files
+                .iter()
+                .find(|f| segment_matches(segment, &f.name))
+                .cloned()
+            {
+                return Ok((ancestors, Resolved::File { file }));
+            }
+        }
+
+        let where_ = ancestors
+            .last()
+            .map(|f| f.name.clone())
+            .unwrap_or_else(|| "the vault root".to_string());
+        return Err(format!("'{segment}' not found in {where_}").into());
+    }
+
+    unreachable!("loop always returns on the last segment")
 }
 
 pub fn resolve_folder(client: &Client, path: &str) -> Result<Option<Folder>> {

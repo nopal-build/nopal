@@ -247,22 +247,35 @@ export default function FruitsMaker() {
               </p>
             ) : (
               <div className="flex flex-col gap-2">
-                {stats.humansInRange.map(({ human, logCount, lastLogDate }) => (
+                {stats.humansInRange.map(({ human, logCount, lastLogDate, cards }) => (
                   <div
                     key={human._id}
-                    className="flex items-center justify-between flex-wrap gap-2 py-2"
+                    className="flex flex-col gap-1 py-2"
                     style={{ borderBottom: "1px solid var(--midground)" }}
                   >
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-sm">{human.name}</span>
-                      <span className="text-xs font-mono subtle-text">
-                        {human.email}
-                      </span>
-                      <Badge variant="neutral">{human.role}</Badge>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-sm">{human.name}</span>
+                        <span className="text-xs font-mono subtle-text">
+                          {human.email}
+                        </span>
+                        <Badge variant="neutral">{human.role}</Badge>
+                      </div>
+                      <div className="text-xs font-mono subtle-text">
+                        {logCount} personal {logCount === 1 ? "log" : "logs"} · last{" "}
+                        {lastLogDate}
+                      </div>
                     </div>
-                    <div className="text-xs font-mono subtle-text">
-                      {logCount} {logCount === 1 ? "log" : "logs"} · last{" "}
-                      {lastLogDate}
+                    {/* A project's sync folder copies Cards only, so a
+                        personal log alone never reaches it. */}
+                    <div className="text-xs font-mono subtle-text" data-maker-cards>
+                      {cards.length === 0
+                        ? "No Cards on a project"
+                        : cards
+                            .map(({ projectName, count, empty }) =>
+                              `${projectName}: ${count} ${count === 1 ? "Card" : "Cards"}${empty ? `, ${empty} empty` : ""}`,
+                            )
+                            .join(" · ")}
                     </div>
                   </div>
                 ))}

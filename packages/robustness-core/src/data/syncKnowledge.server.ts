@@ -616,10 +616,12 @@ export async function runSyncKnowledge(
             durationMs,
           });
         } else if (source.content_type === "application/pdf") {
-          // Readable in principle, too big for one request: a real gap.
-          unsupported.push({ fileId: source._id, name: source.name });
-          log(`sync-knowledge: "${source.name}" is a PDF larger than ${Math.round(PDF_MAX_BYTES / (1024 * 1024))} MB — skipped (no knowledge file written).`);
-          continue;
+          // Over the worker's ceiling: kept as a file, like any file the
+          // model doesn't read, and said once here, rather than listed as
+          // "could not be read" on every run (which no retry fixes).
+          keptAsFile = true;
+          kept.push(source.name);
+          log(`sync-knowledge: "${source.name}" is a PDF larger than ${Math.round(PDF_MAX_BYTES / (1024 * 1024))} MB, kept as a file, not read.`);
         } else {
           keptAsFile = true;
           kept.push(source.name);
@@ -754,10 +756,15 @@ export async function runSyncKnowledge(
   return { ok: true, skipped: false, entries, unsupported, incomplete, staleSidecars, filings };
 }
 
-/** A PDF the model can take whole: the API's request limit is 32 MB, and
- * base64 adds a third, so the bytes stop at 20 MB. Larger is unsupported,
- * as every PDF was before 2026-09-22. */
-const PDF_MAX_BYTES = 20 * 1024 * 1024;
+/** A PDF the model can read: up to about 20 MB inline, and above that
+ * uploaded through the Files API and read by its id
+ * (`INLINE_DOCUMENT_MAX_BASE64`, `anthropicProvider.server.ts`;
+ * 2026-10-03). Before, everything over 20 MB was unsupported, which left
+ * a phone scan on the "could not be read" list every night. The Files API
+ * takes 500 MB; the ceiling here is the worker's memory (1 GB), which
+ * holds the file several times over while it is encoded. Bigger is kept
+ * as a file, not read. */
+export const PDF_MAX_BYTES = 100 * 1024 * 1024;
 /** A PDF's extraction is a bullet list that can run past a paragraph. */
 const PDF_DESCRIPTION_MAX_TOKENS = 2048;
 /** A filing answer is a dozen YAML lines. */

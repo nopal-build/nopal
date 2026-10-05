@@ -24,7 +24,7 @@ import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { getAdminScriptRun } from "robustness-core/data/adminScriptRuns.server";
-import { getAdminScriptJobLog } from "robustness-core/data/adminScriptsQueue.server";
+import { getAdminScriptJobLog, getPendingAdminScriptJob } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 
 export const meta: MetaFunction = () => [{ title: "O.No · M.Scripts" }];
@@ -46,7 +46,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!runId) throw data("Missing run id", { status: 400 });
 
   const run = await getAdminScriptRun(runId);
-  if (!run) throw data("Run not found", { status: 404 });
+  if (!run) {
+    // Not started yet: the job is queued (behind another script, or the
+    // worker is down), or the worker is about to write its row. Shown as
+    // waiting, and polled until the row exists. Only no job at all is a
+    // 404.
+    const pending = await getPendingAdminScriptJob(runId);
+    if (!pending || pending.state === "completed" || pending.state === "failed") {
+      throw data("Run not found", { status: 404 });
+    }
+    const [human] = await getHumansById([pending.data.actingHumanId]);
+    return { pending: { ...pending, humanName: human?.name ?? pending.data.actingHumanId } } as const;
+  }
 
   const [human] = await getHumansById([run.human_id]);
 
@@ -56,6 +67,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const liveLog = run.ok === null ? await getAdminScriptJobLog(runId) : null;
 
   return {
+    pending: null,
     run,
     humanName: human?.name ?? run.human_id,
     liveState: liveLog?.state ?? null,
@@ -153,8 +165,55 @@ function RunStatusBadge({ ok }: { ok: boolean | null }) {
 
 const POLL_MS = 2000;
 
+/** A run the worker hasn't started: what was asked for and what it waits
+ * on. The page refreshes until the run's own record exists. */
+function PendingRun({ pending }: { pending: NonNullable<Awaited<ReturnType<typeof loader>>["pending"]> }) {
+  const revalidator = useRevalidator();
+  useEffect(() => {
+    const interval = setInterval(() => revalidator.revalidate(), POLL_MS);
+    return () => clearInterval(interval);
+  }, [revalidator]);
+  const waitingOnAnother = pending.state === "waiting" || pending.state === "delayed";
+  return (
+    <AppLayout>
+      <div className="container mx-auto px-4 py-12" style={{ maxWidth: "860px" }}>
+        <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
+          <Link to="/maker/scripts" className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}>
+            ← Admin Scripts
+          </Link>
+        </div>
+        <div className={`${surfaceBase} p-5`}>
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="accent">{pending.data.scriptName}</Badge>
+              {pending.data.dryRun && <Badge variant="neutral">dry run</Badge>}
+            </div>
+            <Badge variant="neutral">{waitingOnAnother ? "Waiting" : "Starting"}</Badge>
+          </div>
+          <div className="text-xs font-mono subtle-text flex flex-wrap gap-3">
+            <span>By {pending.humanName}</span>
+            <span>Queued {formatDatetime(pending.enqueuedAt)}</span>
+            {pending.data.args.length > 0 && <span>Args: {pending.data.args.join(", ")}</span>}
+            <span>Job state: {pending.state}</span>
+          </div>
+          <p className="text-sm" style={{ margin: 0, marginTop: "12px" }}>
+            {waitingOnAnother
+              ? "Queued. Scripts run one at a time, so this starts when the one before it finishes. No need to press Run again."
+              : "The worker has it and is starting. This page fills in on its own."}
+          </p>
+        </div>
+      </div>
+    </AppLayout>
+  );
+}
+
 export default function FruitsMakerScriptsRun() {
-  const { run, humanName, liveState, log } = useLoaderData<typeof loader>();
+  const loaded = useLoaderData<typeof loader>();
+  if (loaded.pending) return <PendingRun pending={loaded.pending} />;
+  return <RunRecord {...loaded} />;
+}
+
+function RunRecord({ run, humanName, liveState, log }: Extract<Awaited<ReturnType<typeof loader>>, { pending: null }>) {
   const revalidator = useRevalidator();
 
   // Auto-refresh while still running -- same "poll until settled" idiom

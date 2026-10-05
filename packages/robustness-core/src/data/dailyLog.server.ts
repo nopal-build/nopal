@@ -420,6 +420,22 @@ export async function listCardEntriesForProject(
     .map((r) => ({ humanId: r.human_id, date: r.date }));
 }
 
+/** Every Card dated `startDate` or later, across every project, with the
+ * words it gives its project (`fedContent`). For /maker, where a personal
+ * log and a project Card are easy to mistake for each other. */
+export async function listCardsSince(
+  startDate: string,
+): Promise<{ humanId: string; date: string; projectFolderId: string; fed: string }[]> {
+  const result = await query<[Pick<FileRef, "human_id" | "date" | "project_folder_id" | "content" | "suggestion" | "taken_content">[]]>(
+    `SELECT human_id, date, project_folder_id, content, suggestion, taken_content FROM file_refs
+     WHERE source = 'daily_log_card' AND date >= $startDate`,
+    { startDate },
+  );
+  return (result?.[0] ?? [])
+    .filter((r) => r.human_id && r.date && r.project_folder_id)
+    .map((r) => ({ humanId: r.human_id, date: r.date!, projectFolderId: r.project_folder_id!, fed: fedContent(r) }));
+}
+
 /**
  * Creates (or, if one already exists for this project/date, reuses) that
  * project's Card for `date` — idempotent BY DESIGN: re-clicking the same

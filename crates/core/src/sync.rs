@@ -158,12 +158,14 @@ pub fn fetch_targets(client: &Client) -> Result<Vec<SyncTarget>> {
 /// vault skill.
 pub fn resolve_space(client: &Client, project: Option<&str>) -> Result<Folder> {
     match project {
-        Some(name) => vault::resolve_folder(client, &format!("projects/{name}"))?.ok_or_else(|| {
-            format!(
-                "No project named '{name}'. Start it in the Maker first (o.nopal.build/maker)"
-            )
-            .into()
-        }),
+        Some(name) => {
+            vault::resolve_folder(client, &format!("projects/{name}"))?.ok_or_else(|| {
+                format!(
+                    "No project named '{name}'. Start it in the Maker first (o.nopal.build/maker)"
+                )
+                .into()
+            })
+        }
         None => {
             let children = client.children("root")?;
             children
@@ -1032,6 +1034,7 @@ fn push_new(
         },
         vault_root_key: None,
         folder_type: None,
+        is_folder_type_root: None,
         shared_with: vec![],
         is_public: None,
         updated_at: String::new(),

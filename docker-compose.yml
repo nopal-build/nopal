@@ -1,6 +1,10 @@
 services:
   db:
-    image: surrealdb/surrealdb:latest
+    # Pinned to the SAME exact patch as db/Dockerfile's prod image (not
+    # `latest`/`v3`, both floating tags) -- see the comment there for why:
+    # mismatched SurrealDB versions touching the same surrealkv volume can
+    # write an on-disk catalog revision an older binary can't read back.
+    image: surrealdb/surrealdb:v3.3.0
     user: root
     ports:
       - "8080:8080"
