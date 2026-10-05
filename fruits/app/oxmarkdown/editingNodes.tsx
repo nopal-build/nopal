@@ -306,6 +306,12 @@ function OxDirectiveDecorator({
         mdastNode.type === "containerDirective" ? (
           <OxStaticNodes nodes={mdastNode.children} directives={directives} />
         ) : undefined,
+      // Editing mode has no swatch registry at all yet (a deliberate
+      // Effort 2 scope limit — see `OxRenderer.tsx`'s own comment on its
+      // `swatchRegistry` prop) — always falls straight through to
+      // `fallback`, identical to what `oxmarkdown-core`'s
+      // `resolveSwatchRole` itself does when given no registry.
+      resolveSwatchRole: (opts) => opts.fallback,
     })
   ) : mdastNode.type === "textDirective" ? (
     <span className="ox-directive-unknown">:{mdastNode.name}</span>

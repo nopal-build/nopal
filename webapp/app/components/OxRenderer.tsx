@@ -28,17 +28,22 @@
  * instead, modeled off the same design language.
  */
 
-import { cloneElement, createContext, Fragment, isValidElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, createContext, Fragment, isValidElement, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { Definition, RootContent } from "mdast";
 import {
   parseOxDocument,
+  buildSwatchStyleSheet,
+  collectSwatchRegistry,
   countBlankLines,
   directiveAttrs,
   isDirectiveNode,
   parseRefAttrs,
+  resolveSwatchRole,
   type OxDocument,
   type DirectiveNode,
+  type SwatchRegistry,
+  type SwatchRole,
 } from "oxmarkdown-core";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
@@ -95,11 +100,32 @@ export default function OxRenderer({
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
   const style = theme ? (themeToStyle(theme) as CSSProperties) : undefined;
 
+  // `::swatch{...}`/`::palette{...}` (`oxmarkdown-core/src/swatchDirective.ts`
+  // — see the "Oxmarkdown Colors" garden seed, Effort 3 — PORTED from the
+  // fruits copy, keep both in sync by hand same as every other rendering
+  // change here). Collected once per render; owned HERE rather than inside
+  // `OxTreeRenderer` so the generated `<style>` tag can be scoped to a
+  // selector unique to THIS `OxRenderer` instance's own real `.ox-content`
+  // element (a sanitized `useId()`-derived class) — a real page can mount
+  // more than one independent OxMarkdown document at once, and a shared/
+  // reused selector would let one document's own swatch silently clobber
+  // another's (see `buildSwatchStyleSheet`'s own comment for the full
+  // reasoning). Nothing else about this trimmed, read-only-render copy
+  // needs a Lexical/Editing-mode counterpart, unlike fruits.
+  const swatchScopeId = useId();
+  const swatchScopeClassName = `ox-swatch-scope-${swatchScopeId.replace(/[^a-zA-Z0-9]/g, "")}`;
+  const swatchRegistry = useMemo(() => collectSwatchRegistry(doc), [doc]);
+  const swatchStyleSheet = useMemo(
+    () => buildSwatchStyleSheet(swatchRegistry, `.${swatchScopeClassName}`),
+    [swatchRegistry, swatchScopeClassName],
+  );
+
   return (
     <div
-      className={`ox-content ox-tokens${className ? ` ${className}` : ""}`}
+      className={`ox-content ox-tokens ${swatchScopeClassName}${className ? ` ${className}` : ""}`}
       style={style}
     >
+      {swatchStyleSheet && <style dangerouslySetInnerHTML={{ __html: swatchStyleSheet }} />}
       <div className="ox-dot-grid">
         <OxTreeRenderer
           doc={doc}
@@ -107,6 +133,7 @@ export default function OxRenderer({
           interactive={interactive}
           resolveCard={resolveCard}
           resolveGalleryFolder={resolveGalleryFolder}
+          swatchRegistry={swatchRegistry}
         />
       </div>
     </div>
@@ -162,11 +189,16 @@ export interface OxTreeRendererProps {
   interactive?: OxInteractive;
   resolveCard?: CardResolver;
   resolveGalleryFolder?: GalleryFolderResolver;
+  /** The page's `::swatch`/`::palette` registry — see `oxmarkdown-core`'s
+   * `collectSwatchRegistry`. Supplied by `OxRenderer`, which both computes
+   * it and owns the scope selector its generated `<style>` tag targets
+   * (see that component's own comment). */
+  swatchRegistry?: SwatchRegistry;
 }
 
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
-export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder }: OxTreeRendererProps) {
+export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, swatchRegistry }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
   const ambiguousRefFirstNames = useMemo(() => collectAmbiguousRefFirstNames(doc), [doc]);
   return (
@@ -178,6 +210,7 @@ export function OxTreeRenderer({ doc, directives, interactive, resolveCard, reso
         resolveCard,
         resolveGalleryFolder,
         ambiguousRefFirstNames,
+        swatchRegistry,
       })}
     </>
   );
@@ -195,6 +228,8 @@ interface RenderCtx {
    * `collectAmbiguousRefFirstNames`), because a single `:ref` can't know
    * on its own whether its first name is unique. */
   ambiguousRefFirstNames?: Set<string>;
+  /** See `OxTreeRendererProps.swatchRegistry`. */
+  swatchRegistry?: SwatchRegistry;
 }
 
 /** Which first names are shared by two or more cited people in this
@@ -714,7 +749,37 @@ function renderGalleryGrid(
   );
 }
 
+/** Binds `ctx.swatchRegistry` into the shape a registered directive
+ * actually calls (`DirectiveRenderProps.resolveSwatchRole` — see
+ * `directiveRegistry.ts`) so a website-scoped registry entry
+ * (`websiteDirectives.tsx`'s `section`/`section-title`, today unchanged;
+ * a future `::box`, ...) never needs to import `oxmarkdown-core`'s
+ * `SwatchRegistry` type or handle "no registry at all" itself —
+ * `resolveSwatchRole` (core) already tolerates an `undefined` registry,
+ * always falling straight through to `fallback`. PORTED from the fruits
+ * copy. */
+function boundResolveSwatchRole(ctx: RenderCtx) {
+  return (opts: { role: SwatchRole; explicit?: string; palette?: string; fallback?: string }): string | undefined =>
+    resolveSwatchRole({ ...opts, registry: ctx.swatchRegistry });
+}
+
 function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): ReactNode {
+  // `::swatch{...}`/`::palette{...}` — the shared color-theming framework
+  // (`oxmarkdown-core/src/swatchDirective.ts`, see the "Oxmarkdown Colors"
+  // garden seed). Registering one is a pure side effect of a document
+  // containing it (collected once, up front, by `OxRenderer` via
+  // `collectSwatchRegistry` — see that component's own comment); these
+  // directives themselves always render NOTHING, wherever they appear —
+  // including nested inside a container directive's own body, where
+  // (round 13 of the garden seed) they still render nothing but are never
+  // actually collected into the registry either. Handled here, before the
+  // registry lookup, so they can never be shadowed by (or fall through to
+  // the generic "unknown directive" marker because of) a caller's own
+  // registry having no "swatch"/"palette" entry.
+  if (node.type === "leafDirective" && (node.name === "swatch" || node.name === "palette")) {
+    return null;
+  }
+
   // `::file{...}` is a BUILT-IN interactable, not a caller-registered
   // directive (same category as task checkboxes, not "gallery"/"csv-table")
   // — see `oxmarkdown/fileDirective.ts`'s header. Handled before the
@@ -867,7 +932,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     // Not interactive yet — nested-interactable selection inside a container
     // is TODO 5 in the oxmarkdown skill, deferred until Editing mode exists.
     if (!renderer) return <Fragment key={key}>{rendered}</Fragment>;
-    const registered = renderer({ attrs, label: null, children: rendered });
+    const registered = renderer({ attrs, label: null, children: rendered, resolveSwatchRole: boundResolveSwatchRole(ctx) });
     // Attach `key` directly onto the registry's OWN returned element via
     // `cloneElement`, rather than wrapping it in another `<Fragment
     // key={key}>` (as this used to, unconditionally) -- a `<Fragment>`
@@ -886,7 +951,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
   }
 
   const content = renderer ? (
-    renderer({ attrs, label: null })
+    renderer({ attrs, label: null, resolveSwatchRole: boundResolveSwatchRole(ctx) })
   ) : node.type === "leafDirective" ? (
     <div className="ox-directive-unknown ox-directive-unknown--block">
       Unknown block: ::{node.name}
