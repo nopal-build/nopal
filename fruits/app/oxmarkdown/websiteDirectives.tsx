@@ -293,6 +293,18 @@
  *     every page that wants one, rather than one fixed, settings-driven
  *     footer shape auto-rendered on every page (the OLD
  *     `WebsiteSettings.footer`, removed entirely in favor of this).
+ *     **KNOWN, ACCEPTED LIMITATION**: an included file's own
+ *     `::swatch{...}`/`::palette{...}` registrations do NOT resolve for
+ *     the INCLUDING page's own consuming directives (`oxmarkdown-core`'s
+ *     `collectSwatchRegistry` only ever scans the CURRENT document's own
+ *     top-level children; the included file renders as a genuinely
+ *     separate `<OxRenderer>` instance with its own independent registry
+ *     -- see that function's own comment). A "shared `_theme.md`"
+ *     doesn't work for colors the way it does for a footer -- define
+ *     `::swatch`/`::palette` directly at EACH page's own top level
+ *     instead. Confirmed and pinned by `swatchIncludeOx.test.tsx`; see
+ *     the "Oxmarkdown Colors" garden seed, round 15/16, for the full
+ *     history -- a deliberate, accepted limitation, not a bug to fix.
  */
 import type { CSSProperties } from "react";
 import type { DirectiveRegistry } from "./directiveRegistry";

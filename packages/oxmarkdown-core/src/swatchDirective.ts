@@ -157,12 +157,25 @@ export function createEmptySwatchRegistry(): SwatchRegistry {
  * say) is not recognized here at all: it still renders as nothing
  * wherever `OxRenderer` encounters it (any built-in leaf-directive
  * kind always does), but it never registers — harmless, not an error.
- * The main real use case (defining swatches at the very start of a
- * document, or inside a shared `_footer.md`/`_theme.md` included via
- * `::include-ox`) is already top-level in the document that matters —
- * round 10's "no cross-file inheritance" means an included file resolves
- * its OWN swatches independently, via its OWN top-level scan, with no
- * extra mechanism needed here for that case.
+ * Defining swatches at the very start of a document is the main real use
+ * case, and it's already top-level by construction.
+ *
+ * **KNOWN, ACCEPTED LIMITATION (round 15/16 of the "Oxmarkdown Colors"
+ * garden seed), confirmed by a real test
+ * (`fruits/app/tests/swatchIncludeOx.test.tsx`)**: this does NOT extend
+ * to a shared `_theme.md` included via `::include-ox{file="..."}` the
+ * way an earlier draft of this comment assumed it would —
+ * `::include-ox` (website-scoped, not a core concept at all) mounts the
+ * included file as a genuinely separate, freshly-parsed `<OxRenderer>`
+ * instance; THAT instance's own call to this function only ever sees
+ * the included file's OWN top-level children, building a registry the
+ * INCLUDING page's own `OxTreeRenderer` never reaches. A `::swatch`
+ * defined in an included file is only ever usable by consuming
+ * directives inside that SAME included file — never by the page that
+ * includes it. Deliberately accepted as-is, not fixed: an author who
+ * wants shared colors across multiple pages defines `::swatch`/
+ * `::palette` directly at EACH page's own top level instead of via one
+ * shared include.
  *
  * Registration order is DOCUMENT order, and a later `::swatch`/`::palette`
  * registering the SAME `(role, name)` / palette `name` simply overwrites
