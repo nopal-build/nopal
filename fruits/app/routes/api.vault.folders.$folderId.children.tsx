@@ -7,6 +7,7 @@ import {
   listFolderChildren,
   ensureVaultRootFolders,
 } from "robustness-core/data/vault.server";
+import { nameSyncedAuthors } from "robustness-core/data/syncedAuthors.server";
 
 /**
  * GET /api/vault/folders/:folderId/children
@@ -55,10 +56,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // Children belong to the folder's OWNER, not necessarily the viewer.
-  const { folders, files } = await listFolderChildren(
-    folder.human_id,
-    folderId,
-  );
+  const listed = await listFolderChildren(folder.human_id, folderId);
+  const { folders } = listed;
+  // A `Daily Logs` sync folder's copies carry who wrote them
+  // (`author_name`), since their names are ids.
+  const files = await nameSyncedAuthors(folder, listed.files);
 
   const isOwnProjectsRoot =
     withShared &&

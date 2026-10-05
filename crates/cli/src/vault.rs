@@ -44,12 +44,16 @@ fn print_listing(folders: &[Folder], files: &[FileListing]) {
         );
     }
     for f in files {
-        println!(
+        let line = format!(
             "{:<50} {:>10} {:>12}",
             f.name,
             format_size(f.size),
             format_date(&f.updated_at)
         );
+        match &f.author_name {
+            Some(author) => println!("{line}   {author}"),
+            None => println!("{line}"),
+        }
     }
     if folders.is_empty() && files.is_empty() {
         println!("(empty)");
@@ -77,6 +81,7 @@ pub fn ls(path: &str, json: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
                 "files": children.files.iter().map(|f| serde_json::json!({
                     "id": f._id, "name": f.name, "content_type": f.content_type,
                     "size": f.size, "updated_at": f.updated_at, "has_s3": f.has_s3,
+                    "author_name": f.author_name,
                 })).collect::<Vec<_>>(),
             })
         );

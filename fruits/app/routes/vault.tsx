@@ -61,6 +61,7 @@ import {
   listFolderChildren,
 } from "robustness-core/data/vault.server";
 import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { nameSyncedAuthors, type ListedFile } from "robustness-core/data/syncedAuthors.server";
 import { navFor } from "../data/nav.server";
 import { displayName } from "robustness-core/data/humanNames";
 import { getRelatedHumans } from "robustness-core/data/relationships.server";
@@ -107,7 +108,12 @@ const MAX_CONCURRENT_UPLOADS = 2; // max files uploading at the same time
 // ─── Types ──────────────────────────────────────────────────────────────────────────────
 
 /** One folder's direct children — the unit of lazy tree loading. */
-type FolderChildren = { folders: VaultFolder[]; files: FileRefListing[] };
+type FolderChildren = { folders: VaultFolder[]; files: ListedFile[] };
+
+/** Who wrote a synced Daily Log copy, beside its id-based name. */
+function AuthorTag({ file }: { file: ListedFile }) {
+  return file.author_name ? <span className="subtle-text"> · {file.author_name}</span> : null;
+}
 
 /** A file waiting in (or moving through) the upload queue. */
 type PendingUpload = {
@@ -306,7 +312,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ancestry = anchorSharedAncestry(ancestry, user._id, roots);
     }
     // Children belong to the folder's OWNER, not necessarily the viewer.
-    const children = await listFolderChildren(folder.human_id, folder._id);
+    const listed = await listFolderChildren(folder.human_id, folder._id);
+    const children = { ...listed, files: await nameSyncedAuthors(folder, listed.files) };
     treeSeed[folder._id] = children;
 
     const readmeListing = children.files.find(
@@ -1930,6 +1937,7 @@ function TreeNode({
                 <span className="vault-v2-chevron-spacer" />
                 <span className="vault-v2-tree-name">
                   {fileIcon(file.content_type)} {file.name}
+                  <AuthorTag file={file} />
                 </span>
               </button>
             ))
@@ -3767,7 +3775,10 @@ export default function VaultV2Page() {
                       <span className="vault-v2-row-icon">
                         {fileIcon(row.file.content_type)}
                       </span>
-                      <span className="vault-v2-row-name">{row.file.name}</span>
+                      <span className="vault-v2-row-name">
+                        {row.file.name}
+                        <AuthorTag file={row.file} />
+                      </span>
                       <span className="vault-v2-row-size">
                         {formatSize(row.file.size)}
                       </span>
