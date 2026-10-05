@@ -96,7 +96,26 @@ export async function action({ request }: ActionFunctionArgs) {
   // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
   // Admin/Super, even inside the OWNING human's own vault — see
   // `vaultRoots.ts` / `vaultFolderTypes.ts`.
-  if (!(await canWriteToFolderId(parent._id, user.role))) {
+  //
+  // A `kanban-garden` board is a DELIBERATE exception when the parent is a
+  // `project-n02` container (a project, or Personal): that container is
+  // `writable: "system"` at the content level so a human can never write
+  // ARBITRARY content there directly — same reason `skills`/`syncs` can't
+  // be created through this generic check either. Those two dodge it by
+  // being provisioned straight through server-side data-layer code
+  // (`ensureSyncsFolder`/`applyProjectN02Shape`), never through this route.
+  // A Kanban Garden board is explicitly meant to be created BY a human/
+  // agent calling this exact route (`nopal garden init`), so the
+  // exception has to live here instead — `validateFolderTypeForParent`'s
+  // own `kanban-garden` branch (below) is still the real authority on
+  // whether this specific parent context is allowed; this only skips the
+  // generic, type-agnostic content-lock that would otherwise always
+  // refuse it before that more specific check ever runs.
+  const isKanbanGardenInProjectContainer =
+    body.folder_type === "kanban-garden" &&
+    parent.folder_type === "project-n02" &&
+    parent.is_folder_type_root;
+  if (!isKanbanGardenInProjectContainer && !(await canWriteToFolderId(parent._id, user.role))) {
     return Response.json(
       { error: await explainWriteRefusal(parent._id, user.role) },
       { status: 403 },

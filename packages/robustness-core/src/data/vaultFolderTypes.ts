@@ -92,6 +92,22 @@
  *        root/schema change. `comingSoon: true` keeps them
  *        visible-but-disabled in the UI.
  *
+ * 3. Kanban types (`KanbanFolderTypeKey`) — `kanban-garden`, the first type
+ *    that needs MULTIPLE valid parent contexts at once rather than exactly
+ *    one: creatable directly inside `projects` (a standalone top-level
+ *    board, a sibling to actual projects), inside a specific project, OR
+ *    inside `personal` — see `validateFolderTypeForParent`'s dedicated
+ *    branch for this type in `vault.server.ts`. NOT singleton (any number
+ *    of boards may exist side by side in a given parent). Its own direct
+ *    subfolders (columns) and the markdown files inside them (cards) carry
+ *    no special type of their own — they simply INHERIT `kanban-garden`
+ *    like any ordinary nested folder/file. CLI-only for now: card movement
+ *    between columns happens via `nopal garden mv`/`nopal vault mv`, never
+ *    drag-and-drop in the web Vault UI (see the `vault` skill). A plain,
+ *    hand-maintained "garden" of staged markdown files moving through
+ *    folders like `seeds → ready → growing → harvested` is the reference
+ *    workflow this type productizes.
+ *
  * This file has NO server-only imports — safe on both client and server,
  * same convention as `vaultRoots.ts`.
  */
@@ -109,10 +125,13 @@ export type SyncFolderTypeKey =
   | "sync-email"
   | "sync-custom";
 
+export type KanbanFolderTypeKey = "kanban-garden";
+
 export type VaultFolderTypeKey =
   | ContainerFolderTypeKey
   | SpaceFolderTypeKey
-  | SyncFolderTypeKey;
+  | SyncFolderTypeKey
+  | KanbanFolderTypeKey;
 
 export type VaultFolderTypeDef = {
   /** Display name in the "New folder" type picker and folder labels. */
@@ -272,10 +291,30 @@ export const SYNC_FOLDER_TYPES: Record<SyncFolderTypeKey, VaultFolderTypeDef> = 
   },
 };
 
+/** `kanban-garden` — a board folder: each direct subfolder is a column,
+ * each markdown file inside a column is a card. The first Vault Folder
+ * Type that's creatable in MULTIPLE parent contexts at once (see
+ * `validateFolderTypeForParent`'s dedicated branch in `vault.server.ts`)
+ * — directly inside `projects`, inside any project, or inside `personal`.
+ * Not singleton: a parent may host more than one board. `publishable:
+ * false` for now — whether a board can ever be a public roadmap view is
+ * still an open question (see the `kanban-garden-board-display` seed). */
+export const KANBAN_FOLDER_TYPES: Record<KanbanFolderTypeKey, VaultFolderTypeDef> = {
+  "kanban-garden": {
+    label: "Kanban Garden",
+    description:
+      "A read-only board: each direct subfolder is a column, each markdown file inside one is a card. Cards move between columns via the nopal CLI, not drag-and-drop.",
+    writable: "owner",
+    shareable: true,
+    publishable: false,
+  },
+};
+
 export const VAULT_FOLDER_TYPES: Record<VaultFolderTypeKey, VaultFolderTypeDef> = {
   ...CONTAINER_FOLDER_TYPES,
   ...SPACE_FOLDER_TYPES,
   ...SYNC_FOLDER_TYPES,
+  ...KANBAN_FOLDER_TYPES,
 };
 
 export const CONTAINER_FOLDER_TYPE_KEYS = Object.keys(
@@ -287,6 +326,9 @@ export const SPACE_FOLDER_TYPE_KEYS = Object.keys(
 export const SYNC_FOLDER_TYPE_KEYS = Object.keys(
   SYNC_FOLDER_TYPES,
 ) as SyncFolderTypeKey[];
+export const KANBAN_FOLDER_TYPE_KEYS = Object.keys(
+  KANBAN_FOLDER_TYPES,
+) as KanbanFolderTypeKey[];
 
 export function isVaultFolderTypeKey(value: unknown): value is VaultFolderTypeKey {
   return typeof value === "string" && value in VAULT_FOLDER_TYPES;
@@ -304,6 +346,10 @@ export function isSpaceFolderTypeKey(value: unknown): value is SpaceFolderTypeKe
 
 export function isSyncFolderTypeKey(value: unknown): value is SyncFolderTypeKey {
   return typeof value === "string" && value in SYNC_FOLDER_TYPES;
+}
+
+export function isKanbanFolderTypeKey(value: unknown): value is KanbanFolderTypeKey {
+  return typeof value === "string" && value in KANBAN_FOLDER_TYPES;
 }
 
 /** Whether a folder tagged with this type sits "under syncs" for the

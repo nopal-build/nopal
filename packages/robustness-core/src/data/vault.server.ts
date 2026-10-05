@@ -34,11 +34,13 @@ import {
   isContainerFolderTypeKey,
   isFolderTypePublishable,
   isFolderTypeShareable,
+  isKanbanFolderTypeKey,
   isSpaceFolderTypeKey,
   isSyncFamilyFolderType,
   isSyncFolderTypeKey,
   isVaultFolderTypeKey,
   isWebsiteFolder,
+  KANBAN_FOLDER_TYPES,
   SPACE_FOLDER_TYPES,
   SYNC_FOLDER_TYPES,
   VAULT_FOLDER_TYPES,
@@ -427,6 +429,12 @@ export async function createVaultFolder(data: {
  *    exist side by side), and additionally gated by `creatableBy`
  *    (`canCreateFolderType`) — the one case where CREATING a folder of a
  *    given type needs more than context/singleton checks.
+ *  - Kanban types (`kanban-garden`): the first type with MULTIPLE valid
+ *    parent contexts at once rather than exactly one — directly inside
+ *    the `projects` root itself (a standalone top-level board) OR
+ *    directly inside a `project-n02` container (a project, or `personal`,
+ *    same context space types use). Not singleton — any number of boards
+ *    may exist side by side in a given parent.
  */
 export async function validateFolderTypeForParent(
   parent: VaultFolder,
@@ -477,6 +485,24 @@ export async function validateFolderTypeForParent(
     if (SYNC_FOLDER_TYPES[folderType].comingSoon) {
       return `${SYNC_FOLDER_TYPES[folderType].label} isn't available yet`;
     }
+    return null;
+  }
+
+  if (isKanbanFolderTypeKey(folderType)) {
+    const def = KANBAN_FOLDER_TYPES[folderType];
+
+    const isProjectsRoot = !parent.parent_folder_id && parent.vault_root_key === "projects";
+    const isProjectContainer = parent.folder_type === "project-n02" && parent.is_folder_type_root;
+    if (!isProjectsRoot && !isProjectContainer) {
+      return `${def.label} folders can only be created directly inside Projects, a project, or your Personal space`;
+    }
+
+    if (def.comingSoon) {
+      return `${def.label} isn't available yet`;
+    }
+
+    // Not singleton — any number of boards may exist side by side in a
+    // given parent, unlike Space types above.
     return null;
   }
 
