@@ -627,6 +627,8 @@ export async function updateVaultFolder(
      * intended writer of these two. */
     graphlog_scheduled: boolean | null;
     graphlog_scheduled_at: string | null;
+    /** See `newspaperShare.server.ts`'s `setNewspaperShared`, its only writer. */
+    newspaper_shared_at: string | null;
     /** Written only by graph-project-view on a clean rebuild (ADR-030). */
     efforts_printed_at: string | null;
   }>,

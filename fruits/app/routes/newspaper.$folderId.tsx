@@ -27,8 +27,8 @@ import { listSuggestions } from "robustness-core/data/suggestions.server";
 import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { resolveProjectManifest } from "robustness-core/data/project.server";
 import { getProjectStatus } from "robustness-core/data/projectStatus.server";
-import { isIncompleteBannerText, splitFrontmatter, type ProjectStatus } from "robustness-core/data/project.types";
-import { getProjectSharing, resolveRole } from "robustness-core/data/projectSharing.server";
+import { isIncompleteBannerText, splitFrontmatter } from "robustness-core/data/project.types";
+import { getProjectSharing, isProjectFolder, resolveRole } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import { pageLogs, projectLogbook } from "robustness-core/data/citedLogs.server";
@@ -230,9 +230,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     user,
     folder,
     project,
-    status: getProjectStatus(folder),
-    // Status is the Guide's (see `projectStatus.server.ts`).
-    canEditStatus: !!role?.guiding,
     canMark,
     canEdit,
     canReadLog,
@@ -269,6 +266,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     budgetNames,
     print,
     canBudget: features.includes("budget"),
+    // Sharing the Efforts page by link: Admin/Super only, on a project
+    // (`newspaperShare.server.ts`). Null hides the control.
+    share: isStaff(user) && (await isProjectFolder(folder)) ? { sharedAt: folder.newspaper_shared_at ?? null } : null,
   };
 }
 
@@ -413,62 +413,69 @@ function localDate(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function ProjectStatusControl({
-  folderId,
-  status,
-}: {
-  folderId: string;
-  status: ProjectStatus;
-}) {
+/** Share the Efforts page by link, copy it, or stop sharing. Staff only
+ * (the loader sends `share` to no one else). Quiet: an occasional
+ * control, not part of the page's headline. */
+function ShareLinkControl({ folderId, sharedAt }: { folderId: string; sharedAt: string | null }) {
   const revalidator = useRevalidator();
-  const [updating, setUpdating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  // Set when the clipboard refused: the link, shown to copy by hand.
+  const [manual, setManual] = useState<string | null>(null);
+  const path = `/public/newspaper/${folderId}`;
 
-  const changeStatus = async (next: ProjectStatus) => {
-    if (next === status) return;
-    // Leaving Active is asked first (Austin, 2026-09-30): the control
-    // writes on a single pick, and a trashed project is deleted for good
-    // by the daily cleanup after 30 days. Coming back to Active is not.
-    const ask =
-      next === "trashed"
-        ? "Move this project to the trash? It's deleted for good after 30 days. Until then you can set it back to Active."
-        : next === "completed"
-          ? "Mark this project completed? It leaves everyone's active projects. You can set it back to Active."
-          : null;
-    if (ask && !window.confirm(ask)) return;
-    setUpdating(true);
+  const setShared = async (on: boolean) => {
+    if (on && !window.confirm("Anyone with the link will be able to read this project's Efforts page without logging in. Share it?")) return;
+    setBusy(true);
     try {
-      await fetch(`/api/vault/projects/${folderId}/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: next }),
-      });
+      await fetch(`/api/newspaper/${folderId}/share`, { method: on ? "POST" : "DELETE" });
       revalidator.revalidate();
     } finally {
-      setUpdating(false);
+      setBusy(false);
     }
   };
 
+  const copy = async () => {
+    // Built at click time: `window` doesn't exist during SSR.
+    const url = `${window.location.origin}${path}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // No clipboard (plain http, an old browser).
+      setManual(url);
+    }
+  };
+
+  const quiet = {
+    background: "transparent",
+    border: "none",
+    color: semanticColors.textSubtle,
+    padding: 0,
+    cursor: "pointer",
+  } as const;
+
+  if (!sharedAt) {
+    return (
+      <button type="button" className={textSize.xs} style={quiet} disabled={busy} onClick={() => setShared(true)}>
+        Share link
+      </button>
+    );
+  }
   return (
-    <select
-      aria-label="Project status"
-      value={status}
-      disabled={updating}
-      onChange={(e) => changeStatus(e.target.value as ProjectStatus)}
-      // Quiet on purpose: it is a Guide's occasional control, not part of
-      // the page's headline.
-      className={textSize.xs}
-      style={{
-        background: "transparent",
-        border: "none",
-        color: semanticColors.textSubtle,
-        padding: 0,
-        cursor: "pointer",
-      }}
-    >
-      <option value="active">Active</option>
-      <option value="completed">Completed</option>
-      <option value="trashed">Trashed</option>
-    </select>
+    <Cluster gap={3} align="center" data-share-link>
+      {manual ? (
+        <input readOnly value={manual} className={textSize.xs} onFocus={(e) => e.currentTarget.select()} autoFocus />
+      ) : (
+        <button type="button" className={textSize.xs} style={quiet} onClick={copy}>
+          {copied ? "Copied" : "Copy link"}
+        </button>
+      )}
+      <button type="button" className={textSize.xs} style={quiet} disabled={busy} onClick={() => setShared(false)}>
+        Stop sharing
+      </button>
+    </Cluster>
   );
 }
 
@@ -504,7 +511,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { folder, project, status, canEditStatus, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -710,20 +717,14 @@ export default function NewspaperRoute() {
                 </span>
               ))}
             </p>
-            {/* The project's status, small, at the end of the people line:
-                a Guide changes it here; everyone else reads it. Beside it,
-                Beside it, for a Guide with no round open, the one compact
-                button that opens one: the durable spot when no seeding is
-                happening (Austin, 2026-09-30). */}
+            {/* No status here: a project someone can see is active, and
+                status changes from the Maker (Austin, 2026-10-05). For a
+                Guide with no round open, the one compact button that opens
+                one: the durable spot when no seeding is happening (Austin,
+                2026-09-30). */}
             <Cluster gap={4} align="center">
+              {share && <ShareLinkControl folderId={folder._id} sharedAt={share.sharedAt} />}
               {seeding?.guide && !seeding.open && <SeedRoundQuiet projectFolderId={folder._id} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
-              {canEditStatus ? (
-                <ProjectStatusControl folderId={folder._id} status={status} />
-              ) : (
-              <span className={`${textSize.xs} ${sprinkles({ textTransform: "capitalize" })}`} style={{ color: semanticColors.textSubtle }}>
-                {status}
-              </span>
-              )}
             </Cluster>
           </Cluster>
         </Stack>
