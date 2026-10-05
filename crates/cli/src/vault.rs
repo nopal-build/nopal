@@ -378,20 +378,33 @@ pub fn mkdir(path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
-/// Move a folder into another folder (possibly across vault roots — e.g.
-/// personal → projects). Shared folders, cycles, and root containers are
-/// rejected server-side.
+/// Move a file OR a folder into another folder (possibly across vault
+/// roots — e.g. personal → projects) — mirrors how Unix `mv` already
+/// resolves either kind of path. Shared folders, cycles, and root
+/// containers are rejected server-side.
 pub fn mv(src: &str, dest: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = Client::new()?;
-    let folder = resolve_folder(&client, src)?.ok_or("The vault root can't be moved")?;
     let dest_folder = resolve_folder(&client, dest)?
-        .ok_or("Folders can't be moved to the vault root — pick a destination like projects/")?;
-    let _: serde_json::Value = client.patch_json(
-        &format!("/api/vault/folders/{}", folder._id),
-        &serde_json::json!({ "parent_folder_id": dest_folder._id }),
-    )?;
-    println!("Moved {}/ -> {}/", folder.name, dest_folder.name);
-    Ok(())
+        .ok_or("Nothing can be moved to the vault root — pick a destination like projects/")?;
+    match resolve(&client, src)? {
+        Resolved::Root => Err("The vault root can't be moved".into()),
+        Resolved::Folder(folder) => {
+            let _: serde_json::Value = client.patch_json(
+                &format!("/api/vault/folders/{}", folder._id),
+                &serde_json::json!({ "parent_folder_id": dest_folder._id }),
+            )?;
+            println!("Moved {}/ -> {}/", folder.name, dest_folder.name);
+            Ok(())
+        }
+        Resolved::File { file } => {
+            let _: serde_json::Value = client.patch_json(
+                &format!("/api/vault/{}", file._id),
+                &serde_json::json!({ "folder_id": dest_folder._id }),
+            )?;
+            println!("Moved {} -> {}/", file.name, dest_folder.name);
+            Ok(())
+        }
+    }
 }
 
 /// Rename a folder. (Files can't be renamed — matching the web UI.)

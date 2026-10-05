@@ -14,6 +14,7 @@ use nopal_core::sync_api::{self as core_sync_api, SyncApiColumn, SyncApiSchema};
 use nopal_core::vault::{Client as VaultClient, Folder as VaultFolder};
 
 mod auth;
+mod garden;
 mod graphlog;
 mod image;
 mod record;
@@ -113,6 +114,14 @@ enum Command {
     SyncApi {
         #[command(subcommand)]
         command: SyncApiCommand,
+    },
+    /// Kanban Garden board helpers (create a board, move a card between
+    /// columns) layered on top of the generic `nopal vault` primitives —
+    /// see the `vault` skill. Not a security boundary; `nopal vault
+    /// mkdir`/`nopal vault mv` can always do the same thing directly.
+    Garden {
+        #[command(subcommand)]
+        command: GardenCommand,
     },
     /// Trigger the daily-log Sorter (mentions → project backlinks,
     /// completed Card tasks, Card file attachments → Release Log entries).
@@ -490,6 +499,27 @@ enum SyncApiCommand {
         /// Which project's Syncs folder — defaults to Personal.
         #[arg(long)]
         project: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GardenCommand {
+    /// Create a new Kanban Garden board anchor (creates missing
+    /// intermediate folders too, same as 'nopal vault mkdir'). Columns
+    /// aren't auto-created — add them afterward with plain 'nopal vault
+    /// mkdir <board-path>/<column-name>'.
+    Init {
+        /// Vault path to create, e.g. `projects/roadmap`,
+        /// `projects/some-project/roadmap`, or `personal/roadmap`.
+        path: String,
+    },
+    /// Move a card to a different column on its own board — the board is
+    /// found automatically from the card's current location.
+    Mv {
+        /// Vault path of the card (a markdown file inside a column).
+        card: String,
+        /// Destination column name (a sibling of the card's current one).
+        column: String,
     },
 }
 
@@ -915,6 +945,16 @@ fn main() {
                 SyncApiCommand::LsRuns { analysis, project } => {
                     sync_api::ls_runs(&analysis, project)
                 }
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Garden { command } => {
+            let result = match command {
+                GardenCommand::Init { path } => garden::init(&path),
+                GardenCommand::Mv { card, column } => garden::mv(&card, &column),
             };
             if let Err(e) = result {
                 eprintln!("{e}");
