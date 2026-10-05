@@ -30,15 +30,19 @@ export interface ProjectViewProps {
   /** The pen: marks on this version of the page, and whether a new one
    * can be written. See `oxmarkdown/marks.tsx`. */
   annotations?: OxAnnotations;
+  /** See `OxRendererProps.servedFileIds`. The shared link passes `{}` so a
+   * `::file{}` draws without its picture (`newspaperShare.server.ts`). */
+  servedFileIds?: Record<string, string>;
 }
 
-export function ProjectView({ body, galleryFolders, annotations }: ProjectViewProps) {
+export function ProjectView({ body, galleryFolders, annotations, servedFileIds }: ProjectViewProps) {
   return (
     <OxRenderer
       markdown={body}
       // Written by the skills, not by a person: plain paper (`ox-plain`).
       className="ox-plain"
       annotations={annotations}
+      servedFileIds={servedFileIds}
       resolveGalleryFolder={
         galleryFolders ? (folderName) => galleryFolders[folderName] : undefined
       }

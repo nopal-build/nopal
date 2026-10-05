@@ -176,6 +176,11 @@ export type VaultFolder = {
   graphlog_scheduled?: boolean | null;
   /** ISO timestamp of the last `setGraphLogScheduled` call. */
   graphlog_scheduled_at?: string | null;
+  /** When an Admin/Super shared this project's Efforts page by link
+   * (`newspaperShare.server.ts`, the only writer); null/absent means not
+   * shared. Separate from `is_public` on purpose: the link shows the
+   * Efforts page alone, never the folder's files. Not cascaded. */
+  newspaper_shared_at?: string | null;
   /** When graph-project-view last rebuilt this project's Efforts page:
    * the "Printed" date on the page and what the weekly print cap counts
    * from (ADR-030). Absent on projects not printed since 2026-10-01;
