@@ -400,6 +400,13 @@ pub fn run_target(
         .into());
     }
 
+    // One sync per target at a time, across processes: the launchd watcher
+    // and a manual `nopal sync run` once overlapped on the same folder, and
+    // each side uploaded the same new video (two copies) while one of them
+    // also pushed a half-encoded file. The lock is released when `_lock`
+    // drops, including on error.
+    let _lock = SyncLock::acquire(target)?;
+
     log(&format!(
         "Syncing '{}' ({}) ...",
         target.name, target.local_path
@@ -1059,11 +1066,9 @@ fn push_new(
 }
 
 fn replace_remote(client: &Client, file_id: &str, abs: &Path) -> Result<()> {
-    let _: serde_json::Value = client
-        .post_form(&format!("/api/vault/replace/{file_id}"), || {
-            Ok(reqwest::blocking::multipart::Form::new().file("file", abs)?)
-        })?;
-    Ok(())
+    // Chunked above the multipart threshold, one POST below it; a one-body
+    // replace of a 150 MB video is what 502'd the app on 2026-10-08.
+    vault::replace_file(client, file_id, abs, |_| {})
 }
 
 /// Archive (not delete) a vault file — recoverable for ~30 days via the
@@ -1143,6 +1148,37 @@ struct StateEntry {
 struct SyncState {
     #[serde(default)]
     files: HashMap<String, StateEntry>,
+}
+
+/// An exclusive advisory lock on `<sync-state>/<target id>.lock`, held for
+/// the length of one `run_target`. `try_lock` rather than blocking: a
+/// second run reports and leaves rather than queueing behind the first,
+/// which would only replay the same scan a few minutes late.
+#[derive(Debug)]
+struct SyncLock(#[allow(dead_code)] fs::File);
+
+impl SyncLock {
+    fn acquire(target: &SyncTarget) -> Result<Self> {
+        use fs2::FileExt;
+        let path = state_file_path(&target._id).with_extension("lock");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(SyncLock(file)),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Err(format!(
+                "another sync of '{}' is already running; skipping this run",
+                target.name
+            )
+            .into()),
+            Err(e) => Err(e.into()),
+        }
+    }
 }
 
 fn state_file_path(target_id: &str) -> PathBuf {
@@ -1228,6 +1264,33 @@ fn ensure_remote_dir(
         parent_id = folder._id;
     }
     Ok(parent_id)
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn second_run_of_the_same_target_is_refused_while_the_first_holds_the_lock() {
+        let target = SyncTarget {
+            _id: format!("lock-test-{}", std::process::id()),
+            name: "lock test".into(),
+            folder_id: String::new(),
+            device_id: String::new(),
+            device_label: String::new(),
+            local_path: String::new(),
+            preprocess: false,
+            two_way: false,
+            last_synced_at: None,
+        };
+        let first = SyncLock::acquire(&target).expect("first lock");
+        let second = SyncLock::acquire(&target);
+        assert!(second.is_err(), "second acquire should be refused");
+        assert!(second.unwrap_err().to_string().contains("already running"));
+        drop(first);
+        SyncLock::acquire(&target).expect("lock is free again after drop");
+        let _ = fs::remove_file(state_file_path(&target._id).with_extension("lock"));
+    }
 }
 
 #[cfg(test)]

@@ -639,7 +639,7 @@ pub fn upload_file(
         upload_multipart(
             client,
             local,
-            folder,
+            Destination::Folder(&folder._id),
             &name,
             &content_type,
             size,
@@ -654,25 +654,85 @@ pub fn upload_file(
     })
 }
 
+/// Replaces a vault file's bytes in place: same file id, so links keep
+/// working. Under `MULTIPART_THRESHOLD` it is one POST to the replace
+/// route; above it the bytes go up in parts, exactly like a new file, and
+/// `multipart-complete` repoints the existing row (`replaceFileId`). The
+/// one-body route reads the whole file into the app's memory, and a
+/// re-encoded screen recording (~150 MB) took the app down with a 502.
+pub fn replace_file(
+    client: &Client,
+    file_id: &str,
+    local: &Path,
+    mut on_progress: impl FnMut(UploadProgress),
+) -> Result<()> {
+    let meta = fs::metadata(local).map_err(|e| format!("{}: {e}", local.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{} is not a file", local.display()).into());
+    }
+    let size = meta.len();
+    if size <= MULTIPART_THRESHOLD {
+        let _: serde_json::Value = client
+            .post_form(&format!("/api/vault/replace/{file_id}"), || {
+                Ok(reqwest::blocking::multipart::Form::new().file("file", local)?)
+            })?;
+        return Ok(());
+    }
+    let name = local
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("Invalid file name: {}", local.display()))?
+        .to_string();
+    let content_type = mime_guess::from_path(local)
+        .first_or_octet_stream()
+        .to_string();
+    upload_multipart(
+        client,
+        local,
+        Destination::Replace(file_id),
+        &name,
+        &content_type,
+        size,
+        &mut on_progress,
+    )?;
+    Ok(())
+}
+
+/// Where a multipart upload lands: a new file in a folder, or the new
+/// bytes of an existing file.
+#[derive(Clone, Copy)]
+enum Destination<'a> {
+    Folder(&'a str),
+    Replace(&'a str),
+}
+
+impl Destination<'_> {
+    /// The fields `multipart-init` and `multipart-complete` both take.
+    fn json_fields(&self) -> serde_json::Value {
+        match self {
+            Destination::Folder(folder_id) => serde_json::json!({ "folderId": folder_id }),
+            Destination::Replace(file_id) => serde_json::json!({ "replaceFileId": file_id }),
+        }
+    }
+}
+
 fn upload_multipart(
     client: &Client,
     local: &Path,
-    folder: &Folder,
+    dest: Destination<'_>,
     name: &str,
     content_type: &str,
     size: u64,
     on_progress: &mut impl FnMut(UploadProgress),
 ) -> Result<String> {
-    let init: serde_json::Value = client.post_json(
-        "/api/vault/multipart-init",
-        &serde_json::json!({
-            "filename": name,
-            "contentType": content_type,
-            "folderId": folder._id,
-            "originalName": name,
-            "size": size,
-        }),
-    )?;
+    let mut init_body = serde_json::json!({
+        "filename": name,
+        "contentType": content_type,
+        "originalName": name,
+        "size": size,
+    });
+    merge_json(&mut init_body, dest.json_fields());
+    let init: serde_json::Value = client.post_json("/api/vault/multipart-init", &init_body)?;
     let upload_id = init["uploadId"]
         .as_str()
         .ok_or("multipart-init did not return an uploadId")?
@@ -688,7 +748,7 @@ fn upload_multipart(
         local,
         &upload_id,
         &key,
-        folder,
+        dest,
         name,
         content_type,
         size,
@@ -703,13 +763,22 @@ fn upload_multipart(
     result
 }
 
+/// Adds `extra`'s top-level fields to `body` (both JSON objects).
+fn merge_json(body: &mut serde_json::Value, extra: serde_json::Value) {
+    if let (Some(into), Some(from)) = (body.as_object_mut(), extra.as_object()) {
+        for (k, v) in from {
+            into.insert(k.clone(), v.clone());
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn upload_parts(
     client: &Client,
     local: &Path,
     upload_id: &str,
     key: &str,
-    folder: &Folder,
+    dest: Destination<'_>,
     name: &str,
     content_type: &str,
     size: u64,
@@ -769,19 +838,18 @@ fn upload_parts(
     }
 
     let content_hash = format!("{:x}", hasher.finalize());
-    let resp: serde_json::Value = client.post_json(
-        "/api/vault/multipart-complete",
-        &serde_json::json!({
-            "uploadId": upload_id,
-            "key": key,
-            "parts": parts,
-            "name": name,
-            "folderId": folder._id,
-            "contentType": content_type,
-            "size": size,
-            "contentHash": content_hash,
-        }),
-    )?;
+    let mut complete_body = serde_json::json!({
+        "uploadId": upload_id,
+        "key": key,
+        "parts": parts,
+        "name": name,
+        "contentType": content_type,
+        "size": size,
+        "contentHash": content_hash,
+    });
+    merge_json(&mut complete_body, dest.json_fields());
+    let resp: serde_json::Value =
+        client.post_json("/api/vault/multipart-complete", &complete_body)?;
     resp["fileRef"]["_id"]
         .as_str()
         .map(String::from)

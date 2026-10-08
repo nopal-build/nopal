@@ -1,17 +1,9 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
-import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { uploadFileToS3, deleteFromS3 } from "robustness-core/data/file.server";
-import {
-  canWriteToFolderId,
-  explainWriteRefusal,
-  getFileRefById,
-  computeMdUpdate,
-  isFolderUnderSyncs,
-} from "robustness-core/data/vault.server";
-import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
-import { isFileRefLocked } from "robustness-core/data/vault.types";
+import { getFileRefById, computeMdUpdate } from "robustness-core/data/vault.server";
+import { fileReplaceRefusal, repointFileRef } from "robustness-core/data/fileReplace.server";
 import { merge } from "robustness-core/data/generic.server";
 import { cacheDailyLog } from "robustness-core/data/dailyLog.server";
 
@@ -36,6 +28,10 @@ import { cacheDailyLog } from "robustness-core/data/dailyLog.server";
  *     at it, then deletes the old object.
  *
  * Owner-only. Locked daily-log files cannot be replaced.
+ *
+ * One body, read into memory: only for a file under the multipart
+ * threshold. Anything larger goes through `multipart-init`/`-complete`
+ * with `replaceFileId` (see `fileReplace.server.ts` for why).
  */
 function sha256(buf: Buffer): string {
   return crypto.createHash("sha256").update(buf).digest("hex");
@@ -54,7 +50,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!scoped) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
-  const { user, syncScoped } = scoped;
+  const { user } = scoped;
 
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -69,33 +65,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!existing) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
-  // An owner-tier project Sharing Role (Owner/Crafter) may replace a file
-  // inside someone else's shared project exactly like its own owner could
-  // — see `canActAsProjectOwner`.
-  if (!(await canActAsProjectOwner(user._id, existing.human_id, existing.folder_id))) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  // Sync-scoped tokens may only replace files inside syncs/.
-  if (syncScoped && !(await isFolderUnderSyncs(existing.folder_id))) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
-  // Admin/Super, even inside the OWNING human's own vault — see
-  // `vaultRoots.ts` / `vaultFolderTypes.ts`.
-  if (!(await canWriteToFolderId(existing.folder_id, user.role))) {
-    return Response.json(
-      { error: await explainWriteRefusal(existing.folder_id, user.role) },
-      { status: 403 },
-    );
-  }
-  if (isFileRefLocked(existing)) {
-    return Response.json(
-      {
-        error:
-          "This file is locked. Daily log files can only change on the day they were uploaded.",
-      },
-      { status: 403 },
-    );
+  // Ownership (incl. owner-tier Sharing Roles), sync-token scope, folder
+  // policy, lock — the same checks the chunked replace applies.
+  const refusal = await fileReplaceRefusal(scoped, existing);
+  if (refusal) {
+    return Response.json({ error: refusal.error }, { status: refusal.status });
   }
 
   const form = await request.formData();
@@ -149,32 +123,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const folderSegment = existing.folder_id ?? "root";
     const s3Key = `vault/${user._id}/${folderSegment}/${Date.now()}-${safeName}`;
     const url = await uploadFileToS3(file, s3Key);
-
-    const newContentType = file.type || existing.content_type;
-    const updated = await merge("file_refs", fileId, {
-      s3_url: url,
-      s3_key: s3Key,
-      content_type: newContentType,
-      content_hash: sha256(Buffer.from(await file.arrayBuffer())),
+    const updated = await repointFileRef(existing, {
+      s3Key,
+      s3Url: url,
+      contentType: file.type || existing.content_type,
+      contentHash: sha256(Buffer.from(await file.arrayBuffer())),
       size: file.size,
-      updated_at: now,
     });
-
-    // New bytes live under a new s3_key, so any rendition made for the old
-    // one no longer applies (renditionKey is derived from s3_key) — ask the
-    // worker for a fresh one, same call `api.daily-log.upload.tsx` makes.
-    if (updated && (newContentType.startsWith("image/") || newContentType.startsWith("video/"))) {
-      await enqueueRenditionsJob(fileId).catch((err) => console.error("Could not enqueue renditions:", err));
-    }
-
-    if (existing.s3_key) {
-      try {
-        await deleteFromS3(existing.s3_key);
-      } catch (err) {
-        // Old object is orphaned but the replace succeeded — log and move on.
-        console.error(`Failed to delete replaced S3 object ${existing.s3_key}:`, err);
-      }
-    }
 
     return Response.json({ fileRef: updated });
   } catch (err) {
