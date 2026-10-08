@@ -420,16 +420,25 @@ pub fn run_target(
                 continue;
             }
             let sibling = prepped_sibling(abs);
-            if !sibling.exists() {
-                log(&format!("  \u{25b6} optimizing {rel}"));
+            // A sibling made before prep forced 8-bit 4:2:0 can be a
+            // format browsers show as a green frame; make it again, and the
+            // new hash pushes it as a replace.
+            let stale =
+                sibling.exists() && video::probe(&sibling).is_some_and(|p| !p.is_web_playable());
+            if !sibling.exists() || stale {
+                if stale {
+                    log(&format!(
+                        "  \u{25b6} re-optimizing {rel} (not browser-playable)"
+                    ));
+                } else {
+                    log(&format!("  \u{25b6} optimizing {rel}"));
+                }
                 video::prep(
                     abs,
                     video::PrepOptions {
                         output: Some(sibling.clone()),
-                        crf: 23,
-                        max_height: 1080,
-                        preset: "medium".to_string(),
-                        overwrite: false,
+                        overwrite: stale,
+                        ..Default::default()
                     },
                     log,
                 )?;

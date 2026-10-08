@@ -169,13 +169,13 @@ enum VideoCommand {
         #[arg(long)]
         output: Option<PathBuf>,
         /// H.264 quality (lower = better quality, larger file). Typical range 18-28.
-        #[arg(long, default_value_t = 23)]
+        #[arg(long, default_value_t = nopal_core::video::DEFAULT_CRF)]
         crf: u8,
         /// Cap the output height, preserving aspect ratio; never upscales.
-        #[arg(long, default_value_t = 1080)]
+        #[arg(long, default_value_t = nopal_core::video::DEFAULT_MAX_HEIGHT)]
         max_height: u32,
         /// ffmpeg encoding speed/efficiency tradeoff (e.g. fast, medium, slow).
-        #[arg(long, default_value = "medium")]
+        #[arg(long, default_value = nopal_core::video::DEFAULT_PRESET)]
         preset: String,
         /// Overwrite the output file if it already exists.
         #[arg(long)]
@@ -789,6 +789,7 @@ fn main() {
                     max_height,
                     preset,
                     overwrite,
+                    ..Default::default()
                 };
                 if let Err(e) = video::prep(&input, opts) {
                     eprintln!("video prep failed: {e}");
