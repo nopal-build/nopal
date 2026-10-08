@@ -20,6 +20,7 @@
     "./data/dailyLogSync.server": "./src/data/dailyLogSync.server.ts",
     "./data/db.server": "./src/data/db.server.ts",
     "./data/file.server": "./src/data/file.server.ts",
+    "./data/fileReplace.server": "./src/data/fileReplace.server.ts",
     "./data/fileFolders.server": "./src/data/fileFolders.server.ts",
     "./data/fileReferences.server": "./src/data/fileReferences.server.ts",
     "./data/generic.server": "./src/data/generic.server.ts",

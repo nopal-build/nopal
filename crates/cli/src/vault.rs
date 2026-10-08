@@ -448,10 +448,13 @@ pub fn replace(local: &Path, vault_path: &str) -> Result<(), Box<dyn Error + Sen
         local.display(),
         format_size(Some(meta.len()))
     );
-    let _: serde_json::Value = client
-        .post_form(&format!("/api/vault/replace/{}", listing._id), || {
-            Ok(reqwest::blocking::multipart::Form::new().file("file", local)?)
-        })?;
+    nopal_core::vault::replace_file(&client, &listing._id, local, |progress| {
+        let nopal_core::vault::UploadProgress::Part {
+            part_number,
+            total_parts,
+        } = progress;
+        println!("  part {part_number}/{total_parts}");
+    })?;
     println!("  ✓ {}", listing.name);
     Ok(())
 }

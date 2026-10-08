@@ -84,6 +84,14 @@ pub fn prep(input: &Path, opts: PrepOptions, log: &mut dyn FnMut(&str)) -> Resul
 
     let original_size = fs::metadata(input)?.len();
 
+    // ffmpeg writes into a temp sibling and the finished file is renamed
+    // into place, so nothing ever sees a half-written output under the
+    // final name. The sync's scanner skips dotfiles, and the name matches
+    // what `sync::pull_file` uses for downloads. A sync that ran mid-encode
+    // once uploaded a 4 MB partial over the real file.
+    let temp_path = temp_output_path(&output_path);
+    let _ = fs::remove_file(&temp_path);
+
     let source = probe(input);
     if source.as_ref().is_some_and(|p| p.is_hdr()) {
         log("  ! HDR source: encoding as 8-bit with its HDR tags kept; there is no tone mapping yet, so it may look flat or dim in some players");
@@ -97,7 +105,9 @@ pub fn prep(input: &Path, opts: PrepOptions, log: &mut dyn FnMut(&str)) -> Resul
     ));
 
     let mut cmd = Command::new(&ffmpeg);
-    cmd.arg(if opts.overwrite { "-y" } else { "-n" })
+    // Always `-y`: the temp file is ours; the caller's overwrite choice was
+    // applied to the final path above.
+    cmd.arg("-y")
         .arg("-i")
         .arg(input)
         .arg("-vf")
@@ -109,7 +119,9 @@ pub fn prep(input: &Path, opts: PrepOptions, log: &mut dyn FnMut(&str)) -> Resul
         .args(["-tune", "film", "-x264-params", "aq-mode=3"])
         .args(["-c:a", "aac", "-b:a", "128k"])
         .args(["-movflags", "+faststart"])
-        .arg(&output_path);
+        // The temp name has no .mp4 extension for ffmpeg to infer from.
+        .args(["-f", "mp4"])
+        .arg(&temp_path);
 
     // Inherits stdio by default, so ffmpeg's own progress output stays
     // visible when run from a terminal. A GUI caller won't see this
@@ -119,8 +131,10 @@ pub fn prep(input: &Path, opts: PrepOptions, log: &mut dyn FnMut(&str)) -> Resul
         .status()
         .map_err(|e| format!("Failed to run ffmpeg: {e}"))?;
     if !status.success() {
+        let _ = fs::remove_file(&temp_path);
         return Err(format!("ffmpeg exited with {status}").into());
     }
+    fs::rename(&temp_path, &output_path)?;
 
     let new_size = fs::metadata(&output_path)?.len();
     let reduction = if original_size > 0 {
@@ -281,6 +295,16 @@ fn command_works(program: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// `.<name>.nopal-tmp` beside the final path: a dotfile, so the sync
+/// scanner never picks it up, on the same filesystem, so the rename is
+/// atomic.
+pub fn temp_output_path(output: &Path) -> PathBuf {
+    output.with_file_name(format!(
+        ".{}.nopal-tmp",
+        output.file_name().unwrap_or_default().to_string_lossy()
+    ))
+}
+
 fn default_output_path(input: &Path) -> PathBuf {
     let stem = input
         .file_stem()
@@ -387,7 +411,9 @@ mod tests {
         )
         .unwrap();
         let got = probe(&out.output_path).unwrap();
+        let temp_left = temp_output_path(&out.output_path).exists();
         fs::remove_dir_all(&dir).ok();
+        assert!(!temp_left, "temp output should be renamed away");
         assert!(got.is_web_playable(), "{got:?}");
         assert_eq!(got.color_space.as_deref(), Some("bt709"));
         assert_eq!(got.color_transfer.as_deref(), Some("bt709"));

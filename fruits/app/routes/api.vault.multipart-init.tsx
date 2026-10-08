@@ -1,16 +1,22 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { createMultipartUpload } from "robustness-core/data/file.server";
-import { canWriteToFolderId, explainWriteRefusal, getFolderById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
+import { canWriteToFolderId, explainWriteRefusal, getFileRefById, getFolderById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
 import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
+import { fileReplaceRefusal } from "robustness-core/data/fileReplace.server";
 
 /**
  * POST /api/vault/multipart-init
- * Body (JSON): { filename, contentType, folderId?, originalName, size }
+ * Body (JSON): { filename, contentType, folderId?, originalName, size, replaceFileId? }
  * Returns: { uploadId, key }
  *
  * Creates an S3 multipart upload session. The key is returned so the client
  * can reference it in subsequent part and complete requests.
+ *
+ * With `replaceFileId`, the parts are the new bytes of an EXISTING file
+ * (same row, new object — see `fileReplace.server.ts`). The permission
+ * checks are then the replace route's, against that file's own folder,
+ * and `folderId` is ignored.
  */
 export async function action({ request }: ActionFunctionArgs) {
   const scoped = await getScopedUserFromRequest(request);
@@ -23,14 +29,29 @@ export async function action({ request }: ActionFunctionArgs) {
     contentType?: string;
     folderId?: string | null;
     originalName?: string;
+    replaceFileId?: string;
   };
 
-  const { filename, contentType, folderId } = body;
+  const { filename, contentType, replaceFileId } = body;
   if (!filename || !contentType) {
     return Response.json(
       { error: "filename and contentType are required" },
       { status: 400 },
     );
+  }
+
+  let folderId = body.folderId;
+  if (replaceFileId) {
+    const existing = await getFileRefById(replaceFileId);
+    if (!existing) {
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+    const refusal = await fileReplaceRefusal(scoped, existing);
+    if (refusal) {
+      return Response.json({ error: refusal.error }, { status: refusal.status });
+    }
+    folderId = existing.folder_id;
+    return startSession(user._id, folderId, filename, contentType);
   }
 
   // Sync-scoped tokens may only write inside syncs/.
@@ -62,9 +83,20 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
+  return startSession(user._id, folderId, filename, contentType);
+}
+
+/** Opens the S3 session under this human's own key prefix (which
+ * `multipart-part`/`-complete` check) and returns what the client needs. */
+async function startSession(
+  humanId: string,
+  folderId: string | null | undefined,
+  filename: string,
+  contentType: string,
+): Promise<Response> {
   const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
   const folderSegment = folderId ?? "root";
-  const key = `vault/${user._id}/${folderSegment}/${Date.now()}-${safeName}`;
+  const key = `vault/${humanId}/${folderSegment}/${Date.now()}-${safeName}`;
 
   try {
     const uploadId = await createMultipartUpload(key, contentType);
