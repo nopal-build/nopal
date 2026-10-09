@@ -52,27 +52,17 @@
   --website-content-max-width: 720px;
 }
 
-/* ── Accent colors that DO swap by scheme (green/red only) ─────────────── */
-/* `red`/`green` read as noticeably duller/lower-contrast against a dark
-   background than they do against a light one, so both get a lighter
-   dark-mode counterpart -- `--green-light`/`--red-light` (root.css)
-   already exist for exactly this. `purple` deliberately does NOT get an
-   entry here -- see `:::section-title{...}`'s own text-shadow comment
-   in this file for why a fixed literal purple was already chosen to
-   work in both schemes. Consumers (`:::section-title{color="..."}`,
-   `::line{color="..."}` via `toAccentColorVar` in `websiteDirectives.tsx`)
-   read ONLY these two tokens, never the raw `--green`/`--red` aliases
-   directly, so both stay in sync automatically. */
-:root {
-  --website-accent-green: var(--green);
-  --website-accent-red: var(--red);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --website-accent-green: var(--green-light);
-    --website-accent-red: var(--red-light);
-  }
-}
+/* ── Accent colors (`--website-accent-*`) are RETIRED ────────────────────── */
+/* They backed the old hardcoded `red`/`green`/`purple` enum
+   `:::section-title{color="..."}`/`::line{color="..."}` used to share
+   (`ACCENT_COLOR_VARS` in `websiteDirectives.tsx`) -- round 14 of the
+   "Oxmarkdown Colors" garden seed retires both. Every color-reading
+   website directive now resolves `color=`/`palette=` through the page's
+   own open `::swatch`/`::palette` registry instead
+   (`oxmarkdown-core`'s `resolveSwatchRole`), which emits its OWN
+   generated `--ox-swatch-color-<name>` custom properties at render time
+   -- nothing here needs to pre-declare a fixed token for any particular
+   name anymore, scheme-aware or not. */
 
 /* Manual override for the `/maker/stamps/scratch` guide's / Vault website
    editor's (`WebsitePageSplitEditor` in `vault.tsx`) own light/dark
@@ -82,50 +72,51 @@
    whatever an ancestor's `@media` block resolved to (ordinary CSS
    inheritance: the nearest declared value wins, regardless of
    specificity) -- no exotic `light-dark()`/`color-scheme` mechanism
-   needed. Only covers the tokens THIS file makes scheme-aware (the 2
-   accents, the page background) -- `oxmarkdown.css`'s OWN much larger
-   `.ox-tokens` dark-mode block (actual TEXT colors: headings, links,
-   code background, etc.) is handled separately, right there in that
-   file, because that block sets those properties directly on the SAME
-   element rather than an ancestor -- plain inheritance can't reach it,
-   so it needs its own `.website-preview-force-{light,dark} .ox-tokens`
-   selector instead of this simpler trick. `bg="mint"`'s own dark-mode
-   swap (above) needs that SAME `.ox-tokens`-style selector too, further
-   below -- `background` on `.website-bg-mint` is likewise a direct
-   declaration on that same class, not an ancestor's custom property. */
+   needed. `oxmarkdown.css`'s OWN much larger `.ox-tokens` dark-mode block
+   (actual TEXT colors: headings, links, code background, etc.) is
+   handled separately, right there in that file, because that block sets
+   those properties directly on the SAME element rather than an ancestor
+   -- plain inheritance can't reach it, so it needs its own
+   `.website-preview-force-{light,dark} .ox-tokens` selector instead of
+   this simpler trick. A `::swatch{...}`'s own generated `<style>` tag
+   (`OxRenderer.tsx`) handles ITS scheme-swap the exact same "direct
+   declaration on the real element" way, via its own
+   `@media (prefers-color-scheme: dark)` block -- this override doesn't
+   (and can't, generically) reach into that.
+
+   `--color-*` (`root.css`'s app-wide surface/text tokens), added here
+   after a REAL, confirmed contrast bug (found reviewing `:::box{...}`'s
+   own Tracing Paper, round 8 of the "Box Directive + Pricing Card UI
+   Fix" garden seed -- pre-existing, not new: `:::pricing-card{...}` read
+   the exact same `--color-surface-card` token before it was retired, so
+   this was always broken, just never a visibly obvious contrast failure
+   until a plain-text box demo sat directly against it). These are
+   DIFFERENT from `--website-bg-page`/`--ox-color-*` above: `root.css`
+   declares them at `:root` only (never re-declared on any element BELOW
+   it), so the SAME plain-inheritance trick `--website-bg-page` already
+   used is enough -- confirmed by DIRECT measurement (a one-off Playwright
+   script reading real `getComputedStyle` values under both a forced AND
+   a real opposite-scheme page load, not just reasoned about), no
+   `.ox-tokens`-style same-element override needed. */
 .website-preview-force-light {
-  --website-accent-green: var(--green);
-  --website-accent-red: var(--red);
   --website-bg-page: var(--surface-day-100);
+  --color-text-primary: var(--plum-700);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-danger: var(--clay-500);
+  --color-surface-page: var(--white);
+  --color-surface-card: var(--surface-day-100);
+  --color-surface-inset: var(--surface-day-300);
+  --color-surface-border: var(--surface-day-500);
 }
 .website-preview-force-dark {
-  --website-accent-green: var(--green-light);
-  --website-accent-red: var(--red-light);
   --website-bg-page: var(--purple);
-}
-
-/* `bg="mint"`/`bg="white"`'s own dark-mode swaps (`.website-bg-mint`/
-   `.website-bg-white`, above) need their OWN pairs of overrides here
-   too, separate from the two plain `.website-preview-force-{light,dark}`
-   blocks above -- `background` is declared directly on each class
-   itself (by both the plain rule AND its `@media` variant), not read
-   from an ancestor's custom property, so plain inheritance can't reach
-   it the way it does for `--website-accent-*`/`--website-bg-page`. Two
-   classes' worth of specificity here reliably beats the one-class
-   `@media` rule above in EITHER direction, the exact same trick
-   `oxmarkdown.css`'s own `.website-preview-force-{light,dark} .ox-tokens`
-   already uses. */
-.website-preview-force-light .website-bg-mint {
-  background: var(--cactus-100);
-}
-.website-preview-force-dark .website-bg-mint {
-  background: var(--cactus-800);
-}
-.website-preview-force-light .website-bg-white {
-  background: var(--white);
-}
-.website-preview-force-dark .website-bg-white {
-  background: var(--purple-light);
+  --color-text-primary: var(--white);
+  --color-text-subtle: var(--text-subtle-dark);
+  --color-text-danger: var(--clay-300);
+  --color-surface-page: var(--purple);
+  --color-surface-card: var(--surface-night-100);
+  --color-surface-inset: var(--surface-night-300);
+  --color-surface-border: var(--surface-night-500);
 }
 
 /* ── Content shell (`WebsitePageContent`, packages/stamps) ──────────────── */
@@ -201,7 +192,7 @@
   padding-left: 26px;
 }
 
-/* ── Section (`:::section{bg="..."}`) ──────────────────────────────────── */
+/* ── Section (`:::section{surface="..." palette="..."}`) ─────────────── */
 
 /* `margin-left`/`margin-right: -24px` exactly cancels `.website-page-content`'s
    own horizontal padding above, so this band always exactly fills that
@@ -255,12 +246,16 @@
   margin: 0 auto;
   padding: 0 24px;
   /* The positioned ancestor an `::icon{position="x,y"}` (websiteDirectives.tsx's
-     `parseIconPosition`) resolves its own `left`/`top` PERCENTAGES against,
-     for its first real use: one rendered directly inside `:::section{...}`'s
-     own body. A DIFFERENT container (a pricing-card body, a toggle body, ...)
-     would need this exact same treatment before a positioned icon inside IT
-     had any visible effect -- not added preemptively anywhere else until an
-     actual use needs it there too. */
+     `parseIconPosition`) resolves its own real-pixel anchor coordinates
+     against (`PositionedWebsiteIcon`, websiteIcons.tsx), for its first real
+     use: one rendered directly inside `:::section{...}`'s own body. Also
+     the containing block a `::trail{waypoints="..."}` (WavyLine.tsx's
+     `mode="waypoints"`) sizes itself to fill, since it measures OTHER
+     elements' live positions inside this same box rather than taking any
+     fixed points of its own. A DIFFERENT container (a pricing-card body, a
+     toggle body, ...) would need this exact same treatment before either
+     one had any visible effect inside IT -- not added preemptively
+     anywhere else until an actual use needs it there too. */
   position: relative;
 }
 
@@ -275,36 +270,25 @@
   content: none;
 }
 
-.website-bg-mint {
-  background: var(--cactus-100);
-}
-/* `--cactus-100` (a pale mint) reads as a bright, washed-out patch
-   against the dark scene, so `mint` gets a real dark-mode counterpart:
-   `--cactus-800`, deep enough to read as a distinct tinted band rather
-   than fighting the page's own dark background. */
-@media (prefers-color-scheme: dark) {
-  .website-bg-mint {
-    background: var(--cactus-800);
-  }
-}
-/* `white` is for a section that should actually stand OUT against the
-   page -- reading fine as a real, bright white against the light scene,
-   but a jarring, near-blinding slab against the dark one, so it gets a
-   real dark-mode counterpart too: `--purple-light`, a lighter purple
-   that still reads as a distinct "raised" band without clashing with
-   the page's own dark background. */
-.website-bg-white {
-  background: var(--white);
-}
-@media (prefers-color-scheme: dark) {
-  .website-bg-white {
-    background: var(--purple-light);
-  }
-}
+/* `.website-bg-mint`/`.website-bg-white` (the precompiled classes
+   `SECTION_BG_CLASS` in `websiteDirectives.tsx` used to pick between)
+   are RETIRED -- round 14 of the "Oxmarkdown Colors" garden seed. A
+   section's background is now whatever `surface="..."`/`palette="..."`
+   resolves to, via an inline `style={{ background: ... }}` reading a
+   `::swatch`-generated `--ox-swatch-surface-<name>` custom property --
+   no fixed classes/values live here anymore for this to hand-pick
+   between; an implementer defines its own equivalents in a real
+   `::swatch{...}`/`::palette{...}` (e.g. a shared `_theme.md`), same as
+   any other color this system now handles. A real `/v2` page project
+   using the OLD `mint`/`white` names needs that migration done as part
+   of adopting this -- see the garden seed's round 11/14 for the full
+   "deliberate one-time migration, not a silent compatibility shim"
+   reasoning. */
 
 /* Optional list-style override (`list="timeline"`) -- a NAMED bullet
-   style, same "small fixed vocabulary of pre-designed looks" spirit as
-   `bg="mint|white"` above, not a raw color knob (a section theme's
+   style, a small fixed vocabulary of its own pre-designed looks (unlike
+   `surface=`/`palette=` above, which read the page's own OPEN `::swatch`
+   registry), not a raw color knob (a section theme's
    bullet is a whole little graphic, not just a tint). Swaps the visible
    bullet itself, not just its color -- overrides `content` on the SAME
    `::before` `oxmarkdown.css`'s own `.ox-content ul > li:not(.ox-task-item)::before`
@@ -317,13 +301,15 @@
    already uses -- a custom property can't be referenced from inside one.
    The connector line below deliberately reads `--cactus-500` (the dot's
    own darker fill), NOT `--cactus-300` (the dot's own stroke ring) --
-   `--cactus-500` reads reliably against both `bg="..."` options above,
-   including `bg="mint"` itself (`--cactus-100`, much lighter than either
-   green rung) -- an earlier version of `bg="mint"` was ITSELF
-   `--cactus-300`, which made `--cactus-300` collide/disappear against it;
-   kept reading `--cactus-500` after lightening `mint` since it's still
-   the better/darker choice for legibility on `white`/the unset default
-   too. */
+   `--cactus-500` reads reliably against a themed section's own surface
+   (confirmed historically against the old built-in `mint`/`white`
+   options this directive shipped with before round 14's migration --
+   `--cactus-100`, much lighter than either green rung, was the
+   lightest real case) -- an earlier, even lighter version of that old
+   `mint` value was ITSELF `--cactus-300`, which made `--cactus-300`
+   collide/disappear against it; kept reading `--cactus-500` since it's
+   still the better/darker choice for legibility against an unset/light
+   surface too. */
 .website-section[data-website-list="timeline"] li:not(.ox-task-item)::before {
   content: "";
   top: 15px;
@@ -505,59 +491,86 @@
   content: none;
 }
 
-/* Optional heading-color override (`color="red"|"green"|"purple"`) --
-   same named-color vocabulary and technique `::line{color="..."}`
-   (`websiteDirectives.tsx`) also reads. `:::section{...}` deliberately
-   has NO equivalent of its own -- a section's own headings just read
-   the ordinary default text color; this is the one place a heading
-   inside a themed section can still stand out on purpose. `red`/`green`
-   read the SCHEME-AWARE `--website-accent-*` tokens (above), not the
-   raw `--red`/`--green` aliases directly -- `purple` stays literal, see
-   this rule block's own text-shadow comment below for why. */
-.website-section-title[data-website-color="red"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--website-accent-red);
-}
-.website-section-title[data-website-color="green"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--website-accent-green);
-}
-.website-section-title[data-website-color="purple"] :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--purple);
+/* Heading color override (`color="..."`/`h-color="..."`) -- RETIRED the
+   old `data-website-color="red"|"green"|"purple"` attribute-selector
+   technique (round 14 of the "Oxmarkdown Colors" garden seed): names are
+   OPEN now (the page's own `::swatch`/`::palette` registry), not a fixed
+   enum a hand-written selector-per-value could ever enumerate, so the
+   JS side (`websiteDirectives.tsx`'s `"section-title"` registry entry)
+   resolves the actual color and hands it down as a plain, PRIVATE custom
+   property instead -- this is now the ONE static rule for every name,
+   not three hand-written ones. `color=` is a BASE (set directly on
+   `.website-section-title`, reaching this heading too via ordinary
+   inheritance, same as any other text inside); `h-color=`, when given,
+   is a MORE SPECIFIC override that wins HERE ONLY, via this selector
+   reading the private property below instead of the inherited `color`
+   -- not two unrelated color slots, see the garden seed's round 13.
+   `inherit` fallback covers the case where NEITHER is given at all (the
+   custom property is never set, so this falls through to the ordinary
+   default heading color, unchanged from today). `::line{color="..."}`
+   (`websiteDirectives.tsx`) now reads the exact SAME registry/role, so a
+   themed heading and a themed line drawn alongside it can share one
+   real swatch name and stay in sync on purpose, same as before -- just
+   through the new open mechanism instead of a hardcoded shared enum. */
+.website-section-title :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--website-section-title-h-color, inherit);
 }
 
-/* ── Pricing card (`:::pricing-card{...}`) ─────────────────────────────── */
+/* ── Box (`:::box{...}`) ────────────────────────────────────────────────── */
 
-.website-pricing-card {
+.website-box {
   border: 1px solid var(--color-surface-border);
   border-radius: 8px;
   padding: 20px;
-  margin-bottom: 16px;
+  /* NO margin here (reversed from round 5's own original "always a
+     non-zero outer margin" decision, see the "Box Directive + Pricing
+     Card UI Fix" garden seed, resolved question 5/round 7) -- the
+     human found real double-spacing in practice between stacked boxes:
+     this margin ON TOP of the ordinary blank-line gap this whole
+     document language already provides (N blank lines = N grid units,
+     see the `oxmarkdown` skill's "Between blocks" design language). A
+     box's own vertical spacing is the AUTHOR'S call via blank lines,
+     same as every other block -- not baked into the directive itself. */
   background: var(--color-surface-card);
+  /* The positioned ancestor a `::badge{position="x,y"}` (websiteBadge.tsx's
+     `PositionedWebsiteBadge`) resolves its own real-pixel anchor
+     coordinates against -- same treatment `.website-section-inner` below
+     already has, for the same reason. */
+  position: relative;
 }
 
-.website-pricing-card-header {
+/* Effort 2: `:::box{form-id=... select-group=... value=...}` -- box-shadow,
+   not border-color, for the selected/hover treatment below -- `.website-box`
+   itself sets `border-color` via INLINE style (surface/border resolve
+   through `resolveSwatchRole` in JS), which always wins over any class rule
+   targeting the same property regardless of specificity. `box-shadow` is a
+   genuinely different property, so it layers on top with no conflict. */
+
+.website-box-selectable {
+  cursor: pointer;
+}
+
+.website-box-selectable:hover {
+  box-shadow: 0 0 0 1px var(--color-surface-border);
+}
+
+.website-box-selected {
+  box-shadow: 0 0 0 2px var(--green);
+}
+
+/* ── Flex row (`:::flex{...}`) ──────────────────────────────────────────── */
+/* A generic "lay these direct block children out side by side" primitive,
+   factored out of `.website-pricing-card-header`'s own exact layout below
+   -- `justify-content` itself comes from the directive's own `justify=`
+   attribute (websiteDirectives.tsx), inline, not a class variant here. */
+
+.website-flex {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
 }
 
-.website-pricing-card-name {
-  font-weight: bold;
-  color: var(--green);
-}
-
-.website-pricing-card-price {
-  font-weight: bold;
-  color: var(--purple);
-}
-
-.website-pricing-card-body :is(ul, ol) {
-  margin: 0;
-  padding-left: 20px;
-}
-
-/* ── Buttons (`::button{...}`, pricing card's own cta) ─────────────────── */
+/* ── Buttons (`::button{...}`) ─────────────────────────────────────── */
 /* The look itself is `stamps/button.css`'s own `button({ variant: "..." })`
    recipe now (`websiteDirectives.tsx`) -- no bespoke `.website-button`
    class anymore, so a `/v2` CTA matches every other button in the app
@@ -577,11 +590,7 @@
    competing rule instead lets the recipe's own plain class win outright,
    for any variant, unimpeded. */
 
-.website-pricing-card-cta {
-  margin-top: 12px;
-}
-
-/* ── Daily-log embed (`::daily-log{...}`) ──────────────────────────────── */
+/* ── Daily-log embed (`::daily-log{...}`) ──────────────────────── */
 
 .website-daily-log-embed {
   border-left: 3px solid var(--green);

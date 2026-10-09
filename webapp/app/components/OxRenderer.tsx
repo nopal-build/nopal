@@ -28,17 +28,26 @@
  * instead, modeled off the same design language.
  */
 
-import { cloneElement, createContext, Fragment, isValidElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, createContext, Fragment, isValidElement, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { Definition, RootContent } from "mdast";
 import {
   parseOxDocument,
+  buildSwatchStyleSheet,
+  collectSwatchRegistry,
   countBlankLines,
   directiveAttrs,
   isDirectiveNode,
   parseRefAttrs,
+  resolveSwatchRole,
+  parseVideoOrientation,
+  parseYouTubeId,
+  youTubeEmbedUrl,
+  youTubeThumbnailUrl,
   type OxDocument,
   type DirectiveNode,
+  type SwatchRegistry,
+  type SwatchRole,
 } from "oxmarkdown-core";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import { themeToStyle, type OxTheme } from "../oxmarkdown/theme";
@@ -95,21 +104,49 @@ export default function OxRenderer({
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
   const style = theme ? (themeToStyle(theme) as CSSProperties) : undefined;
 
+  // `::swatch{...}`/`::palette{...}` (`oxmarkdown-core/src/swatchDirective.ts`
+  // — see the "Oxmarkdown Colors" garden seed, Effort 3 — PORTED from the
+  // fruits copy, keep both in sync by hand same as every other rendering
+  // change here). Collected once per render; owned HERE rather than inside
+  // `OxTreeRenderer` so the generated `<style>` tag can be scoped to a
+  // selector unique to THIS `OxRenderer` instance's own real `.ox-content`
+  // element (a sanitized `useId()`-derived class) — a real page can mount
+  // more than one independent OxMarkdown document at once, and a shared/
+  // reused selector would let one document's own swatch silently clobber
+  // another's (see `buildSwatchStyleSheet`'s own comment for the full
+  // reasoning). Nothing else about this trimmed, read-only-render copy
+  // needs a Lexical/Editing-mode counterpart, unlike fruits.
+  const swatchScopeId = useId();
+  const swatchScopeClassName = `ox-swatch-scope-${swatchScopeId.replace(/[^a-zA-Z0-9]/g, "")}`;
+  const swatchRegistry = useMemo(() => collectSwatchRegistry(doc), [doc]);
+  const swatchStyleSheet = useMemo(
+    () => buildSwatchStyleSheet(swatchRegistry, `.${swatchScopeClassName}`),
+    [swatchRegistry, swatchScopeClassName],
+  );
+
   return (
-    <div
-      className={`ox-content ox-tokens${className ? ` ${className}` : ""}`}
-      style={style}
-    >
-      <div className="ox-dot-grid">
-        <OxTreeRenderer
-          doc={doc}
-          directives={directives}
-          interactive={interactive}
-          resolveCard={resolveCard}
-          resolveGalleryFolder={resolveGalleryFolder}
-        />
+    // `WebsiteFormProvider` -- see its own comment above -- wraps the
+    // WHOLE tree so any `:::box{form-id=...}`/`::button{form-id=...}`
+    // rendered anywhere inside shares ONE store scoped to this single
+    // `OxRenderer` instance.
+    <WebsiteFormProvider>
+      <div
+        className={`ox-content ox-tokens ${swatchScopeClassName}${className ? ` ${className}` : ""}`}
+        style={style}
+      >
+        {swatchStyleSheet && <style dangerouslySetInnerHTML={{ __html: swatchStyleSheet }} />}
+        <div className="ox-dot-grid">
+          <OxTreeRenderer
+            doc={doc}
+            directives={directives}
+            interactive={interactive}
+            resolveCard={resolveCard}
+            resolveGalleryFolder={resolveGalleryFolder}
+            swatchRegistry={swatchRegistry}
+          />
+        </div>
       </div>
-    </div>
+    </WebsiteFormProvider>
   );
 }
 
@@ -135,6 +172,97 @@ export const CardResolverContext = createContext<CardResolver | undefined>(undef
  * attachments do (e.g. that day's vault folder), not a second, divergent
  * upload path. */
 export const UploadFileContext = createContext<UploadFileFn | undefined>(undefined);
+
+/** A plain value a `form-id`/`select-group`/`field`-style attribute can
+ * write into and read back out -- see `websiteForms.tsx`'s `BoxDirective`/
+ * `WebsiteFormButton`. */
+export type WebsiteFormValue = string | string[];
+/** Per-document, keyed first by `form-id` then by whatever key that form's
+ * own elements use (`select-group` for a `box`, eventually a plain `field`
+ * name for some future `input` -- see the "Box Directive + Pricing Card UI
+ * Fix" garden seed's own future-payoff mockup). */
+export type WebsiteFormState = Record<string, Record<string, WebsiteFormValue>>;
+
+// Three plain, pure, ZERO-React functions -- the real update/read/payload
+// rules, kept directly unit-testable with no render/hook/DOM machinery at
+// all (same "zero React" testing philosophy `oxmarkdown-core`'s own
+// `swatchDirective.ts` uses, just kept local to this file since this
+// effort is fruits-only-originated but PORTED here too -- see the "Box
+// Directive + Pricing Card UI Fix" garden seed's Effort 3). `WebsiteFormProvider`
+// below is deliberately thin React wiring around these three, nothing more.
+
+/** Overwrites `(formId, key)`'s own value -- radio-style mutual exclusivity
+ * within one `select-group` falls out of this for free: every `box`
+ * sharing the same `(formId, selectGroup)` key reads the SAME single
+ * stored value, so setting a new one is already the entire "deselect every
+ * other option" rule, not a separate step. */
+export function setWebsiteFormValue(
+  state: WebsiteFormState,
+  formId: string,
+  key: string,
+  value: WebsiteFormValue,
+): WebsiteFormState {
+  return { ...state, [formId]: { ...state[formId], [key]: value } };
+}
+
+export function getWebsiteFormValue(
+  state: WebsiteFormState,
+  formId: string,
+  key: string,
+): WebsiteFormValue | undefined {
+  return state[formId]?.[key];
+}
+
+/** OxMarkdown's own scope stops here -- a plain POST of whatever `formId`
+ * has collected so far, as JSON, to a caller-supplied `action` URL.
+ * Whatever that endpoint actually does with it (email, CRM record, a
+ * scheduler redirect, ...) is explicitly out of scope (see the garden
+ * seed's resolved question 7). */
+export async function postWebsiteForm(state: WebsiteFormState, formId: string, action: string): Promise<void> {
+  await fetch(action, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(state[formId] ?? {}),
+  });
+}
+
+export type WebsiteFormApi = {
+  getValue(formId: string, key: string): WebsiteFormValue | undefined;
+  setValue(formId: string, key: string, value: WebsiteFormValue): void;
+  submit(formId: string, action: string): Promise<void>;
+};
+
+/** Option 4 ("centralized storage, not centralized building") of the "Box
+ * Directive + Pricing Card UI Fix" garden seed, Effort 2/3: the shared,
+ * page-level key-value FORM STORE independent directive instances
+ * (`:::box{form-id="..." select-group="..." value="..."}`, `::button
+ * {form-id="..." action="..."}`) write into and read from, without being
+ * literal siblings inside one wrapping directive. `undefined` (no
+ * Provider mounted) is a real, valid state -- a directive with no
+ * `form-id` at all behaves exactly as it did before this existed. */
+export const WebsiteFormContext = createContext<WebsiteFormApi | undefined>(undefined);
+
+/** Mounted ONCE per `OxRenderer` instance (see that component's own
+ * return statement) -- a plain `useState`-backed component naturally gets
+ * a fresh instance per mount, so two independent `OxRenderer`s on one
+ * page never share form state, same isolation `swatchRegistry`'s own
+ * per-instance scope class already has (see this file's header comment
+ * on `swatchScopeId`). */
+function WebsiteFormProvider({ children }: { children: ReactNode }) {
+  const [forms, setForms] = useState<WebsiteFormState>({});
+
+  const setValue = useCallback((formId: string, key: string, value: WebsiteFormValue) => {
+    setForms((prev) => setWebsiteFormValue(prev, formId, key, value));
+  }, []);
+
+  const getValue = useCallback((formId: string, key: string) => getWebsiteFormValue(forms, formId, key), [forms]);
+
+  const submit = useCallback((formId: string, action: string) => postWebsiteForm(forms, formId, action), [forms]);
+
+  const api = useMemo<WebsiteFormApi>(() => ({ getValue, setValue, submit }), [getValue, setValue, submit]);
+
+  return <WebsiteFormContext.Provider value={api}>{children}</WebsiteFormContext.Provider>;
+}
 
 /** Renders a plain list of mdast nodes with the same static logic as
  * `OxRenderer`/`OxTreeRenderer`, but with no `interactive` — used where
@@ -162,11 +290,16 @@ export interface OxTreeRendererProps {
   interactive?: OxInteractive;
   resolveCard?: CardResolver;
   resolveGalleryFolder?: GalleryFolderResolver;
+  /** The page's `::swatch`/`::palette` registry — see `oxmarkdown-core`'s
+   * `collectSwatchRegistry`. Supplied by `OxRenderer`, which both computes
+   * it and owns the scope selector its generated `<style>` tag targets
+   * (see that component's own comment). */
+  swatchRegistry?: SwatchRegistry;
 }
 
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
-export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder }: OxTreeRendererProps) {
+export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, swatchRegistry }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
   const ambiguousRefFirstNames = useMemo(() => collectAmbiguousRefFirstNames(doc), [doc]);
   return (
@@ -178,6 +311,7 @@ export function OxTreeRenderer({ doc, directives, interactive, resolveCard, reso
         resolveCard,
         resolveGalleryFolder,
         ambiguousRefFirstNames,
+        swatchRegistry,
       })}
     </>
   );
@@ -195,6 +329,8 @@ interface RenderCtx {
    * `collectAmbiguousRefFirstNames`), because a single `:ref` can't know
    * on its own whether its first name is unique. */
   ambiguousRefFirstNames?: Set<string>;
+  /** See `OxTreeRendererProps.swatchRegistry`. */
+  swatchRegistry?: SwatchRegistry;
 }
 
 /** Which first names are shared by two or more cited people in this
@@ -714,7 +850,110 @@ function renderGalleryGrid(
   );
 }
 
+/** Binds `ctx.swatchRegistry` into the shape a registered directive
+ * actually calls (`DirectiveRenderProps.resolveSwatchRole` — see
+ * `directiveRegistry.ts`) so a website-scoped registry entry
+ * (`websiteDirectives.tsx`'s `section`/`section-title`, today unchanged;
+ * a future `::box`, ...) never needs to import `oxmarkdown-core`'s
+ * `SwatchRegistry` type or handle "no registry at all" itself —
+ * `resolveSwatchRole` (core) already tolerates an `undefined` registry,
+ * always falling straight through to `fallback`. PORTED from the fruits
+ * copy. */
+/** The YouTube half of `::video{url="..."}` — a "lite embed" facade:
+ * renders a plain poster image + play button first, and only mounts the
+ * real `-nocookie` iframe once clicked. See the fruits copy's own comment
+ * for the full reasoning (page-load cost + doubling as the `poster`
+ * override mechanism). */
+function YouTubeFacade({ id, poster }: { id: string; poster?: string }) {
+  const [activated, setActivated] = useState(false);
+  if (activated) {
+    return (
+      <iframe
+        className="ox-video-media"
+        src={youTubeEmbedUrl(id)}
+        title="YouTube video player"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="ox-video-facade ox-video-media"
+      style={{ backgroundImage: `url(${poster ?? youTubeThumbnailUrl(id)})` }}
+      onClick={() => setActivated(true)}
+      aria-label="Play video"
+    >
+      <span className="ox-video-play" aria-hidden="true" />
+    </button>
+  );
+}
+
+/** `::video{url="..."}` (external, YouTube today) / `::video{fileId="..."}`
+ * (self-hosted, an ordinary vault file) — see the fruits copy's own
+ * comment and `oxmarkdown-core/videoDirective.ts` for the full scope/
+ * rules. `url` wins when both are given; renders nothing when neither
+ * resolves. */
+function VideoDirectiveStatic({ node, directives }: { node: DirectiveNode; directives?: DirectiveRegistry }) {
+  const attrs = directiveAttrs(node);
+  const orientation = parseVideoOrientation(attrs.orientation);
+  const captionDoc = attrs.caption ? parseOxDocument(attrs.caption) : null;
+
+  let media: ReactNode;
+  if (attrs.url) {
+    const youTubeId = parseYouTubeId(attrs.url);
+    if (!youTubeId) return null;
+    media = <YouTubeFacade id={youTubeId} poster={attrs.poster} />;
+  } else if (attrs.fileId) {
+    if (attrs.contentType && !attrs.contentType.startsWith("video/")) return null;
+    media = (
+      <video
+        className="ox-video-media"
+        src={`/api/vault/view/${attrs.fileId}`}
+        poster={attrs.poster}
+        controls
+        preload="metadata"
+      />
+    );
+  } else {
+    return null;
+  }
+
+  return (
+    <div className="ox-video-directive" data-orientation={orientation} contentEditable={false}>
+      {media}
+      {captionDoc && (
+        <div className="ox-video-caption">
+          <OxStaticNodes nodes={captionDoc.children} directives={directives} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function boundResolveSwatchRole(ctx: RenderCtx) {
+  return (opts: { role: SwatchRole; explicit?: string; palette?: string; fallback?: string }): string | undefined =>
+    resolveSwatchRole({ ...opts, registry: ctx.swatchRegistry });
+}
+
 function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): ReactNode {
+  // `::swatch{...}`/`::palette{...}` — the shared color-theming framework
+  // (`oxmarkdown-core/src/swatchDirective.ts`, see the "Oxmarkdown Colors"
+  // garden seed). Registering one is a pure side effect of a document
+  // containing it (collected once, up front, by `OxRenderer` via
+  // `collectSwatchRegistry` — see that component's own comment); these
+  // directives themselves always render NOTHING, wherever they appear —
+  // including nested inside a container directive's own body, where
+  // (round 13 of the garden seed) they still render nothing but are never
+  // actually collected into the registry either. Handled here, before the
+  // registry lookup, so they can never be shadowed by (or fall through to
+  // the generic "unknown directive" marker because of) a caller's own
+  // registry having no "swatch"/"palette" entry.
+  if (node.type === "leafDirective" && (node.name === "swatch" || node.name === "palette")) {
+    return null;
+  }
+
   // `::file{...}` is a BUILT-IN interactable, not a caller-registered
   // directive (same category as task checkboxes, not "gallery"/"csv-table")
   // — see `oxmarkdown/fileDirective.ts`'s header. Handled before the
@@ -856,6 +1095,18 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     );
   }
 
+  // `::video{url="..."}` / `::video{fileId="..."}` — same built-in category
+  // as `::file`/`::gallery` above, PORTED from the fruits copy (keep both
+  // in sync by hand, same as every other rendering change here) — see
+  // that copy's own comment and `oxmarkdown-core/videoDirective.ts` for
+  // the full scope/rules. No `mediaUrls.ts`/rendition-sizing equivalent
+  // exists in this trimmed copy, so a self-hosted video's `poster` is
+  // whatever the `poster="..."` attribute gives (or nothing at all) —
+  // never auto-derived the way the app copy can.
+  if (node.type === "leafDirective" && node.name === "video") {
+    return <VideoDirectiveStatic key={key} node={node} directives={ctx.directives} />;
+  }
+
   const attrs = directiveAttrs(node);
   const renderer = ctx.directives?.[node.name];
 
@@ -867,7 +1118,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
     // Not interactive yet — nested-interactable selection inside a container
     // is TODO 5 in the oxmarkdown skill, deferred until Editing mode exists.
     if (!renderer) return <Fragment key={key}>{rendered}</Fragment>;
-    const registered = renderer({ attrs, label: null, children: rendered });
+    const registered = renderer({ attrs, label: null, children: rendered, resolveSwatchRole: boundResolveSwatchRole(ctx) });
     // Attach `key` directly onto the registry's OWN returned element via
     // `cloneElement`, rather than wrapping it in another `<Fragment
     // key={key}>` (as this used to, unconditionally) -- a `<Fragment>`
@@ -886,7 +1137,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
   }
 
   const content = renderer ? (
-    renderer({ attrs, label: null })
+    renderer({ attrs, label: null, resolveSwatchRole: boundResolveSwatchRole(ctx) })
   ) : node.type === "leafDirective" ? (
     <div className="ox-directive-unknown ox-directive-unknown--block">
       Unknown block: ::{node.name}

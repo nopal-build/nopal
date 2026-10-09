@@ -15,7 +15,7 @@
 // yet. `resolveProjectManifest` never fails closed (see its own doc), so
 // anyone who can view this folder always sees this route; there's no
 // redirect-to-vault fallback to worry about missing here.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, redirect, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { useCallback, useMemo, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
@@ -72,6 +72,10 @@ import { Cluster } from "stamps/Cluster";
 import { Stack } from "stamps/Stack";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? `O.No · ${data.project.manifest.title ?? data.folder.name}` : "O.No" },
+];
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getUser(request);

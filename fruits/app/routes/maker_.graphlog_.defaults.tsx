@@ -4,7 +4,7 @@
 // split out from /maker/graphlog for the same reason PhyLog's own
 // defaults editor is split from its usage dashboard. Admin/Super only,
 // same gate.
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -30,6 +30,8 @@ import {
 } from "robustness-core/data/graphLogDefaults.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { navFor } from "../data/nav.server";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.GraphLog" }];
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);

@@ -32,7 +32,7 @@
 // keep this in sync with the real `buildWebsiteDirectiveRegistry`
 // vocabulary, don't let it drift into its own separate list.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, data, redirect, useFetcher, useLoaderData, useRouteError, useSearchParams, isRouteErrorResponse } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import {
@@ -81,6 +81,8 @@ async function requireMakerAccess(request: Request) {
   }
   return user;
 }
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.S.Scratch Pad" }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
@@ -289,9 +291,11 @@ type TracingPaper = {
   /** What it's for / how it's currently implemented -- markdown, rendered
    * through OxRenderer (`InfoText`) same as the live preview itself. */
   note: string;
-  /** Sections/pricing-cards render their own full-bleed background and
-   * padding — let that reach the preview box's own edge instead of
-   * double-padding it. Everything else gets the box's normal padding. */
+  /** Sections render their own full-bleed background and padding -- let
+   * that reach the preview box's own edge instead of double-padding it.
+   * Everything else (including `:::box{...}`, which carries its own real
+   * margin by design -- see the garden seed's resolved question 5) gets
+   * the preview box's normal padding. */
   fullBleed?: boolean;
   /** A directive whose own layout is `position: absolute` (`::line{...}`
    * on its own, with no `:::section-title{...}` around it to supply real
@@ -318,6 +322,36 @@ const ACCENT_COLOR_OPTIONS: TracingPaperSelectOption[] = [
   { value: "purple" },
 ];
 
+/** Demo-only `::swatch{...}` definitions this guide itself prepends
+ * ahead of any paper that reads `color=`/`palette=` -- NOT a built-in
+ * default vocabulary (there isn't one anymore, by design -- round 11 of
+ * the "Oxmarkdown Colors" garden seed). This is the exact same thing any
+ * real implementer does for their own page (a shared `_theme.md`, say),
+ * just inlined here so `ACCENT_COLOR_OPTIONS`' dropdown values above
+ * continue to resolve to a real, visible color instead of nothing. */
+const DEMO_COLOR_SWATCHES = `::swatch{role="color" name="red" light="var(--red)" dark="var(--red-light)"}
+::swatch{role="color" name="green" light="var(--green)" dark="var(--green-light)"}
+::swatch{role="color" name="purple" light="var(--purple)" dark="var(--purple)"}
+`;
+
+/** Same idea as `DEMO_COLOR_SWATCHES`, for the Section paper's `surface=`
+ * dropdown below -- `mint`/`white` match this directive's own OLD,
+ * now-retired `bg=` enum exactly (identical real values -- see
+ * `website.css`'s own "RETIRED" comment for the history), so the demo
+ * looks identical to before despite the underlying mechanism changing
+ * entirely underneath it. */
+const DEMO_SURFACE_SWATCHES = `::swatch{role="surface" name="mint" light="var(--cactus-100)" dark="var(--cactus-800)"}
+::swatch{role="surface" name="white" light="var(--white)" dark="var(--purple-light)"}
+`;
+
+/** Same idea again, for the Box paper's `border=` dropdown -- a SEPARATE
+ * role namespace from `DEMO_SURFACE_SWATCHES` above (a swatch is keyed by
+ * `(role, name)` together, so reusing plain color names like `green`/
+ * `purple` under `role="border"` here doesn't collide with anything). */
+const DEMO_BOX_BORDER_SWATCHES = `::swatch{role="border" name="green" light="var(--green)" dark="var(--green-light)"}
+::swatch{role="border" name="purple" light="var(--purple)" dark="var(--purple)"}
+`;
+
 /** Every registered `::icon{name="..."}`/`:::section-title{icon="..."}`
  * name, grouped into a "Files" and a "Placeholders" `<optgroup>` -- see
  * `websiteIcons.tsx`'s own `WEBSITE_ICON_FILE_NAMES`/
@@ -334,13 +368,13 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "section",
     name: "Section",
-    directive: ':::section{bg="..." list="..." margin="N"}',
-    note: "Container -- a themeable area, not a fully bespoke one: a handful of independent knobs, not complete control over every style. `bg` picks a full-bleed background class (`mint`/`white`, each aliasing an existing palette token — see `website.css`; both have real dark-mode counterparts of their own, `--cactus-800`/`--purple-light` -- leaving `bg` unset shows the page's own resting background through instead, reading as blended-in/invisible rather than a distinct band); `list` optionally swaps in a NAMED bullet style for the body's own lists (`timeline` today — a small dot + connecting line, not just a tint); `margin` adds extra top/bottom breathing room around the section as a MULTIPLE of the shared `--ox-grid` unit (41px today), e.g. `margin=\"2\"` = `82px` -- negative numbers pull an adjacent section closer instead. Body renders through the ordinary OxRenderer pipeline otherwise — nothing else section-specific about the heading/paragraph/list styling itself, including heading COLOR: a section's own headings just read the ordinary default text color -- reach for the Section title paper (below) instead when a heading specifically needs to stand out.",
+    directive: ':::section{surface="..." palette="..." list="timeline" margin="N"}',
+    note: "Container -- a themeable area, not a fully bespoke one: a handful of independent knobs, not complete control over every style. `surface`/`palette` resolve against the page's own `::swatch`/`::palette` registry — an OPEN vocabulary the page/theme author defines (see the \"Oxmarkdown Colors\" garden seed), not a fixed `mint`/`white` enum anymore. THIS demo prepends two small `::swatch{role=\"surface\" ...}` definitions (`mint`/`white`, matching the old enum's own real values) ahead of the directive below, purely so the dropdown continues to show something real -- a real page does the exact same thing in its own shared theme file (e.g. `_theme.md`). Leaving `surface`/`palette` both unset shows the page's own resting background through instead, reading as blended-in/invisible rather than a distinct band. `list` optionally swaps in a NAMED bullet style for the body's own lists (`timeline` today — a small dot + connecting line, not just a tint); `margin` adds extra top/bottom breathing room around the section as a MULTIPLE of the shared `--ox-grid` unit (41px today), e.g. `margin=\"2\"` = `82px` -- negative numbers pull an adjacent section closer instead. Body renders through the ordinary OxRenderer pipeline otherwise — nothing else section-specific about the heading/paragraph/list styling itself, including heading COLOR: a section's own headings just read the ordinary default text color -- reach for the Section title paper (below) instead when a heading specifically needs to stand out.",
     fullBleed: true,
     attributes: [
       {
-        key: "bg",
-        label: "bg",
+        key: "surface",
+        label: "surface",
         kind: "select",
         default: "mint",
         options: [{ value: "", label: "(none, transparent)" }, { value: "mint" }, { value: "white" }],
@@ -355,8 +389,8 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "margin", label: "margin (x grid unit)", kind: "text", default: "", placeholder: "e.g. 2" },
     ],
     buildMarkdown: (v) => {
-      const attrs = [v.bg && `bg="${v.bg}"`, v.list && `list="${v.list}"`, v.margin && `margin="${v.margin}"`].filter(Boolean).join(" ");
-      return `:::section{${attrs}}
+      const attrs = [v.surface && `surface="${v.surface}"`, v.list && `list="${v.list}"`, v.margin && `margin="${v.margin}"`].filter(Boolean).join(" ");
+      return `${DEMO_SURFACE_SWATCHES}:::section{${attrs}}
 ## At a Cost
 
 - We favored synthetic materials for their higher performance metrics.
@@ -393,17 +427,11 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "icon",
     name: "Icon",
-    directive: '::icon{name="..." size="sm|md|lg" id="..." position="x,y"}',
-    note: 'Leaf. Checks real file-based assets first (**Files**, below), then a small set of inline-drawn placeholder shapes (**Placeholders**), then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** drop a new SVG under `public/guides/`, then add one `{name: path}` entry to `WEBSITE_ICON_FILES` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.\n\n**`position="x,y"` (optional):** absolutely positions the icon instead of leaving it inline -- its OWN normalized `x` 0-100 / `y` 0-40 coordinate box (deliberately DIFFERENT from `::line{points="..."}`\'s own literal-pixel one, below -- placing a single point has no "shape" for x/y to distort the way a multi-point line does, so a plain percentage is still the simpler, right choice here), same anchor-letter (`L`/`C`/`R`/`T`/`C`/`B`) + plain-delta vocabulary, resolved to a single CSS `left`/`top` percentage pair instead of an SVG path. Only has a visible effect when its container is `position: relative` -- `:::section{...}`\'s own body (`.website-section-inner`) already is, for its first real use; try e.g. `R4,T4` to tuck it into a section\'s own top-right corner (4% in from each edge).',
+    directive: '::icon{name="..." size="sm|md|lg|#" id="..." position="x,y"}',
+    note: 'Leaf. Checks real file-based assets first (**Files**, below), then a small set of inline-drawn placeholder shapes (**Placeholders**), then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** drop a new SVG under `public/guides/`, then add one `{name: path}` entry to `WEBSITE_ICON_FILES` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.\n\n**`size`:** `sm`/`md`/`lg` are named presets (20px/32px/64px); any other plain number is a literal pixel width instead — try `48` here.\n\n**`position="x,y"` (optional):** absolutely positions the icon instead of leaving it inline -- the SAME literal-pixel, real-measured-container-edge anchor system `::line{points="..."}`/`::path{points="..."}` use below (see the Line paper\'s own note for the full grammar): a plain number is a pixel DELTA from `(0, 0)`, a reference letter (`L`/`C`/`R` for x, `T`/`C`/`B` for y) plus optional offset is an ANCHOR resolved against this icon\'s own real measured container size on every resize (`ResizeObserver`), not a fixed nominal box. An anchor is also EDGE/CENTER-AWARE of the ICON\'s own real measured size -- `R4,T4` tucks the icon\'s own top-RIGHT corner 4px in from a section\'s top-right corner (not its top-left corner sitting there and overflowing further right), and `C0,C0` centers the icon exactly, no hand math needed. Only has a visible effect when its container is `position: relative` -- `:::section{...}`\'s own body (`.website-section-inner`) already is, for its first real use.',
     attributes: [
       { key: "name", label: "name", kind: "select", default: "sun-home", options: ICON_NAME_OPTIONS },
-      {
-        key: "size",
-        label: "size",
-        kind: "select",
-        default: "lg",
-        options: [{ value: "sm" }, { value: "md" }, { value: "lg" }],
-      },
+      { key: "size", label: "size (sm|md|lg|#)", kind: "text", default: "lg", placeholder: "e.g. lg or 48" },
       { key: "position", label: "position (x,y)", kind: "text", default: "", placeholder: "e.g. R4,T4" },
     ],
     buildMarkdown: (v) => `::icon{name="${v.name}" size="${v.size}"${v.position ? ` position="${v.position}"` : ""}}`,
@@ -423,15 +451,36 @@ const TRACING_PAPERS: TracingPaper[] = [
     id: "waypoint",
     name: "Waypoint",
     directive: '::waypoint{id="..."}',
-    note: "Leaf, invisible on purpose — a zero-size anchor (`data-waypoint-id`) for the not-yet-built wavy connector overlay to measure. Nothing to see here today (that's the point); included so the directive's own markup is visible in the DOM. Needs its own line, same as any leaf directive — embedded mid-sentence it doesn't parse as a directive at all, just literal text.",
+    note: "Leaf, invisible on purpose — a zero-size anchor (`data-waypoint-id`) for `::trail{waypoints=\"...\"}` (see the Trail paper, next) to measure. Nothing to see here today (that's the point); included so the directive's own markup is visible in the DOM. Needs its own line, same as any leaf directive — embedded mid-sentence it doesn't parse as a directive at all, just literal text. Only needed when nothing else is already sitting at the spot a trail should pass through — `::stamp{id=\"...\"}`/`::icon{id=\"...\"}` already carry `data-waypoint-id` via their own `id`, no separate `::waypoint` needed alongside one of those (see the Trail paper's own demo, which uses `::icon{id=\"...\"}` for exactly this reason).",
     attributes: [{ key: "id", label: "id", kind: "text", default: "p1" }],
-    buildMarkdown: (v) => `Some text before.\n\n::waypoint{id="${v.id}"}\n\nAnd after.`,
+    buildMarkdown: (v) => `::waypoint{id="${v.id}"}\n\nAnd after.`,
+  },
+  {
+    id: "trail",
+    name: "Trail",
+    directive: '::trail{waypoints="p1, p2, p3" curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}',
+    previewMinHeight: 160,
+    note: 'Leaf. The SAME wavy-line primitive as `::line`/`::path`, but its points come from LIVE DOM MEASUREMENT instead of any fixed coordinates: `waypoints` is a comma-separated list of ids, each referring to some OTHER element\'s own `data-waypoint-id` elsewhere on the page -- a bare `::waypoint{id="..."}` anchor, or `id` on a `::stamp{...}`/`::icon{...}` (which already carry `data-waypoint-id` for free). This demo uses three small `::icon{name="circle" position="..."}` placeholders (`p1`/`p2`/`p3`) as its waypoints, rather than invisible `::waypoint{...}` anchors, so there\'s something to SEE at each end of the trail, not just the connecting line itself -- `p2` is deliberately offset well clear of the straight line between `p1`/`p3` (bowed out toward the right edge, not sitting at the diagonal\'s own midpoint) so the default `curve="smooth"` has visible room to swoop through it, rather than drawing what would otherwise look like a plain straight segment. Connects them, IN THE ORDER LISTED, through each one\'s own live center point, re-measured on every real resize (drag this browser window and watch the trail follow the dots -- genuinely different from `::line`/`::path`\'s fixed points, which never look at the DOM at all). Try removing `p2` from `waypoints` (or typing in a made-up id) -- an id with no matching element on the page is silently skipped, same "missing asset doesn\'t break the page" spirit `::icon`\'s unregistered-name fallback has, though here it just means one fewer point. No anchor/delta grammar here (nothing to anchor against but the waypoints themselves); `curve`/`tension` behave exactly as they do on `::line` below. `color`/`palette` resolve against the page\'s own `::swatch`/`::palette` registry (an OPEN vocabulary -- see the "Oxmarkdown Colors" garden seed); this demo prepends its own small `::swatch{role="color" ...}` set so `red`/`green`/`purple` below still resolve to something real.',
+    attributes: [
+      { key: "waypoints", label: "waypoints", kind: "text", default: "p1,p2,p3", placeholder: "p1, p2, p3" },
+      {
+        key: "curve",
+        label: "curve",
+        kind: "select",
+        default: "smooth",
+        options: [{ value: "smooth" }, { value: "straight" }, { value: "bezier" }],
+      },
+      { key: "tension", label: "tension (0-1)", kind: "text", default: "0.5" },
+      { key: "color", label: "color", kind: "select", default: "red", options: ACCENT_COLOR_OPTIONS },
+    ],
+    buildMarkdown: (v) =>
+      `${DEMO_COLOR_SWATCHES}::icon{name="circle" size="sm" id="p1" position="L4,T4"}\n::icon{name="circle" size="sm" id="p2" position="R40,C-10"}\n::icon{name="circle" size="sm" id="p3" position="R24,B24"}\n::trail{waypoints="${v.waypoints}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
   },
   {
     id: "line",
     name: "Line",
-    directive: '::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
-    note: 'Leaf. The shared wavy-line primitive (`WavyLine.tsx` + `oxmarkdown-core`\'s `buildSplinePath`) in its fixed-points mode. "A line is drawn from one end to the other": a cursor starts at the line\'s own top-left corner and walks forward, per-axis, per point, in LITERAL PIXELS -- a REVERSED design from an earlier normalized-then-rescaled-to-container version, which made the same numbers look different (often distorted) depending on the container they rendered inside; see `oxmarkdown-core`\'s `wavyLine.ts` header for the full reasoning. Each half of a pair is either a plain number (a DELTA -- moves the cursor by that amount, in real px, cumulative, NEVER rescaled by the container) or a reference letter plus optional offset (an ANCHOR, referenced to the container\'s own REAL measured edge instead of the previous point -- this one IS container-size-dependent, on purpose): `L`/`C`/`R` for x, `T`/`C`/`B` for y (same CSS-inset convention as `top`/`right`/`bottom`/`left` -- `T`/`L` add away from that edge, `B`/`R` subtract inward from it, `C` adds past center -- the offset itself is a literal pixel inset, not a percentage). Anchors and deltas mix freely, per axis, at any point. Sized to exactly fit the resulting path\'s own bounding box, recomputed on every real resize ONLY to re-resolve any anchor letters against the container\'s new real size (`ResizeObserver`, not a passive `preserveAspectRatio` stretch) -- plain deltas never change. `color` sets the stroke directly; omit it and the line inherits `currentColor` instead. Needs a positioned ancestor with real height to draw into -- this row\'s own preview box supplies that; `:::section-title{...}` supplies it for the paper below. Try the "SVG \u2192 Points" tool (see the sidebar\'s own "Tools" section) to trace a real shape into this syntax instead of hand-guessing numbers.',
+    directive: '::line{points="x,y x,y ..." curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}',
+    note: 'Leaf. The shared wavy-line primitive (`WavyLine.tsx` + `oxmarkdown-core`\'s `buildSplinePath`) in its fixed-points mode. "A line is drawn from one end to the other": a cursor starts at the line\'s own top-left corner and walks forward, per-axis, per point, in LITERAL PIXELS -- a REVERSED design from an earlier normalized-then-rescaled-to-container version, which made the same numbers look different (often distorted) depending on the container they rendered inside; see `oxmarkdown-core`\'s `wavyLine.ts` header for the full reasoning. Each half of a pair is either a plain number (a DELTA -- moves the cursor by that amount, in real px, cumulative, NEVER rescaled by the container) or a reference letter plus optional offset (an ANCHOR, referenced to the container\'s own REAL measured edge instead of the previous point -- this one IS container-size-dependent, on purpose): `L`/`C`/`R` for x, `T`/`C`/`B` for y (same CSS-inset convention as `top`/`right`/`bottom`/`left` -- `T`/`L` add away from that edge, `B`/`R` subtract inward from it, `C` adds past center -- the offset itself is a literal pixel inset, not a percentage). Anchors and deltas mix freely, per axis, at any point. Sized to exactly fit the resulting path\'s own bounding box, recomputed on every real resize ONLY to re-resolve any anchor letters against the container\'s new real size (`ResizeObserver`, not a passive `preserveAspectRatio` stretch) -- plain deltas never change. `color`/`palette` resolve against the page\'s own `::swatch`/`::palette` registry (an OPEN vocabulary the page/theme author defines -- see the "Oxmarkdown Colors" garden seed; this demo prepends its own small `::swatch{role="color" ...}` set so `red`/`green`/`purple` below still resolve to something real) and set the stroke directly; omit `color`/leave it unresolved and the line inherits `currentColor` instead. Needs a positioned ancestor with real height to draw into -- this row\'s own preview box supplies that; `:::section-title{...}` supplies it for the paper below. Try the "SVG → Points" tool (see the sidebar\'s own "Tools" section) to trace a real shape into this syntax instead of hand-guessing numbers.',
     previewMinHeight: 100,
     attributes: [
       { key: "points", label: "points", kind: "text", default: "L0,B4 C5,B16 R0,B4", placeholder: "x,y x,y ..." },
@@ -446,13 +495,13 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "color", label: "color", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
     ],
     buildMarkdown: (v) =>
-      `::line{points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
+      `${DEMO_COLOR_SWATCHES}::line{points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
   },
   {
     id: "path",
     name: "Path",
-    directive: '::path{points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
-    note: 'Leaf. The SAME wavy-line primitive as `::line`, `points` parsed with the exact same delta/anchor grammar -- but DECOUPLES the traced shape\'s own natural proportions from how big it renders and where it sits, which `::line` bakes directly into the points themselves. Built for tracing a real, complex SVG shape (try the "SVG \u2192 Points" tool, in the sidebar\'s own "Tools" section) once, then resizing/repositioning it freely without re-baking numbers. `width`/`height` (each optional, independent) -- a plain number is literal px, a trailing `%` is a percentage of `::path`\'s own real measured container size, resolved fresh on every real resize (try dragging this browser window narrower with `width="40%"` set below -- the shape genuinely rescales, unlike anything `::line` can do). ALWAYS a uniform scale (the shape\'s own proportions are never independently stretched) -- give only one axis and the other follows proportionally; give both and it fits inside whichever constrains more. `start="x,y"` positions the (possibly-scaled) shape\'s own bounding-box top-left corner, using the SAME anchor/delta vocabulary as a single `points="..."` pair -- omit it and the shape renders at wherever its own resolved `points` naturally placed it.',
+    directive: '::path{points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}',
+    note: 'Leaf. The SAME wavy-line primitive as `::line`, `points` parsed with the exact same delta/anchor grammar -- but DECOUPLES the traced shape\'s own natural proportions from how big it renders and where it sits, which `::line` bakes directly into the points themselves. Built for tracing a real, complex SVG shape (try the "SVG → Points" tool, in the sidebar\'s own "Tools" section) once, then resizing/repositioning it freely without re-baking numbers. `width`/`height` (each optional, independent) -- a plain number is literal px, a trailing `%` is a percentage of `::path`\'s own real measured container size, resolved fresh on every real resize (try dragging this browser window narrower with `width="40%"` set below -- the shape genuinely rescales, unlike anything `::line` can do). ALWAYS a uniform scale (the shape\'s own proportions are never independently stretched) -- give only one axis and the other follows proportionally; give both and it fits inside whichever constrains more. `start="x,y"` positions the (possibly-scaled) shape\'s own bounding box using the SAME anchor/delta vocabulary as a single `points="..."` pair, and an anchor is EDGE/CENTER-AWARE of the shape\'s OWN already-scaled size -- `start="C0,T10"` (the default below) puts the shape\'s own top-CENTER at the container\'s horizontal center, 10px down, not its top-left corner. Omit `start` and the shape renders at wherever its own resolved `points` naturally placed it.',
     previewMinHeight: 120,
     attributes: [
       { key: "points", label: "points", kind: "text", default: "0,0 10,-15 22,4 34,-18 46,0", placeholder: "x,y x,y ..." },
@@ -470,13 +519,13 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "color", label: "color", kind: "select", default: "purple", options: ACCENT_COLOR_OPTIONS },
     ],
     buildMarkdown: (v) =>
-      `::path{points="${v.points}"${v.width ? ` width="${v.width}"` : ""}${v.height ? ` height="${v.height}"` : ""}${v.start ? ` start="${v.start}"` : ""} curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
+      `${DEMO_COLOR_SWATCHES}::path{points="${v.points}"${v.width ? ` width="${v.width}"` : ""}${v.height ? ` height="${v.height}"` : ""}${v.start ? ` start="${v.start}"` : ""} curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}`,
   },
   {
     id: "line-word",
     name: "Line word",
-    directive: ':line-word{text="..." points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="red|green|purple"}',
-    note: 'A TEXT directive (single colon) -- sits INLINE, mid-sentence, unlike every leaf/container directive above. Wraps `text` in an inline-block, `position: relative` span and draws the SAME `WavyLine` primitive as `::line`/`::path` BEHIND it (`z-index: -1`, `website.css`) -- a hand-drawn squiggle/underline decorating one word or short phrase, sized to that word\'s own real rendered box. `points`/`width`/`height`/`start`/`curve`/`tension`/`color` all behave EXACTLY like `::path{...}` -- see that entry above for the full grammar; the only new attribute is `text`, the literal word/phrase to render (a plain attribute, not bracket-label content). Try editing `text` to something longer/shorter -- the default `points` uses `L`/`R` anchors, so the underline automatically re-spans the word\'s own new width, no manual re-tracing needed. NOTE on the default `points` own `T` values: this preview\'s own paragraph line-height (`--ox-grid`, 41px) is taller than the actual glyphs (measured ~21px, roughly centered inside it), so `T33`/`T39` were tuned by DIRECTLY measuring where the visible text really sits here, not guessed from the line-height alone -- expect to retune both numbers by hand for a real page with different type/line-height.',
+    directive: ':line-word{text="..." points="x,y x,y ..." width="#|#%" height="#|#%" start="x,y" curve="smooth|straight|bezier" tension="0-1" color="..." palette="..."}',
+    note: 'A TEXT directive (single colon) -- sits INLINE, mid-sentence, unlike every leaf/container directive above. Wraps `text` in an inline-block, `position: relative` span and draws the SAME `WavyLine` primitive as `::line`/`::path` BEHIND it (`z-index: -1`, `website.css`) -- a hand-drawn squiggle/underline decorating one word or short phrase, sized to that word\'s own real rendered box. `points`/`width`/`height`/`start`/`curve`/`tension`/`color`/`palette` all behave EXACTLY like `::path{...}` -- see that entry above for the full grammar (including the open `::swatch`/`::palette`-backed vocabulary `color`/`palette` now read); the only new attribute is `text`, the literal word/phrase to render (a plain attribute, not bracket-label content). Try editing `text` to something longer/shorter -- the default `points` uses `L`/`R` anchors, so the underline automatically re-spans the word\'s own new width, no manual re-tracing needed. NOTE on the default `points` own `T` values: this preview\'s own paragraph line-height (`--ox-grid`, 41px) is taller than the actual glyphs (measured ~21px, roughly centered inside it), so `T33`/`T39` were tuned by DIRECTLY measuring where the visible text really sits here, not guessed from the line-height alone -- expect to retune both numbers by hand for a real page with different type/line-height.',
     attributes: [
       { key: "text", label: "text", kind: "text", default: "waterproof jacket" },
       { key: "points", label: "points", kind: "text", default: "L0,T33 C0,T39 R0,T33", placeholder: "x,y x,y ..." },
@@ -491,45 +540,66 @@ const TRACING_PAPERS: TracingPaper[] = [
       { key: "color", label: "color", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
     ],
     buildMarkdown: (v) =>
-      `Take the early :line-word{text="${v.text}" points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}.`,
+      `${DEMO_COLOR_SWATCHES}Take the early :line-word{text="${v.text}" points="${v.points}" curve="${v.curve}" tension="${v.tension}"${v.color ? ` color="${v.color}"` : ""}}.`,
   },
   {
     id: "section-title",
     name: "Section title",
-    directive: ':::section-title{icon="..." color="red|green|purple"}',
-    note: "Container. An icon + a real heading + (usually) a `::line{...}` composed as one titled-header unit -- see `website.css`'s `.website-section-title`. The heading stays real markdown inside it, so an unaware renderer just shows a plain heading, no visible artifact. `color` recolors JUST the heading text (same named-color vocabulary as `:::section`'s `accent`) -- it does NOT also recolor a nested `::line{...}` (try changing `color` here and watch the line stay green regardless), which needs its own, independent `color` attribute since it has to work standalone too.",
+    directive: ':::section-title{icon="..." color="..." h-color="..." palette="..."}',
+    note: "Container. An icon + a real heading + (usually) a `::line{...}` composed as one titled-header unit -- see `website.css`'s `.website-section-title`. The heading stays real markdown inside it, so an unaware renderer just shows a plain heading, no visible artifact. `color` is a BASE text color that reaches everything inside (ordinary CSS inheritance, including the heading); `h-color`, when given, is a MORE SPECIFIC override that wins only for heading tags -- try setting both to different swatch names below and watch `h-color` win for the heading while `color` alone would still apply to it otherwise (same 'ancestor value vs. a more specific descendant rule' relationship CSS's own cascade already has -- see the \"Oxmarkdown Colors\" garden seed, round 13). Both resolve against the page's own `::swatch`/`::palette` registry -- the SAME registry/role `::line{color=\"...\"}` below reads, so give both the same name on purpose to keep a heading and a nearby line in sync (try it: this paper's own `::line` below is hardcoded to `color=\"green\"`). `color`/`h-color` do NOT also recolor that nested `::line{...}`; it needs its own, independent `color` attribute since it has to work standalone too.",
     fullBleed: true,
     attributes: [
       { key: "icon", label: "icon", kind: "select", default: "mountaineer-coffee", options: ICON_NAME_OPTIONS },
       { key: "color", label: "color", kind: "select", default: "green", options: ACCENT_COLOR_OPTIONS },
+      { key: "h-color", label: "h-color (heading override)", kind: "select", default: "", options: ACCENT_COLOR_OPTIONS },
       { key: "heading", label: "heading text", kind: "text", default: "At a Cost" },
     ],
-    buildMarkdown: (v) => `:::section-title{icon="${v.icon}"${v.color ? ` color="${v.color}"` : ""}}
+    buildMarkdown: (v) => `${DEMO_COLOR_SWATCHES}:::section-title{icon="${v.icon}"${v.color ? ` color="${v.color}"` : ""}${v["h-color"] ? ` h-color="${v["h-color"]}"` : ""}}
 ::line{points="L1,B0 R16,B10 R0,B0" curve="smooth" tension="0.4" color="green"}
 ## ${v.heading}
 :::`,
   },
   {
-    id: "pricing-card",
-    name: "Pricing card",
-    directive: ':::pricing-card{name="..." price="..." cta="..." cta-href="..." cta-variant="primary|purple|secondary|yellow|outline"}',
-    note: "Container. Header row (name + price) + body (ordinary children, typically a bullet list) + an optional CTA rendered through the same `stamps/button.css` `button({ variant })` recipe as a standalone `::button` (`cta-variant`, default `primary`).",
+    id: "box",
+    name: "Box",
+    directive: ':::box{surface="..." border="..." palette="..."}',
+    note: "Container. A generic bordered container (border/radius/padding/background only) -- composes with plain markdown + other directives for everything else, UNLIKE the now-retired `:::pricing-card{...}`'s bespoke header/CTA structure (see the Flex/Button/Badge papers for how that composition actually looks). `surface`/`border`/`palette` resolve against the page's own `::swatch`/`::palette` registry -- the SAME open vocabulary `:::section{surface=\"...\"}` above uses. THIS demo prepends small `::swatch{role=\"surface\"/\"border\" ...}` definitions ahead of the directive below, same convention the Section paper already uses. NO margin of its own -- a box's own vertical spacing is the author's call via blank lines, same as every other block.",
     attributes: [
-      { key: "name", label: "name", kind: "text", default: "Light-Guide" },
-      { key: "price", label: "price", kind: "text", default: "$1,499/mo" },
-      { key: "cta", label: "cta", kind: "text", default: "Meet with a Guide" },
+      { key: "surface", label: "surface", kind: "select", default: "", options: [{ value: "", label: "(default card color)" }, { value: "mint" }, { value: "white" }] },
+      { key: "border", label: "border", kind: "select", default: "", options: [{ value: "", label: "(default)" }, { value: "green" }, { value: "purple" }] },
+      { key: "content", label: "content", kind: "text", default: "Some content inside the box." },
     ],
-    buildMarkdown: (v) => `:::pricing-card{name="${v.name}" price="${v.price}" cta="${v.cta}" cta-href="#"}
-- Everything in Self-Guide and...
-- Three 90 minute meetings
-- One report
+    buildMarkdown: (v) => `${DEMO_SURFACE_SWATCHES}${DEMO_BOX_BORDER_SWATCHES}:::box{${v.surface ? `surface="${v.surface}" ` : ""}${v.border ? `border="${v.border}"` : ""}}
+${v.content}
+:::`,
+  },
+  {
+    id: "flex",
+    name: "Flex",
+    directive: ':::flex{justify="space-between|flex-start|flex-end|center"}',
+    note: "Container. Lays out its own direct block children in a single flex row (`justify` default `space-between`) -- e.g. a title + a price side by side. This is the EXACT title+price row the now-retired `:::pricing-card{...}`'s own header baked in, factored out here as its own reusable primitive -- deliberately the simpler sibling of `:::grid{columns=\"N\"}`/`::col` above: no per-item grouping marker, every direct block child is its own flex item.",
+    attributes: [
+      {
+        key: "justify",
+        label: "justify",
+        kind: "select",
+        default: "space-between",
+        options: [{ value: "space-between" }, { value: "flex-start" }, { value: "flex-end" }, { value: "center" }],
+      },
+      { key: "left", label: "left item", kind: "text", default: "### Self-Guide" },
+      { key: "right", label: "right item", kind: "text", default: "**$99/mo**" },
+    ],
+    buildMarkdown: (v) => `:::flex{justify="${v.justify}"}
+${v.left}
+
+${v.right}
 :::`,
   },
   {
     id: "button",
     name: "Button",
     directive: '::button{text="..." href="..." variant="primary|purple|secondary|yellow|outline"}',
-    note: "Leaf. A standalone CTA link, styled with `stamps/button.css`'s own `button({ variant })` recipe (same one the pricing card's own cta uses) -- the site's ordinary buttons, not a bespoke website-only look.",
+    note: 'Leaf. A standalone CTA link, styled with `stamps/button.css`\'s own `button({ variant })` recipe -- the site\'s ordinary buttons, not a bespoke website-only look. Has a SECOND, mutually-exclusive mode this basic paper doesn\'t demo directly: `::button{text="..." form-id="..." action="..."}` renders a real `<button>` that POSTs a shared form\'s collected values instead of navigating -- see the "Price select" paper below for a live, clickable demo of that mode end to end.',
     attributes: [
       { key: "text", label: "text", kind: "text", default: "Meet with a Guide" },
       { key: "href", label: "href", kind: "text", default: "#" },
@@ -546,8 +616,8 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "badge",
     name: "Badge",
-    directive: '::badge{text="..." variant="neutral|success|warning|danger"}',
-    note: 'Leaf. Renders `stamps/Badge` directly — the same component the "Draft" preview banner already uses — rather than a bespoke pill style.',
+    directive: '::badge{text="..." variant="neutral|success|warning|danger" position="x,y" height="#"}',
+    note: 'Leaf. Renders `stamps/Badge` directly — the same component the "Draft" preview banner already uses — rather than a bespoke pill style. `position`/`height` are optional and demoed here wrapped in a `:::box{...}` -- the box supplies the `position: relative` ancestor a positioned badge needs to have any visible effect (the SAME relationship `:::section{...}`\'s own body has for a positioned `::icon{...}`), and this is literally the garden seed\'s own original motivating example: a badge overlapping a box\'s corner, signaling "this is coming soon." An anchor is EDGE/CENTER-AWARE of the badge\'s own real, MEASURED size -- `position="R10,T-10"` below puts the badge\'s own top-right corner 10px in from the box\'s top-right corner (not its top-LEFT corner sitting there), with no `height`/hand-math needed just to get a clean edge alignment. `height`, separately, still SETS the badge\'s own real rendered CSS height when given -- a plain "force this exact visual size" knob, independent of the positioning math.',
     attributes: [
       { key: "text", label: "text", kind: "text", default: "Coming Soon" },
       {
@@ -557,8 +627,52 @@ const TRACING_PAPERS: TracingPaper[] = [
         default: "danger",
         options: [{ value: "neutral" }, { value: "success" }, { value: "warning" }, { value: "danger" }],
       },
+      {
+        key: "position",
+        label: "position",
+        kind: "select",
+        default: "R10,C0",
+        options: [
+          { value: "", label: "(inline, unpositioned)" },
+          { value: "R10,C0", label: "R10,C0 (right-center, exactly centered)" },
+          { value: "C0,T-10", label: "C0,T-10 (top-center)" },
+          { value: "L10,B10", label: "L10,B10 (bottom-left)" },
+        ],
+      },
+      { key: "height", label: "height (optional -- independent of positioning now)", kind: "text", default: "20" },
     ],
-    buildMarkdown: (v) => `::badge{text="${v.text}" variant="${v.variant}"}`,
+    buildMarkdown: (v) => `:::box{}
+${v.position ? `::badge{text="${v.text}" variant="${v.variant}" position="${v.position}"${v.height ? ` height="${v.height}"` : ""}}
+
+` : `::badge{text="${v.text}" variant="${v.variant}"}
+
+`}### Self-Guide
+**$99/mo**
+:::`,
+  },
+  {
+    id: "price-select",
+    name: "Price select (box + button, form-id)",
+    directive: ':::box{form-id="..." select-group="..." value="..."} ... ::button{form-id="..." action="..."}',
+    note: 'The garden seed\'s own original motivating case, composed and LIVE here -- this preview is a real, hydrated `OxRenderer`, not a static mockup, so you can actually click between the two boxes below, then click the button. Several selectable `:::box{form-id="..." select-group="..." value="..."}` siblings share one page-level store (`OxRenderer.tsx`\'s `WebsiteFormContext`) keyed by `(form-id, select-group)` -- clicking one writes its own `value` in and (since one key can only ever hold one value) automatically stops the previously-selected box from matching, radio-style, with no separate "deselect everything else" step anywhere. `::button{form-id="..." action="..."}` is `::button`\'s SECOND mode (not the `href`-link one above) -- clicking it POSTs whatever that `form-id` has collected so far, as JSON, to `action`. This demo\'s own `action` is a non-existent placeholder path, so the POST harmlessly 404s -- open devtools\' Network tab after clicking to see the real request and payload shape. Option 4 ("centralized storage, not centralized building") of the "Box Directive + Pricing Card UI Fix" garden seed.',
+    attributes: [
+      { key: "plan1", label: "plan 1 name", kind: "text", default: "Self-Guide" },
+      { key: "price1", label: "plan 1 price", kind: "text", default: "$99/mo" },
+      { key: "plan2", label: "plan 2 name", kind: "text", default: "Guided" },
+      { key: "price2", label: "plan 2 price", kind: "text", default: "$199/mo" },
+      { key: "cta", label: "button text", kind: "text", default: "Schedule a call" },
+    ],
+    buildMarkdown: (v) => `:::box{form-id="price-select-demo" select-group="plan" value="plan1"}
+### ${v.plan1}
+**${v.price1}**
+:::
+
+:::box{form-id="price-select-demo" select-group="plan" value="plan2"}
+### ${v.plan2}
+**${v.price2}**
+:::
+
+::button{form-id="price-select-demo" action="/api/demo-schedule-call" text="${v.cta}"}`,
   },
   {
     id: "daily-log",
@@ -574,8 +688,8 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "toggle",
     name: "Toggle",
-    directive: ':::toggle{collapsed="true"} (not new — the existing built-in, reused for FAQ)',
-    note: "Not a website-specific directive — the pre-existing Notion-style Toggle List, reused as-is for the Guides page's FAQ. Included here since it's part of the same content vocabulary these pages compose with.",
+    directive: ':::toggle{collapsed="true" border="..." palette="..."} (not new — the existing built-in, reused for FAQ)',
+    note: "Not a website-specific directive — the pre-existing Notion-style Toggle List, reused as-is for the Guides page's FAQ. Included here since it's part of the same content vocabulary these pages compose with. `border`/`palette` are the one genuinely NEW piece (see the \"FAQ toggle design\" garden seed): the caret glyph's own color now resolves against the page's own `::swatch`/`::palette` registry -- the SAME `border` role namespace `:::box{border=\"...\"}` above already uses (THIS demo reuses that same paper's `DEMO_BOX_BORDER_SWATCHES` for its dropdown) -- falling back to the ordinary default accent color when neither resolves. Static/Interacting-mode only: the live WYSIWYG editor doesn't model these two attributes at all (a deliberate scope line -- that editor is a lightweight daily-logging surface, not meant to fully round-trip every directive's attributes), so a toggle using them will lose `border`/`palette` if it's ever opened and re-saved there.",
     attributes: [
       {
         key: "collapsed",
@@ -584,14 +698,25 @@ const TRACING_PAPERS: TracingPaper[] = [
         default: "",
         options: [{ value: "", label: "(expanded)" }, { value: "true", label: "true" }],
       },
+      {
+        key: "border",
+        label: "border",
+        kind: "select",
+        default: "",
+        options: [{ value: "", label: "(default accent)" }, { value: "green" }, { value: "purple" }],
+      },
       { key: "question", label: "question", kind: "text", default: "Can I change between plans?" },
       { key: "answer", label: "answer", kind: "text", default: "Yes, at the end of each contract." },
     ],
-    buildMarkdown: (v) => `:::${v.collapsed === "true" ? `toggle{collapsed="true"}` : "toggle"}
+    buildMarkdown: (v) => {
+      const attrs = [v.collapsed === "true" && `collapsed="true"`, v.border && `border="${v.border}"`].filter(Boolean).join(" ");
+      const swatches = v.border ? DEMO_BOX_BORDER_SWATCHES : "";
+      return `${swatches}:::${attrs ? `toggle{${attrs}}` : "toggle"}
 ${v.question}
 
 ${v.answer}
-:::`,
+:::`;
+    },
   },
   {
     id: "grid",
@@ -1023,7 +1148,18 @@ function PreviewBox({
         minHeight,
       }}
     >
-      <OxRenderer markdown={markdown} directives={registry} className="ox-no-dots" />
+      {/* `ox-no-heading-marks` -- a rendered directive preview isn't
+          markdown source; a heading inside it shouldn't show a literal
+          `#` in front of it, same as a real published `/v2` page
+          (`WebsitePageView.tsx`'s own comment) or the Vault's own
+          website-page preview (`vault.tsx`'s `WebsitePageSplitEditor`) --
+          literal marks are an OxEditor (editing-surface) affordance,
+          reserved for there, not for a finished-page preview like this
+          one. `website-page-ox` -- goes ALONGSIDE those two in both real
+          call sites (see `website.css`'s own comment); zeroes `.ox-content`'s
+          own left/right gutter so this box's own padding above is the
+          ONLY inset, instead of silently double-padding. */}
+      <OxRenderer markdown={markdown} directives={registry} className="ox-no-heading-marks ox-no-dots website-page-ox" />
     </div>
   );
 }

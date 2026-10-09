@@ -39,7 +39,7 @@ export const links: LinksFunction = () => [
 ];
 
 export const meta: MetaFunction = () => [
-  { title: "Nopal" },
+  { title: "O.No" },
   { name: "description", content: "Nopal: journal your day, manage your projects." },
   { name: "robots", content: "noindex, nofollow" },
 ];

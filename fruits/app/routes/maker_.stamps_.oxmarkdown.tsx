@@ -19,7 +19,7 @@
 // interactable demo, ...). Keep entries short — this page is for a quick
 // visual reminder, not the full rationale (that's the skill file).
 import { useMemo, useState } from "react";
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -40,6 +40,8 @@ import { CenterContent } from "stamps/CenterContent";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 import { navFor } from "../data/nav.server";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.S.OxMarkdown" }];
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);

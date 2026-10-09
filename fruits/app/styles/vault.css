@@ -812,12 +812,32 @@
   }
 }
 
+/* The merged header row -- `headerLeft` (the vault's own breadcrumb) hugs
+   the left edge, `.vault-website-editor-toolbar-actions` (everything
+   else: Publish/Draft, Light/Dark, Scratch pad, Flip/Expand, New Page,
+   Copy link, Actions) hugs the right, same `space-between`-with-exactly-
+   two-children pattern `.vault-panel-header` already used for breadcrumb-
+   vs-actions before this merge. `flex-wrap` (not a `display: none` media
+   query) is what keeps this ONE row's worth of content fully reachable
+   on narrow screens -- it just wraps onto additional lines instead of
+   disappearing, since `headerLeft` (the breadcrumb) and most of what's in
+   `.vault-website-editor-toolbar-actions` are NOT desktop-only concerns
+   (only Flip layout genuinely is -- see the `!isMobile` check around its
+   own `ActionBarGroup`, above). */
 .vault-website-editor-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.vault-website-editor-toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .vault-website-editor-panes {
@@ -973,14 +993,15 @@
 }
 
 @media (max-width: 859px) {
-  /* Flip Layout doesn't apply on mobile -- one pane shows at a time
-     regardless, and the bottom bar's own Preview/Markdown toggle is what
-     controls which. Expand still applies -- it moves into each pane's own
-     label row instead (below), matching the mockup this was built from. */
-  .vault-website-editor-toolbar {
-    display: none;
-  }
-
+  /* The merged toolbar row itself STAYS visible here now (it carries the
+     breadcrumb + Actions/New Page/Copy-link, none of which are desktop-
+     only) -- only its own Flip-layout control is conditionally skipped in
+     JS (`!isMobile`, above), since one pane shows at a time on mobile
+     regardless of `mdSide`, controlled by the bottom bar's own Preview/
+     Markdown toggle instead. Expand still applies on mobile -- it moves
+     into each pane's own label row instead (below), matching the mockup
+     this was built from, which is why ITS desktop copy is also skipped
+     alongside Flip rather than independently. */
   .vault-website-editor-mobile-expand {
     display: inline-flex;
   }
