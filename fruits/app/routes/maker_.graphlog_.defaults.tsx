@@ -29,6 +29,7 @@ import {
   type GraphLogDefaultStage,
 } from "robustness-core/data/graphLogDefaults.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { navFor } from "../data/nav.server";
 
 export const meta: MetaFunction = () => [{ title: "O.No · M.GraphLog" }];
 
@@ -42,11 +43,16 @@ async function requireMakerAccess(request: Request) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireMakerAccess(request);
+  // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
+  const user = await requireMakerAccess(request);
+  // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
+  const nav = await navFor(user._id);
   const defaultSkills = await getAllEffectiveGraphLogDefaultSkills();
   const lastEdit = await getGraphLogDefaultsLastEdit();
   const editor = lastEdit ? (await getHumansById([lastEdit.updatedByHumanId]))[0] : undefined;
   return {
+    user,
+    ...nav,
     defaultSkills,
     lastEdit: lastEdit
       ? { updatedAt: lastEdit.updatedAt, by: editor?.name || editor?.email || lastEdit.updatedByHumanId }

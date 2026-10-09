@@ -63,6 +63,7 @@ import { button, type ButtonVariants } from "stamps/button.css";
 import { textSize, truncate } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { semanticColors } from "stamps/tokens";
+import { navFor } from "../data/nav.server";
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -77,7 +78,9 @@ export const meta: MetaFunction = () => [{ title: "O.No · M.Stamps" }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
-  return { user };
+  // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
+  const nav = await navFor(user._id);
+  return { user, ...nav };
 }
 
 export function ErrorBoundary() {

@@ -26,6 +26,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { getAdminScriptRun } from "robustness-core/data/adminScriptRuns.server";
 import { getAdminScriptJobLog, getPendingAdminScriptJob } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { navFor } from "../data/nav.server";
 
 export const meta: MetaFunction = () => [{ title: "O.No · M.Scripts" }];
 
@@ -41,7 +42,10 @@ async function requireAdminScriptsAccess(request: Request) {
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requireAdminScriptsAccess(request);
+  // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
+  const user = await requireAdminScriptsAccess(request);
+  // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
+  const nav = await navFor(user._id);
   const runId = params.runId;
   if (!runId) throw data("Missing run id", { status: 400 });
 
@@ -56,7 +60,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       throw data("Run not found", { status: 404 });
     }
     const [human] = await getHumansById([pending.data.actingHumanId]);
-    return { pending: { ...pending, humanName: human?.name ?? pending.data.actingHumanId } } as const;
+    return { user, ...nav, pending: { ...pending, humanName: human?.name ?? pending.data.actingHumanId } } as const;
   }
 
   const [human] = await getHumansById([run.human_id]);
@@ -67,6 +71,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const liveLog = run.ok === null ? await getAdminScriptJobLog(runId) : null;
 
   return {
+    user,
+    ...nav,
     pending: null,
     run,
     humanName: human?.name ?? run.human_id,

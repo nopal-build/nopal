@@ -39,6 +39,7 @@ import { ErrorPanel } from "stamps/ErrorPanel";
 import { CenterContent } from "stamps/CenterContent";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
+import { navFor } from "../data/nav.server";
 
 export const meta: MetaFunction = () => [{ title: "O.No · M.S.OxMarkdown" }];
 
@@ -53,7 +54,9 @@ async function requireMakerAccess(request: Request) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
-  return { user };
+  // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
+  const nav = await navFor(user._id);
+  return { user, ...nav };
 }
 
 export function ErrorBoundary() {

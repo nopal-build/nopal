@@ -71,6 +71,7 @@ import {
   type LineAnchorY,
 } from "oxmarkdown-core";
 import "../styles/scratch.css";
+import { navFor } from "../data/nav.server";
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -85,9 +86,11 @@ export const meta: MetaFunction = () => [{ title: "O.No · M.S.Scratch Pad" }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
+  // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
+  const nav = await navFor(user._id);
   const overrides = await getWebsiteScratchOverrides();
   const pads = await getWebsiteScratchPads();
-  return { user, overrides, pads };
+  return { user, ...nav, overrides, pads };
 }
 
 /** Create/save/delete a Scratch, or create/save/delete a Pad -- DB-backed

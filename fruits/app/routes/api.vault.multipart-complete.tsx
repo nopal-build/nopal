@@ -1,15 +1,21 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { completeMultipartUpload } from "robustness-core/data/file.server";
-import { createFileRef, explainWriteRefusal, getFolderById, isFolderUnderSyncs, canWriteToFolderId } from "robustness-core/data/vault.server";
+import { createFileRef, explainWriteRefusal, getFileRefById, getFolderById, isFolderUnderSyncs, canWriteToFolderId } from "robustness-core/data/vault.server";
 import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
+import { fileReplaceRefusal, repointFileRef } from "robustness-core/data/fileReplace.server";
 
 /**
  * POST /api/vault/multipart-complete
- * Body (JSON): { uploadId, key, parts, name, folderId, contentType, size }
+ * Body (JSON): { uploadId, key, parts, name, folderId, contentType, size, replaceFileId? }
  * Returns: { url, fileRef }
  *
- * Completes the S3 multipart upload and registers the file_ref in the database.
+ * Completes the S3 multipart upload and registers the file_ref in the
+ * database — or, with `replaceFileId`, points that existing file_ref at
+ * the new object instead (same row, so links keep working; see
+ * `fileReplace.server.ts`). The replace checks run again here rather than
+ * trusting that `multipart-init` ran them: the key prefix only proves the
+ * bytes are this human's, not that the row is theirs to repoint.
  */
 export async function action({ request }: ActionFunctionArgs) {
   const scoped = await getScopedUserFromRequest(request);
@@ -28,9 +34,10 @@ export async function action({ request }: ActionFunctionArgs) {
     /** Client-computed sha256 hex — the server never held the whole file,
      * so this is the only place the hash can come from. */
     contentHash?: string;
+    replaceFileId?: string;
   };
 
-  const { uploadId, key, parts, name, folderId, contentType, size, contentHash } =
+  const { uploadId, key, parts, name, folderId, contentType, size, contentHash, replaceFileId } =
     body;
 
   if (!uploadId || !key || !parts?.length || !name || !contentType) {
@@ -46,6 +53,36 @@ export async function action({ request }: ActionFunctionArgs) {
   // Security: ensure the key belongs to this user
   if (!key.startsWith(`vault/${user._id}/`)) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const validHash = contentHash && /^[0-9a-f]{64}$/.test(contentHash) ? contentHash : null;
+
+  if (replaceFileId) {
+    const existing = await getFileRefById(replaceFileId);
+    if (!existing) {
+      return Response.json({ error: "Not found" }, { status: 404 });
+    }
+    const refusal = await fileReplaceRefusal(scoped, existing);
+    if (refusal) {
+      return Response.json({ error: refusal.error }, { status: refusal.status });
+    }
+    try {
+      const url = await completeMultipartUpload(key, uploadId, parts);
+      const fileRef = await repointFileRef(existing, {
+        s3Key: key,
+        s3Url: url,
+        contentType,
+        contentHash: validHash,
+        size: size ?? existing.size ?? 0,
+      });
+      return Response.json({ url, fileRef });
+    } catch (err) {
+      console.error("Multipart replace error:", err);
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to complete replace" },
+        { status: 500 },
+      );
+    }
   }
 
   // Sync-scoped tokens may only register files inside syncs/.
@@ -86,8 +123,7 @@ export async function action({ request }: ActionFunctionArgs) {
       s3_url: url,
       s3_key: key,
       content_type: contentType,
-      content_hash:
-        contentHash && /^[0-9a-f]{64}$/.test(contentHash) ? contentHash : null,
+      content_hash: validHash,
       size: size ?? null,
       folder_id: folderId ?? null,
     });
