@@ -40,6 +40,10 @@ import {
   isDirectiveNode,
   parseRefAttrs,
   resolveSwatchRole,
+  parseVideoOrientation,
+  parseYouTubeId,
+  youTubeEmbedUrl,
+  youTubeThumbnailUrl,
   type OxDocument,
   type DirectiveNode,
   type SwatchRegistry,
@@ -855,6 +859,79 @@ function renderGalleryGrid(
  * `resolveSwatchRole` (core) already tolerates an `undefined` registry,
  * always falling straight through to `fallback`. PORTED from the fruits
  * copy. */
+/** The YouTube half of `::video{url="..."}` — a "lite embed" facade:
+ * renders a plain poster image + play button first, and only mounts the
+ * real `-nocookie` iframe once clicked. See the fruits copy's own comment
+ * for the full reasoning (page-load cost + doubling as the `poster`
+ * override mechanism). */
+function YouTubeFacade({ id, poster }: { id: string; poster?: string }) {
+  const [activated, setActivated] = useState(false);
+  if (activated) {
+    return (
+      <iframe
+        className="ox-video-media"
+        src={youTubeEmbedUrl(id)}
+        title="YouTube video player"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="ox-video-facade ox-video-media"
+      style={{ backgroundImage: `url(${poster ?? youTubeThumbnailUrl(id)})` }}
+      onClick={() => setActivated(true)}
+      aria-label="Play video"
+    >
+      <span className="ox-video-play" aria-hidden="true" />
+    </button>
+  );
+}
+
+/** `::video{url="..."}` (external, YouTube today) / `::video{fileId="..."}`
+ * (self-hosted, an ordinary vault file) — see the fruits copy's own
+ * comment and `oxmarkdown-core/videoDirective.ts` for the full scope/
+ * rules. `url` wins when both are given; renders nothing when neither
+ * resolves. */
+function VideoDirectiveStatic({ node, directives }: { node: DirectiveNode; directives?: DirectiveRegistry }) {
+  const attrs = directiveAttrs(node);
+  const orientation = parseVideoOrientation(attrs.orientation);
+  const captionDoc = attrs.caption ? parseOxDocument(attrs.caption) : null;
+
+  let media: ReactNode;
+  if (attrs.url) {
+    const youTubeId = parseYouTubeId(attrs.url);
+    if (!youTubeId) return null;
+    media = <YouTubeFacade id={youTubeId} poster={attrs.poster} />;
+  } else if (attrs.fileId) {
+    if (attrs.contentType && !attrs.contentType.startsWith("video/")) return null;
+    media = (
+      <video
+        className="ox-video-media"
+        src={`/api/vault/view/${attrs.fileId}`}
+        poster={attrs.poster}
+        controls
+        preload="metadata"
+      />
+    );
+  } else {
+    return null;
+  }
+
+  return (
+    <div className="ox-video-directive" data-orientation={orientation} contentEditable={false}>
+      {media}
+      {captionDoc && (
+        <div className="ox-video-caption">
+          <OxStaticNodes nodes={captionDoc.children} directives={directives} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function boundResolveSwatchRole(ctx: RenderCtx) {
   return (opts: { role: SwatchRole; explicit?: string; palette?: string; fallback?: string }): string | undefined =>
     resolveSwatchRole({ ...opts, registry: ctx.swatchRegistry });
@@ -1016,6 +1093,18 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
       key,
       attrs.title ?? null,
     );
+  }
+
+  // `::video{url="..."}` / `::video{fileId="..."}` — same built-in category
+  // as `::file`/`::gallery` above, PORTED from the fruits copy (keep both
+  // in sync by hand, same as every other rendering change here) — see
+  // that copy's own comment and `oxmarkdown-core/videoDirective.ts` for
+  // the full scope/rules. No `mediaUrls.ts`/rendition-sizing equivalent
+  // exists in this trimmed copy, so a self-hosted video's `poster` is
+  // whatever the `poster="..."` attribute gives (or nothing at all) —
+  // never auto-derived the way the app copy can.
+  if (node.type === "leafDirective" && node.name === "video") {
+    return <VideoDirectiveStatic key={key} node={node} directives={ctx.directives} />;
   }
 
   const attrs = directiveAttrs(node);

@@ -32,6 +32,10 @@ import {
   refFileId,
   resolveSwatchRole,
   splitSentences,
+  parseVideoOrientation,
+  parseYouTubeId,
+  youTubeEmbedUrl,
+  youTubeThumbnailUrl,
   type OxDocument,
   type DirectiveNode,
   type SwatchRegistry,
@@ -1012,6 +1016,81 @@ function GalleryPhoto({ src, alt, title }: { src: string; alt: string; title?: s
   return <img ref={load.ref} onError={load.onError} src={src} alt={alt} title={title} loading="lazy" />;
 }
 
+/** The YouTube half of `::video{url="..."}` — a "lite embed" facade:
+ * renders a plain poster image + play button first, and only mounts the
+ * real `-nocookie` iframe once clicked. Deliberately NOT a bare always-on
+ * `<iframe>` — this keeps a page with several embedded videos cheap to
+ * load (no YouTube JS/iframe cost paid until a viewer actually wants to
+ * watch), and doubles as the `poster="..."` override mechanism, since a
+ * YouTube iframe has no `poster` attribute of its own to give it one. */
+function YouTubeFacade({ id, poster }: { id: string; poster?: string }) {
+  const [activated, setActivated] = useState(false);
+  if (activated) {
+    return (
+      <iframe
+        className="ox-video-media"
+        src={youTubeEmbedUrl(id)}
+        title="YouTube video player"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="ox-video-facade ox-video-media"
+      style={{ backgroundImage: `url(${poster ?? youTubeThumbnailUrl(id)})` }}
+      onClick={() => setActivated(true)}
+      aria-label="Play video"
+    >
+      <span className="ox-video-play" aria-hidden="true" />
+    </button>
+  );
+}
+
+/** `::video{url="..."}` (external, YouTube today) / `::video{fileId="..."}`
+ * (self-hosted, an ordinary vault file) — see `oxmarkdown-core/
+ * videoDirective.ts`'s header for the full scope/rules. `url` wins when
+ * both are given. Renders nothing (not an error marker) when: neither
+ * attribute is given; `url` isn't a recognized YouTube URL shape; or a
+ * `fileId`'s own `contentType` attribute is given and isn't a video —
+ * `contentType` is optional (nothing resolves a bare `fileId` server-side
+ * here, unlike `::gallery{folder="..."}`), so it's only ever a safety net
+ * against an author pointing `::video` at a non-video file, not a real
+ * lookup. */
+function VideoDirectiveStatic({ node, directives }: { node: DirectiveNode; directives?: DirectiveRegistry }) {
+  const attrs = directiveAttrs(node);
+  const orientation = parseVideoOrientation(attrs.orientation);
+  const captionDoc = attrs.caption ? parseOxDocument(attrs.caption) : null;
+
+  let media: ReactNode;
+  if (attrs.url) {
+    const youTubeId = parseYouTubeId(attrs.url);
+    if (!youTubeId) return null;
+    media = <YouTubeFacade id={youTubeId} poster={attrs.poster} />;
+  } else if (attrs.fileId) {
+    if (attrs.contentType && !attrs.contentType.startsWith("video/")) return null;
+    const src = `/api/vault/view/${attrs.fileId}`;
+    media = (
+      <video className="ox-video-media" src={src} poster={attrs.poster ?? posterUrl(src)} controls preload="metadata" />
+    );
+  } else {
+    return null;
+  }
+
+  return (
+    <div className="ox-video-directive" data-orientation={orientation} contentEditable={false}>
+      {media}
+      {captionDoc && (
+        <div className="ox-video-caption">
+          <OxStaticNodes nodes={captionDoc.children} directives={directives} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Binds `ctx.swatchRegistry` into the shape a registered directive
  * actually calls (`DirectiveRenderProps.resolveSwatchRole` — see
  * `directiveRegistry.ts`) so a website-scoped registry entry
@@ -1208,6 +1287,19 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
       key,
       attrs.title ?? null,
     );
+  }
+
+  // `::video{url="..."}` / `::video{fileId="..."}` — same built-in category
+  // as `::file`/`::gallery` above: STATIC/Interacting-mode rendering only,
+  // with no Editing-mode insertion UI at all (see the "Video embed
+  // directive" garden seed) — a video is always hand-written into the
+  // markdown after it already exists (a self-hosted file uploaded via the
+  // `nopal` CLI, or an existing YouTube link), the same way
+  // `::gallery{folder="..."}` references an existing vault folder nobody
+  // "inserted" through the UI either. See `VideoDirectiveStatic`'s own
+  // comment for the `url`-vs-`fileId`/"render nothing" rules.
+  if (node.type === "leafDirective" && node.name === "video") {
+    return <VideoDirectiveStatic key={key} node={node} directives={ctx.directives} />;
   }
 
   const attrs = directiveAttrs(node);

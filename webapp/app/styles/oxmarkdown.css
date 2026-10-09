@@ -1712,3 +1712,70 @@ img.ox-file-thumb {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── `::video{url="..."}` / `::video{fileId="..."}` ──────────────────────
+   PORTED from the fruits copy, keep both in sync by hand — see that
+   copy's own comment. Full width in whatever space it has; a plain 16:9
+   box by default, 9:16 with `orientation="vertical"`. */
+.ox-video-directive {
+  width: 100%;
+}
+
+.ox-video-media {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+  border: 1px solid var(--ox-color-border);
+  background: var(--ox-color-code-bg);
+}
+
+.ox-video-directive[data-orientation="vertical"] .ox-video-media {
+  aspect-ratio: 9 / 16;
+}
+
+iframe.ox-video-media {
+  border: none;
+}
+
+.ox-video-facade {
+  position: relative;
+  padding: 0;
+  cursor: pointer;
+  background-color: var(--ox-color-code-bg);
+  background-size: cover;
+  background-position: center;
+}
+
+.ox-video-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 68px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 12px;
+}
+
+.ox-video-play::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 54%;
+  transform: translate(-50%, -50%);
+  border-style: solid;
+  border-width: 11px 0 11px 19px;
+  border-color: transparent transparent transparent #fff;
+}
+
+.ox-video-caption {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--ox-color-subtle);
+  line-height: 1.3;
+}
+.ox-video-caption :is(p, li) {
+  margin: 0;
+  line-height: 1.3;
+}

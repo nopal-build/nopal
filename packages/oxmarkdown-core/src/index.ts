@@ -16,6 +16,7 @@ export * from "./galleryDirective";
 export * from "./mention";
 export * from "./refDirective";
 export * from "./swatchDirective";
+export * from "./videoDirective";
 export * from "./wavyLine";
 export * from "./svgToLinePoints";
 export * from "./markUnits";
