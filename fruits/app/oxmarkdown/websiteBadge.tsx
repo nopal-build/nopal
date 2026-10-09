@@ -9,19 +9,22 @@
  * needs a `position: relative` ancestor -- a `:::box{...}`/
  * `:::section{...}` body -- to have any visible effect at all).
  *
- * `height`, new here (not on `::icon`) -- see that garden seed's resolved
- * question 3: `::icon{position=...}` anchors by the element's own
- * top-left corner, not its center ("simplest to reason about" -- that
- * file's own comment), so centering a badge over a box's corner needs
- * the AUTHOR to hand-compute the offset (e.g. `position="R10,T-10"
- * height="20"` roughly centers a 20px-tall badge 10px in from the right
- * edge: `T-10` is half of `20`). `height` SETS the badge's own real
- * rendered CSS height (not just a documented hint an author promises
- * matches reality) so that hand math stays trustworthy instead of
- * silently drifting from whatever the badge actually renders at.
+ * `height`, new here (not on `::icon`) -- originally added so an author
+ * could hand-compute a centering offset against the OLD, always-top-left-
+ * corner anchor design (e.g. `position="R10,T-10" height="20"`, `T-10`
+ * being half of `20`). That hand math is no longer NEEDED for centering
+ * -- `position="R10,C0"` now does it exactly, no `height` or arithmetic
+ * required at all (see `oxmarkdown-core`'s `adjustForElementSize`: an
+ * `R`/`B`/`C` anchor describes WHICH EDGE of the badge's own real,
+ * MEASURED size should land at that container edge, not just its
+ * top-left corner). `height` still SETS the badge's own real rendered
+ * CSS height when given -- now a plain "force this exact visual size"
+ * knob, independent of positioning math, since whatever the badge's real
+ * rendered size ends up being (with or without `height`) is what gets
+ * measured and centered/edge-aligned either way.
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { resolveLinePoints, type LinePointTokens } from "oxmarkdown-core";
+import { adjustForElementSize, resolveLinePoints, type LinePointTokens } from "oxmarkdown-core";
 import { Badge } from "stamps/Badge";
 import { badge as badgeRecipe } from "stamps/badge.css";
 import { useElementSize } from "./WavyLine";
@@ -57,7 +60,16 @@ type WebsiteBadgeProps = {
  * `websiteIcons.tsx`/`websiteDirectives.tsx`'s own fruits/webapp
  * duplication header comments for the broader pattern this follows). */
 function PositionedWebsiteBadge({ position, children }: { position: LinePointTokens; children: ReactNode }) {
-  const { ref, size } = useElementSize<HTMLSpanElement>();
+  const { ref: containerRef, size: containerSize } = useElementSize<HTMLSpanElement>();
+  // A SECOND measurement, of the badge's OWN rendered box -- not just the
+  // container. Human-reported gap: an `R`/`B`/`C` anchor describes WHICH
+  // EDGE of the badge itself should land at that container edge (its
+  // right/bottom edge, or its center), not just its top-left corner --
+  // `adjustForElementSize` (`oxmarkdown-core`) needs the badge's own real
+  // width/height to do that math, and a badge's width in particular
+  // depends on its own text content, so it can't be known ahead of time
+  // the way `::icon{size="..."}` already is -- it has to be measured.
+  const { ref: elementRef, size: elementSize } = useElementSize<HTMLSpanElement>();
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
   // Re-keyed on `position`'s own SERIALIZED value, not the object
   // reference -- `websiteDirectives.tsx` re-parses `attrs.position` fresh
@@ -67,49 +79,58 @@ function PositionedWebsiteBadge({ position, children }: { position: LinePointTok
   const positionKey = JSON.stringify(position);
 
   useEffect(() => {
-    if (!size || size.width === 0 || size.height === 0) return;
-    const resolved = resolveLinePoints([position], size.width, size.height)[0]?.[0];
-    if (resolved) setPoint(resolved);
+    if (!containerSize || containerSize.width === 0 || containerSize.height === 0) return;
+    if (!elementSize || elementSize.width === 0 || elementSize.height === 0) return;
+    const resolved = resolveLinePoints([position], containerSize.width, containerSize.height)[0]?.[0];
+    if (!resolved) return;
+    setPoint(adjustForElementSize(position, resolved, elementSize.width, elementSize.height));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size, positionKey]);
+  }, [containerSize, elementSize, positionKey]);
 
   return (
-    <span ref={ref} style={{ position: "absolute", inset: 0, pointerEvents: "none" }} aria-hidden="true">
-      {point && (
-        <span
-          style={{
-            position: "absolute",
-            left: point.x,
-            top: point.y,
-            // `width: "max-content"` -- same fix `PositionedWebsiteIcon`
-            // needed: without it, a `position: absolute` span with `left`
-            // set but no explicit width shrinks its own available width
-            // down to `(container width - left)`, which can starve the
-            // badge's own text close to its container's right edge.
-            width: "max-content",
-            // `display: "flex"` -- a THIRD real bug, found by the human
-            // one level up from the pill itself: a plain `position:
-            // absolute` span (no `display` set) blockifies but still
-            // sizes its own auto height via ordinary INLINE line-box
-            // math -- which factors in this span's own INHERITED
-            // `line-height` (`.ox-content { line-height: 1.2 }`) as an
-            // invisible "strut", even though its only real content is one
-            // atomic `inline-flex` badge. Confirmed via DevTools: this
-            // wrapper rendered ~23px tall (the inherited line-height's
-            // own computed value) regardless of the badge's own real
-            // height, and the badge's default baseline `vertical-align`
-            // then sat it somewhere INSIDE that taller box, not flush
-            // with this span's own `top` -- throwing off any hand-
-            // computed centering offset by the difference between the
-            // two. A flex formatting context has no line boxes/struts at
-            // all -- this span's own height becomes exactly its single
-            // child's real height, nothing inherited, nothing extra.
-            display: "flex",
-          }}
-        >
-          {children}
-        </span>
-      )}
+    <span ref={containerRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }} aria-hidden="true">
+      {/* ALWAYS mounted (not `{point && (...)}` like before) -- it has to
+          exist in the DOM to be measured via `elementRef` at all, which is
+          what `point` itself now depends on (a real chicken-and-egg
+          dependency the old top-left-only design never had). `visibility:
+          hidden` (NOT `display: none`) while `point` is still unknown --
+          hidden elements still get a real, accurate layout size reported
+          by `ResizeObserver`, so this measures correctly without ever
+          painting at the wrong (unadjusted, pre-measurement) spot first --
+          no flash, same "nothing visible until the first real measurement
+          resolves" contract this whole positioning system already has. */}
+      <span
+        ref={elementRef}
+        style={{
+          position: "absolute",
+          left: point?.x ?? 0,
+          top: point?.y ?? 0,
+          // `width: "max-content"` -- same fix `PositionedWebsiteIcon`
+          // needed: without it, a `position: absolute` span with `left`
+          // set but no explicit width shrinks its own available width
+          // down to `(container width - left)`, which can starve the
+          // badge's own text close to its container's right edge.
+          width: "max-content",
+          // `display: "flex"` -- a real bug, found by the human one level
+          // up from the pill itself: a plain `position: absolute` span (no
+          // `display` set) blockifies but still sizes its own auto height
+          // via ordinary INLINE line-box math -- which factors in this
+          // span's own INHERITED `line-height` (`.ox-content { line-height:
+          // 1.2 }`) as an invisible "strut", even though its only real
+          // content is one atomic `inline-flex` badge. Confirmed via
+          // DevTools: this wrapper rendered ~23px tall (the inherited
+          // line-height's own computed value) regardless of the badge's
+          // own real height, and the badge's default baseline `vertical-
+          // align` then sat it somewhere INSIDE that taller box, not flush
+          // with this span's own `top`. A flex formatting context has no
+          // line boxes/struts at all -- this span's own height becomes
+          // exactly its single child's real height, nothing inherited.
+          display: "flex",
+          visibility: point ? "visible" : "hidden",
+        }}
+      >
+        {children}
+      </span>
     </span>
   );
 }

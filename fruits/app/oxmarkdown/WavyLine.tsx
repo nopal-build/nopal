@@ -230,11 +230,16 @@ function WavyLinePoints({
     // header). `%` specs and the `start` anchor both resolve against this
     // component's OWN real measured size, same as any other anchor here.
     // `start` is always exactly ONE point (never a break), so `[0][0]`
-    // reaches into the single resolved subpath's own single point.
+    // reaches into the single resolved subpath's own single point. `start`
+    // (the ORIGINAL tokens, not just the resolved point) is passed through
+    // too -- `fitAndPositionPoints` uses it to align the right EDGE/CENTER
+    // of the shape's own (already-scaled) bounding box with an `R`/`C`/`B`
+    // anchor, not just its top-left corner (see that function's own
+    // comment and `adjustForElementSize`).
     const targetWidthPx = resolveLineSize(targetWidth, size.width);
     const targetHeightPx = resolveLineSize(targetHeight, size.height);
     const startPoint = start ? resolveLinePoints([start], size.width, size.height)[0]?.[0] : undefined;
-    subpaths = fitAndPositionPoints(subpaths, targetWidthPx, targetHeightPx, startPoint);
+    subpaths = fitAndPositionPoints(subpaths, targetWidthPx, targetHeightPx, startPoint, start);
     const box = boundingBox(subpaths.flat());
     // The path can dip outside its own first point (negative deltas, or
     // an anchor placed "before" an earlier point) -- shift everything by

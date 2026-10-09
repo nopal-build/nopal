@@ -316,14 +316,17 @@
  *     SAME literal-pixel anchor/delta grammar `::icon{position="..."}`
  *     uses (`parseIconPosition`, below, reused as-is) -- needs a
  *     `position: relative` ancestor (a `:::box{...}`/`:::section{...}`
- *     body) to have any visible effect. `height`, new here, SETS the
- *     badge's own real rendered CSS height (e.g. `height="20"`) so an
- *     author can reliably hand-compute a centering offset
- *     (`position="R10,T-10"` roughly centers a 20px-tall badge 10px in
- *     from the right edge) -- see the garden seed's resolved question 3
- *     for why this needed its own attribute instead of leaning on any
- *     auto-center logic (there isn't any, matching `::icon`'s own
- *     top-left-corner anchor precedent).
+ *     body) to have any visible effect. An anchor letter is EDGE/CENTER-
+ *     AWARE of the badge's own real, MEASURED size (`websiteBadge.tsx`'s
+ *     `PositionedWebsiteBadge`, `oxmarkdown-core`'s
+ *     `adjustForElementSize`) -- `position="R10,C0"` puts the badge's own
+ *     right-center point flush against the container's right-center
+ *     point, no hand-computed offset or `height` needed just to center it
+ *     (a real gap this closes -- see the garden seed's resolved question
+ *     3 for the OLD hand-math this replaces). `height`, separately, still
+ *     SETS the badge's own real rendered CSS height when given (e.g.
+ *     `height="20"`) -- now a plain "force this exact visual size" knob,
+ *     independent of positioning math.
  *   ::daily-log{date="YYYY-MM-DD" project="..."} — a curated, static embed
  *     of one real daily-log Card, resolved server-side (see
  *     `robustness-core/data/website.server.ts`'s
@@ -469,11 +472,17 @@ function parseWaypointIds(raw: string | undefined): string[] {
  * convention and reasonably expected `::icon{position="R10,T0"}` to mean
  * the same thing `::line{points="R10,T0"}` would.
  *
- * Represents the icon's TOP-LEFT corner, not its center (simplest to
- * reason about, and consistent with what `left`/`top` mean everywhere
- * else in CSS) -- nudge `x`/`y` by roughly half the icon's own rendered
- * size for a visually "centered on this point" placement instead.
- * Returns `undefined` for an absent/unparseable `position` -- the caller
+ * Which point of the icon itself an anchor letter describes is now EDGE/
+ * CENTER-AWARE, not always the top-left corner -- `R0,T0` puts the icon's
+ * own top-RIGHT corner at the container's top-right corner, `C0,C0` puts
+ * its own CENTER at the container's center, etc. (see `websiteIcons.tsx`'s
+ * `PositionedWebsiteIcon`, which measures the icon's own real rendered
+ * size and runs it through `oxmarkdown-core`'s `adjustForElementSize` --
+ * no more hand-nudging `x`/`y` by half the icon's own size to fake
+ * centering, a real gap this closes). A plain DELTA coordinate (no anchor
+ * letter) still means "top-left corner," unchanged -- there's no edge to
+ * align without an anchor ref to say which one. Returns `undefined` for
+ * an absent/unparseable `position` -- the caller
  * then renders exactly as it always did (ordinary inline flow), matching
  * `::icon{...}`'s own "no position given = unchanged" contract. A bare
  * `|` (pen-up BREAK -- see `oxmarkdown-core`'s `LinePointsEntry`) makes

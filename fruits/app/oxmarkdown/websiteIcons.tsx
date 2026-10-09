@@ -24,7 +24,7 @@
  * page, it just looks obviously unfinished.
  */
 import { useEffect, useState, type CSSProperties, type FC, type ReactNode } from "react";
-import { resolveLinePoints, type LinePointTokens } from "oxmarkdown-core";
+import { adjustForElementSize, resolveLinePoints, type LinePointTokens } from "oxmarkdown-core";
 import { useElementSize } from "./WavyLine";
 import "../styles/website.css";
 
@@ -163,13 +163,26 @@ function WebsiteIconGlyph({ name, size = "md", className, waypointId }: Omit<Web
  * confusion: `R10` reading like "10px from the right", matching `::line`'s
  * own convention, when it actually meant "10% of a fixed nominal box").
  *
- * Client-only by nature (real DOM measurement) -- renders nothing at all
- * until its first post-mount measurement, same convention `WavyLine`'s
- * own `mode="points"` already uses, for the same reason (no special-
- * casing needed for SSR-then-hydrate; a flash from unpositioned to
- * positioned would be strictly worse than a brief absence). */
+ * ALSO measures the icon glyph's OWN rendered size (`elementRef`/
+ * `elementSize`, below) -- not just the container -- and runs the result
+ * through `adjustForElementSize` (`oxmarkdown-core`): an `R`/`B`/`C`
+ * anchor describes WHICH EDGE of the icon itself should land at that
+ * container edge (its right/bottom edge, or its center), not just its
+ * top-left corner the way a bare `resolveLinePoints` call alone would
+ * always place it (a real, reported gap: `R0,T0` used to put the icon's
+ * top-LEFT corner at the container's top-right corner, always overflowing
+ * further right, instead of flush against it).
+ *
+ * Client-only by nature (real DOM measurement) -- renders nothing VISIBLE
+ * at all until its first post-mount measurement, same convention
+ * `WavyLine`'s own `mode="points"` already uses, for the same reason (no
+ * special-casing needed for SSR-then-hydrate; a flash from unpositioned to
+ * positioned would be strictly worse than a brief absence) -- see the
+ * `visibility: "hidden"` comment below for why the glyph is still always
+ * MOUNTED (just not painted) rather than conditionally rendered. */
 function PositionedWebsiteIcon({ position, children }: { position: LinePointTokens; children: ReactNode }) {
-  const { ref, size } = useElementSize<HTMLSpanElement>();
+  const { ref: containerRef, size: containerSize } = useElementSize<HTMLSpanElement>();
+  const { ref: elementRef, size: elementSize } = useElementSize<HTMLSpanElement>();
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
   // Re-keyed on `position`'s own SERIALIZED value, not the object
   // reference -- `websiteDirectives.tsx` re-parses `attrs.position` fresh
@@ -179,27 +192,57 @@ function PositionedWebsiteIcon({ position, children }: { position: LinePointToke
   const positionKey = JSON.stringify(position);
 
   useEffect(() => {
-    if (!size || size.width === 0 || size.height === 0) return;
-    const resolved = resolveLinePoints([position], size.width, size.height)[0]?.[0];
-    if (resolved) setPoint(resolved);
+    if (!containerSize || containerSize.width === 0 || containerSize.height === 0) return;
+    if (!elementSize || elementSize.width === 0 || elementSize.height === 0) return;
+    const resolved = resolveLinePoints([position], containerSize.width, containerSize.height)[0]?.[0];
+    if (!resolved) return;
+    setPoint(adjustForElementSize(position, resolved, elementSize.width, elementSize.height));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size, positionKey]);
+  }, [containerSize, elementSize, positionKey]);
 
   return (
-    <span ref={ref} style={{ position: "absolute", inset: 0, pointerEvents: "none" }} aria-hidden="true">
-      {point && (
-        // `width: "max-content"` -- WITHOUT this, a `position: absolute` span
-        // with `left` set but no explicit width shrinks its own
-        // shrink-to-fit available width to `(container width - left)`
-        // (ordinary CSS absolute-positioning behavior), which starves any
-        // `max-width: 100%` img inside it (`.ox-content img`, oxmarkdown.css)
-        // down to whatever sliver of space is left -- a real, reproduced
-        // bug: an icon anchored close to its container's right edge
-        // (`R10`) rendered at ~10px wide instead of its real `size` once
-        // this positioning switched from percentage- to real-pixel-based,
-        // landing genuinely near that edge for the first time.
-        <span style={{ position: "absolute", left: point.x, top: point.y, width: "max-content" }}>{children}</span>
-      )}
+    <span ref={containerRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }} aria-hidden="true">
+      {/* ALWAYS mounted (not `{point && (...)}` like before this needed to
+          also measure ITSELF) -- `elementRef` needs it in the DOM to
+          report a real size at all, which `point` now depends on.
+          `visibility: "hidden"` (NOT `display: none`) until `point` is
+          known -- hidden elements still get an accurate `ResizeObserver`
+          size, so this measures correctly with no flash: nothing PAINTS
+          at the wrong (unadjusted) spot first, same "nothing visible
+          until the first real measurement resolves" contract as before. */}
+      <span
+        ref={elementRef}
+        style={{
+          position: "absolute",
+          left: point?.x ?? 0,
+          top: point?.y ?? 0,
+          // `width: "max-content"` -- WITHOUT this, a `position: absolute` span
+          // with `left` set but no explicit width shrinks its own
+          // shrink-to-fit available width to `(container width - left)`
+          // (ordinary CSS absolute-positioning behavior), which starves any
+          // `max-width: 100%` img inside it (`.ox-content img`, oxmarkdown.css)
+          // down to whatever sliver of space is left -- a real, reproduced
+          // bug: an icon anchored close to its container's right edge
+          // (`R10`) rendered at ~10px wide instead of its real `size` once
+          // this positioning switched from percentage- to real-pixel-based,
+          // landing genuinely near that edge for the first time.
+          width: "max-content",
+          // `display: "flex"` -- the SAME inherited-`line-height`-strut bug
+          // found (and fixed) on `::badge{position=...}`'s own identical
+          // wrapper (`websiteBadge.tsx`'s `PositionedWebsiteBadge`): a plain
+          // `position: absolute` span with no `display` set still sizes its
+          // own auto height via ordinary INLINE line-box math, which
+          // factors in this span's own INHERITED `line-height` (`.ox-content
+          // { line-height: 1.2 }`) as an invisible "strut" regardless of the
+          // icon's own real size -- a flex formatting context has no line
+          // boxes/struts at all, so this span's own height becomes exactly
+          // its single child's real height, nothing inherited.
+          display: "flex",
+          visibility: point ? "visible" : "hidden",
+        }}
+      >
+        {children}
+      </span>
     </span>
   );
 }
