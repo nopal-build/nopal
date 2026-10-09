@@ -253,19 +253,22 @@
  *   :::box{surface="..." border="..." palette="..." form-id="..."
  *     select-group="..." value="..."} — a generic bordered container
  *     (border/radius/padding/background only -- composes with plain
- *     markdown + other directives for everything else, unlike
- *     `:::pricing-card{...}` below's bespoke header/CTA structure).
- *     `surface`/`border`/`palette` resolve against the page's own
- *     `::swatch`/`::palette` registry exactly like `:::section{surface=
- *     "..."}` above (`oxmarkdown-core`'s `resolveSwatchRole`), falling
- *     back to the same neutral card look `:::pricing-card{...}` already
- *     has when neither is given. ALWAYS carries a non-zero outer margin
- *     -- the deliberate opposite of `:::section{...}`'s own full-bleed,
- *     flush-to-the-edge design (see the "Box Directive + Pricing Card UI
- *     Fix" garden seed, resolved question 5). Also a `position: relative`
- *     ancestor, the same treatment `.website-section-inner` already has
- *     -- so a `::badge{position="..."}` (below) rendered inside one has
- *     a real container to anchor against.
+ *     markdown + other directives for everything else, unlike the
+ *     now-retired `:::pricing-card{...}`'s own bespoke header/CTA
+ *     structure). `surface`/`border`/`palette` resolve against the
+ *     page's own `::swatch`/`::palette` registry exactly like
+ *     `:::section{surface="..."}` above (`oxmarkdown-core`'s
+ *     `resolveSwatchRole`), falling back to the same neutral card look
+ *     `:::pricing-card{...}` used to have when neither is given. NO
+ *     margin of its own (reversed from an earlier "always a non-zero
+ *     outer margin" decision, see the "Box Directive + Pricing Card UI
+ *     Fix" garden seed, resolved question 5/round 7) -- a box's own
+ *     vertical spacing is the AUTHOR'S call via blank lines, same as
+ *     every other block, not baked into the directive. Also a
+ *     `position: relative` ancestor, the same treatment
+ *     `.website-section-inner` already has -- so a `::badge{position=
+ *     "..."}` (below) rendered inside one has a real container to
+ *     anchor against.
  *     `form-id`/`select-group`/`value`, given ALL THREE together, make
  *     the box SELECTABLE -- clicking (or Space/Enter) writes `value`
  *     into a shared, page-level store under `(form-id, select-group)`

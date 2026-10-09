@@ -494,11 +494,15 @@
   border: 1px solid var(--color-surface-border);
   border-radius: 8px;
   padding: 20px;
-  /* ALWAYS a non-zero outer margin, both sides -- the deliberate opposite
-     of `.website-section`'s own full-bleed, flush-to-the-edge design (see
-     the "Box Directive + Pricing Card UI Fix" garden seed, resolved
-     question 5). */
-  margin: 16px 0;
+  /* NO margin here (reversed from round 5's own original "always a
+     non-zero outer margin" decision, see the "Box Directive + Pricing
+     Card UI Fix" garden seed, resolved question 5/round 7) -- the
+     human found real double-spacing in practice between stacked boxes:
+     this margin ON TOP of the ordinary blank-line gap this whole
+     document language already provides (N blank lines = N grid units,
+     see the `oxmarkdown` skill's "Between blocks" design language). A
+     box's own vertical spacing is the AUTHOR'S call via blank lines,
+     same as every other block -- not baked into the directive itself. */
   background: var(--color-surface-card);
   /* The positioned ancestor a `::badge{position="x,y"}` (websiteBadge.tsx's
      `PositionedWebsiteBadge`) resolves its own real-pixel anchor
