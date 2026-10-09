@@ -1584,6 +1584,16 @@ img.ox-file-thumb {
      these are harmless no-ops there. */
   list-style: none;
 }
+/* A real `<summary>` (static/Interacting mode) is natively clickable
+   across its ENTIRE row, not just the caret — browsers toggle the parent
+   `<details>` on a click anywhere in it. Tag-qualified on purpose so this
+   ONLY wins over the plain `cursor: default` above for that real
+   `<summary>`, not Editing mode's `.ox-toggle-summary` (a plain `<div>`,
+   where the title itself is editable text and only the caret truly
+   toggles — see `OxTogglePlugin.tsx`'s own hit-test). */
+summary.ox-toggle-summary {
+  cursor: pointer;
+}
 .ox-toggle-summary::-webkit-details-marker {
   display: none;
 }
@@ -1597,7 +1607,18 @@ img.ox-file-thumb {
    Card's own title has no icon marker pushing its text sideways either.
    `OxTogglePlugin.tsx`'s click-to-toggle hit-test reads this pseudo's
    OWN computed `left`/`width` directly rather than assuming a fixed
-   offset, so this can move without needing a matching JS change. */
+   offset, so this can move without needing a matching JS change. The
+   24x24 hit-box itself is unchanged from the old solid-triangle glyph
+   (same comfortable click target) — only the mask's own SVG and visual
+   `mask`/`-webkit-mask` size changed, to an open chevron (viewBox 15x18,
+   stroke-width 4) instead of a filled triangle. `background-color` reads
+   `--ox-toggle-accent` first — an optional per-instance CSS custom
+   property `OxRenderer.tsx`'s static toggle renderer sets from
+   `:::toggle{border="..."}`/`palette="..."}`'s resolved swatch color (see
+   the "FAQ toggle design" garden seed) — falling back to the ordinary
+   `--ox-color-accent` default when no such attribute resolves (including
+   always, in Editing mode, which never sets `--ox-toggle-accent` at all —
+   a deliberate scope line, not an oversight, see that same seed). */
 .ox-toggle-summary::before {
   content: "";
   position: absolute;
@@ -1607,28 +1628,25 @@ img.ox-file-thumb {
   height: 24px;
   transform: translateY(-50%) rotate(90deg);
   transition: transform 0.12s ease-out;
-  background-color: var(--ox-color-accent);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l8 7-8 7z'/%3E%3C/svg%3E") center / 14px no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l8 7-8 7z'/%3E%3C/svg%3E") center / 14px no-repeat;
+  background-color: var(--ox-toggle-accent, var(--ox-color-accent));
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 15 18'%3E%3Cpath d='M1.19336 1.67188L11.1934 8.23438L1.19336 15.6719' stroke-width='4' stroke='black' fill='none'/%3E%3C/svg%3E") center / 12px 14px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 15 18'%3E%3Cpath d='M1.19336 1.67188L11.1934 8.23438L1.19336 15.6719' stroke-width='4' stroke='black' fill='none'/%3E%3C/svg%3E") center / 12px 14px no-repeat;
   cursor: pointer;
 }
 .ox-toggle--collapsed > .ox-toggle-summary::before {
   transform: translateY(-50%) rotate(0deg);
 }
-.ox-toggle-body {
-  padding-left: var(--ox-grid);
-}
+/* Body content is deliberately FLUSH with the title's own left edge, not
+   indented an extra `--ox-grid` past it (round 2, "FAQ toggle design"
+   garden seed — matches the reference design). No `padding-left` rule
+   needed on `.ox-toggle-body`/Editing mode's flat body children for
+   this, just ordinary inheritance of the document's own left edge; the
+   chevron stays gutter-positioned (negative `left` on
+   `.ox-toggle-summary::before`) either way, so it's still the only thing
+   left of the title. */
 .ox-toggle--collapsed > :not(:first-child),
 .ox-toggle--collapsed > .ox-toggle-body {
   display: none;
-}
-/* Editing mode's body children are flat siblings of the summary (see this
-   section's header) — indent them to match the static renderer's
-   `.ox-toggle-body` wrapper, and give the FIRST of them (right after the
-   summary) no extra top margin of its own, matching how a heading's
-   first following paragraph doesn't either. */
-.ox-toggle > *:not(.ox-toggle-summary) {
-  padding-left: var(--ox-grid);
 }
 
 /* ── Grid layout (`:::grid{columns="N"}` / `::col`) ─────────────────────── */

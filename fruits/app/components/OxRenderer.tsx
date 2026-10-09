@@ -1092,8 +1092,35 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
       ? ((titleNode as { children?: unknown[] }).children ?? [])
       : [];
     const bodySource = isTitleParagraph ? bodyNodes : node.children;
+    const toggleAttrs = directiveAttrs(node);
+    // Optional per-toggle accent, backed by the SAME `::swatch`/`::palette`
+    // framework `::box` already uses (round-promoted from "website-scoped"
+    // adoption to a core built-in — see the "FAQ toggle design" garden
+    // seed) — `border="..."` / `palette="..."` attrs, resolved against
+    // THIS document's own registry, falling all the way back to today's
+    // existing global default (`--ox-color-accent`) when neither resolves,
+    // so a plain `:::toggle` with no attributes renders byte-for-byte the
+    // same as before this existed. Deliberately NOT modeled on
+    // `OxToggleNode` (Editing mode) at all — these two attrs are silently
+    // dropped if a toggle using them is ever opened and re-saved through
+    // the WYSIWYG editor, same as `:::grid`'s own un-modeled attributes
+    // while editing (see the `oxmarkdown` skill) — acceptable because the
+    // real authoring surface for this (website pages, including FAQs) is
+    // the raw-markdown split editor, never the WYSIWYG one.
+    const toggleAccent = resolveSwatchRole({
+      role: "border",
+      explicit: toggleAttrs.border,
+      palette: toggleAttrs.palette,
+      registry: ctx.swatchRegistry,
+      fallback: "var(--ox-color-accent)",
+    });
     return (
-      <details key={key} className="ox-toggle" open={directiveAttrs(node).collapsed !== "true"}>
+      <details
+        key={key}
+        className="ox-toggle"
+        open={toggleAttrs.collapsed !== "true"}
+        style={{ "--ox-toggle-accent": toggleAccent } as CSSProperties}
+      >
         <summary className="ox-toggle-summary">{renderNodes(titleChildren, ctx)}</summary>
         <div className="ox-toggle-body">{renderBlockNodes(bodySource, ctx)}</div>
       </details>

@@ -72,23 +72,51 @@
    whatever an ancestor's `@media` block resolved to (ordinary CSS
    inheritance: the nearest declared value wins, regardless of
    specificity) -- no exotic `light-dark()`/`color-scheme` mechanism
-   needed. Only covers the one token THIS file still makes scheme-aware
-   this way (the page background) -- `oxmarkdown.css`'s OWN much larger
-   `.ox-tokens` dark-mode block (actual TEXT colors: headings, links,
-   code background, etc.) is handled separately, right there in that
-   file, because that block sets those properties directly on the SAME
-   element rather than an ancestor -- plain inheritance can't reach it,
-   so it needs its own `.website-preview-force-{light,dark} .ox-tokens`
-   selector instead of this simpler trick. A `::swatch{...}`'s own
-   generated `<style>` tag (`OxRenderer.tsx`) handles ITS scheme-swap
-   the exact same "direct declaration on the real element" way, via its
-   own `@media (prefers-color-scheme: dark)` block -- this override
-   doesn't (and can't, generically) reach into that. */
+   needed. `oxmarkdown.css`'s OWN much larger `.ox-tokens` dark-mode block
+   (actual TEXT colors: headings, links, code background, etc.) is
+   handled separately, right there in that file, because that block sets
+   those properties directly on the SAME element rather than an ancestor
+   -- plain inheritance can't reach it, so it needs its own
+   `.website-preview-force-{light,dark} .ox-tokens` selector instead of
+   this simpler trick. A `::swatch{...}`'s own generated `<style>` tag
+   (`OxRenderer.tsx`) handles ITS scheme-swap the exact same "direct
+   declaration on the real element" way, via its own
+   `@media (prefers-color-scheme: dark)` block -- this override doesn't
+   (and can't, generically) reach into that.
+
+   `--color-*` (`root.css`'s app-wide surface/text tokens), added here
+   after a REAL, confirmed contrast bug (found reviewing `:::box{...}`'s
+   own Tracing Paper, round 8 of the "Box Directive + Pricing Card UI
+   Fix" garden seed -- pre-existing, not new: `:::pricing-card{...}` read
+   the exact same `--color-surface-card` token before it was retired, so
+   this was always broken, just never a visibly obvious contrast failure
+   until a plain-text box demo sat directly against it). These are
+   DIFFERENT from `--website-bg-page`/`--ox-color-*` above: `root.css`
+   declares them at `:root` only (never re-declared on any element BELOW
+   it), so the SAME plain-inheritance trick `--website-bg-page` already
+   used is enough -- confirmed by DIRECT measurement (a one-off Playwright
+   script reading real `getComputedStyle` values under both a forced AND
+   a real opposite-scheme page load, not just reasoned about), no
+   `.ox-tokens`-style same-element override needed. */
 .website-preview-force-light {
   --website-bg-page: var(--surface-day-100);
+  --color-text-primary: var(--plum-700);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-danger: var(--clay-500);
+  --color-surface-page: var(--white);
+  --color-surface-card: var(--surface-day-100);
+  --color-surface-inset: var(--surface-day-300);
+  --color-surface-border: var(--surface-day-500);
 }
 .website-preview-force-dark {
   --website-bg-page: var(--purple);
+  --color-text-primary: var(--white);
+  --color-text-subtle: var(--text-subtle-dark);
+  --color-text-danger: var(--clay-300);
+  --color-surface-page: var(--purple);
+  --color-surface-card: var(--surface-night-100);
+  --color-surface-inset: var(--surface-night-300);
+  --color-surface-border: var(--surface-night-500);
 }
 
 /* ── Content shell (`WebsitePageContent`, packages/stamps) ──────────────── */

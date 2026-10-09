@@ -937,6 +937,27 @@ Interacting mode first, without needing that decision resolved.
       `oxmarkdown/ToggleListPlugin.tsx` — see "Key resolved decisions" for
       why this needed a hand-rolled workaround rather than an
       `isShadowRoot` override.
+    - **Caret glyph is a thin open chevron** (CSS mask on
+      `.ox-toggle-summary::before`, `oxmarkdown.css`), not a filled
+      triangle — purely a visual update (see the "FAQ toggle design"
+      garden seed), same rotate(90deg)/rotate(0deg) collapse mechanics as
+      before, no JS changes.
+    - **Optional `border=`/`palette=` attributes, STATIC/Interacting-mode
+      only** (same seed) — the caret's own color resolves against the
+      page's own `::swatch`/`::palette` registry via `resolveSwatchRole`
+      (`OxRenderer.tsx`'s toggle branch, the same "promote a
+      website-proven pattern to a core built-in" step `::box` already
+      took), falling back to the ordinary `--ox-color-accent` default
+      when neither resolves — an unadorned `:::toggle` renders exactly as
+      before. Deliberately **not** modeled on `OxToggleNode`/Editing mode
+      at all: `editingTransforms.ts`'s `convertToggle` still reads only
+      `collapsed`, so `border`/`palette` are silently dropped if a toggle
+      using them is ever opened and re-saved through the WYSIWYG editor —
+      an accepted limitation (that editor is a lightweight daily-logging
+      surface, not the full-power authoring path for expressive content
+      like a website FAQ, which is authored through the raw-markdown
+      split editor instead), mirroring `:::grid`'s own already-accepted
+      "attributes don't round-trip while editing" limitation below.
 13. **Done — a basic grid (`:::grid{columns="N"}` / `::col`), STATIC/
     Interacting-mode rendering only, by deliberate, documented design.**
     Motivating case: side-by-side layouts (image comparisons, small

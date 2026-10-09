@@ -688,8 +688,8 @@ ${v.position ? `::badge{text="${v.text}" variant="${v.variant}" position="${v.po
   {
     id: "toggle",
     name: "Toggle",
-    directive: ':::toggle{collapsed="true"} (not new — the existing built-in, reused for FAQ)',
-    note: "Not a website-specific directive — the pre-existing Notion-style Toggle List, reused as-is for the Guides page's FAQ. Included here since it's part of the same content vocabulary these pages compose with.",
+    directive: ':::toggle{collapsed="true" border="..." palette="..."} (not new — the existing built-in, reused for FAQ)',
+    note: "Not a website-specific directive — the pre-existing Notion-style Toggle List, reused as-is for the Guides page's FAQ. Included here since it's part of the same content vocabulary these pages compose with. `border`/`palette` are the one genuinely NEW piece (see the \"FAQ toggle design\" garden seed): the caret glyph's own color now resolves against the page's own `::swatch`/`::palette` registry -- the SAME `border` role namespace `:::box{border=\"...\"}` above already uses (THIS demo reuses that same paper's `DEMO_BOX_BORDER_SWATCHES` for its dropdown) -- falling back to the ordinary default accent color when neither resolves. Static/Interacting-mode only: the live WYSIWYG editor doesn't model these two attributes at all (a deliberate scope line -- that editor is a lightweight daily-logging surface, not meant to fully round-trip every directive's attributes), so a toggle using them will lose `border`/`palette` if it's ever opened and re-saved there.",
     attributes: [
       {
         key: "collapsed",
@@ -698,14 +698,25 @@ ${v.position ? `::badge{text="${v.text}" variant="${v.variant}" position="${v.po
         default: "",
         options: [{ value: "", label: "(expanded)" }, { value: "true", label: "true" }],
       },
+      {
+        key: "border",
+        label: "border",
+        kind: "select",
+        default: "",
+        options: [{ value: "", label: "(default accent)" }, { value: "green" }, { value: "purple" }],
+      },
       { key: "question", label: "question", kind: "text", default: "Can I change between plans?" },
       { key: "answer", label: "answer", kind: "text", default: "Yes, at the end of each contract." },
     ],
-    buildMarkdown: (v) => `:::${v.collapsed === "true" ? `toggle{collapsed="true"}` : "toggle"}
+    buildMarkdown: (v) => {
+      const attrs = [v.collapsed === "true" && `collapsed="true"`, v.border && `border="${v.border}"`].filter(Boolean).join(" ");
+      const swatches = v.border ? DEMO_BOX_BORDER_SWATCHES : "";
+      return `${swatches}:::${attrs ? `toggle{${attrs}}` : "toggle"}
 ${v.question}
 
 ${v.answer}
-:::`,
+:::`;
+    },
   },
   {
     id: "grid",
