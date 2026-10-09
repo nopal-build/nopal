@@ -190,35 +190,43 @@ clone-staging-db:
 	@test -n "$(SURREAL_PASS)" || { echo "Usage: make clone-staging-db SURREAL_PASS=<prod-pass>"; exit 1; }
 	SURREAL_PASS=$(SURREAL_PASS) DB_APP=$(DB_APP) PROXY_PORT=8082 sh db/clone-to-staging.sh
 
-## Restart the webapp container, clearing the Vite dep cache first.
-## Use this when you only want webapp reloaded, not fruits/worker too --
-## see plain `restart` below for "everything."
+## Restart the webapp container -- a SCOPED `make dev`, not a quick
+## `docker compose restart`: rebuilds if `Dockerfile.dev`/dependencies
+## changed (plain `restart` never rebuilds, silently serving a stale
+## image after e.g. a `main` merge that touched either), and `--wait`
+## blocks until the healthcheck actually passes instead of returning the
+## instant the restart command fires, before the container's own
+## `pnpm install && pnpm run dev` has even finished. Robustness over
+## speed, on purpose -- a restart that might not have actually worked
+## defeats the entire point of running it. Use this when you only want
+## webapp reloaded, not fruits/worker too -- see plain `restart` below
+## for "everything."
 restart-webapp:
-	docker compose exec webapp rm -rf /app/webapp/node_modules/.vite
-	docker compose restart webapp
+	docker compose up -d --wait --build webapp
 
-## Restart the fruits container, clearing its own Vite dep cache first --
-## the fruits-only half of `restart` below.
+## Restart the fruits container -- the fruits-only half of `restart`
+## below; see `restart-webapp`'s own comment for why this is a scoped
+## `make dev` rather than a plain `docker compose restart`.
 restart-fruits:
-	docker compose exec fruits rm -rf /app/fruits/node_modules/.vite
-	docker compose restart fruits
+	docker compose up -d --wait --build fruits
 
-## Restart the GraphLog worker container, clearing its own Vite dep cache
-## first -- the worker-only half of `restart` below. `worker.ts` reads
-## webapp/.env (ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID, DATABASE_*, ...)
-## exactly ONCE, at its own process startup -- neither editing that file
-## nor `worker`'s `--watch` dev mode (which only follows the JS import
-## graph, never .env) ever reloads it. Any .env change needs this, not
-## just package changes, or the worker keeps running on a stale value
-## (a rotated API key, a newly-added workspace id, etc.) until it's
+## Restart the GraphLog worker container -- the worker-only half of
+## `restart` below; see `restart-webapp`'s own comment for why this is a
+## scoped `make dev` rather than a plain `docker compose restart`.
+## `worker.ts` reads webapp/.env (ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID,
+## DATABASE_*, ...) exactly ONCE, at its own process startup -- neither
+## editing that file nor `worker`'s `--watch` dev mode (which only follows
+## the JS import graph, never .env) ever reloads it. Any .env change needs
+## this, not just package changes, or the worker keeps running on a stale
+## value (a rotated API key, a newly-added workspace id, etc.) until it's
 ## restarted by hand.
 restart-worker:
-	docker compose exec worker rm -rf /app/packages/worker/node_modules/.vite
-	docker compose restart worker
+	docker compose up -d --wait --build worker
 
 ## Restart webapp, fruits, AND the worker -- the everyday "just restart
 ## everything" command, including after any .env change (so no container
-## is silently still running on a stale secret).
+## is silently still running on a stale secret) or after pulling/merging
+## changes that might need a rebuild.
 restart: restart-webapp restart-fruits restart-worker
 
 ## Stop all containers (data is preserved in named volumes).
