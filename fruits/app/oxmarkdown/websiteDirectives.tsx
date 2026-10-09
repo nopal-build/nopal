@@ -22,19 +22,22 @@
  * must be AT LEAST as long as its own opening fence, and (confirmed by a
  * real parse test against `parseOxDocument`, not just spec-reading) a
  * `:::section{...}` that nests MORE THAN ONE sibling container directive
- * at the same 3-colon length (two `:::pricing-card{...}` blocks, a
- * `:::toggle{...}` alongside anything else, or more than one
- * `:::section-title{...}`) breaks: the FIRST nested container's own
- * closing `:::` also incorrectly closes the outer section, silently
- * popping every later "nested" block up to the top level instead. A
- * single nested container is fine at matching length, but the safe,
- * ALWAYS-correct rule is: `:::section{...}` should open with FOUR colons
- * (`::::section{...}`) whenever its body contains any `:::pricing-card`/
- * `:::toggle`/`:::section-title`/other container directive, so its own
- * closing fence can never be ambiguous with a 3-colon one nested inside
- * it. Leaf directives (`::stamp`, `::icon`, `::button`, `::badge`,
- * `::waypoint`, `::line`, `::path`, `::trail`, `::daily-log`) never open a
- * fence at all, so they never trigger this.
+ * at the same 3-colon length (two `:::box{...}` blocks, a `:::toggle{...}`
+ * alongside anything else, or more than one `:::section-title{...}`)
+ * breaks: the FIRST nested container's own closing `:::` also incorrectly
+ * closes the outer section, silently popping every later "nested" block
+ * up to the top level instead. A single nested container is fine at
+ * matching length, but the safe, ALWAYS-correct rule is: `:::section{...}`
+ * should open with FOUR colons (`::::section{...}`) whenever its body
+ * contains any `:::box`/`:::flex`/`:::toggle`/`:::section-title`/other
+ * container directive, so its own closing fence can never be ambiguous
+ * with a
+ * 3-colon one nested inside it. The SAME rule applies recursively to ANY
+ * container nesting another at matching length, not just `:::section`
+ * itself -- e.g. a `:::box{...}` wrapping a `:::flex{...}` title+price
+ * row needs `::::box{...}` too. Leaf directives (`::stamp`, `::icon`,
+ * `::button`, `::badge`, `::waypoint`, `::line`, `::path`, `::trail`,
+ * `::daily-log`) never open a fence at all, so they never trigger this.
  *
  * Directive vocabulary (first functional pass):
  *   :::section{surface="..." palette="..." list="timeline" margin="N"}
@@ -247,9 +250,46 @@
  *     already is, for its first real use; a trail meant to span MULTIPLE
  *     sections needs its own wrapping container with that same treatment,
  *     not yet added anywhere since nothing has needed it yet.
- *   :::pricing-card{name="..." price="..." cta="..." cta-href="..." cta-variant="primary|purple|secondary|yellow|outline"} —
- *     body is an ordinary bullet list of features; `cta-variant` -- see
- *     `::button`'s own entry below -- defaults to `primary`.
+ *   :::box{surface="..." border="..." palette="..." form-id="..."
+ *     select-group="..." value="..."} — a generic bordered container
+ *     (border/radius/padding/background only -- composes with plain
+ *     markdown + other directives for everything else, unlike
+ *     `:::pricing-card{...}` below's bespoke header/CTA structure).
+ *     `surface`/`border`/`palette` resolve against the page's own
+ *     `::swatch`/`::palette` registry exactly like `:::section{surface=
+ *     "..."}` above (`oxmarkdown-core`'s `resolveSwatchRole`), falling
+ *     back to the same neutral card look `:::pricing-card{...}` already
+ *     has when neither is given. ALWAYS carries a non-zero outer margin
+ *     -- the deliberate opposite of `:::section{...}`'s own full-bleed,
+ *     flush-to-the-edge design (see the "Box Directive + Pricing Card UI
+ *     Fix" garden seed, resolved question 5). Also a `position: relative`
+ *     ancestor, the same treatment `.website-section-inner` already has
+ *     -- so a `::badge{position="..."}` (below) rendered inside one has
+ *     a real container to anchor against.
+ *     `form-id`/`select-group`/`value`, given ALL THREE together, make
+ *     the box SELECTABLE -- clicking (or Space/Enter) writes `value`
+ *     into a shared, page-level store under `(form-id, select-group)`
+ *     (`websiteForms.tsx`'s `BoxDirective`/`OxRenderer.tsx`'s
+ *     `WebsiteFormContext`), radio-style: every other box sharing the
+ *     same `form-id`+`select-group` stops showing as selected the
+ *     moment one of them is picked. Option 4 ("centralized storage, not
+ *     centralized building") of the garden seed's own round 4/6 — a
+ *     `::button{form-id="..." action="..."}` (below) elsewhere on the
+ *     page reads the SAME store at submit time. Missing any of the
+ *     three renders an ordinary, unselectable box, unchanged.
+ *   :::flex{justify="space-between|flex-start|flex-end|center|..."} —
+ *     lays out its own direct block children in a single flex row
+ *     (`justify` default `space-between`), e.g. a title heading + a price
+ *     paragraph side by side -- the exact layout `:::pricing-card{...}`'s
+ *     own header bakes in today, factored out here as its own reusable
+ *     primitive. Deliberately the simpler sibling of `:::grid{columns=
+ *     "N"}`/`::col` above -- no per-item grouping marker, every direct
+ *     child block is its own flex item (see the garden seed's resolved
+ *     question 2).
+ *   `:::pricing-card{...}` is RETIRED (Effort 4 of the "Box Directive +
+ *     Pricing Card UI Fix" garden seed) -- fully superseded by
+ *     `:::box{...}`/`:::flex{...}`/`::button{...}` above/below; confirmed
+ *     no real published content used it before removal.
  *   ::button{text="..." href="..." variant="primary|purple|secondary|yellow|outline"} —
  *     a standalone CTA link, styled with `stamps/button.css`'s own
  *     `button({ variant })` recipe (the site's ordinary buttons elsewhere
@@ -261,9 +301,32 @@
  *     demonstrates for both, rather than rendering an incomplete-looking
  *     button. The pricing card's own `cta`/`cta-href` render through the
  *     exact same recipe.
- *   ::badge{text="..." variant="neutral|success|warning|danger"} — a
- *     status pill, reusing `stamps/Badge` (same component the "Draft"
- *     preview banner already uses) rather than a bespoke style.
+ *     Second, mutually-exclusive mode: `::button{text="..." form-id="..."
+ *     action="..." variant="..."}` — a real `<button type="button">` that
+ *     fires a stateful POST of whatever `form-id`'s own shared store has
+ *     collected so far (JSON, to `action`), instead of rendering an `<a>`
+ *     that navigates. SAME visual recipe/`variant` set as the `href` mode
+ *     — a submit button looks identical to an ordinary CTA link on
+ *     purpose (round 6's Effort 0 decision: extend this directive, not a
+ *     new name). `form-id`+`action` win if somehow given alongside
+ *     `href` too — a simple, deterministic tie-break, not an error.
+ *   ::badge{text="..." variant="neutral|success|warning|danger"
+ *     position="x,y" height="#"} — a status pill, reusing `stamps/Badge`
+ *     (same component the "Draft" preview banner already uses) rather
+ *     than a bespoke style. `position`/`height` are optional -- omit both
+ *     and the badge renders exactly as it always has, inline in ordinary
+ *     flow. Give `position` to absolutely position it instead, the EXACT
+ *     SAME literal-pixel anchor/delta grammar `::icon{position="..."}`
+ *     uses (`parseIconPosition`, below, reused as-is) -- needs a
+ *     `position: relative` ancestor (a `:::box{...}`/`:::section{...}`
+ *     body) to have any visible effect. `height`, new here, SETS the
+ *     badge's own real rendered CSS height (e.g. `height="20"`) so an
+ *     author can reliably hand-compute a centering offset
+ *     (`position="R10,T-10"` roughly centers a 20px-tall badge 10px in
+ *     from the right edge) -- see the garden seed's resolved question 3
+ *     for why this needed its own attribute instead of leaning on any
+ *     auto-center logic (there isn't any, matching `::icon`'s own
+ *     top-left-corner anchor precedent).
  *   ::daily-log{date="YYYY-MM-DD" project="..."} — a curated, static embed
  *     of one real daily-log Card, resolved server-side (see
  *     `robustness-core/data/website.server.ts`'s
@@ -309,10 +372,11 @@
 import type { CSSProperties } from "react";
 import type { DirectiveRegistry } from "./directiveRegistry";
 import { WebsiteIcon } from "./websiteIcons";
+import { WebsiteBadge, toBadgeVariant } from "./websiteBadge";
+import { BoxDirective, WebsiteFormButton } from "./websiteForms";
 import { WebsiteStamp } from "./websiteStamps";
 import { WavyLine } from "./WavyLine";
 import OxRenderer from "../components/OxRenderer";
-import { Badge } from "stamps/Badge";
 import { button as stampsButton } from "stamps/button.css";
 import { parseLinePoints, type LineCurveKind, type LinePointTokens, type LineSizeSpec } from "oxmarkdown-core";
 import "../styles/website.css";
@@ -462,10 +526,16 @@ function parseSectionMarginStyle(raw: string | undefined): CSSProperties | undef
   return { marginTop: margin, marginBottom: margin };
 }
 
-const BADGE_VARIANTS = ["neutral", "success", "warning", "danger"] as const;
-type BadgeVariant = (typeof BADGE_VARIANTS)[number];
-function toBadgeVariant(v: string | undefined): BadgeVariant {
-  return (BADGE_VARIANTS as readonly string[]).includes(v ?? "") ? (v as BadgeVariant) : "neutral";
+/** `::badge{height="20"}` -- a plain literal pixel height, SET on the
+ * badge's own real rendered box (see `websiteBadge.tsx`'s `WebsiteBadge`
+ * for how, not just documented) so an author's by-hand centering math
+ * (`T-10` = half of `20`) stays trustworthy. Returns `undefined` for an
+ * absent/unparseable value -- the badge then keeps its own natural
+ * height, same "no value given = unchanged" contract `::icon`'s own
+ * optional attributes already use. */
+function parseBadgeHeight(raw: string | undefined): number | undefined {
+  const height = Number(raw);
+  return raw && Number.isFinite(height) ? height : undefined;
 }
 
 export type WebsiteDailyLogEntry = {
@@ -711,30 +781,41 @@ export function buildWebsiteDirectiveRegistry(opts: {
       );
     },
 
-    "pricing-card"({ attrs, children }) {
-      const ctaVariant = toWebsiteButtonVariant(attrs["cta-variant"]);
+    box({ attrs, children, resolveSwatchRole }) {
+      const surface = resolveSwatchRole({
+        role: "surface",
+        explicit: attrs.surface,
+        palette: attrs.palette,
+        fallback: "var(--color-surface-card)",
+      });
+      const border = resolveSwatchRole({
+        role: "border",
+        explicit: attrs.border,
+        palette: attrs.palette,
+        fallback: "var(--color-surface-border)",
+      });
       return (
-        <div className="website-pricing-card">
-          <div className="website-pricing-card-header">
-            <span className="website-pricing-card-name">{attrs.name}</span>
-            {attrs.price && <span className="website-pricing-card-price">{attrs.price}</span>}
-          </div>
-          <div className="website-pricing-card-body">{children}</div>
-          {attrs.cta && attrs["cta-href"] && (
-            <a
-              className={`${stampsButton({ variant: ctaVariant })} website-button-link website-pricing-card-cta`}
-              href={attrs["cta-href"]}
-              style={{ textDecoration: "none", ...WEBSITE_BUTTON_VARIANT_STYLE[ctaVariant] }}
-            >
-              {attrs.cta}
-            </a>
-          )}
+        <BoxDirective
+          surfaceStyle={{ background: surface, borderColor: border }}
+          formId={attrs["form-id"]}
+          selectGroup={attrs["select-group"]}
+          value={attrs.value}
+        >
+          {children}
+        </BoxDirective>
+      );
+    },
+
+    flex({ attrs, children }) {
+      return (
+        <div className="website-flex" style={{ justifyContent: attrs.justify || "space-between" }}>
+          {children}
         </div>
       );
     },
 
     button({ attrs }) {
-      if (!attrs.text || !attrs.href) return null;
+      if (!attrs.text) return null;
       const variant = toWebsiteButtonVariant(attrs.variant);
       // `stamps/button.css`'s own recipe -- see this file's header comment
       // for why the `::button` directive uses the site's ordinary button
@@ -748,13 +829,34 @@ export function buildWebsiteDirectiveRegistry(opts: {
       // just belt-and-suspenders (confirmed via a real render, not just
       // CSS-reading) -- `.ox-content a`'s own `color` rule is MORE specific
       // than the recipe's own plain class and was winning the cascade
-      // regardless of variant.
+      // regardless of variant. Shared across BOTH of this directive's two
+      // mutually-exclusive modes (round 6's Effort 0 decision: extend
+      // `::button`, not a new directive name) -- a submit button looks
+      // identical to an ordinary CTA link on purpose.
+      const className = `${stampsButton({ variant })} website-button-link`;
+      const style = { textDecoration: "none", ...WEBSITE_BUTTON_VARIANT_STYLE[variant] };
+
+      // Mode 2: `form-id`+`action` -- fires a stateful POST via the shared
+      // `WebsiteFormContext` store (see `websiteForms.tsx`'s
+      // `WebsiteFormButton`), never navigates. Checked FIRST -- if both
+      // this and `href` are somehow given, `form-id`/`action` wins, a
+      // simple deterministic tie-break rather than rendering nothing.
+      if (attrs["form-id"] && attrs.action) {
+        return (
+          <WebsiteFormButton
+            text={attrs.text}
+            className={className}
+            style={style}
+            formId={attrs["form-id"]}
+            action={attrs.action}
+          />
+        );
+      }
+
+      // Mode 1 (original): a standalone CTA link.
+      if (!attrs.href) return null;
       return (
-        <a
-          className={`${stampsButton({ variant })} website-button-link`}
-          href={attrs.href}
-          style={{ textDecoration: "none", ...WEBSITE_BUTTON_VARIANT_STYLE[variant] }}
-        >
+        <a className={className} href={attrs.href} style={style}>
           {attrs.text}
         </a>
       );
@@ -762,7 +864,14 @@ export function buildWebsiteDirectiveRegistry(opts: {
 
     badge({ attrs }) {
       if (!attrs.text) return null;
-      return <Badge variant={toBadgeVariant(attrs.variant)}>{attrs.text}</Badge>;
+      return (
+        <WebsiteBadge
+          text={attrs.text}
+          variant={toBadgeVariant(attrs.variant)}
+          position={parseIconPosition(attrs.position)}
+          height={parseBadgeHeight(attrs.height)}
+        />
+      );
     },
 
     "daily-log"({ attrs }) {

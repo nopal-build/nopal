@@ -121,22 +121,28 @@ export default function OxRenderer({
   );
 
   return (
-    <div
-      className={`ox-content ox-tokens ${swatchScopeClassName}${className ? ` ${className}` : ""}`}
-      style={style}
-    >
-      {swatchStyleSheet && <style dangerouslySetInnerHTML={{ __html: swatchStyleSheet }} />}
-      <div className="ox-dot-grid">
-        <OxTreeRenderer
-          doc={doc}
-          directives={directives}
-          interactive={interactive}
-          resolveCard={resolveCard}
-          resolveGalleryFolder={resolveGalleryFolder}
-          swatchRegistry={swatchRegistry}
-        />
+    // `WebsiteFormProvider` -- see its own comment above -- wraps the
+    // WHOLE tree so any `:::box{form-id=...}`/`::button{form-id=...}`
+    // rendered anywhere inside shares ONE store scoped to this single
+    // `OxRenderer` instance.
+    <WebsiteFormProvider>
+      <div
+        className={`ox-content ox-tokens ${swatchScopeClassName}${className ? ` ${className}` : ""}`}
+        style={style}
+      >
+        {swatchStyleSheet && <style dangerouslySetInnerHTML={{ __html: swatchStyleSheet }} />}
+        <div className="ox-dot-grid">
+          <OxTreeRenderer
+            doc={doc}
+            directives={directives}
+            interactive={interactive}
+            resolveCard={resolveCard}
+            resolveGalleryFolder={resolveGalleryFolder}
+            swatchRegistry={swatchRegistry}
+          />
+        </div>
       </div>
-    </div>
+    </WebsiteFormProvider>
   );
 }
 
@@ -162,6 +168,97 @@ export const CardResolverContext = createContext<CardResolver | undefined>(undef
  * attachments do (e.g. that day's vault folder), not a second, divergent
  * upload path. */
 export const UploadFileContext = createContext<UploadFileFn | undefined>(undefined);
+
+/** A plain value a `form-id`/`select-group`/`field`-style attribute can
+ * write into and read back out -- see `websiteForms.tsx`'s `BoxDirective`/
+ * `WebsiteFormButton`. */
+export type WebsiteFormValue = string | string[];
+/** Per-document, keyed first by `form-id` then by whatever key that form's
+ * own elements use (`select-group` for a `box`, eventually a plain `field`
+ * name for some future `input` -- see the "Box Directive + Pricing Card UI
+ * Fix" garden seed's own future-payoff mockup). */
+export type WebsiteFormState = Record<string, Record<string, WebsiteFormValue>>;
+
+// Three plain, pure, ZERO-React functions -- the real update/read/payload
+// rules, kept directly unit-testable with no render/hook/DOM machinery at
+// all (same "zero React" testing philosophy `oxmarkdown-core`'s own
+// `swatchDirective.ts` uses, just kept local to this file since this
+// effort is fruits-only-originated but PORTED here too -- see the "Box
+// Directive + Pricing Card UI Fix" garden seed's Effort 3). `WebsiteFormProvider`
+// below is deliberately thin React wiring around these three, nothing more.
+
+/** Overwrites `(formId, key)`'s own value -- radio-style mutual exclusivity
+ * within one `select-group` falls out of this for free: every `box`
+ * sharing the same `(formId, selectGroup)` key reads the SAME single
+ * stored value, so setting a new one is already the entire "deselect every
+ * other option" rule, not a separate step. */
+export function setWebsiteFormValue(
+  state: WebsiteFormState,
+  formId: string,
+  key: string,
+  value: WebsiteFormValue,
+): WebsiteFormState {
+  return { ...state, [formId]: { ...state[formId], [key]: value } };
+}
+
+export function getWebsiteFormValue(
+  state: WebsiteFormState,
+  formId: string,
+  key: string,
+): WebsiteFormValue | undefined {
+  return state[formId]?.[key];
+}
+
+/** OxMarkdown's own scope stops here -- a plain POST of whatever `formId`
+ * has collected so far, as JSON, to a caller-supplied `action` URL.
+ * Whatever that endpoint actually does with it (email, CRM record, a
+ * scheduler redirect, ...) is explicitly out of scope (see the garden
+ * seed's resolved question 7). */
+export async function postWebsiteForm(state: WebsiteFormState, formId: string, action: string): Promise<void> {
+  await fetch(action, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(state[formId] ?? {}),
+  });
+}
+
+export type WebsiteFormApi = {
+  getValue(formId: string, key: string): WebsiteFormValue | undefined;
+  setValue(formId: string, key: string, value: WebsiteFormValue): void;
+  submit(formId: string, action: string): Promise<void>;
+};
+
+/** Option 4 ("centralized storage, not centralized building") of the "Box
+ * Directive + Pricing Card UI Fix" garden seed, Effort 2/3: the shared,
+ * page-level key-value FORM STORE independent directive instances
+ * (`:::box{form-id="..." select-group="..." value="..."}`, `::button
+ * {form-id="..." action="..."}`) write into and read from, without being
+ * literal siblings inside one wrapping directive. `undefined` (no
+ * Provider mounted) is a real, valid state -- a directive with no
+ * `form-id` at all behaves exactly as it did before this existed. */
+export const WebsiteFormContext = createContext<WebsiteFormApi | undefined>(undefined);
+
+/** Mounted ONCE per `OxRenderer` instance (see that component's own
+ * return statement) -- a plain `useState`-backed component naturally gets
+ * a fresh instance per mount, so two independent `OxRenderer`s on one
+ * page never share form state, same isolation `swatchRegistry`'s own
+ * per-instance scope class already has (see this file's header comment
+ * on `swatchScopeId`). */
+function WebsiteFormProvider({ children }: { children: ReactNode }) {
+  const [forms, setForms] = useState<WebsiteFormState>({});
+
+  const setValue = useCallback((formId: string, key: string, value: WebsiteFormValue) => {
+    setForms((prev) => setWebsiteFormValue(prev, formId, key, value));
+  }, []);
+
+  const getValue = useCallback((formId: string, key: string) => getWebsiteFormValue(forms, formId, key), [forms]);
+
+  const submit = useCallback((formId: string, action: string) => postWebsiteForm(forms, formId, action), [forms]);
+
+  const api = useMemo<WebsiteFormApi>(() => ({ getValue, setValue, submit }), [getValue, setValue, submit]);
+
+  return <WebsiteFormContext.Provider value={api}>{children}</WebsiteFormContext.Provider>;
+}
 
 /** Renders a plain list of mdast nodes with the same static logic as
  * `OxRenderer`/`OxTreeRenderer`, but with no `interactive` — used where

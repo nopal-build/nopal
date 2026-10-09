@@ -288,9 +288,11 @@ type TracingPaper = {
   /** What it's for / how it's currently implemented -- markdown, rendered
    * through OxRenderer (`InfoText`) same as the live preview itself. */
   note: string;
-  /** Sections/pricing-cards render their own full-bleed background and
-   * padding — let that reach the preview box's own edge instead of
-   * double-padding it. Everything else gets the box's normal padding. */
+  /** Sections render their own full-bleed background and padding -- let
+   * that reach the preview box's own edge instead of double-padding it.
+   * Everything else (including `:::box{...}`, which carries its own real
+   * margin by design -- see the garden seed's resolved question 5) gets
+   * the preview box's normal padding. */
   fullBleed?: boolean;
   /** A directive whose own layout is `position: absolute` (`::line{...}`
    * on its own, with no `:::section-title{...}` around it to supply real
@@ -337,6 +339,14 @@ const DEMO_COLOR_SWATCHES = `::swatch{role="color" name="red" light="var(--red)"
  * entirely underneath it. */
 const DEMO_SURFACE_SWATCHES = `::swatch{role="surface" name="mint" light="var(--cactus-100)" dark="var(--cactus-800)"}
 ::swatch{role="surface" name="white" light="var(--white)" dark="var(--purple-light)"}
+`;
+
+/** Same idea again, for the Box paper's `border=` dropdown -- a SEPARATE
+ * role namespace from `DEMO_SURFACE_SWATCHES` above (a swatch is keyed by
+ * `(role, name)` together, so reusing plain color names like `green`/
+ * `purple` under `role="border"` here doesn't collide with anything). */
+const DEMO_BOX_BORDER_SWATCHES = `::swatch{role="border" name="green" light="var(--green)" dark="var(--green-light)"}
+::swatch{role="border" name="purple" light="var(--purple)" dark="var(--purple)"}
 `;
 
 /** Every registered `::icon{name="..."}`/`:::section-title{icon="..."}`
@@ -547,26 +557,46 @@ const TRACING_PAPERS: TracingPaper[] = [
 :::`,
   },
   {
-    id: "pricing-card",
-    name: "Pricing card",
-    directive: ':::pricing-card{name="..." price="..." cta="..." cta-href="..." cta-variant="primary|purple|secondary|yellow|outline"}',
-    note: "Container. Header row (name + price) + body (ordinary children, typically a bullet list) + an optional CTA rendered through the same `stamps/button.css` `button({ variant })` recipe as a standalone `::button` (`cta-variant`, default `primary`).",
+    id: "box",
+    name: "Box",
+    directive: ':::box{surface="..." border="..." palette="..."}',
+    note: "Container. A generic bordered container (border/radius/padding/background only) -- composes with plain markdown + other directives for everything else, UNLIKE the now-retired `:::pricing-card{...}`'s bespoke header/CTA structure (see the Flex/Button/Badge papers for how that composition actually looks). `surface`/`border`/`palette` resolve against the page's own `::swatch`/`::palette` registry -- the SAME open vocabulary `:::section{surface=\"...\"}` above uses. THIS demo prepends small `::swatch{role=\"surface\"/\"border\" ...}` definitions ahead of the directive below, same convention the Section paper already uses. ALWAYS carries a non-zero outer margin -- the deliberate opposite of `:::section{...}`'s own full-bleed, flush-to-the-edge design.",
     attributes: [
-      { key: "name", label: "name", kind: "text", default: "Light-Guide" },
-      { key: "price", label: "price", kind: "text", default: "$1,499/mo" },
-      { key: "cta", label: "cta", kind: "text", default: "Meet with a Guide" },
+      { key: "surface", label: "surface", kind: "select", default: "", options: [{ value: "", label: "(default card color)" }, { value: "mint" }, { value: "white" }] },
+      { key: "border", label: "border", kind: "select", default: "", options: [{ value: "", label: "(default)" }, { value: "green" }, { value: "purple" }] },
+      { key: "content", label: "content", kind: "text", default: "Some content inside the box." },
     ],
-    buildMarkdown: (v) => `:::pricing-card{name="${v.name}" price="${v.price}" cta="${v.cta}" cta-href="#"}
-- Everything in Self-Guide and...
-- Three 90 minute meetings
-- One report
+    buildMarkdown: (v) => `${DEMO_SURFACE_SWATCHES}${DEMO_BOX_BORDER_SWATCHES}:::box{${v.surface ? `surface="${v.surface}" ` : ""}${v.border ? `border="${v.border}"` : ""}}
+${v.content}
+:::`,
+  },
+  {
+    id: "flex",
+    name: "Flex",
+    directive: ':::flex{justify="space-between|flex-start|flex-end|center"}',
+    note: "Container. Lays out its own direct block children in a single flex row (`justify` default `space-between`) -- e.g. a title + a price side by side. This is the EXACT title+price row the now-retired `:::pricing-card{...}`'s own header baked in, factored out here as its own reusable primitive -- deliberately the simpler sibling of `:::grid{columns=\"N\"}`/`::col` above: no per-item grouping marker, every direct block child is its own flex item.",
+    attributes: [
+      {
+        key: "justify",
+        label: "justify",
+        kind: "select",
+        default: "space-between",
+        options: [{ value: "space-between" }, { value: "flex-start" }, { value: "flex-end" }, { value: "center" }],
+      },
+      { key: "left", label: "left item", kind: "text", default: "### Self-Guide" },
+      { key: "right", label: "right item", kind: "text", default: "**$99/mo**" },
+    ],
+    buildMarkdown: (v) => `:::flex{justify="${v.justify}"}
+${v.left}
+
+${v.right}
 :::`,
   },
   {
     id: "button",
     name: "Button",
     directive: '::button{text="..." href="..." variant="primary|purple|secondary|yellow|outline"}',
-    note: "Leaf. A standalone CTA link, styled with `stamps/button.css`'s own `button({ variant })` recipe (same one the pricing card's own cta uses) -- the site's ordinary buttons, not a bespoke website-only look.",
+    note: 'Leaf. A standalone CTA link, styled with `stamps/button.css`\'s own `button({ variant })` recipe -- the site\'s ordinary buttons, not a bespoke website-only look. Has a SECOND, mutually-exclusive mode this basic paper doesn\'t demo directly: `::button{text="..." form-id="..." action="..."}` renders a real `<button>` that POSTs a shared form\'s collected values instead of navigating -- see the "Price select" paper below for a live, clickable demo of that mode end to end.',
     attributes: [
       { key: "text", label: "text", kind: "text", default: "Meet with a Guide" },
       { key: "href", label: "href", kind: "text", default: "#" },
@@ -583,8 +613,8 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "badge",
     name: "Badge",
-    directive: '::badge{text="..." variant="neutral|success|warning|danger"}',
-    note: 'Leaf. Renders `stamps/Badge` directly — the same component the "Draft" preview banner already uses — rather than a bespoke pill style.',
+    directive: '::badge{text="..." variant="neutral|success|warning|danger" position="x,y" height="#"}',
+    note: 'Leaf. Renders `stamps/Badge` directly — the same component the "Draft" preview banner already uses — rather than a bespoke pill style. `position`/`height` are optional and demoed here wrapped in a `:::box{...}` -- the box supplies the `position: relative` ancestor a positioned badge needs to have any visible effect (the SAME relationship `:::section{...}`\'s own body has for a positioned `::icon{...}`), and this is literally the garden seed\'s own original motivating example: a badge overlapping a box\'s corner, signaling "this is coming soon." `height` SETS the badge\'s real rendered CSS height so the `position="R10,T-10"` centering math below (`T-10` = half of `height="20"`) stays trustworthy.',
     attributes: [
       { key: "text", label: "text", kind: "text", default: "Coming Soon" },
       {
@@ -594,8 +624,47 @@ const TRACING_PAPERS: TracingPaper[] = [
         default: "danger",
         options: [{ value: "neutral" }, { value: "success" }, { value: "warning" }, { value: "danger" }],
       },
+      {
+        key: "position",
+        label: "position",
+        kind: "select",
+        default: "R10,T-10",
+        options: [{ value: "", label: "(inline, unpositioned)" }, { value: "R10,T-10" }, { value: "L10,T-10" }],
+      },
+      { key: "height", label: "height", kind: "text", default: "20" },
     ],
-    buildMarkdown: (v) => `::badge{text="${v.text}" variant="${v.variant}"}`,
+    buildMarkdown: (v) => `:::box{}
+${v.position ? `::badge{text="${v.text}" variant="${v.variant}" position="${v.position}"${v.height ? ` height="${v.height}"` : ""}}
+
+` : `::badge{text="${v.text}" variant="${v.variant}"}
+
+`}### Self-Guide
+**$99/mo**
+:::`,
+  },
+  {
+    id: "price-select",
+    name: "Price select (box + button, form-id)",
+    directive: ':::box{form-id="..." select-group="..." value="..."} ... ::button{form-id="..." action="..."}',
+    note: 'The garden seed\'s own original motivating case, composed and LIVE here -- this preview is a real, hydrated `OxRenderer`, not a static mockup, so you can actually click between the two boxes below, then click the button. Several selectable `:::box{form-id="..." select-group="..." value="..."}` siblings share one page-level store (`OxRenderer.tsx`\'s `WebsiteFormContext`) keyed by `(form-id, select-group)` -- clicking one writes its own `value` in and (since one key can only ever hold one value) automatically stops the previously-selected box from matching, radio-style, with no separate "deselect everything else" step anywhere. `::button{form-id="..." action="..."}` is `::button`\'s SECOND mode (not the `href`-link one above) -- clicking it POSTs whatever that `form-id` has collected so far, as JSON, to `action`. This demo\'s own `action` is a non-existent placeholder path, so the POST harmlessly 404s -- open devtools\' Network tab after clicking to see the real request and payload shape. Option 4 ("centralized storage, not centralized building") of the "Box Directive + Pricing Card UI Fix" garden seed.',
+    attributes: [
+      { key: "plan1", label: "plan 1 name", kind: "text", default: "Self-Guide" },
+      { key: "price1", label: "plan 1 price", kind: "text", default: "$99/mo" },
+      { key: "plan2", label: "plan 2 name", kind: "text", default: "Guided" },
+      { key: "price2", label: "plan 2 price", kind: "text", default: "$199/mo" },
+      { key: "cta", label: "button text", kind: "text", default: "Schedule a call" },
+    ],
+    buildMarkdown: (v) => `:::box{form-id="price-select-demo" select-group="plan" value="plan1"}
+### ${v.plan1}
+**${v.price1}**
+:::
+
+:::box{form-id="price-select-demo" select-group="plan" value="plan2"}
+### ${v.plan2}
+**${v.price2}**
+:::
+
+::button{form-id="price-select-demo" action="/api/demo-schedule-call" text="${v.cta}"}`,
   },
   {
     id: "daily-log",
@@ -1060,7 +1129,18 @@ function PreviewBox({
         minHeight,
       }}
     >
-      <OxRenderer markdown={markdown} directives={registry} className="ox-no-dots" />
+      {/* `ox-no-heading-marks` -- a rendered directive preview isn't
+          markdown source; a heading inside it shouldn't show a literal
+          `#` in front of it, same as a real published `/v2` page
+          (`WebsitePageView.tsx`'s own comment) or the Vault's own
+          website-page preview (`vault.tsx`'s `WebsitePageSplitEditor`) --
+          literal marks are an OxEditor (editing-surface) affordance,
+          reserved for there, not for a finished-page preview like this
+          one. `website-page-ox` -- goes ALONGSIDE those two in both real
+          call sites (see `website.css`'s own comment); zeroes `.ox-content`'s
+          own left/right gutter so this box's own padding above is the
+          ONLY inset, instead of silently double-padding. */}
+      <OxRenderer markdown={markdown} directives={registry} className="ox-no-heading-marks ox-no-dots website-page-ox" />
     </div>
   );
 }

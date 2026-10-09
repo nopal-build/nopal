@@ -488,40 +488,57 @@
   color: var(--website-section-title-h-color, inherit);
 }
 
-/* ── Pricing card (`:::pricing-card{...}`) ─────────────────────────────── */
+/* ── Box (`:::box{...}`) ────────────────────────────────────────────────── */
 
-.website-pricing-card {
+.website-box {
   border: 1px solid var(--color-surface-border);
   border-radius: 8px;
   padding: 20px;
-  margin-bottom: 16px;
+  /* ALWAYS a non-zero outer margin, both sides -- the deliberate opposite
+     of `.website-section`'s own full-bleed, flush-to-the-edge design (see
+     the "Box Directive + Pricing Card UI Fix" garden seed, resolved
+     question 5). */
+  margin: 16px 0;
   background: var(--color-surface-card);
+  /* The positioned ancestor a `::badge{position="x,y"}` (websiteBadge.tsx's
+     `PositionedWebsiteBadge`) resolves its own real-pixel anchor
+     coordinates against -- same treatment `.website-section-inner` below
+     already has, for the same reason. */
+  position: relative;
 }
 
-.website-pricing-card-header {
+/* Effort 2: `:::box{form-id=... select-group=... value=...}` -- box-shadow,
+   not border-color, for the selected/hover treatment below -- `.website-box`
+   itself sets `border-color` via INLINE style (surface/border resolve
+   through `resolveSwatchRole` in JS), which always wins over any class rule
+   targeting the same property regardless of specificity. `box-shadow` is a
+   genuinely different property, so it layers on top with no conflict. */
+
+.website-box-selectable {
+  cursor: pointer;
+}
+
+.website-box-selectable:hover {
+  box-shadow: 0 0 0 1px var(--color-surface-border);
+}
+
+.website-box-selected {
+  box-shadow: 0 0 0 2px var(--green);
+}
+
+/* ── Flex row (`:::flex{...}`) ──────────────────────────────────────────── */
+/* A generic "lay these direct block children out side by side" primitive,
+   factored out of `.website-pricing-card-header`'s own exact layout below
+   -- `justify-content` itself comes from the directive's own `justify=`
+   attribute (websiteDirectives.tsx), inline, not a class variant here. */
+
+.website-flex {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
 }
 
-.website-pricing-card-name {
-  font-weight: bold;
-  color: var(--green);
-}
-
-.website-pricing-card-price {
-  font-weight: bold;
-  color: var(--purple);
-}
-
-.website-pricing-card-body :is(ul, ol) {
-  margin: 0;
-  padding-left: 20px;
-}
-
-/* ── Buttons (`::button{...}`, pricing card's own cta) ─────────────────── */
+/* ── Buttons (`::button{...}`) ─────────────────────────────────────── */
 /* The look itself is `stamps/button.css`'s own `button({ variant: "..." })`
    recipe now (`websiteDirectives.tsx`) -- no bespoke `.website-button`
    class anymore, so a `/v2` CTA matches every other button in the app
@@ -541,11 +558,7 @@
    competing rule instead lets the recipe's own plain class win outright,
    for any variant, unimpeded. */
 
-.website-pricing-card-cta {
-  margin-top: 12px;
-}
-
-/* ── Daily-log embed (`::daily-log{...}`) ──────────────────────────────── */
+/* ── Daily-log embed (`::daily-log{...}`) ──────────────────────── */
 
 .website-daily-log-embed {
   border-left: 3px solid var(--green);

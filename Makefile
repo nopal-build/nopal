@@ -1,4 +1,4 @@
-.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-fruits restart-worker restart-all cli release-cli update-cli-version
+.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-webapp restart-fruits restart-worker cli release-cli update-cli-version
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -191,21 +191,20 @@ clone-staging-db:
 	SURREAL_PASS=$(SURREAL_PASS) DB_APP=$(DB_APP) PROXY_PORT=8082 sh db/clone-to-staging.sh
 
 ## Restart the webapp container, clearing the Vite dep cache first.
-## Use this after package changes or whenever the dev server needs a clean
-## reload. Does NOT restart fruits/worker (see `restart-fruits`/
-## `restart-worker` below) -- despite the name, this is webapp-only.
-restart:
+## Use this when you only want webapp reloaded, not fruits/worker too --
+## see plain `restart` below for "everything."
+restart-webapp:
 	docker compose exec webapp rm -rf /app/webapp/node_modules/.vite
 	docker compose restart webapp
 
 ## Restart the fruits container, clearing its own Vite dep cache first --
-## the fruits half of `restart` above.
+## the fruits-only half of `restart` below.
 restart-fruits:
 	docker compose exec fruits rm -rf /app/fruits/node_modules/.vite
 	docker compose restart fruits
 
 ## Restart the GraphLog worker container, clearing its own Vite dep cache
-## first -- the worker's own half of `restart` above. `worker.ts` reads
+## first -- the worker-only half of `restart` below. `worker.ts` reads
 ## webapp/.env (ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID, DATABASE_*, ...)
 ## exactly ONCE, at its own process startup -- neither editing that file
 ## nor `worker`'s `--watch` dev mode (which only follows the JS import
@@ -217,10 +216,10 @@ restart-worker:
 	docker compose exec worker rm -rf /app/packages/worker/node_modules/.vite
 	docker compose restart worker
 
-## Restart webapp, fruits, and worker -- run this (not just `restart`)
-## after ANY .env change, so no container is silently still running on a
-## stale secret.
-restart-all: restart restart-fruits restart-worker
+## Restart webapp, fruits, AND the worker -- the everyday "just restart
+## everything" command, including after any .env change (so no container
+## is silently still running on a stale secret).
+restart: restart-webapp restart-fruits restart-worker
 
 ## Stop all containers (data is preserved in named volumes).
 down:
