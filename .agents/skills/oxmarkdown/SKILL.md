@@ -746,8 +746,11 @@ Interacting mode first, without needing that decision resolved.
       upload failure sets `uploadError="1"` rather than looking stuck.
     - Once `fileId`/`contentType` land, the thumbnail renders as a real
       `<img src="/api/vault/view/:fileId">` (`FileDirectiveLayout` in
-      `components/OxRenderer.tsx`) for image types; anything else keeps a
-      placeholder box.
+      `components/OxRenderer.tsx`) for image types; anything else with a
+      `fileId` is a tile (`.ox-file-tile`: kind label from the extension
+      via `fileKindLabel`, the name, opens `/api/vault/view/:fileId` in a
+      new tab). Only an upload still in flight keeps the blank box; a
+      failed one says "failed" in it (2026-10-13).
     - Reachable via the `/files` (or `/file`) slash command (gated by
       `allowFileAttachments`, inserts at the cursor's block) or a
       persistent "add file" link below the editor
