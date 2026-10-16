@@ -35,6 +35,35 @@ mod watch;
 // automatically on next use (see nopal_core::auth::migrate_legacy_host) --
 // this constant only affects brand-new `nopal login` runs.
 const DEFAULT_HOST: &str = "https://o.nopal.build";
+/// Same, but for the `nopal-dev` binary (see `bin_name()`/`default_host()`
+/// below) -- just saves typing `--host` on every dev-server login.
+const DEFAULT_DEV_HOST: &str = "https://o.nopal.dev";
+
+/// The actual executable's own file name (`"nopal"` or `"nopal-dev"` --
+/// see `crates/cli/Cargo.toml`'s two `[[bin]]` targets, both built from
+/// this exact same `main.rs`). Read from `current_exe()` at runtime
+/// rather than a Cargo-set compile-time env var (`CARGO_BIN_NAME` isn't
+/// reliably available via `env!()` across the Rust/Cargo versions this
+/// project supports) -- cheap, and correct for exactly the two binaries
+/// that exist today.
+fn bin_name() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "nopal".to_string())
+}
+
+/// `nopal login`'s own default `--host`, branched on which binary is
+/// actually running -- see `bin_name()`'s own comment for why there are
+/// two at all. Every other command is byte-for-byte identical between
+/// the two binaries; this is the one place they differ.
+fn default_host() -> &'static str {
+    if bin_name() == "nopal-dev" {
+        DEFAULT_DEV_HOST
+    } else {
+        DEFAULT_HOST
+    }
+}
 
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -60,7 +89,7 @@ enum Command {
     /// Log in via your browser and store a session token for the CLI.
     Login {
         /// Nopal host to authenticate against.
-        #[arg(long, default_value = DEFAULT_HOST)]
+        #[arg(long, default_value = default_host())]
         host: String,
         /// Print the login URL instead of opening a browser automatically.
         #[arg(long)]
@@ -738,6 +767,17 @@ struct Cli {
 }
 
 fn main() {
+    // Give `nopal-dev` its own, fully separate `~/.config/nopal-dev/...`
+    // credential/state storage -- see `nopal_core::auth::config_namespace`'s
+    // own doc comment for the full picture. A no-op for the regular
+    // `nopal` binary (and for the native app, which never runs through
+    // this `main()` at all), so this can never change today's behavior
+    // for anyone except `nopal-dev` itself.
+    let bin = bin_name();
+    if bin != "nopal" {
+        std::env::set_var("NOPAL_CONFIG_NAMESPACE", &bin);
+    }
+
     let args = Cli::parse();
     match args.command {
         Command::Test {} => {

@@ -12,10 +12,30 @@ readme = false
 name = "nopal"
 path = "src/main.rs"
 
+# A second, fully independent identity for working against a local/dev
+# server -- same source file as `nopal` above, just a different binary
+# name, which `main()` uses (via `current_exe()`, see its own comment) to
+# namespace its stored login under `~/.config/nopal-dev/` instead of
+# `~/.config/nopal/`. Both can be logged in at once, forever, with zero
+# shared state -- see the `nopal-dev-cli-binary` garden seed. Deliberately
+# NOT part of `[package.metadata.dist]` below -- a developer-only tool,
+# built locally (`cargo build --bin nopal-dev`), not shipped to end users.
+[[bin]]
+name = "nopal-dev"
+path = "src/main.rs"
+
 # `publish = false` above is about crates.io, not dist — this crate should
 # still be distributed as a downloadable binary via GitHub Releases.
+#
+# `binaries` is an explicit allowlist -- without it, `dist` packages EVERY
+# `[[bin]]` in this crate, which would ship `nopal-dev` (a developer-only
+# tool, see that target's own comment above) to every end user alongside
+# the real `nopal` binary. Confirmed this is the supported way to exclude
+# a `[[bin]]` from dist -- `required-features`/`dist = false` on the bin
+# itself don't reliably work for this in cargo-dist as of 0.32.
 [package.metadata.dist]
 dist = true
+binaries = ["nopal"]
 
 [dependencies]
 # reframed.workspace = true
