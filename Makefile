@@ -1,4 +1,4 @@
-.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-webapp restart-fruits restart-worker cli release-cli update-cli-version
+.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-webapp restart-fruits restart-worker cli release-cli release-cli-dev update-cli-version
 
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
@@ -330,3 +330,16 @@ release-cli:
 	echo "  ✓ Pushed $$TAG — GitHub Actions will build and publish the release."; \
 	echo "    Watch:   gh run list --workflow=Release --limit 1"; \
 	echo "    Release: https://github.com/gwing33/nopal/releases/tag/$$TAG"
+
+## Build and install `nopal-dev` to ~/.cargo/bin -- a second, fully
+## independent CLI binary for working against a local/dev server without
+## ever touching your real `nopal` login (see the garden's
+## `nopal-dev-cli-binary` seed for the full why/how). Deliberately NOT a
+## "release" like `release-cli` above -- no version bump, no git tag, no
+## push, no GitHub Actions involved. Just a local `cargo install` of the
+## one extra `[[bin]]` target in crates/cli/Cargo.toml (itself excluded
+## from `release-cli`'s real releases via that file's own `binaries =
+## ["nopal"]` allowlist). `--force` makes this safe to re-run any time
+## you've changed CLI source and want `nopal-dev` to pick it up.
+release-cli-dev:
+	cargo install --path crates/cli --bin nopal-dev --force
