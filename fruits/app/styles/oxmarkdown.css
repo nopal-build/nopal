@@ -927,6 +927,51 @@
 }
 .ox-file-thumb[data-upload-error="true"] {
   border-color: var(--red, #a63b31);
+  color: var(--red, #a63b31);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* An uploaded file that is not a picture: the same 74x74 box as a photo
+   thumbnail, carrying its kind ("PDF") and name, and opening the original
+   in a new tab. `box-sizing: border-box` so the padding stays inside the
+   fixed box `.ox-file-thumb` sets. */
+.ox-file-tile {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 5px;
+  overflow: hidden;
+  text-decoration: none;
+  color: var(--ox-color-text);
+  cursor: pointer;
+}
+.ox-file-tile:hover,
+.ox-file-tile:focus-visible {
+  border-color: var(--ox-color-link);
+}
+.ox-file-tile-kind {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--ox-color-link);
+}
+.ox-file-tile-name {
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--ox-color-subtle);
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow-wrap: anywhere;
 }
 
 .ox-file-caption {

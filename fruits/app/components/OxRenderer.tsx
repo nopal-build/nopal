@@ -1402,6 +1402,17 @@ function RemoveFileIcon() {
  * `contenteditable="false"` ancestor, confirmed directly (same reasoning
  * that makes nesting one live Lexical editor inside another safe at all;
  * see the oxmarkdown skill). */
+/** The short label on a non-picture file's tile: the filename's extension
+ * ("PDF", "XLSX"), or a word from the content type when the name has no
+ * usable one, or "FILE". Pure, so a test can hold it to the cases. */
+export function fileKindLabel(name: string, contentType?: string): string {
+  const ext = /\.([A-Za-z0-9]{1,5})$/.exec(name)?.[1];
+  if (ext) return ext.toUpperCase();
+  const subtype = contentType?.split("/")[1]?.split(/[.+;]/)[0];
+  if (subtype && /^[a-z0-9-]{1,6}$/i.test(subtype) && subtype !== "octet-stream") return subtype.toUpperCase();
+  return "FILE";
+}
+
 export function FileDirectiveLayout({
   name,
   fileId,
@@ -1461,13 +1472,35 @@ export function FileDirectiveLayout({
             }
           }}
         />
+      ) : fileId ? (
+        // An uploaded file that is not a picture (a PDF, a spreadsheet), or
+        // a picture this browser could not draw: a tile that says what it
+        // is and opens the original. Before 2026-10-13 this was the same
+        // blank square as an upload still in flight, so a finished PDF and
+        // a stuck upload were indistinguishable.
+        <a
+          className="ox-file-thumb ox-file-tile"
+          href={`/api/vault/view/${fileId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Open ${name}`}
+          draggable={false}
+        >
+          <span className="ox-file-tile-kind">{fileKindLabel(name, contentType)}</span>
+          <span className="ox-file-tile-name">{name}</span>
+        </a>
       ) : (
+        // No id yet: the upload is in flight, or this surface never wired
+        // one up (the visual mockup). A failed upload says so in the box
+        // rather than only on hover.
         <div
           className="ox-file-thumb"
           title={uploadError ? `${name}: upload failed` : name}
           data-upload-error={uploadError ? "true" : undefined}
-          aria-hidden="true"
-        />
+          aria-hidden={uploadError ? undefined : "true"}
+        >
+          {uploadError && <span className="ox-file-tile-kind">failed</span>}
+        </div>
       )}
       <div className="ox-file-caption">{zoomed ? null : caption}</div>
       {onRemove && (
