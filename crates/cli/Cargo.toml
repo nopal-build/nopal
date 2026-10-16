@@ -27,15 +27,21 @@ path = "src/main.rs"
 # `publish = false` above is about crates.io, not dist — this crate should
 # still be distributed as a downloadable binary via GitHub Releases.
 #
-# `binaries` is an explicit allowlist -- without it, `dist` packages EVERY
-# `[[bin]]` in this crate, which would ship `nopal-dev` (a developer-only
-# tool, see that target's own comment above) to every end user alongside
-# the real `nopal` binary. Confirmed this is the supported way to exclude
-# a `[[bin]]` from dist -- `required-features`/`dist = false` on the bin
-# itself don't reliably work for this in cargo-dist as of 0.32.
+# NOTE: `nopal-dev` (the `[[bin]]` above) currently ships in official
+# releases too, alongside `nopal` -- cargo-dist has no reliable way to
+# exclude ONE `[[bin]]` from an otherwise-dist'd package (confirmed via a
+# real `dist plan` failure: `binaries` here is a PER-TARGET-TRIPLE
+# override map, `{ "x86_64-pc-windows-msvc" = ["a", "b"] }`, not a flat
+# allowlist -- a previous attempt at `binaries = ["nopal"]` broke `dist
+# plan` outright with "invalid type: sequence, expected a map". The
+# `required-features`/package-level `dist = false` tricks other projects
+# use for this don't apply to a single `[[bin]]` within one package
+# either (see axodotdev/cargo-dist#1442). Real exclusion would mean
+# splitting `nopal-dev` into its own package -- not done yet; harmless
+# for now since it's just an extra, never-advertised binary in the
+# archive, not a secret.
 [package.metadata.dist]
 dist = true
-binaries = ["nopal"]
 
 [dependencies]
 # reframed.workspace = true
