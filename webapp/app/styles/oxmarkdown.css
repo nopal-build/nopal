@@ -1574,14 +1574,40 @@ img.ox-file-thumb {
 .ox-toggle-summary::marker {
   content: none;
 }
+/* A real `<summary>` (static/Interacting mode) is natively clickable
+   across its ENTIRE row, not just the caret -- browsers toggle the parent
+   `<details>` on a click anywhere in it. Tag-qualified so this ONLY wins
+   over the plain `cursor: default` above for a real `<summary>`, not
+   Editing mode's `.ox-toggle-summary` (a plain `<div>`, where the title
+   itself is editable text and only the caret truly toggles). PORTED from
+   the fruits copy ("FAQ toggle design" garden seed, follow-up round) --
+   missed here at the time, so this website renderer's whole toggle row
+   showed the wrong (default) cursor even though clicking anywhere on it
+   already worked. */
+summary.ox-toggle-summary {
+  cursor: pointer;
+}
 /* The caret lives IN THE GUTTER (a negative `left` offset, same
    convention as the `#`/`##`/`###`/`>` markers above), NOT in reserved
-   inline padding the way the checkbox glyph is — the title text itself
+   inline padding the way the checkbox glyph is -- the title text itself
    stays flush with the rest of the document's column, matching how a
    Card's own title has no icon marker pushing its text sideways either.
    `OxTogglePlugin.tsx`'s click-to-toggle hit-test reads this pseudo's
    OWN computed `left`/`width` directly rather than assuming a fixed
-   offset, so this can move without needing a matching JS change. */
+   offset, so this can move without needing a matching JS change.
+
+   A thin open chevron (">"/"v", not a filled triangle) -- PORTED from
+   the fruits copy ("FAQ toggle design" garden seed), which shipped this
+   glyph + the `--ox-toggle-accent` custom-property support here and
+   missed porting it to this copy at the time, so this `/v2/*` website
+   renderer kept showing the OLD solid-filled-triangle glyph with no
+   accent support -- a real, visible divergence between Vault and
+   website toggles, caught in review. `background-color` reads
+   `--ox-toggle-accent` first -- an optional per-instance CSS custom
+   property `OxRenderer.tsx`'s static toggle renderer sets from
+   `:::toggle{border="..."}`/`palette="..."}`'s resolved swatch color --
+   falling back to the ordinary `--ox-color-accent` default when no such
+   attribute resolves. */
 .ox-toggle-summary::before {
   content: "";
   position: absolute;
@@ -1591,30 +1617,28 @@ img.ox-file-thumb {
   height: 24px;
   transform: translateY(-50%) rotate(90deg);
   transition: transform 0.12s ease-out;
-  background-color: var(--ox-color-accent);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l8 7-8 7z'/%3E%3C/svg%3E") center / 14px no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l8 7-8 7z'/%3E%3C/svg%3E") center / 14px no-repeat;
+  background-color: var(--ox-toggle-accent, var(--ox-color-accent));
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 15 18'%3E%3Cpath d='M1.19336 1.67188L11.1934 8.23438L1.19336 15.6719' stroke-width='4' stroke='black' fill='none'/%3E%3C/svg%3E") center / 12px 14px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 15 18'%3E%3Cpath d='M1.19336 1.67188L11.1934 8.23438L1.19336 15.6719' stroke-width='4' stroke='black' fill='none'/%3E%3C/svg%3E") center / 12px 14px no-repeat;
   cursor: pointer;
 }
 .ox-toggle--collapsed > .ox-toggle-summary::before {
   transform: translateY(-50%) rotate(0deg);
 }
-.ox-toggle-body {
-  padding-left: var(--ox-grid);
-}
+/* Body content is deliberately FLUSH with the title's own left edge, not
+   indented an extra `--ox-grid` past it. PORTED from the fruits copy
+   ("FAQ toggle design" garden seed, follow-up round) -- missed here at
+   the time, so this website renderer's toggle bodies stayed indented an
+   extra `--ox-grid` (41px) past the title, a real visible divergence
+   from the Vault's own already-flush toggles. No `padding-left` rule
+   needed for this, just ordinary inheritance of the document's own left
+   edge; the chevron stays gutter-positioned (negative `left` on
+   `.ox-toggle-summary::before`) either way, so it's still the only thing
+   left of the title. */
 .ox-toggle--collapsed > :not(:first-child),
 .ox-toggle--collapsed > .ox-toggle-body {
   display: none;
 }
-/* Editing mode's body children are flat siblings of the summary (see this
-   section's header) — indent them to match the static renderer's
-   `.ox-toggle-body` wrapper, and give the FIRST of them (right after the
-   summary) no extra top margin of its own, matching how a heading's
-   first following paragraph doesn't either. */
-.ox-toggle > *:not(.ox-toggle-summary) {
-  padding-left: var(--ox-grid);
-}
-
 /* ── Grid layout (`:::grid{columns="N"}` / `::col`) ─────────────────────── */
 /* A basic side-by-side layout, built the same way `:::toggle` is: a
    first-class, always-available built-in, not a caller-registered

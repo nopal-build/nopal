@@ -1004,8 +1004,30 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
       ? ((titleNode as { children?: unknown[] }).children ?? [])
       : [];
     const bodySource = isTitleParagraph ? bodyNodes : node.children;
+    const toggleAttrs = directiveAttrs(node);
+    // Optional per-toggle accent -- PORTED from the fruits copy ("FAQ
+    // toggle design" garden seed), which shipped this here and missed
+    // porting it to this copy at the time. Same `::swatch`/`::palette`
+    // framework `::box`/`::section` already use: `border=`/`palette=`
+    // attrs, resolved against this document's own registry, falling all
+    // the way back to today's existing global default
+    // (`--ox-color-accent`) when neither resolves -- a plain `:::toggle`
+    // with no attributes renders byte-for-byte the same as before this
+    // existed.
+    const toggleAccent = resolveSwatchRole({
+      role: "border",
+      explicit: toggleAttrs.border,
+      palette: toggleAttrs.palette,
+      registry: ctx.swatchRegistry,
+      fallback: "var(--ox-color-accent)",
+    });
     return (
-      <details key={key} className="ox-toggle" open={directiveAttrs(node).collapsed !== "true"}>
+      <details
+        key={key}
+        className="ox-toggle"
+        open={toggleAttrs.collapsed !== "true"}
+        style={{ "--ox-toggle-accent": toggleAccent } as CSSProperties}
+      >
         <summary className="ox-toggle-summary">{renderNodes(titleChildren, ctx)}</summary>
         <div className="ox-toggle-body">{renderBlockNodes(bodySource, ctx)}</div>
       </details>
