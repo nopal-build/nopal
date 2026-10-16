@@ -20,14 +20,17 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   getWebsiteFormValue,
   setWebsiteFormValue,
   postWebsiteForm,
+  WebsiteFormContext,
+  type WebsiteFormApi,
   type WebsiteFormState,
 } from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
-import { BoxDirective, WebsiteFormButton } from "../oxmarkdown/websiteForms";
+import { BoxDirective, WebsiteFormButton, WebsiteFormLink } from "../oxmarkdown/websiteForms";
 
 describe("setWebsiteFormValue/getWebsiteFormValue — the real selection-storage rule", () => {
   it("stores a value under (formId, key), readable back by the same pair", () => {
@@ -168,5 +171,124 @@ describe("::button{form-id=... action=...} — the second, mutually-exclusive mo
 
   it("neither href nor form-id+action renders nothing, same as missing text before", () => {
     expect(registry.button({ attrs: { text: "Orphan" }, label: null, resolveSwatchRole })).toBeNull();
+  });
+});
+
+describe("::button{href=... form-id=... select-group=...} — the third, mutually-exclusive mode", () => {
+  const registry = buildWebsiteDirectiveRegistry({ dailyLogEntries: {} });
+
+  function resolveSwatchRole() {
+    return undefined;
+  }
+
+  it("href + form-id + select-group renders a WebsiteFormLink, not a plain <a>", () => {
+    const el = registry.button({
+      attrs: {
+        text: "Meet with a Guide",
+        href: "https://calendly.com/build-for-good/30min",
+        "form-id": "pricing",
+        "select-group": "plan",
+        param: "utm_content",
+      },
+      label: null,
+      resolveSwatchRole,
+    }) as ReactElement<{ href: string; formId: string; selectGroup: string; param: string; text: string }>;
+    expect(el.type).toBe(WebsiteFormLink);
+    expect(el.props.href).toBe("https://calendly.com/build-for-good/30min");
+    expect(el.props.formId).toBe("pricing");
+    expect(el.props.selectGroup).toBe("plan");
+    expect(el.props.param).toBe("utm_content");
+    expect(el.props.text).toBe("Meet with a Guide");
+  });
+
+  it("param defaults to \"value\" when omitted, same degrade-gracefully convention as everything else here", () => {
+    const el = registry.button({
+      attrs: { text: "Meet with a Guide", href: "/book", "form-id": "pricing", "select-group": "plan" },
+      label: null,
+      resolveSwatchRole,
+    }) as ReactElement<{ param: string }>;
+    expect(el.props.param).toBe("value");
+  });
+
+  it("form-id + action still wins over form-id + select-group + href, same tie-break as before (mode 2 checked first)", () => {
+    const el = registry.button({
+      attrs: {
+        text: "Both",
+        href: "/book",
+        "form-id": "pricing",
+        "select-group": "plan",
+        action: "/api/schedule-call",
+      },
+      label: null,
+      resolveSwatchRole,
+    }) as ReactElement;
+    expect(el.type).toBe(WebsiteFormButton);
+  });
+
+  it("form-id without select-group falls through to the plain <a> (mode 1), not mode 3", () => {
+    const el = registry.button({
+      attrs: { text: "Meet with a Guide", href: "/book", "form-id": "pricing" },
+      label: null,
+      resolveSwatchRole,
+    }) as ReactElement<{ href?: string }>;
+    expect(el.type).toBe("a");
+    expect(el.props.href).toBe("/book");
+  });
+});
+
+describe("WebsiteFormLink — the actual href-computation rule", () => {
+  function renderWithSelection(selected: string | undefined, props: Partial<Parameters<typeof WebsiteFormLink>[0]> = {}) {
+    const api: WebsiteFormApi = {
+      getValue: () => selected,
+      setValue: () => {},
+      submit: async () => {},
+    };
+    return renderToStaticMarkup(
+      <WebsiteFormContext.Provider value={api}>
+        <WebsiteFormLink
+          text="Meet with a Guide"
+          className="btn"
+          href="https://calendly.com/build-for-good/30min"
+          formId="pricing"
+          selectGroup="plan"
+          param="utm_content"
+          {...props}
+        />
+      </WebsiteFormContext.Provider>,
+    );
+  }
+
+  it("nothing selected yet — falls back to the plain href, untouched (the resolved fallback decision)", () => {
+    const html = renderWithSelection(undefined);
+    expect(html).toContain('href="https://calendly.com/build-for-good/30min"');
+  });
+
+  it("a value is selected — appends it as the given query param", () => {
+    const html = renderWithSelection("self-guide");
+    expect(html).toContain('href="https://calendly.com/build-for-good/30min?utm_content=self-guide"');
+  });
+
+  it("uses & instead of ? when the base href already has a query string", () => {
+    const html = renderWithSelection("self-guide", { href: "https://calendly.com/build-for-good/30min?a=1" });
+    expect(html).toContain('href="https://calendly.com/build-for-good/30min?a=1&amp;utm_content=self-guide"');
+  });
+
+  it("URL-encodes a selected value with special characters", () => {
+    const html = renderWithSelection("self guide & more");
+    expect(html).toContain("utm_content=self%20guide%20%26%20more");
+  });
+
+  it("no Provider mounted (undefined context) still renders the plain href, not a crash", () => {
+    const html = renderToStaticMarkup(
+      <WebsiteFormLink
+        text="Meet with a Guide"
+        className="btn"
+        href="https://calendly.com/build-for-good/30min"
+        formId="pricing"
+        selectGroup="plan"
+        param="utm_content"
+      />,
+    );
+    expect(html).toContain('href="https://calendly.com/build-for-good/30min"');
   });
 });

@@ -379,7 +379,7 @@ import type { CSSProperties } from "react";
 import type { DirectiveRegistry } from "./directiveRegistry";
 import { WebsiteIcon } from "./websiteIcons";
 import { WebsiteBadge, toBadgeVariant } from "./websiteBadge";
-import { BoxDirective, WebsiteFormButton } from "./websiteForms";
+import { BoxDirective, WebsiteFormButton, WebsiteFormLink } from "./websiteForms";
 import { WebsiteStamp } from "./websiteStamps";
 import { WavyLine } from "./WavyLine";
 import OxRenderer from "../components/OxRenderer";
@@ -861,6 +861,30 @@ export function buildWebsiteDirectiveRegistry(opts: {
             style={style}
             formId={attrs["form-id"]}
             action={attrs.action}
+          />
+        );
+      }
+
+      // Mode 3: `href` + `form-id` + `select-group` (no `action`) -- still
+      // a navigating `<a>`, but with whatever's currently selected in
+      // that `(form-id, select-group)` appended as a query param (see
+      // `websiteForms.tsx`'s `WebsiteFormLink`) -- e.g. a shared "Meet
+      // with a Guide" button carrying the selected pricing plan through
+      // to a Calendly link. Checked before Mode 1 so a bare `href` alone
+      // (no `form-id`/`select-group`) still falls through unchanged.
+      // `param` defaults to `"value"` if omitted, same "degrade
+      // gracefully, don't error" convention as every other optional
+      // attribute here.
+      if (attrs["form-id"] && attrs["select-group"] && attrs.href) {
+        return (
+          <WebsiteFormLink
+            text={attrs.text}
+            className={className}
+            style={style}
+            href={attrs.href}
+            formId={attrs["form-id"]}
+            selectGroup={attrs["select-group"]}
+            param={attrs.param || "value"}
           />
         );
       }

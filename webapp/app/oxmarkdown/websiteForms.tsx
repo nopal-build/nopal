@@ -18,7 +18,7 @@
  * Effort 1.
  */
 import { useContext, type CSSProperties, type ReactNode } from "react";
-import { WebsiteFormContext } from "../components/OxRenderer";
+import { WebsiteFormContext, type WebsiteFormValue } from "../components/OxRenderer";
 
 type BoxDirectiveProps = {
   /** `surface=`/`border=`'s already-resolved inline style, computed by
@@ -113,4 +113,54 @@ export function WebsiteFormButton({
       {text}
     </button>
   );
+}
+
+/** The third, mutually-exclusive mode of `::button{...}` (the
+ * `meet-with-a-guide-calendly-link` garden seed): a real `<a>` that
+ * still navigates (unlike mode 2's POST-and-stay button), but appends
+ * whichever value is CURRENTLY selected in the shared `(formId,
+ * selectGroup)` store as a `param=value` query param before navigating
+ * -- e.g. a shared "Meet with a Guide" button carrying whichever pricing
+ * box is selected through to a Calendly link as `?utm_content=...`.
+ * Recomputed on every render (not just captured at mount), so the link
+ * always reflects whatever's selected the moment it's actually clicked.
+ * Falls back to the plain `href`, untouched, if nothing's selected yet
+ * -- the simplest option, and this seed's own resolved decision; revisit
+ * if that turns out to need its own signal (disabled, a prompt, ...). */
+export function WebsiteFormLink({
+  text,
+  className,
+  style,
+  href,
+  formId,
+  selectGroup,
+  param,
+}: {
+  text: string;
+  className: string;
+  style?: CSSProperties;
+  href: string;
+  formId: string;
+  selectGroup: string;
+  param: string;
+}) {
+  const formApi = useContext(WebsiteFormContext);
+  const selected = asQueryValue(formApi?.getValue(formId, selectGroup));
+  const url = selected ? `${href}${href.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(selected)}` : href;
+  return (
+    <a className={className} href={url} style={style}>
+      {text}
+    </a>
+  );
+}
+
+/** A select-group box's own `value` is always a plain string in
+ * practice (`BoxDirective` only ever calls `setValue(formId, selectGroup,
+ * value)` with its own string `value` attr) -- `WebsiteFormValue`'s
+ * wider `string | string[]` type is for other, unrelated future form
+ * fields sharing the same store, not this one. The array case can't
+ * meaningfully become a single query param, so it's treated the same as
+ * "nothing selected yet" rather than guessed at. */
+function asQueryValue(value: WebsiteFormValue | undefined): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }

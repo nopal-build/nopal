@@ -6,6 +6,7 @@ import { getFileRefById, computeMdUpdate } from "robustness-core/data/vault.serv
 import { fileReplaceRefusal, repointFileRef } from "robustness-core/data/fileReplace.server";
 import { merge } from "robustness-core/data/generic.server";
 import { cacheDailyLog } from "robustness-core/data/dailyLog.server";
+import { invalidateWebsiteCacheForFile } from "robustness-core/data/website.server";
 
 /**
  * POST /api/vault/replace/:fileId
@@ -114,6 +115,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }
       if (existing.source === "daily_log" && existing.date) {
         await cacheDailyLog(existing.human_id, existing.date, content);
+      }
+      // This route writes via a raw `merge(...)` above, not
+      // `vault.server.ts`'s `updateFileRef` -- so, unlike every other
+      // content-editing path (the normal markdown editor's save,
+      // `setWebsitePagePublish`'s publish toggle), it was never hooked
+      // into `/v2/*`'s page cache invalidation at all. Confirmed as a
+      // real, live bug (not just a code-reading guess): replacing a
+      // `website`-project page's content via `nopal vault replace` (or
+      // the Vault UI's "replace file") left `/v2/*` serving the OLD
+      // content indefinitely (up to the cache's 1-hour TTL backstop),
+      // even though the new content was genuinely saved. Fixed by calling
+      // the same hook `updateFileRef` itself calls, directly.
+      if (updated) {
+        await invalidateWebsiteCacheForFile(updated as unknown as Parameters<typeof invalidateWebsiteCacheForFile>[0]);
       }
       return Response.json({ fileRef: updated });
     }
