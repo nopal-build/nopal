@@ -17,7 +17,7 @@
  */
 
 import type { ReactNode } from "react";
-import type { DirectiveAttrs } from "oxmarkdown-core";
+import type { DirectiveAttrs, SwatchRole } from "oxmarkdown-core";
 
 export type DirectiveRenderProps = {
   attrs: DirectiveAttrs;
@@ -27,6 +27,16 @@ export type DirectiveRenderProps = {
   /** Only present for container directives — the recursively-rendered
    * inner markdown. */
   children?: ReactNode;
+  /** Resolves a color role against the page's `::swatch`/`::palette`
+   * registry, using round 8's three-step cascade (see the "Oxmarkdown
+   * Colors" garden seed, and `oxmarkdown-core`'s `resolveSwatchRole`,
+   * which this is a thin, already-bound wrapper around — the registry
+   * itself is supplied automatically by `OxRenderer`, never by the
+   * directive). Always present and always safe to call, even when the
+   * current document registered no swatches at all — it simply falls
+   * straight through to `fallback` in that case, so a directive never
+   * needs its own existence check. */
+  resolveSwatchRole: (opts: { role: SwatchRole; explicit?: string; palette?: string; fallback?: string }) => string | undefined;
 };
 
 export type DirectiveRenderer = (props: DirectiveRenderProps) => ReactNode;

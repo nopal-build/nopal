@@ -15,7 +15,7 @@
 // with the category nav living in the drawer instead of a horizontal bar
 // up top.
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -73,6 +73,8 @@ async function requireMakerAccess(request: Request) {
   }
   return user;
 }
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.Stamps" }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
@@ -1136,6 +1138,12 @@ const BUTTON_VARIANTS: ButtonExample[] = [
   { variant: "secondary", label: "Secondary Action", code: 'button({ variant: "secondary" })' },
   { variant: "yellow", label: "Soft Action", code: 'button({ variant: "yellow" })' },
   {
+    variant: "callout",
+    label: "Meet the Guides",
+    code: 'button({ variant: "callout" })',
+    note: "A single, prominently-featured pill CTA — e.g. the /v2 site header's one featured nav link (WebsiteHeader.tsx).",
+  },
+  {
     variant: "outline",
     label: "Outline",
     code: 'button({ variant: "outline" })',
@@ -1167,6 +1175,31 @@ function CompactPairSpecimen() {
       <SpecimenCaption>{'button({ variant: "secondary", size: "compact" })  +  button({ variant: "quiet" })'}</SpecimenCaption>
       <p className={textSize.xs} style={{ color: semanticColors.textSubtle, margin: 0 }}>
         primary is the page's one big call; secondary at compact is a row's. Any variant with padding takes size: "compact".
+      </p>
+    </Stack>
+  );
+}
+
+/** `size: "thin"` next to the same variant at its default padding — only
+ * top/bottom shrinks; left/right (and everything else: color, shadow,
+ * shape) stays exactly whatever the variant itself set. Built for
+ * `callout` specifically (a site header's featured pill CTA, see
+ * `webapp/app/components/WebsiteHeader.tsx`), but the size variant itself
+ * works on any variant with its own baked-in padding. */
+function ThinPairSpecimen() {
+  return (
+    <Stack gap={2} align="flex-start" style={{ maxWidth: "320px" }}>
+      <Cluster gap={3} align="center">
+        <a href="#" className={button({ variant: "callout" })} style={{ textDecoration: "none" }}>
+          Meet the Guides
+        </a>
+        <a href="#" className={button({ variant: "callout", size: "thin" })} style={{ textDecoration: "none" }}>
+          Meet the Guides
+        </a>
+      </Cluster>
+      <SpecimenCaption>{'button({ variant: "callout" })  vs.  button({ variant: "callout", size: "thin" })'}</SpecimenCaption>
+      <p className={textSize.xs} style={{ color: semanticColors.textSubtle, margin: 0 }}>
+        A pill CTA sitting inline in a nav bar (next to plain text links) reads too tall at the variant's own default padding — thin brings just the vertical rhythm down to match.
       </p>
     </Stack>
   );
@@ -1226,6 +1259,12 @@ function ButtonsSection() {
             Compact, and the quiet choice beside it
           </div>
           <CompactPairSpecimen />
+        </Stack>
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Thin — shallower vertical padding only
+          </div>
+          <ThinPairSpecimen />
         </Stack>
         <Stack gap={3}>
           <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>

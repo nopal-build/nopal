@@ -5,7 +5,7 @@
 // "same place, on the project page in Maker"). Its Guide sees it, and
 // admins see every project's; anyone else gets the same 404 as a project
 // that doesn't exist. Starting a project lands here with only you on it.
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, data, redirect, useLoaderData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
@@ -23,6 +23,8 @@ import { link } from "stamps/link.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.Projects" }];
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getUser(request);

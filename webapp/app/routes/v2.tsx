@@ -5,17 +5,18 @@
 // Styled entirely with `stamps` (sprinkles + tokens + navLink/link
 // recipes) rather than a hand-rolled stylesheet — see the `stamps`
 // component guide (`fruits/app/routes/styles.tsx`, the app's living style
-// guide) for the full inventory.
-import { Link, Outlet, useLoaderData, type LinksFunction } from "react-router";
+// guide) for the full inventory. The header itself is its own component
+// (`../components/WebsiteHeader.tsx`) — real logic (mobile menu state,
+// rendering `settings.featuredButton` as its own pill CTA) that doesn't
+// belong inline in a route module.
+import { Outlet, useLoaderData, type LinksFunction } from "react-router";
 import {
   getPrimaryWebsiteFolder,
   getWebsiteSettings,
   type WebsiteSettings,
 } from "robustness-core/data/website.server";
-import { WebsiteLink } from "../components/WebsitePageView";
+import { WebsiteHeader } from "../components/WebsiteHeader";
 import { sprinkles } from "stamps/sprinkles.css";
-import { textSize } from "stamps/typography.css";
-import { colors, semanticColors } from "stamps/tokens";
 import websiteStyles from "../styles/website.css?url";
 import oxmarkdownStyles from "../styles/oxmarkdown.css?url";
 
@@ -68,7 +69,6 @@ export const links: LinksFunction = () => [
 
 const EMPTY_SETTINGS: WebsiteSettings = {
   nav: [],
-  footer: { tagline: "", links: [], social: [] },
 };
 
 export async function loader() {
@@ -85,67 +85,26 @@ export default function V2Layout() {
       className={`website-page-bg ${sprinkles({ display: "flex", flexDirection: "column" })}`}
       style={{ minHeight: "100vh" }}
     >
-      <header
-        className={sprinkles({
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: 6,
-          px: 6,
-          py: 4,
-        })}
-        style={{ borderBottom: `1px solid ${semanticColors.surfaceBorder}` }}
-      >
-        <Link
-          to="/v2"
-          className={sprinkles({ fontWeight: "bold" })}
-          style={{ color: colors.purpleLight, textDecoration: "none", fontSize: "1.25rem" }}
-        >
-          Nopal
-        </Link>
-        {settings.nav.length > 0 && (
-          <nav className={sprinkles({ display: "flex", flexWrap: "wrap", gap: 1 })}>
-            {settings.nav.map((item) => (
-              <WebsiteLink key={item.to} item={item} variant="nav" />
-            ))}
-          </nav>
-        )}
-      </header>
+      <WebsiteHeader nav={settings.nav} featuredButton={settings.featuredButton} />
 
       {/* Horizontal max-width/centering lives on `WebsitePageContent`
           (stamps) now, inside `WebsitePageView` -- shared with the Vault
           preview's own identical wrapper (see `website.css`'s
           `.website-page-content`). This `<main>` only owns the page-level
-          VERTICAL rhythm above/below it. */}
+          VERTICAL rhythm above/below it.
+
+          No `<footer>` here anymore -- `WebsiteSettings.footer` (a
+          tagline + links + social, auto-rendered identically on every
+          page) was removed entirely in favor of `::include-ox{file=
+          "..."}` (see `oxmarkdown/websiteDirectives.tsx`'s own doc
+          comment on that directive): a page that wants a footer now ends
+          its own markdown body with e.g. `::include-ox{file="./_footer.
+          md"}`, pointing at one shared, hand-authored file -- full
+          creative control per site, not one fixed shape every site gets
+          whether it fits or not. */}
       <main className={sprinkles({ flexGrow: 1 })} style={{ width: "100%", padding: "32px 0 64px" }}>
         <Outlet />
       </main>
-
-      <footer
-        className={sprinkles({ display: "flex", flexDirection: "column", gap: 3, p: 6 })}
-        style={{ borderTop: `1px solid ${semanticColors.surfaceBorder}` }}
-      >
-        {settings.footer.tagline && (
-          <p className={`${textSize.sm}`} style={{ color: semanticColors.textSubtle }}>
-            {settings.footer.tagline}
-          </p>
-        )}
-        {settings.footer.links.length > 0 && (
-          <div className={sprinkles({ display: "flex", flexWrap: "wrap", gap: 4 })}>
-            {settings.footer.links.map((item) => (
-              <WebsiteLink key={item.to} item={item} variant="footer" />
-            ))}
-          </div>
-        )}
-        {settings.footer.social.length > 0 && (
-          <div className={sprinkles({ display: "flex", flexWrap: "wrap", gap: 4 })}>
-            {settings.footer.social.map((item) => (
-              <WebsiteLink key={item.to} item={item} variant="footer" />
-            ))}
-          </div>
-        )}
-      </footer>
     </div>
   );
 }

@@ -45,3 +45,7 @@ export function isMarkdownFile(file: {
 export function isImageFile(file: { content_type: string }): boolean {
   return file.content_type.startsWith("image/");
 }
+
+export function isVideoFile(file: { content_type: string }): boolean {
+  return file.content_type.startsWith("video/");
+}

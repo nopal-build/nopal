@@ -9,7 +9,7 @@
 // tab alone; the Humans tab typed is a 404, like a project tab their
 // group isn't given. Every people change goes through `peopleAction`.
 import { useState } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Form, Link, data, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { guidesAny, listEveryProject, listProjectsFor, resolveRole, roleIn } from "robustness-core/data/projectSharing.server";
@@ -37,6 +37,8 @@ import { link } from "stamps/link.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.Projects" }];
 
 type Tab = "projects" | "humans";
 const TAB_LABELS: Record<Tab, string> = { projects: "Projects", humans: "Humans" };

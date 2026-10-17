@@ -7,7 +7,7 @@
 // data: a `.server` value referenced in the component is "Server-only
 // module referenced by client", a 404 on the route's client bundle, and
 // a page that renders but whose buttons are dead (2026-09-22, twice).
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   isRouteErrorResponse,
@@ -186,6 +186,21 @@ type GraphLogProjectStatus = {
   lastCompletedOk: boolean | null;
   lastCompletedError: string | null;
   scheduled: boolean;
+};
+
+/** `V.<Root Label>` while viewing a root container or anything directly
+ * inside one; `V.<folder name>` for a first-level folder under a root, or
+ * for anything deeper (sub-folder or file) — deeper nesting is never shown,
+ * per the "O.No" page-titles spec. */
+function vaultTitle(ancestry: VaultFolder[]): string {
+  if (ancestry.length === 0) return "Vault";
+  const anchor = ancestry.length === 1 ? ancestry[0] : ancestry[1];
+  return `V.${folderLabel(anchor)}`;
+}
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  if (!data || data.current.kind === "root") return [{ title: "O.No · Vault" }];
+  return [{ title: `O.No · ${vaultTitle(data.current.ancestry)}` }];
 };
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -1269,6 +1284,60 @@ function LinkListEditor({
   );
 }
 
+/** `WebsiteSettings.featuredButton` — an OPTIONAL single link, not a list
+ * (`LinkListEditor`'s own +/✕ row management doesn't apply here). Typing
+ * into either field creates the item on the fly (starts as `undefined`);
+ * the ✕ button clears it back to `undefined` entirely rather than just
+ * blanking the fields, so an author can cleanly opt back out of having a
+ * featured button at all. See `WebsiteHeader.tsx` (`webapp`) for how this
+ * renders — a standalone `stamps/button.css` `callout` pill alongside
+ * (not replacing) the main navigation above. */
+function FeaturedButtonEditor({
+  item,
+  onChange,
+}: {
+  item: WebsiteLinkItem | undefined;
+  onChange: (next: WebsiteLinkItem | undefined) => void;
+}) {
+  return (
+    <div style={{ marginBottom: "12px" }}>
+      <div className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginBottom: "4px" }}>
+        Featured button (optional)
+      </div>
+      <div style={{ display: "flex", gap: "4px", marginBottom: "4px" }}>
+        <input
+          type="text"
+          value={item?.label ?? ""}
+          onChange={(e) => onChange({ label: e.target.value, to: item?.to ?? "" })}
+          placeholder="Label (e.g. Meet the Guides)"
+          className="text-xs font-mono"
+          style={{ flex: 1, minWidth: 0, padding: "4px 6px", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)" }}
+        />
+        <input
+          type="text"
+          value={item?.to ?? ""}
+          onChange={(e) => onChange({ label: item?.label ?? "", to: e.target.value })}
+          placeholder="/v2/page or https://..."
+          className="text-xs font-mono"
+          style={{ flex: 2, minWidth: 0, padding: "4px 6px", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)" }}
+        />
+        {item && (
+          <button
+            type="button"
+            onClick={() => onChange(undefined)}
+            className="btn-outline text-xs font-mono px-2 rounded"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      <p className="text-xs font-mono" style={{ color: "var(--text-subtle)" }}>
+        Shown as its own standout pill in the header, alongside the main navigation above (not instead of it) — a page listed in "Main navigation" can also be the featured button.
+      </p>
+    </div>
+  );
+}
+
 function SiteSettingsModal({
   folderId,
   onClose,
@@ -1282,7 +1351,6 @@ function SiteSettingsModal({
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<WebsiteSettings>({
     nav: [],
-    footer: { tagline: "", links: [], social: [] },
   });
 
   useEffect(() => {
@@ -1300,9 +1368,17 @@ function SiteSettingsModal({
 
   const handleSave = async () => {
     setSaving(true);
+    // A `featuredButton` left half-filled-in (e.g. a label typed then
+    // deleted, `to` never touched) normalizes to fully absent here rather
+    // than persisting `{ label: "", to: "" }` into the JSON file --
+    // `getWebsiteSettings` would drop it right back out on the next read
+    // anyway (`parseLinkItem` requires both fields), so this just keeps
+    // the saved file itself clean.
+    const featuredButton =
+      settings.featuredButton?.label && settings.featuredButton?.to ? settings.featuredButton : undefined;
     const data = await apiJson(`/api/vault/website/${folderId}/settings`, {
       method: "PUT",
-      body: JSON.stringify({ settings }),
+      body: JSON.stringify({ settings: { ...settings, featuredButton } }),
     });
     setSaving(false);
     if (data) onClose();
@@ -1313,7 +1389,10 @@ function SiteSettingsModal({
       <div className="vault-modal" onClick={(e) => e.stopPropagation()}>
         <h3 className="vault-modal-title">Site settings</h3>
         <p className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginTop: "-8px", marginBottom: "16px" }}>
-          Configures the main nav and footer for this site's public pages.
+          Configures the main nav for this site's public pages. For a
+          footer, hand-write a shared file (e.g. <code>_footer.md</code>)
+          and end each page's own body with{" "}
+          <code>{'::include-ox{file="./_footer.md"}'}</code>.
         </p>
 
         {loading ? (
@@ -1327,36 +1406,10 @@ function SiteSettingsModal({
               items={settings.nav}
               onChange={(nav) => setSettings((prev) => ({ ...prev, nav }))}
             />
-            <div style={{ marginBottom: "12px" }}>
-              <div className="text-xs font-mono" style={{ color: "var(--text-subtle)", marginBottom: "4px" }}>
-                Footer tagline
-              </div>
-              <input
-                type="text"
-                value={settings.footer.tagline}
-                onChange={(e) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    footer: { ...prev.footer, tagline: e.target.value },
-                  }))
-                }
-                placeholder="A short line under the footer"
-                className="text-xs font-mono"
-                style={{ width: "100%", padding: "4px 6px", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)" }}
-              />
-            </div>
-            <LinkListEditor
-              label="Footer links"
-              items={settings.footer.links}
-              onChange={(links) =>
-                setSettings((prev) => ({ ...prev, footer: { ...prev.footer, links } }))
-              }
-            />
-            <LinkListEditor
-              label="Footer social links"
-              items={settings.footer.social}
-              onChange={(social) =>
-                setSettings((prev) => ({ ...prev, footer: { ...prev.footer, social } }))
+            <FeaturedButtonEditor
+              item={settings.featuredButton}
+              onChange={(featuredButton) =>
+                setSettings((prev) => ({ ...prev, featuredButton }))
               }
             />
           </>
@@ -1433,31 +1486,59 @@ function MarkdownSplitEditor({
   initialContent,
   editable,
   onSave,
+  headerLeft,
   toolbarLeft,
+  toolbarRight,
   renderPreview,
   showScratchPadLink = false,
+  onBodyChange,
 }: {
   fileId: string;
   initialContent: string;
   editable: boolean;
   onSave: (fileId: string, content: string) => Promise<unknown>;
-  /** Rendered at the left of the toolbar, before the light/dark/scratch-
+  /** Rendered FIRST in the merged toolbar row -- the vault's own
+   * breadcrumb (+ mobile folder-tree-drawer toggle + "Published"
+   * public-link badge), built once by `VaultV2Page` and reused here
+   * instead of that generic `.vault-panel-header` rendering its own copy
+   * -- this merges what used to be two separate header rows (breadcrumb
+   * row above, this toolbar below) into the one row below. */
+  headerLeft?: ReactNode;
+  /** Rendered right after `headerLeft`, before the light/dark/scratch-
    * pad/flip/expand `ActionBar` -- the website editor's own
    * `WebsitePublishToggle`; omitted entirely for anything with no
    * draft/published concept (e.g. a sync-api run's notes). */
   toolbarLeft?: ReactNode;
+  /** Rendered LAST in the merged toolbar row -- `VaultV2Page`'s "New
+   * Page"/"Copy public link"/"Actions" (Download folded in, alongside
+   * whatever `moreActions` already had) cluster, replacing the separate
+   * actions block the old, now-unused `.vault-panel-header` file branch
+   * used to render for these two file kinds. */
+  toolbarRight?: ReactNode;
   /** Renders the live-preview pane's own body from the current raw
    * Markdown `body` -- the website editor wraps it in `WebsitePageContent`
    * with the full website directive registry so it matches the real
    * published page exactly; anything else gets a bare `OxRenderer`. */
   renderPreview: (body: string, previewScheme: "light" | "dark") => ReactNode;
   showScratchPadLink?: boolean;
+  /** Fires (in an effect, not during render) whenever the live, possibly-
+   * unsaved `body` changes -- `WebsitePageSplitEditor`'s own hook for
+   * re-resolving `::include-ox{...}` against whatever's CURRENTLY typed,
+   * not just what's on disk (see its own `resolveIncludes` effect).
+   * Omitted entirely by anything that doesn't need to react to body
+   * changes outside the render-prop `renderPreview` already gets them
+   * through (e.g. `SyncApiRunEditor`). */
+  onBodyChange?: (body: string) => void;
 }) {
   const initialBody = useMemo(() => splitFrontmatter(initialContent).body, [initialContent]);
   const [body, setBody] = useState(initialBody);
   const [isSaving, setIsSaving] = useState(false);
   const lastSavedBodyRef = useRef(initialBody);
   const isDirty = body !== lastSavedBodyRef.current;
+
+  useEffect(() => {
+    onBodyChange?.(body);
+  }, [body, onBodyChange]);
 
   // Persisted globally (not per-file) -- "which side do I like Markdown
   // on" is a human's own standing preference, the same way an editor's
@@ -1564,54 +1645,73 @@ function MarkdownSplitEditor({
   return (
     <div className={`vault-website-editor${expanded ? " vault-website-editor--expanded" : ""}`}>
       <div className="vault-website-editor-toolbar">
-        {toolbarLeft}
-        <ActionBar>
-          <ActionBarGroup>
-            <ActionBarButton
-              active={previewScheme === "light"}
-              onClick={() => setPreviewScheme("light")}
-              aria-label="Preview in light mode"
-            >
-              Light
-            </ActionBarButton>
-            <ActionBarButton
-              active={previewScheme === "dark"}
-              onClick={() => setPreviewScheme("dark")}
-              aria-label="Preview in dark mode"
-            >
-              Dark
-            </ActionBarButton>
-          </ActionBarGroup>
-          {showScratchPadLink && (
+        {headerLeft}
+        <div className="vault-website-editor-toolbar-actions">
+          {toolbarLeft}
+          <ActionBar>
             <ActionBarGroup>
-              {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
-                  itself uses (`stamps/actionBar.css`), rather than extending
-                  that shared component with an `href` variant -- matches this
-                  codebase's own established convention (`button.css`'s own
-                  recipe, `link.css`, `surfaceBase`, ...) of applying a
-                  recipe's className polymorphically at each call site instead
-                  of baking router-awareness into a router-agnostic `stamps`
-                  component. Opens in a new tab -- this is a REFERENCE jump
-                  (going to look up/try a directive's own vocabulary), not a
-                  navigation away from the file currently being edited here.
-                  Website pages only -- not relevant to a non-website
-                  markdown editor like `SyncApiRunEditor`. */}
-              <Link
-                to="/maker/stamps/scratch"
-                className={actionBarButtonClass({ active: false })}
-                aria-label="Open the website directives scratch pad in a new tab"
+              <ActionBarButton
+                active={previewScheme === "light"}
+                onClick={() => setPreviewScheme("light")}
+                aria-label="Preview in light mode"
               >
-                Scratch pad
-              </Link>
+                Light
+              </ActionBarButton>
+              <ActionBarButton
+                active={previewScheme === "dark"}
+                onClick={() => setPreviewScheme("dark")}
+                aria-label="Preview in dark mode"
+              >
+                Dark
+              </ActionBarButton>
             </ActionBarGroup>
-          )}
-          <ActionBarGroup>
-            <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">
-              <LayoutFlipIcon mdSide={mdSide} />
-            </ActionBarButton>
-            {expandButton}
-          </ActionBarGroup>
-        </ActionBar>
+            {showScratchPadLink && (
+              <ActionBarGroup>
+                {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
+                    itself uses (`stamps/actionBar.css`), rather than extending
+                    that shared component with an `href` variant -- matches this
+                    codebase's own established convention (`button.css`'s own
+                    recipe, `link.css`, `surfaceBase`, ...) of applying a
+                    recipe's className polymorphically at each call site instead
+                    of baking router-awareness into a router-agnostic `stamps`
+                    component. Opens in a new tab -- this is a REFERENCE jump
+                    (going to look up/try a directive's own vocabulary), not a
+                    navigation away from the file currently being edited here.
+                    Website pages only -- not relevant to a non-website
+                    markdown editor like `SyncApiRunEditor`. */}
+                <Link
+                  to="/maker/stamps/scratch"
+                  className={actionBarButtonClass({ active: false })}
+                  aria-label="Open the website directives scratch pad in a new tab"
+                >
+                  Scratch pad
+                </Link>
+              </ActionBarGroup>
+            )}
+            {/* Flip layout is genuinely inert on mobile (one pane shows at a
+                time regardless, controlled by the bottom bar's own Preview/
+                Markdown toggle, not `mdSide`) and Expand already has its own
+                mobile equivalent inside each pane's own label row
+                (`.vault-website-editor-mobile-expand`, below) -- rendering
+                BOTH here too on mobile would just be a confusing, partly-
+                inert duplicate. Checked in JS (`isMobile`), not hidden via
+                CSS media query like the rest of this toolbar's surroundings
+                used to be -- this group is the ONE part of the merged row
+                that's genuinely desktop-only; everything else (Light/Dark,
+                Scratch pad, `headerLeft`, `toolbarLeft`, `toolbarRight`)
+                stays reachable on every width now, wrapping instead of
+                disappearing -- see `vault.css`'s own comment on this. */}
+            {!isMobile && (
+              <ActionBarGroup>
+                <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">
+                  <LayoutFlipIcon mdSide={mdSide} />
+                </ActionBarButton>
+                {expandButton}
+              </ActionBarGroup>
+            )}
+          </ActionBar>
+          {toolbarRight}
+        </div>
       </div>
 
       <div
@@ -1716,19 +1816,72 @@ function MarkdownSplitEditor({
 // page (`WebsitePageView`).
 function WebsitePageSplitEditor({
   fileId,
+  folderId,
   initialContent,
   editable,
   onSave,
   publish,
   onPublishToggled,
+  headerLeft,
+  toolbarRight,
 }: {
   fileId: string;
+  /** The page's own containing folder -- `current.file.folder_id` at the
+   * one real call site (`VaultV2Page`). Needed to resolve
+   * `::include-ox{file="..."}` relative to THIS file, exactly like the
+   * real public `/v2/*` renderer does (`loadWebsitePage.server.ts`'s own
+   * `resolveWebsiteIncludes` call) -- see `resolveIncludes` below. */
+  folderId: string | null;
   initialContent: string;
   editable: boolean;
   onSave: (fileId: string, content: string) => Promise<unknown>;
   publish: WebsitePublishStatus;
   onPublishToggled: () => void;
+  headerLeft?: ReactNode;
+  toolbarRight?: ReactNode;
 }) {
+  // Resolves `::include-ox{file="..."}` against whatever's CURRENTLY
+  // typed in the Markdown pane (not just what's saved to disk) -- the
+  // real public page's own loader (`loadWebsitePage.server.ts`) does the
+  // equivalent resolution server-side against the SAVED body, which this
+  // preview has no access to (it needs real vault/DB access `OxRenderer`
+  // never has on its own, and the body being previewed may not even be
+  // saved yet). Debounced (not re-fetched on every keystroke) -- a fresh
+  // `AbortController` per call so a slow, now-stale request can never
+  // clobber a newer one's result after the fact (a real race, not just a
+  // defensive guess: typing quickly while the first request is still in
+  // flight was confirmed to otherwise sometimes let it resolve LAST and
+  // overwrite the correct result with a stale one).
+  const [includes, setIncludes] = useState<Record<string, string>>({});
+  const resolveAbortRef = useRef<AbortController | null>(null);
+  const resolveIncludes = useMemo(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    return (body: string) => {
+      if (!folderId) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(async () => {
+        resolveAbortRef.current?.abort();
+        const controller = new AbortController();
+        resolveAbortRef.current = controller;
+        try {
+          const res = await fetch(`/api/vault/website/${folderId}/resolve-includes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ body }),
+            signal: controller.signal,
+          });
+          const data = await res.json().catch(() => null);
+          if (res.ok && data) setIncludes(data.includes ?? {});
+        } catch {
+          // Aborted (a newer call superseded this one) or a network hiccup
+          // -- either way, fail soft and just keep showing whatever
+          // `includes` already resolved, same convention the directive's
+          // own render-time fallback (nothing at all) already uses.
+        }
+      }, 400);
+    };
+  }, [folderId]);
+
   return (
     <MarkdownSplitEditor
       fileId={fileId}
@@ -1736,6 +1889,9 @@ function WebsitePageSplitEditor({
       editable={editable}
       onSave={onSave}
       showScratchPadLink
+      headerLeft={headerLeft}
+      toolbarRight={toolbarRight}
+      onBodyChange={resolveIncludes}
       toolbarLeft={
         <WebsitePublishToggle
           fileId={fileId}
@@ -1748,7 +1904,7 @@ function WebsitePageSplitEditor({
         <WebsitePageContent>
           <OxRenderer
             markdown={body}
-            directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme: previewScheme })}
+            directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, includes, forcedScheme: previewScheme })}
             className="ox-no-dots ox-no-heading-marks website-page-ox"
           />
         </WebsitePageContent>
@@ -1771,11 +1927,15 @@ function SyncApiRunEditor({
   initialContent,
   editable,
   onSave,
+  headerLeft,
+  toolbarRight,
 }: {
   fileId: string;
   initialContent: string;
   editable: boolean;
   onSave: (fileId: string, content: string) => Promise<unknown>;
+  headerLeft?: ReactNode;
+  toolbarRight?: ReactNode;
 }) {
   return (
     <MarkdownSplitEditor
@@ -1783,6 +1943,8 @@ function SyncApiRunEditor({
       initialContent={initialContent}
       editable={editable}
       onSave={onSave}
+      headerLeft={headerLeft}
+      toolbarRight={toolbarRight}
       renderPreview={(body) => <OxRenderer markdown={body} />}
     />
   );
@@ -3383,7 +3545,168 @@ export default function VaultV2Page() {
     crumbs.push({ id: current.file._id, label: current.file.name, link: false });
   }
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
+  // ─── Merged markdown-editor header (website pages / sync-api runs) ────
+  // `WebsitePageSplitEditor`/`SyncApiRunEditor` (below) render their OWN
+  // single toolbar row (`MarkdownSplitEditor`'s `headerLeft`/`toolbarLeft`/
+  // `toolbarRight`) instead of sitting under the generic `.vault-panel-
+  // header` breadcrumb+actions row every other vault page gets — the two
+  // used to be visually separate rows; this merges them into the one the
+  // split editor now owns. `breadcrumbNode`/`toolbarRight` below are built
+  // ONCE here and handed down, so `.vault-panel-header` (further down)
+  // can skip rendering entirely for these two file kinds rather than
+  // showing a duplicate breadcrumb above the editor's own merged row.
+  const usesMergedHeader =
+    current.kind === "file" &&
+    ((Boolean(current.websiteAnchor) && Boolean(current.websitePageMeta) && isMarkdownFile(current.file)) ||
+      (fileFolderType === "sync-api" && isMarkdownFile(current.file)));
+
+  const handleCreateMarkdownFile = async () => {
+    if (current.kind !== "file" || !current.file.folder_id) return;
+    const folderId = current.file.folder_id;
+    const name = window.prompt("New page name", "Untitled")?.trim();
+    if (!name) return;
+    const data = await apiJson("/api/vault/files", {
+      method: "POST",
+      body: JSON.stringify({ name, folder_id: folderId }),
+    });
+    if (data?.file) {
+      markOwnMutation(data.file._id);
+      invalidateAndRevalidate([folderId]);
+      selectFile(data.file);
+    }
+  };
+
+  // Same underlying `moreActions` (Replace/Delete) the legacy file-actions
+  // block already computed above, with Download folded in as a real menu
+  // item instead of its own standalone button — the whole point of
+  // renaming this trigger "Actions" or so it doesn't claim to be "more"
+  // than the one thing (Download) it used to sit right beside.
+  const splitEditorActions: MoreMenuItem[] =
+    current.kind === "file" && fileDownloadable
+      ? [{ label: "Download", onClick: () => handleDownload(current.file) }, ...moreActions]
+      : moreActions;
+
+  const actionsTrigger = ({
+    toggle,
+    open,
+  }: {
+    toggle: () => void;
+    open: boolean;
+  }) => (
+    <button
+      type="button"
+      className="vault-toolbar-btn"
+      disabled={splitEditorActions.length === 0 || replacing}
+      aria-label="Actions"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      onClick={toggle}
+    >
+      {replacing ? "Replacing…" : "Actions ▾"}
+    </button>
+  );
+
+  const breadcrumbNode = (
+    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+      <div className="flex items-center gap-2">
+        {/* Mobile: open drawer button (close btn lives in the sidebar) */}
+        {!sidebarOpen && (
+          <button
+            className="vault-sidebar-toggle"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open folder tree"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+              <path d="M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12" />
+              <path d="M9 4v16" />
+              <path d="M14 10l2 2l-2 2" />
+            </svg>
+          </button>
+        )}
+
+        <h2
+          className="font-mono font-bold text-sm purple-light-text"
+          style={{ margin: 0, minWidth: 0 }}
+        >
+          {current.kind === "root" ? (
+            <span>Vault</span>
+          ) : (
+            <Link to="/vault" className="vault-v2-crumb">
+              Vault
+            </Link>
+          )}
+          {crumbs.map((c) => (
+            <span key={c.id}>
+              <span className="vault-v2-crumb-sep">/</span>
+              {c.link ? (
+                <Link to={`?folder=${c.id}`} className="vault-v2-crumb">
+                  {c.label}
+                </Link>
+              ) : (
+                <span>{c.label}</span>
+              )}
+            </span>
+          ))}
+        </h2>
+      </div>
+
+      {(folderEffectivelyPublic || fileEffectivelyPublic) && (
+        <span
+          className="text-xs font-mono"
+          style={{
+            color: "var(--purple-light)",
+            whiteSpace: "nowrap",
+          }}
+          title="Anyone with the link can view this"
+        >
+          Published
+        </span>
+      )}
+    </div>
+  );
+
+  // `toolbarRight` for a WEBSITE page specifically — "New Page" (website
+  // pages are the one markdown-split-editor kind this term fits; a sync-
+  // api run's own notes aren't a "page") then Copy-link then Actions.
+  const websiteToolbarRight = (
+    <>
+      {canWriteCurrentFile && (
+        <button type="button" className="vault-toolbar-btn" onClick={handleCreateMarkdownFile}>
+          + New Page
+        </button>
+      )}
+      {current.kind === "file" && fileEffectivelyPublic && (
+        <CopyLinkButton path={`/public/file/${current.file._id}`} />
+      )}
+      <MoreMenu label="Actions" items={splitEditorActions} trigger={actionsTrigger} />
+    </>
+  );
+
+  // Same, minus "New Page" — a sync-api run's notes aren't "pages" (see
+  // above), and there's no equivalent "create a new run" action this
+  // header could trigger (runs are created via the analysis's own CLI/API
+  // flow — see the `vault` skill's "Sync types" section).
+  const syncApiToolbarRight = (
+    <>
+      {current.kind === "file" && fileEffectivelyPublic && (
+        <CopyLinkButton path={`/public/file/${current.file._id}`} />
+      )}
+      <MoreMenu label="Actions" items={splitEditorActions} trigger={actionsTrigger} />
+    </>
+  );
+
+  // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
     <AppLayout>
@@ -3454,73 +3777,14 @@ export default function VaultV2Page() {
 
         {/* ═══ RIGHT: main view ═════════════════════════════════════════════ */}
         <div className="vault-main">
-          {/* Breadcrumb + actions */}
+          {/* Breadcrumb + actions -- SKIPPED entirely for a website-page/
+              sync-api-run file (`usesMergedHeader`), which renders its own
+              single merged row instead (`headerLeft`/`toolbarRight` passed
+              into `WebsitePageSplitEditor`/`SyncApiRunEditor`, below) --
+              see this block's own comment, above, for why. */}
+          {!usesMergedHeader && (
           <div className="vault-panel-header">
-            <div className="flex items-center gap-2">
-            {/* Mobile: open drawer button (close btn lives in the sidebar) */}
-            {!sidebarOpen && (
-              <button
-                className="vault-sidebar-toggle"
-                onClick={() => setSidebarOpen(true)}
-                aria-label="Open folder tree"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                  <path d="M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12" />
-                  <path d="M9 4v16" />
-                  <path d="M14 10l2 2l-2 2" />
-                </svg>
-              </button>
-            )}
-
-            <h2
-              className="font-mono font-bold text-sm purple-light-text"
-              style={{ margin: 0, minWidth: 0 }}
-            >
-              {current.kind === "root" ? (
-                <span>Vault</span>
-              ) : (
-                <Link to="/vault" className="vault-v2-crumb">
-                  Vault
-                </Link>
-              )}
-              {crumbs.map((c) => (
-                <span key={c.id}>
-                  <span className="vault-v2-crumb-sep">/</span>
-                  {c.link ? (
-                    <Link to={`?folder=${c.id}`} className="vault-v2-crumb">
-                      {c.label}
-                    </Link>
-                  ) : (
-                    <span>{c.label}</span>
-                  )}
-                </span>
-              ))}
-            </h2>
-            </div>
-
-            {(folderEffectivelyPublic || fileEffectivelyPublic) && (
-              <span
-                className="text-xs font-mono"
-                style={{
-                  color: "var(--purple-light)",
-                  whiteSpace: "nowrap",
-                }}
-                title="Anyone with the link can view this"
-              >
-                Published
-              </span>
-            )}
+            {breadcrumbNode}
 
             {/* Actions */}
             {current.kind === "folder" && (
@@ -3654,6 +3918,7 @@ export default function VaultV2Page() {
               </div>
             )}
           </div>
+          )}
 
           {current.kind === "folder" && isTopLevelProject && (
             <ProjectRoleBanner
@@ -3901,6 +4166,7 @@ export default function VaultV2Page() {
               <WebsitePageSplitEditor
                 key={`${current.file._id}-${current.file.updated_at}`}
                 fileId={current.file._id}
+                folderId={current.file.folder_id}
                 initialContent={current.file.content ?? ""}
                 editable={canWriteCurrentFile}
                 onSave={handleSaveWebsitePage}
@@ -3908,6 +4174,8 @@ export default function VaultV2Page() {
                 onPublishToggled={() =>
                   handleWebsitePublishToggled(current.file._id, current.file.folder_id)
                 }
+                headerLeft={breadcrumbNode}
+                toolbarRight={websiteToolbarRight}
               />
             ) : fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (
               // A sync-api analysis run's own `<run>.md` (see the `vault`
@@ -3921,6 +4189,8 @@ export default function VaultV2Page() {
                 initialContent={current.file.content ?? ""}
                 editable={canWriteCurrentFile}
                 onSave={handleSaveSyncApiRunFile}
+                headerLeft={breadcrumbNode}
+                toolbarRight={syncApiToolbarRight}
               />
             ) : isMarkdownFile(current.file) ? (
               <div className="vault-readme-section">

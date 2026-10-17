@@ -3,7 +3,7 @@
 // Mirrors maker_.phylog.tsx exactly, against GraphLog's own
 // tables/stage set. Admin/Super only, same gate as the parent Maker
 // dashboard.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -30,6 +30,8 @@ import { listRecentGraphLogRuns, type GraphLogRun } from "robustness-core/data/g
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { navFor } from "../data/nav.server";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.GraphLog" }];
 
 const RECENT_RUNS_LIMIT = 20;
 

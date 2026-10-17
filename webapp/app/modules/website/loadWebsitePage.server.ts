@@ -22,6 +22,7 @@ import {
   getPrimaryWebsiteFolder,
   resolveWebsitePageByPath,
   resolveWebsiteDailyLogEntries,
+  resolveWebsiteIncludes,
   type ResolvedWebsiteDailyLogEntry,
 } from "robustness-core/data/website.server";
 
@@ -38,6 +39,12 @@ export type LoadedWebsitePage = {
    * `resolveWebsiteDailyLogEntries` and `oxmarkdown/websiteDirectives.tsx`.
    * Empty for a page that doesn't use the directive at all. */
   dailyLogEntries: Record<string, ResolvedWebsiteDailyLogEntry>;
+  /** Resolved `::include-ox{file="..."}` references found in this page's
+   * own body -- see `website.server.ts`'s `resolveWebsiteIncludes` and
+   * `oxmarkdown/websiteDirectives.tsx`. Keyed by the literal `file="..."`
+   * string, each value the included file's own markdown body. Empty for a
+   * page that doesn't use the directive at all. */
+  includes: Record<string, string>;
 };
 
 export async function loadWebsitePage(
@@ -55,6 +62,7 @@ export async function loadWebsitePage(
   }
 
   const dailyLogEntries = await resolveWebsiteDailyLogEntries(siteFolder, resolved.body);
+  const includes = await resolveWebsiteIncludes(siteFolder, resolved.file.folder_id, resolved.body);
 
   return {
     body: resolved.body,
@@ -62,5 +70,6 @@ export async function loadWebsitePage(
     description: resolved.meta.description,
     isDraftPreview: false,
     dailyLogEntries,
+    includes,
   };
 }

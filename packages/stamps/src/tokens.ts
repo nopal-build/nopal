@@ -163,6 +163,15 @@ export const semanticColors = {
   fieldText: "var(--color-field-text)",
 
   navActiveBg: "var(--color-nav-active-bg)",
+  // A more vibrant, brand-blue alternative to `navActiveBg` -- for
+  // `navLink`'s own `tone: "website"` (see `navLink.css.ts`), the public
+  // marketing site's current-page highlight. Resolves to the `moonlight`
+  // palette family (pale blue/lavender, `--moon` is its own 500 rung) --
+  // a deeper rung in dark mode (see root.css) since the paler one is
+  // already what ordinary (non-active) nav link TEXT renders in under
+  // dark mode (`--color-text-brand`), and would otherwise wash out
+  // against itself.
+  navActiveAccentBg: "var(--color-nav-active-accent-bg)",
 } as const;
 
 // Mirrors `webapp/tailwind.config.ts`'s `fontFamily` — kept here too so

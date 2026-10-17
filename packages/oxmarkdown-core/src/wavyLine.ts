@@ -37,14 +37,24 @@
  * width/height, via `resolveAnchor` below — an anchor's own OFFSET is
  * still a literal pixel inset from that edge, not a percentage of it.
  *
- * `::icon{position="x,y"}` (`websiteDirectives.tsx`'s `parseIconPosition`)
- * is the one remaining consumer of the OLD normalized-box design
- * (`resolveNormalizedLinePoint`, below) — placing a single point has no
- * "shape" for independent x/y scaling to distort, so a plain CSS
- * percentage (needing zero JS/DOM measurement at all) is still the right,
- * simpler choice there, not a bug to fix the same way. The two directives'
- * coordinate systems are DELIBERATELY different now — don't assume
- * `::line`'s literal-pixel design applies there too.
+ * STALE NOTE, kept only as history: `::icon{position="x,y"}` used to be
+ * the one remaining consumer of an OLDER normalized-box design
+ * (`resolveNormalizedLinePoint`, below, now DEAD CODE -- confirmed zero
+ * real callers left anywhere in the codebase). It migrated to this exact
+ * same literal-pixel `resolveLinePoints` design `::line`/`::path` already
+ * use (see `websiteIcons.tsx`'s own `WebsiteIconGlyph`/
+ * `PositionedWebsiteIcon` comments for that history) -- `::badge
+ * {position="..."}` (`websiteBadge.tsx`) was built directly on top of
+ * THIS migrated version from day one, never the old one.
+ *
+ * `::icon`/`::badge`/`::path{start="..."}` share a FURTHER refinement on
+ * top of plain anchor resolution: `adjustForElementSize`, below --
+ * `resolveAnchor` only ever answers "where does this anchor edge sit in
+ * the container," with no idea an `R`/`B`/`C` ref describes WHICH EDGE of
+ * the real, sized element being placed should land there (not just its
+ * top-left corner, which is all a bare `resolveLinePoints` call gives
+ * you). See `adjustForElementSize`'s own doc comment for the full
+ * reasoning and a worked example.
  *
  * `points="..."` can ALSO contain a literal, standalone `|` -- a pen-up
  * BREAK (`LinePointsEntry`), matching what a real SVG `M` (moveto)
@@ -176,6 +186,60 @@ export function resolveAnchor(ref: "L" | "C" | "R" | "T" | "B", offset: number, 
       return span - offset;
     case "C":
       return span / 2 + offset;
+  }
+}
+
+/** Adjusts an already-resolved anchor POINT (`resolveLinePoints`'s own
+ * output, or `fitAndPositionPoints`'s `start`) to account for the SIZE of
+ * the real, sized element actually being placed there -- a real,
+ * confirmed gap `resolveAnchor` above doesn't close on its own: that
+ * function only ever answers "where does this anchor EDGE sit in the
+ * container," with no idea an `R`/`B`/`C` ref is meant to describe WHICH
+ * EDGE of the positioned element should land there, not just where that
+ * element's own top-left corner goes. Without this, `R0,T0` always put a
+ * positioned element's top-left corner exactly at the container's own
+ * top-right corner -- correct for `L0,T0` (hug the left/top with the
+ * element's own left/top edge), but wrong for `R0,T0` (the element's own
+ * RIGHT edge should hug the container's right edge, not its left edge
+ * sitting there and overflowing further right) -- a real, reported
+ * confusion once elements with a real measurable size (`::badge`,
+ * `::icon`, `::path{start=...}`'s own shape) needed exact, no-hand-
+ * computed-offset corner/edge/center alignment.
+ *
+ * Takes the ORIGINAL per-axis tokens (not just the resolved numbers)
+ * because only an `anchor`-kind token carries real alignment intent on
+ * that axis -- a plain `delta` coordinate has no "edge" to align (it's a
+ * cumulative cursor move, see `resolveLinePoints`), so it's left
+ * untouched on that axis: still "the element's top-left corner goes
+ * here," the same meaning a delta already had before this existed. */
+export function adjustForElementSize(
+  tokens: LinePointTokens,
+  point: LinePoint,
+  elementWidth: number,
+  elementHeight: number,
+): LinePoint {
+  return {
+    x: tokens.x.kind === "anchor" ? adjustAxisForElementSize(point.x, tokens.x.ref, elementWidth) : point.x,
+    y: tokens.y.kind === "anchor" ? adjustAxisForElementSize(point.y, tokens.y.ref, elementHeight) : point.y,
+  };
+}
+
+/** `L`/`T` (start-of-axis refs): the element's own start edge is already
+ * exactly where it should be -- no adjustment. `R`/`B` (end-of-axis
+ * refs): the element's own END edge should land at `raw`, so its START
+ * edge (what CSS `left`/`top` actually positions) is `raw - size` back
+ * from there. `C` (center, shared between axes): the element's own
+ * CENTER should land at `raw`, so its start edge is `raw - size / 2`. */
+function adjustAxisForElementSize(raw: number, ref: "L" | "C" | "R" | "T" | "B", size: number): number {
+  switch (ref) {
+    case "L":
+    case "T":
+      return raw;
+    case "C":
+      return raw - size / 2;
+    case "R":
+    case "B":
+      return raw - size;
   }
 }
 
@@ -485,7 +549,16 @@ export function resolveLineSize(spec: LineSizeSpec | undefined, containerSize: n
  *      given a single-entry list, exactly how `start="..."` gets
  *      resolved). Omitting `start` leaves the shape at wherever its own
  *      resolved `points` naturally placed it, unscaled step aside --
- *      `::line`'s own existing behavior.
+ *      `::line`'s own existing behavior. When `startTokens` is ALSO given
+ *      (the ORIGINAL, unresolved `start="..."` tokens, not just the
+ *      resolved point), an anchor ref on either axis describes WHICH EDGE
+ *      of the shape's own (already-scaled) bounding box should land at
+ *      `start`, not just its top-left corner -- `adjustForElementSize`,
+ *      above, applied here against the scaled shape's own real width/
+ *      height, the one place in this whole file that already has them
+ *      computed. Omitting `startTokens` (or passing a `start` with no
+ *      real anchor on an axis) keeps the ORIGINAL "top-left corner"
+ *      behavior on that axis, unchanged.
  *
  * Operates on `LinePoint[][]` (subpaths -- see `resolveLinePoints`'s own
  * `"break"` handling), not a flat list -- the scale factor and the
@@ -499,6 +572,7 @@ export function fitAndPositionPoints(
   targetWidth: number | undefined,
   targetHeight: number | undefined,
   start: LinePoint | undefined,
+  startTokens?: LinePointTokens,
 ): LinePoint[][] {
   const flatPoints = subpaths.flat();
   if (flatPoints.length === 0) return subpaths;
@@ -523,7 +597,10 @@ export function fitAndPositionPoints(
   if (!start) return scaled;
 
   const scaledBox = boundingBox(scaled.flat());
-  const dx = start.x - scaledBox.minX;
-  const dy = start.y - scaledBox.minY;
+  const target = startTokens
+    ? adjustForElementSize(startTokens, start, scaledBox.maxX - scaledBox.minX, scaledBox.maxY - scaledBox.minY)
+    : start;
+  const dx = target.x - scaledBox.minX;
+  const dy = target.y - scaledBox.minY;
   return scaled.map((group) => group.map((p) => ({ x: p.x + dx, y: p.y + dy })));
 }
