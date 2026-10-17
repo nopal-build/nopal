@@ -760,6 +760,33 @@ ${v.cell2}
 ![nopal stamp](/guides/stamp-nopal.svg)
 :::`,
   },
+  {
+    id: "video",
+    name: "Video",
+    directive: '::video{url="..." orientation="horizontal|vertical" poster="..." caption="..."} (not new — the existing built-in)',
+    note: 'Not a website-specific directive — the same pre-existing `::video{url="..."}` (external/YouTube) / `::video{fileId="..."}` (self-hosted vault file) built-in (`oxmarkdown-core`\'s `videoDirective.ts`, `OxRenderer.tsx`\'s `VideoDirectiveStatic`), reused as-is. `url` wins when both are given; this demo only shows the `url` form — `fileId` needs real vault access this static playground doesn\'t have, same caveat the folder-backed Gallery paper above has. A YouTube `url` renders as a "lite embed" facade (poster image + play button) rather than a bare always-on iframe, swapped for the real `youtube-nocookie.com` iframe only once clicked — cheaper to load with several embeds on one page, and the facade is also how `poster="..."` overrides YouTube\'s own thumbnail (YouTube has no native `poster` attribute). `orientation` is the one layout knob (`horizontal`, 16:9, default; `vertical`, 9:16, for phone-shot clips) — always renders full-width otherwise. `caption`, when given, is real nested markdown rendered underneath, same idea as `::file`\'s caption but always plain/non-interactive (this directive has no Editing-mode presence at all — see the "Video embed directive" garden seed). Renders nothing at all (not an error marker) for a `url` that isn\'t a recognized YouTube link shape.',
+    attributes: [
+      { key: "url", label: "url", kind: "text", default: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+      {
+        key: "orientation",
+        label: "orientation",
+        kind: "select",
+        default: "",
+        options: [{ value: "", label: "(horizontal, default)" }, { value: "vertical" }],
+      },
+      { key: "poster", label: "poster (optional override)", kind: "text", default: "", placeholder: "https://..." },
+      { key: "caption", label: "caption (optional)", kind: "text", default: "A short caption, rendered as real markdown." },
+    ],
+    buildMarkdown: (v) => {
+      const attrs = [
+        `url="${v.url}"`,
+        v.orientation === "vertical" && `orientation="vertical"`,
+        v.poster && `poster="${v.poster}"`,
+        v.caption && `caption="${v.caption}"`,
+      ].filter(Boolean).join(" ");
+      return `::video{${attrs}}`;
+    },
+  },
 ];
 
 // ─── Scratches / Pads ───────────────────────────────────────────────────────
