@@ -22,8 +22,19 @@ import {
   getPrimaryWebsiteFolder,
   resolveWebsitePageByPath,
   resolveWebsiteDailyLogEntries,
+  resolveWebsiteIncludes,
   type ResolvedWebsiteDailyLogEntry,
 } from "robustness-core/data/website.server";
+// Server request-performance tracing (see the `fruits-performance-
+// monitoring` garden seed) -- `/v2/*` is the pilot route for `webapp`,
+// the same way `vault.tsx` is for `fruits`. Both `v2._index.tsx` and
+// `v2.$.tsx` call THIS function for their entire loader body, so wrapping
+// it here traces every `/v2/*` content request from one place rather
+// than duplicating the wrap in both route files. `humanId` is always
+// `null` -- webapp has no session/auth code at all (see this file's own
+// header comment).
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
+import { timeRequestPerf } from "robustness-core/data/requestPerfContext.server";
 
 export type LoadedWebsitePage = {
   body: string;
@@ -38,23 +49,49 @@ export type LoadedWebsitePage = {
    * `resolveWebsiteDailyLogEntries` and `oxmarkdown/websiteDirectives.tsx`.
    * Empty for a page that doesn't use the directive at all. */
   dailyLogEntries: Record<string, ResolvedWebsiteDailyLogEntry>;
+  /** Resolved `::include-ox{file="..."}` references found in this page's
+   * own body -- see `website.server.ts`'s `resolveWebsiteIncludes` and
+   * `oxmarkdown/websiteDirectives.tsx`. Keyed by the literal `file="..."`
+   * string, each value the included file's own markdown body. Empty for a
+   * page that doesn't use the directive at all. */
+  includes: Record<string, string>;
 };
 
 export async function loadWebsitePage(
-  _request: Request,
+  request: Request,
   segments: string[],
 ): Promise<LoadedWebsitePage> {
-  const siteFolder = await getPrimaryWebsiteFolder();
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "webapp", route: url.pathname, method: request.method, humanId: null },
+    () => loadWebsitePageBody(segments),
+  );
+}
+
+async function loadWebsitePageBody(segments: string[]): Promise<LoadedWebsitePage> {
+  const siteFolder = await timeRequestPerf("fn", "getPrimaryWebsiteFolder", null, () =>
+    getPrimaryWebsiteFolder(),
+  );
   if (!siteFolder) throw data("Not found", { status: 404 });
 
-  const resolved = await resolveWebsitePageByPath(siteFolder, segments);
+  const resolved = await timeRequestPerf("fn", "resolveWebsitePageByPath", { segments }, () =>
+    resolveWebsitePageByPath(siteFolder, segments),
+  );
   if (!resolved) throw data("Not found", { status: 404 });
 
   if (resolved.meta.publish !== "published") {
     throw data("Not found", { status: 404 });
   }
 
-  const dailyLogEntries = await resolveWebsiteDailyLogEntries(siteFolder, resolved.body);
+  const dailyLogEntries = await timeRequestPerf("fn", "resolveWebsiteDailyLogEntries", null, () =>
+    resolveWebsiteDailyLogEntries(siteFolder, resolved.body),
+  );
+  const includes = await timeRequestPerf(
+    "fn",
+    "resolveWebsiteIncludes",
+    { folderId: resolved.file.folder_id },
+    () => resolveWebsiteIncludes(siteFolder, resolved.file.folder_id, resolved.body),
+  );
 
   return {
     body: resolved.body,
@@ -62,5 +99,6 @@ export async function loadWebsitePage(
     description: resolved.meta.description,
     isDraftPreview: false,
     dailyLogEntries,
+    includes,
   };
 }

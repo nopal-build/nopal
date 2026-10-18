@@ -3,7 +3,7 @@
 // Mirrors maker_.phylog.tsx exactly, against GraphLog's own
 // tables/stage set. Admin/Super only, same gate as the parent Maker
 // dashboard.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -29,7 +29,10 @@ import { RunCost } from "../components/RunSpend";
 import { listRecentGraphLogRuns, type GraphLogRun } from "robustness-core/data/graphLogPerf.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { navFor } from "../data/nav.server";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.GraphLog" }];
 
 const RECENT_RUNS_LIMIT = 20;
 
@@ -46,10 +49,13 @@ async function requireMakerAccess(request: Request) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
   const nav = await navFor(user._id);
 
-  const url = new URL(request.url);
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
   const usage = await getGraphLogUsageSummary(days);
 
@@ -79,6 +85,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   return { user, ...nav, days, usage, recentRuns, spendByRunId, projectNameById, humanById };
+    },
+  );
 }
 
 export function ErrorBoundary() {

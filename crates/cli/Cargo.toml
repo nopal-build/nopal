@@ -12,8 +12,34 @@ readme = false
 name = "nopal"
 path = "src/main.rs"
 
+# A second, fully independent identity for working against a local/dev
+# server -- same source file as `nopal` above, just a different binary
+# name, which `main()` uses (via `current_exe()`, see its own comment) to
+# namespace its stored login under `~/.config/nopal-dev/` instead of
+# `~/.config/nopal/`. Both can be logged in at once, forever, with zero
+# shared state -- see the `nopal-dev-cli-binary` garden seed. Deliberately
+# NOT part of `[package.metadata.dist]` below -- a developer-only tool,
+# built locally (`cargo build --bin nopal-dev`), not shipped to end users.
+[[bin]]
+name = "nopal-dev"
+path = "src/main.rs"
+
 # `publish = false` above is about crates.io, not dist — this crate should
 # still be distributed as a downloadable binary via GitHub Releases.
+#
+# NOTE: `nopal-dev` (the `[[bin]]` above) currently ships in official
+# releases too, alongside `nopal` -- cargo-dist has no reliable way to
+# exclude ONE `[[bin]]` from an otherwise-dist'd package (confirmed via a
+# real `dist plan` failure: `binaries` here is a PER-TARGET-TRIPLE
+# override map, `{ "x86_64-pc-windows-msvc" = ["a", "b"] }`, not a flat
+# allowlist -- a previous attempt at `binaries = ["nopal"]` broke `dist
+# plan` outright with "invalid type: sequence, expected a map". The
+# `required-features`/package-level `dist = false` tricks other projects
+# use for this don't apply to a single `[[bin]]` within one package
+# either (see axodotdev/cargo-dist#1442). Real exclusion would mean
+# splitting `nopal-dev` into its own package -- not done yet; harmless
+# for now since it's just an extra, never-advertised binary in the
+# archive, not a secret.
 [package.metadata.dist]
 dist = true
 

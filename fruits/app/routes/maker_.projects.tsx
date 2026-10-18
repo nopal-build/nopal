@@ -9,7 +9,7 @@
 // tab alone; the Humans tab typed is a 404, like a project tab their
 // group isn't given. Every people change goes through `peopleAction`.
 import { useState } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Form, Link, data, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { guidesAny, listEveryProject, listProjectsFor, resolveRole, roleIn } from "robustness-core/data/projectSharing.server";
@@ -20,6 +20,7 @@ import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { displayName } from "robustness-core/data/humanNames";
 import { navFor } from "../data/nav.server";
 import { candidatesFor, isStaff, peopleAction, peopleOnMany, type PeopleProject, type PersonRow } from "../data/projectPeople.server";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { AppLayout } from "../components/AppLayout";
 import { MakerErrorBoundary } from "../components/MakerErrorBoundary";
 import { GroupSelect, ProjectPeople } from "../components/ProjectPeople";
@@ -38,18 +39,24 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 
+export const meta: MetaFunction = () => [{ title: "O.No · M.Projects" }];
+
 type Tab = "projects" | "humans";
 const TAB_LABELS: Record<Tab, string> = { projects: "Projects", humans: "Humans" };
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   const staff = isStaff(user);
   const memberships = await listProjectsFor(user._id);
   if (!staff && !guidesAny(memberships)) throw data("Forbidden", { status: 403 });
 
   const allowed: Tab[] = staff ? ["projects", "humans"] : ["projects"];
-  const wanted = new URL(request.url).searchParams.get("tab") ?? "projects";
+  const wanted = url.searchParams.get("tab") ?? "projects";
   const tab = allowed.find((t) => t === wanted);
   if (!tab) throw data("Not found", { status: 404 });
 
@@ -95,6 +102,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     legend: GROUPS.map((g) => ({ name: g, features: [...GROUP_FEATURES[g]] })),
     ...(await navFor(user._id, memberships)),
   };
+    },
+  );
 }
 
 /** Starting a project is `startProject`, the one path; any other post is

@@ -5,7 +5,7 @@
 // project shows what the system gives back, the way the viewer's role
 // there shows it (ADR-023). Everything the page shows comes from
 // `loadDashboard`; what it leaves out never reaches the browser.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { redirect, useLoaderData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
@@ -28,6 +28,8 @@ import {
   PROJECT_STATUSES,
   type ProjectStatus,
 } from "robustness-core/data/project.types";
+
+export const meta: MetaFunction = () => [{ title: "O.No · My Projects" }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);

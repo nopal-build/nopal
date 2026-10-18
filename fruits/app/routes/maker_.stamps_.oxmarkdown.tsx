@@ -19,7 +19,7 @@
 // interactable demo, ...). Keep entries short — this page is for a quick
 // visual reminder, not the full rationale (that's the skill file).
 import { useMemo, useState } from "react";
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -39,7 +39,10 @@ import { ErrorPanel } from "stamps/ErrorPanel";
 import { CenterContent } from "stamps/CenterContent";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { navFor } from "../data/nav.server";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.S.OxMarkdown" }];
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -52,9 +55,15 @@ async function requireMakerAccess(request: Request) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
   const nav = await navFor(user._id);
   return { user, ...nav };
+    },
+  );
 }
 
 export function ErrorBoundary() {

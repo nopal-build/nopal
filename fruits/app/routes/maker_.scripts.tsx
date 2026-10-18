@@ -8,7 +8,7 @@
 // run's outcome is permanently recorded to `admin_script_runs`
 // (`adminScriptRuns.server.ts`) and viewable at
 // /maker/scripts/runs/:runId.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, data, redirect, useLoaderData, useRouteError, isRouteErrorResponse } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
@@ -20,12 +20,15 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { listRecentAdminScriptRuns } from "robustness-core/data/adminScriptRuns.server";
 import { isAnyAdminScriptRunning } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { navFor } from "../data/nav.server";
 
 // Super only, NOT the usual Admin-or-Super Maker bar -- unlike GraphLog's
 // own staff override (which only ever touches ONE project's own data),
 // these scripts can mutate arbitrary rows across the whole database in
 // production. Keep this stricter than `requireMakerAccess` elsewhere.
+export const meta: MetaFunction = () => [{ title: "O.No · M.Scripts" }];
+
 async function requireAdminScriptsAccess(request: Request) {
   const user = await getUser(request);
   if (!user) throw redirect("/login");
@@ -38,6 +41,10 @@ async function requireAdminScriptsAccess(request: Request) {
 export async function loader({ request }: LoaderFunctionArgs) {
   // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
   const user = await requireAdminScriptsAccess(request);
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
   const nav = await navFor(user._id);
 
@@ -54,6 +61,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     running,
     humanNameById: Object.fromEntries(humanNameById),
   };
+    },
+  );
 }
 
 export function ErrorBoundary() {

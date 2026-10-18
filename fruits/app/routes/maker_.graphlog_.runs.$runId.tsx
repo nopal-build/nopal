@@ -6,7 +6,7 @@
 // every other Maker page. See `graphLogPerf.server.ts` for how this data
 // is captured — every duration here is code-measured wall-clock time,
 // never a number the model itself reports.
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -33,7 +33,10 @@ import { getFolderById } from "robustness-core/data/vault.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { getGraphLogRunSpend } from "robustness-core/data/graphLogMetrics.server";
 import { RunSpendSection } from "../components/RunSpend";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { navFor } from "../data/nav.server";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.GraphLog" }];
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -47,6 +50,10 @@ async function requireMakerAccess(request: Request) {
 export async function loader({ request, params }: LoaderFunctionArgs) {
   // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
   const user = await requireMakerAccess(request);
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
   const nav = await navFor(user._id);
   const runId = params.runId;
@@ -71,6 +78,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     projectName: projectFolder?.name ?? "(deleted project)",
     humanName: human?.name ?? found.run.human_id,
   };
+    },
+  );
 }
 
 export function ErrorBoundary() {

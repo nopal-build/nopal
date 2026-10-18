@@ -4,7 +4,7 @@
 // split out from /maker/graphlog for the same reason PhyLog's own
 // defaults editor is split from its usage dashboard. Admin/Super only,
 // same gate.
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
   data,
@@ -29,7 +29,10 @@ import {
   type GraphLogDefaultStage,
 } from "robustness-core/data/graphLogDefaults.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { navFor } from "../data/nav.server";
+
+export const meta: MetaFunction = () => [{ title: "O.No · M.GraphLog" }];
 
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
@@ -43,6 +46,10 @@ async function requireMakerAccess(request: Request) {
 export async function loader({ request }: LoaderFunctionArgs) {
   // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
   const user = await requireMakerAccess(request);
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
   const nav = await navFor(user._id);
   const defaultSkills = await getAllEffectiveGraphLogDefaultSkills();
@@ -56,6 +63,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? { updatedAt: lastEdit.updatedAt, by: editor?.name || editor?.email || lastEdit.updatedByHumanId }
       : null,
   };
+    },
+  );
 }
 
 const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice", "sow"]);

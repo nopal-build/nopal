@@ -327,7 +327,7 @@ pub struct SyncCredentials {
 
 pub fn sync_credentials_path() -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("nopal").join("sync-credentials.json")
+    base.join(config_namespace()).join("sync-credentials.json")
 }
 
 pub fn save_sync_credentials(creds: &SyncCredentials) -> Result<()> {
@@ -356,6 +356,25 @@ pub fn load_sync_credentials() -> Option<SyncCredentials> {
 
 pub fn delete_sync_credentials() -> bool {
     fs::remove_file(sync_credentials_path()).is_ok()
+}
+
+/// Which `dirs::config_dir()` subfolder every piece of CLI-stored state
+/// (this file's `credentials.json`/`sync-credentials.json`, plus
+/// `sync.rs`'s `device.json`/sync state and `watch.rs`'s heartbeat file)
+/// lives under. Defaults to `"nopal"` everywhere -- including the native
+/// GPUI app (`crates/app`), which calls straight into this module and
+/// never sets the override below -- so existing behavior is completely
+/// unchanged unless something deliberately opts in.
+///
+/// The one opt-in today: the `nopal-dev` CLI binary (a second `[[bin]]`
+/// target in `crates/cli/Cargo.toml`, same source as `nopal` itself) sets
+/// `NOPAL_CONFIG_NAMESPACE=nopal-dev` as the very first thing in `main()`,
+/// purely so it reads/writes `~/.config/nopal-dev/...` instead -- a fully
+/// separate, simultaneously-valid login from the regular `nopal` binary's
+/// own `~/.config/nopal/...`, with no profile/flag concept anywhere in
+/// this module itself. See the `nopal-dev-cli-binary` garden seed.
+pub fn config_namespace() -> String {
+    std::env::var("NOPAL_CONFIG_NAMESPACE").unwrap_or_else(|_| "nopal".to_string())
 }
 
 // ─── Credential storage ─────────────────────────────────────────────
@@ -430,7 +449,7 @@ fn delete_credentials() -> Result<()> {
 
 fn credentials_file_path() -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("nopal").join("credentials.json")
+    base.join(config_namespace()).join("credentials.json")
 }
 
 fn save_credentials_to_file(creds: &Credentials) -> Result<()> {

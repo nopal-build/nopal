@@ -1,6 +1,7 @@
 import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
+  MetaFunction,
 } from "react-router";
 import {
   redirect,
@@ -38,6 +39,8 @@ import { getProjectRole, listProjectsFor } from "robustness-core/data/projectSha
 import { featuresOf } from "robustness-core/data/features";
 import { navFor } from "../data/nav.server";
 import { markOwnMutation } from "../hooks/useVaultEvents";
+
+export const meta: MetaFunction = () => [{ title: "O.No · Daily Logs" }];
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
 

@@ -56,7 +56,8 @@ fn log_path() -> PathBuf {
 
 fn heartbeat_path() -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("nopal").join("watch-heartbeat.json")
+    base.join(auth::config_namespace())
+        .join("watch-heartbeat.json")
 }
 
 // ─── Heartbeat (read by `status`) ─────────────────────────────────────────────

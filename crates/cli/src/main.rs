@@ -17,6 +17,7 @@ mod auth;
 mod garden;
 mod graphlog;
 mod image;
+mod perf;
 mod record;
 mod release_log;
 mod skills;
@@ -35,6 +36,35 @@ mod watch;
 // automatically on next use (see nopal_core::auth::migrate_legacy_host) --
 // this constant only affects brand-new `nopal login` runs.
 const DEFAULT_HOST: &str = "https://o.nopal.build";
+/// Same, but for the `nopal-dev` binary (see `bin_name()`/`default_host()`
+/// below) -- just saves typing `--host` on every dev-server login.
+const DEFAULT_DEV_HOST: &str = "https://o.nopal.dev";
+
+/// The actual executable's own file name (`"nopal"` or `"nopal-dev"` --
+/// see `crates/cli/Cargo.toml`'s two `[[bin]]` targets, both built from
+/// this exact same `main.rs`). Read from `current_exe()` at runtime
+/// rather than a Cargo-set compile-time env var (`CARGO_BIN_NAME` isn't
+/// reliably available via `env!()` across the Rust/Cargo versions this
+/// project supports) -- cheap, and correct for exactly the two binaries
+/// that exist today.
+fn bin_name() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "nopal".to_string())
+}
+
+/// `nopal login`'s own default `--host`, branched on which binary is
+/// actually running -- see `bin_name()`'s own comment for why there are
+/// two at all. Every other command is byte-for-byte identical between
+/// the two binaries; this is the one place they differ.
+fn default_host() -> &'static str {
+    if bin_name() == "nopal-dev" {
+        DEFAULT_DEV_HOST
+    } else {
+        DEFAULT_HOST
+    }
+}
 
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -60,7 +90,7 @@ enum Command {
     /// Log in via your browser and store a session token for the CLI.
     Login {
         /// Nopal host to authenticate against.
-        #[arg(long, default_value = DEFAULT_HOST)]
+        #[arg(long, default_value = default_host())]
         host: String,
         /// Print the login URL instead of opening a browser automatically.
         #[arg(long)]
@@ -142,6 +172,15 @@ enum Command {
     Graphlog {
         #[command(subcommand)]
         command: GraphlogCommand,
+    },
+    /// Server request-performance traces (`/maker/performance`'s own
+    /// data) — summary stats, recent traced requests, and one request's
+    /// full function/DB-call timeline. Admin/Super login required. The
+    /// intended primary way to actually inspect this data (including for
+    /// an AI agent via `--json`), not just the web dashboard.
+    Perf {
+        #[command(subcommand)]
+        command: PerfCommand,
     },
     /// Reference docs for how to write things in Nopal (OxMarkdown syntax,
     /// the Vault, etc). Lists available skills by default.
@@ -687,6 +726,42 @@ enum GraphlogScheduleCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum PerfCommand {
+    /// High-level stats across every traced route: request count, avg/p95/
+    /// max duration, error count, by-route breakdown. The same numbers the
+    /// Maker landing page's own Performance section shows.
+    Summary {
+        /// 7 or 30 -- any other value is treated as 7.
+        #[arg(long, default_value_t = 7)]
+        days: u32,
+        /// Print the server's raw JSON response instead of a formatted
+        /// summary -- the form an AI agent should actually consume.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Most recent traced requests, newest first. Each row's id is what to
+    /// pass to `nopal perf show`.
+    Recent {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        /// Print the server's raw JSON response instead of a formatted list.
+        #[arg(long)]
+        json: bool,
+    },
+    /// One request's own full function/DB-call event timeline, in order,
+    /// with each event's own duration -- the actual breakdown of where
+    /// time went inside that one request.
+    Show {
+        /// The request's own id, from `nopal perf recent`'s own listing.
+        request_id: String,
+        /// Print the server's raw JSON response instead of a formatted
+        /// timeline -- the form an AI agent should actually consume.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ReleaseLogCommand {
     /// Reverts one entry — only entries that changed a project file (a
     /// Card file attachment being filed into the project) can be
@@ -738,6 +813,17 @@ struct Cli {
 }
 
 fn main() {
+    // Give `nopal-dev` its own, fully separate `~/.config/nopal-dev/...`
+    // credential/state storage -- see `nopal_core::auth::config_namespace`'s
+    // own doc comment for the full picture. A no-op for the regular
+    // `nopal` binary (and for the native app, which never runs through
+    // this `main()` at all), so this can never change today's behavior
+    // for anyone except `nopal-dev` itself.
+    let bin = bin_name();
+    if bin != "nopal" {
+        std::env::set_var("NOPAL_CONFIG_NAMESPACE", &bin);
+    }
+
     let args = Cli::parse();
     match args.command {
         Command::Test {} => {
@@ -1006,6 +1092,17 @@ fn main() {
         Command::Sort { command } => {
             let result = match command {
                 SortCommand::Run { date, force } => sort::run(date, force),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Perf { command } => {
+            let result = match command {
+                PerfCommand::Summary { days, json } => perf::summary(days, json),
+                PerfCommand::Recent { limit, json } => perf::recent(limit, json),
+                PerfCommand::Show { request_id, json } => perf::show(&request_id, json),
             };
             if let Err(e) = result {
                 eprintln!("{e}");

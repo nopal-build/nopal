@@ -43,7 +43,9 @@ pub struct DeviceIdentity {
 /// Stable per-machine identity, created on first use.
 pub fn device_identity() -> Result<DeviceIdentity> {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    let path = base.join("nopal").join("device.json");
+    let path = base
+        .join(crate::auth::config_namespace())
+        .join("device.json");
 
     if let Ok(contents) = fs::read_to_string(&path) {
         if let Ok(id) = serde_json::from_str(&contents) {
@@ -1183,7 +1185,7 @@ impl SyncLock {
 
 fn state_file_path(target_id: &str) -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("nopal")
+    base.join(crate::auth::config_namespace())
         .join("sync-state")
         .join(format!("{target_id}.json"))
 }

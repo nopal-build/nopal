@@ -5,13 +5,14 @@
 // "same place, on the project page in Maker"). Its Guide sees it, and
 // admins see every project's; anyone else gets the same 404 as a project
 // that doesn't exist. Starting a project lands here with only you on it.
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, data, redirect, useLoaderData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { assignableGroups } from "robustness-core/data/features";
 import { navFor } from "../data/nav.server";
 import { candidatesFor, isStaff, peopleAction, peopleOn, runsPeople } from "../data/projectPeople.server";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { AppLayout } from "../components/AppLayout";
 import { MakerErrorBoundary } from "../components/MakerErrorBoundary";
 import { ProjectPeople } from "../components/ProjectPeople";
@@ -24,9 +25,15 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 
+export const meta: MetaFunction = () => [{ title: "O.No · M.Projects" }];
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   const folder = params.folderId ? await getFolderById(params.folderId) : undefined;
   if (!folder || !(await runsPeople(user, folder))) throw data("Not found", { status: 404 });
 
@@ -40,6 +47,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     staff,
     ...nav,
   };
+    },
+  );
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
