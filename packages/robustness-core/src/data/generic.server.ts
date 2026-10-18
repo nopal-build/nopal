@@ -70,22 +70,32 @@ export async function queryCollection<T extends Data>(
   params: Record<string, any> = {},
   options: AllQueryOptions = {},
 ): Promise<Collection<T>> {
-  const db = await getDb();
-  if (!db) {
-    console.error("Database not initialized");
-    return formatCollection();
-  }
+  const { limit = DEFAULT_LIMIT, start = 0 } = options;
+  const queryParams = { ...params, limit: limit + 1, start };
 
-  try {
-    const { limit = DEFAULT_LIMIT, start = 0 } = options;
-    const queryParams = { ...params, limit: limit + 1, start };
-    const result = await timeRequestPerf("db", summarizeQuery(query), queryParams, () =>
-      db.query<[T[]]>(query, queryParams),
-    );
-    return formatCollection(result?.[0] || [], { start, limit });
-  } catch (err) {
-    console.error("Failed to get data:", err);
-    invalidateDb();
+  // Up to 2 attempts: `getDb()` can hand back a cached connection that's
+  // gone dead (e.g. an idle cross-region WebSocket silently dropped by a
+  // proxy/NAT) -- the dead connection's first query throws, which used to
+  // be swallowed here and returned as an empty collection, indistinguishable
+  // from a real "no rows" result to every caller (e.g. a vault lookup
+  // reading this as "not found" and 404ing a page that's actually fine --
+  // see the /v2 404-after-idle investigation). `invalidateDb()` already
+  // resets the cached connection so the NEXT call reconnects from scratch;
+  // retrying once HERE means that reconnect happens within the same
+  // request instead of only benefiting whichever request happens to come
+  // next.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const db = await getDb();
+    try {
+      const result = await timeRequestPerf("db", summarizeQuery(query), queryParams, () =>
+        db.query<[T[]]>(query, queryParams),
+      );
+      return formatCollection(result?.[0] || [], { start, limit });
+    } catch (err) {
+      console.error("Failed to get data:", err);
+      invalidateDb();
+      if (attempt === 2) break;
+    }
   }
   return formatCollection();
 }
@@ -94,18 +104,18 @@ export async function query<T extends unknown[]>(
   query: string,
   params: Record<string, any> = {},
 ) {
-  const db = await getDb();
-  if (!db) {
-    console.error("Database not initialized");
-    return [];
-  }
-
-  try {
-    const result = await timeRequestPerf("db", summarizeQuery(query), params, () => db.query<T>(query, params));
-    return result;
-  } catch (err) {
-    console.error("Failed to get data:", err);
-    invalidateDb();
+  // See `queryCollection`'s own comment above on why this retries once
+  // instead of swallowing a dead-connection error as an empty result.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const db = await getDb();
+    try {
+      const result = await timeRequestPerf("db", summarizeQuery(query), params, () => db.query<T>(query, params));
+      return result;
+    } catch (err) {
+      console.error("Failed to get data:", err);
+      invalidateDb();
+      if (attempt === 2) break;
+    }
   }
   return [];
 }
@@ -117,29 +127,29 @@ export async function select<T extends Data>(
   thing: string,
 ): Promise<Collection<T> | undefined>;
 export async function select<T extends Data>(thing: RecordId | string) {
-  const db = await getDb();
-  if (!db) {
-    console.error("Database not initialized");
-    return undefined;
-  }
-
-  try {
-    const result = await timeRequestPerf(
-      "db",
-      `select ${typeof thing === "string" ? thing : thing.tb}`,
-      null,
-      () => db.select<T>(thing),
-    );
-    if (!result) {
-      return undefined;
+  // See `queryCollection`'s own comment above on why this retries once
+  // instead of swallowing a dead-connection error as an empty result.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const db = await getDb();
+    try {
+      const result = await timeRequestPerf(
+        "db",
+        `select ${typeof thing === "string" ? thing : thing.tb}`,
+        null,
+        () => db.select<T>(thing),
+      );
+      if (!result) {
+        return undefined;
+      }
+      if (Array.isArray(result)) {
+        return formatCollection<T>(result, { limit: result.length });
+      }
+      return formatRecord<T>(result);
+    } catch (err) {
+      console.error("Failed to get data:", err);
+      invalidateDb();
+      if (attempt === 2) break;
     }
-    if (Array.isArray(result)) {
-      return formatCollection<T>(result, { limit: result.length });
-    }
-    return formatRecord<T>(result);
-  } catch (err) {
-    console.error("Failed to get data:", err);
-    invalidateDb();
   }
   return undefined;
 }
@@ -159,18 +169,18 @@ export async function defineTable(name: string) {
 }
 
 export async function remove(tb: string, id: string) {
-  const db = await getDb();
-  if (!db) {
-    console.error("Database not initialized");
-    return undefined;
-  }
-
-  try {
-    const result = await db.delete(new RecordId(tb, id));
-    return result;
-  } catch (err) {
-    console.error("Failed to delete data:", err);
-    invalidateDb();
+  // See `queryCollection`'s own comment above on why this retries once
+  // instead of swallowing a dead-connection error as an empty result.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const db = await getDb();
+    try {
+      const result = await db.delete(new RecordId(tb, id));
+      return result;
+    } catch (err) {
+      console.error("Failed to delete data:", err);
+      invalidateDb();
+      if (attempt === 2) break;
+    }
   }
   return undefined;
 }
@@ -180,37 +190,38 @@ export async function merge(
   id: string,
   data: Record<string, unknown>,
 ) {
-  const db = await getDb();
-  if (!db) {
-    console.error("Database not initialized");
-    return undefined;
-  }
-  try {
-    const result = await db.merge(new RecordId(tb, id), data);
-    return result;
-  } catch (err) {
-    console.error("Failed to merge data:", err);
-    invalidateDb();
+  // See `queryCollection`'s own comment above on why this retries once
+  // instead of swallowing a dead-connection error as an empty result.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const db = await getDb();
+    try {
+      const result = await db.merge(new RecordId(tb, id), data);
+      return result;
+    } catch (err) {
+      console.error("Failed to merge data:", err);
+      invalidateDb();
+      if (attempt === 2) break;
+    }
   }
   return undefined;
 }
 
 export async function upsert(name: string | RecordId, record: any) {
-  const db = await getDb();
-  if (!db) {
-    console.error("Database not initialized");
-    return undefined;
-  }
-
-  try {
-    const result = await db.upsert(name, record);
-    if (!result) {
-      return undefined;
+  // See `queryCollection`'s own comment above on why this retries once
+  // instead of swallowing a dead-connection error as an empty result.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const db = await getDb();
+    try {
+      const result = await db.upsert(name, record);
+      if (!result) {
+        return undefined;
+      }
+      return result;
+    } catch (err) {
+      console.error("Failed to upsert data:", err);
+      invalidateDb();
+      if (attempt === 2) break;
     }
-    return result;
-  } catch (err) {
-    console.error("Failed to upsert data:", err);
-    invalidateDb();
   }
   return undefined;
 }
