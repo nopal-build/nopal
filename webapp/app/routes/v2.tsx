@@ -9,12 +9,18 @@
 // (`../components/WebsiteHeader.tsx`) — real logic (mobile menu state,
 // rendering `settings.featuredButton` as its own pill CTA) that doesn't
 // belong inline in a route module.
-import { Outlet, useLoaderData, type LinksFunction } from "react-router";
+import { Outlet, useLoaderData, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import {
   getPrimaryWebsiteFolder,
   getWebsiteSettings,
   type WebsiteSettings,
 } from "robustness-core/data/website.server";
+// Server request-performance tracing -- see `loadWebsitePage.server.ts`'s
+// own comment for the fuller picture; this traces the layout's OWN nav/
+// settings fetch as its own row, separate from the leaf route's content
+// fetch (React Router runs them as sibling loaders, not nested), so a
+// slow `/v2/*` page view can show up as either or both.
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { WebsiteHeader } from "../components/WebsiteHeader";
 import { sprinkles } from "stamps/sprinkles.css";
 import websiteStyles from "../styles/website.css?url";
@@ -71,10 +77,16 @@ const EMPTY_SETTINGS: WebsiteSettings = {
   nav: [],
 };
 
-export async function loader() {
-  const siteFolder = await getPrimaryWebsiteFolder();
-  const settings = siteFolder ? await getWebsiteSettings(siteFolder) : EMPTY_SETTINGS;
-  return { settings };
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "webapp", route: url.pathname, method: request.method, humanId: null },
+    async () => {
+      const siteFolder = await getPrimaryWebsiteFolder();
+      const settings = siteFolder ? await getWebsiteSettings(siteFolder) : EMPTY_SETTINGS;
+      return { settings };
+    },
+  );
 }
 
 export default function V2Layout() {

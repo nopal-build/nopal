@@ -121,6 +121,31 @@ async function persistRequest(
 }
 
 /**
+ * A thrown `Response` (e.g. `vault.tsx`'s `throw new Response(..., {
+ * status: 404 })`) is a real `Response` instance — easy. A thrown
+ * `data(...)` (react-router's own helper, used by `loadWebsitePage.
+ * server.ts` and plenty of `fruits` routes) is NOT a `Response` instance
+ * at all; it's an internal `DataWithResponseInit` wrapper carrying the
+ * same status in its own `init.status`. Duck-typed rather than importing
+ * that internal class (not a stable public export) — returns `null`
+ * (meaning "not a well-behaved thrown response, treat as a real error")
+ * for anything that matches neither shape, which is the correct fallback
+ * for an ordinary thrown `Error`. */
+function responseStatusOf(err: unknown): number | null {
+  if (err instanceof Response) return err.status;
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { type?: unknown }).type === "DataWithResponseInit"
+  ) {
+    const init = (err as { init?: { status?: unknown } }).init;
+    const status = init?.status;
+    return typeof status === "number" ? status : 200;
+  }
+  return null;
+}
+
+/**
  * Wraps a loader/action body, tracing its total duration plus every
  * nested `"fn"`/`"db"` event recorded during it (see the file header).
  * Returns/throws exactly what `fn` returns/throws, unchanged — tracing is
@@ -157,11 +182,12 @@ export async function withRequestPerf<T>(
 
   try {
     const result = await runWithRequestPerfContext({ pushEvent: (e) => events.push(e) }, fn);
-    finish("ok", result instanceof Response ? result.status : 200, null);
+    finish("ok", responseStatusOf(result) ?? 200, null);
     return result;
   } catch (err) {
-    if (err instanceof Response) {
-      finish("ok", err.status, null);
+    const thrownStatus = responseStatusOf(err);
+    if (thrownStatus !== null) {
+      finish("ok", thrownStatus, null);
     } else {
       finish("error", null, err instanceof Error ? err.message : String(err));
     }
