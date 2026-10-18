@@ -18,6 +18,9 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { getPerfRequest, withRequestPerf, type PerfRequestEvent } from "robustness-core/data/requestPerf.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { navFor } from "../data/nav.server";
+import { TimezoneSelect } from "../components/TimezoneSelect";
+import { useTimezonePref } from "../hooks/useTimezonePref";
+import { formatPerfTimestamp } from "../util/perfTimezones";
 
 export const meta: MetaFunction = () => [{ title: "O.No · M.Performance" }];
 
@@ -77,20 +80,6 @@ export function ErrorBoundary() {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function formatDatetime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: "UTC",
-  })} UTC`;
-}
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -205,6 +194,7 @@ function EventRow({
 
 export default function FruitsMakerPerformanceRequest() {
   const { request, events, humanName } = useLoaderData<typeof loader>();
+  const [tz, setTz] = useTimezonePref();
 
   const maxDurationMs = Math.max(1, ...events.map((e) => e.duration_ms));
   const dbEvents = events.filter((e) => e.type === "db");
@@ -219,6 +209,7 @@ export default function FruitsMakerPerformanceRequest() {
           <Link to="/maker/performance" className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}>
             ← Performance
           </Link>
+          <TimezoneSelect value={tz} onChange={setTz} />
         </div>
 
         <div className={`${surfaceBase} p-5 mb-8`}>
@@ -233,7 +224,7 @@ export default function FruitsMakerPerformanceRequest() {
           </div>
           <div className="text-xs font-mono subtle-text flex flex-wrap gap-3">
             {humanName && <span>By {humanName}</span>}
-            <span>Started {formatDatetime(request.started_at)}</span>
+            <span>Started {formatPerfTimestamp(request.started_at, tz)}</span>
             <span>Total {formatDuration(request.duration_ms)}</span>
             <span>{events.length} event(s)</span>
           </div>

@@ -29,6 +29,9 @@ import {
 } from "robustness-core/data/requestPerf.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { navFor } from "../data/nav.server";
+import { TimezoneSelect } from "../components/TimezoneSelect";
+import { useTimezonePref } from "../hooks/useTimezonePref";
+import { formatPerfTimestamp, type PerfTimezoneKey } from "../util/perfTimezones";
 
 export const meta: MetaFunction = () => [{ title: "O.No · M.Performance" }];
 
@@ -185,23 +188,6 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
-/** Pinned to an explicit locale AND `timeZone: "UTC"` — never the viewer's
- * own — same fix the GraphLog pages use, for the same SSR/hydration-
- * mismatch reason. */
-function formatDatetime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: "UTC",
-  })} UTC`;
-}
-
 function BarRow({ label, value, max, detail }: { label: string; value: number; max: number; detail: string }) {
   const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
@@ -227,9 +213,13 @@ function RequestStatusBadge({ request }: { request: PerfRequest }) {
 function RecentRequestsSection({
   requests,
   humanNameById,
+  tz,
+  now,
 }: {
   requests: PerfRequest[];
   humanNameById: Record<string, string>;
+  tz: PerfTimezoneKey;
+  now: number;
 }) {
   return (
     <section className="mb-12">
@@ -264,7 +254,7 @@ function RecentRequestsSection({
                 )}
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-mono subtle-text">{formatDatetime(r.started_at)}</span>
+                <span className="text-xs font-mono subtle-text">{formatPerfTimestamp(r.started_at, tz, now)}</span>
                 <span className="text-xs font-mono subtle-text">{formatDuration(r.duration_ms)}</span>
                 <RequestStatusBadge request={r} />
               </div>
@@ -280,6 +270,8 @@ function RecentRequestsSection({
 
 export default function FruitsMakerPerformance() {
   const { days, bucket, summary, recentRequests, humanNameById } = useLoaderData<typeof loader>();
+  const [tz, setTz] = useTimezonePref();
+  const now = Date.now();
 
   const maxRouteAvg = Math.max(1, ...summary.byRoute.map((r) => r.avgDurationMs));
   const activeBucketLabel = BUCKETS.find((b) => b.key === bucket)?.label ?? "All";
@@ -291,7 +283,10 @@ export default function FruitsMakerPerformance() {
           <Link to="/maker" className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}>
             ← Maker
           </Link>
-          <RangeToggle days={days} bucket={bucket} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <TimezoneSelect value={tz} onChange={setTz} />
+            <RangeToggle days={days} bucket={bucket} />
+          </div>
         </div>
 
         <div className="mb-6">
@@ -336,7 +331,7 @@ export default function FruitsMakerPerformance() {
               </div>
             </section>
 
-            <RecentRequestsSection requests={recentRequests} humanNameById={humanNameById} />
+            <RecentRequestsSection requests={recentRequests} humanNameById={humanNameById} tz={tz} now={now} />
           </>
         )}
       </div>
