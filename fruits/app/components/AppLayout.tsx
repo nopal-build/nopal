@@ -121,7 +121,101 @@ function getCurrentSectionLabel(pathname: string, homeLabel: string): string {
   return homeLabel;
 }
 
+type MakerSubItem = { to: string; label: string };
+
+/** The Maker's own sub-pages, gated the same way the Maker landing
+ * page's own entry tiles/sections are (`maker.tsx`) -- "Manage" (Projects
+ * and humans) is for anyone the Maker is shown to at all (staff or a
+ * Guide); GraphLog/Performance/Stamps need Admin or Super; Admin
+ * (Scripts) needs Super specifically. Shared between the desktop hover
+ * dropdown and the mobile indented list below, so the two can never
+ * silently drift apart. */
+function makerSubItems(user: ReturnType<typeof useUser>): MakerSubItem[] {
+  const items: MakerSubItem[] = [{ to: "/maker/projects", label: "Manage" }];
+  if (permissions.isAdmin(user)) {
+    items.push({ to: "/maker/graphlog", label: "GraphLog" });
+    items.push({ to: "/maker/performance", label: "Performance" });
+  }
+  if (permissions.isSuper(user)) {
+    items.push({ to: "/maker/scripts", label: "Admin" });
+  }
+  if (permissions.isAdmin(user)) {
+    items.push({ to: "/maker/stamps", label: "Stamps" });
+  }
+  return items;
+}
+
 const navLinkFontClass = `${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`;
+
+/**
+ * Desktop topbar's "Maker" entry: still a real link (clicking it goes
+ * straight to `/maker`), but hovering ANYWHERE over this wrapper --
+ * including the dropdown panel itself, since it's a DOM descendant of
+ * the same wrapper `mouseenter`/`mouseleave` are bound to, regardless of
+ * its own `position: absolute` -- opens a panel listing the Maker's own
+ * sub-pages. `onFocus`/`onBlur` open the same panel for keyboard nav,
+ * closing only once focus genuinely leaves the whole wrapper (checked via
+ * `relatedTarget`), not when it merely moves from the trigger to one of
+ * the panel's own links.
+ */
+function MakerNavDropdown({ items }: { items: MakerSubItem[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      style={{ position: "relative" }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
+      <NavLink
+        to="/maker"
+        prefetch="intent"
+        className={({ isActive }) =>
+          `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+        }
+      >
+        Maker
+      </NavLink>
+      {open && items.length > 0 && (
+        <div
+          role="menu"
+          aria-label="Maker"
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            minWidth: "160px",
+            background: "var(--farground)",
+            border: "1px solid var(--midground)",
+            borderRadius: "8px",
+            boxShadow: "0 4px 16px rgba(0, 0, 0, 0.15)",
+            padding: "6px",
+            zIndex: 50,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              prefetch="intent"
+              className={({ isActive }) =>
+                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+              }
+              style={{ padding: "8px 10px", borderRadius: "6px", whiteSpace: "nowrap" }}
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function AppLayout({ children }: { children?: ReactNode }) {
   const schemePref = useSchemePref();
@@ -131,6 +225,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   // `/maker` refuses everyone else on the server too.
   const guidesAProject = useMaker();
   const showMaker = permissions.isAdmin(user) || guidesAProject;
+  const makerItems = showMaker ? makerSubItems(user) : [];
   // A client gets their project, the Daily Log and their account, nothing
   // else (ADR-023); `/vault` refuses them on the server too.
   const showVault = !useVaultHidden();
@@ -243,17 +338,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 Vault
               </NavLink>
             )}
-            {showMaker && (
-              <NavLink
-                to="/maker"
-                prefetch="intent"
-                className={({ isActive }) =>
-                  `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
-                }
-              >
-                Maker
-              </NavLink>
-            )}
+            {showMaker && <MakerNavDropdown items={makerItems} />}
           </nav>
 
           <div className={topbarProfile}>
@@ -331,16 +416,40 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 </NavLink>
               )}
               {showMaker && (
-                <NavLink
-                  to="/maker"
-                  prefetch="intent"
-                  className={({ isActive }) =>
-                    `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
-                  }
-                  onClick={closeMenu}
-                >
-                  Maker
-                </NavLink>
+                <>
+                  <NavLink
+                    to="/maker"
+                    prefetch="intent"
+                    className={({ isActive }) =>
+                      `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                    }
+                    onClick={closeMenu}
+                  >
+                    Maker
+                  </NavLink>
+                  {/* No hover on touch, so the Maker's own sub-pages are
+                      just always-visible, indented entries right under
+                      it -- same list `MakerNavDropdown` shows on desktop,
+                      see `makerSubItems`. */}
+                  <div
+                    className={sprinkles({ display: "flex", flexDirection: "column" })}
+                    style={{ paddingLeft: "20px" }}
+                  >
+                    {makerItems.map((item) => (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        prefetch="intent"
+                        className={({ isActive }) =>
+                          `${navLink({ context: "mobile", active: isActive })} ${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`
+                        }
+                        onClick={closeMenu}
+                      >
+                        {item.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                </>
               )}
               <NavLink
                 to="/profile"
