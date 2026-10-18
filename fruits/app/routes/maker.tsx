@@ -18,7 +18,6 @@ import { surfaceBase } from "stamps/surface.css";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
-import { useSchemePref } from "../hooks/useSchemePref";
 import { getMakerStats, type MakerRangeDays } from "robustness-core/data/makerStats.server";
 import { getGraphLogUsageSummary } from "robustness-core/data/graphLogMetrics.server";
 import { getPerfSummary, type PerfSummary } from "robustness-core/data/requestPerf.server";
@@ -34,8 +33,6 @@ import { guidesAny, listEveryProject, listProjectsFor, resolveRole } from "robus
 import { getHumans } from "robustness-core/data/humans.server";
 import { navFor } from "../data/nav.server";
 import { isStaff } from "../data/projectPeople.server";
-import stamp22cLight from "../images/stamps/22c-light.svg";
-import stamp22cDark from "../images/stamps/22c-dark.svg";
 
 export const meta: MetaFunction = () => [{ title: "O.No · Maker" }];
 
@@ -125,43 +122,44 @@ function RangeToggle({ days }: { days: MakerRangeDays }) {
   );
 }
 
-function StampsPromoCard() {
-  const schemePref = useSchemePref();
-  const isDark = schemePref === "dark";
+// ─── Main ───────────────────────────────────────────────────────────────────
 
+/** One shared visual shape for every top-row entry tile (Projects and
+ * humans, Admin Scripts, Stamps) so the row reads as one coherent set of
+ * doors into the Maker's sub-pages, not three differently-styled links.
+ * `linkText` is the already-computed trailing summary (a static label
+ * for most tiles, a per-viewer count for Projects and humans). */
+function MakerCard({
+  to,
+  title,
+  description,
+  linkText,
+  dataTile,
+}: {
+  to: string;
+  title: string;
+  description: string;
+  linkText: string;
+  dataTile?: string;
+}) {
   return (
     <Link
-      to="/maker/stamps"
+      to={to}
       prefetch="intent"
-      className="flex items-center gap-5 hover:opacity-80 transition-opacity"
-      style={{
-        textDecoration: "none",
-        color: "inherit",
-        width: "fit-content",
-      }}
+      className={`${surfaceBase} ${sprinkles({ p: 5, display: "flex", flexDirection: "column", gap: 1 })}`}
+      style={{ textDecoration: "none", color: "inherit", flex: "1 1 220px", minWidth: "220px" }}
+      data-maker-tile={dataTile}
     >
-      <img
-        src={isDark ? stamp22cDark : stamp22cLight}
-        alt=""
-        style={{ width: "100px", height: "auto", flexShrink: 0, display: "block" }}
-      />
-      <div className="flex flex-col gap-1">
-        <h3
-          className="font-bold text-lg"
-          style={{ color: isDark ? "var(--pink)" : "var(--purple-light)" }}
-        >
-          Stamps
-        </h3>
-        <p className="text-sm subtle-text" style={{ margin: 0 }}>
-          Our design system and style reference
-        </p>
-        <span className="text-sm font-mono purple-light-text">View →</span>
-      </div>
+      <h3 className="font-bold text-lg purple-light-text" style={{ margin: 0 }}>
+        {title}
+      </h3>
+      <p className="text-sm subtle-text" style={{ margin: 0 }}>
+        {description}
+      </p>
+      <span className="text-sm font-mono purple-light-text">{linkText} →</span>
     </Link>
   );
 }
-
-// ─── Main ───────────────────────────────────────────────────────────────────
 
 /** The way in: start a project, see who's on each, everyone's groups. */
 function ProjectsAndHumansTile({ counts, staff }: { counts: { projects: number; people: number | null }; staff: boolean }) {
@@ -169,21 +167,42 @@ function ProjectsAndHumansTile({ counts, staff }: { counts: { projects: number; 
     ? `${counts.projects} ${counts.projects === 1 ? "project" : "projects"} · ${counts.people} ${counts.people === 1 ? "person" : "people"}`
     : `${counts.projects} ${counts.projects === 1 ? "project" : "projects"} you guide`;
   return (
-    <Link
+    <MakerCard
       to="/maker/projects"
-      prefetch="intent"
-      className={`${surfaceBase} ${sprinkles({ p: 5, display: "flex", flexDirection: "column", gap: 1 })}`}
-      style={{ textDecoration: "none", color: "inherit" }}
-      data-maker-tile="projects-and-humans"
-    >
-      <h3 className="font-bold text-lg purple-light-text" style={{ margin: 0 }}>
-        Projects and humans
-      </h3>
-      <p className="text-sm subtle-text" style={{ margin: 0 }}>
-        Projects, and who's on them.
-      </p>
-      <span className="text-sm font-mono purple-light-text">{summary} →</span>
-    </Link>
+      title="Projects and humans"
+      description="Projects, and who's on them."
+      linkText={summary}
+      dataTile="projects-and-humans"
+    />
+  );
+}
+
+/** Super only -- these scripts can mutate arbitrary rows across the
+ * whole database in production, stricter than every other tile here.
+ * Not rendered at all for an Admin, rather than shown as a dead link to
+ * a 403 (same "hidden, not dead-linked" choice the section itself used
+ * to make before this became a card). */
+function AdminScriptsCard() {
+  return (
+    <MakerCard
+      to="/maker/scripts"
+      title="Admin Scripts"
+      description="Repair scripts, run in production by the worker. Super only."
+      linkText="Run/view"
+      dataTile="admin-scripts"
+    />
+  );
+}
+
+function StampsCard() {
+  return (
+    <MakerCard
+      to="/maker/stamps"
+      title="Stamps"
+      description="Our design system and style reference."
+      linkText="View"
+      dataTile="stamps"
+    />
   );
 }
 
@@ -284,13 +303,18 @@ export default function FruitsMaker() {
         className="container mx-auto px-4 py-12"
         style={{ maxWidth: "860px" }}
       >
+        {/* ── Entry tiles: Projects and humans, Admin Scripts, Stamps ─────── */}
         <section className="mb-12">
-          <ProjectsAndHumansTile counts={counts} staff={staff} />
+          <div className="flex flex-wrap gap-4">
+            <ProjectsAndHumansTile counts={counts} staff={staff} />
+            {user.role === "Super" && <AdminScriptsCard />}
+            {staff && <StampsCard />}
+          </div>
         </section>
 
         {staff && stats && graphLogUsage && (
           <>
-        {/* ── General Stats ─────────────────────────────────────────────── */}
+        {/* ── General Stats ────────────────────────────────────── */}
         <section className="mb-12">
           <hr
             style={{
@@ -455,53 +479,6 @@ export default function FruitsMaker() {
         </section>
 
         {staff && perfSummary && <PerformanceSection days={days} perfSummary={perfSummary} />}
-
-        {/* ── Admin Scripts ─────────────────────────── */}
-        {/* Super only -- these scripts can mutate arbitrary rows across
-            the whole database in production, stricter than everything
-            else on this Admin-or-Super page. Hidden entirely for Admins
-            rather than shown as a dead link to a 403. */}
-        {user.role === "Super" && (
-          <section className="mb-12">
-            <hr
-              style={{
-                borderColor: "currentColor",
-                opacity: 0.12,
-                margin: "0 0 24px",
-              }}
-            />
-            <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
-              <h2
-                className="font-bold text-lg font-mono purple-text"
-                style={{ margin: 0 }}
-              >
-                Admin Scripts
-              </h2>
-              <Link
-                to="/maker/scripts"
-                prefetch="intent"
-                className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
-              >
-                Run/view →
-              </Link>
-            </div>
-            <p className="text-sm subtle-text" style={{ margin: 0 }}>
-              Repair scripts, run in production by the worker. Super only.
-            </p>
-          </section>
-        )}
-
-        {/* ── Stamps ─────────────────────────── */}
-        <section>
-          <hr
-            style={{
-              borderColor: "currentColor",
-              opacity: 0.12,
-              margin: "0 0 24px",
-            }}
-          />
-          <StampsPromoCard />
-        </section>
           </>
         )}
       </div>
