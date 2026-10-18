@@ -26,6 +26,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { getAdminScriptRun } from "robustness-core/data/adminScriptRuns.server";
 import { getAdminScriptJobLog, getPendingAdminScriptJob } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { navFor } from "../data/nav.server";
 
 export const meta: MetaFunction = () => [{ title: "O.No · M.Scripts" }];
@@ -44,6 +45,10 @@ async function requireAdminScriptsAccess(request: Request) {
 export async function loader({ request, params }: LoaderFunctionArgs) {
   // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
   const user = await requireAdminScriptsAccess(request);
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
   const nav = await navFor(user._id);
   const runId = params.runId;
@@ -79,6 +84,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     liveState: liveLog?.state ?? null,
     log: run.ok !== null ? run.log : liveLog?.log ?? [],
   };
+    },
+  );
 }
 
 export function ErrorBoundary() {

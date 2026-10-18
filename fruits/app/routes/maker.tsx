@@ -22,6 +22,14 @@ import { useSchemePref } from "../hooks/useSchemePref";
 import { getMakerStats, type MakerRangeDays } from "robustness-core/data/makerStats.server";
 import { getGraphLogUsageSummary } from "robustness-core/data/graphLogMetrics.server";
 import { getPerfSummary, type PerfSummary } from "robustness-core/data/requestPerf.server";
+// Server request-performance tracing (see the `fruits-performance-
+// monitoring` garden seed) -- every Maker page is wrapped so the
+// "Maker" filter bucket on `/maker/performance` has real data. Nested
+// as a closure INSIDE `loader` (not a separate top-level function) so
+// `app/tests/navUser.test.ts`'s static scan of the `user`/`navFor(...)`
+// return still sees it -- see `vault.tsx`'s own loader for the first
+// place this exact shape was needed.
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { guidesAny, listEveryProject, listProjectsFor, resolveRole } from "robustness-core/data/projectSharing.server";
 import { getHumans } from "robustness-core/data/humans.server";
 import { navFor } from "../data/nav.server";
@@ -34,6 +42,10 @@ export const meta: MetaFunction = () => [{ title: "O.No · Maker" }];
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   const staff = isStaff(user);
   const memberships = await listProjectsFor(user._id);
   if (!staff && !guidesAny(memberships)) {
@@ -46,7 +58,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? { projects: (await listEveryProject()).length, people: ((await getHumans())?.data ?? []).length }
     : { projects: memberships.filter((m) => resolveRole(m.role).guiding).length, people: null };
 
-  const url = new URL(request.url);
   // TODO: support a custom start/end range once there's demand for it —
   // for now this is a simple 7 vs 30 day toggle.
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
@@ -57,6 +68,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : [null, null, null];
 
   return { user, staff, counts, days, stats, graphLogUsage, perfSummary, ...(await navFor(user._id, memberships)) };
+    },
+  );
 }
 
 export function ErrorBoundary() {

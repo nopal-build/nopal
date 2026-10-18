@@ -195,13 +195,45 @@ export async function withRequestPerf<T>(
   }
 }
 
+/**
+ * The four preset filters `/maker/performance` offers, per the user's
+ * own framing: "all" is no filter; "webapp" is the `webapp` app only;
+ * "ono" (O.No, `fruits`'s own product name — see `maker.tsx`'s page
+ * title) is `fruits` minus anything under `/maker`; "maker" is exactly
+ * that `/maker` slice of `fruits`. Every Maker page loader is wrapped in
+ * `withRequestPerf` (see e.g. `maker.tsx`) specifically so this last
+ * bucket has real data, not an empty list.
+ */
+export type PerfBucket = "all" | "webapp" | "ono" | "maker";
+
+/** The `WHERE` condition for one bucket — applied INSIDE the query,
+ * before any `LIMIT`, not as a post-hoc JS filter on an already-limited
+ * result. That distinction matters: a low-volume bucket (today, `maker`)
+ * could otherwise fall entirely outside the most-recent N rows once a
+ * high-volume route (Vault) is generating real traffic, and would then
+ * look empty even though matching rows exist further back. */
+function bucketCondition(bucket: PerfBucket): string {
+  switch (bucket) {
+    case "webapp":
+      return "app = 'webapp'";
+    case "ono":
+      return "app = 'fruits' AND NOT string::starts_with(route, '/maker')";
+    case "maker":
+      return "app = 'fruits' AND string::starts_with(route, '/maker')";
+    case "all":
+    default:
+      return "true";
+  }
+}
+
 /** Most recent traced requests, newest first — powers the "Recent
  * Requests" list on `/maker/performance`. */
-export async function listRecentPerfRequests(limit = 50): Promise<PerfRequest[]> {
+export async function listRecentPerfRequests(limit = 50, bucket: PerfBucket = "all"): Promise<PerfRequest[]> {
   await ensureTables();
-  const result = await query<[PerfRequest[]]>(`SELECT * FROM perf_requests ORDER BY started_at DESC LIMIT $limit`, {
-    limit,
-  });
+  const result = await query<[PerfRequest[]]>(
+    `SELECT * FROM perf_requests WHERE (${bucketCondition(bucket)}) ORDER BY started_at DESC LIMIT $limit`,
+    { limit },
+  );
   return (result?.[0] ?? []).map(formatRecord);
 }
 
@@ -262,11 +294,15 @@ function percentile(sorted: number[], p: number): number {
  * Computed directly from `perf_requests` rows (no separate rollup table
  * yet — see the garden seed's open question on retention/pruning once
  * this grows past what's comfortable to scan on every Maker page load). */
-export async function getPerfSummary(sinceDays = 7, limit = 1000): Promise<PerfSummary> {
+export async function getPerfSummary(
+  sinceDays = 7,
+  limit = 1000,
+  bucket: PerfBucket = "all",
+): Promise<PerfSummary> {
   await ensureTables();
   const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
   const result = await query<[PerfRequest[]]>(
-    `SELECT * FROM perf_requests WHERE started_at >= $since ORDER BY started_at DESC LIMIT $limit`,
+    `SELECT * FROM perf_requests WHERE started_at >= $since AND (${bucketCondition(bucket)}) ORDER BY started_at DESC LIMIT $limit`,
     { since, limit },
   );
   const requests = (result?.[0] ?? []).map(formatRecord);

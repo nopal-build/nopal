@@ -22,6 +22,8 @@ import { sprinkles } from "stamps/sprinkles.css";
 import {
   getPerfSummary,
   listRecentPerfRequests,
+  withRequestPerf,
+  type PerfBucket,
   type PerfRequest,
   type PerfSummary,
 } from "robustness-core/data/requestPerf.server";
@@ -34,6 +36,20 @@ const RECENT_REQUESTS_LIMIT = 50;
 
 type MakerRangeDays = 7 | 30;
 
+// Label/order for the four preset filters -- the user's own framing:
+// "All" is no filter, "Webapp" is the `webapp` app only, "O.No" (fruits's
+// own product name, see the page title above) is `fruits` minus the
+// `/maker` section, and "Maker" is exactly that `/maker` slice. See
+// `requestPerf.server.ts`'s own `PerfBucket`/`bucketCondition` for where
+// this is actually applied (in the DB query, before any `LIMIT`).
+const BUCKETS: { key: PerfBucket; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "webapp", label: "Webapp" },
+  { key: "ono", label: "O.No" },
+  { key: "maker", label: "Maker" },
+];
+const BUCKET_KEYS = new Set(BUCKETS.map((b) => b.key));
+
 async function requireMakerAccess(request: Request) {
   const user = await getUser(request);
   if (!user) throw redirect("/login");
@@ -45,14 +61,19 @@ async function requireMakerAccess(request: Request) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   const nav = await navFor(user._id);
 
-  const url = new URL(request.url);
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
+  const wantedBucket = url.searchParams.get("bucket") ?? "all";
+  const bucket: PerfBucket = (BUCKET_KEYS.has(wantedBucket as PerfBucket) ? wantedBucket : "all") as PerfBucket;
 
   const [summary, recentRequests] = await Promise.all([
-    getPerfSummary(days),
-    listRecentPerfRequests(RECENT_REQUESTS_LIMIT),
+    getPerfSummary(days, 1000, bucket),
+    listRecentPerfRequests(RECENT_REQUESTS_LIMIT, bucket),
   ]);
 
   const humanIds = [...new Set(recentRequests.map((r) => r.human_id).filter((id): id is string => Boolean(id)))];
@@ -62,7 +83,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     humanNameById[h._id] = h.name;
   });
 
-  return { user, ...nav, days, summary, recentRequests, humanNameById };
+  return { user, ...nav, days, bucket, summary, recentRequests, humanNameById };
+    },
+  );
 }
 
 export function ErrorBoundary() {
@@ -99,7 +122,7 @@ function StatCard({ label, value, hint }: { label: string; value: number | strin
   );
 }
 
-function RangeToggle({ days }: { days: MakerRangeDays }) {
+function RangeToggle({ days, bucket }: { days: MakerRangeDays; bucket: PerfBucket }) {
   return (
     <div className="flex gap-2">
       {([7, 30] as const).map((option) => {
@@ -107,7 +130,7 @@ function RangeToggle({ days }: { days: MakerRangeDays }) {
         return (
           <Link
             key={option}
-            to={`/maker/performance?range=${option}`}
+            to={`/maker/performance?range=${option}&bucket=${bucket}`}
             prefetch="intent"
             className="text-sm font-mono rounded"
             style={{
@@ -119,6 +142,37 @@ function RangeToggle({ days }: { days: MakerRangeDays }) {
             }}
           >
             Last {option} days
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The four preset filters — see `BUCKETS`' own comment above. Styled as
+ * a small pill row, same visual language as `RangeToggle` right next to
+ * it, so the two read as one coherent filter bar rather than two
+ * unrelated controls. */
+function BucketToggle({ bucket, days }: { bucket: PerfBucket; days: MakerRangeDays }) {
+  return (
+    <div className="flex gap-2 flex-wrap">
+      {BUCKETS.map((option) => {
+        const isActive = option.key === bucket;
+        return (
+          <Link
+            key={option.key}
+            to={`/maker/performance?range=${days}&bucket=${option.key}`}
+            prefetch="intent"
+            className="text-sm font-mono rounded"
+            style={{
+              padding: "6px 14px",
+              textDecoration: "none",
+              border: `1px solid ${isActive ? "var(--purple)" : "var(--midground)"}`,
+              background: isActive ? "var(--purple)" : "transparent",
+              color: isActive ? "var(--farground)" : "var(--purple-light)",
+            }}
+          >
+            {option.label}
           </Link>
         );
       })}
@@ -225,18 +279,23 @@ function RecentRequestsSection({
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 export default function FruitsMakerPerformance() {
-  const { days, summary, recentRequests, humanNameById } = useLoaderData<typeof loader>();
+  const { days, bucket, summary, recentRequests, humanNameById } = useLoaderData<typeof loader>();
 
   const maxRouteAvg = Math.max(1, ...summary.byRoute.map((r) => r.avgDurationMs));
+  const activeBucketLabel = BUCKETS.find((b) => b.key === bucket)?.label ?? "All";
 
   return (
     <AppLayout>
       <div className="container mx-auto px-4 py-12" style={{ maxWidth: "860px" }}>
-        <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
+        <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
           <Link to="/maker" className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}>
             ← Maker
           </Link>
-          <RangeToggle days={days} />
+          <RangeToggle days={days} bucket={bucket} />
+        </div>
+
+        <div className="mb-6">
+          <BucketToggle bucket={bucket} days={days} />
         </div>
 
         <h1 className="font-bold text-2xl purple-text mb-6" style={{ margin: 0, marginBottom: "24px" }}>
@@ -244,7 +303,9 @@ export default function FruitsMakerPerformance() {
         </h1>
 
         {summary.requestCount === 0 ? (
-          <p className="text-sm subtle-text">No traced requests in the last {days} days.</p>
+          <p className="text-sm subtle-text">
+            No traced requests in the last {days} days{bucket !== "all" ? ` for "${activeBucketLabel}"` : ""}.
+          </p>
         ) : (
           <>
             <section className="mb-12">

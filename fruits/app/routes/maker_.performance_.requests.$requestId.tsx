@@ -15,7 +15,7 @@ import { surfaceBase } from "stamps/surface.css";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
-import { getPerfRequest, type PerfRequestEvent } from "robustness-core/data/requestPerf.server";
+import { getPerfRequest, withRequestPerf, type PerfRequestEvent } from "robustness-core/data/requestPerf.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { navFor } from "../data/nav.server";
 
@@ -32,6 +32,10 @@ async function requireMakerAccess(request: Request) {
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await requireMakerAccess(request);
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   const nav = await navFor(user._id);
   const requestId = params.requestId;
   if (!requestId) throw data("Missing request id", { status: 400 });
@@ -44,6 +48,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     : null;
 
   return { user, ...nav, request: found.request, events: found.events, humanName };
+    },
+  );
 }
 
 export function ErrorBoundary() {

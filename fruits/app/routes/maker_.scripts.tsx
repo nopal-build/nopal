@@ -20,6 +20,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { listRecentAdminScriptRuns } from "robustness-core/data/adminScriptRuns.server";
 import { isAnyAdminScriptRunning } from "robustness-core/data/adminScriptsQueue.server";
 import { getHumansById } from "robustness-core/data/humans.server";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { navFor } from "../data/nav.server";
 
 // Super only, NOT the usual Admin-or-Super Maker bar -- unlike GraphLog's
@@ -40,6 +41,10 @@ async function requireAdminScriptsAccess(request: Request) {
 export async function loader({ request }: LoaderFunctionArgs) {
   // `user` is what AppLayout's nav reads (`useUser`) to show the Maker tab.
   const user = await requireAdminScriptsAccess(request);
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   // The rest of what the nav reads (home tab, Vault, Maker), as every app page.
   const nav = await navFor(user._id);
 
@@ -56,6 +61,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     running,
     humanNameById: Object.fromEntries(humanNameById),
   };
+    },
+  );
 }
 
 export function ErrorBoundary() {

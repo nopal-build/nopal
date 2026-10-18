@@ -12,6 +12,7 @@ import { getFolderById } from "robustness-core/data/vault.server";
 import { assignableGroups } from "robustness-core/data/features";
 import { navFor } from "../data/nav.server";
 import { candidatesFor, isStaff, peopleAction, peopleOn, runsPeople } from "../data/projectPeople.server";
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { AppLayout } from "../components/AppLayout";
 import { MakerErrorBoundary } from "../components/MakerErrorBoundary";
 import { ProjectPeople } from "../components/ProjectPeople";
@@ -29,6 +30,10 @@ export const meta: MetaFunction = () => [{ title: "O.No · M.Projects" }];
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
+  const url = new URL(request.url);
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    async () => {
   const folder = params.folderId ? await getFolderById(params.folderId) : undefined;
   if (!folder || !(await runsPeople(user, folder))) throw data("Not found", { status: 404 });
 
@@ -42,6 +47,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     staff,
     ...nav,
   };
+    },
+  );
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
