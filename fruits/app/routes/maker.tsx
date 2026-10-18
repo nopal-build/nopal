@@ -21,6 +21,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { getMakerStats, type MakerRangeDays } from "robustness-core/data/makerStats.server";
 import { getGraphLogUsageSummary } from "robustness-core/data/graphLogMetrics.server";
+import { getPerfSummary, type PerfSummary } from "robustness-core/data/requestPerf.server";
 import { guidesAny, listEveryProject, listProjectsFor, resolveRole } from "robustness-core/data/projectSharing.server";
 import { getHumans } from "robustness-core/data/humans.server";
 import { navFor } from "../data/nav.server";
@@ -51,11 +52,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
 
   // The stats and the usage are the admins'; a Guide's page never asks.
-  const [stats, graphLogUsage] = staff
-    ? await Promise.all([getMakerStats(days), getGraphLogUsageSummary(days)])
-    : [null, null];
+  const [stats, graphLogUsage, perfSummary] = staff
+    ? await Promise.all([getMakerStats(days), getGraphLogUsageSummary(days), getPerfSummary(days)])
+    : [null, null, null];
 
-  return { user, staff, counts, days, stats, graphLogUsage, ...(await navFor(user._id, memberships)) };
+  return { user, staff, counts, days, stats, graphLogUsage, perfSummary, ...(await navFor(user._id, memberships)) };
 }
 
 export function ErrorBoundary() {
@@ -173,8 +174,96 @@ function ProjectsAndHumansTile({ counts, staff }: { counts: { projects: number; 
   );
 }
 
+function formatPerfDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+/** High-level numbers only — which routes are slow and how slow, not the
+ * full per-request timeline. Clicking through to `/maker/performance`
+ * gets the drill-down (recent requests, then one request's own function/
+ * DB-call breakdown). See `requestPerf.server.ts` for how this is
+ * measured: server-side only, real wall-clock durations, never a
+ * self-reported number. */
+function PerformanceSection({ days, perfSummary }: { days: MakerRangeDays; perfSummary: PerfSummary }) {
+  const slowestRoutes = perfSummary.byRoute.slice(0, 3);
+  return (
+    <section className="mb-12">
+      <hr
+        style={{
+          borderColor: "currentColor",
+          opacity: 0.12,
+          margin: "0 0 24px",
+        }}
+      />
+      <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
+        <h2
+          className="font-bold text-lg font-mono purple-text"
+          style={{ margin: 0 }}
+        >
+          Performance
+        </h2>
+        <Link
+          to="/maker/performance"
+          prefetch="intent"
+          className={`${link} ${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`}
+        >
+          Full breakdown →
+        </Link>
+      </div>
+
+      {perfSummary.requestCount === 0 ? (
+        <p className="text-sm subtle-text" style={{ margin: 0 }}>
+          No traced requests in the last {days} days yet. Tracing is opt-in per
+          route — see `requestPerf.server.ts` for which ones are wrapped today.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-4 mb-4">
+            <StatCard
+              label="Traced Requests"
+              value={perfSummary.requestCount}
+              hint={`Last ${days} days`}
+            />
+            <StatCard
+              label="Avg Duration"
+              value={formatPerfDuration(perfSummary.avgDurationMs)}
+              hint={`p95: ${formatPerfDuration(perfSummary.p95DurationMs)}`}
+            />
+            <StatCard
+              label="Slowest Request"
+              value={formatPerfDuration(perfSummary.maxDurationMs)}
+            />
+            <StatCard
+              label="Errors"
+              value={perfSummary.errorCount}
+              hint={`of ${perfSummary.requestCount} requests`}
+            />
+          </div>
+          <div className={`${surfaceBase} p-5`}>
+            <div className="text-xs font-mono subtle-text uppercase tracking-wide mb-3">
+              Slowest routes (by average)
+            </div>
+            <div className="flex flex-col gap-2">
+              {slowestRoutes.map((r) => (
+                <div key={r.route} className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-mono">{r.route}</span>
+                  <span className="text-xs font-mono subtle-text">
+                    avg {formatPerfDuration(r.avgDurationMs)} · worst {formatPerfDuration(r.maxDurationMs)} ·{" "}
+                    {r.requestCount} req
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function FruitsMaker() {
-  const { user, staff, counts, days, stats, graphLogUsage } = useLoaderData<typeof loader>();
+  const { user, staff, counts, days, stats, graphLogUsage, perfSummary } = useLoaderData<typeof loader>();
 
   return (
     <AppLayout>
@@ -351,6 +440,8 @@ export default function FruitsMaker() {
             />
           </div>
         </section>
+
+        {staff && perfSummary && <PerformanceSection days={days} perfSummary={perfSummary} />}
 
         {/* ── Admin Scripts ─────────────────────────── */}
         {/* Super only -- these scripts can mutate arbitrary rows across

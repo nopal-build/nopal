@@ -1,5 +1,16 @@
 import Surreal, { RecordId } from "surrealdb";
 import { getDb, invalidateDb } from "./db.server";
+import { timeRequestPerf } from "./requestPerfContext.server";
+
+/** A short, loggable label for a SurrealQL query string — collapsed
+ * whitespace, capped length — used as the `name` of the automatic `"db"`
+ * perf event these functions record whenever a request is being traced
+ * (see `requestPerfContext.server.ts`). Never the full query, just a
+ * label: some callers build quite long multi-line SurrealQL. */
+function summarizeQuery(q: string): string {
+  const collapsed = q.replace(/\s+/g, " ").trim();
+  return collapsed.length > 80 ? `${collapsed.slice(0, 77)}...` : collapsed;
+}
 
 export type AllQueryOptions = {
   order?: "date" | "title";
@@ -67,11 +78,10 @@ export async function queryCollection<T extends Data>(
 
   try {
     const { limit = DEFAULT_LIMIT, start = 0 } = options;
-    const result = await db.query<[T[]]>(query, {
-      ...params,
-      limit: limit + 1,
-      start,
-    });
+    const queryParams = { ...params, limit: limit + 1, start };
+    const result = await timeRequestPerf("db", summarizeQuery(query), queryParams, () =>
+      db.query<[T[]]>(query, queryParams),
+    );
     return formatCollection(result?.[0] || [], { start, limit });
   } catch (err) {
     console.error("Failed to get data:", err);
@@ -91,7 +101,7 @@ export async function query<T extends unknown[]>(
   }
 
   try {
-    const result = await db.query<T>(query, params);
+    const result = await timeRequestPerf("db", summarizeQuery(query), params, () => db.query<T>(query, params));
     return result;
   } catch (err) {
     console.error("Failed to get data:", err);
@@ -114,7 +124,12 @@ export async function select<T extends Data>(thing: RecordId | string) {
   }
 
   try {
-    const result = await db.select<T>(thing);
+    const result = await timeRequestPerf(
+      "db",
+      `select ${typeof thing === "string" ? thing : thing.tb}`,
+      null,
+      () => db.select<T>(thing),
+    );
     if (!result) {
       return undefined;
     }

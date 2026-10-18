@@ -62,6 +62,15 @@ import {
 } from "robustness-core/data/vault.server";
 import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
 import { nameSyncedAuthors, type ListedFile } from "robustness-core/data/syncedAuthors.server";
+// Pilot route for server request-performance tracing (see the
+// `fruits-performance-monitoring` garden seed) -- the Vault loader is the
+// first one wrapped since it's the suspected-slow one. `withRequestPerf`
+// traces the whole loader; `timeRequestPerf` marks individual
+// suspected-expensive calls within it as "fn" events. DB calls inside
+// anything this loader calls (`vault.server.ts`, etc.) are captured
+// automatically by `generic.server.ts` and need no changes here.
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
+import { timeRequestPerf } from "robustness-core/data/requestPerfContext.server";
 import { navFor } from "../data/nav.server";
 import { displayName } from "robustness-core/data/humanNames";
 import { getRelatedHumans } from "robustness-core/data/relationships.server";
@@ -205,9 +214,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
+// The real loader body is nested as `vaultLoaderBody` (not a separate
+// top-level function) specifically so it stays textually inside
+// `export async function loader` -- `app/tests/navUser.test.ts` scans
+// that exact slice for the page's `user`/`navFor(...)` return, the
+// static guard against the exact nav-losing bug its own header describes.
+// `withRequestPerf` wraps this body to trace the whole loader; see
+// `requestPerf.server.ts`.
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
+  const url = new URL(request.url);
+
+  const vaultLoaderBody = async () => {
   // A client never gets the Vault (ADR-023): the same bare 404 as a page
   // that doesn't exist.
   const memberships = await listProjectsFor(user._id);
@@ -217,17 +236,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const [roots, ownFolders, sharedFolders, relatedHumansRaw] =
     await Promise.all([
-      ensureVaultRootFolders(user._id),
+      timeRequestPerf("fn", "ensureVaultRootFolders", { humanId: user._id }, () =>
+        ensureVaultRootFolders(user._id),
+      ),
       // Every folder the human owns — one cheap query. The left tree renders
       // its full folder skeleton from this, so expanding never waits on the
       // network; only per-folder FILE listings load lazily.
-      getFoldersByHuman(user._id),
+      timeRequestPerf("fn", "getFoldersByHuman", { humanId: user._id }, () => getFoldersByHuman(user._id)),
       // Every folder shared with the human, anywhere in the vault — sharing
       // cascades `shared_with` onto every descendant at share-time, so this
       // already includes the full subtree of each shared folder, not just
       // its top level.
-      getSharedFoldersForHuman(user._id),
-      getRelatedHumans(user),
+      timeRequestPerf("fn", "getSharedFoldersForHuman", { humanId: user._id }, () =>
+        getSharedFoldersForHuman(user._id),
+      ),
+      timeRequestPerf("fn", "getRelatedHumans", null, () => getRelatedHumans(user)),
     ]);
   // Sorted alphabetically — the Share modal's checklist previously showed
   // humans in raw DB order, which made it easy to miscount/misclick on a
@@ -249,7 +272,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     (f) => !f.parent_folder_id || !sharedIds.has(f.parent_folder_id),
   );
 
-  const url = new URL(request.url);
   const fileParam = url.searchParams.get("file");
   const folderParam = url.searchParams.get("folder");
 
@@ -271,11 +293,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let viewerGuidesProject = false;
 
   if (fileParam) {
-    const file = await getFileRefById(fileParam);
+    const file = await timeRequestPerf("fn", "getFileRefById", { fileId: fileParam }, () =>
+      getFileRefById(fileParam),
+    );
     if (!file || !(await canViewFileRef(user._id, file))) {
       throw new Response("File not found", { status: 404 });
     }
-    let ancestry = file.folder_id ? await getFolderAncestry(file.folder_id) : [];
+    const fileFolderId = file.folder_id;
+    let ancestry = fileFolderId
+      ? await timeRequestPerf("fn", "getFolderAncestry", { folderId: fileFolderId }, () =>
+          getFolderAncestry(fileFolderId),
+        )
+      : [];
     // Not the owner: this file is only reachable via a shared folder —
     // anchor the ancestry under the viewer's OWN matching root container
     // (always "projects" today) so it reads/navigates as if nested inside
@@ -290,7 +319,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       file.name.toLowerCase() === "readme.md" &&
       fileProjectFolder &&
       isProjectAnchor(fileProjectFolder)
-        ? await resolveProjectManifest(fileProjectFolder.human_id, fileProjectFolder)
+        ? await timeRequestPerf("fn", "resolveProjectManifest", { folderId: fileProjectFolder._id }, () =>
+            resolveProjectManifest(fileProjectFolder.human_id, fileProjectFolder),
+          )
         : null;
     // A non-owner viewing a file may still act as a full co-owner of it,
     // via an owner-tier project Sharing Role (Owner/Crafter) rather than
@@ -298,8 +329,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // and the `vault` skill's Sharing Roles section. Resolved once here so
     // the client doesn't need its own copy of the Sharing Role logic just
     // to decide whether to render actions as available.
-    if (file.human_id !== user._id && file.folder_id) {
-      const role = await getProjectRoleForFolderId(file.folder_id, user._id);
+    if (file.human_id !== user._id && fileFolderId) {
+      const role = await timeRequestPerf("fn", "getProjectRoleForFolderId", { folderId: fileFolderId }, () =>
+        getProjectRoleForFolderId(fileFolderId, user._id),
+      );
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
       viewerGuidesProject = Boolean(role?.guiding);
     }
@@ -317,36 +350,53 @@ export async function loader({ request }: LoaderFunctionArgs) {
       websitePageMeta: websitePageMetaForFile,
     };
   } else if (folderParam) {
-    const folder = await getFolderById(folderParam);
+    const folder = await timeRequestPerf("fn", "getFolderById", { folderId: folderParam }, () =>
+      getFolderById(folderParam),
+    );
     if (!folder || !canViewFolder(user._id, folder)) {
       throw new Response("Folder not found", { status: 404 });
     }
     // Ancestry includes the folder itself (root container → … → folder).
-    let ancestry = await getFolderAncestry(folder._id);
+    let ancestry = await timeRequestPerf("fn", "getFolderAncestry", { folderId: folder._id }, () =>
+      getFolderAncestry(folder._id),
+    );
     if (folder.human_id !== user._id) {
       ancestry = anchorSharedAncestry(ancestry, user._id, roots);
     }
     // Children belong to the folder's OWNER, not necessarily the viewer.
-    const listed = await listFolderChildren(folder.human_id, folder._id);
-    const children = { ...listed, files: await nameSyncedAuthors(folder, listed.files) };
+    const listed = await timeRequestPerf("fn", "listFolderChildren", { folderId: folder._id }, () =>
+      listFolderChildren(folder.human_id, folder._id),
+    );
+    const children = {
+      ...listed,
+      files: await timeRequestPerf("fn", "nameSyncedAuthors", { folderId: folder._id }, () =>
+        nameSyncedAuthors(folder, listed.files),
+      ),
+    };
     treeSeed[folder._id] = children;
 
     const readmeListing = children.files.find(
       (f) => f.name.toLowerCase() === "readme.md",
     );
     const readme = readmeListing
-      ? ((await getFileRefById(readmeListing._id)) ?? null)
+      ? ((await timeRequestPerf("fn", "getFileRefById", { fileId: readmeListing._id }, () =>
+          getFileRefById(readmeListing._id),
+        )) ?? null)
       : null;
     const projectManifestForFolder =
       readme && isProjectAnchor(folder)
-        ? await resolveProjectManifest(folder.human_id, folder)
+        ? await timeRequestPerf("fn", "resolveProjectManifest", { folderId: folder._id }, () =>
+            resolveProjectManifest(folder.human_id, folder),
+          )
         : null;
     // Same owner-tier-role resolution as the file branch above, for a
     // folder view — lets the client light up Upload/New folder/Rename/
     // Move/Share/Publish/Delete for an owner-tier collaborator exactly
     // like it already does for the folder's own owner.
     if (folder.human_id !== user._id) {
-      const role = await getProjectRoleForFolderId(folder._id, user._id);
+      const role = await timeRequestPerf("fn", "getProjectRoleForFolderId", { folderId: folder._id }, () =>
+        getProjectRoleForFolderId(folder._id, user._id),
+      );
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
       viewerGuidesProject = Boolean(role?.guiding);
     }
@@ -379,6 +429,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // The nav: a Guide's Maker tab stays lit while they're in here.
     ...(await navFor(user._id, memberships)),
   };
+  };
+
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    vaultLoaderBody,
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

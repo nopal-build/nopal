@@ -161,7 +161,29 @@ httpServer.listen(3000, () => {
       setInterval(runTrashCleanup, 24 * 60 * 60 * 1000);
     }, 37_000);
 
-    // ── Daily-log sort ────────────────────────────────────────────────────
+    // ── Performance-trace pruning ──────────────────────────────
+    // Deletes traced server-request rows (and their fn/db events) past
+    // their retention window -- see api.performance.prune.tsx's own
+    // comment for why this matters beyond raw storage cost. Same
+    // CRON_SECRET, staggered from the two cleanups above.
+    const runPerfPrune = async () => {
+      try {
+        const res = await fetch("http://localhost:3000/api/performance/prune", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${cronSecret}` },
+        });
+        const data = await res.json();
+        console.log("[cron] performance/prune:", data);
+      } catch (err) {
+        console.error("[cron] performance/prune failed:", err);
+      }
+    };
+    setTimeout(() => {
+      runPerfPrune();
+      setInterval(runPerfPrune, 24 * 60 * 60 * 1000);
+    }, 44_000);
+
+    // ── Daily-log sort ──────────────────────────────────────────────────────────────
     // Sorts every human's closed, not-yet-sorted daily logs (mentions →
     // project backlinks, completed Card tasks, Card file attachments —
     // see sorter.server.ts) into their Release Logs. Same CRON_SECRET,

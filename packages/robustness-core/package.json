@@ -76,6 +76,8 @@
     "./data/realtime.server": "./src/data/realtime.server.ts",
     "./data/relationships.server": "./src/data/relationships.server.ts",
     "./data/releaseLog.server": "./src/data/releaseLog.server.ts",
+    "./data/requestPerf.server": "./src/data/requestPerf.server.ts",
+    "./data/requestPerfContext.server": "./src/data/requestPerfContext.server.ts",
     "./data/sharingRoles.server": "./src/data/sharingRoles.server.ts",
     "./data/sorter.server": "./src/data/sorter.server.ts",
     "./data/syncedAuthors.server": "./src/data/syncedAuthors.server.ts",

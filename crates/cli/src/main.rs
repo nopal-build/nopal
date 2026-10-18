@@ -17,6 +17,7 @@ mod auth;
 mod garden;
 mod graphlog;
 mod image;
+mod perf;
 mod record;
 mod release_log;
 mod skills;
@@ -171,6 +172,15 @@ enum Command {
     Graphlog {
         #[command(subcommand)]
         command: GraphlogCommand,
+    },
+    /// Server request-performance traces (`/maker/performance`'s own
+    /// data) — summary stats, recent traced requests, and one request's
+    /// full function/DB-call timeline. Admin/Super login required. The
+    /// intended primary way to actually inspect this data (including for
+    /// an AI agent via `--json`), not just the web dashboard.
+    Perf {
+        #[command(subcommand)]
+        command: PerfCommand,
     },
     /// Reference docs for how to write things in Nopal (OxMarkdown syntax,
     /// the Vault, etc). Lists available skills by default.
@@ -716,6 +726,42 @@ enum GraphlogScheduleCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum PerfCommand {
+    /// High-level stats across every traced route: request count, avg/p95/
+    /// max duration, error count, by-route breakdown. The same numbers the
+    /// Maker landing page's own Performance section shows.
+    Summary {
+        /// 7 or 30 -- any other value is treated as 7.
+        #[arg(long, default_value_t = 7)]
+        days: u32,
+        /// Print the server's raw JSON response instead of a formatted
+        /// summary -- the form an AI agent should actually consume.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Most recent traced requests, newest first. Each row's id is what to
+    /// pass to `nopal perf show`.
+    Recent {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        /// Print the server's raw JSON response instead of a formatted list.
+        #[arg(long)]
+        json: bool,
+    },
+    /// One request's own full function/DB-call event timeline, in order,
+    /// with each event's own duration -- the actual breakdown of where
+    /// time went inside that one request.
+    Show {
+        /// The request's own id, from `nopal perf recent`'s own listing.
+        request_id: String,
+        /// Print the server's raw JSON response instead of a formatted
+        /// timeline -- the form an AI agent should actually consume.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ReleaseLogCommand {
     /// Reverts one entry — only entries that changed a project file (a
     /// Card file attachment being filed into the project) can be
@@ -1046,6 +1092,17 @@ fn main() {
         Command::Sort { command } => {
             let result = match command {
                 SortCommand::Run { date, force } => sort::run(date, force),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Perf { command } => {
+            let result = match command {
+                PerfCommand::Summary { days, json } => perf::summary(days, json),
+                PerfCommand::Recent { limit, json } => perf::recent(limit, json),
+                PerfCommand::Show { request_id, json } => perf::show(&request_id, json),
             };
             if let Err(e) = result {
                 eprintln!("{e}");
