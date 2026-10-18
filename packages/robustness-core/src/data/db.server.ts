@@ -48,11 +48,69 @@ export const DEFAULT_CONFIG: DbConfig = {
  */
 let cachedDbPromise: Promise<Surreal> | null = null;
 
+/**
+ * Identifies which `connect()` call a given keepalive timer (below) belongs
+ * to, bumped once per successful connection. Lets a timer notice it's been
+ * superseded (by a fresh reconnect, from either its OWN failed ping or
+ * `generic.server.ts` hitting a dead connection first) and stop quietly
+ * instead of going on to ping a `Surreal` instance nobody holds a reference
+ * to anymore.
+ */
+let connectionGeneration = 0;
+let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Comfortably under the idle timeouts of the intermediaries this
+ * connection's traffic actually crosses in production (`webapp`/`fruits`
+ * in `lax`, the DB in `dfw` -- some proxy or NAT in between, not SurrealDB
+ * itself, is the one silently dropping a quiet-too-long socket). A real
+ * repro motivated this: `/v2` 404ing after the page sat untouched for a
+ * while, loading fine again on the very next request (see `generic.server
+ * .ts`'s own retry-on-dead-connection fix for the other half of that
+ * story) -- this keepalive aims to stop the connection from ever going
+ * idle long enough to be dropped in the first place, rather than only
+ * recovering gracefully after the fact.
+ */
+const KEEPALIVE_INTERVAL_MS = 20_000;
+
+function stopKeepalive(): void {
+  if (keepaliveTimer) {
+    clearInterval(keepaliveTimer);
+    keepaliveTimer = null;
+  }
+}
+
+/** `.unref()`'d so this timer never by itself keeps the Node process alive
+ * (a graceful shutdown, a one-off script, a test run that happens to
+ * import this module) -- it should only ever fire while something else is
+ * already keeping the process running. */
+function startKeepalive(db: Surreal, generation: number): void {
+  stopKeepalive();
+  keepaliveTimer = setInterval(() => {
+    if (generation !== connectionGeneration) {
+      // Superseded by a newer connection already -- this timer's own `db`
+      // is on its way out (or already gone); nothing left to keep alive.
+      stopKeepalive();
+      return;
+    }
+    db.ping().catch((err) => {
+      console.error(
+        "SurrealDB keepalive ping failed -- invalidating the cached connection so the next query reconnects:",
+        err instanceof Error ? err.message : String(err),
+      );
+      invalidateDb();
+    });
+  }, KEEPALIVE_INTERVAL_MS);
+  keepaliveTimer.unref?.();
+}
+
 async function connect(config: DbConfig): Promise<Surreal> {
   const db = new Surreal();
   await db.connect(config.url, { versionCheck: false });
   await db.signin({ ...config.auth });
   await db.use({ namespace: config.namespace, database: config.database });
+  connectionGeneration += 1;
+  startKeepalive(db, connectionGeneration);
   return db;
 }
 
@@ -87,5 +145,6 @@ export async function getDb(config: DbConfig = DEFAULT_CONFIG): Promise<Surreal>
  * silently-dead connection.
  */
 export function invalidateDb(): void {
+  stopKeepalive();
   cachedDbPromise = null;
 }
