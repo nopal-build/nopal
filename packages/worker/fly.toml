@@ -18,7 +18,10 @@
 # redundancy is safe here without any code change.
 
 app = 'nopal-phylog-worker'
-primary_region = 'lax'
+# Co-located with the DB (`db/fly.toml`'s own `primary_region`) -- see the
+# `fruits-performance-followup` garden seed. Was `lax`; moved to `dfw` to
+# put every piece (app, worker, DB) in the same region.
+primary_region = 'dfw'
 
 [build]
 
