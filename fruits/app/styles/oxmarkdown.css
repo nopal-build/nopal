@@ -1311,7 +1311,14 @@ img.ox-file-thumb {
 .ox-content .ox-task-item-editing--unchecked::after {
   content: "";
   position: absolute;
-  top: 50%;
+  /* Centered within the FIRST grid row only (`var(--ox-grid)` tall), not
+     `top: 50%` of the whole `<li>` — a multi-line item (wrapped text)
+     grows the `<li>`'s total height well past one row, and `50%` of that
+     taller box drags the glyph down toward the item's vertical center
+     instead of keeping it pinned top-left next to the first line, where
+     every other list-marker convention in this file already anchors
+     (confirmed by a real screenshot of a wrapped checklist item). */
+  top: calc(var(--ox-grid) / 2);
   left: 9px;
   transform: translateY(-50%);
   width: 23px;
