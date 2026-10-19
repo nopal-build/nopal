@@ -30,6 +30,7 @@ import {
   getFolderAncestry,
   getFolderById,
   listFolderChildren,
+  resolveDailyLogsFolder,
   updateFileRef,
   type FileRef,
   type VaultFolder,
@@ -350,14 +351,28 @@ export async function resolveWebsiteDailyLogEntries(
   }
   if (dates.size === 0) return {};
 
+  // Resolved ONCE and reused for every date below. `resolveDailyLogsFolder`
+  // only depends on `humanId`, not `date`, but used to run once PER date
+  // here (itself several round trips) -- a page citing N days paid for the
+  // same resolution N times over, sequentially. Confirmed the single worst
+  // request in the `fruits-performance-followup` garden seed's real-traffic
+  // investigation (3.56s total, 2.37s inside this function alone).
+  const rootFolder = await resolveDailyLogsFolder(siteFolder.human_id);
+
+  // The dates are independent of each other, so resolved concurrently
+  // rather than one sequential `await` per date.
+  const dateList = [...dates];
+  const cardsByDate = await Promise.all(
+    dateList.map((date) => getDailyLogCards(siteFolder.human_id, date, rootFolder)),
+  );
+
   const entries: Record<string, ResolvedWebsiteDailyLogEntry> = {};
-  for (const date of dates) {
-    const cards = await getDailyLogCards(siteFolder.human_id, date);
-    for (const card of cards) {
+  dateList.forEach((date, i) => {
+    for (const card of cardsByDate[i]) {
       const key = `${date}::${card.projectName.trim().toLowerCase()}`;
       entries[key] = { projectName: card.projectName, date, content: card.content };
     }
-  }
+  });
   return entries;
 }
 

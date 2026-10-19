@@ -51,6 +51,7 @@ import {
 // Server functions are only used inside `loader`; React Router strips them
 // from the client bundle automatically.
 import {
+  buildOwnedFolderAncestry,
   canViewFileRef,
   ensureVaultRootFolders,
   getFileRefById,
@@ -300,9 +301,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
       throw new Response("File not found", { status: 404 });
     }
     const fileFolderId = file.folder_id;
+    // Owned: every ancestor is owned by the SAME human too, so the whole
+    // chain is already sitting in `ownFolders` from the Promise.all above —
+    // no DB round trips needed (see `buildOwnedFolderAncestry`'s own doc).
+    // Shared: climbs into another human's private tree above the share
+    // point, which isn't in memory, so that case still needs the
+    // DB-walking `getFolderAncestry`.
     let ancestry = fileFolderId
-      ? await timeRequestPerf("fn", "getFolderAncestry", { folderId: fileFolderId }, () =>
-          getFolderAncestry(fileFolderId),
+      ? await timeRequestPerf("fn", "getFolderAncestry", { folderId: fileFolderId }, async () =>
+          file.human_id === user._id
+            ? buildOwnedFolderAncestry(fileFolderId, ownFolders)
+            : getFolderAncestry(fileFolderId),
         )
       : [];
     // Not the owner: this file is only reachable via a shared folder —
@@ -357,16 +366,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
       throw new Response("Folder not found", { status: 404 });
     }
     // Ancestry includes the folder itself (root container → … → folder).
-    let ancestry = await timeRequestPerf("fn", "getFolderAncestry", { folderId: folder._id }, () =>
-      getFolderAncestry(folder._id),
-    );
-    if (folder.human_id !== user._id) {
+    // Owned: built from the already-in-memory `ownFolders` (no DB round
+    // trips). Shared: still needs the DB-walking `getFolderAncestry` (see
+    // `buildOwnedFolderAncestry`'s own doc). Independent of
+    // `listFolderChildren` either way, so run them together rather than
+    // sequentially — `Promise.all` is a no-op for the owned case (already
+    // synchronous) but saves a real round trip for the shared case.
+    const folderIsOwned = folder.human_id === user._id;
+    const [ancestryRaw, listed] = await Promise.all([
+      timeRequestPerf("fn", "getFolderAncestry", { folderId: folder._id }, async () =>
+        folderIsOwned ? buildOwnedFolderAncestry(folder._id, ownFolders) : getFolderAncestry(folder._id),
+      ),
+      // Children belong to the folder's OWNER, not necessarily the viewer.
+      timeRequestPerf("fn", "listFolderChildren", { folderId: folder._id }, () =>
+        listFolderChildren(folder.human_id, folder._id),
+      ),
+    ]);
+    let ancestry = ancestryRaw;
+    if (!folderIsOwned) {
       ancestry = anchorSharedAncestry(ancestry, user._id, roots);
     }
-    // Children belong to the folder's OWNER, not necessarily the viewer.
-    const listed = await timeRequestPerf("fn", "listFolderChildren", { folderId: folder._id }, () =>
-      listFolderChildren(folder.human_id, folder._id),
-    );
     const children = {
       ...listed,
       files: await timeRequestPerf("fn", "nameSyncedAuthors", { folderId: folder._id }, () =>

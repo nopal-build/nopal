@@ -1159,22 +1159,35 @@ export async function moveVaultFolder(
 export async function ensureVaultRootFolders(
   humanId: string,
 ): Promise<VaultFolder[]> {
+  // One query for every root key's existence check, instead of one
+  // sequential round trip PER key — this runs on most Vault/Maker page
+  // loads (see this function's own doc), so N-1 avoided round trips here
+  // is a real difference, not a micro-optimization (see the
+  // `fruits-performance-followup` garden seed's real-traffic investigation).
+  // `ORDER BY created_at ASC` still lets every caller converge on the same
+  // (oldest) pick among any already-existing duplicates per name, same as
+  // the old per-key query did; grouping below keeps only the first
+  // (oldest) row per name.
+  const existingResult = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders
+     WHERE human_id = $humanId
+       AND parent_folder_id = null
+       AND name IN $names
+     ORDER BY created_at ASC`,
+    { humanId, names: VAULT_ROOT_KEYS },
+  );
+  const existingByName = new Map<string, VaultFolder>();
+  for (const row of (existingResult?.[0] ?? []).map(formatRecord)) {
+    if (!existingByName.has(row.name)) existingByName.set(row.name, row);
+  }
+
   const roots: VaultFolder[] = [];
   for (const key of VAULT_ROOT_KEYS) {
     // Same check-then-create race `getOrCreateVaultFolder` above documents
     // in full — and the same fix: `ORDER BY` for a stable pick among any
     // ALREADY-existing duplicates, plus a deterministic `id` (below) so a
     // race can never produce a NEW one going forward.
-    const result = await query<[VaultFolder[]]>(
-      `SELECT * FROM vault_folders
-       WHERE human_id = $humanId
-         AND parent_folder_id = null
-         AND name = $name
-       ORDER BY created_at ASC
-       LIMIT 1`,
-      { humanId, name: key },
-    );
-    const existing = result?.[0]?.[0] ? formatRecord(result[0][0]) : null;
+    const existing = existingByName.get(key) ?? null;
 
     if (existing) {
       if (existing.vault_root_key !== key) {
@@ -1524,6 +1537,45 @@ export async function getFolderAncestry(
   let currentId: string | null = folderId;
   for (let depth = 0; currentId && depth < 50; depth++) {
     const folder: VaultFolder | undefined = await getFolderById(currentId);
+    if (!folder) break;
+    chain.unshift(folder);
+    currentId = folder.parent_folder_id;
+  }
+  return chain;
+}
+
+/**
+ * Same ancestor chain as `getFolderAncestry`, resolved entirely from an
+ * already-fetched flat list of folders (e.g. `vault.tsx`'s own
+ * `ownFolders`) instead of one DB round trip per level.
+ *
+ * ONLY correct when `folders` is guaranteed to contain the folder's ENTIRE
+ * ownership chain up to its root — true for a human's own folders
+ * (ownership never changes walking up a tree, so `getFoldersByHuman(id)`'s
+ * result always has every ancestor of any folder it contains). NOT true
+ * for a shared folder: its ancestry climbs into another human's private
+ * tree above the share point, which isn't in this list (sharing cascades
+ * `shared_with` onto descendants, not ancestors — see `vault.tsx`'s
+ * `anchorSharedAncestry`). Callers must keep using `getFolderAncestry` for
+ * that case; see the `fruits-performance-followup` garden seed for the
+ * investigation that motivated this split.
+ *
+ * Same `depth < 50`-equivalent cycle guard as `getFolderAncestry` (here, a
+ * `seen` set, since walking a `Map` can't rely on a DB round trip ever
+ * naturally terminating) — corrupt/cyclic `parent_folder_id` data should
+ * never hang a page render instead of just a request.
+ */
+export function buildOwnedFolderAncestry(
+  folderId: string,
+  folders: VaultFolder[],
+): VaultFolder[] {
+  const byId = new Map(folders.map((f) => [f._id, f]));
+  const chain: VaultFolder[] = [];
+  const seen = new Set<string>();
+  let currentId: string | null = folderId;
+  for (let depth = 0; currentId && depth < 50 && !seen.has(currentId); depth++) {
+    seen.add(currentId);
+    const folder = byId.get(currentId);
     if (!folder) break;
     chain.unshift(folder);
     currentId = folder.parent_folder_id;

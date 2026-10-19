@@ -10,7 +10,7 @@ import {
   ensureVaultRootFolders,
   resolveDailyLogsFolder,
 } from "./vault.server";
-import type { FileRef } from "./vault.types";
+import type { FileRef, VaultFolder } from "./vault.types";
 import { cardFileName } from "oxmarkdown-core";
 
 export type DailyLog = Data & {
@@ -315,13 +315,23 @@ export function fedContent(card: Pick<FileRef, "content" | "suggestion" | "taken
  * flash before a client-side fetch resolves). Only ever READS; the day's
  * folder is expected to already exist (every date passed here comes from
  * an already-saved day, which means `upsertDailyLogReadme` already ran).
+ *
+ * `rootFolder` is an optional pre-resolved `resolveDailyLogsFolder(humanId)`
+ * result, for a caller that needs this for MULTIPLE dates of the SAME
+ * human in one go (e.g. `resolveWebsiteDailyLogEntries`) — that resolution
+ * is itself several round trips (`ensureVaultRootFolders`, a Syncs-folder
+ * check, a query, a folder listing, occasionally a one-time migration
+ * write) and only depends on `humanId`, not `date`, so paying for it once
+ * per date in a loop was pure waste. Omit it for a single-date call; this
+ * resolves it itself exactly as before.
  */
 export async function getDailyLogCards(
   humanId: string,
   date: string,
+  rootFolder?: VaultFolder,
 ): Promise<DailyLogCard[]> {
-  const rootFolder = await resolveDailyLogsFolder(humanId);
-  const dateFolder = await getOrCreateVaultFolder(humanId, date, rootFolder._id);
+  const resolvedRootFolder = rootFolder ?? (await resolveDailyLogsFolder(humanId));
+  const dateFolder = await getOrCreateVaultFolder(humanId, date, resolvedRootFolder._id);
   const result = await query<[FileRef[]]>(
     `SELECT * FROM file_refs
      WHERE human_id = $humanId
