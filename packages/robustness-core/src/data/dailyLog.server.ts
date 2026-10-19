@@ -369,6 +369,98 @@ export async function getDailyLogCards(
 }
 
 /**
+ * Same Cards as `getDailyLogCards`, for every one of `dates` at once —
+ * built for `resolveWebsiteDailyLogEntries` (`website.server.ts`), which
+ * used to call `getDailyLogCards` once per date. That was already fixed
+ * once (hoisting `resolveDailyLogsFolder` out of the per-date loop, see
+ * that function's own history in the `fruits-performance-followup`
+ * garden seed), but the remaining per-date `getOrCreateVaultFolder` +
+ * `file_refs` query pair was still effectively N×2 round trips (just
+ * concurrent instead of sequential) — real traffic with ~15 dates on one
+ * page showed the later ones queueing against the DB's single shared-CPU
+ * machine (35ms baseline stretching past 180ms). This collapses that to
+ * 2 queries TOTAL regardless of how many dates are asked for: one to
+ * resolve every date's folder at once, one for every one of their Cards
+ * at once.
+ *
+ * Every date's folder is expected to already exist (see
+ * `getDailyLogCards`'s own doc on why) — the rare case where one doesn't
+ * falls back to that single-date function (its own create-if-missing
+ * path) so correctness never depends on this optimistic batch finding
+ * everything; it only needs to find most of it.
+ */
+export async function getDailyLogCardsForDates(
+  humanId: string,
+  dates: string[],
+  rootFolder?: VaultFolder,
+): Promise<Record<string, DailyLogCard[]>> {
+  if (dates.length === 0) return {};
+  const resolvedRootFolder = rootFolder ?? (await resolveDailyLogsFolder(humanId));
+
+  const uniqueDates = [...new Set(dates)];
+  const folderResult = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders
+     WHERE human_id = $humanId
+       AND parent_folder_id = $parentFolderId
+       AND name IN $dates`,
+    { humanId, parentFolderId: resolvedRootFolder._id, dates: uniqueDates },
+  );
+  const foldersByDate = new Map(
+    (folderResult?.[0] ?? []).map((f) => [f.name, formatRecord(f)]),
+  );
+  // Expected to be empty in practice (see this function's own doc) — one
+  // `getOrCreateVaultFolder` call per missing date, same as the
+  // single-date path would've done, so a cold/edge-case date doesn't
+  // silently come back empty instead of self-healing like it always has.
+  await Promise.all(
+    uniqueDates
+      .filter((date) => !foldersByDate.has(date))
+      .map(async (date) => {
+        foldersByDate.set(date, await getOrCreateVaultFolder(humanId, date, resolvedRootFolder._id));
+      }),
+  );
+
+  const folderIdToDate = new Map(
+    [...foldersByDate.entries()].map(([date, folder]) => [folder._id, date]),
+  );
+  const allFolderIds = [...folderIdToDate.keys()];
+  const filesResult = await query<[FileRef[]]>(
+    `SELECT * FROM file_refs
+     WHERE human_id = $humanId
+       AND folder_id IN $folderIds
+       AND source = 'daily_log_card'
+     ORDER BY created_at ASC`,
+    { humanId, folderIds: allFolderIds },
+  );
+  const allFiles = (filesResult?.[0] ?? []).map((r) => formatRecord(r as unknown as FileRef));
+
+  // Same batched project-folder-name lookup `getDailyLogCards` already
+  // does, just across every date's files at once instead of one date's.
+  const projectFolderIds = [
+    ...new Set(allFiles.map((f) => f.project_folder_id).filter((id): id is string => !!id)),
+  ];
+  const projectFolders = await getFoldersByIds(projectFolderIds);
+  const projectNameById = new Map(projectFolders.map((f) => [f._id, f.name]));
+
+  const cardsByDate: Record<string, DailyLogCard[]> = {};
+  for (const date of uniqueDates) cardsByDate[date] = [];
+  for (const file of allFiles) {
+    if (!file.project_folder_id || !file.folder_id) continue;
+    const date = folderIdToDate.get(file.folder_id);
+    if (!date) continue;
+    cardsByDate[date].push({
+      fileId: file._id,
+      fileName: file.name,
+      projectFolderId: file.project_folder_id,
+      projectName: projectNameById.get(file.project_folder_id) ?? "Unknown project",
+      content: file.content ?? "",
+      ...(file.suggestion ? { suggestion: true, takenContent: file.taken_content ?? "" } : {}),
+    });
+  }
+  return cardsByDate;
+}
+
+/**
  * Every Card written for `projectFolderId`, by anyone, with the content it
  * feeds the project (`fedContent`: a suggestion's untaken words aren't
  * here): one query, the record itself. The files view and the file-marks route

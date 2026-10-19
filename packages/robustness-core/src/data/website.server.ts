@@ -37,7 +37,7 @@ import {
 } from "./vault.server";
 import { splitFrontmatter } from "./project.types";
 import { canActAsProjectOwner } from "./projectSharing.server";
-import { getDailyLogCards } from "./dailyLog.server";
+import { getDailyLogCardsForDates } from "./dailyLog.server";
 import { findLeafDirectiveOccurrences } from "../util/nopalDirectives";
 import {
   getCachedWebsitePage,
@@ -330,8 +330,9 @@ export type ResolvedWebsiteDailyLogEntry = {
  * human to resolve against, and it matches the intent anyway: a website
  * page's author is curating THEIR OWN project history.
  *
- * Batches by unique `date` (one `getDailyLogCards` call per date, not per
- * directive occurrence) — mirrors `project.server.ts`'s own
+ * Batches by unique `date` (one `getDailyLogCardsForDates` call for every
+ * date at once, not per directive occurrence, and not even one call per
+ * date — see that function's own doc) — mirrors `project.server.ts`'s own
  * `resolveProjectManifest` deduping repeated `::gallery{folder="..."}`
  * lookups by folder name.
  *
@@ -359,20 +360,24 @@ export async function resolveWebsiteDailyLogEntries(
   // investigation (3.56s total, 2.37s inside this function alone).
   const rootFolder = await resolveDailyLogsFolder(siteFolder.human_id);
 
-  // The dates are independent of each other, so resolved concurrently
-  // rather than one sequential `await` per date.
+  // Every date's Cards resolved in 2 queries TOTAL, not 2 PER date --
+  // `getDailyLogCardsForDates` (`dailyLog.server.ts`) batches the
+  // date-folder lookup and the card lookup across every date at once. An
+  // earlier version of this resolved dates concurrently via `Promise.all`
+  // over single-date `getDailyLogCards` calls, which helped (sequential ->
+  // concurrent) but still fired 2 round trips PER date -- real traffic
+  // with ~15 dates on one page showed the later ones queueing against the
+  // DB's single shared-CPU machine. See the garden seed for the trace.
   const dateList = [...dates];
-  const cardsByDate = await Promise.all(
-    dateList.map((date) => getDailyLogCards(siteFolder.human_id, date, rootFolder)),
-  );
+  const cardsByDate = await getDailyLogCardsForDates(siteFolder.human_id, dateList, rootFolder);
 
   const entries: Record<string, ResolvedWebsiteDailyLogEntry> = {};
-  dateList.forEach((date, i) => {
-    for (const card of cardsByDate[i]) {
+  for (const date of dateList) {
+    for (const card of cardsByDate[date] ?? []) {
       const key = `${date}::${card.projectName.trim().toLowerCase()}`;
       entries[key] = { projectName: card.projectName, date, content: card.content };
     }
-  });
+  }
   return entries;
 }
 
