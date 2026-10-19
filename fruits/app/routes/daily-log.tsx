@@ -26,6 +26,7 @@ import {
   saveDailyLog,
   workableSaveDailyLog,
   getDailyLogCards,
+  getDailyLogCardsForDates,
   createDailyLogCard,
   saveDailyLogCard,
   isOwnCard,
@@ -39,6 +40,12 @@ import { getProjectRole, listProjectsFor } from "robustness-core/data/projectSha
 import { featuresOf } from "robustness-core/data/features";
 import { navFor } from "../data/nav.server";
 import { markOwnMutation } from "../hooks/useVaultEvents";
+// Pilot-route tracing, same discipline as `vault.tsx` and the Maker pages
+// (see the `fruits-performance-followup` garden seed) — this route wasn't
+// traced at all until now, so there was no production telemetry to
+// diagnose a "feels slow" report against.
+import { withRequestPerf } from "robustness-core/data/requestPerf.server";
+import { timeRequestPerf } from "robustness-core/data/requestPerfContext.server";
 
 export const meta: MetaFunction = () => [{ title: "O.No · Daily Logs" }];
 
@@ -47,8 +54,13 @@ export const meta: MetaFunction = () => [{ title: "O.No · Daily Logs" }];
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
+  const url = new URL(request.url);
+
+  const dailyLogLoaderBody = async () => {
   // Load all entries newest-first; 500 is a generous ceiling for any user
-  const { entries } = await getDailyLogs(user._id, { limit: 500 });
+  const { entries } = await timeRequestPerf("fn", "getDailyLogs", { humanId: user._id }, () =>
+    getDailyLogs(user._id, { limit: 500 }),
+  );
 
   // Projects for "Add a card": every project whose group gets `dailyLog`
   // (a Client does; an Observer doesn't write to the project).
@@ -58,14 +70,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Cards for each day that actually references one — a cheap substring
   // check up front so this stays proportional to real Card usage instead
   // of doing a real folder/file lookup for every one of up to 500 days
-  // unconditionally (most days won't have any).
-  const cardsByDate: Record<string, DailyLogCard[]> = {};
-  await Promise.all(
-    entries
-      .filter((e) => e.content.includes("::card{"))
-      .map(async (e) => {
-        cardsByDate[e.date] = await getDailyLogCards(user._id, e.date);
-      }),
+  // unconditionally (most days won't have any). Resolved for every
+  // qualifying day in ONE batched call (`getDailyLogCardsForDates`)
+  // instead of one `getDailyLogCards` call per day — that used to mean
+  // re-resolving `resolveDailyLogsFolder(humanId)` (several round trips)
+  // once per qualifying day, plus 2 more un-batched round trips per day
+  // on top, the exact same redundant-fan-out pattern
+  // `resolveWebsiteDailyLogEntries` had (see the
+  // `fruits-performance-followup` garden seed) — a person with many
+  // Card-bearing days paid for that resolution and those queries that
+  // many times over on every single page load.
+  const qualifyingDates = entries.filter((e) => e.content.includes("::card{")).map((e) => e.date);
+  const cardsByDate = await timeRequestPerf("fn", "getDailyLogCardsForDates", { humanId: user._id, dateCount: qualifyingDates.length }, () =>
+    getDailyLogCardsForDates(user._id, qualifyingDates),
   );
 
   return {
@@ -75,6 +92,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cardsByDate,
     ...(await navFor(user._id, memberships)),
   };
+  };
+
+  return withRequestPerf(
+    { app: "fruits", route: url.pathname, method: request.method, humanId: user._id },
+    dailyLogLoaderBody,
+  );
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
