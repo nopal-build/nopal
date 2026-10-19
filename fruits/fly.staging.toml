@@ -19,7 +19,9 @@
 #   fly deploy . --config fruits/fly.staging.toml --dockerfile fruits/Dockerfile
 
 app = 'fruits-staging'
-primary_region = 'lax'
+# Moved ahead of prod's own fly.toml on purpose -- this is the dry run for
+# that migration (see the `fruits-performance-followup` garden seed).
+primary_region = 'dfw'
 
 [build]
 

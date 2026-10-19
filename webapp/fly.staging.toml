@@ -14,7 +14,9 @@
 #   fly deploy . --config webapp/fly.staging.toml --dockerfile webapp/Dockerfile
 
 app = 'nopal-webapp-staging'
-primary_region = 'lax'
+# Moved ahead of prod's own fly.toml on purpose -- this is the dry run for
+# that migration (see the `fruits-performance-followup` garden seed).
+primary_region = 'dfw'
 
 [build]
 
