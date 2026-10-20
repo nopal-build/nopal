@@ -139,6 +139,18 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     into the graph). Up to 20 MB of bytes. A PDF attached before then
     gets its first sidecar on the next run, and because a day's graph
     hashes its sidecars, that day re-extracts once; the stage logs it.
+  - A Word file (`.docx`) is read by code (`docxText.server.ts`: the
+    zip's `word/document.xml`, paragraphs only, tracked deletions left
+    out, no dependency; up to 50 MB) and goes down the same text path a
+    `.md` attachment does, for both the description and the filing. The
+    sidecar's front matter says `describedFrom: docx`. Since 2026-10-20
+    (a `.docx` in This Healthy House's seed packet was kept as a file,
+    and the Efforts page told the reader to turn KNOWLEDGE.md on when it
+    was on). `isDescribableAttachment` is the one list of what this stage
+    can read at all; `sync-graph`'s INCOMPLETE line for an attachment
+    with neither caption nor description (`uncaptionedReason`) asks it, so
+    the line names the actual fix: the stage is off, the kind is unread
+    (re-add as PDF or paste the text), or the next run should get it.
   - **Filing** (`syncFiling.server.ts`): the stage's second question
     about a file, under its own skill `skills/FILING.md`, into its own
     file `_knowledge/<base>.filing.md`. The model says the kind (photo,

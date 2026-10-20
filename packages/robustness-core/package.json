@@ -18,6 +18,7 @@
     "./data/citedLogs.server": "./src/data/citedLogs.server.ts",
     "./data/dailyLog.server": "./src/data/dailyLog.server.ts",
     "./data/dailyLogSync.server": "./src/data/dailyLogSync.server.ts",
+    "./data/docxText.server": "./src/data/docxText.server.ts",
     "./data/db.server": "./src/data/db.server.ts",
     "./data/file.server": "./src/data/file.server.ts",
     "./data/fileReplace.server": "./src/data/fileReplace.server.ts",
