@@ -421,6 +421,8 @@ describe("a stage's skill is fingerprinted, stamped, and reported, never a cache
     for (const name of Object.values(SKILL_FILE_NAMES)) expect(RESERVED_SKILL_FILE_NAMES.has(name.toLowerCase())).toBe(true);
     expect(RESERVED_SKILL_FILE_NAMES.has("project_view.md")).toBe(true);
     expect(RESERVED_SKILL_FILE_NAMES.has("skill.md")).toBe(true);
+    // PhyLog's retired files are never extras (2026-10-20: TUFF still had them).
+    for (const name of ["CAPTURE.md", "PRE_CAPTURE.md", "POST_CAPTURE.md"]) expect(RESERVED_SKILL_FILE_NAMES.has(name.toLowerCase())).toBe(true);
   });
 });
 

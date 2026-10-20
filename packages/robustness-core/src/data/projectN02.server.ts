@@ -125,12 +125,22 @@ export const SKILL_FILE_NAMES: Record<GraphLogDefaultStage, string> = {
   sow: "SOW.md",
 };
 
-/** Former names of seeded files, deleted by `reseedProjectN02Skills` when
- * the current name exists beside them. Kept reserved (below) too: a
- * leftover that is neither seeded nor reserved would be folded into
- * every stage's prompt as an extra, which is worse than either. */
+/** Retired skill file names, each mapped to what replaced it, deleted by
+ * `reseedProjectN02Skills` (and so by the "Reset GraphLog skills to
+ * current" admin script, which can delete on a project whatever the
+ * acting person's role). Kept reserved (below) too: a leftover that is
+ * neither seeded nor reserved would be folded into every stage's prompt
+ * as an extra, which is worse than either.
+ *
+ * The three CAPTURE files are PhyLog's, retired in September 2026 when
+ * GraphLog's graph stage replaced capture. Nothing deleted them, so on
+ * the projects that still had them (TUFF last) they rode into every
+ * GraphLog prompt as extras for two months (2026-10-20). */
 const LEGACY_SKILL_FILE_NAMES: Record<string, string> = {
   "PROJECT_VIEW.md": "EFFORTS.md",
+  "CAPTURE.md": "GRAPH.md",
+  "PRE_CAPTURE.md": "GRAPH.md",
+  "POST_CAPTURE.md": "GRAPH.md",
 };
 
 export type SkillReseedOutcome = "reseeded" | "unchanged" | "created" | "removed";
@@ -399,6 +409,11 @@ export const RESERVED_SKILL_FILE_NAMES = new Set([
   // file becomes seed. Reserved for the same reason as filing.md.
   "sow.md",
   "skill.md",
+  // PhyLog's retired files (`LEGACY_SKILL_FILE_NAMES`): never an extra,
+  // even before a reseed deletes them.
+  "capture.md",
+  "pre_capture.md",
+  "post_capture.md",
 ]);
 
 /** Any OTHER file a project owner drops into `skills/` — auto-folded into
