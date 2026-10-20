@@ -1,5 +1,10 @@
 .PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-webapp restart-fruits restart-worker cli release-cli release-cli-dev update-cli-version
 
+# The dev containers run as you, so files they write into the repo are
+# yours, not root's (see bin/dev-as-host-user.sh).
+export HOST_UID ?= $(shell id -u)
+export HOST_GID ?= $(shell id -g)
+
 SURREAL_USER ?= root
 SURREAL_PASS ?= root
 
@@ -104,7 +109,7 @@ seed: migrate
 		--user $(SURREAL_USER) \
 		--pass $(SURREAL_PASS) \
 		--pretty
-	docker compose exec -T \
+	docker compose exec -T --user $(HOST_UID):$(HOST_GID) \
 		-e DATABASE_USERNAME=$(SURREAL_USER) -e DATABASE_PASSWORD=$(SURREAL_PASS) \
 		--workdir /app/webapp \
 		webapp npm run seed:data

@@ -174,3 +174,85 @@ export function countBlankLines(
   if (!prevPos || !nextPos) return 0;
   return Math.max(0, nextPos.start.line - prevPos.end.line - 1);
 }
+
+/** How many grid units of space a READING surface (`OxRenderer`'s
+ * `renderBlockNodes`, both the fruits and webapp copies) draws between two
+ * sibling blocks. The file's own blank-line count, literally, with one
+ * exception: a heading always gets at least one line above it, so text
+ * never runs straight into the next heading (Austin, 2026-10-20: "one
+ * deliberate line between text and a heading"). Below a heading stays
+ * literal — no space unless someone typed a blank line there. More than
+ * one typed line above a heading is kept, never collapsed.
+ *
+ * Only ever called BETWEEN siblings, so a heading that opens its container
+ * (the document, a section, a list item, ...) gets nothing above it.
+ * Editing mode deliberately doesn't use this: there, one line in the file
+ * is one row on screen, and a forced line would be a row that isn't in
+ * the file — it keeps reading `countBlankLines` directly. */
+export function blankLineUnits(
+  prev: { position?: { end: { line: number } } },
+  next: { type?: string; position?: { start: { line: number } } },
+): number {
+  const blanks = countBlankLines(prev, next);
+  return next.type === "heading" ? Math.max(1, blanks) : blanks;
+}
+
+/** A `serializeOxDocument` join that keeps the source file's own blank
+ * lines between any two blocks that both came from it (they carry a
+ * `position`), instead of the library default of exactly one everywhere.
+ * For a mutate-and-reserialize edit of a PARSED tree — Interacting mode's
+ * checkbox toggle, a directive popover's attribute edit — so one click
+ * changes the one thing clicked, not every blank-line run and heading gap
+ * in the file. A node added since the parse has no `position` and gets the
+ * library's ordinary single blank line. */
+export const sourceBlankLineJoin: Join = (left, right) => {
+  if (!left.position || !right.position) return undefined;
+  return countBlankLines(left, right);
+};
+
+const ATX_HEADING_LINE_RE = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+const FENCE_LINE_RE = /^ {0,3}(```|~~~)/;
+
+/** Puts headings in markdown that a MODEL wrote (not a person) into the
+ * same shape everywhere: exactly one blank line above a heading that isn't
+ * the first line, no blank lines directly under one, and no blank lines at
+ * the very start or end. Line-based (an ATX `#` line), leaving fenced code
+ * untouched. For writers like GraphLog's Efforts page (`update_section`),
+ * where whatever blank lines the model happened to send would otherwise
+ * become the page's spacing — never run on a person's own text, whose
+ * blank lines are deliberate. */
+export function normalizeHeadingSpacing(markdown: string): string {
+  const out: string[] = [];
+  let fence: string | null = null;
+  let afterHeading = false;
+  for (const line of markdown.split("\n")) {
+    const fenceMatch = line.match(FENCE_LINE_RE);
+    if (fence) {
+      out.push(line);
+      if (fenceMatch && fenceMatch[1] === fence) fence = null;
+      continue;
+    }
+    if (fenceMatch) {
+      fence = fenceMatch[1];
+      afterHeading = false;
+      out.push(line);
+      continue;
+    }
+    if (line.trim() === "") {
+      if (!afterHeading) out.push("");
+      continue;
+    }
+    if (ATX_HEADING_LINE_RE.test(line)) {
+      while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+      if (out.length > 0) out.push("");
+      out.push(line);
+      afterHeading = true;
+      continue;
+    }
+    afterHeading = false;
+    out.push(line);
+  }
+  while (out.length > 0 && out[0].trim() === "") out.shift();
+  while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+  return out.join("\n");
+}

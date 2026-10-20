@@ -144,6 +144,7 @@ import {
   stripChangeTags,
   type EffortDescription,
 } from "./effortReadings.server";
+import { normalizeHeadingSpacing } from "oxmarkdown-core";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -718,7 +719,10 @@ function createReadmeExecutors(input: {
         return 'Error: update_section needs both "heading" and "content" as strings. Nothing was written.';
       }
       const heading = normalizeIntroHeading(headingText(toolInput.heading));
-      const content = toolInput.content;
+      // The model's own blank lines are not a person's: whatever it sent
+      // around a heading or at either end would become the page's spacing.
+      // One line above every heading, none under it (`normalizeHeadingSpacing`).
+      const content = normalizeHeadingSpacing(toolInput.content);
       const key = heading.toLowerCase();
 
       // A section holds its BODY, never headings of its own. The README is

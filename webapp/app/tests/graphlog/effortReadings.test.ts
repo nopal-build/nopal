@@ -338,10 +338,10 @@ describe("round 3: rules in code, goals in the skill", () => {
     const good = [
       "### Gerald · Cladding",
       "",
-      '- Now: "under 8 rows to go" :ref{name="Gerald L" human-id="super_1"}',
-      "  - the crew worked 6 to 2:30",
-      "- Next: eaves, then the birch soffit",
-      "- Why it matters: the metal skirt hangs off the finished rows",
+      '- Now: Gerald has "under 8 rows to go." :ref{name="Gerald L" human-id="super_1"}',
+      "  - The crew worked 6 to 2:30.",
+      "- Next: eaves, then the birch soffit.",
+      "- Why it matters: the metal skirt hangs off the finished rows.",
     ].join("\n");
     expect(sectionShapeNotes("On the bench", good, ["Gerald", "Lucas"])).toEqual([]);
 
@@ -371,6 +371,20 @@ describe("round 3: rules in code, goals in the skill", () => {
     expect(sectionShapeNotes("Shelf", Array.from({ length: 130 }, () => "word").join(" "))[0]).toContain("130 words against a budget of 120");
     // Bullets outside any effort (Ready next, the shelf) are checked too.
     expect(sectionShapeNotes("Ready next", "- Metal skirt: hangs off the cladding; the call is not logged")[0]).toContain("semicolon");
+
+    // THH, 2026-10-20: bullets stopped where a clipped quote stopped.
+    const clipped = [
+      "### Austin · Permit application · L",
+      '- Why it matters: the addition setback "will be the one to watch" :ref{name="Austin T" human-id="admin_1"}',
+      "  - Submittal slipped over a week",
+      '- Next: the post review, "set for the following week." :ref{name="Austin T" human-id="admin_1"}',
+    ].join("\n");
+    const unfinished = sectionShapeNotes("On the bench", clipped, ["Austin"]).find((n) => n.includes("without finishing the sentence"));
+    expect(unfinished).toContain("2 bullets stop");
+    expect(unfinished).toContain('"will be the one to watch"');
+    expect(unfinished).not.toContain("following week");
+    // A shelf or drawer line that is only a name is not a sentence.
+    expect(sectionShapeNotes("Drawer", "- Second EV charger").some((n) => n.includes("finishing the sentence"))).toBe(false);
   });
 
   it("removed efforts are last run's efforts that share no thread and no name with the page", () => {
@@ -481,7 +495,7 @@ describe("round 5: size in words on the heading, and the mechanical voice rules 
   });
 
   it("the size on the page is the t-shirt letter on the heading; a Size: field or a written-out size is a shape note", () => {
-    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding · M\n- Now: rows on the S wall going up", ["Gerald"])).toEqual([]);
+    expect(sectionShapeNotes("On the bench", "### Gerald · Cladding · M\n- Now: rows on the S wall going up.", ["Gerald"])).toEqual([]);
     expect(sectionShapeNotes("On the bench", "### Gerald · Cladding\n- Size: L, about a week\n", ["Gerald"]).some((n) => n.includes("size written out"))).toBe(true);
     expect(sectionShapeNotes("On the bench", "### Gerald · Cladding · a few weeks of one person's time\n- Now: x", ["Gerald"]).some((n) => n.includes("size written out"))).toBe(true);
     // The heading's letter wins over a describe_effort report for size.

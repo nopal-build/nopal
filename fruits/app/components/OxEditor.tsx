@@ -64,6 +64,7 @@ import { $createParagraphNode, $getRoot, type LexicalEditor } from "lexical";
 import {
   parseOxDocument,
   serializeOxDocument,
+  sourceBlankLineJoin,
   type DirectiveNode,
 } from "oxmarkdown-core";
 import type { OxInteractive } from "../oxmarkdown/interactive";
@@ -226,7 +227,9 @@ function OxInteractingSurface({
    * the caller's updated markdown into an entirely new tree, so the old
    * selected reference can't mean anything there. */
   function commit() {
-    onChange(serializeOxDocument(doc));
+    // Keep the file's own blank lines: a click changes what was clicked,
+    // not every blank-line run and heading gap in the file.
+    onChange(serializeOxDocument(doc, sourceBlankLineJoin));
     setSelected(null);
   }
 

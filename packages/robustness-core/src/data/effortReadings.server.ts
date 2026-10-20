@@ -623,6 +623,8 @@ const ARROW_OR_CURLY_RE = /[→←⇒⇐↔“”‘’]/;
 const UNDERLINE_RE = /<u>/i;
 const LABEL_RE = /^([A-Z][A-Za-z' ]{1,24}):\s/;
 const QUOTED_RE = /"[^"\n]{2,}"|“[^”\n]{2,}”/g;
+/** A sentence's end: . ? or ! with any closing quote or bracket after it. */
+const SENTENCE_END_RE = /[.?!]["'”’)\]]*$/;
 
 /** The shape rules code holds for one section as it is written, as
  * plain notes for the tool result: empty when the section is in shape.
@@ -685,6 +687,7 @@ export function sectionShapeNotes(
     }
   }
   const allowed = new Set(writerFirstNames.map((n) => n.toLowerCase()));
+  const unfinished: string[] = [];
   for (const e of efforts) {
     const text = e.lines.join("\n");
     const quotes = (text.replace(REF_RE, "").match(QUOTED_RE) ?? []).length;
@@ -711,6 +714,13 @@ export function sectionShapeNotes(
       // The label is not content: "Not logged:" costs nothing.
       const wordCount = outsideQuotes.replace(LABEL_RE, "").split(/\s+/).filter(Boolean).length;
       if (wordCount > BULLET_WORD_LIMIT) notes.push(`a bullet in "${e.name}" runs ${wordCount} words outside its quote (about ${BULLET_WORD_LIMIT} is the line): "${body.slice(0, 60)}${body.length > 60 ? "…" : ""}"`);
+      // A bullet that says something (a label, or someone's words) is a
+      // sentence and ends like one. Without this the cheapest bullet was
+      // `Label: "phrase"`, stopping wherever the clipped quote stopped
+      // (Austin, 2026-10-20, THH). Name-only lines (a shelf or drawer
+      // entry with no label and no quote) are names, not sentences; an
+      // item nested under a label is a statement and counts.
+      if ((label || indented || body.match(QUOTED_RE)) && !SENTENCE_END_RE.test(body)) unfinished.push(body);
     }
     for (const [label, count] of labelCounts) {
       if (count > 1) notes.push(`"${e.name}" repeats the label ${label} ${count} times; each label once, with the items under it`);
@@ -727,6 +737,10 @@ export function sectionShapeNotes(
         notes.push(`"${e.name}" names "${e.person}"; bench headings use a first name (${firstName(e.person)})`);
       }
     }
+  }
+  if (unfinished.length > 0) {
+    const shown = unfinished.slice(0, 3).map((b) => `"${b.length > 60 ? `…${b.slice(-60)}` : b}"`).join(", ");
+    notes.push(`${unfinished.length} bullet${unfinished.length === 1 ? "" : "s"} stop${unfinished.length === 1 ? "s" : ""} without finishing the sentence (${shown}); a quote sits inside a sentence of yours, and the sentence ends with a full stop`);
   }
   return notes;
 }

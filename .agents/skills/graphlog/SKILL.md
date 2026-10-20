@@ -501,7 +501,10 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     citations, gallery lines and list markers are free), more than three
     quoted phrases in an effort, a label repeated or holding more than
     three items, a bullet with a semicolon or more than about 20 words
-    outside its quote, a bench heading naming someone outside the writers
+    outside its quote, a bullet that says something (a label, a quote, or
+    an item nested under a label) but does not end its sentence with
+    `.` `?` or `!` (2026-10-20: bullets stopped where a clipped quote
+    stopped; name-only shelf and drawer lines are exempt), a bench heading naming someone outside the writers
     list or by more than a first name, a size written as `Size:` or in
     words, an em dash, an arrow or curly quote, an underline, most bullets
     opening bold. What needs meaning to check stays in `VOICE.md`.
