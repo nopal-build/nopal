@@ -65,7 +65,6 @@ import { fitImageForVision, formatSeconds, hasFfmpeg, isVideoContentType, normal
 import {
   FILING_FRAMING,
   buildFilingContent,
-  filingFileName,
   parseFilingYaml,
   readFilingRecord,
   validateFiling,
@@ -84,6 +83,7 @@ import {
 } from "./projectN02.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { docxText, isDocx } from "./docxText.server";
+import { resolveSidecar } from "./sidecarNames";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
@@ -395,14 +395,21 @@ export async function runSyncKnowledge(
     const hash = sourceHash(source.content_hash ?? source.s3_key ?? source._id);
     const knowledgeFolder = await ensureKnowledgeFolder(source.human_id, source.folder_id);
     const { files: knowledgeFiles } = await listFolderChildren(source.human_id, knowledgeFolder._id);
-    const name = knowledgeFileName(source.name);
-    const existingListing = knowledgeFiles.find((f) => f.name === name);
-    const existing = existingListing ? await getFileRefById(existingListing._id) : undefined;
+    // Which sidecars are this file's own: a sibling that differs only by
+    // extension may hold the plain name (`sidecarNames.ts`).
+    const sidecarRefs = new Map<string, Awaited<ReturnType<typeof getFileRefById>>>();
+    const sidecarContent = async (sidecarName: string): Promise<string | null | undefined> => {
+      const listing = knowledgeFiles.find((f) => f.name === sidecarName);
+      if (!listing) return undefined;
+      if (!sidecarRefs.has(sidecarName)) sidecarRefs.set(sidecarName, await getFileRefById(listing._id));
+      return sidecarRefs.get(sidecarName)?.content ?? null;
+    };
+    const { name } = await resolveSidecar(source.name, source._id, ".knowledge.md", sidecarContent);
+    const existing = sidecarRefs.get(name) ?? undefined;
     const knowledgeUpToDate = !!existing && existingSourceHash(existing.content) === hash;
 
-    const filingName = filingFileName(source.name);
-    const existingFilingListing = knowledgeFiles.find((f) => f.name === filingName);
-    const existingFiling = existingFilingListing ? await getFileRefById(existingFilingListing._id) : undefined;
+    const { name: filingName } = await resolveSidecar(source.name, source._id, ".filing.md", sidecarContent);
+    const existingFiling = sidecarRefs.get(filingName) ?? undefined;
     const filingRecord = readFilingRecord(existingFiling?.content);
     const filingUpToDate = !filingComposed || filingRecord?.sourceHash === hash;
     if (filingComposed && filingUpToDate) filings.upToDate += 1;

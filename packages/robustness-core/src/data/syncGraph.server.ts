@@ -235,6 +235,7 @@ import {
 import { parseSyncedCardFileName, parseSyncedAttachmentFileName, syncedAttachmentFileName } from "./dailyLogSync.server";
 import { extractFileAttachments } from "./sorter.server";
 import { KNOWLEDGE_FOLDER_NAME, isDescribableAttachment } from "./syncKnowledge.server";
+import { sidecarNameToRead } from "./sidecarNames";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -493,10 +494,10 @@ async function findKnowledgeSidecar(
   const { folders } = await listFolderChildren(humanId, candidate.folderId);
   const knowledgeFolder = folders.find((f) => f.name === KNOWLEDGE_FOLDER_NAME);
   if (!knowledgeFolder) return null;
-  const dot = candidate.name.lastIndexOf(".");
-  const base = dot > 0 ? candidate.name.slice(0, dot) : candidate.name;
-  const sidecarName = `${base}.knowledge.md`;
   const { files } = await listFolderChildren(humanId, knowledgeFolder._id);
+  // A sibling that differs only by extension may hold the plain name
+  // (`sidecarNames.ts`).
+  const sidecarName = sidecarNameToRead(candidate.name, ".knowledge.md", (n) => files.some((f) => f.name === n));
   const listing = files.find((f) => f.name === sidecarName);
   return listing ? { fileId: listing._id, contentHash: listing.content_hash ?? null } : null;
 }

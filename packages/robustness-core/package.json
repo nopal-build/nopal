@@ -83,6 +83,7 @@
     "./data/sorter.server": "./src/data/sorter.server.ts",
     "./data/syncedAuthors.server": "./src/data/syncedAuthors.server.ts",
     "./data/syncApi.server": "./src/data/syncApi.server.ts",
+    "./data/sidecarNames": "./src/data/sidecarNames.ts",
     "./data/syncFiling.server": "./src/data/syncFiling.server.ts",
     "./data/syncGraph.server": "./src/data/syncGraph.server.ts",
     "./data/syncKnowledge.server": "./src/data/syncKnowledge.server.ts",

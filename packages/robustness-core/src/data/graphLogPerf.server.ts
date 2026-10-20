@@ -473,7 +473,13 @@ export async function getGraphLogRun(
     `SELECT * FROM graphlog_run_events WHERE run_id = $runId ORDER BY started_at ASC, seq ASC`,
     { runId },
   );
-  const events = (eventsResult?.[0] ?? []).map(formatRecord);
+  // Runs enqueued before ids were unique (`uniqueJobId`) can share a
+  // number with an older run whose events are still stored; only events
+  // from this run's own start on belong to it.
+  const since = run.started_at ? Date.parse(String(run.started_at)) - 60_000 : Number.NEGATIVE_INFINITY;
+  const events = (eventsResult?.[0] ?? [])
+    .map(formatRecord)
+    .filter((e) => !e.started_at || Date.parse(String(e.started_at)) >= since);
   return { run, events };
 }
 

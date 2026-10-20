@@ -873,6 +873,16 @@ export function stripChangeTags(body: string): string {
     .join("\n");
 }
 
+/** The page with no `# ` title line. The Efforts tab already sits inside
+ * the project, and the model was never told the project's name, so a
+ * title was always a guess: Sunny's page came back as "# Crouch", the
+ * one place-name in its logs, which is also another project's name.
+ * Code owns this, the skill only says so. `##` and deeper are left. */
+export function stripTitleLines(body: string): string {
+  const kept = body.split("\n").filter((raw) => !/^#\s/.test(raw.trim()));
+  return kept.join("\n").replace(/^\s*\n/, "");
+}
+
 /** The date a previously written `Graph/efforts.md` was written for, and
  * the threads it left without an effort, or null when unreadable. What
  * the readings block turns into "since the page was last written" and
