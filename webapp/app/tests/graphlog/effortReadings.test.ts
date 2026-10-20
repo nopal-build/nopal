@@ -36,6 +36,7 @@ import {
   speedLabel,
   splitHeading,
   stripChangeTags,
+  stripTitleLines,
   unknownThreadNames,
   withChangeTags,
   RECENT_WINDOW_DAYS,
@@ -323,6 +324,14 @@ describe("round 2: the page as a list", () => {
     expect(stripChangeTags(tagged)).toBe("## On the bench\n### Gerald · Cladding\n- Now: x\n### Lucas · Inside\n- Now: y\n");
     expect(readEffortsSidecar("no block here")).toBeNull();
     expect(readEffortsSidecar(null)).toBeNull();
+  });
+
+  it("the page has no title: a `# ` line comes off, `##` and deeper stay", () => {
+    // Sunny's page came back titled with another project's name: the
+    // model is never told its own, so any title it writes is a guess.
+    expect(stripTitleLines("# Crouch\n\nThe roof is days out.\n\n## Regroup\ntext")).toBe("The roof is days out.\n\n## Regroup\ntext");
+    expect(stripTitleLines("The roof.\n## On the bench\n### Gerald · Battens · M\n- Now: x")).toBe("The roof.\n## On the bench\n### Gerald · Battens · M\n- Now: x");
+    expect(stripTitleLines("#hashtag stays\n# Title goes")).toBe("#hashtag stays");
   });
 });
 

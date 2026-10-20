@@ -142,6 +142,7 @@ import {
   removedEfforts,
   sectionShapeNotes,
   stripChangeTags,
+  stripTitleLines,
   type EffortDescription,
 } from "./effortReadings.server";
 import { normalizeHeadingSpacing } from "oxmarkdown-core";
@@ -310,8 +311,8 @@ const BUILT_IN_ORDER: readonly string[] = [
  * ("## On the two lanes", "## Get shit done is a surface, not an
  * assignment") that a naive scan would take for sections. The fence is
  * an unambiguous delimiter; inside it `splitReadmeSections` does the same
- * work it does on a README, and `# <Project>` falls into the intro
- * (heading `""`) the way an intro is represented everywhere else.
+ * work it does on a README, and the opening placeholder falls into the
+ * intro (heading `""`) the way an intro is represented everywhere else.
  */
 export function parseSectionShape(skill: string | null | undefined): string[] {
   if (!skill) return [];
@@ -722,7 +723,8 @@ function createReadmeExecutors(input: {
       // The model's own blank lines are not a person's: whatever it sent
       // around a heading or at either end would become the page's spacing.
       // One line above every heading, none under it (`normalizeHeadingSpacing`).
-      const content = normalizeHeadingSpacing(toolInput.content);
+      // And no `# ` title: the page has none (`stripTitleLines`).
+      const content = normalizeHeadingSpacing(stripTitleLines(toolInput.content));
       const key = heading.toLowerCase();
 
       // A section holds its BODY, never headings of its own. The README is
@@ -2007,10 +2009,12 @@ export async function runGraphProjectView(
   const rawReadmeContent = readmeFile?.content ?? "";
   // Change tags come off with the banner, for the same reason: a mark the
   // model can see is a mark it can copy forward, and a copied `{moved}`
-  // would say something moved when nothing did.
+  // would say something moved when nothing did. A `# ` title comes off
+  // too (`stripTitleLines`), which is how a page written before the
+  // skill dropped it loses its guessed title on its next rebuild.
   const initialContent = withReadmeBody(
     rawReadmeContent,
-    stripChangeTags(stripIncompleteBanner(splitFrontmatter(rawReadmeContent).body)),
+    stripTitleLines(stripChangeTags(stripIncompleteBanner(splitFrontmatter(rawReadmeContent).body))),
   );
 
   // Pull out any unstamped reader comments from a "Notes on this view"

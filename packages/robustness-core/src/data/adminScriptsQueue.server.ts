@@ -14,6 +14,7 @@
  */
 
 import { Queue } from "bullmq";
+import { uniqueJobId } from "./graphLogQueue.server";
 import IORedis from "ioredis";
 
 let connection: IORedis | undefined;
@@ -56,7 +57,8 @@ const JOB_OPTIONS = {
 };
 
 export async function enqueueAdminScriptJob(data: AdminScriptJobData): Promise<string> {
-  const job = await getAdminScriptsQueue().add(data.scriptName, data, JOB_OPTIONS);
+  // Unique without Redis's counter; see `uniqueJobId`.
+  const job = await getAdminScriptsQueue().add(data.scriptName, data, { ...JOB_OPTIONS, jobId: uniqueJobId(data.scriptName) });
   if (!job.id) throw new Error("Failed to enqueue admin script job");
   return job.id;
 }

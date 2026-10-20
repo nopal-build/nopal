@@ -36,8 +36,9 @@ import { parseGraphLogNodes, type GraphLogNode } from "./graphNodeIndex.server";
 import { nodeIdsInSection } from "./graphStructure.server";
 import { splitFrontmatter, splitReadmeSections } from "./project.types";
 import { findProjectGraphFolder } from "./projectN02.server";
-import { filingFileName, filingValuesHash, isCostKind, readFilingRecord, type Filing, type FilingKind, type FilingSource } from "./syncFiling.server";
-import { KNOWLEDGE_FOLDER_NAME, knowledgeFileName } from "./syncKnowledge.server";
+import { filingValuesHash, isCostKind, readFilingRecord, type Filing, type FilingKind, type FilingSource } from "./syncFiling.server";
+import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
+import { sidecarNameToRead } from "./sidecarNames";
 import { findSeedDocumentsFolder, linkSeedNames, parseSeedDocument, seedMembers } from "./seed.server";
 import { listPacketFiles } from "./seedPackets.server";
 import { getFileRefListingsByIds, getFileRefsByFolderIds, listFolderChildren, type VaultFolder } from "./vault.server";
@@ -327,9 +328,12 @@ export function projectFileRows(input: FileFoldersInput): ProjectFileRow[] {
     copyName: string;
   }): ProjectFileRow => {
     const { copyName, serveId } = input2;
-    const knowledge = knowledgeByName.get(knowledgeFileName(copyName)) ?? null;
+    // A sibling that differs only by extension may hold the plain
+    // sidecar name (`sidecarNames.ts`).
+    const has = (n: string) => knowledgeByName.has(n);
+    const knowledge = knowledgeByName.get(sidecarNameToRead(copyName, ".knowledge.md", has)) ?? null;
     const description = knowledge ? splitFrontmatter(knowledge).body.trim() || null : null;
-    const filingRecord = readFilingRecord(knowledgeByName.get(filingFileName(copyName)));
+    const filingRecord = readFilingRecord(knowledgeByName.get(sidecarNameToRead(copyName, ".filing.md", has)));
     const filing = filingRecord?.filing ?? null;
     const filingSource = filingRecord?.describedFrom ?? null;
 

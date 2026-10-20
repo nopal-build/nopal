@@ -6,6 +6,7 @@
  * queue rather than an in-request call.
  */
 
+import { randomBytes } from "node:crypto";
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import {
@@ -82,10 +83,51 @@ export function graphLogJobPriority(name: GraphLogJobName): number {
   return name === "print" || name === "sow" ? 1 : 10;
 }
 
+/** A job id that is unique without Redis's help. A job's id doubles as
+ * its run's id (`graphlog_runs`, `admin_script_runs`), and BullMQ's own
+ * ids are a counter kept in Redis: when production's Redis lost its data
+ * on 2026-10-20 the counter restarted at 1, each new run overwrote the
+ * row of the old run with the same number, and inherited that run's
+ * events. Name, UTC time to the second, and six random hex characters:
+ * `run-20261020T204500-3f9a1c`. */
+export function uniqueJobId(name: string, now: Date = new Date()): string {
+  const stamp = now.toISOString().replace(/[-:]/g, "").slice(0, 15);
+  return `${name}-${stamp}-${randomBytes(3).toString("hex")}`;
+}
+
 export async function enqueueGraphLogJob(name: GraphLogJobName, data: GraphLogJobData): Promise<string> {
-  const job = await getGraphLogQueue().add(name, data, { ...JOB_OPTIONS, priority: graphLogJobPriority(name) });
+  const job = await getGraphLogQueue().add(name, data, { ...JOB_OPTIONS, priority: graphLogJobPriority(name), jobId: uniqueJobId(name) });
   if (!job.id) throw new Error("Failed to enqueue GraphLog job");
   return job.id;
+}
+
+/** The nightly's job id for one project on one night. Every fruits
+ * machine runs the midnight cron (`server.js`; production keeps two), so
+ * the nightly used to be enqueued once per machine and every project ran
+ * twice. The `running` guard in `api.graphlog.scheduled-run.tsx` cannot
+ * catch it: a run row only exists once the worker picks a job up, and the
+ * second machine asks while the first job still waits in the queue. The
+ * night is the UTC date six hours after now, so two machines firing a few
+ * seconds either side of midnight still name the same night. */
+export function nightlyGraphLogJobId(projectFolderId: string, now: Date = new Date()): string {
+  const night = new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return `nightly-${projectFolderId}-${night}`;
+}
+
+/** Enqueues the nightly `"run"` for one project under its fixed id
+ * (`nightlyGraphLogJobId`). BullMQ ignores an add whose id is already in
+ * the queue, and a finished job keeps its id for a day
+ * (`removeOnComplete`), so a second machine's add is a no-op whether the
+ * first job is waiting, running or done. `duplicate` says which. */
+export async function enqueueNightlyGraphLogJob(
+  data: GraphLogJobData,
+  now: Date = new Date(),
+  queue: Pick<Queue<GraphLogJobData, unknown, GraphLogJobName>, "getJob" | "add"> = getGraphLogQueue(),
+): Promise<{ jobId: string; duplicate: boolean }> {
+  const jobId = nightlyGraphLogJobId(data.projectFolderId, now);
+  if (await queue.getJob(jobId)) return { jobId, duplicate: true };
+  await queue.add("run", data, { ...JOB_OPTIONS, priority: graphLogJobPriority("run"), jobId });
+  return { jobId, duplicate: false };
 }
 
 export type GraphLogJobStatus =

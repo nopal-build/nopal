@@ -124,7 +124,13 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   Cards themselves — see `collectSyncCandidates`) and asks an AI, per
   `skills/KNOWLEDGE.md`, to pull concrete extractable metadata (names,
   dates, decisions — not a narrative summary) into a
-  `_knowledge/<name>.knowledge.md` sidecar next to the source file. A
+  `_knowledge/<name>.knowledge.md` sidecar next to the source file
+  (`<name>` without its extension; when a sibling that differs only by
+  extension already owns that name, per the sidecar's `source:`, the
+  extension is kept: `run-1.csv.knowledge.md`. Readers open the
+  extension-keeping name when it exists. `sidecarNames.ts`, 2026-10-20,
+  after Hot box's `run-N.md`/`.csv` pairs overwrote each other every
+  night). A
   photo is one vision call; a HEIC/HEIF is converted to JPEG first; a
   video is a few evenly spaced still frames described as a sequence
   (`attachmentFrames.server.ts`, ffmpeg via `ffmpeg-static`, frames only,
@@ -938,7 +944,11 @@ record id (`worker.ts`'s `processGraphLogJob` calls
   off.
 - `/maker/graphlog`'s "Recent Runs" section lists recent runs
   (`listRecentGraphLogRuns`); each links to
-  `/maker/graphlog/runs/$runId` (`getGraphLogRun`) — a full
+  `/maker/graphlog/runs/$runId` (`getGraphLogRun`; a run's id is its
+  job's id, `uniqueJobId` since 2026-10-20, e.g.
+  `run-20261020T204500-3f9a1c`, because BullMQ's own counter restarted
+  at 1 when production's Redis lost its data; events earlier than a
+  run's start are left off its timeline) — a full
   timeline, one row per event ordered by actual start time, with a
   right-aligned duration bar (max 33% of the row's width). A row with
   `params.text` renders it in a collapsed `<details>`/`<summary>`.
@@ -1014,7 +1024,10 @@ runs in-process from the checkout and never has this problem.
   (`msUntilNextMidnight()` — unlike the other crons, which just repeat
   every 24h from server start), same `CRON_SECRET` bearer-token
   protection, hitting `POST /api/graphlog/scheduled-run` which fans out
-  one normal `"run"` job per scheduled project (`actingHumanId` set to
+  one normal `"run"` job per scheduled project, under a fixed id per
+  project per night (`enqueueNightlyGraphLogJob`, `nightly-<folder>-<date>`):
+  every fruits machine runs this cron (production keeps two), and the
+  second machine's add is a no-op (`actingHumanId` set to
   the project's own `human_id`, since no human is present to attribute
   the run to). No separate "fresh vs incremental" mode was needed —
   every one of the five stages already decides for itself whether it has

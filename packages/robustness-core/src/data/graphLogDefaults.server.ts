@@ -458,7 +458,7 @@ The page tracks, and the person decides. It is a living page, rewritten as the g
 
 # The opening
 
-The page opens with a paragraph, no label and no heading: three or four sentences, the one place on the page that reasons across the whole project rather than reporting one entry at a time. It has three jobs, and a fourth when it is worth saying.
+The page opens with a paragraph, no label and no heading, not even the project's name: the reader is already in the project, and code takes off any \`# \` line you send. Three or four sentences, the one place on the page that reasons across the whole project rather than reporting one entry at a time. It has three jobs, and a fourth when it is worth saying.
 
 - **Where we stand,** in one sentence anyone on the team would agree with. The shape of the climb, not the list of tasks.
 - **The tension:** two things pulling against each other.
@@ -480,8 +480,6 @@ An effort is what its citations say it is: code reads the threads behind an effo
 A list, not an essay. The same labels in the same order on every effort, each label once, so the eye learns where to look. A slot with nothing true to say is left out.
 
 \`\`\`markdown
-# <Project>
-
 <The opening: where we stand, the tension, the blind spot, what moved. Three or four sentences. No label.>
 
 One ask: <the question the blind spot raises>

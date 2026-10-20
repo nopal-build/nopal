@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getGraphLogScheduledFolders } from "robustness-core/data/graphLogSchedule.server";
-import { enqueueGraphLogJob, getGraphLogProjectStatus } from "robustness-core/data/graphLogQueue.server";
+import { enqueueNightlyGraphLogJob, getGraphLogProjectStatus } from "robustness-core/data/graphLogQueue.server";
 
 /**
  * POST /api/graphlog/scheduled-run
@@ -20,6 +20,10 @@ import { enqueueGraphLogJob, getGraphLogProjectStatus } from "robustness-core/da
  * disk, so a brand new or just-reset project does a full first pass here
  * and an existing one only picks up what's new — see
  * `graphLogSchedule.server.ts`'s module doc.
+ *
+ * Every fruits machine calls this at midnight (production runs two), so
+ * each project's job carries a fixed id for the night and a second call
+ * enqueues nothing (`enqueueNightlyGraphLogJob`).
  *
  * Each project is enqueued as its own independent job, `actingHumanId`
  * set to the project's own owner (`human_id`) since no human is actually
@@ -51,6 +55,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   let enqueued = 0;
   let skippedAlreadyRunning = 0;
+  let skippedAlreadyQueued = 0;
   const errors: string[] = [];
 
   for (const folder of folders) {
@@ -63,10 +68,16 @@ export async function action({ request }: ActionFunctionArgs) {
         skippedAlreadyRunning++;
         continue;
       }
-      await enqueueGraphLogJob("run", {
+      // One job per project per night, however many machines ask
+      // (`enqueueNightlyGraphLogJob`).
+      const { duplicate } = await enqueueNightlyGraphLogJob({
         actingHumanId: folder.human_id,
         projectFolderId: folder._id,
       });
+      if (duplicate) {
+        skippedAlreadyQueued++;
+        continue;
+      }
       enqueued++;
     } catch (err) {
       const msg = `Failed to enqueue ${folder._id} (${folder.name}): ${err instanceof Error ? err.message : String(err)}`;
@@ -76,8 +87,8 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   console.log(
-    `graphlog/scheduled-run: enqueued ${enqueued}/${folders.length} project(s)${skippedAlreadyRunning ? `, ${skippedAlreadyRunning} already running` : ""}${errors.length ? `, ${errors.length} errors` : ""}`,
+    `graphlog/scheduled-run: enqueued ${enqueued}/${folders.length} project(s)${skippedAlreadyRunning ? `, ${skippedAlreadyRunning} already running` : ""}${skippedAlreadyQueued ? `, ${skippedAlreadyQueued} already queued tonight` : ""}${errors.length ? `, ${errors.length} errors` : ""}`,
   );
 
-  return Response.json({ enqueued, total: folders.length, skippedAlreadyRunning, errors });
+  return Response.json({ enqueued, total: folders.length, skippedAlreadyRunning, skippedAlreadyQueued, errors });
 }
