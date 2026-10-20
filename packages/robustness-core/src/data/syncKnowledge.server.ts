@@ -83,6 +83,7 @@ import {
   readSkillFingerprint,
 } from "./projectN02.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
+import { docxText, isDocx } from "./docxText.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
 import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
@@ -414,6 +415,22 @@ export async function runSyncKnowledge(
         downloadFileBytes(source.s3_key!),
       ));
 
+    /** What the text path reads: a text file's own stored content, or the
+     * words of a Word file read by code (`docxText.server.ts`, 2026-10-20;
+     * before that a `.docx` was kept as a file and had no path into the
+     * graph). Null for anything else. Resolved once, only when a step
+     * needs it, same shape as `getBytes`. */
+    let textCache: string | null | undefined;
+    const getText = async (): Promise<string | null> => {
+      if (textCache !== undefined) return textCache;
+      if (source.content) return (textCache = source.content);
+      if (!isDocx(source)) return (textCache = null);
+      const text = docxText(await getBytes());
+      if (text) log(`sync-knowledge: "${source.name}" is a Word file; its text was read by code (${text.length} characters).`);
+      else log(`sync-knowledge: "${source.name}" is a Word file with no readable text, kept as a file.`);
+      return (textCache = text);
+    };
+
     /** The description the filing call is given as context: the sidecar
      * body, whether it was just written or already there. */
     let descriptionForFiling: string | null = null;
@@ -455,6 +472,7 @@ export async function runSyncKnowledge(
             : "text-knowledge";
       const callStart = Date.now();
       try {
+        const text = isImage || isVideo || isPdf ? null : await getText();
         if (isImage || isVideo || isPdf) {
           photoLlm ??= AnthropicProvider.forStage("sync-knowledge");
           const bytes = await getBytes();
@@ -540,7 +558,11 @@ export async function runSyncKnowledge(
             params: { fileId: source._id, name: source.name, ...extraMeta },
             durationMs,
           });
-        } else if (source.content) {
+        } else if (text) {
+          // A text file's own content, or a Word file's words (`getText`).
+          // The sidecar says which, so a reader knows the text was read by
+          // code from a binary rather than stored as the file itself.
+          if (!source.content) extraMeta = { describedFrom: "docx" };
           textLlm ??= AnthropicProvider.forStage("sync-knowledge");
           const cacheSystemPrompt = realTextCallsSoFar > 0;
           realTextCallsSoFar++;
@@ -549,7 +571,7 @@ export async function runSyncKnowledge(
             messages: [
               {
                 role: "user",
-                content: `File name: ${source.name}\n\nFile content:\n\n${source.content}`,
+                content: `File name: ${source.name}\n\nFile content:\n\n${text}`,
               },
             ],
             tools: [],
@@ -707,8 +729,18 @@ export async function runSyncKnowledge(
     // which is already written; the file is simply asked again next run.
     photoLlm ??= AnthropicProvider.forStage("sync-knowledge");
     textLlm ??= AnthropicProvider.forStage("sync-knowledge");
+    // A Word file is filed from its words, like a text file; `getText`
+    // may have to download it, and a download failure here is the same
+    // "asked again next run" as any other filing failure.
+    let filingText: string | null;
+    try {
+      filingText = await getText();
+    } catch (err) {
+      log(`sync-knowledge: "${source.name}" could not be read for filing (${err instanceof Error ? err.message : "unknown error"}); asked again next run.`);
+      continue;
+    }
     const outcome = await fileAttachment({
-      source,
+      source: { ...source, content: filingText },
       hash,
       getBytes,
       description: descriptionForFiling,
@@ -774,6 +806,28 @@ const PDF_DESCRIPTION_FRAMING = `You are reading a PDF that was attached to a pr
 
 function isReadablePdf(source: { content_type: string; s3_key: string | null; size?: number | null }): boolean {
   return source.content_type === "application/pdf" && !!source.s3_key && (source.size ?? 0) <= PDF_MAX_BYTES;
+}
+
+/**
+ * Whether this stage can read an attachment at all: an image or a video
+ * in storage, a PDF under the ceiling, a Word file, or a file with stored
+ * text. Everything else is kept as a file, not read, and no retry changes
+ * that. `sync-graph` asks this when a file reaches it with neither a
+ * caption nor a description, so the INCOMPLETE line can say what would
+ * fix it instead of pointing at KNOWLEDGE.md (2026-10-20: a `.docx` in a
+ * seed packet drew "KNOWLEDGE.md turned on fixes this" on a project where
+ * it was on).
+ */
+export function isDescribableAttachment(source: {
+  content_type: string;
+  name: string;
+  s3_key: string | null;
+  size?: number | null;
+  content: string | null;
+}): boolean {
+  if (!!source.content) return true;
+  if (!source.s3_key) return false;
+  return isImageContentType(source.content_type) || isVideoContentType(source.content_type) || isReadablePdf(source) || isDocx(source);
 }
 
 type FileAttachmentOutcome = "written" | "rejected" | "unsupported" | "error";

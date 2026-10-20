@@ -234,7 +234,7 @@ import {
 } from "./projectN02.server";
 import { parseSyncedCardFileName, parseSyncedAttachmentFileName, syncedAttachmentFileName } from "./dailyLogSync.server";
 import { extractFileAttachments } from "./sorter.server";
-import { KNOWLEDGE_FOLDER_NAME } from "./syncKnowledge.server";
+import { KNOWLEDGE_FOLDER_NAME, isDescribableAttachment } from "./syncKnowledge.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -347,6 +347,55 @@ type GraphCandidate = {
   contentHash: string | null;
   folderId: string;
 };
+
+/** One attached file a day's extraction had to pass over: nobody
+ * captioned it and nothing described it. `describable` is sync-knowledge's
+ * own answer to "could I ever read this" (`isDescribableAttachment`);
+ * `captionable` is false for a seed file, which has no caption field. */
+export type UncaptionedFile = { name: string; describable: boolean; captionable: boolean };
+
+function fileExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 && dot < name.length - 1 ? `.${name.slice(dot + 1).toLowerCase()}` : "(no extension)";
+}
+
+/**
+ * The INCOMPLETE line for a day's uncaptioned, undescribed attachments.
+ * It used to end "(a caption on the file, or KNOWLEDGE.md turned on,
+ * fixes this)" whatever the cause. On 2026-10-20 This Healthy House's
+ * page said that about a `.docx` in its seed packet: KNOWLEDGE.md was on,
+ * a seed file takes no caption, and nothing read Word files. Neither fix
+ * applied. The line now says which of three things is true: the stage is
+ * off, the file is a kind nothing here reads, or the stage is on and can
+ * read it (so the next run should, and if it doesn't the run page has
+ * the stage's own lines). A reader who follows this line should land on
+ * the fix.
+ *
+ * This is a sentence a client reads at the top of their Efforts page, so
+ * it is written the way we talk, with no code names beyond the one file
+ * (`skills/KNOWLEDGE.md`) a person would actually open.
+ */
+export function uncaptionedReason(input: { date: string; files: UncaptionedFile[]; knowledgeOn: boolean }): string {
+  const { date, files, knowledgeOn } = input;
+  const shown = files.slice(0, 3).map((f) => `"${f.name}"`);
+  const names = shown.join(", ") + (files.length > 3 ? `, and ${files.length - 3} more` : "");
+  const head = `${date}: ${files.length} attached file(s) had neither a caption nor a description, so they never became nodes: ${names}.`;
+  const anyCaptionable = files.some((f) => f.captionable);
+  const captionClause = anyCaptionable ? " A caption on the file, written by whoever attached it, is the other way in." : "";
+
+  if (!knowledgeOn) {
+    return `${head} skills/KNOWLEDGE.md is off (missing, or its first line is "skip"), so no file is described; turning it on describes them on the next run.${captionClause}`;
+  }
+  const unreadable = files.filter((f) => !f.describable);
+  if (unreadable.length === 0) {
+    return `${head} KNOWLEDGE.md is on and these are kinds it reads, so the next run should describe them; if this line stays, the run page's sync-knowledge lines say why.${captionClause}`;
+  }
+  const kinds = [...new Set(unreadable.map((f) => fileExtension(f.name)))].join(", ");
+  if (unreadable.length === files.length) {
+    return `${head} Nothing here reads a ${kinds} file, and no retry changes that; re-add it as a PDF, or paste its text as a document.${captionClause}`;
+  }
+  return `${head} ${files.length - unreadable.length} of them KNOWLEDGE.md reads, so the next run should describe those; nothing here reads the other ${unreadable.length} (${kinds}): re-add as a PDF, or paste the text as a document.${captionClause}`;
+}
 
 /** Walks a project's `syncs/` tree recursively, collecting every file
  * that carries a `date` — skipping `_knowledge/` folders (their own
@@ -1379,6 +1428,10 @@ export async function runSyncGraph(
   if (!isGraphLogAgentConfigured()) {
     return { ok: false, error: "GraphLog isn't configured (missing ANTHROPIC_API_KEY)" };
   }
+  // Read once, for the INCOMPLETE line below (`uncaptionedReason`): whether
+  // sync-knowledge was ever going to describe an attachment on this
+  // project. Not a gate on anything here.
+  const knowledgeOn = !isSkipInstruction(await getProjectStageSkill(projectFolder, "KNOWLEDGE.md"));
 
   const { folders } = await listFolderChildren(projectFolder.human_id, projectFolder._id);
   const syncsFolder = folders.find((f) => f.is_folder_type_root && f.folder_type === "syncs");
@@ -1570,7 +1623,9 @@ export async function runSyncGraph(
     // if the model passes it over, the rule marks already follow.
     const sourceSeed: ({ humanAuthored: boolean } | null)[] = [];
     const sourceNotedTexts: (string[] | null)[] = [];
-    let uncaptionedSkipped = 0;
+    /** Attached files this day with neither a caption nor a description,
+     * and what would give each one a path in; see `uncaptionedReason`. */
+    const uncaptioned: UncaptionedFile[] = [];
     // Whether any source this day holds anything at all. A day whose only
     // entry was moved to another project keeps an empty synced copy (see
     // `graphLogMoves.server.ts`), and that day has to leave the graph.
@@ -1609,7 +1664,9 @@ export async function runSyncGraph(
           seedSources = [buildSeedDocumentSource({ fileId: source._id, name: candidate.name, meta, links, memberNames: seedMemberNames, fileDate: date })];
         } else {
           if (!knowledgeContent) {
-            uncaptionedSkipped++;
+            // A seed file has no caption field, so a description is its
+            // only way in.
+            uncaptioned.push({ name: candidate.name, describable: isDescribableAttachment(source), captionable: false });
             continue;
           }
           seedFileInfo = { fileId: source._id, name: candidate.name, contentType: source.content_type };
@@ -1658,7 +1715,7 @@ export async function runSyncGraph(
       // enough sources of grounding. The Card's own text content is
       // never skipped this way.
       if (attribution.isAttachment && !knowledgeContent && !caption) {
-        uncaptionedSkipped++;
+        uncaptioned.push({ name: candidate.name, describable: isDescribableAttachment(source), captionable: true });
         continue;
       }
 
@@ -1711,7 +1768,7 @@ export async function runSyncGraph(
       );
     }
 
-    if (uncaptionedSkipped > 0) {
+    if (uncaptioned.length > 0) {
       // Deliberate (a file with neither a human caption nor a description
       // is nothing to ground a node in), and until now completely
       // unreported: no counter, no log, no `incomplete`. A project with
@@ -1721,8 +1778,9 @@ export async function runSyncGraph(
       // Reported once per day, not once per file, so a photo-heavy day
       // is one line.
       // The banner says "will retry on the next run"; a retry does not fix
-      // this one, a person does, so the line says what would.
-      const reason = `${date}: ${uncaptionedSkipped} attached file(s) had neither a caption nor a description, so they never became nodes (a caption on the file, or KNOWLEDGE.md turned on, fixes this)`;
+      // this one, a person does, so the line says what would -- and says
+      // it per cause, not generically (`uncaptionedReason`).
+      const reason = uncaptionedReason({ date, files: uncaptioned, knowledgeOn });
       incomplete.push(reason);
       log(`sync-graph: ${reason}.`);
     }
