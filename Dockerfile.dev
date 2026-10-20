@@ -28,4 +28,11 @@ RUN apt-get update -qq && \
 
 RUN corepack enable pnpm
 
+# The services run as the host user, not root (bin/dev-as-host-user.sh),
+# and that uid may have no home in this image (501 on a Mac). Give
+# corepack (which downloads pnpm on first use) and pnpm's own caches a
+# home any uid can write to.
+ENV HOME=/home/dev COREPACK_HOME=/opt/corepack
+RUN mkdir -p /home/dev /opt/corepack && chmod 1777 /home/dev /opt/corepack
+
 WORKDIR /app

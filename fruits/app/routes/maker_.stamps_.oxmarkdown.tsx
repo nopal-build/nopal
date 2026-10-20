@@ -35,6 +35,7 @@ import OxEditor from "../components/OxEditor";
 import type { DirectiveRegistry } from "../oxmarkdown/directiveRegistry";
 import type { MentionItem, MentionSearch } from "oxmarkdown-core";
 import { surfaceBase } from "stamps/surface.css";
+import { sprinkles } from "stamps/sprinkles.css";
 import { ErrorPanel } from "stamps/ErrorPanel";
 import { CenterContent } from "stamps/CenterContent";
 import { link } from "stamps/link.css";
@@ -851,9 +852,37 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "Headings: one line above, none below unless someone typed it",
+    body: (
+      <>
+        Austin, 2026-10-20: one deliberate line between text and a heading, and no line between
+        a heading and its body that nobody entered. Expressed in the literal spacer model, not
+        CSS: <code>blankLineUnits</code> (<code>oxmarkdown-core</code>) is the file's own
+        blank-line count between two blocks, raised to at least one when the second is a
+        heading. Both <code>OxRenderer</code> copies (this app and the website) call it.
+        Editing mode stays literal, since a forced line there would be a row that isn't in
+        the file. Saving never adds a line either: the editor saves a heading with its body
+        directly under it as written, and an Interacting-mode click re-saves with{" "}
+        <code>sourceBlankLineJoin</code>, keeping every blank line the file already had.
+        GraphLog's Efforts writer runs the model's sections through{" "}
+        <code>normalizeHeadingSpacing</code>, since a model's stray blank lines are not a
+        person's. See the Heading spacing section below.
+      </>
+    ),
+  },
 ];
 
 // ─── Sample content for the playground ──────────────────────────────────────────────────────────────────
+
+const HEADING_SPACING_SAMPLE = `# Title
+Opening line, straight under the heading.
+## Runs into a heading
+This text was typed with no blank line above the heading.
+
+## A typed line under this one
+
+The blank line under this heading was typed, so it shows.`;
 
 const DEFAULT_SAMPLE = `# Try editing this
 
@@ -1113,6 +1142,21 @@ export default function OxMarkdownStyles() {
                 colorAccent: colorAccent || undefined,
               }}
             />
+          </div>
+        </Section>
+
+        <Section id="heading-spacing" title="Heading spacing">
+          <p className="text-sm subtle-text mb-4">
+            One line above every heading that follows other content, even when the file has
+            none. Under a heading, only the lines someone typed.
+          </p>
+          <Label>Source</Label>
+          <pre className={`${surfaceBase} ${sprinkles({ p: 4, fontFamily: "mono" })}`} style={{ whiteSpace: "pre-wrap" }}>
+            {HEADING_SPACING_SAMPLE}
+          </pre>
+          <Label>Rendered (OxRenderer)</Label>
+          <div className={`${surfaceBase} p-4`}>
+            <OxRenderer markdown={HEADING_SPACING_SAMPLE} />
           </div>
         </Section>
 

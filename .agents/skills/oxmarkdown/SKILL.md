@@ -345,7 +345,29 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
     re-expressing in terms of the literal `.ox-blank-line-spacer` model
     above instead (e.g. collapsing/forcing specific spacer counts around a
     heading or list) — see the matching NOTE in both `oxmarkdown.css`
-    copies.
+    copies. **Resolved for headings (2026-10-20), exactly that way:**
+    - **Reading surfaces**: `blankLineUnits` (`oxmarkdown-core`) is
+      `countBlankLines`, raised to at least 1 when the NEXT block is a
+      heading. Both `OxRenderer` copies' `renderBlockNodes` call it. So
+      there is one line above any heading that follows content, even when
+      the file has none, and below a heading stays literal. A heading
+      opening its container gets nothing. Two or more typed lines above
+      are kept.
+    - **Editing mode** stays literal (`countBlankLines`): a forced line
+      there would be a row not in the file.
+    - **Saving adds no lines**: `blankLineJoin` returns 0 for a heading
+      directly against a real block (the default join used to save
+      `## H\nbody` as `## H\n\nbody`, which then reloaded as a phantom row).
+      Interacting-mode `commit()` serializes with `sourceBlankLineJoin`,
+      which reuses the source's own count, so a checkbox click no longer
+      reformats the file.
+    - **Model-written pages**: GraphLog's Efforts `update_section` runs the
+      model's content through `normalizeHeadingSpacing` (one line above a
+      heading, none under, ends trimmed), and `joinReadmeSections` puts a
+      blank line before each `## ` it writes.
+    - Lists keep no fixed rhythm; nobody has asked for one since.
+    - Tests: `fruits/app/tests/headingSpacing.test.tsx`,
+      `webapp/app/tests/headingSpacing.test.tsx`.
   - **`ox-plain` (2026-09-28): pages the skills write render on plain
     paper.** No dot grid and no heading/blockquote gutter glyphs; list
     markers stay. `ProjectView` (the Efforts page) passes it; a daily log,

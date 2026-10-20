@@ -530,7 +530,7 @@ Sizes: XS an hour · S a day or two · M a week of one person, or a few people f
 
 # Evidence
 
-One bullet is one fact or one move. Every bullet doing work carries its node's \`:ref{...}\` directive, copied exactly as it appears on the node. Two or three quoted phrases in an effort is normal; six is a wall. Your own words say what happened; the person's own words appear inside them as the phrases that cannot be paraphrased, and never paraphrase where the phrasing is the point. Where two people arrived at the same thing in different words, two short phrases side by side show it happened.
+One bullet is one fact or one move, and it is a sentence: it finishes its thought and ends with a full stop. A quoted phrase sits inside your sentence; never end a bullet where a clipped quote ends. Every bullet doing work carries its node's \`:ref{...}\` directive, copied exactly as it appears on the node. Two or three quoted phrases in an effort is normal; six is a wall. Your own words say what happened; the person's own words appear inside them as the phrases that cannot be paraphrased, and never paraphrase where the phrasing is the point. Where two people arrived at the same thing in different words, two short phrases side by side show it happened.
 
 A node grounded only in an AI description of a file carries no \`==\` marks and says so. Cite it, show its photo, never quote it or attribute it to a person. A node's photo or video belongs with the effort its words land in, inside one \`:::gallery{}...:::\` block per effort, the image line copied exactly. Never describe a photo instead of showing it.
 

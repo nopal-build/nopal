@@ -60,6 +60,9 @@ services:
     environment:
       NODE_ENV: development
       CI: "true"
+      # Who the container runs as (bin/dev-as-host-user.sh); set by the Makefile.
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
       DATABASE_URL: http://db:8080/rpc
       DATABASE_USERNAME: ${APP_USER:-root}
       DATABASE_PASSWORD: ${APP_PASS:-root}
@@ -79,7 +82,7 @@ services:
       # the Caddy-fronted https://o.nopal.dev (WebAuthn needs a secure
       # context) -- see the repo-root Caddyfile.
       APP_BASE_URL: https://o.nopal.dev
-    command: sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter remix run dev"
+    command: /app/bin/dev-as-host-user.sh sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter remix run dev"
     # Hits the real dev server, so `docker compose up --wait` (used by
     # `make dev`) actually blocks until `pnpm install` AND `server.js` are
     # both done, not just until the container process has started. Without
@@ -129,6 +132,9 @@ services:
     environment:
       NODE_ENV: development
       CI: "true"
+      # Who the container runs as (bin/dev-as-host-user.sh); set by the Makefile.
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
       DATABASE_URL: http://db:8080/rpc
       DATABASE_USERNAME: ${APP_USER:-root}
       DATABASE_PASSWORD: ${APP_PASS:-root}
@@ -141,7 +147,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
-    command: sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter fruits run dev"
+    command: /app/bin/dev-as-host-user.sh sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter fruits run dev"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
       interval: 3s
@@ -194,6 +200,9 @@ services:
     environment:
       NODE_ENV: development
       CI: "true"
+      # Who the container runs as (bin/dev-as-host-user.sh); set by the Makefile.
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
       DATABASE_URL: http://db:8080/rpc
       DATABASE_USERNAME: ${APP_USER:-root}
       DATABASE_PASSWORD: ${APP_PASS:-root}
@@ -204,7 +213,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
-    command: sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter worker run dev"
+    command: /app/bin/dev-as-host-user.sh sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter worker run dev"
     # worker has no HTTP server to curl, so this checks for vite-node's
     # bin instead — a reliable stand-in for "pnpm install finished" (the
     # same install step webapp's healthcheck is really waiting out too).

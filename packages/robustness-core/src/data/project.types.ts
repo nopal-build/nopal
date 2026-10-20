@@ -417,11 +417,16 @@ export function splitReadmeSections(body: string): ReadmeSection[] {
 
 /** Inverse of `splitReadmeSections` -- reassembles a README body from its
  * sections, in array order. The intro (`heading: ""`) never gets a `##`
- * line of its own; every other section does. */
+ * line of its own; every other section does. Every `## ` line the join
+ * writes gets a blank line above it when the section before it ended on
+ * text: a section's content is whatever its writer sent, and joining with
+ * a bare `\n` used to run that text straight into the next heading. Below
+ * the heading is left as the content has it. */
 export function joinReadmeSections(sections: ReadmeSection[]): string {
   return sections
     .map((s) => (s.heading ? `## ${s.heading}\n${s.content}` : s.content))
     .join("\n")
+    .replace(/([^\n])\n(##[ \t])/g, "$1\n\n$2")
     .replace(/\n{3,}/g, "\n\n\n");
 }
 
