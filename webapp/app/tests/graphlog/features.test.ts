@@ -38,12 +38,12 @@ describe("the groups", () => {
   it("test 9: a Guide reaches what an Owner did, a Crafter what a Crafter did", () => {
     const guide = resolveRole("Owner");
     expect(guide).toMatchObject({ isOwner: true, guiding: true });
-    expect(tabsFor(guide.features)).toEqual(["efforts", "photos", "files", "sensorData", "costs", "logbook", "suggestions"]);
+    expect(tabsFor(guide.features)).toEqual(["efforts", "deliverables", "photos", "files", "sensorData", "costs", "logbook", "suggestions"]);
     expect(guide.features).toEqual(expect.arrayContaining(["marks", "steepTap", "steepReadings", "dailyLog"]));
 
     const crafter = resolveRole("Crafter");
     expect(crafter).toMatchObject({ isOwner: true, guiding: false });
-    expect(tabsFor(crafter.features)).toEqual(["efforts", "photos", "files", "sensorData", "costs", "logbook"]);
+    expect(tabsFor(crafter.features)).toEqual(["efforts", "deliverables", "photos", "files", "sensorData", "costs", "logbook"]);
     expect(crafter.features).not.toContain("steepReadings");
   });
 
@@ -70,9 +70,10 @@ describe("the groups", () => {
     expect(seesSuggestions(featuresOf("Observer"))).toBe(true);
   });
 
-  it("a Client gets Efforts, Photos, the pen, their own tap and their own log, and runs nothing", () => {
+  it("a Client gets Efforts, Deliverables, Photos, the pen, their own tap and their own log, and runs nothing", () => {
     const client = resolveRole("Client");
-    expect(tabsFor(client.features)).toEqual(["efforts", "photos"]);
+    // Deliverables (2026-10-21): a client keeps the pages made for them.
+    expect(tabsFor(client.features)).toEqual(["efforts", "deliverables", "photos"]);
     expect(client.features).toEqual(expect.arrayContaining(["steepTap", "dailyLog"]));
     expect(client).toMatchObject({ isOwner: false, guiding: false });
     expect(client.features).not.toContain("steepReadings");
@@ -147,7 +148,7 @@ describe("test 2: one row", () => {
   const client = featuresOf("Client", withoutPhotos);
 
   it("taking Photos from clients takes the tab, the rows and the files, and nothing else", () => {
-    expect(tabsFor(client)).toEqual(["efforts"]);
+    expect(tabsFor(client)).toEqual(["efforts", "deliverables"]);
     expect(resolveProjectTab("photos", tabsFor(client))).toBeNull();
     expect(rowsForReader(rows, client)).toEqual([]);
     expect(isReachablePhoto(photo, client)).toBe(false);

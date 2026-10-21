@@ -32,6 +32,7 @@ import { getFileRefById, getFolderById, updateVaultFolder, type VaultFolder } fr
 import type { FileRef } from "./vault.types";
 import { resolveProjectManifest } from "./project.server";
 import { getProjectStatus } from "./projectStatus.server";
+import { rewriteViewUrls, viewFileIds } from "./publicBody";
 
 export function isNewspaperShared(folder: Pick<VaultFolder, "newspaper_shared_at">): boolean {
   return !!folder.newspaper_shared_at;
@@ -59,7 +60,6 @@ export async function setNewspaperShared(
 // (`refDirective.ts`'s `escapeDirectiveAttrValue`), so a quoted value is
 // matched whole and a `}` inside one doesn't end the directive.
 const REF_DIRECTIVE = /[ \t]?:ref\{(?:[^}"]|"[^"]*")*\}/g;
-const VIEW_URL = /\/api\/vault\/view\/([A-Za-z0-9]+)/g;
 
 /** Where the shared page loads one of its files from. */
 export function sharedViewUrl(folderId: string, fileId: string): string {
@@ -69,7 +69,7 @@ export function sharedViewUrl(folderId: string, fileId: string): string {
 /** The README body as the shared page shows it: no citations, and every
  * file URL pointing at this folder's own route. */
 export function publicEffortsBody(body: string, folderId: string): string {
-  return body.replace(REF_DIRECTIVE, "").replace(VIEW_URL, (_, id: string) => sharedViewUrl(folderId, id));
+  return rewriteViewUrls(body.replace(REF_DIRECTIVE, ""), (id) => sharedViewUrl(folderId, id));
 }
 
 /** The galleries the body names, with their URLs pointed the same way. */
@@ -80,7 +80,7 @@ export function publicGalleryFolders(
   return Object.fromEntries(
     Object.entries(galleryFolders).map(([name, images]) => [
       name,
-      images.map((img) => ({ ...img, url: img.url.replace(VIEW_URL, (_, id: string) => sharedViewUrl(folderId, id)) })),
+      images.map((img) => ({ ...img, url: rewriteViewUrls(img.url, (id) => sharedViewUrl(folderId, id)) })),
     ]),
   );
 }
@@ -89,12 +89,8 @@ export function publicGalleryFolders(
  * videos, linked files) and in the galleries it resolves. Nothing else is
  * served under the link. */
 export function sharedFileIds(body: string, galleryFolders: Record<string, ResolvedGalleryImage[]>): Set<string> {
-  const ids = new Set<string>();
-  const collect = (text: string) => {
-    for (const m of text.matchAll(VIEW_URL)) ids.add(m[1]);
-  };
-  collect(body.replace(REF_DIRECTIVE, ""));
-  for (const images of Object.values(galleryFolders)) for (const img of images) collect(img.url);
+  const ids = viewFileIds(body.replace(REF_DIRECTIVE, ""));
+  for (const images of Object.values(galleryFolders)) for (const img of images) for (const id of viewFileIds(img.url)) ids.add(id);
   return ids;
 }
 

@@ -34,6 +34,8 @@
     "./data/graphLogMarks.server": "./src/data/graphLogMarks.server.ts",
     "./data/graphLogMoves.server": "./src/data/graphLogMoves.server.ts",
     "./data/newspaperShare.server": "./src/data/newspaperShare.server.ts",
+    "./data/deliverables.server": "./src/data/deliverables.server.ts",
+    "./data/publicBody": "./src/data/publicBody.ts",
     "./data/pageBody.server": "./src/data/pageBody.server.ts",
     "./data/graphLogSchedule.server": "./src/data/graphLogSchedule.server.ts",
     "./data/effortsPrint.server": "./src/data/effortsPrint.server.ts",

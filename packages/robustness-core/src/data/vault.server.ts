@@ -198,6 +198,9 @@ export async function updateFileRef(
     is_public: boolean;
     /** ISO timestamp to archive the file; null to unarchive. */
     archived_at: string | null;
+    /** See `deliverables.server.ts`'s `setDeliverableShared`, its only
+     * intended writer. */
+    shared_at: string | null;
     /** Same field `createFileRef` already accepts at creation (e.g.
      * `dailyLogSync.server.ts`'s own `date: entryDate` stamp) -- also
      * settable here so a file COPIED in after the fact (an attachment,

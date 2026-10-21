@@ -116,7 +116,7 @@ import type { Role } from "./humans.server";
 
 export type ContainerFolderTypeKey = "project-n02" | "website";
 
-export type SpaceFolderTypeKey = "skills" | "syncs" | "graph";
+export type SpaceFolderTypeKey = "skills" | "syncs" | "graph" | "deliverables";
 
 export type SyncFolderTypeKey =
   | "sync-one-way"
@@ -210,6 +210,22 @@ export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> 
     description:
       "Daily graph-log files GraphLog's sync-graph stage writes here, one per day with new content — the durable record graph-project-view reads to build README.md. System-managed, not directly editable.",
     writable: "system",
+    shareable: false,
+    publishable: false,
+  },
+  // `deliverables` — the project's deliverables: markdown pages a guide
+  // uploads for the client (`deliverables.server.ts`). Each file has its
+  // own share switch (`file_refs.shared_at`) and public page
+  // (`/public/deliverable/<fileId>`); `publishable: false` keeps the
+  // Vault's Publish off it, so a deliverable is shared, never published
+  // (publishing opens the folder-browsing routes too). Created by the
+  // first upload from the project's Deliverables tab, with the same
+  // deterministic id as Skills; also creatable from the Vault.
+  deliverables: {
+    label: "Deliverables",
+    description:
+      "Pages a guide uploads for the client: one markdown file each, shared by its own link from the project's Deliverables tab.",
+    writable: "owner",
     shareable: false,
     publishable: false,
   },
