@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+import { enqueueDeliverablePdfIfShared } from "robustness-core/data/deliverablePdf.server";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   getScopedUserFromRequest,
@@ -256,9 +258,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const { content, md_versions } = computeMdUpdate(file, body.content);
       updates.content = content;
       updates.md_versions = md_versions;
+      // The hash is the basis for change detection (sync) and for a
+      // deliverable's PDF key (`deliverablePdf.server.ts`): an edit that
+      // left it stale would keep serving the old PDF.
+      updates.content_hash = crypto.createHash("sha256").update(content, "utf8").digest("hex");
     }
 
     const updated = await updateFileRef(fileId, updates);
+    // A shared deliverable's PDF is the page printed: a saved edit asks
+    // the worker for the new one ahead of the click. Nothing for any
+    // other file (the hook's own gate).
+    if (body.content !== undefined) await enqueueDeliverablePdfIfShared(updated);
     if (
       file.source === "daily_log" &&
       file.date &&

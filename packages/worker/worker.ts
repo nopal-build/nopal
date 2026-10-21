@@ -48,6 +48,12 @@ import {
   finishAdminScriptRun,
 } from "robustness-core/data/adminScriptRuns.server";
 import {
+  DELIVERABLE_PDF_QUEUE_NAME,
+  type DeliverablePdfJobData,
+  type DeliverablePdfJobResult,
+} from "robustness-core/data/deliverablePdf.server";
+import { renderDeliverablePdf } from "robustness-core/data/deliverablePdfRender.server";
+import {
   PUBLIC_ZIP_QUEUE_NAME,
   runPublicFolderZip,
   type PublicZipJobData,
@@ -462,6 +468,35 @@ console.log(
   `[worker] Public folder zip worker listening on queue "${PUBLIC_ZIP_QUEUE_NAME}" (concurrency ${PUBLIC_ZIP_CONCURRENCY}).`,
 );
 
+// ── Deliverable PDFs ───────────────────────────────────────────────────
+// The public deliverable page, printed (`deliverablePdfRender.server.ts`).
+// One at a time: a Chromium holds a few hundred MB and this worker has
+// 1 GB shared with GraphLog's runs and the media decodes. Rare: one
+// render per share or replace, asked for by the app ahead of the click
+// (`deliverablePdf.server.ts`).
+const DELIVERABLE_PDF_CONCURRENCY = 1;
+
+const deliverablePdfWorker = new Worker<DeliverablePdfJobData, DeliverablePdfJobResult, string>(
+  DELIVERABLE_PDF_QUEUE_NAME,
+  (job) =>
+    renderDeliverablePdf(job.data, (line) => {
+      job.log(line).catch((err) => console.error("Failed to write job log line:", err));
+    }),
+  {
+    connection: { url: REDIS_URL, maxRetriesPerRequest: null },
+    concurrency: DELIVERABLE_PDF_CONCURRENCY,
+    lockDuration: 5 * 60 * 1000,
+  },
+);
+deliverablePdfWorker.on("completed", (job) => {
+  const r = job.returnvalue;
+  console.log(`[worker] deliverable pdf ${job.data.fileId}: ${"skipped" in r ? `skipped (${r.skipped})` : `${r.size} bytes at ${r.s3Key}`}.`);
+});
+deliverablePdfWorker.on("failed", (job, err) => {
+  console.error(`[worker] deliverable pdf ${job?.data.fileId} failed:`, err);
+});
+console.log(`[worker] Deliverable PDF worker listening on queue "${DELIVERABLE_PDF_QUEUE_NAME}" (concurrency ${DELIVERABLE_PDF_CONCURRENCY}).`);
+
 // Graceful shutdown — let an in-flight job finish (or fail cleanly) rather
 // than abandon it mid-run: GraphLog's own idempotency makes a clean
 // re-run of an ABANDONED job safe, but an UNGRACEFULLY killed one can
@@ -471,7 +506,7 @@ async function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[worker] received ${signal}, finishing in-flight jobs before exit…`);
-  await Promise.all([graphLogWorker.close(), adminScriptsWorker.close(), publicZipWorker.close()]);
+  await Promise.all([graphLogWorker.close(), adminScriptsWorker.close(), publicZipWorker.close(), mediaWorker.close(), deliverablePdfWorker.close()]);
   process.exit(0);
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));

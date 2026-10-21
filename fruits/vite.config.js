@@ -14,7 +14,9 @@ export default defineConfig({
     // this app at o.nopal.dev gets a 403 "Blocked request" for every
     // request, since the browser's Host header is `o.nopal.dev`, not
     // `localhost`.
-    allowedHosts: ["o.nopal.dev", "nopal.dev"],
+    // `fruits` is the compose service name: the worker's headless browser
+    // opens the public deliverable page at http://fruits:3000 to print it.
+    allowedHosts: ["o.nopal.dev", "nopal.dev", "fruits"],
   },
   ssr: {
     // react-markdown, remark-gfm and rehype-raw are ESM-only packages.

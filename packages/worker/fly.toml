@@ -25,6 +25,11 @@ primary_region = 'dfw'
 
 [build]
 
+# Where the worker finds the app, to print a deliverable's public page
+# (`deliverablePdfRender.server.ts`).
+[env]
+APP_BASE_URL = 'https://o.nopal.build'
+
 # No [http_service] — this app never serves HTTP, so it gets no public
 # listener at all. It just needs to stay running to drain the queue. No
 # `[deploy] strategy = 'bluegreen'` either — that requires a health check,

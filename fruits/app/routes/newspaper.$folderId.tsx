@@ -66,6 +66,7 @@ import { ProjectFilesView } from "../components/ProjectFilesView";
 import { DeliverablesView } from "../components/DeliverablesView";
 import { ShareLinkControl } from "../components/ShareLinkControl";
 import { canManageDeliverables, listDeliverables } from "robustness-core/data/deliverables.server";
+import { deliverablePdfState } from "robustness-core/data/deliverablePdf.server";
 import { ProjectView } from "../components/ProjectView";
 import type { CitedLogsForPen, MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
 import { sprinkles } from "stamps/sprinkles.css";
@@ -125,8 +126,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // The Deliverables tab (`deliverables.server.ts`): the list for
   // everyone with the tab; upload, replace and the share switch for a
   // Guide on the project or staff. The server refuses the rest anyway.
-  const deliverables = tab === "deliverables" ? await listDeliverables(folder) : null;
   const manageDeliverables = tab === "deliverables" && canManageDeliverables(user, role);
+  // A manager also sees each shared file's PDF state (ready, preparing,
+  // failed with the worker's reason): the outcome of a worker job shows
+  // on the page that asked for it, not in a log (`deliverablePdf.server.ts`).
+  const deliverables =
+    tab === "deliverables"
+      ? await Promise.all(
+          (await listDeliverables(folder)).map(async (row) => ({
+            ...row,
+            pdf: manageDeliverables && row.sharedAt ? await deliverablePdfState(row.fileId, row.contentHash) : null,
+          })),
+        )
+      : null;
   // A Card names its writer's originals; a reader opens the project's
   // copies, by the same rows the file tabs are built from.
   const logbookFileIds = logbook ? servedFileIds(await loadProjectFiles(folder), features) : null;

@@ -45,7 +45,16 @@ COPY --link packages/worker packages/worker
 
 RUN pnpm --filter worker deploy --prod /app/deploy
 
-FROM base
+# The final stage is Playwright's own image at the lockfile's version
+# (`playwright-core` in `package.json` must match this tag): Node 22 plus
+# Chromium and its libraries, for the deliverable PDF
+# (`deliverablePdfRender.server.ts`). The build stage above stays on
+# node-slim; only the runtime needs a browser.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
+
+WORKDIR /app
+
+ENV NODE_ENV="production"
 
 COPY --from=build /app/deploy /app
 
