@@ -85,7 +85,7 @@ describe("the public body", () => {
 describe("what leaves the server", () => {
   it("is a fixed set of fields, the link keyed by the file's own id", () => {
     const page = deliverablePage({ _id: FILE, name: "madison-attic.md", content: PAGE, updated_at: "2026-10-21T08:00:00Z" }, "https://o.nopal.build");
-    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "pdfUrl", "preview", "title", "updated", "url"]);
+    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "pdfUrl", "preview", "showTitle", "title", "updated", "url"]);
     expect(page.preview).toBe(false);
     expect(page.url).toBe(`https://o.nopal.build/public/deliverable/${FILE}`);
     expect(page.downloadUrl).toBe(`/api/deliverable/${FILE}/download`);

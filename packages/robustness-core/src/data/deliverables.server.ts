@@ -251,6 +251,10 @@ export interface DeliverablePage {
   /** The page printed (`deliverablePdf.server.ts`). */
   pdfUrl: string;
   fileName: string;
+  /** False when the body opens with its own `# ` heading
+   * (`bodyOpensWithTitle`), so the header doesn't repeat it. Decided here
+   * because the page component can't import this server module. */
+  showTitle: boolean;
   /** True when a Guide is looking at a deliverable whose link is off:
    * the page as the client would see it, with the session serving the
    * pictures and no downloads (there is no PDF until the link is on). */
@@ -258,12 +262,14 @@ export interface DeliverablePage {
 }
 
 export function deliverablePage(file: Pick<FileRef, "_id" | "name" | "content" | "updated_at">, origin: string, preview = false): DeliverablePage {
+  // A preview keeps the session view URLs: the Guide has a session, and
+  // the public file routes refuse an unshared deliverable.
+  const body = preview ? splitFrontmatter(file.content ?? "").body : publicDeliverableBody(file.content ?? "", file._id);
   return {
     title: deliverableTitle(file),
     updated: new Date(file.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }),
-    // A preview keeps the session view URLs: the Guide has a session, and
-    // the public file routes refuse an unshared deliverable.
-    body: preview ? splitFrontmatter(file.content ?? "").body : publicDeliverableBody(file.content ?? "", file._id),
+    body,
+    showTitle: !bodyOpensWithTitle(body),
     url: `${origin}${deliverablePublicPath(file._id)}`,
     downloadUrl: `/api/deliverable/${file._id}/download`,
     pdfUrl: `/api/deliverable/${file._id}/pdf`,
