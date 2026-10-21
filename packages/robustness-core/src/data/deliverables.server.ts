@@ -25,8 +25,10 @@
  *   project, is a 404.
  * - Nothing turns a link on at upload. A person does.
  *
- * The PDF the seed asks for is the follow-up round; this module leaves
- * `downloadUrl` pointing at the markdown source.
+ * The PDF is the public page printed by the worker, keyed by the file's
+ * content hash (`deliverablePdf.server.ts`). The share route and the
+ * replace route ask for it ahead of the click; this module stays free of
+ * the queue so the two don't import each other.
  */
 
 import { isStaff, type Human } from "./humans.server";
@@ -224,8 +226,10 @@ export interface DeliverablePage {
   updated: string;
   body: string;
   url: string;
-  /** The markdown source. The PDF lands beside it in the next round. */
+  /** The markdown source, the quieter second option. */
   downloadUrl: string;
+  /** The page printed (`deliverablePdf.server.ts`). */
+  pdfUrl: string;
   fileName: string;
 }
 
@@ -236,6 +240,7 @@ export function deliverablePage(file: Pick<FileRef, "_id" | "name" | "content" |
     body: publicDeliverableBody(file.content ?? "", file._id),
     url: `${origin}${deliverablePublicPath(file._id)}`,
     downloadUrl: `/api/deliverable/${file._id}/download`,
+    pdfUrl: `/api/deliverable/${file._id}/pdf`,
     fileName: file.name,
   };
 }

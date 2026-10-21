@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFileRefById } from "robustness-core/data/vault.server";
 import { deliverablePublicPath, setDeliverableShared } from "robustness-core/data/deliverables.server";
+import { enqueueDeliverablePdfIfShared } from "robustness-core/data/deliverablePdf.server";
 
 /**
  * POST   /api/deliverable/:fileId/share   turn the deliverable's link on
@@ -21,5 +22,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const result = await setDeliverableShared(user, file, request.method === "POST");
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+  // The PDF is rendered ahead of the click: turning the link on asks the
+  // worker for it now (`deliverablePdf.server.ts`).
+  if (result.sharedAt) await enqueueDeliverablePdfIfShared({ ...file, shared_at: result.sharedAt });
   return Response.json({ sharedAt: result.sharedAt, path: deliverablePublicPath(file._id) });
 }

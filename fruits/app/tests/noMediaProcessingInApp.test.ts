@@ -26,6 +26,11 @@ const FORBIDDEN = [
   // Imports of the decoding modules, not mentions of them in a comment.
   /from "robustness-core\/data\/mediaRenditions\.server"/,
   /from "robustness-core\/data\/attachmentFrames\.server"/,
+  // A headless browser is the worker's too (the deliverable PDF,
+  // `deliverablePdfRender.server.ts`): the app asks for a PDF through
+  // the queue module and never carries the browser driver.
+  /from "playwright(-core)?"/,
+  /from "robustness-core\/data\/deliverablePdfRender\.server"/,
 ];
 
 function files(dir: string): string[] {

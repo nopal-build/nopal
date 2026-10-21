@@ -320,6 +320,9 @@ importers:
       oxmarkdown-core:
         specifier: workspace:*
         version: link:../oxmarkdown-core
+      playwright-core:
+        specifier: 1.62.1
+        version: 1.62.1
       react-router:
         specifier: ^7.14.0
         version: 7.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -373,6 +376,9 @@ importers:
       bullmq:
         specifier: ^5.60.0
         version: 5.81.3
+      playwright-core:
+        specifier: 1.62.1
+        version: 1.62.1
       robustness-core:
         specifier: workspace:*
         version: file:packages/robustness-core(@types/node@26.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
@@ -6660,6 +6666,7 @@ snapshots:
       heic-convert: 2.1.0
       ioredis: 5.11.1
       oxmarkdown-core: file:packages/oxmarkdown-core
+      playwright-core: 1.62.1
       react-router: 7.18.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       remix-auth: 4.2.0
       remix-auth-totp: 4.0.0(remix-auth@4.2.0)

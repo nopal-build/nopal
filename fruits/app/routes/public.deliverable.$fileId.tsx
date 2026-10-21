@@ -13,6 +13,10 @@
 // and `servedFileIds={{}}` makes a `::file{}` directive draw without its
 // picture rather than through a login-only URL (as the shared Efforts
 // page does).
+//
+// The PDF is this page, printed by the worker (`deliverablePdf.server.ts`);
+// `deliverable.css` hides the download links under print so the file
+// carries no button to itself.
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import { bodyOpensWithTitle, deliverablePage, resolveSharedDeliverable } from "robustness-core/data/deliverables.server";
@@ -23,6 +27,7 @@ import { WebsitePageContent } from "stamps/WebsitePageContent";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
+import "../styles/deliverable.css";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const shared = params.fileId ? await resolveSharedDeliverable(params.fileId) : null;
@@ -46,7 +51,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicDeliverablePage() {
-  const { title, updated, body, downloadUrl } = useLoaderData<typeof loader>();
+  const { title, updated, body, downloadUrl, pdfUrl } = useLoaderData<typeof loader>();
   return (
     <AuthShell maxWidth="820px">
       {/* The file's own `# ` heading is the title when it has one; the
@@ -54,10 +59,16 @@ export default function PublicDeliverablePage() {
       <header className={sprinkles({ mb: 8 })}>
         {!bodyOpensWithTitle(body) && <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>{title}</h1>}
         <p className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
-          Updated {updated} ·{" "}
-          <a href={downloadUrl} style={{ color: semanticColors.textSubtle }}>
-            Download the markdown
-          </a>
+          Updated {updated}
+          {/* The PDF is the download; the source is the quieter second option. */}
+          <span className="deliverable-actions">
+            {" · "}
+            <a href={pdfUrl}>Download PDF</a>
+            {" · "}
+            <a href={downloadUrl} style={{ color: semanticColors.textSubtle }}>
+              markdown source
+            </a>
+          </span>
         </p>
       </header>
       <WebsitePageContent>

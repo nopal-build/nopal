@@ -40,6 +40,7 @@ vi.mock("robustness-core/data/projectSharing.server", async (importOriginal) => 
 });
 
 const { deliverablePageFile, resolveSharedDeliverable } = await import("robustness-core/data/deliverables.server");
+const { enqueueDeliverablePdfIfShared } = await import("robustness-core/data/deliverablePdf.server");
 
 describe("resolveSharedDeliverable", () => {
   it("finds a shared markdown file in a Deliverables folder of a live project", async () => {
@@ -61,5 +62,14 @@ describe("deliverablePageFile", () => {
     expect((await deliverablePageFile("shared1", "pic1"))?._id).toBe("pic1");
     expect(await deliverablePageFile("shared1", "pic2")).toBeNull();
     expect(await deliverablePageFile("off1", "pic1")).toBeNull();
+  });
+});
+
+describe("a render ahead of the click", () => {
+  it("is asked for only for a shared markdown file in a Deliverables folder", async () => {
+    // Nothing reaches the queue in these three: the gate answers first.
+    expect(await enqueueDeliverablePdfIfShared(files.off1 as never)).toBeNull();
+    expect(await enqueueDeliverablePdfIfShared(files.stray1 as never)).toBeNull();
+    expect(await enqueueDeliverablePdfIfShared(null)).toBeNull();
   });
 });

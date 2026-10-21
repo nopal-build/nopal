@@ -213,6 +213,11 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
+      # The deliverable PDF: the worker prints the public page from the
+      # fruits service (its container port; see fruits' `allowedHosts`),
+      # with the Chromium Dockerfile.dev installs.
+      APP_BASE_URL: http://fruits:3000
+      CHROMIUM_PATH: /usr/bin/chromium
     command: /app/bin/dev-as-host-user.sh sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter worker run dev"
     # worker has no HTTP server to curl, so this checks for vite-node's
     # bin instead — a reliable stand-in for "pnpm install finished" (the

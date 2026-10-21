@@ -27,6 +27,7 @@ import { WebsitePageContent } from "stamps/WebsitePageContent";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { DeliverablesView } from "../components/DeliverablesView";
+import { preparingPage } from "robustness-core/data/deliverablePdf.server";
 
 const FILE = "d3l1v3r4bl3";
 const PAGE = `---
@@ -84,9 +85,10 @@ describe("the public body", () => {
 describe("what leaves the server", () => {
   it("is a fixed set of fields, the link keyed by the file's own id", () => {
     const page = deliverablePage({ _id: FILE, name: "madison-attic.md", content: PAGE, updated_at: "2026-10-21T08:00:00Z" }, "https://o.nopal.build");
-    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "title", "updated", "url"]);
+    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "pdfUrl", "title", "updated", "url"]);
     expect(page.url).toBe(`https://o.nopal.build/public/deliverable/${FILE}`);
     expect(page.downloadUrl).toBe(`/api/deliverable/${FILE}/download`);
+    expect(page.pdfUrl).toBe(`/api/deliverable/${FILE}/pdf`);
     expect(page.updated).toBe("Oct 21, 2026");
     expect(page.title).toBe("Madison attic");
   });
@@ -156,6 +158,7 @@ describe("read only", () => {
     "api.deliverable.$fileId.view.$id.tsx",
     "api.deliverable.$fileId.rendition.$id.tsx",
     "api.deliverable.$fileId.download.tsx",
+    "api.deliverable.$fileId.pdf.tsx",
   ];
 
   it("the public routes take no writes", () => {
@@ -163,6 +166,22 @@ describe("read only", () => {
       const src = readFileSync(path.join(here, "../routes", file), "utf8");
       expect(src, file).not.toMatch(/export\s+(async\s+)?(function|const)\s+action\b/);
     }
+  });
+
+  it("the PDF route serves nothing unless the link is on, and its waiting page has no script", () => {
+    const src = readFileSync(path.join(here, "../routes/api.deliverable.$fileId.pdf.tsx"), "utf8");
+    expect(src).toContain("resolveSharedDeliverable(");
+    const html = preparingPage();
+    expect(html).toMatch(/<meta http-equiv="refresh" content="\d+">/);
+    expect(html).not.toMatch(/<script|<form|<button|<a /);
+  });
+
+  it("the PDF is the page printed: both download links sit in the wrapper the print rules hide", () => {
+    const src = readFileSync(path.join(here, "../routes/public.deliverable.$fileId.tsx"), "utf8");
+    expect(src).toContain('className="deliverable-actions"');
+    expect(src).toContain("deliverable.css");
+    const css = readFileSync(path.join(here, "../styles/deliverable.css"), "utf8");
+    expect(css).toMatch(/@media print \{[^}]*\.deliverable-actions \{\s*display: none;/);
   });
 
   it("the page renders with no pen, no form and nothing editable, and hands the renderer no served ids", () => {
