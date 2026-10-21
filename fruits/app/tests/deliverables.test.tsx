@@ -151,13 +151,25 @@ describe("the tab", () => {
     expect(pdfLine({ state: "none" })).toMatch(/not made yet/);
   });
 
-  it("a manager gets Upload, and per page the switch and Replace", () => {
+  it("a manager gets Upload, and per page the switch, Replace and Edit in Vault", () => {
     const html = renderToStaticMarkup(<DeliverablesView projectFolderId="proj1" rows={rows} manage={true} openInVault={true} onChanged={() => {}} />);
     expect(html).toContain("Upload a deliverable");
     expect(html).toContain("Stop sharing");
     expect(html).toContain("Share link");
-    expect(html).toContain(`href="/vault?file=${FILE}"`);
     expect((html.match(/>Replace</g) ?? []).length).toBe(2);
+    expect((html.match(/>Edit in Vault</g) ?? []).length).toBe(2);
+  });
+
+  it("the title opens what the client sees: the public page when the link is on, the Vault only for a manager when it is off", () => {
+    const html = renderToStaticMarkup(<DeliverablesView projectFolderId="proj1" rows={rows} manage={true} openInVault={true} onChanged={() => {}} />);
+    // The title is the base-size link; "Edit in Vault" is the xs one.
+    expect(html).toContain(`<a href="/public/deliverable/${FILE}" class="typography_textSize_base`);
+    expect(html).not.toContain(`<a href="/vault?file=${FILE}" class="typography_textSize_base`);
+    expect(html).toContain(`<a href="/vault?file=draft1" class="typography_textSize_base`);
+    const reader = renderToStaticMarkup(<DeliverablesView projectFolderId="proj1" rows={rows} manage={false} openInVault={true} onChanged={() => {}} />);
+    expect(reader).toContain(`<a href="/public/deliverable/${FILE}"`);
+    expect(reader).not.toContain("/vault?file=draft1");
+    expect(reader).not.toContain("Edit in Vault");
   });
 });
 

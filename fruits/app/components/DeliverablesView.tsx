@@ -141,7 +141,12 @@ function DeliverableRowView({
 }) {
   const replaceInput = useRef<HTMLInputElement>(null);
   const publicPath = deliverablePublicPath(row.fileId);
-  const href = openInVault ? `/vault?file=${row.fileId}` : row.sharedAt ? publicPath : null;
+  const vaultPath = `/vault?file=${row.fileId}`;
+  // The title opens what the client sees (Austin, 2026-10-21): the public
+  // page whenever the link is on. Off, a manager's title opens the Vault
+  // (the only place it renders) and a reader's title is no link; the raw
+  // file stays one click away for a manager through "Edit in Vault".
+  const href = row.sharedAt ? publicPath : openInVault && manage ? vaultPath : null;
   const title = href ? (
     <a href={href} className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} style={{ color: "inherit" }}>
       {row.title}
@@ -180,6 +185,11 @@ function DeliverableRowView({
           <button type="button" className={textSize.xs} disabled={busy} onClick={() => replaceInput.current?.click()} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, padding: 0, cursor: "pointer" }}>
             Replace
           </button>
+          {openInVault && (
+            <a href={vaultPath} className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+              Edit in Vault
+            </a>
+          )}
         </div>
       )}
     </li>
