@@ -26,7 +26,7 @@ import { tabsFor } from "robustness-core/data/projectView.server";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
-import { DeliverablesView } from "../components/DeliverablesView";
+import { DeliverablesView, pdfLine } from "../components/DeliverablesView";
 import { preparingPage } from "robustness-core/data/deliverablePdf.server";
 
 const FILE = "d3l1v3r4bl3";
@@ -128,8 +128,8 @@ describe("the tab", () => {
   });
 
   const rows = [
-    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z" },
-    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null },
+    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", pdf: { state: "failed" as const, reason: "the public page answered 500", at: "2026-10-21T09:01:00Z" } },
+    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", pdf: null },
   ];
 
   it("a reader sees the list and no controls; a shared page is the client's link, an unshared one is not a link", () => {
@@ -139,6 +139,16 @@ describe("the tab", () => {
     expect(html).not.toContain("/vault?file=");
     expect(html).not.toMatch(/Upload a deliverable|Share link|Stop sharing|Replace/);
     expect(html).toContain("Shared");
+    expect(html).not.toContain("PDF");
+  });
+
+  it("a manager reads what became of a shared file's PDF, in the worker's own words", () => {
+    const html = renderToStaticMarkup(<DeliverablesView projectFolderId="proj1" rows={rows} manage={true} openInVault={true} onChanged={() => {}} />);
+    expect(html).toContain("PDF couldn&#x27;t be made: the public page answered 500");
+    expect(html).toContain('data-pdf-state="failed"');
+    expect(pdfLine({ state: "ready" })).toBe("PDF ready");
+    expect(pdfLine({ state: "preparing" })).toBe("PDF preparing");
+    expect(pdfLine({ state: "none" })).toMatch(/not made yet/);
   });
 
   it("a manager gets Upload, and per page the switch and Replace", () => {

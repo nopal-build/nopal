@@ -6,7 +6,7 @@
  */
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { deliverablePdfFileName, deliverablePdfJobId, deliverablePdfKey, pdfFingerprint } from "robustness-core/data/deliverablePdf.server";
+import { deliverablePdfFileName, deliverablePdfJobId, deliverablePdfKey, pdfFingerprint, pdfStateFromJob } from "robustness-core/data/deliverablePdf.server";
 
 describe("the PDF's key", () => {
   it("sits under the deliverable's id and changes with the content hash", () => {
@@ -30,5 +30,28 @@ describe("the PDF's key", () => {
   it("names the download after the markdown file", () => {
     expect(deliverablePdfFileName("madison-attic.md")).toBe("madison-attic.pdf");
     expect(deliverablePdfFileName("notes")).toBe("notes.pdf");
+  });
+});
+
+describe("what the tab says about the PDF", () => {
+  it("is ready when the file is in storage, whatever the queue says", () => {
+    expect(pdfStateFromJob(true, null)).toEqual({ state: "ready" });
+    expect(pdfStateFromJob(true, { state: "failed", failedReason: "old" })).toEqual({ state: "ready" });
+  });
+
+  it("is preparing while the job waits or runs, and nothing when nobody asked", () => {
+    for (const state of ["waiting", "active", "delayed", "prioritized"]) expect(pdfStateFromJob(false, { state })).toEqual({ state: "preparing" });
+    expect(pdfStateFromJob(false, null)).toEqual({ state: "none" });
+  });
+
+  it("carries the worker's own reason when it failed or skipped, with the time", () => {
+    expect(pdfStateFromJob(false, { state: "failed", failedReason: "browserType.launch: Executable doesn't exist", finishedOn: Date.UTC(2026, 9, 21, 15) })).toEqual({
+      state: "failed",
+      reason: "browserType.launch: Executable doesn't exist",
+      at: "2026-10-21T15:00:00.000Z",
+    });
+    expect(pdfStateFromJob(false, { state: "failed" })).toMatchObject({ state: "failed", reason: "the worker gave no reason", at: null });
+    expect(pdfStateFromJob(false, { state: "completed", returnvalue: { skipped: "the link is off" } })).toMatchObject({ state: "failed", reason: "the link is off" });
+    expect(pdfStateFromJob(false, { state: "completed", returnvalue: { s3Key: "k", size: 1 } })).toEqual({ state: "none" });
   });
 });

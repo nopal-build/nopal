@@ -6,6 +6,26 @@
 // server refuses all three for anyone else; `manage` only hides them.
 import { useRef, useState } from "react";
 import type { DeliverableRow } from "robustness-core/data/deliverables.server";
+import type { DeliverablePdfState } from "robustness-core/data/deliverablePdf.server";
+
+/** A row as the tab receives it: the file, plus (for a manager, while
+ * the link is on) what became of its PDF. */
+export type DeliverableTabRow = DeliverableRow & { pdf: DeliverablePdfState | null };
+
+/** The PDF line a manager reads under a shared file. Plain words; the
+ * reason is the worker's own. */
+export function pdfLine(pdf: DeliverablePdfState): string {
+  switch (pdf.state) {
+    case "ready":
+      return "PDF ready";
+    case "preparing":
+      return "PDF preparing";
+    case "failed":
+      return `PDF couldn't be made: ${pdf.reason}${pdf.at ? ` (${longDate(pdf.at)})` : ""}`;
+    case "none":
+      return "PDF not made yet. The next click asks for it.";
+  }
+}
 import { Badge } from "stamps/Badge";
 import { button } from "stamps/button.css";
 import { sprinkles } from "stamps/sprinkles.css";
@@ -29,7 +49,7 @@ export function DeliverablesView({
   onChanged,
 }: {
   projectFolderId: string;
-  rows: DeliverableRow[];
+  rows: DeliverableTabRow[];
   /** Upload, Replace and the share switch. */
   manage: boolean;
   /** Whether a row opens the Vault's file view; a client has no Vault
@@ -112,7 +132,7 @@ function DeliverableRowView({
   onReplace,
   onChanged,
 }: {
-  row: DeliverableRow;
+  row: DeliverableTabRow;
   manage: boolean;
   openInVault: boolean;
   busy: boolean;
@@ -138,6 +158,11 @@ function DeliverableRowView({
         </span>
         {row.sharedAt && <Badge variant="success">Shared</Badge>}
       </div>
+      {manage && row.pdf && (
+        <p className={textSize.xs} style={{ margin: 0, color: row.pdf.state === "failed" ? semanticColors.textDanger : semanticColors.textSubtle }} data-pdf-state={row.pdf.state}>
+          {pdfLine(row.pdf)}
+        </p>
+      )}
       {manage && (
         <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 })}>
           <ShareLinkControl what="this deliverable" path={publicPath} endpoint={`/api/deliverable/${row.fileId}/share`} sharedAt={row.sharedAt} onChanged={onChanged} />

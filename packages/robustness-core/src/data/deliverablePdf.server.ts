@@ -20,10 +20,9 @@
  * through the public URL, and re-checks the share before writing.
  */
 
-import crypto from "node:crypto";
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
-import { deliverableHome, isDeliverableShared, isMarkdownFileName } from "./deliverables.server";
+import { contentFingerprint, deliverableHome, isDeliverableShared, isMarkdownFileName } from "./deliverables.server";
 import { objectExists } from "./file.server";
 import type { FileRef } from "./vault.types";
 
@@ -52,10 +51,9 @@ const JOB_OPTIONS = {
   removeOnFail: { age: 60 * 60 },
 };
 
-/** What the PDF is keyed by: the stored content hash, else a hash of the
- * content itself (records from before hashing have none). */
+/** What the PDF is keyed by (`contentFingerprint`). */
 export function pdfFingerprint(file: Pick<FileRef, "content" | "content_hash">): string {
-  return file.content_hash ?? crypto.createHash("sha256").update(file.content ?? "", "utf8").digest("hex");
+  return contentFingerprint(file);
 }
 
 /** Where the PDF for one version of the file lives. */
@@ -129,4 +127,42 @@ export function preparingPage(): string {
 </body>
 </html>
 `;
+}
+
+/**
+ * What a Guide sees on the Deliverables tab about a shared file's PDF
+ * (Austin, 2026-10-21: nobody reads the worker's logs; the outcome
+ * belongs on the page that asked for it). Ready when the file is in
+ * storage; otherwise what the queue knows: preparing, failed with the
+ * worker's own reason, or nothing asked for.
+ */
+export type DeliverablePdfState =
+  | { state: "ready" }
+  | { state: "preparing" }
+  | { state: "failed"; reason: string; at: string | null }
+  | { state: "none" };
+
+/** The mapping on its own, so the test reads every branch. `job` is
+ * what BullMQ knows, or null when no job exists. */
+export function pdfStateFromJob(
+  ready: boolean,
+  job: { state: string; failedReason?: string; finishedOn?: number; returnvalue?: unknown } | null,
+): DeliverablePdfState {
+  if (ready) return { state: "ready" };
+  if (!job) return { state: "none" };
+  if (job.state === "waiting" || job.state === "active" || job.state === "delayed" || job.state === "prioritized") return { state: "preparing" };
+  const at = job.finishedOn ? new Date(job.finishedOn).toISOString() : null;
+  if (job.state === "failed") return { state: "failed", reason: job.failedReason || "the worker gave no reason", at };
+  // Completed without a file: the worker skipped it and said why.
+  const skipped = job.returnvalue && typeof job.returnvalue === "object" && "skipped" in job.returnvalue ? String((job.returnvalue as { skipped: unknown }).skipped) : null;
+  if (job.state === "completed" && skipped) return { state: "failed", reason: skipped, at };
+  return { state: "none" };
+}
+
+export async function deliverablePdfState(fileId: string, contentHash: string): Promise<DeliverablePdfState> {
+  const ready = await objectExists(deliverablePdfKey(fileId, contentHash));
+  if (ready) return { state: "ready" };
+  const job = await getQueue().getJob(deliverablePdfJobId(fileId, contentHash));
+  if (!job) return pdfStateFromJob(false, null);
+  return pdfStateFromJob(false, { state: await job.getState(), failedReason: job.failedReason, finishedOn: job.finishedOn, returnvalue: job.returnvalue });
 }

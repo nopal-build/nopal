@@ -31,6 +31,7 @@
  * the queue so the two don't import each other.
  */
 
+import crypto from "node:crypto";
 import { isStaff, type Human } from "./humans.server";
 import { findOwningProjectFolder, getProjectRole, type ResolvedProjectRole } from "./projectSharing.server";
 import { getProjectStatus } from "./projectStatus.server";
@@ -92,6 +93,8 @@ export type DeliverableRow = {
   updatedAt: string;
   size: number | null;
   sharedAt: string | null;
+  /** `contentFingerprint`: what this version's PDF is keyed by. */
+  contentHash: string;
 };
 
 export function deliverableTitle(file: Pick<FileRef, "name" | "content">): string {
@@ -101,6 +104,13 @@ export function deliverableTitle(file: Pick<FileRef, "name" | "content">): strin
 
 export function isDeliverableShared(file: Pick<FileRef, "shared_at">): boolean {
   return !!file.shared_at;
+}
+
+/** What a version of the file is known by: the stored content hash, else
+ * a hash of the content itself (records from before hashing have none).
+ * The PDF is keyed by it (`deliverablePdf.server.ts`). */
+export function contentFingerprint(file: Pick<FileRef, "content" | "content_hash">): string {
+  return file.content_hash ?? crypto.createHash("sha256").update(file.content ?? "", "utf8").digest("hex");
 }
 
 /** The markdown files in the folder, newest change first. */
@@ -117,6 +127,7 @@ export async function listDeliverables(project: VaultFolder): Promise<Deliverabl
       updatedAt: f.updated_at,
       size: f.size,
       sharedAt: f.shared_at ?? null,
+      contentHash: contentFingerprint(f),
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
