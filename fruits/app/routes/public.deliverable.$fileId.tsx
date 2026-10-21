@@ -19,7 +19,8 @@
 // carries no button to itself.
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
-import { bodyOpensWithTitle, deliverablePage, resolveSharedDeliverable } from "robustness-core/data/deliverables.server";
+import { bodyOpensWithTitle, deliverablePage, resolveDeliverableForManager, resolveSharedDeliverable } from "robustness-core/data/deliverables.server";
+import { getUser } from "../modules/auth/auth.server";
 import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
@@ -30,10 +31,17 @@ import { semanticColors } from "stamps/tokens";
 import "../styles/deliverable.css";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
+  const origin = new URL(request.url).origin;
   const shared = params.fileId ? await resolveSharedDeliverable(params.fileId) : null;
-  if (!shared) throw new Response("Not Found", { status: 404 });
   // The whole of what leaves the server (`deliverablePage`).
-  return deliverablePage(shared.file, new URL(request.url).origin);
+  if (shared) return deliverablePage(shared.file, origin);
+  // Link off: a Guide on the project still sees the page as the client
+  // would (the tab's title always opens this), with the session serving
+  // the pictures and no downloads. Anyone else: not found, as before.
+  const user = await getUser(request);
+  const mine = user && params.fileId ? await resolveDeliverableForManager(params.fileId, user) : null;
+  if (!mine) throw new Response("Not Found", { status: 404 });
+  return deliverablePage(mine.file, origin, true);
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -51,7 +59,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicDeliverablePage() {
-  const { title, updated, body, downloadUrl, pdfUrl } = useLoaderData<typeof loader>();
+  const { title, updated, body, downloadUrl, pdfUrl, preview } = useLoaderData<typeof loader>();
   return (
     <AuthShell maxWidth="820px">
       {/* The file's own `# ` heading is the title when it has one; the
@@ -60,15 +68,19 @@ export default function PublicDeliverablePage() {
         {!bodyOpensWithTitle(body) && <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>{title}</h1>}
         <p className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
           Updated {updated}
-          {/* The PDF is the download; the source is the quieter second option. */}
-          <span className="deliverable-actions">
-            {" · "}
-            <a href={pdfUrl}>Download PDF</a>
-            {" · "}
-            <a href={downloadUrl} style={{ color: semanticColors.textSubtle }}>
-              markdown source
-            </a>
-          </span>
+          {preview ? (
+            <span data-preview-note>{" · "}Only Guides can see this until its link is turned on.</span>
+          ) : (
+            /* The PDF is the download; the source is the quieter second option. */
+            <span className="deliverable-actions">
+              {" · "}
+              <a href={pdfUrl}>Download PDF</a>
+              {" · "}
+              <a href={downloadUrl} style={{ color: semanticColors.textSubtle }}>
+                markdown source
+              </a>
+            </span>
+          )}
         </p>
       </header>
       <WebsitePageContent>

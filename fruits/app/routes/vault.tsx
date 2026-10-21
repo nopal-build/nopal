@@ -94,6 +94,8 @@ import {
 import { Badge } from "stamps/Badge";
 import { Surface } from "stamps/Surface";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
+import { insertAtSelection } from "../oxmarkdown/insertAtSelection";
+import { ProjectPhotoPicker, type ProjectPhoto } from "../components/ProjectPhotoPicker";
 import { AppLayout } from "../components/AppLayout";
 import { MoreMenu, type MoreMenuItem } from "stamps/MoreMenu";
 import { ActionBar, ActionBarButton, ActionBarGroup } from "stamps/ActionBar";
@@ -1567,11 +1569,24 @@ function MarkdownSplitEditor({
   renderPreview,
   showScratchPadLink = false,
   onBodyChange,
+  onInsertFiles,
+  renderPicturePicker,
 }: {
   fileId: string;
   initialContent: string;
   editable: boolean;
   onSave: (fileId: string, content: string) => Promise<unknown>;
+  /** Pictures dropped, pasted or picked into the Markdown pane: given the
+   * files, stores them and returns the markdown to put at the cursor,
+   * one string per file (`DeliverableSplitEditor` uploads each beside the
+   * page and returns a standard image). Omitted by editors whose pages
+   * take no pictures this way (a website page, a sync-api run). */
+  onInsertFiles?: (files: File[]) => Promise<string[]>;
+  /** A panel for choosing pictures already on the project, opened by
+   * "Add picture" and rendered above the Markdown pane; `insert` puts
+   * markdown at the cursor, `upload` opens the file picker, `close` shuts
+   * the panel. Without it, "Add picture" opens the file picker directly. */
+  renderPicturePicker?: (ctx: { insert: (markdown: string[]) => void; upload: () => void; close: () => void }) => ReactNode;
   /** Rendered FIRST in the merged toolbar row -- the vault's own
    * breadcrumb (+ mobile folder-tree-drawer toggle + "Published"
    * public-link badge), built once by `VaultV2Page` and reused here
@@ -1610,6 +1625,46 @@ function MarkdownSplitEditor({
   const [isSaving, setIsSaving] = useState(false);
   const lastSavedBodyRef = useRef(initialBody);
   const isDirty = body !== lastSavedBodyRef.current;
+
+  // Pictures into the text (`onInsertFiles`): the files are stored first,
+  // then their markdown lands where the cursor was, as its own block
+  // (`insertAtSelection`). One status line while that runs; a failure says
+  // so and inserts nothing.
+  const [insertStatus, setInsertStatus] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pictureInputRef = useRef<HTMLInputElement | null>(null);
+  // Where the cursor is when the text arrives: the textarea's own
+  // selection, read at that moment (the picker panel may hold focus).
+  const insertTexts = useCallback(
+    (texts: string[]) => {
+      const el = textareaRef.current;
+      const start = el?.selectionStart ?? body.length;
+      const end = el?.selectionEnd ?? start;
+      setBody((prev) => insertAtSelection(prev, start, end, texts.join("\n\n")).body);
+    },
+    [body.length],
+  );
+  const insertFiles = useCallback(
+    async (candidates: File[]) => {
+      if (!onInsertFiles || !editable) return;
+      const files = candidates.filter((f) => f.type.startsWith("image/"));
+      if (files.length === 0) return;
+      setInsertStatus(files.length === 1 ? "Adding the picture…" : `Adding ${files.length} pictures…`);
+      try {
+        const texts = await onInsertFiles(files);
+        insertTexts(texts);
+        setInsertStatus(null);
+        setPickerOpen(false);
+      } catch (err) {
+        setInsertStatus(err instanceof Error && err.message ? err.message : "The picture didn't upload. Try again.");
+      }
+    },
+    [onInsertFiles, editable, insertTexts],
+  );
+  const openAddPicture = useCallback(() => {
+    if (renderPicturePicker) setPickerOpen((open) => !open);
+    else pictureInputRef.current?.click();
+  }, [renderPicturePicker]);
 
   useEffect(() => {
     onBodyChange?.(body);
@@ -1803,6 +1858,15 @@ function MarkdownSplitEditor({
             <span>Markdown</span>
             <span className="vault-website-editor-mobile-expand">{expandButton}</span>
           </div>
+          {pickerOpen &&
+            renderPicturePicker?.({
+              insert: (texts) => {
+                insertTexts(texts);
+                setPickerOpen(false);
+              },
+              upload: () => pictureInputRef.current?.click(),
+              close: () => setPickerOpen(false),
+            })}
           <textarea
             ref={textareaRef}
             className="vault-website-editor-textarea"
@@ -1811,6 +1875,29 @@ function MarkdownSplitEditor({
             readOnly={!editable}
             spellCheck={false}
             placeholder="Write this page..."
+            onDragOver={onInsertFiles ? (e) => e.preventDefault() : undefined}
+            onDrop={
+              onInsertFiles
+                ? (e) => {
+                    const files = Array.from(e.dataTransfer.files);
+                    if (files.some((f) => f.type.startsWith("image/"))) {
+                      e.preventDefault();
+                      void insertFiles(files);
+                    }
+                  }
+                : undefined
+            }
+            onPaste={
+              onInsertFiles
+                ? (e) => {
+                    const files = Array.from(e.clipboardData.files);
+                    if (files.some((f) => f.type.startsWith("image/"))) {
+                      e.preventDefault();
+                      void insertFiles(files);
+                    }
+                  }
+                : undefined
+            }
           />
           <div className="vault-website-editor-save-row">
             <button
@@ -1821,6 +1908,30 @@ function MarkdownSplitEditor({
             >
               {saveButtonLabel}
             </button>
+            {onInsertFiles && editable && (
+              <>
+                <input
+                  ref={pictureInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const files = Array.from(e.currentTarget.files ?? []);
+                    e.currentTarget.value = "";
+                    void insertFiles(files);
+                  }}
+                />
+                <button type="button" className="vault-toolbar-btn" onClick={openAddPicture} disabled={insertStatus?.startsWith("Adding") ?? false} aria-expanded={pickerOpen}>
+                  Add picture
+                </button>
+                {insertStatus && (
+                  <span className="text-xs font-mono" style={{ color: insertStatus.startsWith("Adding") ? "var(--color-text-subtle)" : "var(--color-text-danger)" }}>
+                    {insertStatus}
+                  </span>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -1869,6 +1980,13 @@ function MarkdownSplitEditor({
             Markdown
           </ActionBarButton>
         </ActionBarGroup>
+        {/* The same picture button the desktop save row has; that row is
+            hidden on narrow screens (`vault.css`). */}
+        {onInsertFiles && editable && (
+          <button type="button" className="vault-toolbar-btn" onClick={openAddPicture} disabled={insertStatus?.startsWith("Adding") ?? false} aria-expanded={pickerOpen}>
+            Add picture
+          </button>
+        )}
         <button
           type="button"
           className="vault-website-editor-mobile-save"
@@ -2023,6 +2141,129 @@ function SyncApiRunEditor({
       renderPreview={(body) => <OxRenderer markdown={body} />}
     />
   );
+}
+
+// ─── Deliverable editor ──────────────────────────────────────────────────
+// A deliverable is a website page that lives in a project (Austin,
+// 2026-10-21; `deliverables.server.ts`): the same `MarkdownSplitEditor`
+// as a website page, previewing through the website directive registry
+// inside `WebsitePageContent`, which is exactly what the public
+// deliverable page renders (`public.deliverable.$fileId.tsx`). No publish
+// toggle: sharing is the switch on the project's Deliverables tab. A
+// picture dropped, pasted or picked uploads beside the file
+// (`/api/vault/upload` into its folder) and lands in the text as a
+// standard markdown image pointing at the vault, the one form the public
+// page serves.
+function DeliverableSplitEditor({
+  fileId,
+  folderId,
+  projectFolderId,
+  initialContent,
+  editable,
+  onSave,
+  headerLeft,
+  toolbarRight,
+}: {
+  fileId: string;
+  folderId: string | null;
+  /** The project the deliverable belongs to: where "Add picture" looks
+   * first (`/api/projects/:id/photos`, the Photos tab's own rows). */
+  projectFolderId: string | null;
+  initialContent: string;
+  editable: boolean;
+  onSave: (fileId: string, content: string) => Promise<unknown>;
+  headerLeft?: ReactNode;
+  toolbarRight?: ReactNode;
+}) {
+  // The project's photos, fetched the first time the picker opens.
+  const [photos, setPhotos] = useState<ProjectPhoto[] | null>(null);
+  const [photosError, setPhotosError] = useState<string | null>(null);
+  const loadPhotos = useCallback(async () => {
+    if (!projectFolderId) {
+      setPhotosError("This file isn't inside a project");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/projects/${projectFolderId}/photos`);
+      const data = (await res.json().catch(() => null)) as { photos?: ProjectPhoto[]; error?: string } | null;
+      if (!res.ok || !data?.photos) throw new Error(data?.error ?? "The project's photos didn't load. Try again.");
+      setPhotos(data.photos);
+      setPhotosError(null);
+    } catch (err) {
+      setPhotosError(err instanceof Error ? err.message : "The project's photos didn't load. Try again.");
+    }
+  }, [projectFolderId]);
+
+  const insertPictures = useCallback(
+    async (files: File[]): Promise<string[]> => {
+      if (!folderId) throw new Error("This file has no folder to keep a picture in");
+      const out: string[] = [];
+      for (const file of files) {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("folderId", folderId);
+        const res = await fetch("/api/vault/upload", { method: "POST", body: form });
+        const data = (await res.json().catch(() => null)) as { fileRef?: { _id: string }; error?: string } | null;
+        if (!res.ok || !data?.fileRef?._id) throw new Error(data?.error ?? `${file.name} didn't upload. Try again.`);
+        const alt = file.name.replace(/\.[^.]+$/, "");
+        out.push(`![${alt}](/api/vault/view/${data.fileRef._id})`);
+      }
+      return out;
+    },
+    [folderId],
+  );
+
+  // Simpler than the website editor on purpose (Austin, 2026-10-21): the
+  // same design language, fewer ways to go wrong. No scratch pad link;
+  // which directives a deliverable gets, against what stays website-only,
+  // is a later, deliberate pass. Light/Dark stays: the public link follows
+  // the reader's scheme, only the PDF is pinned to light.
+  return (
+    <MarkdownSplitEditor
+      fileId={fileId}
+      initialContent={initialContent}
+      editable={editable}
+      onSave={onSave}
+      headerLeft={headerLeft}
+      toolbarRight={toolbarRight}
+      onInsertFiles={insertPictures}
+      renderPicturePicker={({ insert, upload, close }) => (
+        <PhotoPickerLoader photos={photos} error={photosError} load={loadPhotos} insert={insert} upload={upload} close={close} />
+      )}
+      renderPreview={(body, previewScheme) => (
+        <WebsitePageContent>
+          <OxRenderer
+            markdown={body}
+            directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme: previewScheme })}
+            className="ox-no-dots ox-no-heading-marks website-page-ox"
+          />
+        </WebsitePageContent>
+      )}
+    />
+  );
+}
+
+/** Fetches the project's photos when the picker panel mounts, then hands
+ * them to `ProjectPhotoPicker`. */
+function PhotoPickerLoader({
+  photos,
+  error,
+  load,
+  insert,
+  upload,
+  close,
+}: {
+  photos: ProjectPhoto[] | null;
+  error: string | null;
+  load: () => Promise<void>;
+  insert: (markdown: string[]) => void;
+  upload: () => void;
+  close: () => void;
+}) {
+  useEffect(() => {
+    if (photos === null && !error) void load();
+  }, [photos, error, load]);
+  return <ProjectPhotoPicker photos={photos ?? []} loading={photos === null && !error} error={error} onPick={(md) => insert([md])} onUpload={upload} onClose={close} />;
 }
 
 // ─── Skill file editor ───────────────────────────────────────────────────
@@ -3633,7 +3874,8 @@ export default function VaultV2Page() {
   const usesMergedHeader =
     current.kind === "file" &&
     ((Boolean(current.websiteAnchor) && Boolean(current.websitePageMeta) && isMarkdownFile(current.file)) ||
-      (fileFolderType === "sync-api" && isMarkdownFile(current.file)));
+      (fileFolderType === "sync-api" && isMarkdownFile(current.file)) ||
+      (fileFolderType === "deliverables" && isMarkdownFile(current.file)));
 
   const handleCreateMarkdownFile = async () => {
     if (current.kind !== "file" || !current.file.folder_id) return;
@@ -3772,6 +4014,17 @@ export default function VaultV2Page() {
   // above), and there's no equivalent "create a new run" action this
   // header could trigger (runs are created via the analysis's own CLI/API
   // flow — see the `vault` skill's "Sync types" section).
+  // A deliverable's toolbar: the public link while it is shared (the
+  // switch itself lives on the project's Deliverables tab), then Actions.
+  const deliverableToolbarRight = (
+    <>
+      {current.kind === "file" && current.file.shared_at && (
+        <CopyLinkButton path={`/public/deliverable/${current.file._id}`} />
+      )}
+      <MoreMenu label="Actions" items={splitEditorActions} trigger={actionsTrigger} />
+    </>
+  );
+
   const syncApiToolbarRight = (
     <>
       {current.kind === "file" && fileEffectivelyPublic && (
@@ -4251,6 +4504,21 @@ export default function VaultV2Page() {
                 }
                 headerLeft={breadcrumbNode}
                 toolbarRight={websiteToolbarRight}
+              />
+            ) : fileFolderType === "deliverables" && isMarkdownFile(current.file) ? (
+              // A deliverable (see `DeliverableSplitEditor` above): the
+              // website page's split editor, previewing what the client's
+              // public page shows.
+              <DeliverableSplitEditor
+                key={`${current.file._id}-${current.file.updated_at}`}
+                fileId={current.file._id}
+                folderId={current.file.folder_id}
+                projectFolderId={current.ancestry.find((f) => isProjectAnchor(f))?._id ?? null}
+                initialContent={current.file.content ?? ""}
+                editable={canWriteCurrentFile}
+                onSave={handleSaveWebsitePage}
+                headerLeft={breadcrumbNode}
+                toolbarRight={deliverableToolbarRight}
               />
             ) : fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (
               // A sync-api analysis run's own `<run>.md` (see the `vault`

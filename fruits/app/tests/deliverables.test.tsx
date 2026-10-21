@@ -85,13 +85,25 @@ describe("the public body", () => {
 describe("what leaves the server", () => {
   it("is a fixed set of fields, the link keyed by the file's own id", () => {
     const page = deliverablePage({ _id: FILE, name: "madison-attic.md", content: PAGE, updated_at: "2026-10-21T08:00:00Z" }, "https://o.nopal.build");
-    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "pdfUrl", "title", "updated", "url"]);
+    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "pdfUrl", "preview", "title", "updated", "url"]);
+    expect(page.preview).toBe(false);
     expect(page.url).toBe(`https://o.nopal.build/public/deliverable/${FILE}`);
     expect(page.downloadUrl).toBe(`/api/deliverable/${FILE}/download`);
     expect(page.pdfUrl).toBe(`/api/deliverable/${FILE}/pdf`);
     expect(page.updated).toBe("Oct 21, 2026");
     expect(page.title).toBe("Madison attic");
   });
+});
+
+describe("a Guide's preview before the link is on", () => {
+  it("is the same page with the session's own file URLs, marked as a preview", () => {
+    const page = deliverablePage({ _id: FILE, name: "madison-attic.md", content: PAGE, updated_at: "2026-10-21T08:00:00Z" }, "https://o.nopal.build", true);
+    expect(page.preview).toBe(true);
+    expect(page.body).toContain("/api/vault/view/ntfc5km0612jeex7fjiv");
+    expect(page.body).not.toContain("/api/deliverable/");
+    expect(page.body).not.toContain("title: Madison attic");
+  });
+
 });
 
 describe("who manages: upload, replace, the switch", () => {
@@ -151,25 +163,30 @@ describe("the tab", () => {
     expect(pdfLine({ state: "none" })).toMatch(/not made yet/);
   });
 
-  it("a manager gets Upload, and per page the switch, Replace and Edit in Vault", () => {
+  it("a manager gets New deliverable and Upload, and per page the switch, Replace and Edit", () => {
     const html = renderToStaticMarkup(<DeliverablesView projectFolderId="proj1" rows={rows} manage={true} openInVault={true} onChanged={() => {}} />);
+    expect(html).toContain("New deliverable");
     expect(html).toContain("Upload a deliverable");
+    expect(html).toContain('accept=".md,text/markdown,image/*"');
+    expect(html).toContain("multiple");
     expect(html).toContain("Stop sharing");
     expect(html).toContain("Share link");
     expect((html.match(/>Replace</g) ?? []).length).toBe(2);
-    expect((html.match(/>Edit in Vault</g) ?? []).length).toBe(2);
+    expect((html.match(/>Edit</g) ?? []).length).toBe(2);
   });
 
-  it("the title opens what the client sees: the public page when the link is on, the Vault only for a manager when it is off", () => {
+  it("the title opens what the client sees: the public page, always for a manager, once shared for a reader", () => {
     const html = renderToStaticMarkup(<DeliverablesView projectFolderId="proj1" rows={rows} manage={true} openInVault={true} onChanged={() => {}} />);
-    // The title is the base-size link; "Edit in Vault" is the xs one.
+    // The title is the base-size link; "Edit" is the xs one. A manager's
+    // title always opens the client's page, shared or not.
     expect(html).toContain(`<a href="/public/deliverable/${FILE}" class="typography_textSize_base`);
+    expect(html).toContain(`<a href="/public/deliverable/draft1" class="typography_textSize_base`);
     expect(html).not.toContain(`<a href="/vault?file=${FILE}" class="typography_textSize_base`);
-    expect(html).toContain(`<a href="/vault?file=draft1" class="typography_textSize_base`);
     const reader = renderToStaticMarkup(<DeliverablesView projectFolderId="proj1" rows={rows} manage={false} openInVault={true} onChanged={() => {}} />);
     expect(reader).toContain(`<a href="/public/deliverable/${FILE}"`);
     expect(reader).not.toContain("/vault?file=draft1");
-    expect(reader).not.toContain("Edit in Vault");
+    expect(reader).not.toContain(">Edit<");
+    expect(reader).not.toContain("New deliverable");
   });
 });
 
@@ -204,6 +221,28 @@ describe("read only", () => {
     expect(src).toContain("deliverable.css");
     const css = readFileSync(path.join(here, "../styles/deliverable.css"), "utf8");
     expect(css).toMatch(/@media print \{[^}]*\.deliverable-actions \{\s*display: none;/);
+  });
+
+  it("with the link off, the public route admits only a manager, as a preview", () => {
+    const src = readFileSync(path.join(here, "../routes/public.deliverable.$fileId.tsx"), "utf8");
+    expect(src).toContain("resolveDeliverableForManager(");
+    expect(src).toContain("deliverablePage(mine.file, origin, true)");
+  });
+
+  it("a saved edit refreshes the content hash and asks for the PDF, so the key moves with the words", () => {
+    const src = readFileSync(path.join(here, "../routes/api.vault.$fileId.tsx"), "utf8");
+    expect(src).toMatch(/updates\.content_hash = crypto\.createHash\("sha256"\)/);
+    expect(src).toContain("await enqueueDeliverablePdfIfShared(updated)");
+  });
+
+  it("a deliverable opens in the Vault's split editor, never the read-only render", () => {
+    const src = readFileSync(path.join(here, "../routes/vault.tsx"), "utf8");
+    const branch = src.indexOf('fileFolderType === "deliverables" && isMarkdownFile(current.file) ? (');
+    const syncApi = src.indexOf('fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (');
+    expect(branch).toBeGreaterThan(-1);
+    expect(branch).toBeLessThan(syncApi);
+    expect(src).toContain("<DeliverableSplitEditor");
+    expect(src).toMatch(/usesMergedHeader =[\s\S]*fileFolderType === "deliverables"/);
   });
 
   it("the page renders with no pen, no form and nothing editable, and hands the renderer no served ids", () => {

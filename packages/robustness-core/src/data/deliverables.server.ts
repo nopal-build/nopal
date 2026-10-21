@@ -26,9 +26,18 @@
  * - Nothing turns a link on at upload. A person does.
  *
  * The PDF is the public page printed by the worker, keyed by the file's
- * content hash (`deliverablePdf.server.ts`). The share route and the
- * replace route ask for it ahead of the click; this module stays free of
- * the queue so the two don't import each other.
+ * content hash (`deliverablePdf.server.ts`). The share route, the replace
+ * route and a content save ask for it ahead of the click; this module
+ * stays free of the queue so the two don't import each other.
+ *
+ * Two doors in, one file (Austin, 2026-10-21: a deliverable is a website
+ * page that lives in a project). Written here: the Vault's split editor
+ * (`vault.tsx`, `DeliverableSplitEditor`), where a dropped or pasted
+ * picture uploads beside the file and lands in the text as a standard
+ * markdown image. Brought from outside: the markdown and its pictures in
+ * one upload; `rewriteLocalImagePaths` points every local image path at
+ * the uploaded picture with that name and names the ones it couldn't,
+ * so nobody has to find a file id by hand.
  */
 
 import crypto from "node:crypto";
@@ -242,16 +251,133 @@ export interface DeliverablePage {
   /** The page printed (`deliverablePdf.server.ts`). */
   pdfUrl: string;
   fileName: string;
+  /** True when a Guide is looking at a deliverable whose link is off:
+   * the page as the client would see it, with the session serving the
+   * pictures and no downloads (there is no PDF until the link is on). */
+  preview: boolean;
 }
 
-export function deliverablePage(file: Pick<FileRef, "_id" | "name" | "content" | "updated_at">, origin: string): DeliverablePage {
+export function deliverablePage(file: Pick<FileRef, "_id" | "name" | "content" | "updated_at">, origin: string, preview = false): DeliverablePage {
   return {
     title: deliverableTitle(file),
     updated: new Date(file.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }),
-    body: publicDeliverableBody(file.content ?? "", file._id),
+    // A preview keeps the session view URLs: the Guide has a session, and
+    // the public file routes refuse an unshared deliverable.
+    body: preview ? splitFrontmatter(file.content ?? "").body : publicDeliverableBody(file.content ?? "", file._id),
     url: `${origin}${deliverablePublicPath(file._id)}`,
     downloadUrl: `/api/deliverable/${file._id}/download`,
     pdfUrl: `/api/deliverable/${file._id}/pdf`,
     fileName: file.name,
+    preview,
   };
+}
+
+/** A deliverable a Guide may preview before its link is on (Austin,
+ * 2026-10-21: the title on the tab always opens what the client would
+ * see). Null for anyone who doesn't manage the project's deliverables,
+ * for a non-deliverable, or for a trashed project. */
+export async function resolveDeliverableForManager(
+  fileId: string,
+  actor: Pick<Human, "_id" | "role">,
+): Promise<{ file: FileRef; project: VaultFolder } | null> {
+  const file = await getFileRefById(fileId);
+  if (!file || file.archived_at || !isMarkdownFileName(file.name)) return null;
+  const home = await deliverableHome(file);
+  if (!home || getProjectStatus(home.project) === "trashed") return null;
+  if (!canManageDeliverables(actor, await getProjectRole(home.project, actor._id))) return null;
+  return { file, project: home.project };
+}
+
+/** The text a new deliverable starts with: a title in front matter (the
+ * tab and the public page read it) and the heading the page opens on. */
+export function newDeliverableContent(name: string): string {
+  const title = name.trim();
+  return `---\ntitle: ${title.replace(/"/g, "'")}\n---\n\n# ${title}\n\n`;
+}
+
+export function deliverableFileName(name: string): string {
+  const base = name.trim().replace(/\.md$/i, "").replace(/[\\/]/g, "-");
+  return `${base || "Untitled"}.md`;
+}
+
+export function isImageUpload(file: { name: string; type: string }): boolean {
+  return file.type.startsWith("image/") || /\.(jpe?g|png|gif|webp|heic|heif|avif|svg)$/i.test(file.name);
+}
+
+export function isMarkdownUpload(file: { name: string; type: string }): boolean {
+  return file.type === "text/markdown" || isMarkdownFileName(file.name);
+}
+
+export type UploadBundle = { markdown: File; pictures: File[] };
+
+/** One markdown file and its pictures, or the one-line reason the
+ * upload is refused. The order files arrive in doesn't matter. */
+export function splitUploadBundle(files: File[]): { ok: true; bundle: UploadBundle } | { ok: false; error: string } {
+  const markdowns = files.filter(isMarkdownUpload);
+  const pictures = files.filter((f) => !isMarkdownUpload(f) && isImageUpload(f));
+  const others = files.filter((f) => !isMarkdownUpload(f) && !isImageUpload(f));
+  if (markdowns.length === 0) return { ok: false, error: "A deliverable is a markdown file (.md), with its pictures alongside" };
+  if (markdowns.length > 1) return { ok: false, error: "One deliverable at a time: upload one markdown file, with its pictures alongside" };
+  if (others.length > 0) return { ok: false, error: `Only pictures can come with the markdown; not ${others.map((f) => f.name).join(", ")}` };
+  return { ok: true, bundle: { markdown: markdowns[0], pictures } };
+}
+
+export type UploadedPicture = { name: string; fileId: string };
+
+/** The name a markdown path refers to: its last segment, URL-decoded,
+ * lower-cased, without a query or fragment. */
+function pathBasename(path: string): string {
+  const clean = path.split(/[?#]/)[0].trim();
+  const last = clean.split("/").pop() ?? clean;
+  try {
+    return decodeURIComponent(last).toLowerCase();
+  } catch {
+    return last.toLowerCase();
+  }
+}
+
+/** A path the rewrite leaves alone: already on the web, already the
+ * vault's, inline data, or an anchor. */
+function isExternalPath(path: string): boolean {
+  return /^(https?:)?\/\//i.test(path) || path.startsWith("/") || /^(data|mailto|tel):/i.test(path) || path.startsWith("#");
+}
+
+/**
+ * Points every local image path in `markdown` at the uploaded picture
+ * with that file name, and names the paths it couldn't match. Handles
+ * `![alt](path)`, `![alt](<a path with spaces>)`, `![alt](path "title")`
+ * and reference definitions `[id]: path`. Matching is by basename,
+ * case-insensitive, URL-decoded, so `./images/Kitchen.JPG` finds
+ * `kitchen.jpg`. Pure; the route calls it after the pictures are stored.
+ */
+export function rewriteLocalImagePaths(markdown: string, pictures: UploadedPicture[]): { markdown: string; unmatched: string[] } {
+  const byName = new Map<string, string>();
+  for (const p of pictures) if (!byName.has(p.name.toLowerCase())) byName.set(p.name.toLowerCase(), p.fileId);
+  const unmatched: string[] = [];
+  const seenUnmatched = new Set<string>();
+  const resolve = (rawPath: string): string | null => {
+    const path = rawPath.trim();
+    if (!path || isExternalPath(path)) return null;
+    const id = byName.get(pathBasename(path));
+    if (id) return `/api/vault/view/${id}`;
+    if (!seenUnmatched.has(path)) {
+      seenUnmatched.add(path);
+      unmatched.push(path);
+    }
+    return null;
+  };
+  // Inline images: the destination is either <...> or a run with no
+  // spaces or closing paren, optionally followed by a quoted title.
+  const inline = /!\[([^\]]*)\]\(\s*(?:<([^>]*)>|([^\s)]+))(\s+"[^"]*"|\s+'[^']*')?\s*\)/g;
+  let out = markdown.replace(inline, (whole, alt: string, angled: string | undefined, bare: string | undefined, title: string | undefined) => {
+    const target = resolve(angled ?? bare ?? "");
+    return target ? `![${alt}](${target}${title ?? ""})` : whole;
+  });
+  // Reference definitions at a line start: [id]: path "title"
+  const definition = /^(\s{0,3}\[[^\]]+\]:\s*)(?:<([^>]*)>|(\S+))(.*)$/gm;
+  out = out.replace(definition, (whole, lead: string, angled: string | undefined, bare: string | undefined, rest: string) => {
+    const target = resolve(angled ?? bare ?? "");
+    return target ? `${lead}${target}${rest}` : whole;
+  });
+  return { markdown: out, unmatched };
 }
