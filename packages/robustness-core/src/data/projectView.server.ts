@@ -12,10 +12,11 @@
 import type { FileFolder, ProjectFileRow } from "./fileFolders.server";
 import type { Feature } from "./features";
 
-export type ProjectTab = "efforts" | "photos" | "files" | "sensorData" | "costs" | "logbook" | "suggestions";
+export type ProjectTab = "efforts" | "deliverables" | "photos" | "files" | "sensorData" | "costs" | "logbook" | "suggestions";
 
 export const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
   efforts: "Efforts",
+  deliverables: "Deliverables",
   photos: "Photos",
   files: "Files",
   sensorData: "Sensor Data",
@@ -34,7 +35,7 @@ export const TAB_FOLDERS: Partial<Record<ProjectTab, FileFolder[]>> = {
 /** The tabs, in order. Each is a feature of the same name on the
  * features list (`features.ts`): a group sees the tabs it is given.
  * Suggestions is the one exception (`seesSuggestions`). */
-export const PROJECT_TABS: ProjectTab[] = ["efforts", "photos", "files", "sensorData", "costs", "logbook", "suggestions"];
+export const PROJECT_TABS: ProjectTab[] = ["efforts", "deliverables", "photos", "files", "sensorData", "costs", "logbook", "suggestions"];
 
 /** The tabs a member with these features sees, in order. */
 export function tabsFor(features: readonly Feature[]): ProjectTab[] {

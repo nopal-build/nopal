@@ -63,6 +63,9 @@ import { CardTabs } from "../components/stamps-candidates/CardTabs";
 import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
 import OxRenderer from "../components/OxRenderer";
 import { ProjectFilesView } from "../components/ProjectFilesView";
+import { DeliverablesView } from "../components/DeliverablesView";
+import { ShareLinkControl } from "../components/ShareLinkControl";
+import { canManageDeliverables, listDeliverables } from "robustness-core/data/deliverables.server";
 import { ProjectView } from "../components/ProjectView";
 import type { CitedLogsForPen, MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
 import { sprinkles } from "stamps/sprinkles.css";
@@ -119,6 +122,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const files: ProjectFileRow[] | null =
     tabFolders && folder.folder_type === "project-n02" ? rowsForReader(await loadProjectFiles(folder), features) : null;
   const logbook = tab === "logbook" ? await projectLogbook(folder) : null;
+  // The Deliverables tab (`deliverables.server.ts`): the list for
+  // everyone with the tab; upload, replace and the share switch for a
+  // Guide on the project or staff. The server refuses the rest anyway.
+  const deliverables = tab === "deliverables" ? await listDeliverables(folder) : null;
+  const manageDeliverables = tab === "deliverables" && canManageDeliverables(user, role);
   // A Card names its writer's originals; a reader opens the project's
   // copies, by the same rows the file tabs are built from.
   const logbookFileIds = logbook ? servedFileIds(await loadProjectFiles(folder), features) : null;
@@ -263,6 +271,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     fileKinds: FILING_KINDS.filter((k) => k !== "video"),
     logbook,
     logbookFileIds,
+    deliverables,
+    manageDeliverables,
     sensorData,
     seeding,
     budgetView,
@@ -417,72 +427,6 @@ function localDate(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** Share the Efforts page by link, copy it, or stop sharing. Staff only
- * (the loader sends `share` to no one else). Quiet: an occasional
- * control, not part of the page's headline. */
-function ShareLinkControl({ folderId, sharedAt }: { folderId: string; sharedAt: string | null }) {
-  const revalidator = useRevalidator();
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-  // Set when the clipboard refused: the link, shown to copy by hand.
-  const [manual, setManual] = useState<string | null>(null);
-  const path = `/public/newspaper/${folderId}`;
-
-  const setShared = async (on: boolean) => {
-    if (on && !window.confirm("Anyone with the link will be able to read this project's Efforts page without logging in. Share it?")) return;
-    setBusy(true);
-    try {
-      await fetch(`/api/newspaper/${folderId}/share`, { method: on ? "POST" : "DELETE" });
-      revalidator.revalidate();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const copy = async () => {
-    // Built at click time: `window` doesn't exist during SSR.
-    const url = `${window.location.origin}${path}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // No clipboard (plain http, an old browser).
-      setManual(url);
-    }
-  };
-
-  const quiet = {
-    background: "transparent",
-    border: "none",
-    color: semanticColors.textSubtle,
-    padding: 0,
-    cursor: "pointer",
-  } as const;
-
-  if (!sharedAt) {
-    return (
-      <button type="button" className={textSize.xs} style={quiet} disabled={busy} onClick={() => setShared(true)}>
-        Share link
-      </button>
-    );
-  }
-  return (
-    <Cluster gap={3} align="center" data-share-link>
-      {manual ? (
-        <input readOnly value={manual} className={textSize.xs} onFocus={(e) => e.currentTarget.select()} autoFocus />
-      ) : (
-        <button type="button" className={textSize.xs} style={quiet} onClick={copy}>
-          {copied ? "Copied" : "Copy link"}
-        </button>
-      )}
-      <button type="button" className={textSize.xs} style={quiet} disabled={busy} onClick={() => setShared(false)}>
-        Stop sharing
-      </button>
-    </Cluster>
-  );
-}
-
 /** The Logbook: what each person wrote about this project, one card per
  * person per day, pinned into a scrapbook. Read-only; each person edits
  * their own on the Daily Log. */
@@ -515,7 +459,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, deliverables, manageDeliverables, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -727,7 +671,9 @@ export default function NewspaperRoute() {
                 one: the durable spot when no seeding is happening (Austin,
                 2026-09-30). */}
             <Cluster gap={4} align="center">
-              {share && <ShareLinkControl folderId={folder._id} sharedAt={share.sharedAt} />}
+              {share && (
+                <ShareLinkControl what="this project's Efforts page" path={`/public/newspaper/${folder._id}`} endpoint={`/api/newspaper/${folder._id}/share`} sharedAt={share.sharedAt} onChanged={() => revalidator.revalidate()} />
+              )}
               {seeding?.guide && !seeding.open && <SeedRoundQuiet projectFolderId={folder._id} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
             </Cluster>
           </Cluster>
@@ -763,6 +709,9 @@ export default function NewspaperRoute() {
               onChanged={() => revalidator.revalidate()}
               canFile={canEdit}
             />
+          )}
+          {deliverables && (
+            <DeliverablesView projectFolderId={folder._id} rows={deliverables} manage={manageDeliverables} openInVault={openInVault} onChanged={() => revalidator.revalidate()} />
           )}
           {tab === "sensorData" && sensorData && (
             <SensorDataView projectFolderId={folder._id} data={sensorData} />
