@@ -19,7 +19,7 @@
 // carries no button to itself.
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
-import { bodyOpensWithTitle, deliverablePage, resolveDeliverableForManager, resolveSharedDeliverable } from "robustness-core/data/deliverables.server";
+import { deliverablePage, resolveDeliverableForManager, resolveSharedDeliverable } from "robustness-core/data/deliverables.server";
 import { getUser } from "../modules/auth/auth.server";
 import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
@@ -59,13 +59,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicDeliverablePage() {
-  const { title, updated, body, downloadUrl, pdfUrl, preview } = useLoaderData<typeof loader>();
+  const { title, showTitle, updated, body, downloadUrl, pdfUrl, preview } = useLoaderData<typeof loader>();
   return (
     <AuthShell maxWidth="820px">
       {/* The file's own `# ` heading is the title when it has one; the
           header repeats nothing. */}
       <header className={sprinkles({ mb: 8 })}>
-        {!bodyOpensWithTitle(body) && <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>{title}</h1>}
+        {showTitle && <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>{title}</h1>}
         <p className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
           Updated {updated}
           {preview ? (
