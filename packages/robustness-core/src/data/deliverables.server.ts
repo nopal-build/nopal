@@ -211,6 +211,13 @@ export function deliverablePublicPath(fileId: string): string {
   return `/public/deliverable/${fileId}`;
 }
 
+/** What the banner's Deliverables tile lists: the shared ones only, by
+ * title, each to its public page. Everyone on the project sees the same
+ * tile, so a Guide sees what the client sees. Pure. */
+export function sharedDeliverableLinks(rows: Pick<DeliverableRow, "fileId" | "title" | "sharedAt">[]): { fileId: string; title: string; path: string }[] {
+  return rows.filter((r) => !!r.sharedAt).map((r) => ({ fileId: r.fileId, title: r.title, path: deliverablePublicPath(r.fileId) }));
+}
+
 /** The file as the public page shows it: no front matter, every file URL
  * pointing at the deliverable's own route. */
 export function publicDeliverableBody(markdown: string, fileId: string): string {

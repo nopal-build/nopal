@@ -19,6 +19,7 @@ import {
   deliverableTitle,
   isDeliverablesFolder,
   publicDeliverableBody,
+  sharedDeliverableLinks,
 } from "robustness-core/data/deliverables.server";
 import { resolveRole } from "robustness-core/data/projectSharing.server";
 import { featuresOf } from "robustness-core/data/features";
@@ -27,6 +28,7 @@ import { WebsitePageContent } from "stamps/WebsitePageContent";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { DeliverablesView, pdfLine } from "../components/DeliverablesView";
+import { DeliverablesTile } from "../components/DeliverablesTile";
 import { preparingPage } from "robustness-core/data/deliverablePdf.server";
 
 const FILE = "d3l1v3r4bl3";
@@ -133,10 +135,20 @@ describe("who manages: upload, replace, the switch", () => {
 });
 
 describe("the tab", () => {
-  it("every group reads it, a Client included, second after Efforts", () => {
-    expect(tabsFor(featuresOf("Client")).slice(0, 2)).toEqual(["efforts", "deliverables"]);
+  it("every group but a Client reads it, second after Efforts; a Client has no tab (2026-10-22)", () => {
+    expect(tabsFor(featuresOf("Client"))).not.toContain("deliverables");
     expect(tabsFor(featuresOf("Guide")).slice(0, 2)).toEqual(["efforts", "deliverables"]);
     expect(tabsFor(featuresOf("Observer"))).toContain("deliverables");
+  });
+
+  it("the banner's tile lists only what is shared, each to its public page, and is absent with nothing shared", () => {
+    const links = sharedDeliverableLinks(rows);
+    expect(links).toEqual([{ fileId: FILE, title: "Madison attic", path: `/public/deliverable/${FILE}` }]);
+    const html = renderToStaticMarkup(<DeliverablesTile links={links} />);
+    expect(html).toContain("data-deliverables-tile");
+    expect(html).toContain(`href="/public/deliverable/${FILE}"`);
+    expect(html).not.toContain("draft1");
+    expect(renderToStaticMarkup(<DeliverablesTile links={sharedDeliverableLinks([rows[1]])} />)).toBe("");
   });
 
   const rows = [

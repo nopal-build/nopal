@@ -20,9 +20,12 @@ export const CLIENT: Group = "Client";
 export const FEATURE_NAMES = [
   /** The Efforts page (the project README the skills write). */
   "efforts",
-  /** The Deliverables tab: the pages a guide uploaded for the client,
-   * each with its own public link (`deliverables.server.ts`). Reading
-   * only; uploading, replacing and the share switch are a Guide's. */
+  /** The Deliverables tab: where a guide works on the pages a client
+   * gets, each with its own public link (`deliverables.server.ts`).
+   * Reading only; uploading, replacing and the share switch are a
+   * Guide's. A Client has no tab: what is shared reaches them as the
+   * Deliverables tile in the project's banner (Austin, 2026-10-22: "the
+   * tab is for deliverables that are being worked"). */
   "deliverables",
   /** The Photos tab, and the photos themselves, never a cost file. */
   "photos",
@@ -80,7 +83,7 @@ export const GROUP_FEATURES: Record<Group, readonly Feature[]> = {
   Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people", "feeds", "suggestions", "budget", "print"],
   Crafter: [...READING, "marks", "steepTap", "dailyLog", "edit", "feeds", "print"],
   Observer: [...READING, "marks", "steepTap", "dailyLog", "print"],
-  Client: ["efforts", "deliverables", "photos", "marks", "steepTap", "dailyLog", "feeds", "print"],
+  Client: ["efforts", "photos", "marks", "steepTap", "dailyLog", "feeds", "print"],
 };
 
 /** The groups someone may give: every group for an admin; a Guide who
