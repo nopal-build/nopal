@@ -70,10 +70,11 @@ describe("the groups", () => {
     expect(seesSuggestions(featuresOf("Observer"))).toBe(true);
   });
 
-  it("a Client gets Efforts, Deliverables, Photos, the pen, their own tap and their own log, and runs nothing", () => {
+  it("a Client gets Efforts, Photos, the pen, their own tap and their own log, and runs nothing", () => {
     const client = resolveRole("Client");
-    // Deliverables (2026-10-21): a client keeps the pages made for them.
-    expect(tabsFor(client.features)).toEqual(["efforts", "deliverables", "photos"]);
+    // No Deliverables tab (Austin, 2026-10-22): the tab is where guides
+    // work; a client reaches what is shared through the banner's tile.
+    expect(tabsFor(client.features)).toEqual(["efforts", "photos"]);
     expect(client.features).toEqual(expect.arrayContaining(["steepTap", "dailyLog"]));
     expect(client).toMatchObject({ isOwner: false, guiding: false });
     expect(client.features).not.toContain("steepReadings");
@@ -148,7 +149,7 @@ describe("test 2: one row", () => {
   const client = featuresOf("Client", withoutPhotos);
 
   it("taking Photos from clients takes the tab, the rows and the files, and nothing else", () => {
-    expect(tabsFor(client)).toEqual(["efforts", "deliverables"]);
+    expect(tabsFor(client)).toEqual(["efforts"]);
     expect(resolveProjectTab("photos", tabsFor(client))).toBeNull();
     expect(rowsForReader(rows, client)).toEqual([]);
     expect(isReachablePhoto(photo, client)).toBe(false);
