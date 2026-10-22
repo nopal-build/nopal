@@ -734,6 +734,15 @@ type SourceFileInfo = { fileId: string; name: string; caption?: string; contentT
  * literally inside alt text at all), same "substitute, don't pretend to
  * escape" approach `refDirective.ts`'s own `escapeDirectiveAttrValue`
  * already takes for `:ref{...}`'s attribute values. */
+/** A node's opening words for the captured-node list a later pass reads.
+ * Cut by code point, never by UTF-16 unit: `.slice` can keep half of an
+ * emoji's surrogate pair, and a lone surrogate in a request body is
+ * rejected by the API as invalid JSON (Susan Marcquenski's 8/7 seed day,
+ * 2026-10-22, failed on every retry because 😵‍💫 began at unit 159). */
+export function capturedPreview(text: string, limit = 160): string {
+  return Array.from(text.replace(/\s+/g, " ").trim()).slice(0, limit).join("");
+}
+
 function escapeMarkdownImageAlt(value: string): string {
   return value.replace(/[[\]]/g, "");
 }
@@ -997,7 +1006,7 @@ function createSyncGraphExecutors(input: {
       // captured without re-reading its whole text. Deliberately the
       // node's own words rather than a paraphrase: the next pass is
       // comparing against the same sources this one read.
-      const preview = quoteBody.replace(/\s+/g, " ").replace(/==/g, "").trim().slice(0, 160);
+      const preview = capturedPreview(quoteBody.replace(/==/g, ""));
       capturedSummaries.push(`Node ${number} (from Source ${sourceIndex}): "${preview}"`);
       nextNumber++;
 
@@ -1013,7 +1022,7 @@ function createSyncGraphExecutors(input: {
       // line is nobody's and never is (ADR-012).
       const body = quoted ? `==${text.trim()}==` : `${text.trim()}\n\n${SEED_NOTED_PROVENANCE}`;
       nodeBlocks.push([`### Node ${number}`, body, input.sourceCitations[sourceIndex]].join("\n"));
-      capturedSummaries.push(`Node ${number} (from Source ${sourceIndex}): "${text.replace(/\s+/g, " ").trim().slice(0, 160)}"`);
+      capturedSummaries.push(`Node ${number} (from Source ${sourceIndex}): "${capturedPreview(text)}"`);
       nextNumber++;
       return number;
     },
