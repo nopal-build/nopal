@@ -1,6 +1,4 @@
 import { useState, useMemo } from "react";
-import { Layout } from "../components/Layout";
-import { Footer } from "../components/Footer";
 import { Breadcrumb } from "../components/Breadcrumb";
 import { VisualPreviewer } from "../features/ViewFinder/VisualPreviewer";
 import {
@@ -14,7 +12,13 @@ import { MTFPrintLayout } from "../features/ViewFinder/MTFPrintLayout";
 import CutStockOptimizer from "../calculators/CutStockOptimizer";
 import { NumberInput } from "../components/NumberInput";
 import type { MetaFunction } from "react-router";
-import { Link } from "react-router";
+import { Link, useLoaderData } from "react-router";
+import { loadWebsiteFooter } from "../modules/website/loadWebsiteFooter.server";
+import { WebsiteToolFooter } from "../components/WebsiteToolFooter";
+
+export async function loader() {
+  return { footer: await loadWebsiteFooter() };
+}
 
 export const meta: MetaFunction = () => [
   { title: "MTF | Nopal Tools" },
@@ -387,10 +391,11 @@ export default function MTFCalc() {
     );
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ────
+  const { footer } = useLoaderData<typeof loader>();
   return (
-    <Layout>
-      {/* ── Print page CSS ──────────────────────────────────────────────── */}
+    <>
+      {/* ── Print page CSS ── */}
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -1056,7 +1061,7 @@ export default function MTFCalc() {
       </div>
 
       <div className="print:hidden">
-        <Footer />
+        <WebsiteToolFooter footer={footer} />
       </div>
 
       {/* ── Print layout (11×17 blueprint, shown only when printing) ──── */}
@@ -1071,6 +1076,6 @@ export default function MTFCalc() {
         totalPhysicalBoards={totalPhysicalBoards}
         totalOffCutIn={totalOffCutIn}
       />
-    </Layout>
+    </>
   );
 }

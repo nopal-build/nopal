@@ -116,7 +116,7 @@ export default function FramesVolumeCalc() {
       <div>
         <div className="simple-container p-4">
           <Breadcrumb>
-            <Link to="/v2/tools">All Tools</Link>
+            <Link to="/tools">All Tools</Link>
           </Breadcrumb>
           <h1 className="text-4xl font-bold mt-8">
             Volume Calculator by Frames

@@ -1,11 +1,15 @@
 import { useState, useMemo } from "react";
-import { Link } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import type { MetaFunction } from "react-router";
-import { Layout } from "../components/Layout";
-import { Footer } from "../components/Footer";
 import { Breadcrumb } from "../components/Breadcrumb";
 import { NumberInput } from "../components/NumberInput";
 import { surfaceBase } from "stamps/surface.css";
+import { loadWebsiteFooter } from "../modules/website/loadWebsiteFooter.server";
+import { WebsiteToolFooter } from "../components/WebsiteToolFooter";
+
+export async function loader() {
+  return { footer: await loadWebsiteFooter() };
+}
 
 export const meta: MetaFunction = () => [
   { title: "Fresh Air Calculator | Nopal Tools" },
@@ -198,10 +202,11 @@ export default function ERVCalculator() {
     () => compute(residents, guests),
     [residents, guests]
   );
+  const { footer } = useLoaderData<typeof loader>();
 
   return (
-    <Layout>
-      <div className="scene1">
+    <>
+      <div>
         <div className="simple-container p-4" style={{ maxWidth: 720 }}>
           {/* Breadcrumb */}
           <div className="mt-4 mb-6">
@@ -386,8 +391,7 @@ export default function ERVCalculator() {
           </div>
         </div>
       </div>
-
-      <Footer />
-    </Layout>
+      <WebsiteToolFooter footer={footer} />
+    </>
   );
 }

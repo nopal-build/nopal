@@ -1,14 +1,18 @@
-// app/routes/v2.tsx — layout route for the `/v2/*` prototype marketing
-// site (see the `vault` skill's "website projects" section). Deliberately
-// NOT a port of the existing marketing `Layout`/`Footer` — just enough
-// chrome to prove the OxMarkdown-driven CMS pipeline out end to end.
-// Styled entirely with `stamps` (sprinkles + tokens + navLink/link
-// recipes) rather than a hand-rolled stylesheet — see the `stamps`
-// component guide (`fruits/app/routes/styles.tsx`, the app's living style
-// guide) for the full inventory. The header itself is its own component
-// (`../components/WebsiteHeader.tsx`) — real logic (mobile menu state,
-// rendering `settings.featuredButton` as its own pill CTA) that doesn't
-// belong inline in a route module.
+// app/routes/_website.tsx — root layout for the whole marketing site (see
+// the `vault` skill's "website projects" section). Pathless (file starts
+// with `_`, so it contributes no URL segment of its own) — this used to
+// be `v2.tsx`, living at `/v2/*` alongside the old hand-coded marketing
+// routes while the Vault-backed `website` project was proven out; once it
+// covered everything those old routes did, this file (and its children)
+// moved here to become the real `/` site and the old routes were deleted
+// (see `garden/2-ready/website-switchover.md`). NOT a port of the old
+// marketing `Layout`/`Footer` — styled entirely with `stamps` (sprinkles +
+// tokens + navLink/link recipes) rather than a hand-rolled stylesheet —
+// see the `stamps` component guide (`fruits/app/routes/styles.tsx`, the
+// app's living style guide) for the full inventory. The header itself is
+// its own component (`../components/WebsiteHeader.tsx`) — real logic
+// (mobile menu state, rendering `settings.featuredButton` as its own pill
+// CTA) that doesn't belong inline in a route module.
 import { Outlet, useLoaderData, type LinksFunction, type LoaderFunctionArgs } from "react-router";
 import {
   getPrimaryWebsiteFolder,
@@ -19,7 +23,7 @@ import {
 // own comment for the fuller picture; this traces the layout's OWN nav/
 // settings fetch as its own row, separate from the leaf route's content
 // fetch (React Router runs them as sibling loaders, not nested), so a
-// slow `/v2/*` page view can show up as either or both.
+// slow page view can show up as either or both.
 import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { WebsiteHeader } from "../components/WebsiteHeader";
 import { sprinkles } from "stamps/sprinkles.css";
@@ -28,10 +32,12 @@ import oxmarkdownStyles from "../styles/oxmarkdown.css?url";
 
 // REAL BUG fixed here, found via a real repro (sampling a live
 // `:::section-title{...}` heading's `getBoundingClientRect()` every 50ms
-// right after a fresh navigation): unlike every OTHER route in this app
-// (`about.tsx`, `health.tsx`, `explore.tsx`, `good.*.tsx`, ...) --  which
-// all bring in their own route-specific CSS via a `?url` import + this
-// exact `links()` export, producing a real render-blocking `<link>` in
+// right after a fresh navigation): unlike every OTHER route that used to
+// exist in this app (`about.tsx`, `health.tsx`, `explore.tsx`,
+// `good.*.tsx`, ... -- all since removed, see this file's own header
+// comment) -- which all brought in their own route-specific CSS via a
+// `?url` import + this exact `links()` export, producing a real
+// render-blocking `<link>` in
 // the SSR'd `<head>` -- `website.css`/`oxmarkdown.css` used to be pulled
 // in only as a plain side-effect `import "../styles/website.css"` deep
 // inside component files (`websiteDirectives.tsx`, `OxRenderer.tsx`, ...).
@@ -89,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 }
 
-export default function V2Layout() {
+export default function WebsiteLayout() {
   const { settings } = useLoaderData<typeof loader>();
 
   return (

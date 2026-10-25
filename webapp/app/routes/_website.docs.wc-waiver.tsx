@@ -3,13 +3,18 @@ import {
   Form,
   Link,
   useActionData,
+  useLoaderData,
   useNavigation,
   useSearchParams,
 } from "react-router";
 import type { ActionFunctionArgs, MetaFunction } from "react-router";
-import { Layout } from "../components/Layout";
-import { Footer } from "../components/Footer";
 import { link } from "stamps/link.css";
+import { loadWebsiteFooter } from "../modules/website/loadWebsiteFooter.server";
+import { WebsiteToolFooter } from "../components/WebsiteToolFooter";
+
+export async function loader() {
+  return { footer: await loadWebsiteFooter() };
+}
 import { generateWaiverPdf } from "../util/waiverPdf.server";
 import { uploadPrivateFileToS3, getPresignedViewUrl } from "robustness-core/data/file.server";
 import { createLegalDocument } from "robustness-core/data/legalDocuments.server";
@@ -221,6 +226,7 @@ type ActionResult =
 
 export default function WcWaiver() {
   const actionData = useActionData<ActionResult>();
+  const { footer } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   const [searchParams] = useSearchParams();
@@ -233,8 +239,8 @@ export default function WcWaiver() {
 
   if (actionData?.ok) {
     return (
-      <Layout>
-        <div className="scene1">
+      <>
+        <div>
           <div
             className="simple-container p-4 mt-12 mb-16"
             style={{ maxWidth: 640 }}
@@ -242,14 +248,14 @@ export default function WcWaiver() {
             <SuccessScreen pdfUrl={actionData.pdfUrl} />
           </div>
         </div>
-        <Footer />
-      </Layout>
+        <WebsiteToolFooter footer={footer} />
+      </>
     );
   }
 
   return (
-    <Layout>
-      <div className="scene1">
+    <>
+      <div>
         <div
           className="simple-container p-4 mt-8 mb-16"
           style={{ maxWidth: 640 }}
@@ -528,8 +534,8 @@ export default function WcWaiver() {
           </Form>
         </div>
       </div>
-      <Footer />
-    </Layout>
+      <WebsiteToolFooter footer={footer} />
+    </>
   );
 }
 

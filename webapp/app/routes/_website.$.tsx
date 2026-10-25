@@ -1,5 +1,5 @@
-// app/routes/v2.$.tsx — every other `/v2/*` page. Resolves the splat path
-// against the primary website project's folder tree (see
+// app/routes/_website.$.tsx — every other page on the site. Resolves the
+// splat path against the primary website project's folder tree (see
 // `website.server.ts`'s `resolveWebsitePageByPath`) — a folder segment
 // walks the tree, the last segment may match a plain `.md` file, and
 // running out of segments inside a folder lands on that folder's own
@@ -18,7 +18,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) =>
   data ? buildWebsiteMeta(data.title, data.description) : [];
 
-export default function V2Page() {
+export default function WebsitePage() {
   const { body, isDraftPreview, dailyLogEntries, includes } = useLoaderData<typeof loader>();
   return (
     <WebsitePageView

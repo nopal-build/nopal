@@ -1,5 +1,5 @@
-// app/routes/v2._index.tsx — the `/v2` homepage: the primary website
-// project's own README.md (see `website.server.ts`'s
+// app/routes/_website._index.tsx — the site's homepage: the primary
+// website project's own README.md (see `website.server.ts`'s
 // `resolveWebsitePageByPath`, called here with zero path segments).
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
@@ -13,7 +13,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) =>
   data ? buildWebsiteMeta(data.title, data.description) : [];
 
-export default function V2Index() {
+export default function WebsiteIndex() {
   const { body, isDraftPreview, dailyLogEntries, includes } = useLoaderData<typeof loader>();
   return (
     <WebsitePageView

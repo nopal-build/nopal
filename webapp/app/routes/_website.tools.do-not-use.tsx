@@ -649,7 +649,7 @@ export default function DoNotUseTool() {
       <div>
         <div className="simple-container p-4 pb-24 max-w-screen-md">
           <Breadcrumb>
-            <Link to="/v2/tools">All Tools</Link>
+            <Link to="/tools">All Tools</Link>
           </Breadcrumb>
 
           <h1 className="text-4xl font-bold mt-8">Do Not Use</h1>

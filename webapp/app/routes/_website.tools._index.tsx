@@ -33,46 +33,46 @@ const TOOLS: Tool[] = [
     name: "Print a DO NOT USE list",
     description:
       "Print or customize your own DO NOT USE list for your building.",
-    href: "/v2/tools/do-not-use",
+    href: "/tools/do-not-use",
   },
   {
     name: "Building Envelope",
     description:
       "Evaluate your building envelope — air tightness, ventilation, and fresh air strategy — and see where your home lands on the health vs efficiency quadrant.",
-    href: "/v2/tools/building-envelope",
+    href: "/tools/building-envelope",
   },
   {
     name: "Fresh Air Calculator",
     description:
       "Size your balanced ventilation system (ERV/HRV) based on occupancy. Calculate supply and exhaust tube counts, design base flow, boost flow, and get Zehnder and Brink unit recommendations.",
-    href: "/v2/tools/erv-calculator",
+    href: "/tools/erv-calculator",
     inDevelopment: true,
   },
   {
     name: "Volume Calculator by Frames",
     description:
       "Calculate backfill volumes along a linear run using cross-section frames. Supports multiple materials with weight estimation.",
-    href: "/v2/tools/frames-volume-calc",
+    href: "/tools/frames-volume-calc",
     inDevelopment: true,
   },
   {
     name: "Grade Differential",
     description:
       "Set elevations across a grid, build multiple grade layers, and calculate cut & fill volumes between any two surfaces. Auto-interpolates unset points using inverse-distance weighting.",
-    href: "/v2/tools/grade-differential",
+    href: "/tools/grade-differential",
     inDevelopment: true,
   },
   {
     name: "Medium Timber Framing",
     description: "Size and generate takeoffs for MTF",
-    href: "/v2/tools/mtf",
+    href: "/tools/mtf",
     inDevelopment: true,
   },
   {
     name: "Thermal Inertia",
     description:
       "Compare thermal diffusivity of common insulation and structural materials. Understand how thermal inertia affects real-world comfort beyond R-values alone.",
-    href: "/v2/tools/thermal-inertia",
+    href: "/tools/thermal-inertia",
     inDevelopment: true,
   },
 ];
@@ -82,7 +82,7 @@ const DOCS: Doc[] = [
     name: "AZ Independent Contractor Workers' Comp Acknowledgment",
     description:
       "Arizona Independent Contractor Workers' Compensation Acknowledgment and Responsibility form.",
-    href: "/v2/docs/wc-waiver",
+    href: "/docs/wc-waiver",
   },
 ];
 
