@@ -548,6 +548,15 @@
 
 .website-box-selectable {
   cursor: pointer;
+  /* The radio sits to the LEFT of the box's own content, not floating in
+     a corner -- a plain flex row does this directly, no absolute
+     positioning or reserved padding needed (unlike a `::badge{position=
+     "..."}`, which anchors against `.website-box`'s own `position:
+     relative` above because it CAN land anywhere, including overlapping
+     the border). */
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .website-box-selectable:hover {
@@ -556,6 +565,32 @@
 
 .website-box-selected {
   box-shadow: 0 0 0 2px var(--green);
+}
+
+/* The `Checkbox` (stamps, `variant="radio"`) a selectable box renders to
+   show its own checked state. `margin-top` centers its own 23px circle
+   (checkbox.css.ts) against the first line of `.website-box-content`'s
+   own text -- a selectable box's own content always starts with an
+   `:::flex` heading row (see guides.md's own pricing cards), whose `h3`
+   gets `line-height: var(--ox-grid)` (oxmarkdown.css) rather than a
+   plain unitless line-height, so centering against THAT (not the radio's
+   OWN line-height, which doesn't matter here -- it has no text) is what
+   actually lines the two up. `--ox-grid` resolves correctly here despite
+   living under `.ox-tokens` (oxmarkdown.css) rather than plain `:root`
+   -- `.website-box` is only ever reached already inside an `.ox-content.
+   ox-tokens` wrapper (`OxRenderer`'s own root element), never standalone. */
+.website-box-radio {
+  flex-shrink: 0;
+  margin-top: calc((var(--ox-grid, 41px) - 23px) / 2);
+}
+
+/* The flex row's second (growing) item -- without `min-width: 0` a flex
+   item defaults to `min-width: auto`, which can refuse to shrink below
+   its own content's natural width (e.g. a long line of text or a wide
+   image) and overflow the row instead of wrapping. */
+.website-box-content {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ── Flex row (`:::flex{...}`) ──────────────────────────────────────────── */

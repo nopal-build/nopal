@@ -15,6 +15,7 @@
  */
 import { useContext, type CSSProperties, type ReactNode } from "react";
 import { WebsiteFormContext, type WebsiteFormValue } from "../components/OxRenderer";
+import { Checkbox } from "stamps/Checkbox";
 
 type BoxDirectiveProps = {
   /** `surface=`/`border=`'s already-resolved inline style, computed by
@@ -76,7 +77,25 @@ export function BoxDirective({ surfaceStyle, formId, selectGroup, value, childre
           : undefined
       }
     >
-      {children}
+      {selectable ? (
+        <>
+          {/* Presentational only (no `label`, see `Checkbox`'s own doc
+              comment) -- this `<div>` already owns the real `role="radio"`/
+              `aria-checked`/click/keyboard handling above; a second nested
+              interactive control here would be invalid ARIA (a radio
+              containing a checkbox) as well as redundant. `variant="radio"`
+              -- these boxes are already mutually exclusive within their own
+              `select-group` (picking one deselects every other), so the
+              dot-in-ring look reads correctly, unlike a checkbox's own
+              filled-square look. */}
+          <span className="website-box-radio">
+            <Checkbox checked={selected} variant="radio" />
+          </span>
+          <div className="website-box-content">{children}</div>
+        </>
+      ) : (
+        children
+      )}
     </div>
   );
 }
