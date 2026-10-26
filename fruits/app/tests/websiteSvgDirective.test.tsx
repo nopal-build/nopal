@@ -11,8 +11,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 
-function render(markdown: string) {
-  const registry = buildWebsiteDirectiveRegistry({ dailyLogEntries: {} });
+function render(markdown: string, forcedScheme?: "light" | "dark") {
+  const registry = buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme });
   return renderToStaticMarkup(<OxRenderer markdown={markdown} directives={registry} />);
 }
 
@@ -76,5 +76,45 @@ describe("::svg{...}", () => {
     const html = render(`::svg{src="/guides/guides-camps-trail.svg" float="center"}`);
     expect(html).toContain('class="website-svg"');
     expect(html).not.toContain("website-svg-float");
+  });
+
+  describe("darkSrc= (2026-10-26, human ask)", () => {
+    it("omitted darkSrc= renders the exact same bare <img>, no <picture> wrapper at all", () => {
+      const html = render(`::svg{src="/guides/guides-camps-trail.svg"}`);
+      expect(html).not.toContain("<picture");
+      expect(html).not.toContain("<source");
+    });
+
+    it("given darkSrc= wraps the <img> in a <picture> with a dark-mode <source>, src= still the <img>'s own (light) src", () => {
+      const html = render(
+        `::svg{src="/guides/guides-camps-trail.svg" darkSrc="/guides/guides-camps-trail-dark.svg"}`,
+      );
+      expect(html).toContain("<picture");
+      expect(html).toContain('srcSet="/guides/guides-camps-trail-dark.svg"');
+      expect(html).toContain('media="(prefers-color-scheme: dark)"');
+      expect(html).toContain('src="/guides/guides-camps-trail.svg"');
+    });
+
+    it("a forced preview scheme (the Vault editor's/scratch guide's light/dark toggle) picks the matching src directly, bypassing <picture> entirely", () => {
+      const forcedLight = render(
+        `::svg{src="/guides/guides-camps-trail.svg" darkSrc="/guides/guides-camps-trail-dark.svg"}`,
+        "light",
+      );
+      expect(forcedLight).not.toContain("<picture");
+      expect(forcedLight).toContain('src="/guides/guides-camps-trail.svg"');
+
+      const forcedDark = render(
+        `::svg{src="/guides/guides-camps-trail.svg" darkSrc="/guides/guides-camps-trail-dark.svg"}`,
+        "dark",
+      );
+      expect(forcedDark).not.toContain("<picture");
+      expect(forcedDark).toContain('src="/guides/guides-camps-trail-dark.svg"');
+    });
+
+    it("a forced preview scheme with no darkSrc= at all is a no-op -- still the plain light <img>", () => {
+      const html = render(`::svg{src="/guides/guides-camps-trail.svg"}`, "dark");
+      expect(html).not.toContain("<picture");
+      expect(html).toContain('src="/guides/guides-camps-trail.svg"');
+    });
   });
 });

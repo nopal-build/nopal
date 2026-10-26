@@ -89,8 +89,8 @@
  *     icons (`quail-walking`) use both independently, each with its own
  *     default. See `websiteIcons.tsx`'s own header for the full tier
  *     breakdown.
- *   ::svg{src="..." width="N" alt="..." float="left|right|inline"
- *     id="..."} — renders an arbitrary, already-designed SVG FILE
+ *   ::svg{src="..." darkSrc="..." width="N" alt="..." float="left|right|
+ *     inline" id="..."} — renders an arbitrary, already-designed SVG FILE
  *     verbatim, exactly as `::icon`'s own no-color tier does for a
  *     REGISTERED name (plain `<img src>`, no recoloring, no theming) --
  *     except `src` is a literal path the author gives directly, with no
@@ -118,6 +118,16 @@
  *     absent" convention `::badge{text="..."}`/`::button{text="..."}`
  *     already use (not a visible placeholder -- that's reserved for a
  *     GIVEN name/id that fails to resolve, a different failure mode).
+ *     `darkSrc` (2026-10-26, human ask) is OPTIONAL -- a second SVG file
+ *     to show instead under `prefers-color-scheme: dark`, for an
+ *     illustration whose baked-in colors need a dark-mode-specific
+ *     variant (same idea as `::stamp`'s own light/dark pair, just an
+ *     author-supplied path instead of a registered name). Omit it and
+ *     `::svg` renders exactly as before, one plain `<img>`, no `<picture>`
+ *     wrapper at all. Given, the SAME `<picture>`/`<source media=
+ *     "(prefers-color-scheme: dark)">` no-JS swap `::stamp` already uses
+ *     takes over (see the `svg` registry entry below) -- `width`/`alt`/
+ *     `float`/`id` all still apply to the rendered image either way.
  *   ::waypoint{id="..."} — an invisible anchor for `::trail{waypoints="..."}`
  *     (below) to measure; renders nothing visible on its own. Only needed
  *     when nothing else is already at the spot a trail should pass through
@@ -683,10 +693,12 @@ export function buildWebsiteDirectiveRegistry(opts: {
    * included file's own already-frontmatter-stripped markdown body.
    * Defaults to `{}` so existing callers that don't pass it don't break. */
   includes?: Record<string, string>;
-  /** Forces `::stamp{...}`'s light/dark asset pick, bypassing its own
-   * `<picture>`/`<source media="...">` OS-driven selection -- see
-   * `WebsiteStamp`'s own `forcedScheme` comment (`websiteStamps.tsx`) for
-   * why that needs an explicit override instead of a CSS trick. Always
+  /** Forces `::stamp{...}`'s AND `::svg{darkSrc="..."}`'s light/dark asset
+   * pick, bypassing their own `<picture>`/`<source media="...">`
+   * OS-driven selection -- see `WebsiteStamp`'s own `forcedScheme` comment
+   * (`websiteStamps.tsx`) for why that needs an explicit override instead
+   * of a CSS trick (the `svg` registry entry below does the exact same
+   * thing inline, with no separate component to hold the comment). Always
    * undefined here (webapp has no preview toggle) -- kept for parity
    * with fruits' copy since this function's shape is meant to stay
    * identical. */
@@ -811,14 +823,34 @@ export function buildWebsiteDirectiveRegistry(opts: {
       const width = Number(attrs.width);
       const float = attrs.float === "left" || attrs.float === "right" ? attrs.float : "inline";
       const floatClass = float === "inline" ? "" : ` website-svg-float-${float}`;
-      return (
+      const style = attrs.width && Number.isFinite(width) ? { width, height: "auto" } : undefined;
+      // Picks the light src directly, same as always, UNLESS the Vault
+      // editor's own preview toggle forces dark -- see `forcedScheme`'s own
+      // comment above (the exact same reasoning `WebsiteStamp` documents
+      // for why `<source media="...">` can't be overridden by CSS).
+      const src = opts.forcedScheme === "dark" && attrs.darkSrc ? attrs.darkSrc : attrs.src;
+      const img = (
         <img
-          src={attrs.src}
+          src={src}
           alt={attrs.alt ?? ""}
           className={`website-svg${floatClass}`}
-          style={attrs.width && Number.isFinite(width) ? { width, height: "auto" } : undefined}
+          style={style}
           data-waypoint-id={attrs.id || undefined}
         />
+      );
+      // No `darkSrc` given (the overwhelming majority of `::svg` uses
+      // today) -- or a forced preview scheme already picked a side above --
+      // renders the exact same bare `<img>` as before `darkSrc` existed at
+      // all, zero markup change. Only a REAL public page with a `darkSrc`
+      // gets the `<picture>` wrapper -- the browser's own media-query
+      // engine, not React, decides which `src` paints, so there's no
+      // hydration mismatch risk either.
+      if (!attrs.darkSrc || opts.forcedScheme) return img;
+      return (
+        <picture>
+          <source srcSet={attrs.darkSrc} media="(prefers-color-scheme: dark)" />
+          {img}
+        </picture>
       );
     },
 
