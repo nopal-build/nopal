@@ -60,7 +60,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { semanticColors } from "stamps/tokens";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
-import { WEBSITE_ICON_FILE_NAMES, WEBSITE_ICON_PLACEHOLDER_NAMES } from "../oxmarkdown/websiteIcons";
+import { WEBSITE_ICON_FILE_NAMES, WEBSITE_ICON_ONE_COLOR_NAMES, WEBSITE_ICON_TWO_COLOR_NAMES } from "../oxmarkdown/websiteIcons";
 import { WEBSITE_STAMP_NAMES } from "../oxmarkdown/websiteStamps";
 import {
   extractSvgGeometry,
@@ -360,13 +360,15 @@ const DEMO_BOX_BORDER_SWATCHES = `::swatch{role="border" name="green" light="var
 `;
 
 /** Every registered `::icon{name="..."}`/`:::section-title{icon="..."}`
- * name, grouped into a "Files" and a "Placeholders" `<optgroup>` -- see
- * `websiteIcons.tsx`'s own `WEBSITE_ICON_FILE_NAMES`/
- * `WEBSITE_ICON_PLACEHOLDER_NAMES`, which this can never drift out of sync
+ * name, grouped into a "Files" (no color support), "One Color", and "Two
+ * Color" `<optgroup>` -- see `websiteIcons.tsx`'s own
+ * `WEBSITE_ICON_FILE_NAMES`/`WEBSITE_ICON_ONE_COLOR_NAMES`/
+ * `WEBSITE_ICON_TWO_COLOR_NAMES`, which this can never drift out of sync
  * with (it's built FROM them, not a separately hand-kept copy). */
 const ICON_NAME_OPTIONS: TracingPaperSelectOption[] = [
   ...WEBSITE_ICON_FILE_NAMES.map((name) => ({ value: name, group: "Files" })),
-  ...WEBSITE_ICON_PLACEHOLDER_NAMES.map((name) => ({ value: name, group: "Placeholders" })),
+  ...WEBSITE_ICON_ONE_COLOR_NAMES.map((name) => ({ value: name, group: "One Color" })),
+  ...WEBSITE_ICON_TWO_COLOR_NAMES.map((name) => ({ value: name, group: "Two Color" })),
 ];
 
 const STAMP_NAME_OPTIONS: TracingPaperSelectOption[] = WEBSITE_STAMP_NAMES.map((name) => ({ value: name }));
@@ -434,22 +436,25 @@ const TRACING_PAPERS: TracingPaper[] = [
   {
     id: "icon",
     name: "Icon",
-    directive: '::icon{name="..." size="sm|md|lg|#" id="..." position="x,y"}',
-    note: 'Leaf. Checks real file-based assets first (**Files**, below), then a small set of inline-drawn placeholder shapes (**Placeholders**), then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** drop a new SVG under `public/guides/`, then add one `{name: path}` entry to `WEBSITE_ICON_FILES` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.\n\n**`size`:** `sm`/`md`/`lg` are named presets (20px/32px/64px); any other plain number is a literal pixel width instead — try `48` here.\n\n**`position="x,y"` (optional):** absolutely positions the icon instead of leaving it inline -- the SAME literal-pixel, real-measured-container-edge anchor system `::line{points="..."}`/`::path{points="..."}` use below (see the Line paper\'s own note for the full grammar): a plain number is a pixel DELTA from `(0, 0)`, a reference letter (`L`/`C`/`R` for x, `T`/`C`/`B` for y) plus optional offset is an ANCHOR resolved against this icon\'s own real measured container size on every resize (`ResizeObserver`), not a fixed nominal box. An anchor is also EDGE/CENTER-AWARE of the ICON\'s own real measured size -- `R4,T4` tucks the icon\'s own top-RIGHT corner 4px in from a section\'s top-right corner (not its top-left corner sitting there and overflowing further right), and `C0,C0` centers the icon exactly, no hand math needed. Only has a visible effect when its container is `position: relative` -- `:::section{...}`\'s own body (`.website-section-inner`) already is, for its first real use.',
+    directive: '::icon{name="..." size="sm|md|lg|#" id="..." position="x,y" primaryColor="..." secondaryColor="..." palette="..."}',
+    note: 'Leaf. Checks real file-based assets first (**Files**, below -- no color support, always multi-toned already), then a small set of inline-drawn **One Color** shapes, then a smaller set of inline-drawn **Two Color** shapes, then falls back to a labeled dashed circle for any other name — see `websiteIcons.tsx`. Meant for small inline glyphs or standalone floating shapes, distinct from `::stamp`\'s full postage-stamp graphics.\n\n**Adding a new icon:** add one entry to `WEBSITE_ICON_FILES` (a real, pre-colored asset under `public/guides/`), `ONE_COLOR_ICONS`, or `TWO_COLOR_ICONS` in `websiteIcons.tsx` (both the `webapp` and `fruits` copies — see its own header comment) — it appears in the `name` dropdown above automatically, nothing else needs to change.\n\n**`size`:** `sm`/`md`/`lg` are named presets (20px/32px/64px); any other plain number is a literal pixel width instead — try `48` here.\n\n**`primaryColor`/`secondaryColor` (optional):** resolve against the page\'s own `::swatch`/`::palette` registry, same open vocabulary `::line{color="..."}`/`:::section-title{color="..."}` already use (this demo prepends its own small `::swatch{role="color" ...}` set so the dropdowns below resolve to something real) -- a **Files** name ignores both; a **One Color** name uses `primaryColor` only; a **Two Color** name uses both independently. Leave either unset and that icon falls back to its own built-in default color, unchanged from before this existed -- try switching `name` to `quail-walking` below, then setting only `primaryColor`.\n\n**`position="x,y"` (optional):** absolutely positions the icon instead of leaving it inline -- the SAME literal-pixel, real-measured-container-edge anchor system `::line{points="..."}`/`::path{points="..."}` use below (see the Line paper\'s own note for the full grammar): a plain number is a pixel DELTA from `(0, 0)`, a reference letter (`L`/`C`/`R` for x, `T`/`C`/`B` for y) plus optional offset is an ANCHOR resolved against this icon\'s own real measured container size on every resize (`ResizeObserver`), not a fixed nominal box. An anchor is also EDGE/CENTER-AWARE of the ICON\'s own real measured size -- `R4,T4` tucks the icon\'s own top-RIGHT corner 4px in from a section\'s top-right corner (not its top-left corner sitting there and overflowing further right), and `C0,C0` centers the icon exactly, no hand math needed. Only has a visible effect when its container is `position: relative` -- `:::section{...}`\'s own body (`.website-section-inner`) already is, for its first real use.',
     attributes: [
       { key: "name", label: "name", kind: "select", default: "sun-home", options: ICON_NAME_OPTIONS },
       { key: "size", label: "size (sm|md|lg|#)", kind: "text", default: "lg", placeholder: "e.g. lg or 48" },
+      { key: "primaryColor", label: "primaryColor", kind: "select", default: "", options: ACCENT_COLOR_OPTIONS },
+      { key: "secondaryColor", label: "secondaryColor", kind: "select", default: "", options: ACCENT_COLOR_OPTIONS },
       { key: "position", label: "position (x,y)", kind: "text", default: "", placeholder: "e.g. R4,T4" },
     ],
-    buildMarkdown: (v) => `::icon{name="${v.name}" size="${v.size}"${v.position ? ` position="${v.position}"` : ""}}`,
+    buildMarkdown: (v) =>
+      `${DEMO_COLOR_SWATCHES}::icon{name="${v.name}" size="${v.size}"${v.primaryColor ? ` primaryColor="${v.primaryColor}"` : ""}${v.secondaryColor ? ` secondaryColor="${v.secondaryColor}"` : ""}${v.position ? ` position="${v.position}"` : ""}}`,
   },
   {
     id: "icon-placeholder",
     name: "Icon placeholder",
-    directive: "::icon{...} — placeholder shape vs. unregistered name",
-    note: "A registered placeholder shape (no real asset yet, but still recognized) vs. a totally unregistered one, side by side. (Leaf directives need their own line each — two on the same line don't both parse.)",
+    directive: "::icon{...} — one-color shape vs. unregistered name",
+    note: "A registered one-color shape (inline-drawn, no real asset yet) vs. a totally unregistered one, side by side. (Leaf directives need their own line each — two on the same line don't both parse.)",
     attributes: [
-      { key: "placeholderName", label: "left icon (placeholder shape)", kind: "select", default: "arrow", options: WEBSITE_ICON_PLACEHOLDER_NAMES.map((n) => ({ value: n })) },
+      { key: "placeholderName", label: "left icon (one-color shape)", kind: "select", default: "arrow", options: WEBSITE_ICON_ONE_COLOR_NAMES.map((n) => ({ value: n })) },
       { key: "unknownName", label: "right icon (any name)", kind: "text", default: "totally-made-up" },
     ],
     buildMarkdown: (v) => `::icon{name="${v.placeholderName}"}\n::icon{name="${v.unknownName}"}`,

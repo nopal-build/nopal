@@ -69,7 +69,8 @@
  *   ::stamp{name="coffee|mtn|nopal|quail" rotate="deg" float="left|right|inline" id="..."}
  *     — a complete, pre-designed postage-stamp graphic (see
  *     `websiteStamps.tsx`); `id` doubles as a waypoint.
- *   ::icon{name="..." size="sm|md|lg|#" id="..." position="x,y"} — a bare
+ *   ::icon{name="..." size="sm|md|lg|#" id="..." position="x,y"
+ *     primaryColor="..." secondaryColor="..." palette="..."} — a bare
  *     named illustration, for inline glyphs or standalone floating
  *     shapes. `size` is one of the three named presets OR a literal pixel
  *     width (see `parseIconSize`'s own comment, below). `position` is
@@ -83,6 +84,17 @@
  *     inner`, for `:::section{...}` -- see `PositionedWebsiteIcon`
  *     (`websiteIcons.tsx`) for why other containers need the same
  *     `position: relative` treatment before this works inside THEM too).
+ *     `primaryColor`/`secondaryColor` resolve against the page's own
+ *     `::swatch`/`::palette` registry exactly like `:::section{surface=
+ *     "..."}`/`::line{color="..."}` above (`oxmarkdown-core`'s
+ *     `resolveSwatchRole`, role `"color"`) -- an icon name registered with
+ *     NO color support (`websiteIcons.tsx`'s no-color tier, e.g.
+ *     `sun-home`) silently ignores both; ONE-color icons (`arrow`,
+ *     `circle`, `mountaineer-coffee`) use `primaryColor` only, falling
+ *     back to that icon's own built-in default when omitted; TWO-color
+ *     icons (`quail-walking`) use both independently, each with its own
+ *     default. See `websiteIcons.tsx`'s own header for the full tier
+ *     breakdown.
  *   ::waypoint{id="..."} — an invisible anchor for `::trail{waypoints="..."}`
  *     (below) to measure; renders nothing visible on its own. Only needed
  *     when nothing else is already at the spot a trail should pass through
@@ -659,7 +671,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
       );
     },
 
-    icon({ attrs }) {
+    icon({ attrs, resolveSwatchRole }) {
       const size = parseIconSize(attrs.size);
       return (
         <WebsiteIcon
@@ -667,6 +679,8 @@ export function buildWebsiteDirectiveRegistry(opts: {
           size={size}
           waypointId={attrs.id}
           position={parseIconPosition(attrs.position)}
+          primaryColor={resolveSwatchRole({ role: "color", explicit: attrs.primaryColor, palette: attrs.palette })}
+          secondaryColor={resolveSwatchRole({ role: "color", explicit: attrs.secondaryColor, palette: attrs.palette })}
         />
       );
     },

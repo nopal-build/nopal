@@ -175,27 +175,20 @@ export function countBlankLines(
   return Math.max(0, nextPos.start.line - prevPos.end.line - 1);
 }
 
-/** How many grid units of space a READING surface (`OxRenderer`'s
- * `renderBlockNodes`, both the fruits and webapp copies) draws between two
- * sibling blocks. The file's own blank-line count, literally, with one
- * exception: a heading always gets at least one line above it, so text
- * never runs straight into the next heading (Austin, 2026-10-20: "one
- * deliberate line between text and a heading"). Below a heading stays
- * literal — no space unless someone typed a blank line there. More than
- * one typed line above a heading is kept, never collapsed.
- *
- * Only ever called BETWEEN siblings, so a heading that opens its container
- * (the document, a section, a list item, ...) gets nothing above it.
- * Editing mode deliberately doesn't use this: there, one line in the file
- * is one row on screen, and a forced line would be a row that isn't in
- * the file — it keeps reading `countBlankLines` directly. */
-export function blankLineUnits(
-  prev: { position?: { end: { line: number } } },
-  next: { type?: string; position?: { start: { line: number } } },
-): number {
-  const blanks = countBlankLines(prev, next);
-  return next.type === "heading" ? Math.max(1, blanks) : blanks;
-}
+// `blankLineUnits` -- a `countBlankLines` variant that forced at least one
+// blank-line unit above any heading, even when the file ran straight into
+// it with no blank line typed (Austin, 2026-10-20: "one deliberate line
+// between text and a heading") -- is RETIRED (2026-10-25, reversed
+// outright, not just patched). The exception never sat well even in its
+// own more-refined form (a same-day fix had already carved out "unless the
+// thing above is ANOTHER heading", for an eyebrow/title pair typed tight
+// together) -- the REAL rule, stated plainly: every reading surface defers
+// to the file's own blank lines, full stop, with NO exceptions for any
+// block type. If there's no newline in the markdown, there's no newline in
+// the render. `OxRenderer`'s `renderBlockNodes` (both copies) now calls
+// `countBlankLines` directly for every sibling pair, headings included --
+// the exact same function Editing mode's own import already used (so the
+// two surfaces keep agreeing exactly, same as before this reversal).
 
 /** A `serializeOxDocument` join that keeps the source file's own blank
  * lines between any two blocks that both came from it (they carry a
