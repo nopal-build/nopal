@@ -3,6 +3,7 @@ import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFileRefById } from "robustness-core/data/vault.server";
 import {
   setWebsitePagePublish,
+  WEBSITE_PUBLISH_STATUSES,
   type WebsitePublishStatus,
 } from "robustness-core/data/website.server";
 
@@ -30,9 +31,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!file) return Response.json({ error: "Not found" }, { status: 404 });
 
   const body = (await request.json()) as { publish?: WebsitePublishStatus };
-  if (body.publish !== "draft" && body.publish !== "published") {
+  if (!body.publish || !WEBSITE_PUBLISH_STATUSES.includes(body.publish)) {
     return Response.json(
-      { error: 'publish must be "draft" or "published"' },
+      { error: `publish must be one of: ${WEBSITE_PUBLISH_STATUSES.join(", ")}` },
       { status: 400 },
     );
   }

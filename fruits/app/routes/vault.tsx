@@ -92,6 +92,7 @@ import {
   withReadmeBody,
 } from "robustness-core/data/project.types";
 import { Badge } from "stamps/Badge";
+import { Select } from "stamps/Select";
 import { Surface } from "stamps/Surface";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
 import { insertAtSelection } from "../oxmarkdown/insertAtSelection";
@@ -1244,11 +1245,38 @@ function MoveFolderModal({
 
 // ─── Website publish toggle ─────────────────────────────────────────────
 // The `publish` front-matter flag on a page inside a `website` project
-// (see the `vault` skill's "website projects" section) — a small Badge
-// (Draft/Published) that's also a button when `editable`, PUTting to the
-// dedicated `/api/vault/website-pages/:fileId/publish` endpoint (a targeted
+// (see the `vault` skill's "website projects" section) — a small dropdown
+// (Draft/Published/Archived) when `editable`, PUTting to the dedicated
+// `/api/vault/website-pages/:fileId/publish` endpoint (a targeted
 // front-matter rewrite, same idea as Project Status's own dedicated
-// endpoint — see `withWebsitePublish`).
+// endpoint — see `withWebsitePublish`), or a plain read-only Badge
+// otherwise. A real `<Select>` (`stamps/Select`), not a two-state
+// click-to-flip Badge/button like before 2026-10-25 -- that only ever
+// worked for a straight binary toggle, and stopped making sense the
+// moment a third `"archived"` state existed to pick (see
+// `website.server.ts`'s `WebsitePublishStatus`). `WEBSITE_PUBLISH_OPTIONS`
+// is hand-kept here, NOT imported from `website.server.ts`'s own
+// `WEBSITE_PUBLISH_STATUSES` -- that file's `.server` suffix means ANY
+// value import (not just functions) gets stripped from the client bundle
+// (see this file's own header comment); only `type`-only imports from it
+// are safe in component code, which is exactly what `WebsitePublishStatus`
+// below already is.
+const WEBSITE_PUBLISH_OPTIONS: { value: WebsitePublishStatus; label: string }[] = [
+  { value: "draft", label: "Draft" },
+  { value: "published", label: "Published" },
+  { value: "archived", label: "Archived" },
+];
+
+function publishBadgeVariant(publish: WebsitePublishStatus): "neutral" | "success" | "warning" {
+  if (publish === "published") return "success";
+  if (publish === "archived") return "warning";
+  return "neutral";
+}
+
+function publishLabel(publish: WebsitePublishStatus): string {
+  return publish === "published" ? "Published" : publish === "archived" ? "Archived" : "Draft";
+}
+
 function WebsitePublishToggle({
   fileId,
   publish,
@@ -1261,15 +1289,13 @@ function WebsitePublishToggle({
   onToggled: (next: WebsitePublishStatus) => void;
 }) {
   const [saving, setSaving] = useState(false);
-  const isPublished = publish === "published";
 
   if (!editable) {
-    return <Badge variant={isPublished ? "success" : "neutral"}>{isPublished ? "Published" : "Draft"}</Badge>;
+    return <Badge variant={publishBadgeVariant(publish)}>{publishLabel(publish)}</Badge>;
   }
 
-  const handleClick = async () => {
+  const handleChange = async (next: WebsitePublishStatus) => {
     setSaving(true);
-    const next: WebsitePublishStatus = isPublished ? "draft" : "published";
     try {
       const res = await fetch(`/api/vault/website-pages/${fileId}/publish`, {
         method: "PUT",
@@ -1287,17 +1313,16 @@ function WebsitePublishToggle({
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
+    <Select
+      label="Publish status"
+      hideLabel
+      size="small"
+      name="publish"
+      value={publish}
       disabled={saving}
-      style={{ border: "none", background: "none", padding: 0, cursor: saving ? "default" : "pointer" }}
-      title={isPublished ? "Published. Click to unpublish" : "Draft. Click to publish"}
-    >
-      <Badge variant={isPublished ? "success" : "neutral"}>
-        {saving ? "…" : isPublished ? "Published" : "Draft"}
-      </Badge>
-    </button>
+      options={WEBSITE_PUBLISH_OPTIONS}
+      onChange={(e) => handleChange(e.target.value as WebsitePublishStatus)}
+    />
   );
 }
 

@@ -79,7 +79,10 @@ async function loadWebsitePageBody(segments: string[]): Promise<LoadedWebsitePag
   );
   if (!resolved) throw data("Not found", { status: 404 });
 
-  if (resolved.meta.publish !== "published") {
+  // `"archived"` is PUBLICLY VISIBLE, same as `"published"` -- only a real
+  // `"draft"` 404s. See `website.server.ts`'s `WebsitePublishStatus` for
+  // why archiving a page isn't the same as hiding it.
+  if (resolved.meta.publish === "draft") {
     throw data("Not found", { status: 404 });
   }
 
