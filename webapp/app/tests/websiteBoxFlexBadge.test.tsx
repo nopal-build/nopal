@@ -75,6 +75,35 @@ content
     expect(html).not.toContain("margin-top");
     expect(html).not.toContain("margin-bottom");
   });
+
+  it("scale= sets an inline zoom factor, scaling the whole box's subtree (not just --ox-grid)", () => {
+    const html = render(`:::box{scale="0.75"}
+content
+:::`);
+    expect(html).toContain("zoom:0.75");
+  });
+
+  it("omitting scale= sets no zoom at all -- renders at ordinary 1:1 size", () => {
+    const html = render(`:::box{}
+content
+:::`);
+    expect(html).not.toContain("zoom");
+  });
+
+  it("a non-positive or unparseable scale= is ignored, same as an absent one", () => {
+    const zero = render(`:::box{scale="0"}
+content
+:::`);
+    const negative = render(`:::box{scale="-1"}
+content
+:::`);
+    const garbage = render(`:::box{scale="not-a-number"}
+content
+:::`);
+    expect(zero).not.toContain("zoom");
+    expect(negative).not.toContain("zoom");
+    expect(garbage).not.toContain("zoom");
+  });
 });
 
 describe(":::flex{...}", () => {

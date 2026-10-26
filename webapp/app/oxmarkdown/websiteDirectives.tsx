@@ -256,8 +256,9 @@
  *     already is, for its first real use; a trail meant to span MULTIPLE
  *     sections needs its own wrapping container with that same treatment,
  *     not yet added anywhere since nothing has needed it yet.
- *   :::box{surface="..." border="..." palette="..." margin="N" form-id="..."
- *     select-group="..." value="..."} — a generic bordered container
+ *   :::box{surface="..." border="..." palette="..." margin="N"
+ *     scale="N" form-id="..." select-group="..." value="..."} — a
+ *     generic bordered container
  *     (border/radius/padding/background only -- composes with plain
  *     markdown + other directives for everything else, unlike the
  *     now-retired `:::pricing-card{...}`'s own bespoke header/CTA
@@ -277,10 +278,19 @@
  *     spacings between stacked boxes, zero or one full `--ox-grid` unit
  *     (~41px), with nothing in between -- a real reported gap once
  *     price-select boxes on `guides.md` needed a SMALLER, author-tunable
- *     gap on mobile than either option gave. Also a `position: relative`
- *     ancestor, the same treatment `.website-section-inner` already has
- *     -- so a `::badge{position="..."}` (below) rendered inside one has a
- *     real container to anchor against.
+ *     gap on mobile than either option gave. `scale="N"` is ALSO
+ *     optional (2026-10-25, same motivating page) -- a plain CSS `zoom`
+ *     factor (`scale="0.75"` -> `zoom: 0.75`) applied to the box's
+ *     whole rendered subtree, not a retuned `--ox-grid` (see
+ *     `parseScaleStyle`, below, for why `zoom` and not that -- several
+ *     things, headings' own font-size among them, are fixed px values
+ *     that never read `--ox-grid` at all, so only retuning that one
+ *     token would shrink spacing while leaving type size unchanged).
+ *     Omit it and a box renders at its ordinary 1:1 size, unchanged.
+ *     Also a `position: relative` ancestor, the same treatment
+ *     `.website-section-inner` already has -- so a `::badge{position=
+ *     "..."}` (below) rendered inside one has a real container to
+ *     anchor against.
  *     `form-id`/`select-group`/`value`, given ALL THREE together, make
  *     the box SELECTABLE -- clicking (or Space/Enter) writes `value`
  *     into a shared, page-level store under `(form-id, select-group)`
@@ -554,6 +564,40 @@ function parseMarginStyle(raw: string | undefined): CSSProperties | undefined {
   if (!Number.isFinite(multiplier)) return undefined;
   const margin = `calc(${multiplier} * var(--ox-grid, 41px))`;
   return { marginTop: margin, marginBottom: margin };
+}
+
+/** `:::box{scale="N"}` -- scales the box's ENTIRE rendered subtree via
+ * a literal CSS `zoom` factor (`scale="0.75"` -> `zoom: 0.75`, 75% of
+ * ordinary size), not just a retuned `--ox-grid`. `--ox-grid`-derived
+ * line-heights/paddings/spacer-heights/checkbox-sizes are only PART of
+ * what a visually smaller box needs smaller -- several things that make
+ * up the overall "feel" of a block's own typography (every heading's own
+ * fixed-px `font-size`, `.ox-content`'s own base `font-size: 1.2rem`)
+ * never read `--ox-grid` at all, so overriding that ONE custom property
+ * locally would shrink the LINE SPACING/padding/gutters but leave
+ * headings/body text exactly their ordinary size -- an inconsistent mix,
+ * not the uniformly-smaller box the name promises. `zoom` sidesteps that
+ * entirely: it re-renders the WHOLE subtree as though laid out at a
+ * different pixel density, so literally every px-based value inside
+ * (font-size, line-height, padding, margin, border-width, background-
+ * size, ...) scales together automatically, with ZERO CSS changes needed
+ * anywhere else in this stylesheet. Nested scales COMPOUND for free too
+ * (a `scale="0.5"` box inside an ancestor already at `zoom: 0.5`
+ * renders at a net 25%) -- an emergent property of how browsers already
+ * implement `zoom`, not something this function computes by hand the way
+ * `parseMarginStyle` above has to for its own `calc()` formula. Every
+ * JS-measured feature elsewhere in this file (`::icon{position=...}`,
+ * `::badge{position=...}`, `WavyLine`) already reads
+ * `getBoundingClientRect()`/`ResizeObserver` sizes that come back
+ * PRE-ZOOMED from the browser itself, so none of them need any special-
+ * casing to cooperate with a zoomed ancestor. Returns `undefined` for an
+ * absent/unparseable/non-positive value (zero or negative zoom is
+ * meaningless) -- the caller then renders at its own ordinary 1:1 size,
+ * unchanged. */
+function parseScaleStyle(raw: string | undefined): CSSProperties | undefined {
+  const scale = Number(raw);
+  if (!Number.isFinite(scale) || scale <= 0) return undefined;
+  return { zoom: scale };
 }
 
 /** `::badge{height="20"}` -- a plain literal pixel height, SET on the
@@ -859,7 +903,12 @@ export function buildWebsiteDirectiveRegistry(opts: {
       });
       return (
         <BoxDirective
-          style={{ background: surface, borderColor: border, ...parseMarginStyle(attrs.margin) }}
+          style={{
+            background: surface,
+            borderColor: border,
+            ...parseMarginStyle(attrs.margin),
+            ...parseScaleStyle(attrs.scale),
+          }}
           formId={attrs["form-id"]}
           selectGroup={attrs["select-group"]}
           value={attrs.value}
