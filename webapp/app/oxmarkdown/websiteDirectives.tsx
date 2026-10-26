@@ -50,7 +50,7 @@
  *     look, not a raw color. `margin` adds extra top/bottom breathing
  *     room around the section, as a MULTIPLE of the shared `--ox-grid`
  *     unit (41px today) rather than a raw pixel count -- `margin="2"`
- *     means `2 * 41px` = `82px` (see `parseSectionMarginStyle`, below,
+ *     means `2 * 41px` = `82px` (see `parseMarginStyle`, below,
  *     for why that stays token-driven instead of a hardcoded number);
  *     negative values pull an adjacent section closer instead.
  *     Deliberately a themeable-area directive, not a fully bespoke-per-
@@ -256,7 +256,7 @@
  *     already is, for its first real use; a trail meant to span MULTIPLE
  *     sections needs its own wrapping container with that same treatment,
  *     not yet added anywhere since nothing has needed it yet.
- *   :::box{surface="..." border="..." palette="..." form-id="..."
+ *   :::box{surface="..." border="..." palette="..." margin="N" form-id="..."
  *     select-group="..." value="..."} — a generic bordered container
  *     (border/radius/padding/background only -- composes with plain
  *     markdown + other directives for everything else, unlike the
@@ -265,16 +265,22 @@
  *     page's own `::swatch`/`::palette` registry exactly like
  *     `:::section{surface="..."}` above (`oxmarkdown-core`'s
  *     `resolveSwatchRole`), falling back to the same neutral card look
- *     `:::pricing-card{...}` used to have when neither is given. NO
- *     margin of its own (reversed from an earlier "always a non-zero
- *     outer margin" decision, see the "Box Directive + Pricing Card UI
- *     Fix" garden seed, resolved question 5/round 7) -- a box's own
- *     vertical spacing is the AUTHOR'S call via blank lines, same as
- *     every other block, not baked into the directive. Also a
- *     `position: relative` ancestor, the same treatment
- *     `.website-section-inner` already has -- so a `::badge{position=
- *     "..."}` (below) rendered inside one has a real container to
- *     anchor against.
+ *     `:::pricing-card{...}` used to have when neither is given.
+ *     `margin="N"` is OPTIONAL and behaves exactly like `:::section
+ *     {margin="N"}` above (`parseMarginStyle`, shared by both) --
+ *     reintroduced (2026-10-25) on top of an earlier "NO margin of its
+ *     own" decision (the "Box Directive + Pricing Card UI Fix" garden
+ *     seed, resolved question 5/round 7, which left a box's own vertical
+ *     spacing entirely to the author's blank lines, same as every other
+ *     block) -- that still holds as the DEFAULT (omit `margin` and
+ *     nothing changes), but blank lines alone only ever offer two
+ *     spacings between stacked boxes, zero or one full `--ox-grid` unit
+ *     (~41px), with nothing in between -- a real reported gap once
+ *     price-select boxes on `guides.md` needed a SMALLER, author-tunable
+ *     gap on mobile than either option gave. Also a `position: relative`
+ *     ancestor, the same treatment `.website-section-inner` already has
+ *     -- so a `::badge{position="..."}` (below) rendered inside one has a
+ *     real container to anchor against.
  *     `form-id`/`select-group`/`value`, given ALL THREE together, make
  *     the box SELECTABLE -- clicking (or Space/Enter) writes `value`
  *     into a shared, page-level store under `(form-id, select-group)`
@@ -519,24 +525,31 @@ function parseIconSize(raw: string | undefined): "sm" | "md" | "lg" | number {
   return "md";
 }
 
-/** `:::section{margin="N"}` -- `N` MULTIPLIES the shared `--ox-grid`
- * token (oxmarkdown.css, 41px today -- the same single-source-of-truth
- * vertical-rhythm unit every other spacing decision across OxMarkdown
- * already derives from) to get a real `margin-top`/`margin-bottom` in
- * px, e.g. `margin="2"` -> `2 * 41px` = `82px`. Reads the token via a
- * plain CSS `calc()` in an inline style rather than computing a literal
- * pixel number here in JS, so a section's own margin stays correct even
- * if `--ox-grid` itself is ever retuned (a caller-supplied `oxmarkdown/
- * theme.ts` override, or a future grid-size change) -- matches this
- * whole codebase's own standing preference for reading a shared token
- * over hardcoding its current value. Applies to BOTH top and bottom
- * symmetrically (a single knob for "extra breathing room around this
- * section," not independent per-side control) -- negative numbers work
- * fine too (pulls an adjacent section closer, even overlapping, via
- * ordinary CSS margin math). Returns `undefined` for an absent/
- * unparseable `margin` -- the caller then renders with its own ordinary
- * default spacing, unchanged. */
-function parseSectionMarginStyle(raw: string | undefined): CSSProperties | undefined {
+/** `:::section{margin="N"}`/`:::box{margin="N"}` -- `N` MULTIPLIES the
+ * shared `--ox-grid` token (oxmarkdown.css, 41px today -- the same
+ * single-source-of-truth vertical-rhythm unit every other spacing
+ * decision across OxMarkdown already derives from) to get a real
+ * `margin-top`/`margin-bottom` in px, e.g. `margin="2"` -> `2 * 41px` =
+ * `82px`. `N` is NOT restricted to whole numbers -- `margin="0.5"` ->
+ * `20.5px` works fine, for whenever a full grid unit is too coarse (the
+ * `:::box{...}` case this was extended for, below: blank-line-only
+ * spacing between stacked boxes only ever offers "0" or "~41px," nothing
+ * in between). Reads the token via a plain CSS `calc()` in an inline
+ * style rather than computing a literal pixel number here in JS, so a
+ * block's own margin stays correct even if `--ox-grid` itself is ever
+ * retuned (a caller-supplied `oxmarkdown/theme.ts` override, or a future
+ * grid-size change) -- matches this whole codebase's own standing
+ * preference for reading a shared token over hardcoding its current
+ * value. Applies to BOTH top and bottom symmetrically (a single knob for
+ * "extra breathing room around this block," not independent per-side
+ * control) -- negative numbers work fine too (pulls an adjacent block
+ * closer, even overlapping, via ordinary CSS margin math). Returns
+ * `undefined` for an absent/unparseable `margin` -- the caller then
+ * renders with its own ordinary default spacing, unchanged. Shared by
+ * `section`/`box` below rather than two copies of the same formula --
+ * nothing else about either directive's own styling overlaps, this is
+ * purely the one formula both happen to want verbatim. */
+function parseMarginStyle(raw: string | undefined): CSSProperties | undefined {
   const multiplier = Number(raw);
   if (!Number.isFinite(multiplier)) return undefined;
   const margin = `calc(${multiplier} * var(--ox-grid, 41px))`;
@@ -674,7 +687,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
         <section
           className="website-section"
           data-website-list={attrs.list || undefined}
-          style={{ ...parseSectionMarginStyle(attrs.margin), background: surface }}
+          style={{ ...parseMarginStyle(attrs.margin), background: surface }}
         >
           <div className="website-section-inner">{children}</div>
         </section>
@@ -846,7 +859,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
       });
       return (
         <BoxDirective
-          surfaceStyle={{ background: surface, borderColor: border }}
+          style={{ background: surface, borderColor: border, ...parseMarginStyle(attrs.margin) }}
           formId={attrs["form-id"]}
           selectGroup={attrs["select-group"]}
           value={attrs.value}

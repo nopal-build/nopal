@@ -59,6 +59,22 @@ Some real content here.
 :::`);
     expect(html).toContain("Some real content here.");
   });
+
+  it("margin= sets an inline top/bottom margin, same formula :::section{margin=...} uses", () => {
+    const html = render(`:::box{margin="0.5"}
+content
+:::`);
+    expect(html).toContain("margin-top:calc(0.5 * var(--ox-grid, 41px))");
+    expect(html).toContain("margin-bottom:calc(0.5 * var(--ox-grid, 41px))");
+  });
+
+  it("omitting margin= sets no margin at all -- the pre-existing default is unchanged", () => {
+    const html = render(`:::box{}
+content
+:::`);
+    expect(html).not.toContain("margin-top");
+    expect(html).not.toContain("margin-bottom");
+  });
 });
 
 describe(":::flex{...}", () => {

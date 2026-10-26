@@ -216,11 +216,11 @@
   margin-left: -24px;
   margin-right: -24px;
   /* `margin-top`/`margin-bottom` deliberately NOT set here -- `:::section
-     {margin="N"}` (websiteDirectives.tsx's `parseSectionMarginStyle`)
-     sets those as an INLINE style instead (a `calc(N * var(--ox-grid))`
-     formula), since the multiplier is a free-form per-instance number,
-     not a small fixed vocabulary a CSS class could represent the way
-     `bg`/`list` do above. */
+     {margin="N"}` (websiteDirectives.tsx's `parseMarginStyle`, shared
+     with `:::box{margin="N"}`) sets those as an INLINE style instead (a
+     `calc(N * var(--ox-grid))` formula), since the multiplier is a
+     free-form per-instance number, not a small fixed vocabulary a CSS
+     class could represent the way `bg`/`list` do above. */
 }
 
 /* Once the content shell itself is no longer edge-to-edge (its own
@@ -522,15 +522,22 @@
   border: 1px solid var(--color-surface-border);
   border-radius: 8px;
   padding: 20px;
-  /* NO margin here (reversed from round 5's own original "always a
-     non-zero outer margin" decision, see the "Box Directive + Pricing
-     Card UI Fix" garden seed, resolved question 5/round 7) -- the
+  /* NO margin here BY DEFAULT (reversed from round 5's own original
+     "always a non-zero outer margin" decision, see the "Box Directive +
+     Pricing Card UI Fix" garden seed, resolved question 5/round 7) -- the
      human found real double-spacing in practice between stacked boxes:
      this margin ON TOP of the ordinary blank-line gap this whole
      document language already provides (N blank lines = N grid units,
      see the `oxmarkdown` skill's "Between blocks" design language). A
-     box's own vertical spacing is the AUTHOR'S call via blank lines,
-     same as every other block -- not baked into the directive itself. */
+     box's own vertical spacing is still the AUTHOR'S call by default, via
+     blank lines, same as every other block -- not baked into the
+     directive itself. `:::box{margin="N"}` (2026-10-25) is the author's
+     own OPT-IN escape hatch for when blank lines alone are too coarse
+     (zero or one full `--ox-grid` unit, nothing in between) -- sets
+     `margin-top`/`margin-bottom` as an INLINE style instead
+     (`websiteDirectives.tsx`'s `parseMarginStyle`, shared verbatim with
+     `:::section{margin="N"}` above), same reasoning as that directive's
+     own matching comment. */
   background: var(--color-surface-card);
   /* The positioned ancestor a `::badge{position="x,y"}` (websiteBadge.tsx's
      `PositionedWebsiteBadge`) resolves its own real-pixel anchor
