@@ -33,6 +33,31 @@
 }
 .website-page-bg {
   background: var(--website-bg-page);
+  /* `overflow-x: hidden` -- NOT `overflow-y` (sticky/scroll behavior on
+     that axis stays completely ordinary) -- contains intentional
+     decorative overhang at the VIEWPORT, not just at whatever element it
+     overflows. A real reported bug: `::icon{position="R-80,T20" size=
+     "200"}` (deliberately hanging part of itself past its own section's
+     right edge -- `.ox-content.website-page-ox`'s own `overflow-x:
+     visible` exists specifically so this kind of bleed ISN'T clipped at
+     the section/content level) had nothing further up the tree stopping
+     it at the page level either, so the whole page gained a real
+     horizontal scrollbar just to reach a few decorative pixels of a
+     circle nobody was meant to scroll to. This is the ROOT wrapper every
+     website page renders inside (`_website.tsx`'s own outer `<div
+     className="website-page-bg">`) -- the right/only place to draw this
+     line, since every inner `overflow-x: visible` (`.ox-content.website-
+     page-ox`, `.website-section`'s own intentional negative-margin
+     bleed) needs to stay exactly as permissive as it already is for
+     genuinely-contained overflow (a section's own full-bleed background,
+     an icon hanging slightly past a box's edge) to keep working --
+     clipping any of THOSE would reintroduce the exact bugs their own
+     `overflow-x: visible` already fixed. Scoped to this one class, not
+     the app-wide `html`/`body` (`root.css`) -- those are shared by every
+     OTHER part of the app (Vault, Daily Log, Project Newspaper, Skills),
+     which have never reported this problem and don't need a new global
+     behavior change just to fix a website-only bug. */
+  overflow-x: hidden;
 }
 
 /* The single source of truth for the reading column's own width -- used
@@ -188,7 +213,32 @@
   padding-left: 26px;
 }
 
-/* ── Section (`:::section{surface="..." palette="..."}`) ─────────────── */
+/* `:::toggle{...}`'s caret (`.ox-toggle-summary::before`, oxmarkdown.css)
+   is tuned for the ORDINARY dot-grid's own full `--ox-grid` (41px) gutter
+   (`left: -38px`, comfortably inside that) -- `.ox-content.website-page-ox`
+   above zeroes that gutter out entirely in favor of the website's own
+   narrower 24px one (`.website-page-content`'s `padding: 0 24px`), so the
+   caret's own `-38px` offset overflowed 14px past it. A real reported bug:
+   on a real page this only reads as clipped on MOBILE specifically --
+   desktop has extra page margin around the centered, capped-width
+   content for the same overflow to quietly bleed into unclipped, even
+   though it's overflowing the "logical" gutter there too. Repositioned to
+   sit exactly flush with the website's real 24px edge instead -- confirmed
+   this exact position reads correctly on desktop too, so one rule covers
+   both, no separate breakpoint needed. `top` is now a literal pixel
+   position, not `50%` -- so the shared rule's paired `translateY(-50%)`
+   (there for percentage-based vertical centering) is dropped here too;
+   only the rotate (collapsed vs. expanded) carries over. */
+.ox-content.website-page-ox .ox-toggle-summary::before {
+  left: -24px;
+  top: 10px;
+  transform: rotate(90deg);
+}
+.ox-content.website-page-ox .ox-toggle--collapsed > .ox-toggle-summary::before {
+  transform: rotate(0deg);
+}
+
+/* ── Section (`:::section{surface="..." palette="..."}`) ────────────────── */
 
 /* `margin-left`/`margin-right: -24px` exactly cancels `.website-page-content`'s
    own horizontal padding above, so this band always exactly fills that
@@ -253,22 +303,49 @@
      one had any visible effect inside IT -- not added preemptively
      anywhere else until an actual use needs it there too. */
   position: relative;
-  /* `display: flow-root` -- establishes a new block formatting context so
-     this box's own auto HEIGHT correctly includes a floated child (a real
-     reported bug: `::svg{float="left"/"right"}`/`::stamp{float="..."}`
-     rendered inside `:::section{...}` left the section's own background/
-     padding ending partway up the floated image instead of enclosing it,
-     since an ordinary block box's auto height ignores floated descendants
-     entirely by default -- the textbook CSS "collapsing container"
-     problem). Deliberately `flow-root`, NOT the older `overflow: hidden`/
-     `auto` clearfix hack -- those also establish a BFC, but as a SIDE
-     EFFECT of clipping/scrolling overflow, which would clip anything in
-     here that's SUPPOSED to render outside this box's own bounds on
-     purpose (an `::icon{position="..."}`/`::badge{position="..."}`
-     deliberately positioned to poke past an edge). `flow-root` contains
-     floats for height purposes ONLY, with no overflow/clipping behavior
-     at all. */
-  display: flow-root;
+}
+
+/* `::after { clear: both }` -- the CLASSIC "micro clearfix" (pre-dates
+   `flow-root`, which this REPLACES -- see below for why) -- makes this
+   box's own auto HEIGHT correctly include a floated child (the original
+   bug: `::svg{float="left"/"right"}`/`::stamp{float="..."}` rendered
+   INSIDE `:::section{...}` left the section's own background/padding
+   ending partway up the floated image instead of enclosing it, since an
+   ordinary block box's auto height ignores floated descendants entirely
+   by default -- the textbook CSS "collapsing container" problem). This
+   invisible, zero-size pseudo-element sits AFTER every real child; its own
+   `clear: both` pushes IT below any still-active float, and since it's
+   the LAST thing in the box, the box's own auto height naturally stretches
+   to include it -- and therefore the float too.
+
+   REPLACES an earlier `display: flow-root` fix for the exact same bug,
+   reverted after a DIFFERENT real reported bug it introduced: `flow-root`
+   establishes a new block formatting context, which ALSO changes how this
+   box reacts to a float OUTSIDE it entirely -- a `::stamp{float="right"}`
+   sitting as a PRECEDING SIBLING before `:::section{...}` (not inside it
+   at all -- the real homepage's own first stamp, `README.md`) made the
+   WHOLE section narrow itself for its ENTIRE height to avoid the stamp,
+   not just the portion actually overlapping it vertically -- a new-BFC
+   block box computes ONE rectangle for its whole height up front, unlike
+   ordinary inline content, which re-wraps line-by-line and naturally
+   regains full width the moment it passes a float's bottom edge. The
+   reported symptom: paragraph text inside the section stayed squeezed
+   into a narrow column for six-plus lines, long after visually clearing
+   the stamp above it, instead of flowing full width again like ordinary
+   floated-image text always should. A plain clearfix doesn't have this
+   side effect at all -- it never makes THIS box a new BFC, so content
+   inside it keeps wrapping around ANY float (inside or outside) exactly
+   like ordinary inline content always has, while still fixing the
+   original auto-height bug this whole rule exists for. Also, unlike the
+   OLDER `overflow: hidden`/`auto` clearfix hack (which `flow-root` itself
+   had already replaced for a separate reason): still doesn't clip
+   anything deliberately positioned to poke past this box's own edge (an
+   `::icon{position="..."}`/`::badge{position="..."}`) -- a clearfix
+   pseudo-element has no `overflow` of its own either. */
+.website-section-inner::after {
+  content: "";
+  display: block;
+  clear: both;
 }
 
 /* Suppress oxmarkdown's own `#`/`##`/`###` gutter-marker glyph on a
@@ -584,16 +661,23 @@
      coordinates against -- same treatment `.website-section-inner` below
      already has, for the same reason. */
   position: relative;
-  /* `display: flow-root` -- same float-containment fix as
-     `.website-section-inner` above (see that rule's own comment for the
-     full reasoning): without it, a `::svg{float="..."}`/`::stamp
-     {float="..."}` rendered inside a box would float past the box's own
-     background/border instead of being enclosed by it. Harmless for a
-     SELECTABLE box (`.website-box-selectable`'s own `display: flex`
-     below overrides this anyway -- a flex container's own children never
-     float in the first place, per spec, so there's nothing to contain
-     there regardless). */
-  display: flow-root;
+}
+
+/* `::after { clear: both }` -- same classic clearfix fix as
+   `.website-section-inner` above (see that rule's own comment for the
+   full "replaces an earlier `flow-root`" story): without it, a `::svg
+   {float="..."}`/`::stamp{float="..."}` rendered inside a box would float
+   past the box's own background/border instead of being enclosed by it.
+   `flow-root` would ALSO fix that, but (per the sibling comment) breaks
+   how this box reacts to a float OUTSIDE it -- a plain clearfix doesn't.
+   Harmless for a SELECTABLE box (`.website-box-selectable`'s own
+   `display: flex` elsewhere overrides `display` entirely regardless -- a
+   flex container's own children never float in the first place, per
+   spec, so there's nothing for either technique to contain there). */
+.website-box::after {
+  content: "";
+  display: block;
+  clear: both;
 }
 
 /* Effort 2: `:::box{form-id=... select-group=... value=...}` -- box-shadow,
@@ -616,12 +700,25 @@
   gap: 12px;
 }
 
-.website-box-selectable:hover {
+.website-box-selectable:hover:not(.website-box-disabled) {
   box-shadow: 0 0 0 1px var(--color-surface-border);
 }
 
 .website-box-selected {
   box-shadow: 0 0 0 2px var(--green);
+}
+
+/* `:::box{disabled="true"}` -- the SAME `opacity: 0.5 cursor: not-allowed`
+   convention `stamps/button.css.ts`'s own `&:disabled` recipe already
+   uses, so a grayed-out box and a grayed-out button read consistently.
+   Independent of selected/hover above -- `.website-box-selectable:hover`'s
+   own `:not(.website-box-disabled)` guard (above) keeps the hover
+   highlight from firing on a disabled box, which would otherwise read as
+   "still interactive" despite the click itself being a no-op
+   (`websiteForms.tsx`'s `BoxDirective`). */
+.website-box-disabled {
+  opacity: 0.67;
+  cursor: not-allowed;
 }
 
 /* The `Checkbox` (stamps, `variant="radio"`) a selectable box renders to

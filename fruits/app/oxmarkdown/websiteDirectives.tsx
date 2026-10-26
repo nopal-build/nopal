@@ -292,8 +292,8 @@
  *     sections needs its own wrapping container with that same treatment,
  *     not yet added anywhere since nothing has needed it yet.
  *   :::box{surface="..." border="..." palette="..." margin="N"
- *     scale="N" form-id="..." select-group="..." value="..."} — a
- *     generic bordered container
+ *     scale="N" form-id="..." select-group="..." value="..."
+ *     disabled="true"} — a generic bordered container
  *     (border/radius/padding/background only -- composes with plain
  *     markdown + other directives for everything else, unlike the
  *     now-retired `:::pricing-card{...}`'s own bespoke header/CTA
@@ -337,6 +337,17 @@
  *     `::button{form-id="..." action="..."}` (below) elsewhere on the
  *     page reads the SAME store at submit time. Missing any of the
  *     three renders an ordinary, unselectable box, unchanged.
+ *     `disabled="true"` (2026-10-25) grays the box out (`opacity: 0.67`,
+ *     the same convention `stamps/button.css.ts`'s own `&:disabled`
+ *     recipe already uses) and makes clicking/Space/Enter a no-op --
+ *     first use: a price-select box on `guides.md` for a plan that isn't
+ *     actually available yet. Independent of SELECTABLE above -- a
+ *     disabled box still renders its own radio/content layout exactly
+ *     like any other selectable one (so it reads as "this option exists,
+ *     just not right now," not a totally different box shape), just
+ *     inert; a plain, non-selectable box can carry `disabled="true"` too,
+ *     though with nothing to disable but the graying itself, since it had
+ *     no click behavior to begin with.
  *   :::flex{justify="space-between|flex-start|flex-end|center|..."} —
  *     lays out its own direct block children in a single flex row
  *     (`justify` default `space-between`), e.g. a title heading + a price
@@ -933,6 +944,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
           formId={attrs["form-id"]}
           selectGroup={attrs["select-group"]}
           value={attrs.value}
+          disabled={attrs.disabled === "true"}
         >
           {children}
         </BoxDirective>

@@ -104,6 +104,38 @@ content
     expect(negative).not.toContain("zoom");
     expect(garbage).not.toContain("zoom");
   });
+
+  it("disabled=\"true\" grays out a selectable box and drops it from the tab order", () => {
+    const html = render(`:::box{form-id="plan" select-group="tier" value="self-guide" disabled="true"}
+content
+:::`);
+    expect(html).toContain("website-box-disabled");
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).not.toContain("tabindex");
+  });
+
+  it("omitting disabled= (or disabled=\"false\") leaves a selectable box fully interactive", () => {
+    const withoutDisabled = render(`:::box{form-id="plan" select-group="tier" value="self-guide"}
+content
+:::`);
+    expect(withoutDisabled).not.toContain("website-box-disabled");
+    expect(withoutDisabled).not.toContain("aria-disabled");
+    expect(withoutDisabled).toContain('tabindex="0"');
+
+    const withFalse = render(`:::box{form-id="plan" select-group="tier" value="self-guide" disabled="false"}
+content
+:::`);
+    expect(withFalse).not.toContain("website-box-disabled");
+    expect(withFalse).toContain('tabindex="0"');
+  });
+
+  it("disabled=\"true\" on a plain, non-selectable box still grays it out, with nothing else to disable", () => {
+    const html = render(`:::box{disabled="true"}
+content
+:::`);
+    expect(html).toContain("website-box-disabled");
+    expect(html).not.toContain("website-box-selectable");
+  });
 });
 
 describe(":::flex{...}", () => {

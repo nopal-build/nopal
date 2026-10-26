@@ -15,20 +15,27 @@ export const meta: MetaFunction = () => [
   },
 ];
 
-interface Tool {
+export interface Tool {
   name: string;
   description: string;
   href: string;
   inDevelopment?: boolean;
 }
 
-interface Doc {
+export interface Doc {
   name: string;
   description: string;
   href: string;
 }
 
-const TOOLS: Tool[] = [
+// Exported (not just module-local) so `/sitemap` (`_website.sitemap.tsx`)
+// can list every real tool/doc route too, straight from this one real
+// source of truth -- these aren't Vault-backed pages
+// `listWebsiteSitemapEntries` can discover on its own (they're real app
+// routes, not markdown files), so the sitemap's "Tools" section would
+// otherwise need its own hand-kept copy of this exact list, silently
+// drifting the moment a tool is added/renamed here and not there.
+export const TOOLS: Tool[] = [
   {
     name: "Print a DO NOT USE list",
     description:
@@ -77,7 +84,7 @@ const TOOLS: Tool[] = [
   },
 ];
 
-const DOCS: Doc[] = [
+export const DOCS: Doc[] = [
   {
     name: "AZ Independent Contractor Workers' Comp Acknowledgment",
     description:

@@ -312,6 +312,126 @@ async function resolveWebsitePageByPathUncached(
   return full ? toResolvedPage(full) : null;
 }
 
+export type WebsiteSitemapEntry = {
+  /** The real, resolvable `/`-rooted URL path -- e.g. `"/"`, `"/guides"`,
+   * `"/materials/zip-r"` -- built from the SAME folder-name/file-name
+   * segments `resolveWebsitePageByPath` above matches against, just
+   * walked forward (DB tree -> URL) instead of backward (URL -> DB tree). */
+  path: string;
+  /** The page's own `title` front matter when it set one; otherwise a
+   * humanized version of the path's own last segment (`"scc-demo"` ->
+   * `"Scc Demo"`) -- same "never show a blank link" instinct `::icon`/
+   * `::stamp`'s own placeholders already use, just text instead of a
+   * dashed box. Never actually exercised today (every currently-published
+   * page already sets a real `title`), but a sitemap is exactly the kind
+   * of listing that silently degrades into a wall of blank links the
+   * moment someone forgets one, so it's worth the small defensive cost. */
+  title: string;
+  /** The top-level folder name a nested page lives under (humanized, e.g.
+   * `"Materials"`), or `null` for a root-level page (the homepage, or a
+   * plain `.md` file sitting directly in the site's own root) -- callers
+   * group the flat list returned by `listWebsiteSitemapEntries` by this
+   * for display. Only ever ONE level deep (the site's real content is
+   * flat-per-folder today -- materials/assemblies/science/posts, no
+   * nesting within those) -- a page three folders deep would still only
+   * ever report its FIRST ancestor folder's name here, by design: more
+   * than one grouping tier isn't worth the complexity until a real site
+   * actually has that much depth. `ARCHIVE_FOLDER_NAMES` below folds
+   * SEVERAL distinct folders into one shared `"Archive"` label (2026-10-25,
+   * human ask) rather than each getting its own section -- the ported
+   * Notion content (materials/assemblies/science) plus posts reads as one
+   * "everything else" bucket to a visitor, not four separate site
+   * sections on par with the handful of real top-level pages. */
+  section: string | null;
+};
+
+/** Folder names (lowercased) whose pages ALL share the single `"Archive"`
+ * sitemap section, instead of each getting its own humanized label --
+ * see `WebsiteSitemapEntry.section`'s own comment for why. Deliberately a
+ * closed, hand-picked list, NOT a generic "any non-root folder is an
+ * archive" rule -- a real future content folder that ISN'T meant to read
+ * as archival (nothing like that exists today) would otherwise get
+ * silently swept in here too. */
+const ARCHIVE_FOLDER_NAMES = new Set(["materials", "assemblies", "posts", "science"]);
+
+function humanizeSlug(slug: string): string {
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+const SITEMAP_CACHE_KEY = "__sitemap__";
+
+/**
+ * Every PUBLISHED page under a `website` project, flattened and grouped --
+ * the data behind `/sitemap`'s auto-generated page list (see `garden`'s
+ * website-switchover seed). Deliberately NOT an OxMarkdown page an editor
+ * hand-maintains (the one thing explicitly asked against): a hand-written
+ * list silently drifts the moment a page is added/renamed/(un)published,
+ * which is exactly the failure mode a sitemap exists to prevent. Walks the
+ * ENTIRE folder tree recursively (today: one level deep in practice, see
+ * `WebsiteSitemapEntry.section`'s own comment, but written generically in
+ * case that ever changes) -- a `README.md` is that folder's own page (same
+ * convention `resolveWebsitePageByPathUncached` above already resolves a
+ * URL against); every OTHER plain `.md` file is a page at `folder-path/
+ * filename`; anything (file OR folder) whose name starts with `_` is
+ * PRIVATE infrastructure (`_footer.md`, `_site-settings.json`, a future
+ * `_theme.md`), never a real page, and is skipped entirely, never
+ * recursed into. A page missing `publish: published` front matter (the
+ * default -- see `DEFAULT_WEBSITE_PUBLISH_STATUS`) is silently excluded,
+ * same gate every other public-facing read of this content already
+ * applies. Cached under the SAME per-site version-bump scheme
+ * `resolveWebsitePageByPath` above uses (`websiteCache.server.ts`) --
+ * `"__sitemap__"` is a RESERVED sentinel pathKey, the exact same role
+ * `"__index__"` already plays there for the (real, resolvable) empty
+ * path, so it can never collide with an actual page's own lowercased
+ * path-segment key.
+ */
+export async function listWebsiteSitemapEntries(
+  siteFolder: VaultFolder,
+): Promise<WebsiteSitemapEntry[]> {
+  const cached = await getCachedWebsitePage<WebsiteSitemapEntry[]>(siteFolder._id, SITEMAP_CACHE_KEY);
+  if (cached) return cached;
+
+  const entries: WebsiteSitemapEntry[] = [];
+
+  async function maybeAddPage(fileId: string, segments: string[], section: string | null) {
+    const full = await getFileRefById(fileId);
+    if (!full) return;
+    const meta = parseWebsitePageMeta(full.content ?? "");
+    if (meta.publish !== "published") return;
+    const lastSegment = segments[segments.length - 1] ?? "";
+    const title = meta.title || humanizeSlug(lastSegment) || "Home";
+    entries.push({ path: `/${segments.join("/")}`, title, section });
+  }
+
+  async function walk(folder: VaultFolder, segments: string[], section: string | null) {
+    const { folders, files } = await listFolderChildren(folder.human_id, folder._id);
+
+    const readme = files.find((f) => f.name.toLowerCase() === README_NAME.toLowerCase());
+    if (readme) await maybeAddPage(readme._id, segments, section);
+
+    for (const file of files) {
+      if (file.name.toLowerCase() === README_NAME.toLowerCase()) continue;
+      if (!file.name.toLowerCase().endsWith(".md")) continue;
+      if (file.name.startsWith("_")) continue;
+      await maybeAddPage(file._id, [...segments, stripMdExtension(file.name)], section);
+    }
+
+    for (const sub of folders) {
+      if (sub.name.startsWith("_")) continue;
+      const label = ARCHIVE_FOLDER_NAMES.has(sub.name.toLowerCase()) ? "Archive" : humanizeSlug(sub.name);
+      await walk(sub, [...segments, sub.name], section ?? label);
+    }
+  }
+
+  await walk(siteFolder, [], null);
+  await setCachedWebsitePage(siteFolder._id, SITEMAP_CACHE_KEY, entries);
+  return entries;
+}
+
 export type ResolvedWebsiteDailyLogEntry = {
   projectName: string;
   date: string;

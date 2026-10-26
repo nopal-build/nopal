@@ -34,6 +34,16 @@ type BoxDirectiveProps = {
   formId?: string;
   selectGroup?: string;
   value?: string;
+  /** `:::box{disabled="true"}` -- grays the box out (same `opacity: 0.5
+   * cursor: not-allowed` convention `stamps/button.css.ts`'s own
+   * `&:disabled` recipe already uses) and makes it unselectable: a click/
+   * Space/Enter no-ops instead of writing into the shared form store, and
+   * it drops out of the tab order entirely. Independent of `selectable`
+   * below -- a disabled box still renders its own radio/content layout
+   * exactly as any other selectable box would (so an author can show
+   * "this option exists but isn't available yet" without it looking like
+   * a totally different, unrelated box), just inert. */
+  disabled?: boolean;
   children?: ReactNode;
 };
 
@@ -54,10 +64,11 @@ type BoxDirectiveProps = {
  * `role="radiogroup"` ancestor, so each box only carries its own
  * `role="radio"`/`aria-checked` individually. Revisit if a real
  * accessibility gap is reported. */
-export function BoxDirective({ style, formId, selectGroup, value, children }: BoxDirectiveProps) {
+export function BoxDirective({ style, formId, selectGroup, value, disabled, children }: BoxDirectiveProps) {
   const formApi = useContext(WebsiteFormContext);
   const selectable = Boolean(formId && selectGroup && value);
   const selected = selectable && formApi?.getValue(formId!, selectGroup!) === value;
+  const interactive = selectable && !disabled;
 
   function select() {
     formApi?.setValue(formId!, selectGroup!, value!);
@@ -65,14 +76,15 @@ export function BoxDirective({ style, formId, selectGroup, value, children }: Bo
 
   return (
     <div
-      className={`website-box${selectable ? " website-box-selectable" : ""}${selected ? " website-box-selected" : ""}`}
+      className={`website-box${selectable ? " website-box-selectable" : ""}${selected ? " website-box-selected" : ""}${disabled ? " website-box-disabled" : ""}`}
       style={style}
       role={selectable ? "radio" : undefined}
       aria-checked={selectable ? selected : undefined}
-      tabIndex={selectable ? 0 : undefined}
-      onClick={selectable ? select : undefined}
+      aria-disabled={disabled ? true : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={interactive ? select : undefined}
       onKeyDown={
-        selectable
+        interactive
           ? (e) => {
               // Space/Enter activation -- the same convention the
               // `oxmarkdown` skill's own interactables (task checkboxes,
