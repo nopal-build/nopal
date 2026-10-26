@@ -95,6 +95,35 @@
  *     icons (`quail-walking`) use both independently, each with its own
  *     default. See `websiteIcons.tsx`'s own header for the full tier
  *     breakdown.
+ *   ::svg{src="..." width="N" alt="..." float="left|right|inline"
+ *     id="..."} — renders an arbitrary, already-designed SVG FILE
+ *     verbatim, exactly as `::icon`'s own no-color tier does for a
+ *     REGISTERED name (plain `<img src>`, no recoloring, no theming) --
+ *     except `src` is a literal path the author gives directly, with no
+ *     code-side registry entry needed first. For a genuinely one-off,
+ *     page-specific illustration (a hand-designed diagram, chart, or
+ *     compound graphic with its own baked-in colors) that will likely
+ *     never be reused anywhere else -- reach for `::icon{name="..."}`
+ *     instead (`websiteIcons.tsx`) when a glyph IS meant to be reused by
+ *     name across pages, or needs `primaryColor`/`secondaryColor`
+ *     theming. `width` is an optional literal pixel number; omit it and
+ *     the file renders at its own natural intrinsic size (from the SVG's
+ *     own `width`/`height`), capped responsively by `.ox-content img`'s
+ *     own `max-width: 100%` either way, so a wide illustration never
+ *     overflows a narrow mobile viewport even with no `width` given.
+ *     `float` defaults to `"inline"` (ordinary flow, same as the file's
+ *     own `display`) -- `"left"`/`"right"` float it the SAME way
+ *     `::stamp{float="..."}` above already does (plain CSS `float` +
+ *     margin, `.website-svg-float-{left,right}`), letting surrounding
+ *     paragraph text wrap around it instead of pushing it onto its own
+ *     line. `alt` defaults to empty (decorative), but SHOULD be given
+ *     here unlike `::icon`/`::stamp` -- an ad-hoc illustration like this
+ *     is often substantive content (a diagram, a labeled chart), not
+ *     pure decoration. `id` doubles as a waypoint, same as `::icon`/
+ *     `::stamp`. Missing `src` renders nothing, same "required attribute
+ *     absent" convention `::badge{text="..."}`/`::button{text="..."}`
+ *     already use (not a visible placeholder -- that's reserved for a
+ *     GIVEN name/id that fails to resolve, a different failure mode).
  *   ::waypoint{id="..."} — an invisible anchor for `::trail{waypoints="..."}`
  *     (below) to measure; renders nothing visible on its own. Only needed
  *     when nothing else is already at the spot a trail should pass through
@@ -738,6 +767,22 @@ export function buildWebsiteDirectiveRegistry(opts: {
           position={parseIconPosition(attrs.position)}
           primaryColor={resolveSwatchRole({ role: "color", explicit: attrs.primaryColor, palette: attrs.palette })}
           secondaryColor={resolveSwatchRole({ role: "color", explicit: attrs.secondaryColor, palette: attrs.palette })}
+        />
+      );
+    },
+
+    svg({ attrs }) {
+      if (!attrs.src) return null;
+      const width = Number(attrs.width);
+      const float = attrs.float === "left" || attrs.float === "right" ? attrs.float : "inline";
+      const floatClass = float === "inline" ? "" : ` website-svg-float-${float}`;
+      return (
+        <img
+          src={attrs.src}
+          alt={attrs.alt ?? ""}
+          className={`website-svg${floatClass}`}
+          style={attrs.width && Number.isFinite(width) ? { width, height: "auto" } : undefined}
+          data-waypoint-id={attrs.id || undefined}
         />
       );
     },

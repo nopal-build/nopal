@@ -253,6 +253,22 @@
      one had any visible effect inside IT -- not added preemptively
      anywhere else until an actual use needs it there too. */
   position: relative;
+  /* `display: flow-root` -- establishes a new block formatting context so
+     this box's own auto HEIGHT correctly includes a floated child (a real
+     reported bug: `::svg{float="left"/"right"}`/`::stamp{float="..."}`
+     rendered inside `:::section{...}` left the section's own background/
+     padding ending partway up the floated image instead of enclosing it,
+     since an ordinary block box's auto height ignores floated descendants
+     entirely by default -- the textbook CSS "collapsing container"
+     problem). Deliberately `flow-root`, NOT the older `overflow: hidden`/
+     `auto` clearfix hack -- those also establish a BFC, but as a SIDE
+     EFFECT of clipping/scrolling overflow, which would clip anything in
+     here that's SUPPOSED to render outside this box's own bounds on
+     purpose (an `::icon{position="..."}`/`::badge{position="..."}`
+     deliberately positioned to poke past an edge). `flow-root` contains
+     floats for height purposes ONLY, with no overflow/clipping behavior
+     at all. */
+  display: flow-root;
 }
 
 /* Suppress oxmarkdown's own `#`/`##`/`###` gutter-marker glyph on a
@@ -405,7 +421,34 @@
   vertical-align: middle;
 }
 
-/* ── Waypoints (`::waypoint{...}`) ─────────────────────────────────────── */
+/* ── Arbitrary SVG files (`::svg{src="..."}`) ───────────────────────────── */
+/* No width/height set here on purpose -- an ad-hoc illustration's own
+   natural intrinsic size (from the file's own `width`/`height`) is
+   almost always the right default, unlike `::icon`'s small registered
+   glyphs (`sm`/`md`/`lg` presets make sense for a 20-64px icon, not for
+   a one-off diagram that could be any size). `.ox-content img`'s own
+   `max-width: 100%` (oxmarkdown.css) already keeps a wide illustration
+   from overflowing a narrow mobile viewport even with no `width="N"`
+   attribute given. */
+.website-svg {
+  vertical-align: middle;
+}
+
+/* `::svg{float="left"/"right"}` -- the EXACT SAME float + margin recipe
+   `.website-stamp-float-{left,right}` above already uses, so a flowing
+   illustration reads consistently with a floated stamp elsewhere on the
+   same page. `float: inline` (the default) needs no class at all -- the
+   plain `.website-svg` rule above already renders it in ordinary flow. */
+.website-svg-float-left {
+  float: left;
+  margin: 0 16px 8px 0;
+}
+.website-svg-float-right {
+  float: right;
+  margin: 0 0 8px 16px;
+}
+
+/* ── Waypoints (`::waypoint{...}`) ──────────────────────────────────── */
 /* Zero-size on purpose — a pure position marker, never visible layout. The
    wavy connector overlay (not yet built) reads its own live position via
    `getBoundingClientRect`, so it must sit inline exactly where the author
@@ -541,6 +584,16 @@
      coordinates against -- same treatment `.website-section-inner` below
      already has, for the same reason. */
   position: relative;
+  /* `display: flow-root` -- same float-containment fix as
+     `.website-section-inner` above (see that rule's own comment for the
+     full reasoning): without it, a `::svg{float="..."}`/`::stamp
+     {float="..."}` rendered inside a box would float past the box's own
+     background/border instead of being enclosed by it. Harmless for a
+     SELECTABLE box (`.website-box-selectable`'s own `display: flex`
+     below overrides this anyway -- a flex container's own children never
+     float in the first place, per spec, so there's nothing to contain
+     there regardless). */
+  display: flow-root;
 }
 
 /* Effort 2: `:::box{form-id=... select-group=... value=...}` -- box-shadow,

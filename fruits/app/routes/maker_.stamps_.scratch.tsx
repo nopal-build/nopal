@@ -460,6 +460,26 @@ const TRACING_PAPERS: TracingPaper[] = [
     buildMarkdown: (v) => `::icon{name="${v.placeholderName}"}\n::icon{name="${v.unknownName}"}`,
   },
   {
+    id: "svg",
+    name: "Svg",
+    directive: '::svg{src="..." width="N" alt="..." float="left|right|inline" id="..."}',
+    note: 'Leaf. Renders an arbitrary, already-designed SVG FILE verbatim (plain `<img src>`, no recoloring, no theming) -- unlike `::icon{name="..."}`, `src` is a literal path given directly, with no code-side registry entry needed first. Meant for a genuinely one-off, page-specific illustration (a hand-designed diagram/chart/compound graphic with its own baked-in colors) that will likely never be reused anywhere else -- reach for `::icon{name="..."}` instead when a glyph IS meant to be reused by name across pages, or needs `primaryColor`/`secondaryColor` theming.\n\n**`width` (optional):** a literal pixel number; omit it and the file renders at its own natural intrinsic size, capped responsively by `.ox-content img`\'s own `max-width: 100%` either way.\n\n**`float` (optional):** `"left"`/`"right"` float it the SAME way `::stamp{float="..."}` already does, letting paragraph text wrap around it -- try it with the longer sample content below. Defaults to `"inline"` (ordinary flow).\n\n**`alt`:** defaults to empty (decorative), but SHOULD be given for a real illustration like this one, unlike `::icon`/`::stamp`\'s purely decorative glyphs.\n\n**Missing `src`:** renders nothing, same convention `::badge{text="..."}`/`::button{text="..."}` already use for a missing required attribute.',
+    attributes: [
+      { key: "src", label: "src", kind: "text", default: "/guides/guides-camps-trail.svg" },
+      { key: "width", label: "width (px)", kind: "text", default: "200", placeholder: "e.g. 300" },
+      { key: "alt", label: "alt", kind: "text", default: "A winding trail connecting four camps" },
+      {
+        key: "float",
+        label: "float",
+        kind: "select",
+        default: "inline",
+        options: [{ value: "left" }, { value: "right" }, { value: "inline" }],
+      },
+    ],
+    buildMarkdown: (v) =>
+      `::svg{src="${v.src}"${v.width ? ` width="${v.width}"` : ""}${v.alt ? ` alt="${v.alt}"` : ""}${v.float !== "inline" ? ` float="${v.float}"` : ""}}\n\nThe Discovery stage comes first and often takes the longest: understanding the site, the client's real priorities, and the constraints a good design has to work within before anything gets drawn. Design follows once the brief is clear, then Sourcing lines up the actual materials and crews, and Construction is where it all comes together.`,
+  },
+  {
     id: "waypoint",
     name: "Waypoint",
     directive: '::waypoint{id="..."}',
