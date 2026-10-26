@@ -815,10 +815,15 @@ export async function getPrimaryWebsiteFolder(): Promise<VaultFolder | null> {
 
 /**
  * `vault.server.ts`'s `updateFileRef` calls this after EVERY file update
- * (whenever `content`/`name`/`folder_id` is part of it) via the lazy
- * `getWebsiteModule()` import there — a no-op for the overwhelming
- * majority of vault writes, which have nothing to do with a `website`
- * project at all. Only does real work when the edited file's own folder
+ * (whenever `content`/`name`/`folder_id` is part of it), and `createFileRef`
+ * calls it after EVERY brand-new file (2026-10-26 -- a real gap found while
+ * backfilling a folder of pages into an already-live site: an upload never
+ * went through `updateFileRef` at all, so a freshly-added page's folder
+ * could sit fully resolvable yet silently MISSING from a site's own cached
+ * sitemap until that cache's 1-hour TTL backstop happened to expire).
+ * Both go through the lazy `getWebsiteModule()` import -- a no-op for the
+ * overwhelming majority of vault writes, which have nothing to do with a
+ * `website` project at all. Only does real work when the file's own folder
  * is actually `folder_type: "website"` (denormalized onto every
  * descendant of a website anchor, so THIS part needs no ancestry walk).
  *

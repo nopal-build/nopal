@@ -136,6 +136,17 @@ export async function createFileRef(data: {
     // File Referencing & Renaming — see the import comment above.
     const { syncFileReferences } = await getFileReferencesModule();
     await syncFileReferences(created);
+    // A brand-new page/asset uploaded straight into a LIVE `website`
+    // project (e.g. backfilling a folder of pages after a deploy) is just
+    // as cache-invalidating as editing an existing one -- `updateFileRef`
+    // already bumps this on a content/name/folder change; a fresh upload
+    // never hit that path at all before this, so a site's sitemap/page
+    // cache could silently miss newly-added content until its 1-hour TTL
+    // backstop happened to expire (see `invalidateWebsiteCacheForFile`'s
+    // own doc comment for the full reasoning -- a no-op for every upload
+    // outside a `website` project).
+    const { invalidateWebsiteCacheForFile } = await getWebsiteModule();
+    await invalidateWebsiteCacheForFile(created);
   }
   return created;
 }

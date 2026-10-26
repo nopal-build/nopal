@@ -15,9 +15,10 @@ describe("cost per million tokens", () => {
     expect(estimateCostUsd("claude-opus-5", 1_000_000, 1_000_000)).toBeCloseTo(30);
   });
 
-  it("a cached read is a fortieth of input on Fable, a twentieth on Opus 5.5, a tenth elsewhere", () => {
+  it("a cached read is a fortieth of input on Fable, a twentieth on Opus 5.5 and Sonnet 5.5, a tenth elsewhere", () => {
     expect(estimateCostUsd("claude-fable-5-1", 0, 0, 1_000_000)).toBeCloseTo(0.25);
     expect(estimateCostUsd("claude-opus-5-5", 0, 0, 1_000_000)).toBeCloseTo(0.2);
+    expect(estimateCostUsd("claude-sonnet-5-5", 0, 0, 1_000_000)).toBeCloseTo(0.1);
     expect(estimateCostUsd("claude-sonnet-5", 0, 0, 1_000_000)).toBeCloseTo(0.2);
     expect(estimateCostUsd("claude-opus-5", 0, 0, 1_000_000)).toBeCloseTo(0.5);
   });
