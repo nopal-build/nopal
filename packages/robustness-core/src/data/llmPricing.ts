@@ -27,7 +27,7 @@
  * against https://platform.claude.com/docs/en/about-claude/pricing —
  * whether or not the numbers actually changed, so staleness reflects
  * "last checked," not just "last edited." */
-export const PRICING_AS_OF = "2026-09-25";
+export const PRICING_AS_OF = "2026-10-26";
 
 const PRICING_MAX_AGE_DAYS = 30;
 
@@ -49,9 +49,10 @@ export type ModelPricing = {
 // READ (a later call reusing that exact cached prefix) costs 90% LESS.
 // The write ratio holds across every model. The read ratio was the same
 // everywhere until the 5.x models: Fable 5.1 reads at $0.25 against $10
-// input (a fortieth) and Opus 5.5 at $0.20 against $4 (a twentieth), so
-// a model may carry its own `cacheReadPerMTok` and the multiplier is the
-// default for the rest.
+// input (a fortieth), and Opus 5.5 and Sonnet 5.5 both read at a
+// twentieth of their own input price ($0.20 against $4, $0.10 against
+// $2), so a model may carry its own `cacheReadPerMTok` and the
+// multiplier is the default for the rest.
 const CACHE_WRITE_MULTIPLIER = 1.25;
 const CACHE_READ_MULTIPLIER = 0.1;
 
@@ -65,7 +66,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "claude-fable-5-1": { inputPerMTok: 10, outputPerMTok: 50, cacheReadPerMTok: 0.25 },
   "claude-opus-5-5": { inputPerMTok: 4, outputPerMTok: 20, cacheReadPerMTok: 0.2 },
   "claude-opus-5": { inputPerMTok: 5, outputPerMTok: 25 },
-  "claude-sonnet-5-5": { inputPerMTok: 2, outputPerMTok: 10 },
+  "claude-sonnet-5-5": { inputPerMTok: 2, outputPerMTok: 10, cacheReadPerMTok: 0.1 },
   "claude-sonnet-5": { inputPerMTok: 2, outputPerMTok: 10 },
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-sonnet-4-5-20250929": { inputPerMTok: 3, outputPerMTok: 15 },
