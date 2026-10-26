@@ -346,22 +346,38 @@ export type WebsiteSitemapEntry = {
    * of listing that silently degrades into a wall of blank links the
    * moment someone forgets one, so it's worth the small defensive cost. */
   title: string;
-  /** The top-level folder name a nested page lives under (humanized, e.g.
-   * `"Materials"`), or `null` for a root-level page (the homepage, or a
-   * plain `.md` file sitting directly in the site's own root) -- callers
-   * group the flat list returned by `listWebsiteSitemapEntries` by this
-   * for display. Only ever ONE level deep (the site's real content is
-   * flat-per-folder today -- materials/assemblies/science/posts, no
-   * nesting within those) -- a page three folders deep would still only
-   * ever report its FIRST ancestor folder's name here, by design: more
-   * than one grouping tier isn't worth the complexity until a real site
-   * actually has that much depth. `ARCHIVE_FOLDER_NAMES` below folds
-   * SEVERAL distinct folders into one shared `"Archive"` label (2026-10-25,
-   * human ask) rather than each getting its own section -- the ported
-   * Notion content (materials/assemblies/science) plus posts reads as one
-   * "everything else" bucket to a visitor, not four separate site
-   * sections on par with the handful of real top-level pages. */
+  /** Which of the sitemap's three fixed top-level sections ("Pages",
+   * "Tools", "Archive" -- 2026-10-25, human ask) this page belongs under:
+   * `null` means "Pages" (the default); `"Archive"` is the only other
+   * value this function ever produces ("Tools" is never a possible value
+   * here at all -- see this field's own `/sitemap` caller, which sources
+   * Tools from `_website.tools._index.tsx`'s real route list instead,
+   * since those aren't Vault-backed pages this function could ever
+   * discover on its own). A page living under one of `ARCHIVE_FOLDER_NAMES`
+   * defaults to `"Archive"`; a page's own `publish: archived` ALSO forces
+   * `"Archive"` regardless of which folder it's actually in, overriding
+   * that folder default -- see `ARCHIVE_FOLDER_NAMES`'s own comment. */
   section: string | null;
+  /** The immediate parent folder's humanized name (e.g. `"Materials"`),
+   * or `null` for a root-level page (the homepage, or a plain `.md` file
+   * sitting directly in the site's own root) -- an independent dimension
+   * from `section` above (2026-10-25, human ask): `/sitemap` renders this
+   * as a subheading WITHIN whichever section the page landed in, rather
+   * than its own top-level section the way folder names used to double as
+   * section labels before this field existed. Only ever ONE level deep
+   * (the site's real content is flat-per-folder today -- materials/
+   * assemblies/science/posts, no nesting within those) -- a page three
+   * folders deep would still only ever report its FIRST ancestor folder's
+   * name here, by design: more than one grouping tier isn't worth the
+   * complexity until a real site actually has that much depth. */
+  category: string | null;
+  /** The file's own `created_at` (ISO timestamp) -- there's no `date`
+   * front-matter field today, so this is the closest stand-in for "when
+   * was this page added," used to sort the Archive section's entries
+   * newest-first within each category (2026-10-25, human ask). Deliberately
+   * NOT `updated_at`: a light front-matter edit (e.g. just flipping
+   * `publish`) would otherwise reorder an entry for no content reason. */
+  date: string;
 };
 
 /** Folder names (lowercased) whose pages ALL default to the shared
@@ -379,7 +395,13 @@ export type WebsiteSitemapEntry = {
  * still matters for the common case: a page living in one of these
  * folders defaults to "Archive" the moment it's merely `published`, with
  * no need to ALSO set `archived` by hand just to land in the right
- * section. */
+ * section.
+ *
+ * Only ever governs `section` (the top-level bucket) -- every folder's
+ * humanized name becomes that page's `category` regardless of whether the
+ * folder is in this list, since `category` is purely a display subheading
+ * WITHIN whatever section a page landed in (see `WebsiteSitemapEntry`'s
+ * own comments on both fields). */
 const ARCHIVE_FOLDER_NAMES = new Set(["materials", "assemblies", "posts", "science"]);
 
 function humanizeSlug(slug: string): string {
@@ -400,7 +422,7 @@ const SITEMAP_CACHE_KEY = "__sitemap__";
  * asked against): a hand-written list silently drifts the moment a page
  * is added/renamed/(un)published, which is exactly the failure mode a
  * sitemap exists to prevent. Walks the ENTIRE folder tree recursively
- * (today: one level deep in practice, see `WebsiteSitemapEntry.section`'s
+ * (today: one level deep in practice, see `WebsiteSitemapEntry.category`'s
  * own comment, but written generically in case that ever changes) -- a
  * `README.md` is that folder's own page (same convention
  * `resolveWebsitePageByPathUncached` above already resolves a URL
@@ -427,7 +449,12 @@ export async function listWebsiteSitemapEntries(
 
   const entries: WebsiteSitemapEntry[] = [];
 
-  async function maybeAddPage(fileId: string, segments: string[], section: string | null) {
+  async function maybeAddPage(
+    fileId: string,
+    segments: string[],
+    section: string | null,
+    category: string | null,
+  ) {
     const full = await getFileRefById(fileId);
     if (!full) return;
     const meta = parseWebsitePageMeta(full.content ?? "");
@@ -438,32 +465,50 @@ export async function listWebsiteSitemapEntries(
     // folder-based section it would have otherwise gotten (including the
     // ARCHIVE_FOLDER_NAMES heuristic below) -- an explicit per-page choice
     // should never be silently overridden by which folder a file happens
-    // to sit in.
+    // to sit in. `category` is untouched by this override -- it's purely
+    // about which folder the file physically lives in, independent of
+    // which section that lands it in.
     const entrySection = meta.publish === "archived" ? "Archive" : section;
-    entries.push({ path: `/${segments.join("/")}`, title, section: entrySection });
+    entries.push({
+      path: `/${segments.join("/")}`,
+      title,
+      section: entrySection,
+      category,
+      date: full.created_at,
+    });
   }
 
-  async function walk(folder: VaultFolder, segments: string[], section: string | null) {
+  async function walk(
+    folder: VaultFolder,
+    segments: string[],
+    section: string | null,
+    category: string | null,
+  ) {
     const { folders, files } = await listFolderChildren(folder.human_id, folder._id);
 
     const readme = files.find((f) => f.name.toLowerCase() === README_NAME.toLowerCase());
-    if (readme) await maybeAddPage(readme._id, segments, section);
+    if (readme) await maybeAddPage(readme._id, segments, section, category);
 
     for (const file of files) {
       if (file.name.toLowerCase() === README_NAME.toLowerCase()) continue;
       if (!file.name.toLowerCase().endsWith(".md")) continue;
       if (file.name.startsWith("_")) continue;
-      await maybeAddPage(file._id, [...segments, stripMdExtension(file.name)], section);
+      await maybeAddPage(file._id, [...segments, stripMdExtension(file.name)], section, category);
     }
 
     for (const sub of folders) {
       if (sub.name.startsWith("_")) continue;
-      const label = ARCHIVE_FOLDER_NAMES.has(sub.name.toLowerCase()) ? "Archive" : humanizeSlug(sub.name);
-      await walk(sub, [...segments, sub.name], section ?? label);
+      // `??` on each independently -- the FIRST ancestor folder to set
+      // either one wins, so both stay pinned to the top-level content
+      // folder even if a real site ever nests folders more than one level
+      // deep (see `WebsiteSitemapEntry.category`'s own comment).
+      const subSection = section ?? (ARCHIVE_FOLDER_NAMES.has(sub.name.toLowerCase()) ? "Archive" : null);
+      const subCategory = category ?? humanizeSlug(sub.name);
+      await walk(sub, [...segments, sub.name], subSection, subCategory);
     }
   }
 
-  await walk(siteFolder, [], null);
+  await walk(siteFolder, [], null, null);
   await setCachedWebsitePage(siteFolder._id, SITEMAP_CACHE_KEY, entries);
   return entries;
 }

@@ -9,6 +9,16 @@
 // `TOOLS`/`DOCS` arrays from `_website.tools._index.tsx` directly, since
 // those are real app routes, not Vault files `listWebsiteSitemapEntries`
 // could ever discover on its own.
+//
+// Three fixed sections, in this fixed order (2026-10-25, human ask):
+// Pages, Tools, Archive. "Pages" is the odd one out -- rather than a plain
+// alphabetical/category list, four real pages (Home, Terrain, Stories,
+// Guides) always lead it in that exact order, with everything else in the
+// section (a folder-nested page, or any other root page) falling into a
+// category subheading below them -- see `MAIN_PAGE_PATHS` and
+// `groupByCategory`. "Archive" is entirely category-subheadinged (by
+// folder name) and sorted newest-first within each category — see
+// `sortByDateThenTitle`.
 import { Link, useLoaderData } from "react-router";
 import type { MetaFunction } from "react-router";
 import {
@@ -34,30 +44,109 @@ export const meta: MetaFunction = () => [
   { name: "description", content: "Every page on the Nopal website." },
 ];
 
-type SitemapGroup = { label: string; entries: WebsiteSitemapEntry[] };
+type SitemapCategoryGroup = { label: string; entries: WebsiteSitemapEntry[] };
 
-/** Buckets a flat entry list by `section` — root-level pages (`section:
- * null`) always lead under the label "Pages", regardless of where the
- * walk happened to visit them first; every other section keeps whatever
- * order it first appeared in. */
-function groupBySection(entries: WebsiteSitemapEntry[]): SitemapGroup[] {
-  const order: string[] = [];
-  const bySection = new Map<string, WebsiteSitemapEntry[]>();
+/** The handful of pages that always lead the "Pages" section, in this
+ * exact order, by their real (resolvable) path -- NOT by title text, which
+ * is free to change without breaking this list. Everything else in
+ * "Pages" falls through to `groupByCategory` below instead. */
+const MAIN_PAGE_PATHS = ["/", "/terrain", "/stories", "/guides"];
+
+/** Splits the flat entry list `listWebsiteSitemapEntries` returns into the
+ * two sections it ever actually produces -- `entry.section === "Archive"`,
+ * or everything else (`null`, meaning "Pages"). "Tools" is never a
+ * possible `section` value (see `WebsiteSitemapEntry.section`'s own
+ * comment) -- it's sourced from `TOOLS`/`DOCS` below instead. */
+function splitBySection(entries: WebsiteSitemapEntry[]): {
+  pages: WebsiteSitemapEntry[];
+  archive: WebsiteSitemapEntry[];
+} {
+  const pages: WebsiteSitemapEntry[] = [];
+  const archive: WebsiteSitemapEntry[] = [];
   for (const entry of entries) {
-    const key = entry.section ?? "Pages";
-    if (!bySection.has(key)) {
-      order.push(key);
-      bySection.set(key, []);
-    }
-    bySection.get(key)!.push(entry);
+    (entry.section === "Archive" ? archive : pages).push(entry);
   }
-  const labels = ["Pages", ...order.filter((key) => key !== "Pages")];
-  return labels.filter((label) => bySection.has(label)).map((label) => ({ label, entries: bySection.get(label)! }));
+  return { pages, archive };
+}
+
+/** Buckets entries by `category` (a folder's humanized name) for display
+ * as a subheading within a section -- entries with no category (a
+ * root-level page) fall into a shared "Other" bucket instead of rendering
+ * bare, so a section is always either "just a flat list" (no categories at
+ * all) or "every entry has a heading," never a mix of the two. Categories
+ * sort alphabetically; "Other" always sorts last, since it's a leftover
+ * bucket rather than a real content grouping. */
+function groupByCategory(entries: WebsiteSitemapEntry[]): SitemapCategoryGroup[] {
+  const order: string[] = [];
+  const byCategory = new Map<string, WebsiteSitemapEntry[]>();
+  for (const entry of entries) {
+    const key = entry.category ?? "Other";
+    if (!byCategory.has(key)) {
+      order.push(key);
+      byCategory.set(key, []);
+    }
+    byCategory.get(key)!.push(entry);
+  }
+  const labels = [...order].sort((a, b) => {
+    if (a === "Other") return b === "Other" ? 0 : 1;
+    if (b === "Other") return -1;
+    return a.localeCompare(b);
+  });
+  return labels.map((label) => ({ label, entries: byCategory.get(label)! }));
+}
+
+function sortAlphabetically(entries: WebsiteSitemapEntry[]): WebsiteSitemapEntry[] {
+  return [...entries].sort((a, b) => a.title.localeCompare(b.title));
+}
+
+/** Newest first (by `WebsiteSitemapEntry.date`); same-date ties break
+ * alphabetically by title -- the Archive section's own sort (2026-10-25,
+ * human ask). */
+function sortByDateThenTitle(entries: WebsiteSitemapEntry[]): WebsiteSitemapEntry[] {
+  return [...entries].sort((a, b) => {
+    if (a.date !== b.date) return a.date > b.date ? -1 : 1;
+    return a.title.localeCompare(b.title);
+  });
+}
+
+function CategoryList({ groups }: { groups: SitemapCategoryGroup[] }) {
+  return (
+    <>
+      {groups.map((group) => (
+        <div key={group.label} className="mt-6">
+          <h3 className="text-lg font-semibold mb-1">{group.label}</h3>
+          <ul className="space-y-2">
+            {group.entries.map((entry) => (
+              <li key={entry.path}>
+                <Link to={entry.path} prefetch="intent" className="underline">
+                  {entry.title}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
+  );
 }
 
 export default function SiteMap() {
   const { entries, footer } = useLoaderData<typeof loader>();
-  const groups = groupBySection(entries);
+  const { pages, archive } = splitBySection(entries);
+
+  const mainPages = MAIN_PAGE_PATHS.map((path) => pages.find((e) => e.path === path)).filter(
+    (e): e is WebsiteSitemapEntry => Boolean(e),
+  );
+  const mainPagePaths = new Set(mainPages.map((e) => e.path));
+  const otherPageGroups = groupByCategory(pages.filter((e) => !mainPagePaths.has(e.path))).map((group) => ({
+    ...group,
+    entries: sortAlphabetically(group.entries),
+  }));
+
+  const archiveGroups = groupByCategory(archive).map((group) => ({
+    ...group,
+    entries: sortByDateThenTitle(group.entries),
+  }));
 
   return (
     <>
@@ -66,20 +155,19 @@ export default function SiteMap() {
           <h1 className="text-4xl font-bold mt-8">Site Map</h1>
           <p className="purple-light-text text-xl mt-2">Every page on the site.</p>
 
-          {groups.map((group) => (
-            <div key={group.label} className="mt-8">
-              <h2 className="text-2xl font-semibold green-text">{group.label}</h2>
-              <ul className="mt-4 space-y-2">
-                {group.entries.map((entry) => (
-                  <li key={entry.path}>
-                    <Link to={entry.path} prefetch="intent" className="underline">
-                      {entry.title}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          <div className="mt-8">
+            <h2 className="text-2xl font-semibold green-text">Pages</h2>
+            <ul className="mt-4 space-y-2">
+              {mainPages.map((entry) => (
+                <li key={entry.path}>
+                  <Link to={entry.path} prefetch="intent" className="underline">
+                    {entry.title}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <CategoryList groups={otherPageGroups} />
+          </div>
 
           <div className="mt-8">
             <h2 className="text-2xl font-semibold green-text">Tools</h2>
@@ -99,6 +187,11 @@ export default function SiteMap() {
                 </li>
               ))}
             </ul>
+          </div>
+
+          <div className="mt-8">
+            <h2 className="text-2xl font-semibold green-text">Archive</h2>
+            <CategoryList groups={archiveGroups} />
           </div>
         </div>
       </div>
