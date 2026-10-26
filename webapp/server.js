@@ -68,6 +68,25 @@ app.use((req, res, next) => {
   res.redirect(308, `${APP_BASE_URL_FOR_REDIRECTS}${newPath}${query}`);
 });
 
+// ── Internal page-move redirects (stay on this host) ─────────────────────────────────────
+// Distinct from the cross-host redirects above: these are pages that moved
+// to a new path within webapp itself. `/scc-demo` is the canonical page now
+// (part of the website-switchover's content, with its own standalone
+// content) — the old Notion-backed `/science/scc-demo` entry is superseded
+// rather than kept as a separate page (see
+// garden/2-ready/website-switchover.md). Same 308 reasoning as above
+// (preserves method/body), even though every entry here is a plain GET page
+// move today.
+const INTERNAL_REDIRECTS = new Map([["/science/scc-demo", "/scc-demo"]]);
+
+app.use((req, res, next) => {
+  const newPath = INTERNAL_REDIRECTS.get(req.path);
+  if (!newPath) return next();
+  const queryIndex = req.originalUrl.indexOf("?");
+  const query = queryIndex === -1 ? "" : req.originalUrl.slice(queryIndex);
+  res.redirect(308, `${newPath}${query}`);
+});
+
 const viteDevServer =
   process.env.NODE_ENV === "production"
     ? null

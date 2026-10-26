@@ -346,15 +346,27 @@ The dot-grid visual identity (`webapp/app/styles/oxmarkdown.css`,
     above instead (e.g. collapsing/forcing specific spacer counts around a
     heading or list) — see the matching NOTE in both `oxmarkdown.css`
     copies. **Resolved for headings (2026-10-20), exactly that way:**
-    - **Reading surfaces**: `blankLineUnits` (`oxmarkdown-core`) is
-      `countBlankLines`, raised to at least 1 when the NEXT block is a
-      heading. Both `OxRenderer` copies' `renderBlockNodes` call it. So
-      there is one line above any heading that follows content, even when
-      the file has none, and below a heading stays literal. A heading
-      opening its container gets nothing. Two or more typed lines above
-      are kept.
+    - **Reading surfaces, REVERSED (2026-10-25):** the original rule here
+      (`blankLineUnits`, `oxmarkdown-core`, read `countBlankLines` but
+      raised to at least 1 when the NEXT block was a heading) is RETIRED
+      outright, not just refined. Real report against a live page: an
+      eyebrow heading directly above a title heading (`### Good Building`
+      then `# The Terrain`, no blank line typed between them) still got a
+      forced spacer, even after a same-day attempt had already carved out
+      "unless the thing above is ANOTHER heading" to fix exactly that
+      case. The follow-up made the real intent explicit and stricter than
+      either version: every reading surface defers to the file's own
+      blank lines, full stop, with NO exceptions for ANY block type,
+      headings included — "if there's no newline in the markdown, there
+      shouldn't be one in the render." `blankLineUnits` no longer exists;
+      both `OxRenderer` copies' `renderBlockNodes` now call
+      `countBlankLines` directly for every sibling pair (headings
+      included), exactly the same function Editing mode's own import
+      already used — so the two surfaces still agree exactly, just
+      without the old heading carve-out.
     - **Editing mode** stays literal (`countBlankLines`): a forced line
-      there would be a row not in the file.
+      there would be a row not in the file. (Unaffected by the reversal
+      above — it was always literal.)
     - **Saving adds no lines**: `blankLineJoin` returns 0 for a heading
       directly against a real block (the default join used to save
       `## H\nbody` as `## H\n\nbody`, which then reloaded as a phantom row).

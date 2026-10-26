@@ -37,6 +37,31 @@
 }
 .website-page-bg {
   background: var(--website-bg-page);
+  /* `overflow-x: hidden` -- NOT `overflow-y` (sticky/scroll behavior on
+     that axis stays completely ordinary) -- contains intentional
+     decorative overhang at the VIEWPORT, not just at whatever element it
+     overflows. A real reported bug: `::icon{position="R-80,T20" size=
+     "200"}` (deliberately hanging part of itself past its own section's
+     right edge -- `.ox-content.website-page-ox`'s own `overflow-x:
+     visible` exists specifically so this kind of bleed ISN'T clipped at
+     the section/content level) had nothing further up the tree stopping
+     it at the page level either, so the whole page gained a real
+     horizontal scrollbar just to reach a few decorative pixels of a
+     circle nobody was meant to scroll to. This is the ROOT wrapper every
+     website page renders inside (`_website.tsx`'s own outer `<div
+     className="website-page-bg">`) -- the right/only place to draw this
+     line, since every inner `overflow-x: visible` (`.ox-content.website-
+     page-ox`, `.website-section`'s own intentional negative-margin
+     bleed) needs to stay exactly as permissive as it already is for
+     genuinely-contained overflow (a section's own full-bleed background,
+     an icon hanging slightly past a box's edge) to keep working --
+     clipping any of THOSE would reintroduce the exact bugs their own
+     `overflow-x: visible` already fixed. Scoped to this one class, not
+     the app-wide `html`/`body` (`root.css`) -- those are shared by every
+     OTHER part of the app (Vault, Daily Log, Project Newspaper, Skills),
+     which have never reported this problem and don't need a new global
+     behavior change just to fix a website-only bug. */
+  overflow-x: hidden;
 }
 
 /* The single source of truth for the reading column's own width -- used
@@ -192,7 +217,32 @@
   padding-left: 26px;
 }
 
-/* ── Section (`:::section{surface="..." palette="..."}`) ─────────────── */
+/* `:::toggle{...}`'s caret (`.ox-toggle-summary::before`, oxmarkdown.css)
+   is tuned for the ORDINARY dot-grid's own full `--ox-grid` (41px) gutter
+   (`left: -38px`, comfortably inside that) -- `.ox-content.website-page-ox`
+   above zeroes that gutter out entirely in favor of the website's own
+   narrower 24px one (`.website-page-content`'s `padding: 0 24px`), so the
+   caret's own `-38px` offset overflowed 14px past it. A real reported bug:
+   on a real page this only reads as clipped on MOBILE specifically --
+   desktop has extra page margin around the centered, capped-width
+   content for the same overflow to quietly bleed into unclipped, even
+   though it's overflowing the "logical" gutter there too. Repositioned to
+   sit exactly flush with the website's real 24px edge instead -- confirmed
+   this exact position reads correctly on desktop too, so one rule covers
+   both, no separate breakpoint needed. `top` is now a literal pixel
+   position, not `50%` -- so the shared rule's paired `translateY(-50%)`
+   (there for percentage-based vertical centering) is dropped here too;
+   only the rotate (collapsed vs. expanded) carries over. */
+.ox-content.website-page-ox .ox-toggle-summary::before {
+  left: -24px;
+  top: 10px;
+  transform: rotate(90deg);
+}
+.ox-content.website-page-ox .ox-toggle--collapsed > .ox-toggle-summary::before {
+  transform: rotate(0deg);
+}
+
+/* ── Section (`:::section{surface="..." palette="..."}`) ────────────────── */
 
 /* `margin-left`/`margin-right: -24px` exactly cancels `.website-page-content`'s
    own horizontal padding above, so this band always exactly fills that
@@ -216,11 +266,11 @@
   margin-left: -24px;
   margin-right: -24px;
   /* `margin-top`/`margin-bottom` deliberately NOT set here -- `:::section
-     {margin="N"}` (websiteDirectives.tsx's `parseSectionMarginStyle`)
-     sets those as an INLINE style instead (a `calc(N * var(--ox-grid))`
-     formula), since the multiplier is a free-form per-instance number,
-     not a small fixed vocabulary a CSS class could represent the way
-     `bg`/`list` do above. */
+     {margin="N"}` (websiteDirectives.tsx's `parseMarginStyle`, shared
+     with `:::box{margin="N"}`) sets those as an INLINE style instead (a
+     `calc(N * var(--ox-grid))` formula), since the multiplier is a
+     free-form per-instance number, not a small fixed vocabulary a CSS
+     class could represent the way `bg`/`list` do above. */
 }
 
 /* Once the content shell itself is no longer edge-to-edge (its own
@@ -257,6 +307,49 @@
      one had any visible effect inside IT -- not added preemptively
      anywhere else until an actual use needs it there too. */
   position: relative;
+}
+
+/* `::after { clear: both }` -- the CLASSIC "micro clearfix" (pre-dates
+   `flow-root`, which this REPLACES -- see below for why) -- makes this
+   box's own auto HEIGHT correctly include a floated child (the original
+   bug: `::svg{float="left"/"right"}`/`::stamp{float="..."}` rendered
+   INSIDE `:::section{...}` left the section's own background/padding
+   ending partway up the floated image instead of enclosing it, since an
+   ordinary block box's auto height ignores floated descendants entirely
+   by default -- the textbook CSS "collapsing container" problem). This
+   invisible, zero-size pseudo-element sits AFTER every real child; its own
+   `clear: both` pushes IT below any still-active float, and since it's
+   the LAST thing in the box, the box's own auto height naturally stretches
+   to include it -- and therefore the float too.
+
+   REPLACES an earlier `display: flow-root` fix for the exact same bug,
+   reverted after a DIFFERENT real reported bug it introduced: `flow-root`
+   establishes a new block formatting context, which ALSO changes how this
+   box reacts to a float OUTSIDE it entirely -- a `::stamp{float="right"}`
+   sitting as a PRECEDING SIBLING before `:::section{...}` (not inside it
+   at all -- the real homepage's own first stamp, `README.md`) made the
+   WHOLE section narrow itself for its ENTIRE height to avoid the stamp,
+   not just the portion actually overlapping it vertically -- a new-BFC
+   block box computes ONE rectangle for its whole height up front, unlike
+   ordinary inline content, which re-wraps line-by-line and naturally
+   regains full width the moment it passes a float's bottom edge. The
+   reported symptom: paragraph text inside the section stayed squeezed
+   into a narrow column for six-plus lines, long after visually clearing
+   the stamp above it, instead of flowing full width again like ordinary
+   floated-image text always should. A plain clearfix doesn't have this
+   side effect at all -- it never makes THIS box a new BFC, so content
+   inside it keeps wrapping around ANY float (inside or outside) exactly
+   like ordinary inline content always has, while still fixing the
+   original auto-height bug this whole rule exists for. Also, unlike the
+   OLDER `overflow: hidden`/`auto` clearfix hack (which `flow-root` itself
+   had already replaced for a separate reason): still doesn't clip
+   anything deliberately positioned to poke past this box's own edge (an
+   `::icon{position="..."}`/`::badge{position="..."}`) -- a clearfix
+   pseudo-element has no `overflow` of its own either. */
+.website-section-inner::after {
+  content: "";
+  display: block;
+  clear: both;
 }
 
 /* Suppress oxmarkdown's own `#`/`##`/`###` gutter-marker glyph on a
@@ -409,7 +502,34 @@
   vertical-align: middle;
 }
 
-/* ── Waypoints (`::waypoint{...}`) ─────────────────────────────────────── */
+/* ── Arbitrary SVG files (`::svg{src="..."}`) ───────────────────────────── */
+/* No width/height set here on purpose -- an ad-hoc illustration's own
+   natural intrinsic size (from the file's own `width`/`height`) is
+   almost always the right default, unlike `::icon`'s small registered
+   glyphs (`sm`/`md`/`lg` presets make sense for a 20-64px icon, not for
+   a one-off diagram that could be any size). `.ox-content img`'s own
+   `max-width: 100%` (oxmarkdown.css) already keeps a wide illustration
+   from overflowing a narrow mobile viewport even with no `width="N"`
+   attribute given. */
+.website-svg {
+  vertical-align: middle;
+}
+
+/* `::svg{float="left"/"right"}` -- the EXACT SAME float + margin recipe
+   `.website-stamp-float-{left,right}` above already uses, so a flowing
+   illustration reads consistently with a floated stamp elsewhere on the
+   same page. `float: inline` (the default) needs no class at all -- the
+   plain `.website-svg` rule above already renders it in ordinary flow. */
+.website-svg-float-left {
+  float: left;
+  margin: 0 16px 8px 0;
+}
+.website-svg-float-right {
+  float: right;
+  margin: 0 0 8px 16px;
+}
+
+/* ── Waypoints (`::waypoint{...}`) ──────────────────────────────────── */
 /* Zero-size on purpose — a pure position marker, never visible layout. The
    wavy connector overlay (not yet built) reads its own live position via
    `getBoundingClientRect`, so it must sit inline exactly where the author
@@ -522,21 +642,45 @@
   border: 1px solid var(--color-surface-border);
   border-radius: 8px;
   padding: 20px;
-  /* NO margin here (reversed from round 5's own original "always a
-     non-zero outer margin" decision, see the "Box Directive + Pricing
-     Card UI Fix" garden seed, resolved question 5/round 7) -- the
+  /* NO margin here BY DEFAULT (reversed from round 5's own original
+     "always a non-zero outer margin" decision, see the "Box Directive +
+     Pricing Card UI Fix" garden seed, resolved question 5/round 7) -- the
      human found real double-spacing in practice between stacked boxes:
      this margin ON TOP of the ordinary blank-line gap this whole
      document language already provides (N blank lines = N grid units,
      see the `oxmarkdown` skill's "Between blocks" design language). A
-     box's own vertical spacing is the AUTHOR'S call via blank lines,
-     same as every other block -- not baked into the directive itself. */
+     box's own vertical spacing is still the AUTHOR'S call by default, via
+     blank lines, same as every other block -- not baked into the
+     directive itself. `:::box{margin="N"}` (2026-10-25) is the author's
+     own OPT-IN escape hatch for when blank lines alone are too coarse
+     (zero or one full `--ox-grid` unit, nothing in between) -- sets
+     `margin-top`/`margin-bottom` as an INLINE style instead
+     (`websiteDirectives.tsx`'s `parseMarginStyle`, shared verbatim with
+     `:::section{margin="N"}` above), same reasoning as that directive's
+     own matching comment. */
   background: var(--color-surface-card);
   /* The positioned ancestor a `::badge{position="x,y"}` (websiteBadge.tsx's
      `PositionedWebsiteBadge`) resolves its own real-pixel anchor
      coordinates against -- same treatment `.website-section-inner` below
      already has, for the same reason. */
   position: relative;
+}
+
+/* `::after { clear: both }` -- same classic clearfix fix as
+   `.website-section-inner` above (see that rule's own comment for the
+   full "replaces an earlier `flow-root`" story): without it, a `::svg
+   {float="..."}`/`::stamp{float="..."}` rendered inside a box would float
+   past the box's own background/border instead of being enclosed by it.
+   `flow-root` would ALSO fix that, but (per the sibling comment) breaks
+   how this box reacts to a float OUTSIDE it -- a plain clearfix doesn't.
+   Harmless for a SELECTABLE box (`.website-box-selectable`'s own
+   `display: flex` elsewhere overrides `display` entirely regardless -- a
+   flex container's own children never float in the first place, per
+   spec, so there's nothing for either technique to contain there). */
+.website-box::after {
+  content: "";
+  display: block;
+  clear: both;
 }
 
 /* Effort 2: `:::box{form-id=... select-group=... value=...}` -- box-shadow,
@@ -548,14 +692,62 @@
 
 .website-box-selectable {
   cursor: pointer;
+  /* The radio sits to the LEFT of the box's own content, not floating in
+     a corner -- a plain flex row does this directly, no absolute
+     positioning or reserved padding needed (unlike a `::badge{position=
+     "..."}`, which anchors against `.website-box`'s own `position:
+     relative` above because it CAN land anywhere, including overlapping
+     the border). */
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 }
 
-.website-box-selectable:hover {
+.website-box-selectable:hover:not(.website-box-disabled) {
   box-shadow: 0 0 0 1px var(--color-surface-border);
 }
 
 .website-box-selected {
   box-shadow: 0 0 0 2px var(--green);
+}
+
+/* `:::box{disabled="true"}` -- the SAME `opacity: 0.5 cursor: not-allowed`
+   convention `stamps/button.css.ts`'s own `&:disabled` recipe already
+   uses, so a grayed-out box and a grayed-out button read consistently.
+   Independent of selected/hover above -- `.website-box-selectable:hover`'s
+   own `:not(.website-box-disabled)` guard (above) keeps the hover
+   highlight from firing on a disabled box, which would otherwise read as
+   "still interactive" despite the click itself being a no-op
+   (`websiteForms.tsx`'s `BoxDirective`). */
+.website-box-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The `Checkbox` (stamps, `variant="radio"`) a selectable box renders to
+   show its own checked state. `margin-top` centers its own 23px circle
+   (checkbox.css.ts) against the first line of `.website-box-content`'s
+   own text -- a selectable box's own content always starts with an
+   `:::flex` heading row (see guides.md's own pricing cards), whose `h3`
+   gets `line-height: var(--ox-grid)` (oxmarkdown.css) rather than a
+   plain unitless line-height, so centering against THAT (not the radio's
+   OWN line-height, which doesn't matter here -- it has no text) is what
+   actually lines the two up. `--ox-grid` resolves correctly here despite
+   living under `.ox-tokens` (oxmarkdown.css) rather than plain `:root`
+   -- `.website-box` is only ever reached already inside an `.ox-content.
+   ox-tokens` wrapper (`OxRenderer`'s own root element), never standalone. */
+.website-box-radio {
+  flex-shrink: 0;
+  margin-top: calc((var(--ox-grid, 41px) - 23px) / 2);
+}
+
+/* The flex row's second (growing) item -- without `min-width: 0` a flex
+   item defaults to `min-width: auto`, which can refuse to shrink below
+   its own content's natural width (e.g. a long line of text or a wide
+   image) and overflow the row instead of wrapping. */
+.website-box-content {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ── Flex row (`:::flex{...}`) ──────────────────────────────────────────── */

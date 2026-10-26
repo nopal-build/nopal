@@ -1,14 +1,21 @@
 /**
- * Heading spacing (2026-10-20): one line above a heading on every reading
- * surface, none under it unless somebody typed one, and saving never adds
- * a line nobody typed. See `blankLineUnits` (oxmarkdown-core).
+ * Heading spacing: every reading surface defers to the file's OWN blank
+ * lines, full stop, with no forced minimum before a heading (REVERSED
+ * 2026-10-25 -- the original 2026-10-20 rule forced at least one line
+ * above any heading even when the file ran straight into it; retired
+ * outright after a real report that an eyebrow heading directly above a
+ * title heading, with no blank line typed between them, was still getting
+ * a forced spacer). "If there's no newline in the markdown, there's no
+ * newline in the render." Saving still never adds a line nobody typed.
+ * See `countBlankLines` (oxmarkdown-core) -- `blankLineUnits`, the
+ * heading-forcing variant, no longer exists.
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createEditor, $getRoot } from "lexical";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import {
-  blankLineUnits,
+  countBlankLines,
   normalizeHeadingSpacing,
   parseOxDocument,
   serializeOxDocument,
@@ -29,33 +36,52 @@ function shape(markdown: string): string {
   return tokens.map((t) => (t === SPACER ? "_" : t.replace(/[<> ]/g, ""))).join(" ");
 }
 
-describe("blankLineUnits", () => {
+describe("countBlankLines around headings -- no special-casing of any kind", () => {
   const blocks = (md: string) => parseOxDocument(md).children;
 
-  it("a heading straight after text still gets one line above", () => {
+  it("a heading straight after text gets NO forced line -- literal zero, since none was typed", () => {
     const [p, h] = blocks("text\n## H");
-    expect(blankLineUnits(p, h)).toBe(1);
+    expect(countBlankLines(p, h)).toBe(0);
+  });
+
+  it("a line someone DID type above a heading is kept", () => {
+    const [p, h] = blocks("text\n\n## H");
+    expect(countBlankLines(p, h)).toBe(1);
   });
 
   it("two typed lines above a heading stay two", () => {
     const [p, h] = blocks("text\n\n\n## H");
-    expect(blankLineUnits(p, h)).toBe(2);
+    expect(countBlankLines(p, h)).toBe(2);
   });
 
   it("under a heading stays literal", () => {
     const [h, p] = blocks("## H\nbody");
-    expect(blankLineUnits(h, p)).toBe(0);
+    expect(countBlankLines(h, p)).toBe(0);
   });
 
   it("paragraph to paragraph is unchanged", () => {
     const [a, b] = blocks("a\n\nb");
-    expect(blankLineUnits(a, b)).toBe(1);
+    expect(countBlankLines(a, b)).toBe(1);
+  });
+
+  it("an eyebrow heading directly above a title heading gets NO forced line either", () => {
+    const [h3, h1] = blocks("### Good Building\n# The Terrain");
+    expect(countBlankLines(h3, h1)).toBe(0);
+  });
+
+  it("a line someone DID type between two headings is still kept", () => {
+    const [h3, h1] = blocks("### Good Building\n\n# The Terrain");
+    expect(countBlankLines(h3, h1)).toBe(1);
   });
 });
 
 describe("OxRenderer around headings", () => {
-  it("text running into a heading: one line above, none below", () => {
-    expect(shape("intro\n## H\nbody")).toBe("p _ h2 p");
+  it("text running straight into a heading: no spacer, since none was typed", () => {
+    expect(shape("intro\n## H\nbody")).toBe("p h2 p");
+  });
+
+  it("a line someone typed above a heading still shows", () => {
+    expect(shape("intro\n\n## H\nbody")).toBe("p _ h2 p");
   });
 
   it("a line someone typed under a heading still shows", () => {
@@ -67,7 +93,11 @@ describe("OxRenderer around headings", () => {
   });
 
   it("holds inside a list item too", () => {
-    expect(shape("- item\n\n  text\n  ## H")).toContain("p _ h2");
+    expect(shape("- item\n\n  text\n\n  ## H")).toContain("p _ h2");
+  });
+
+  it("an eyebrow heading directly above a title heading renders with no spacer between them", () => {
+    expect(shape("### Good Building\n# The Terrain\nbody")).toBe("h3 h1 p");
   });
 });
 

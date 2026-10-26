@@ -25,7 +25,7 @@ import {
   parseOxDocument,
   buildSwatchStyleSheet,
   collectSwatchRegistry,
-  blankLineUnits,
+  countBlankLines,
   directiveAttrs,
   isDirectiveNode,
   parseRefAttrs,
@@ -475,9 +475,12 @@ function renderNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode {
  * exactly how the old zero-gap mechanism kept quietly breaking for new
  * container types.
  *
- * One exception, in `blankLineUnits` (oxmarkdown-core) rather than here
- * or in CSS: a heading always gets at least one spacer above it, even when
- * the file runs text straight into it. Below a heading stays literal.
+ * NO exception for headings (reversed 2026-10-25, see `oxmarkdown-core`'s
+ * `document.ts` for the full history) -- a heading gets exactly the
+ * number of spacers the file's own blank-line count says, same as any
+ * other block, including zero when the file runs straight into it with no
+ * blank line typed. Every reading surface defers to the markdown's own
+ * line breaks, full stop.
  *
  * Only meaningful for block content (root children, a blockquote's/
  * container directive's children, ...) — inline phrasing content (a
@@ -500,7 +503,7 @@ function renderBlockNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode 
       rendered = renderNode(node, i, ctx);
     }
     if (i > 0) {
-      const units = blankLineUnits(list[i - 1], node);
+      const units = countBlankLines(list[i - 1], node);
       for (let s = 0; s < units; s++) {
         out.push(<div key={`spacer-${i}-${s}`} className="ox-blank-line-spacer" aria-hidden="true" />);
       }

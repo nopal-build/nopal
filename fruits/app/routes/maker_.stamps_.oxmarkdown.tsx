@@ -871,18 +871,41 @@ const DECISIONS: { title: string; body: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    title: "Headings: REVERSED -- no forced line after all, markdown's own blank lines rule everything",
+    body: (
+      <>
+        Gerald, 2026-10-25, reported against a real page: an eyebrow heading directly above a
+        title heading (<code>### Good Building</code> then <code># The Terrain</code>, no blank
+        line typed between them) was still getting a forced spacer shoved in between them -- a
+        same-day attempt that day had already special-cased "unless the thing above is ANOTHER
+        heading" to fix exactly that case, but the follow-up conversation made the actual intent
+        explicit and stricter than either version: <em>every</em> reading surface defers to the
+        markdown's own blank lines, full stop, with NO exceptions for any block type, headings
+        included. If there's no newline in the file, there's no newline in the render -- the
+        entire <code>blankLineUnits</code> function (<code>oxmarkdown-core</code>) is retired;
+        both <code>OxRenderer</code> copies (this app and the website) now call{" "}
+        <code>countBlankLines</code> directly for every sibling pair, exactly the same function
+        Editing mode's own import already used -- so the two surfaces still agree exactly, just
+        without the heading carve-out. See the Heading spacing section below, updated to match.
+      </>
+    ),
+  },
 ];
 
 // ─── Sample content for the playground ──────────────────────────────────────────────────────────────────
 
 const HEADING_SPACING_SAMPLE = `# Title
 Opening line, straight under the heading.
-## Runs into a heading
-This text was typed with no blank line above the heading.
+## Runs straight into a heading
+This text was typed with no blank line above the heading, so none renders.
 
-## A typed line under this one
+## A typed line above this one
 
-The blank line under this heading was typed, so it shows.`;
+The blank line above this heading was typed, so it shows.
+### An eyebrow heading
+# Directly above a title heading
+No blank line was typed between these two headings either, so they render tight together.`;
 
 const DEFAULT_SAMPLE = `# Try editing this
 
@@ -1147,8 +1170,8 @@ export default function OxMarkdownStyles() {
 
         <Section id="heading-spacing" title="Heading spacing">
           <p className="text-sm subtle-text mb-4">
-            One line above every heading that follows other content, even when the file has
-            none. Under a heading, only the lines someone typed.
+            Purely literal (reversed 2026-10-25): exactly as many blank-line gaps as the file
+            itself has, around every block including headings, with no forced minimum anywhere.
           </p>
           <Label>Source</Label>
           <pre className={`${surfaceBase} ${sprinkles({ p: 4, fontFamily: "mono" })}`} style={{ whiteSpace: "pre-wrap" }}>

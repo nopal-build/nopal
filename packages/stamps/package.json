@@ -9,6 +9,8 @@
     "./badge.css": "./src/badge.css.ts",
     "./Chip": "./src/Chip.tsx",
     "./Input": "./src/Input.tsx",
+    "./Checkbox": "./src/Checkbox.tsx",
+    "./checkbox.css": "./src/checkbox.css.ts",
     "./Surface": "./src/Surface.tsx",
     "./surface.css": "./src/surface.css.ts",
     "./Modal": "./src/Modal.tsx",

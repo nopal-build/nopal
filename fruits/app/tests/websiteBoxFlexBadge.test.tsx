@@ -59,6 +59,83 @@ Some real content here.
 :::`);
     expect(html).toContain("Some real content here.");
   });
+
+  it("margin= sets an inline top/bottom margin, same formula :::section{margin=...} uses", () => {
+    const html = render(`:::box{margin="0.5"}
+content
+:::`);
+    expect(html).toContain("margin-top:calc(0.5 * var(--ox-grid, 41px))");
+    expect(html).toContain("margin-bottom:calc(0.5 * var(--ox-grid, 41px))");
+  });
+
+  it("omitting margin= sets no margin at all -- the pre-existing default is unchanged", () => {
+    const html = render(`:::box{}
+content
+:::`);
+    expect(html).not.toContain("margin-top");
+    expect(html).not.toContain("margin-bottom");
+  });
+
+  it("scale= sets an inline zoom factor, scaling the whole box's subtree (not just --ox-grid)", () => {
+    const html = render(`:::box{scale="0.75"}
+content
+:::`);
+    expect(html).toContain("zoom:0.75");
+  });
+
+  it("omitting scale= sets no zoom at all -- renders at ordinary 1:1 size", () => {
+    const html = render(`:::box{}
+content
+:::`);
+    expect(html).not.toContain("zoom");
+  });
+
+  it("a non-positive or unparseable scale= is ignored, same as an absent one", () => {
+    const zero = render(`:::box{scale="0"}
+content
+:::`);
+    const negative = render(`:::box{scale="-1"}
+content
+:::`);
+    const garbage = render(`:::box{scale="not-a-number"}
+content
+:::`);
+    expect(zero).not.toContain("zoom");
+    expect(negative).not.toContain("zoom");
+    expect(garbage).not.toContain("zoom");
+  });
+
+  it("disabled=\"true\" grays out a selectable box and drops it from the tab order", () => {
+    const html = render(`:::box{form-id="plan" select-group="tier" value="self-guide" disabled="true"}
+content
+:::`);
+    expect(html).toContain("website-box-disabled");
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).not.toContain("tabindex");
+  });
+
+  it("omitting disabled= (or disabled=\"false\") leaves a selectable box fully interactive", () => {
+    const withoutDisabled = render(`:::box{form-id="plan" select-group="tier" value="self-guide"}
+content
+:::`);
+    expect(withoutDisabled).not.toContain("website-box-disabled");
+    expect(withoutDisabled).not.toContain("aria-disabled");
+    expect(withoutDisabled).toContain('tabindex="0"');
+
+    const withFalse = render(`:::box{form-id="plan" select-group="tier" value="self-guide" disabled="false"}
+content
+:::`);
+    expect(withFalse).not.toContain("website-box-disabled");
+    expect(withFalse).toContain('tabindex="0"');
+  });
+
+  it("disabled=\"true\" on a plain, non-selectable box still grays it out, with nothing else to disable", () => {
+    const html = render(`:::box{disabled="true"}
+content
+:::`);
+    expect(html).toContain("website-box-disabled");
+    expect(html).not.toContain("website-box-selectable");
+  });
 });
 
 describe(":::flex{...}", () => {

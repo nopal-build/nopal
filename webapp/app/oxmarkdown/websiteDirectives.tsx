@@ -50,7 +50,7 @@
  *     look, not a raw color. `margin` adds extra top/bottom breathing
  *     room around the section, as a MULTIPLE of the shared `--ox-grid`
  *     unit (41px today) rather than a raw pixel count -- `margin="2"`
- *     means `2 * 41px` = `82px` (see `parseSectionMarginStyle`, below,
+ *     means `2 * 41px` = `82px` (see `parseMarginStyle`, below,
  *     for why that stays token-driven instead of a hardcoded number);
  *     negative values pull an adjacent section closer instead.
  *     Deliberately a themeable-area directive, not a fully bespoke-per-
@@ -63,7 +63,8 @@
  *   ::stamp{name="coffee|mtn|nopal|quail" rotate="deg" float="left|right|inline" id="..."}
  *     — a complete, pre-designed postage-stamp graphic (see
  *     `websiteStamps.tsx`); `id` doubles as a waypoint.
- *   ::icon{name="..." size="sm|md|lg|#" id="..." position="x,y"} — a bare
+ *   ::icon{name="..." size="sm|md|lg|#" id="..." position="x,y"
+ *     primaryColor="..." secondaryColor="..." palette="..."} — a bare
  *     named illustration, for inline glyphs or standalone floating
  *     shapes. `size` is one of the three named presets OR a literal pixel
  *     width (see `parseIconSize`'s own comment, below). `position` is
@@ -77,6 +78,56 @@
  *     inner`, for `:::section{...}` -- see `PositionedWebsiteIcon`
  *     (`websiteIcons.tsx`) for why other containers need the same
  *     `position: relative` treatment before this works inside THEM too).
+ *     `primaryColor`/`secondaryColor` resolve against the page's own
+ *     `::swatch`/`::palette` registry exactly like `:::section{surface=
+ *     "..."}`/`::line{color="..."}` above (`oxmarkdown-core`'s
+ *     `resolveSwatchRole`, role `"color"`) -- an icon name registered with
+ *     NO color support (`websiteIcons.tsx`'s no-color tier, e.g.
+ *     `sun-home`) silently ignores both; ONE-color icons (`arrow`,
+ *     `circle`, `mountaineer-coffee`) use `primaryColor` only, falling
+ *     back to that icon's own built-in default when omitted; TWO-color
+ *     icons (`quail-walking`) use both independently, each with its own
+ *     default. See `websiteIcons.tsx`'s own header for the full tier
+ *     breakdown.
+ *   ::svg{src="..." darkSrc="..." width="N" alt="..." float="left|right|
+ *     inline" id="..."} — renders an arbitrary, already-designed SVG FILE
+ *     verbatim, exactly as `::icon`'s own no-color tier does for a
+ *     REGISTERED name (plain `<img src>`, no recoloring, no theming) --
+ *     except `src` is a literal path the author gives directly, with no
+ *     code-side registry entry needed first. For a genuinely one-off,
+ *     page-specific illustration (a hand-designed diagram, chart, or
+ *     compound graphic with its own baked-in colors) that will likely
+ *     never be reused anywhere else -- reach for `::icon{name="..."}`
+ *     instead (`websiteIcons.tsx`) when a glyph IS meant to be reused by
+ *     name across pages, or needs `primaryColor`/`secondaryColor`
+ *     theming. `width` is an optional literal pixel number; omit it and
+ *     the file renders at its own natural intrinsic size (from the SVG's
+ *     own `width`/`height`), capped responsively by `.ox-content img`'s
+ *     own `max-width: 100%` either way, so a wide illustration never
+ *     overflows a narrow mobile viewport even with no `width` given.
+ *     `float` defaults to `"inline"` (ordinary flow, same as the file's
+ *     own `display`) -- `"left"`/`"right"` float it the SAME way
+ *     `::stamp{float="..."}` above already does (plain CSS `float` +
+ *     margin, `.website-svg-float-{left,right}`), letting surrounding
+ *     paragraph text wrap around it instead of pushing it onto its own
+ *     line. `alt` defaults to empty (decorative), but SHOULD be given
+ *     here unlike `::icon`/`::stamp` -- an ad-hoc illustration like this
+ *     is often substantive content (a diagram, a labeled chart), not
+ *     pure decoration. `id` doubles as a waypoint, same as `::icon`/
+ *     `::stamp`. Missing `src` renders nothing, same "required attribute
+ *     absent" convention `::badge{text="..."}`/`::button{text="..."}`
+ *     already use (not a visible placeholder -- that's reserved for a
+ *     GIVEN name/id that fails to resolve, a different failure mode).
+ *     `darkSrc` (2026-10-26, human ask) is OPTIONAL -- a second SVG file
+ *     to show instead under `prefers-color-scheme: dark`, for an
+ *     illustration whose baked-in colors need a dark-mode-specific
+ *     variant (same idea as `::stamp`'s own light/dark pair, just an
+ *     author-supplied path instead of a registered name). Omit it and
+ *     `::svg` renders exactly as before, one plain `<img>`, no `<picture>`
+ *     wrapper at all. Given, the SAME `<picture>`/`<source media=
+ *     "(prefers-color-scheme: dark)">` no-JS swap `::stamp` already uses
+ *     takes over (see the `svg` registry entry below) -- `width`/`alt`/
+ *     `float`/`id` all still apply to the rendered image either way.
  *   ::waypoint{id="..."} — an invisible anchor for `::trail{waypoints="..."}`
  *     (below) to measure; renders nothing visible on its own. Only needed
  *     when nothing else is already at the spot a trail should pass through
@@ -244,8 +295,9 @@
  *     already is, for its first real use; a trail meant to span MULTIPLE
  *     sections needs its own wrapping container with that same treatment,
  *     not yet added anywhere since nothing has needed it yet.
- *   :::box{surface="..." border="..." palette="..." form-id="..."
- *     select-group="..." value="..."} — a generic bordered container
+ *   :::box{surface="..." border="..." palette="..." margin="N"
+ *     scale="N" form-id="..." select-group="..." value="..."
+ *     disabled="true"} — a generic bordered container
  *     (border/radius/padding/background only -- composes with plain
  *     markdown + other directives for everything else, unlike the
  *     now-retired `:::pricing-card{...}`'s own bespoke header/CTA
@@ -253,13 +305,28 @@
  *     page's own `::swatch`/`::palette` registry exactly like
  *     `:::section{surface="..."}` above (`oxmarkdown-core`'s
  *     `resolveSwatchRole`), falling back to the same neutral card look
- *     `:::pricing-card{...}` used to have when neither is given. NO
- *     margin of its own (reversed from an earlier "always a non-zero
- *     outer margin" decision, see the "Box Directive + Pricing Card UI
- *     Fix" garden seed, resolved question 5/round 7) -- a box's own
- *     vertical spacing is the AUTHOR'S call via blank lines, same as
- *     every other block, not baked into the directive. Also a
- *     `position: relative` ancestor, the same treatment
+ *     `:::pricing-card{...}` used to have when neither is given.
+ *     `margin="N"` is OPTIONAL and behaves exactly like `:::section
+ *     {margin="N"}` above (`parseMarginStyle`, shared by both) --
+ *     reintroduced (2026-10-25) on top of an earlier "NO margin of its
+ *     own" decision (the "Box Directive + Pricing Card UI Fix" garden
+ *     seed, resolved question 5/round 7, which left a box's own vertical
+ *     spacing entirely to the author's blank lines, same as every other
+ *     block) -- that still holds as the DEFAULT (omit `margin` and
+ *     nothing changes), but blank lines alone only ever offer two
+ *     spacings between stacked boxes, zero or one full `--ox-grid` unit
+ *     (~41px), with nothing in between -- a real reported gap once
+ *     price-select boxes on `guides.md` needed a SMALLER, author-tunable
+ *     gap on mobile than either option gave. `scale="N"` is ALSO
+ *     optional (2026-10-25, same motivating page) -- a plain CSS `zoom`
+ *     factor (`scale="0.75"` -> `zoom: 0.75`) applied to the box's
+ *     whole rendered subtree, not a retuned `--ox-grid` (see
+ *     `parseScaleStyle`, below, for why `zoom` and not that -- several
+ *     things, headings' own font-size among them, are fixed px values
+ *     that never read `--ox-grid` at all, so only retuning that one
+ *     token would shrink spacing while leaving type size unchanged).
+ *     Omit it and a box renders at its ordinary 1:1 size, unchanged.
+ *     Also a `position: relative` ancestor, the same treatment
  *     `.website-section-inner` already has -- so a `::badge{position=
  *     "..."}` (below) rendered inside one has a real container to
  *     anchor against.
@@ -274,6 +341,17 @@
  *     `::button{form-id="..." action="..."}` (below) elsewhere on the
  *     page reads the SAME store at submit time. Missing any of the
  *     three renders an ordinary, unselectable box, unchanged.
+ *     `disabled="true"` (2026-10-25) grays the box out (`opacity: 0.5`,
+ *     the same convention `stamps/button.css.ts`'s own `&:disabled`
+ *     recipe already uses) and makes clicking/Space/Enter a no-op --
+ *     first use: a price-select box on `guides.md` for a plan that isn't
+ *     actually available yet. Independent of SELECTABLE above -- a
+ *     disabled box still renders its own radio/content layout exactly
+ *     like any other selectable one (so it reads as "this option exists,
+ *     just not right now," not a totally different box shape), just
+ *     inert; a plain, non-selectable box can carry `disabled="true"` too,
+ *     though with nothing to disable but the graying itself, since it had
+ *     no click behavior to begin with.
  *   :::flex{justify="space-between|flex-start|flex-end|center|..."} —
  *     lays out its own direct block children in a single flex row
  *     (`justify` default `space-between`), e.g. a title heading + a price
@@ -507,28 +585,69 @@ function parseIconSize(raw: string | undefined): "sm" | "md" | "lg" | number {
   return "md";
 }
 
-/** `:::section{margin="N"}` -- `N` MULTIPLIES the shared `--ox-grid`
- * token (oxmarkdown.css, 41px today -- the same single-source-of-truth
- * vertical-rhythm unit every other spacing decision across OxMarkdown
- * already derives from) to get a real `margin-top`/`margin-bottom` in
- * px, e.g. `margin="2"` -> `2 * 41px` = `82px`. Reads the token via a
- * plain CSS `calc()` in an inline style rather than computing a literal
- * pixel number here in JS, so a section's own margin stays correct even
- * if `--ox-grid` itself is ever retuned (a caller-supplied `oxmarkdown/
- * theme.ts` override, or a future grid-size change) -- matches this
- * whole codebase's own standing preference for reading a shared token
- * over hardcoding its current value. Applies to BOTH top and bottom
- * symmetrically (a single knob for "extra breathing room around this
- * section," not independent per-side control) -- negative numbers work
- * fine too (pulls an adjacent section closer, even overlapping, via
- * ordinary CSS margin math). Returns `undefined` for an absent/
- * unparseable `margin` -- the caller then renders with its own ordinary
- * default spacing, unchanged. */
-function parseSectionMarginStyle(raw: string | undefined): CSSProperties | undefined {
+/** `:::section{margin="N"}`/`:::box{margin="N"}` -- `N` MULTIPLIES the
+ * shared `--ox-grid` token (oxmarkdown.css, 41px today -- the same
+ * single-source-of-truth vertical-rhythm unit every other spacing
+ * decision across OxMarkdown already derives from) to get a real
+ * `margin-top`/`margin-bottom` in px, e.g. `margin="2"` -> `2 * 41px` =
+ * `82px`. `N` is NOT restricted to whole numbers -- `margin="0.5"` ->
+ * `20.5px` works fine, for whenever a full grid unit is too coarse (the
+ * `:::box{...}` case this was extended for, below: blank-line-only
+ * spacing between stacked boxes only ever offers "0" or "~41px," nothing
+ * in between). Reads the token via a plain CSS `calc()` in an inline
+ * style rather than computing a literal pixel number here in JS, so a
+ * block's own margin stays correct even if `--ox-grid` itself is ever
+ * retuned (a caller-supplied `oxmarkdown/theme.ts` override, or a future
+ * grid-size change) -- matches this whole codebase's own standing
+ * preference for reading a shared token over hardcoding its current
+ * value. Applies to BOTH top and bottom symmetrically (a single knob for
+ * "extra breathing room around this block," not independent per-side
+ * control) -- negative numbers work fine too (pulls an adjacent block
+ * closer, even overlapping, via ordinary CSS margin math). Returns
+ * `undefined` for an absent/unparseable `margin` -- the caller then
+ * renders with its own ordinary default spacing, unchanged. Shared by
+ * `section`/`box` below rather than two copies of the same formula --
+ * nothing else about either directive's own styling overlaps, this is
+ * purely the one formula both happen to want verbatim. */
+function parseMarginStyle(raw: string | undefined): CSSProperties | undefined {
   const multiplier = Number(raw);
   if (!Number.isFinite(multiplier)) return undefined;
   const margin = `calc(${multiplier} * var(--ox-grid, 41px))`;
   return { marginTop: margin, marginBottom: margin };
+}
+
+/** `:::box{scale="N"}` -- scales the box's ENTIRE rendered subtree via
+ * a literal CSS `zoom` factor (`scale="0.75"` -> `zoom: 0.75`, 75% of
+ * ordinary size), not just a retuned `--ox-grid`. `--ox-grid`-derived
+ * line-heights/paddings/spacer-heights/checkbox-sizes are only PART of
+ * what a visually smaller box needs smaller -- several things that make
+ * up the overall "feel" of a block's own typography (every heading's own
+ * fixed-px `font-size`, `.ox-content`'s own base `font-size: 1.2rem`)
+ * never read `--ox-grid` at all, so overriding that ONE custom property
+ * locally would shrink the LINE SPACING/padding/gutters but leave
+ * headings/body text exactly their ordinary size -- an inconsistent mix,
+ * not the uniformly-smaller box the name promises. `zoom` sidesteps that
+ * entirely: it re-renders the WHOLE subtree as though laid out at a
+ * different pixel density, so literally every px-based value inside
+ * (font-size, line-height, padding, margin, border-width, background-
+ * size, ...) scales together automatically, with ZERO CSS changes needed
+ * anywhere else in this stylesheet. Nested scales COMPOUND for free too
+ * (a `scale="0.5"` box inside an ancestor already at `zoom: 0.5`
+ * renders at a net 25%) -- an emergent property of how browsers already
+ * implement `zoom`, not something this function computes by hand the way
+ * `parseMarginStyle` above has to for its own `calc()` formula. Every
+ * JS-measured feature elsewhere in this file (`::icon{position=...}`,
+ * `::badge{position=...}`, `WavyLine`) already reads
+ * `getBoundingClientRect()`/`ResizeObserver` sizes that come back
+ * PRE-ZOOMED from the browser itself, so none of them need any special-
+ * casing to cooperate with a zoomed ancestor. Returns `undefined` for an
+ * absent/unparseable/non-positive value (zero or negative zoom is
+ * meaningless) -- the caller then renders at its own ordinary 1:1 size,
+ * unchanged. */
+function parseScaleStyle(raw: string | undefined): CSSProperties | undefined {
+  const scale = Number(raw);
+  if (!Number.isFinite(scale) || scale <= 0) return undefined;
+  return { zoom: scale };
 }
 
 /** `::badge{height="20"}` -- a plain literal pixel height, SET on the
@@ -574,10 +693,12 @@ export function buildWebsiteDirectiveRegistry(opts: {
    * included file's own already-frontmatter-stripped markdown body.
    * Defaults to `{}` so existing callers that don't pass it don't break. */
   includes?: Record<string, string>;
-  /** Forces `::stamp{...}`'s light/dark asset pick, bypassing its own
-   * `<picture>`/`<source media="...">` OS-driven selection -- see
-   * `WebsiteStamp`'s own `forcedScheme` comment (`websiteStamps.tsx`) for
-   * why that needs an explicit override instead of a CSS trick. Always
+  /** Forces `::stamp{...}`'s AND `::svg{darkSrc="..."}`'s light/dark asset
+   * pick, bypassing their own `<picture>`/`<source media="...">`
+   * OS-driven selection -- see `WebsiteStamp`'s own `forcedScheme` comment
+   * (`websiteStamps.tsx`) for why that needs an explicit override instead
+   * of a CSS trick (the `svg` registry entry below does the exact same
+   * thing inline, with no separate component to hold the comment). Always
    * undefined here (webapp has no preview toggle) -- kept for parity
    * with fruits' copy since this function's shape is meant to stay
    * identical. */
@@ -662,7 +783,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
         <section
           className="website-section"
           data-website-list={attrs.list || undefined}
-          style={{ ...parseSectionMarginStyle(attrs.margin), background: surface }}
+          style={{ ...parseMarginStyle(attrs.margin), background: surface }}
         >
           <div className="website-section-inner">{children}</div>
         </section>
@@ -683,7 +804,7 @@ export function buildWebsiteDirectiveRegistry(opts: {
       );
     },
 
-    icon({ attrs }) {
+    icon({ attrs, resolveSwatchRole }) {
       const size = parseIconSize(attrs.size);
       return (
         <WebsiteIcon
@@ -691,7 +812,45 @@ export function buildWebsiteDirectiveRegistry(opts: {
           size={size}
           waypointId={attrs.id}
           position={parseIconPosition(attrs.position)}
+          primaryColor={resolveSwatchRole({ role: "color", explicit: attrs.primaryColor, palette: attrs.palette })}
+          secondaryColor={resolveSwatchRole({ role: "color", explicit: attrs.secondaryColor, palette: attrs.palette })}
         />
+      );
+    },
+
+    svg({ attrs }) {
+      if (!attrs.src) return null;
+      const width = Number(attrs.width);
+      const float = attrs.float === "left" || attrs.float === "right" ? attrs.float : "inline";
+      const floatClass = float === "inline" ? "" : ` website-svg-float-${float}`;
+      const style = attrs.width && Number.isFinite(width) ? { width, height: "auto" } : undefined;
+      // Picks the light src directly, same as always, UNLESS the Vault
+      // editor's own preview toggle forces dark -- see `forcedScheme`'s own
+      // comment above (the exact same reasoning `WebsiteStamp` documents
+      // for why `<source media="...">` can't be overridden by CSS).
+      const src = opts.forcedScheme === "dark" && attrs.darkSrc ? attrs.darkSrc : attrs.src;
+      const img = (
+        <img
+          src={src}
+          alt={attrs.alt ?? ""}
+          className={`website-svg${floatClass}`}
+          style={style}
+          data-waypoint-id={attrs.id || undefined}
+        />
+      );
+      // No `darkSrc` given (the overwhelming majority of `::svg` uses
+      // today) -- or a forced preview scheme already picked a side above --
+      // renders the exact same bare `<img>` as before `darkSrc` existed at
+      // all, zero markup change. Only a REAL public page with a `darkSrc`
+      // gets the `<picture>` wrapper -- the browser's own media-query
+      // engine, not React, decides which `src` paints, so there's no
+      // hydration mismatch risk either.
+      if (!attrs.darkSrc || opts.forcedScheme) return img;
+      return (
+        <picture>
+          <source srcSet={attrs.darkSrc} media="(prefers-color-scheme: dark)" />
+          {img}
+        </picture>
       );
     },
 
@@ -832,10 +991,16 @@ export function buildWebsiteDirectiveRegistry(opts: {
       });
       return (
         <BoxDirective
-          surfaceStyle={{ background: surface, borderColor: border }}
+          style={{
+            background: surface,
+            borderColor: border,
+            ...parseMarginStyle(attrs.margin),
+            ...parseScaleStyle(attrs.scale),
+          }}
           formId={attrs["form-id"]}
           selectGroup={attrs["select-group"]}
           value={attrs.value}
+          disabled={attrs.disabled === "true"}
         >
           {children}
         </BoxDirective>

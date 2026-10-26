@@ -378,7 +378,9 @@ const blankLineJoin: Join = (left, right) => {
   // library default would add one, and the file would gain a line nobody
   // typed (it then reloads as an extra empty row under the heading). A
   // heading ends at its own line, so CommonMark needs no blank line here.
-  // Reading surfaces still draw one line ABOVE a heading (`blankLineUnits`).
+  // Reading surfaces agree -- `countBlankLines` is now read literally for
+  // every sibling pair, headings included, with no forced minimum (reversed
+  // 2026-10-25 -- see `oxmarkdown-core`'s `document.ts`).
   if (left.type === "heading" || right.type === "heading") return 0;
   return undefined; // no opinion — defer to the library's own default (one blank line)
 };

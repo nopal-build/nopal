@@ -103,13 +103,31 @@ export async function applyWebsiteShape(folder: VaultFolder): Promise<VaultFolde
 
 // ─── Public rendering (`/v2/*`) — read side only for now ────────────────────
 
-export type WebsitePublishStatus = "draft" | "published";
+export type WebsitePublishStatus = "draft" | "published" | "archived";
+
+/** Every valid `publish` value, in the order the Vault's own dropdown
+ * (`vault.tsx`'s `WebsitePublishToggle`) offers them -- mirrors
+ * `project.types.ts`'s own `PROJECT_STATUSES` array precedent. */
+export const WEBSITE_PUBLISH_STATUSES: WebsitePublishStatus[] = ["draft", "published", "archived"];
 
 /** Conservative default — a page with no front matter at all (a brand new
  * `website` project's seeded README, or any hand-added file) stays hidden
  * from the public `/v2/*` routes until an editor explicitly opts it in.
  * Same "fail closed" instinct the rest of Vault's permission model uses. */
 export const DEFAULT_WEBSITE_PUBLISH_STATUS: WebsitePublishStatus = "draft";
+
+/** `"archived"` (2026-10-25, human ask) is a THIRD, publicly-VISIBLE
+ * state, not a stronger kind of hidden -- it means "still a real, live
+ * page, just not active/current content," the author's explicit way to
+ * mark something that should read as reference material rather than a
+ * draft-in-progress OR a featured current page. Every public-facing
+ * consumer below (`resolveWebsitePageByPath`'s callers,
+ * `listWebsiteSitemapEntries`) treats `"published"` and `"archived"`
+ * identically for VISIBILITY -- only `"draft"` actually hides a page --
+ * and `listWebsiteSitemapEntries` additionally groups an archived page
+ * under its own `"Archive"` sitemap section regardless of which folder it
+ * lives in, superseding (for that one page) whatever folder-name-based
+ * section it would have otherwise gotten. */
 
 export type WebsitePageMeta = {
   title: string | null;
@@ -158,7 +176,8 @@ export function parseWebsitePageMeta(markdown: string): WebsitePageMeta {
     return {
       title: typeof d.title === "string" ? d.title : null,
       description: typeof d.description === "string" ? d.description : null,
-      publish: d.publish === "published" ? "published" : DEFAULT_WEBSITE_PUBLISH_STATUS,
+      publish:
+        d.publish === "published" || d.publish === "archived" ? d.publish : DEFAULT_WEBSITE_PUBLISH_STATUS,
     };
   } catch {
     return fallback;
@@ -310,6 +329,188 @@ async function resolveWebsitePageByPathUncached(
   if (!readme) return null;
   const full = await getFileRefById(readme._id);
   return full ? toResolvedPage(full) : null;
+}
+
+export type WebsiteSitemapEntry = {
+  /** The real, resolvable `/`-rooted URL path -- e.g. `"/"`, `"/guides"`,
+   * `"/materials/zip-r"` -- built from the SAME folder-name/file-name
+   * segments `resolveWebsitePageByPath` above matches against, just
+   * walked forward (DB tree -> URL) instead of backward (URL -> DB tree). */
+  path: string;
+  /** The page's own `title` front matter when it set one; otherwise a
+   * humanized version of the path's own last segment (`"scc-demo"` ->
+   * `"Scc Demo"`) -- same "never show a blank link" instinct `::icon`/
+   * `::stamp`'s own placeholders already use, just text instead of a
+   * dashed box. Never actually exercised today (every currently-published
+   * page already sets a real `title`), but a sitemap is exactly the kind
+   * of listing that silently degrades into a wall of blank links the
+   * moment someone forgets one, so it's worth the small defensive cost. */
+  title: string;
+  /** Which of the sitemap's three fixed top-level sections ("Pages",
+   * "Tools", "Archive" -- 2026-10-25, human ask) this page belongs under:
+   * `null` means "Pages" (the default); `"Archive"` is the only other
+   * value this function ever produces ("Tools" is never a possible value
+   * here at all -- see this field's own `/sitemap` caller, which sources
+   * Tools from `_website.tools._index.tsx`'s real route list instead,
+   * since those aren't Vault-backed pages this function could ever
+   * discover on its own). A page living under one of `ARCHIVE_FOLDER_NAMES`
+   * defaults to `"Archive"`; a page's own `publish: archived` ALSO forces
+   * `"Archive"` regardless of which folder it's actually in, overriding
+   * that folder default -- see `ARCHIVE_FOLDER_NAMES`'s own comment. */
+  section: string | null;
+  /** The immediate parent folder's humanized name (e.g. `"Materials"`),
+   * or `null` for a root-level page (the homepage, or a plain `.md` file
+   * sitting directly in the site's own root) -- an independent dimension
+   * from `section` above (2026-10-25, human ask): `/sitemap` renders this
+   * as a subheading WITHIN whichever section the page landed in, rather
+   * than its own top-level section the way folder names used to double as
+   * section labels before this field existed. Only ever ONE level deep
+   * (the site's real content is flat-per-folder today -- materials/
+   * assemblies/science/posts, no nesting within those) -- a page three
+   * folders deep would still only ever report its FIRST ancestor folder's
+   * name here, by design: more than one grouping tier isn't worth the
+   * complexity until a real site actually has that much depth. */
+  category: string | null;
+  /** The file's own `created_at` (ISO timestamp) -- there's no `date`
+   * front-matter field today, so this is the closest stand-in for "when
+   * was this page added," used to sort the Archive section's entries
+   * newest-first within each category (2026-10-25, human ask). Deliberately
+   * NOT `updated_at`: a light front-matter edit (e.g. just flipping
+   * `publish`) would otherwise reorder an entry for no content reason. */
+  date: string;
+};
+
+/** Folder names (lowercased) whose pages ALL default to the shared
+ * `"Archive"` sitemap section, instead of each getting its own humanized
+ * label -- see `WebsiteSitemapEntry.section`'s own comment for why.
+ * Deliberately a closed, hand-picked list, NOT a generic "any non-root
+ * folder is an archive" rule -- a real future content folder that ISN'T
+ * meant to read as archival (nothing like that exists today) would
+ * otherwise get silently swept in here too.
+ *
+ * A FALLBACK now (2026-10-25), not the only path to "Archive" --
+ * `publish: archived`'s own explicit per-page override (`maybeAddPage`,
+ * below) lets ANY page, in ANY folder (including the site's own root),
+ * join "Archive" too, without needing its own folder at all. This list
+ * still matters for the common case: a page living in one of these
+ * folders defaults to "Archive" the moment it's merely `published`, with
+ * no need to ALSO set `archived` by hand just to land in the right
+ * section.
+ *
+ * Only ever governs `section` (the top-level bucket) -- every folder's
+ * humanized name becomes that page's `category` regardless of whether the
+ * folder is in this list, since `category` is purely a display subheading
+ * WITHIN whatever section a page landed in (see `WebsiteSitemapEntry`'s
+ * own comments on both fields). */
+const ARCHIVE_FOLDER_NAMES = new Set(["materials", "assemblies", "posts", "science"]);
+
+function humanizeSlug(slug: string): string {
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+const SITEMAP_CACHE_KEY = "__sitemap__";
+
+/**
+ * Every PUBLISHED or ARCHIVED page under a `website` project, flattened
+ * and grouped -- the data behind `/sitemap`'s auto-generated page list
+ * (see `garden`'s website-switchover seed). Deliberately NOT an
+ * OxMarkdown page an editor hand-maintains (the one thing explicitly
+ * asked against): a hand-written list silently drifts the moment a page
+ * is added/renamed/(un)published, which is exactly the failure mode a
+ * sitemap exists to prevent. Walks the ENTIRE folder tree recursively
+ * (today: one level deep in practice, see `WebsiteSitemapEntry.category`'s
+ * own comment, but written generically in case that ever changes) -- a
+ * `README.md` is that folder's own page (same convention
+ * `resolveWebsitePageByPathUncached` above already resolves a URL
+ * against); every OTHER plain `.md` file is a page at `folder-path/
+ * filename`; anything (file OR folder) whose name starts with `_` is
+ * PRIVATE infrastructure (`_footer.md`, `_site-settings.json`, a future
+ * `_theme.md`), never a real page, and is skipped entirely, never
+ * recursed into. Only a `publish: draft` page (the default -- see
+ * `DEFAULT_WEBSITE_PUBLISH_STATUS`) is excluded -- `archived` is
+ * INCLUDED, same as `published` (see `WebsitePublishStatus`'s own
+ * comment for why), just under the `"Archive"` section regardless of its
+ * real folder. Cached under the SAME per-site version-bump scheme
+ * `resolveWebsitePageByPath` above uses (`websiteCache.server.ts`) --
+ * `"__sitemap__"` is a RESERVED sentinel pathKey, the exact same role
+ * `"__index__"` already plays there for the (real, resolvable) empty
+ * path, so it can never collide with an actual page's own lowercased
+ * path-segment key.
+ */
+export async function listWebsiteSitemapEntries(
+  siteFolder: VaultFolder,
+): Promise<WebsiteSitemapEntry[]> {
+  const cached = await getCachedWebsitePage<WebsiteSitemapEntry[]>(siteFolder._id, SITEMAP_CACHE_KEY);
+  if (cached) return cached;
+
+  const entries: WebsiteSitemapEntry[] = [];
+
+  async function maybeAddPage(
+    fileId: string,
+    segments: string[],
+    section: string | null,
+    category: string | null,
+  ) {
+    const full = await getFileRefById(fileId);
+    if (!full) return;
+    const meta = parseWebsitePageMeta(full.content ?? "");
+    if (meta.publish === "draft") return;
+    const lastSegment = segments[segments.length - 1] ?? "";
+    const title = meta.title || humanizeSlug(lastSegment) || "Home";
+    // A page's OWN `publish: archived` wins outright over whatever
+    // folder-based section it would have otherwise gotten (including the
+    // ARCHIVE_FOLDER_NAMES heuristic below) -- an explicit per-page choice
+    // should never be silently overridden by which folder a file happens
+    // to sit in. `category` is untouched by this override -- it's purely
+    // about which folder the file physically lives in, independent of
+    // which section that lands it in.
+    const entrySection = meta.publish === "archived" ? "Archive" : section;
+    entries.push({
+      path: `/${segments.join("/")}`,
+      title,
+      section: entrySection,
+      category,
+      date: full.created_at,
+    });
+  }
+
+  async function walk(
+    folder: VaultFolder,
+    segments: string[],
+    section: string | null,
+    category: string | null,
+  ) {
+    const { folders, files } = await listFolderChildren(folder.human_id, folder._id);
+
+    const readme = files.find((f) => f.name.toLowerCase() === README_NAME.toLowerCase());
+    if (readme) await maybeAddPage(readme._id, segments, section, category);
+
+    for (const file of files) {
+      if (file.name.toLowerCase() === README_NAME.toLowerCase()) continue;
+      if (!file.name.toLowerCase().endsWith(".md")) continue;
+      if (file.name.startsWith("_")) continue;
+      await maybeAddPage(file._id, [...segments, stripMdExtension(file.name)], section, category);
+    }
+
+    for (const sub of folders) {
+      if (sub.name.startsWith("_")) continue;
+      // `??` on each independently -- the FIRST ancestor folder to set
+      // either one wins, so both stay pinned to the top-level content
+      // folder even if a real site ever nests folders more than one level
+      // deep (see `WebsiteSitemapEntry.category`'s own comment).
+      const subSection = section ?? (ARCHIVE_FOLDER_NAMES.has(sub.name.toLowerCase()) ? "Archive" : null);
+      const subCategory = category ?? humanizeSlug(sub.name);
+      await walk(sub, [...segments, sub.name], subSection, subCategory);
+    }
+  }
+
+  await walk(siteFolder, [], null, null);
+  await setCachedWebsitePage(siteFolder._id, SITEMAP_CACHE_KEY, entries);
+  return entries;
 }
 
 export type ResolvedWebsiteDailyLogEntry = {

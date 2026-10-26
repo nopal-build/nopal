@@ -12,12 +12,14 @@ import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 
 const navLinkFontClass = `${textSize.sm} ${sprinkles({ fontFamily: "mono" })}`;
 
-/** The `/v2` site's own root path — shared so a "Home" nav item (`to:
- * "/v2"`, same destination `WebsiteHeader`'s own logo link points at)
- * doesn't fall into `NavLink`'s default PREFIX matching below (which
- * would otherwise highlight it on every single page, since every other
- * page's path also starts with `"/v2"`). */
-export const WEBSITE_ROOT = "/v2";
+/** The site's own root path — shared so a "Home" nav item (`to: "/"`,
+ * same destination `WebsiteHeader`'s own logo link points at) doesn't
+ * fall into `NavLink`'s default PREFIX matching below (which would
+ * otherwise highlight it on every single page, since every path starts
+ * with `"/"`). Was `"/v2"` pre-cutover, back when this site lived
+ * alongside the old marketing routes rather than replacing them — see
+ * `garden/2-ready/website-switchover.md`. */
+export const WEBSITE_ROOT = "/";
 
 /** Strips a single trailing slash (but never the root `"/"` itself) —
  * the Vault's Site Settings editor is a free-text `to` field, and a real

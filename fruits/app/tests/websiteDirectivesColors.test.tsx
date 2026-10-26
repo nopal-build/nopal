@@ -157,3 +157,43 @@ describe("::line/::path/:line-word/::trail onto color=/palette=, sharing the SAM
     expect(trailEl.props.color).toBe("var(--ox-swatch-color-red)");
   });
 });
+
+describe("::icon onto primaryColor=/secondaryColor=/palette=", () => {
+  const registry = buildWebsiteDirectiveRegistry({ dailyLogEntries: {} });
+  const resolveSwatchRole = boundResolve();
+
+  it("resolves primaryColor=/secondaryColor= to the matching swatch variables", () => {
+    const el = registry.icon({
+      attrs: { name: "quail-walking", primaryColor: "red", secondaryColor: "green" },
+      label: null,
+      resolveSwatchRole,
+    }) as ReactElement<{ primaryColor?: string; secondaryColor?: string }>;
+    expect(el.props.primaryColor).toBe("var(--ox-swatch-color-red)");
+    expect(el.props.secondaryColor).toBe("var(--ox-swatch-color-green)");
+  });
+
+  it("palette= can feed BOTH primaryColor and secondaryColor when neither is explicitly given", () => {
+    const el = registry.icon({ attrs: { name: "quail-walking", palette: "crisp" }, label: null, resolveSwatchRole }) as ReactElement<{
+      primaryColor?: string;
+      secondaryColor?: string;
+    }>;
+    expect(el.props.primaryColor).toBe("var(--ox-swatch-color-green)");
+    expect(el.props.secondaryColor).toBe("var(--ox-swatch-color-green)");
+  });
+
+  it("an unresolved primaryColor/secondaryColor falls through to undefined, letting WebsiteIcon apply its own built-in default", () => {
+    const el = registry.icon({ attrs: { name: "arrow", primaryColor: "not-a-real-swatch" }, label: null, resolveSwatchRole }) as ReactElement<{
+      primaryColor?: string;
+    }>;
+    expect(el.props.primaryColor).toBeUndefined();
+  });
+
+  it("with no color attrs at all, both resolve to undefined -- WebsiteIcon's own per-icon default applies", () => {
+    const el = registry.icon({ attrs: { name: "sun-home" }, label: null, resolveSwatchRole }) as ReactElement<{
+      primaryColor?: string;
+      secondaryColor?: string;
+    }>;
+    expect(el.props.primaryColor).toBeUndefined();
+    expect(el.props.secondaryColor).toBeUndefined();
+  });
+});

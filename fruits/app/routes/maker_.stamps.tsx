@@ -39,6 +39,7 @@ import { CenterContent } from "stamps/CenterContent";
 import { DrawerContent } from "stamps/DrawerContent";
 import { Chip } from "stamps/Chip";
 import { Input } from "stamps/Input";
+import { Checkbox } from "stamps/Checkbox";
 import { CopyField } from "stamps/CopyField";
 import { CircleButton } from "stamps/CircleButton";
 import { HamburgerNeqIcon } from "stamps/HamburgerNeqIcon";
@@ -1518,8 +1519,88 @@ function FormInputsSection() {
           </Cluster>
           <SpecimenCaption>{'<Select label="Group" name="group" size="small" options={[...]} />'}</SpecimenCaption>
         </Stack>
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Checkbox
+          </div>
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            <Code>Checkbox</Code> from <Code>stamps/Checkbox</Code>: visually
+            matched to OxMarkdown's own task-list checkbox (accent-colored
+            border, always-transparent background, an overlay glyph signals
+            checked — never a solid fill), so a checkbox looks the same
+            whether it's in a Daily Log task list or anywhere else in the
+            app. Give it a <Code>label</Code> for a real, standalone field (a
+            visually-hidden <Code>{'<input type="checkbox"|"radio">'}</Code>{" "}
+            under the hood); omit <Code>label</Code> for a purely
+            presentational box with no input and no click handling of its
+            own — for showing checked state inside something ELSE that
+            already owns the click/keyboard interaction (e.g. the website{" "}
+            <Code>::box</Code> directive's own selectable pricing cards,
+            each already a <Code>{'role="radio"'}</Code>).
+          </p>
+          <CheckboxDemo />
+          <SpecimenCaption>{'<Checkbox label="Subscribe" checked={checked} onChange={setChecked} />'}</SpecimenCaption>
+
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
+            <Code>{'variant="radio"'}</Code> — the same look on a circle
+            instead of a square, with a smaller filled dot overlay instead
+            of the X, for a MUTUALLY EXCLUSIVE selection — same convention a
+            native <Code>{'<input type="radio">'}</Code> already uses.
+            OxMarkdown has no radio concept of its own; this extends its
+            exact visual language to a shape it doesn't otherwise define.
+          </p>
+          <RadioDemo />
+          <SpecimenCaption>{'<Checkbox variant="radio" label="Light-Guide" checked={...} onChange={...} />'}</SpecimenCaption>
+        </Stack>
       </Stack>
     </Section>
+  );
+}
+
+function CheckboxDemo() {
+  const [checked, setChecked] = useState(false);
+  return (
+    <Cluster gap={6} align="center">
+      <Checkbox label="Subscribe to updates" name="checkbox-demo" checked={checked} onChange={setChecked} />
+      <Cluster gap={2} align="center">
+        <Checkbox checked={false} />
+        <Checkbox checked={true} />
+        <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+          presentational only (no label)
+        </span>
+      </Cluster>
+    </Cluster>
+  );
+}
+
+function RadioDemo() {
+  const [plan, setPlan] = useState("self-guide");
+  const plans = [
+    { value: "self-guide", label: "Self-Guide" },
+    { value: "light-guide", label: "Light-Guide" },
+    { value: "just-a-guide", label: "Just-a-Guide" },
+  ];
+  return (
+    <Cluster gap={6} align="center">
+      {plans.map((p) => (
+        <Checkbox
+          key={p.value}
+          variant="radio"
+          label={p.label}
+          name="radio-demo"
+          checked={plan === p.value}
+          onChange={() => setPlan(p.value)}
+        />
+      ))}
+      <Cluster gap={2} align="center">
+        <Checkbox variant="radio" checked={false} />
+        <Checkbox variant="radio" checked={true} />
+        <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+          presentational only (no label)
+        </span>
+      </Cluster>
+    </Cluster>
   );
 }
 
