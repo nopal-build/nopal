@@ -1596,11 +1596,18 @@ function MarkdownSplitEditor({
   onBodyChange,
   onInsertFiles,
   renderPicturePicker,
+  spellCheck = false,
 }: {
   fileId: string;
   initialContent: string;
   editable: boolean;
   onSave: (fileId: string, content: string) => Promise<unknown>;
+  /** The browser's spellcheck on the Markdown pane. Off by default: a
+   * vault file or a website page is as much frontmatter, directives and
+   * code as prose, and the red underlines are noise there. A deliverable
+   * is prose a client reads, so `DeliverableSplitEditor` turns it on
+   * (Austin, 2026-10-27). */
+  spellCheck?: boolean;
   /** Pictures dropped, pasted or picked into the Markdown pane: given the
    * files, stores them and returns the markdown to put at the cursor,
    * one string per file (`DeliverableSplitEditor` uploads each beside the
@@ -1898,7 +1905,7 @@ function MarkdownSplitEditor({
             value={body}
             onChange={(e) => setBody(e.target.value)}
             readOnly={!editable}
-            spellCheck={false}
+            spellCheck={spellCheck}
             placeholder="Write this page..."
             onDragOver={onInsertFiles ? (e) => e.preventDefault() : undefined}
             onDrop={
@@ -2252,6 +2259,7 @@ function DeliverableSplitEditor({
       headerLeft={headerLeft}
       toolbarRight={toolbarRight}
       onInsertFiles={insertPictures}
+      spellCheck
       renderPicturePicker={({ insert, upload, close }) => (
         <PhotoPickerLoader photos={photos} error={photosError} load={loadPhotos} insert={insert} upload={upload} close={close} />
       )}
