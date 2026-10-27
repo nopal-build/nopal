@@ -1597,6 +1597,7 @@ function MarkdownSplitEditor({
   onInsertFiles,
   renderPicturePicker,
   spellCheck = false,
+  autosave = false,
 }: {
   fileId: string;
   initialContent: string;
@@ -1608,6 +1609,13 @@ function MarkdownSplitEditor({
    * is prose a client reads, so `DeliverableSplitEditor` turns it on
    * (Austin, 2026-10-27). */
   spellCheck?: boolean;
+  /** Save on its own two seconds after typing stops, the way the daily
+   * log does (`TodayLog`'s `scheduleSave`), instead of waiting for the
+   * Save button. Off by default; `DeliverableSplitEditor` turns it on
+   * (Austin, 2026-10-27: a deliverable "should auto save, like the daily
+   * log, not need a click like the website"). The button stays as a
+   * manual save and reads "Saved" once the text is clean. */
+  autosave?: boolean;
   /** Pictures dropped, pasted or picked into the Markdown pane: given the
    * files, stores them and returns the markdown to put at the cursor,
    * one string per file (`DeliverableSplitEditor` uploads each beside the
@@ -1786,6 +1794,17 @@ function MarkdownSplitEditor({
     });
   }, [body, editable, fileId, initialContent, isDirty, onSave]);
 
+  // Autosave: one timer, reset on every keystroke, so a pause of two
+  // seconds saves once. A timer that fires while a save is in flight does
+  // nothing; `isSaving` flipping back to false re-runs this effect, which
+  // schedules the next save if the text moved on meanwhile, so two PATCHes
+  // never race each other for the same file.
+  useEffect(() => {
+    if (!autosave || !editable || !isDirty || isSaving) return;
+    const timer = setTimeout(handleSave, 2000);
+    return () => clearTimeout(timer);
+  }, [autosave, editable, isDirty, isSaving, body, handleSave]);
+
   const expandButton = (
     <ActionBarButton
       onClick={() => setExpanded((v) => !v)}
@@ -1802,7 +1821,7 @@ function MarkdownSplitEditor({
     </ActionBarButton>
   );
 
-  const saveButtonLabel = isSaving ? "Saving\u2026" : "Save";
+  const saveButtonLabel = isSaving ? "Saving\u2026" : autosave && !isDirty ? "Saved" : "Save";
 
   return (
     <div className={`vault-website-editor${expanded ? " vault-website-editor--expanded" : ""}`}>
@@ -2260,6 +2279,7 @@ function DeliverableSplitEditor({
       toolbarRight={toolbarRight}
       onInsertFiles={insertPictures}
       spellCheck
+      autosave
       renderPicturePicker={({ insert, upload, close }) => (
         <PhotoPickerLoader photos={photos} error={photosError} load={loadPhotos} insert={insert} upload={upload} close={close} />
       )}
