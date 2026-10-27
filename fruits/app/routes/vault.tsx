@@ -1613,8 +1613,8 @@ function MarkdownSplitEditor({
    * log does (`TodayLog`'s `scheduleSave`), instead of waiting for the
    * Save button. Off by default; `DeliverableSplitEditor` turns it on
    * (Austin, 2026-10-27: a deliverable "should auto save, like the daily
-   * log, not need a click like the website"). The button stays as a
-   * manual save and reads "Saved" once the text is clean. */
+   * log, not need a click like the website"). The Save button goes away;
+   * the row shows "Saving…" or "Unsaved" and nothing when clean. */
   autosave?: boolean;
   /** Pictures dropped, pasted or picked into the Markdown pane: given the
    * files, stores them and returns the markdown to put at the cursor,
@@ -1821,7 +1821,10 @@ function MarkdownSplitEditor({
     </ActionBarButton>
   );
 
-  const saveButtonLabel = isSaving ? "Saving\u2026" : autosave && !isDirty ? "Saved" : "Save";
+  const saveButtonLabel = isSaving ? "Saving\u2026" : "Save";
+  // With autosave there is nothing to click: the row says what the
+  // editor is doing, and says nothing while the text is clean.
+  const saveStatus = isSaving ? "Saving\u2026" : isDirty ? "Unsaved" : "";
 
   return (
     <div className={`vault-website-editor${expanded ? " vault-website-editor--expanded" : ""}`}>
@@ -1951,14 +1954,20 @@ function MarkdownSplitEditor({
             }
           />
           <div className="vault-website-editor-save-row">
-            <button
-              type="button"
-              className="vault-website-editor-save-btn"
-              onClick={handleSave}
-              disabled={!editable || !isDirty || isSaving}
-            >
-              {saveButtonLabel}
-            </button>
+            {autosave ? (
+              <span className="vault-website-editor-save-status" aria-live="polite">
+                {saveStatus}
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="vault-website-editor-save-btn"
+                onClick={handleSave}
+                disabled={!editable || !isDirty || isSaving}
+              >
+                {saveButtonLabel}
+              </button>
+            )}
             {onInsertFiles && editable && (
               <>
                 <input
