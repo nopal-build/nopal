@@ -12,11 +12,11 @@
 import type { FileFolder, ProjectFileRow } from "./fileFolders.server";
 import type { Feature } from "./features";
 
-export type ProjectTab = "efforts" | "deliverables" | "photos" | "files" | "sensorData" | "costs" | "logbook" | "suggestions";
+export type ProjectTab = "efforts" | "letters" | "photos" | "files" | "sensorData" | "costs" | "logbook" | "suggestions";
 
 export const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
   efforts: "Efforts",
-  deliverables: "Deliverables",
+  letters: "Letters",
   photos: "Photos",
   files: "Files",
   sensorData: "Sensor Data",
@@ -35,7 +35,7 @@ export const TAB_FOLDERS: Partial<Record<ProjectTab, FileFolder[]>> = {
 /** The tabs, in order. Each is a feature of the same name on the
  * features list (`features.ts`): a group sees the tabs it is given.
  * Suggestions is the one exception (`seesSuggestions`). */
-export const PROJECT_TABS: ProjectTab[] = ["efforts", "deliverables", "photos", "files", "sensorData", "costs", "logbook", "suggestions"];
+export const PROJECT_TABS: ProjectTab[] = ["efforts", "letters", "photos", "files", "sensorData", "costs", "logbook", "suggestions"];
 
 /** The tabs a member with these features sees, in order. */
 export function tabsFor(features: readonly Feature[]): ProjectTab[] {
@@ -55,8 +55,11 @@ export function seesSuggestions(features: readonly Feature[]): boolean {
  * given one when none (or no real tab) was asked for. Null, a 404, when a
  * real tab is asked for that this member isn't given. */
 export function resolveProjectTab(requested: string | null, allowed: readonly ProjectTab[] = PROJECT_TABS): ProjectTab | null {
-  if (!PROJECT_TABS.includes(requested as ProjectTab)) return allowed[0] ?? null;
-  return allowed.includes(requested as ProjectTab) ? (requested as ProjectTab) : null;
+  // `?tab=deliverables` is a bookmark from before 2026-10-27, when the
+  // Letters tab was renamed; it opens the same tab.
+  const asked = requested === "deliverables" ? "letters" : requested;
+  if (!PROJECT_TABS.includes(asked as ProjectTab)) return allowed[0] ?? null;
+  return allowed.includes(asked as ProjectTab) ? (asked as ProjectTab) : null;
 }
 
 /** The file rows a member with these features is sent: only rows that

@@ -43,8 +43,10 @@ import {
   SPACE_FOLDER_TYPES,
   SYNC_FOLDER_TYPES,
   canWriteToFolderType,
+  canonicalFolderType,
   isFolderTypePublishable,
   isFolderTypeShareable,
+  isLettersFolderType,
   type SpaceFolderTypeKey,
   type SyncFolderTypeKey,
 } from "robustness-core/data/vaultFolderTypes";
@@ -991,15 +993,18 @@ function NewFolderPanel({
   const isSyncsContainer =
     parentFolder.folder_type === "syncs" && parentFolder.is_folder_type_root;
 
+  // By what each type means today: a `deliverables` folder from before
+  // the rename is the project's Letters folder (`canonicalFolderType`).
   const existingSpaceTypes = new Set(
     existingChildren
       .filter((f) => f.is_folder_type_root && f.folder_type)
-      .map((f) => f.folder_type as string),
+      .map((f) => canonicalFolderType(f.folder_type) as string),
   );
 
+  // An old stored name (`legacyOf`) is never offered.
   const spaceTypeOptions = isSpaceTypeEligible
     ? (Object.keys(SPACE_FOLDER_TYPES) as SpaceFolderTypeKey[]).filter(
-        (key) => !existingSpaceTypes.has(key),
+        (key) => !SPACE_FOLDER_TYPES[key].legacyOf && !existingSpaceTypes.has(key),
       )
     : [];
   // Sync types are NOT singleton (a Syncs folder can hold any number of
@@ -1605,20 +1610,20 @@ function MarkdownSplitEditor({
   onSave: (fileId: string, content: string) => Promise<unknown>;
   /** The browser's spellcheck on the Markdown pane. Off by default: a
    * vault file or a website page is as much frontmatter, directives and
-   * code as prose, and the red underlines are noise there. A deliverable
-   * is prose a client reads, so `DeliverableSplitEditor` turns it on
+   * code as prose, and the red underlines are noise there. A letter
+   * is prose a client reads, so `LetterSplitEditor` turns it on
    * (Austin, 2026-10-27). */
   spellCheck?: boolean;
   /** Save on its own two seconds after typing stops, the way the daily
    * log does (`TodayLog`'s `scheduleSave`), instead of waiting for the
-   * Save button. Off by default; `DeliverableSplitEditor` turns it on
-   * (Austin, 2026-10-27: a deliverable "should auto save, like the daily
-   * log, not need a click like the website"). The button stays as a
-   * manual save and reads "Saved" once the text is clean. */
+   * Save button. Off by default; `LetterSplitEditor` turns it on
+   * (Austin, 2026-10-27: a letter "should auto save, like the daily
+   * log, not need a click like the website"). The Save button goes away;
+   * the row shows "Saving…" or "Unsaved" and nothing when clean. */
   autosave?: boolean;
   /** Pictures dropped, pasted or picked into the Markdown pane: given the
    * files, stores them and returns the markdown to put at the cursor,
-   * one string per file (`DeliverableSplitEditor` uploads each beside the
+   * one string per file (`LetterSplitEditor` uploads each beside the
    * page and returns a standard image). Omitted by editors whose pages
    * take no pictures this way (a website page, a sync-api run). */
   onInsertFiles?: (files: File[]) => Promise<string[]>;
@@ -1821,7 +1826,10 @@ function MarkdownSplitEditor({
     </ActionBarButton>
   );
 
-  const saveButtonLabel = isSaving ? "Saving\u2026" : autosave && !isDirty ? "Saved" : "Save";
+  const saveButtonLabel = isSaving ? "Saving\u2026" : "Save";
+  // With autosave there is nothing to click: the row says what the
+  // editor is doing, and says nothing while the text is clean.
+  const saveStatus = isSaving ? "Saving\u2026" : isDirty ? "Unsaved" : "";
 
   return (
     <div className={`vault-website-editor${expanded ? " vault-website-editor--expanded" : ""}`}>
@@ -1951,14 +1959,20 @@ function MarkdownSplitEditor({
             }
           />
           <div className="vault-website-editor-save-row">
-            <button
-              type="button"
-              className="vault-website-editor-save-btn"
-              onClick={handleSave}
-              disabled={!editable || !isDirty || isSaving}
-            >
-              {saveButtonLabel}
-            </button>
+            {autosave ? (
+              <span className="vault-website-editor-save-status" aria-live="polite">
+                {saveStatus}
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="vault-website-editor-save-btn"
+                onClick={handleSave}
+                disabled={!editable || !isDirty || isSaving}
+              >
+                {saveButtonLabel}
+              </button>
+            )}
             {onInsertFiles && editable && (
               <>
                 <input
@@ -2194,18 +2208,18 @@ function SyncApiRunEditor({
   );
 }
 
-// ─── Deliverable editor ──────────────────────────────────────────────────
-// A deliverable is a website page that lives in a project (Austin,
-// 2026-10-21; `deliverables.server.ts`): the same `MarkdownSplitEditor`
+// ─── Letter editor ──────────────────────────────────────────────────
+// A letter is a website page that lives in a project (Austin,
+// 2026-10-21; `letters.server.ts`): the same `MarkdownSplitEditor`
 // as a website page, previewing through the website directive registry
 // inside `WebsitePageContent`, which is exactly what the public
-// deliverable page renders (`public.deliverable.$fileId.tsx`). No publish
-// toggle: sharing is the switch on the project's Deliverables tab. A
+// letter page renders (`public.letter.$fileId.tsx`). No publish
+// toggle: sharing is the switch on the project's Letters tab. A
 // picture dropped, pasted or picked uploads beside the file
 // (`/api/vault/upload` into its folder) and lands in the text as a
 // standard markdown image pointing at the vault, the one form the public
 // page serves.
-function DeliverableSplitEditor({
+function LetterSplitEditor({
   fileId,
   folderId,
   projectFolderId,
@@ -2217,7 +2231,7 @@ function DeliverableSplitEditor({
 }: {
   fileId: string;
   folderId: string | null;
-  /** The project the deliverable belongs to: where "Add picture" looks
+  /** The project the letter belongs to: where "Add picture" looks
    * first (`/api/projects/:id/photos`, the Photos tab's own rows). */
   projectFolderId: string | null;
   initialContent: string;
@@ -2266,7 +2280,7 @@ function DeliverableSplitEditor({
 
   // Simpler than the website editor on purpose (Austin, 2026-10-21): the
   // same design language, fewer ways to go wrong. No scratch pad link;
-  // which directives a deliverable gets, against what stays website-only,
+  // which directives a letter gets, against what stays website-only,
   // is a later, deliberate pass. Light/Dark stays: the public link follows
   // the reader's scheme, only the PDF is pinned to light.
   return (
@@ -3928,7 +3942,7 @@ export default function VaultV2Page() {
     current.kind === "file" &&
     ((Boolean(current.websiteAnchor) && Boolean(current.websitePageMeta) && isMarkdownFile(current.file)) ||
       (fileFolderType === "sync-api" && isMarkdownFile(current.file)) ||
-      (fileFolderType === "deliverables" && isMarkdownFile(current.file)));
+      (isLettersFolderType(fileFolderType) && isMarkdownFile(current.file)));
 
   const handleCreateMarkdownFile = async () => {
     if (current.kind !== "file" || !current.file.folder_id) return;
@@ -4067,12 +4081,12 @@ export default function VaultV2Page() {
   // above), and there's no equivalent "create a new run" action this
   // header could trigger (runs are created via the analysis's own CLI/API
   // flow — see the `vault` skill's "Sync types" section).
-  // A deliverable's toolbar: the public link while it is shared (the
-  // switch itself lives on the project's Deliverables tab), then Actions.
-  const deliverableToolbarRight = (
+  // A letter's toolbar: the public link while it is shared (the
+  // switch itself lives on the project's Letters tab), then Actions.
+  const letterToolbarRight = (
     <>
       {current.kind === "file" && current.file.shared_at && (
-        <CopyLinkButton path={`/public/deliverable/${current.file._id}`} />
+        <CopyLinkButton path={`/public/letter/${current.file._id}`} />
       )}
       <MoreMenu label="Actions" items={splitEditorActions} trigger={actionsTrigger} />
     </>
@@ -4558,11 +4572,11 @@ export default function VaultV2Page() {
                 headerLeft={breadcrumbNode}
                 toolbarRight={websiteToolbarRight}
               />
-            ) : fileFolderType === "deliverables" && isMarkdownFile(current.file) ? (
-              // A deliverable (see `DeliverableSplitEditor` above): the
+            ) : isLettersFolderType(fileFolderType) && isMarkdownFile(current.file) ? (
+              // A letter (see `LetterSplitEditor` above): the
               // website page's split editor, previewing what the client's
               // public page shows.
-              <DeliverableSplitEditor
+              <LetterSplitEditor
                 key={`${current.file._id}-${current.file.updated_at}`}
                 fileId={current.file._id}
                 folderId={current.file.folder_id}
@@ -4571,7 +4585,7 @@ export default function VaultV2Page() {
                 editable={canWriteCurrentFile}
                 onSave={handleSaveWebsitePage}
                 headerLeft={breadcrumbNode}
-                toolbarRight={deliverableToolbarRight}
+                toolbarRight={letterToolbarRight}
               />
             ) : fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (
               // A sync-api analysis run's own `<run>.md` (see the `vault`

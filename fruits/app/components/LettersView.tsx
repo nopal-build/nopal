@@ -1,20 +1,20 @@
-// The project's Deliverables tab: the pages a guide uploaded for the
+// The project's Letters tab: the pages a guide uploaded for the
 // client, one markdown file each, newest change first
-// (`deliverables.server.ts`). Everyone with the tab reads the list; a
+// (`letters.server.ts`). Everyone with the tab reads the list; a
 // manager (a Guide on the project, or staff) uploads, replaces in place
 // (same id, so the same link) and flips each file's public link. The
 // server refuses all three for anyone else; `manage` only hides them.
 import { useRef, useState, type DragEvent } from "react";
-import type { DeliverableRow } from "robustness-core/data/deliverables.server";
-import type { DeliverablePdfState } from "robustness-core/data/deliverablePdf.server";
+import type { LetterRow } from "robustness-core/data/letters.server";
+import type { LetterPdfState } from "robustness-core/data/letterPdf.server";
 
 /** A row as the tab receives it: the file, plus (for a manager, while
  * the link is on) what became of its PDF. */
-export type DeliverableTabRow = DeliverableRow & { pdf: DeliverablePdfState | null };
+export type LetterTabRow = LetterRow & { pdf: LetterPdfState | null };
 
 /** The PDF line a manager reads under a shared file. Plain words; the
  * reason is the worker's own. */
-export function pdfLine(pdf: DeliverablePdfState): string {
+export function pdfLine(pdf: LetterPdfState): string {
   switch (pdf.state) {
     case "ready":
       return "PDF ready";
@@ -33,15 +33,15 @@ import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { ShareLinkControl } from "./ShareLinkControl";
 
-export function deliverablePublicPath(fileId: string): string {
-  return `/public/deliverable/${fileId}`;
+export function letterPublicPath(fileId: string): string {
+  return `/public/letter/${fileId}`;
 }
 
 function longDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export function DeliverablesView({
+export function LettersView({
   projectFolderId,
   rows,
   manage,
@@ -49,7 +49,7 @@ export function DeliverablesView({
   onChanged,
 }: {
   projectFolderId: string;
-  rows: DeliverableTabRow[];
+  rows: LetterTabRow[];
   /** Upload, Replace and the share switch. */
   manage: boolean;
   /** Whether a row opens the Vault's file view; a client has no Vault
@@ -92,16 +92,16 @@ export function DeliverablesView({
     if (files.length === 0) return;
     const form = new FormData();
     for (const f of files) form.append("file", f);
-    void send(`/api/projects/${projectFolderId}/deliverables`, form);
+    void send(`/api/projects/${projectFolderId}/letters`, form);
   };
 
-  /** An empty deliverable with a title, opened in the editor. */
+  /** An empty letter with a title, opened in the editor. */
   const create = async () => {
-    const name = window.prompt("What is this deliverable called?", "")?.trim();
+    const name = window.prompt("What is this letter called?", "")?.trim();
     if (!name) return;
     const form = new FormData();
     form.append("name", name);
-    const data = await send(`/api/projects/${projectFolderId}/deliverables`, form);
+    const data = await send(`/api/projects/${projectFolderId}/letters`, form);
     if (data?.fileId) window.location.assign(`/vault?file=${data.fileId}`);
   };
 
@@ -114,7 +114,7 @@ export function DeliverablesView({
   return (
     <section
       className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 })}
-      aria-label="Deliverables"
+      aria-label="Letters"
       onDragOver={manage ? (e) => e.preventDefault() : undefined}
       onDrop={manage ? onDrop : undefined}
     >
@@ -133,10 +133,10 @@ export function DeliverablesView({
             }}
           />
           <button type="button" className={button({ variant: "secondary", size: "compact" })} disabled={busy} onClick={() => void create()}>
-            New deliverable
+            New letter
           </button>
           <button type="button" className={button({ variant: "secondary", size: "compact" })} disabled={busy} onClick={() => uploadInput.current?.click()}>
-            Upload a deliverable
+            Upload a letter
           </button>
           <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
             A markdown file, with its pictures alongside. Or drop them here.
@@ -155,12 +155,12 @@ export function DeliverablesView({
       )}
       {rows.length === 0 ? (
         <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-          No deliverables yet.
+          No letters yet.
         </p>
       ) : (
         <ul className={sprinkles({ display: "flex", flexDirection: "column", gap: 4 })} style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {rows.map((row) => (
-            <DeliverableRowView
+            <LetterRowView
               key={row.fileId}
               row={row}
               manage={manage}
@@ -180,7 +180,7 @@ export function DeliverablesView({
   );
 }
 
-function DeliverableRowView({
+function LetterRowView({
   row,
   manage,
   openInVault,
@@ -188,7 +188,7 @@ function DeliverableRowView({
   onReplace,
   onChanged,
 }: {
-  row: DeliverableTabRow;
+  row: LetterTabRow;
   manage: boolean;
   openInVault: boolean;
   busy: boolean;
@@ -196,7 +196,7 @@ function DeliverableRowView({
   onChanged: () => void;
 }) {
   const replaceInput = useRef<HTMLInputElement>(null);
-  const publicPath = deliverablePublicPath(row.fileId);
+  const publicPath = letterPublicPath(row.fileId);
   const vaultPath = `/vault?file=${row.fileId}`;
   // The title opens exactly what the client sees (Austin, 2026-10-21): the
   // public page. With the link off that page admits a manager as a
@@ -211,7 +211,7 @@ function DeliverableRowView({
     <span className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`}>{row.title}</span>
   );
   return (
-    <li className={sprinkles({ display: "flex", flexDirection: "column", gap: 1.5 })} data-deliverable={row.fileId}>
+    <li className={sprinkles({ display: "flex", flexDirection: "column", gap: 1.5 })} data-letter={row.fileId}>
       <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 2 })}>
         {title}
         <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
@@ -226,7 +226,7 @@ function DeliverableRowView({
       )}
       {manage && (
         <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 })}>
-          <ShareLinkControl what="this deliverable" path={publicPath} endpoint={`/api/deliverable/${row.fileId}/share`} sharedAt={row.sharedAt} onChanged={onChanged} />
+          <ShareLinkControl what="this letter" path={publicPath} endpoint={`/api/letter/${row.fileId}/share`} sharedAt={row.sharedAt} onChanged={onChanged} />
           <input
             ref={replaceInput}
             type="file"

@@ -1,6 +1,6 @@
-// The deliverable editor's picture picker: the project's own photos, the
+// The letter editor's picture picker: the project's own photos, the
 // ones already documented on the daily logs (Austin, 2026-10-21: building
-// a deliverable here should draw on what's been uploaded), with upload
+// a letter here should draw on what's been uploaded), with upload
 // from the computer as the second option. Picking one puts a standard
 // markdown image in the text, pointing at the project's copy, which is
 // the form the public page serves. Rendered inside the Markdown pane of

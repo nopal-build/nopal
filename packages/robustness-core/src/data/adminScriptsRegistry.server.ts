@@ -50,6 +50,7 @@ import { run as runBackfillSyncedDailyLogDates } from "./adminScripts/backfillSy
 import { run as runReseedGraphlogSkills } from "./adminScripts/reseedGraphlogSkills.server";
 import { run as runDedupeSummaries } from "./adminScripts/dedupeSummaries.server";
 import { run as runMergeSkillsSyncsCaseVariants } from "./adminScripts/migrateMergeSkillsSyncsCaseVariants.server";
+import { run as runMigrateDeliverablesToLetters } from "./adminScripts/migrateDeliverablesToLetters.server";
 import type { AdminScriptDefinition } from "./adminScripts/types";
 
 export type { AdminScriptDefinition, AdminScriptRunOpts, AdminScriptResult } from "./adminScripts/types";
@@ -146,6 +147,13 @@ const REGISTRY: AdminScriptDefinition[] = [
     description:
       "Merges duplicate skills/syncs space folders that differ only by capitalization (e.g. 'Syncs' and 'syncs') into one properly-capitalized survivor — content merged (file-name collisions get an auto-dedupe suffix, never silently dropped), connector folders (e.g. a published sync-one-way folder) kept at their original id so a public link survives. Idempotent.",
     run: runMergeSkillsSyncsCaseVariants,
+  },
+  {
+    name: "migrate-deliverables-to-letters",
+    label: "Rename Deliverables folders to Letters",
+    description:
+      "Deliverables became Letters on 2026-10-27. Rewrites every folder still stored as the old type to `letters` and renames a root called \"Deliverables\" to \"Letters\" (ids stay, so every file and link keeps working). Until this has run the code reads the old name as the new one, so nothing waits on it. Try a dry run first. Idempotent.",
+    run: runMigrateDeliverablesToLetters,
   },
 ];
 

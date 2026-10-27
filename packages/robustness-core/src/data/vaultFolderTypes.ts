@@ -48,7 +48,9 @@
  *    project. `README.md` doubles as both the project's Sharing Roles doc
  *    (same as always) AND the site's homepage.
  *
- * 1. Space types (`SpaceFolderTypeKey`) — `skills`, `syncs`, and `graph`.
+ * 1. Space types (`SpaceFolderTypeKey`) — `skills`, `syncs`, `graph` and
+ *    `letters` (stored as `deliverables` before 2026-10-27, see
+ *    `LegacyLettersFolderTypeKey`).
  *    Creatable directly inside a `project-n02` folder (a project, or
  *    `personal`). SINGLETON per parent — at most one of each
  *    (enforced server-side, `validateFolderTypeForParent` in
@@ -116,7 +118,15 @@ import type { Role } from "./humans.server";
 
 export type ContainerFolderTypeKey = "project-n02" | "website";
 
-export type SpaceFolderTypeKey = "skills" | "syncs" | "graph" | "deliverables";
+/** `deliverables` is the name `letters` was stored under until
+ * 2026-10-27. It stays a key so a folder written before the rename keeps
+ * its policy (writable, label) until `migrate-deliverables-to-letters`
+ * has rewritten it; nothing creates one (`validateFolderTypeForParent`)
+ * and the picker never offers it (`legacyOf`). Retire it with the
+ * script. */
+export type LegacyLettersFolderTypeKey = "deliverables";
+
+export type SpaceFolderTypeKey = "skills" | "syncs" | "graph" | "letters" | LegacyLettersFolderTypeKey;
 
 export type SyncFolderTypeKey =
   | "sync-one-way"
@@ -175,6 +185,10 @@ export type VaultFolderTypeDef = {
    * Sharing-Roles-gated project like any other, unrestricted by platform
    * role — see `canCreateFolderType` below. */
   creatableBy?: Role;
+  /** An old stored name for another type: read as that type, never
+   * offered or created. `letters` was stored as `deliverables` before
+   * 2026-10-27. */
+  legacyOf?: SpaceFolderTypeKey;
 };
 
 export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> = {
@@ -213,23 +227,49 @@ export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> 
     shareable: false,
     publishable: false,
   },
-  // `deliverables` — the project's deliverables: markdown pages a guide
-  // uploads for the client (`deliverables.server.ts`). Each file has its
-  // own share switch (`file_refs.shared_at`) and public page
-  // (`/public/deliverable/<fileId>`); `publishable: false` keeps the
-  // Vault's Publish off it, so a deliverable is shared, never published
+  // `letters` — the project's letters: a markdown page a guide writes
+  // for the client (`letters.server.ts`). Each file has its own share
+  // switch (`file_refs.shared_at`) and public page
+  // (`/public/letter/<fileId>`); `publishable: false` keeps the
+  // Vault's Publish off it, so a letter is shared, never published
   // (publishing opens the folder-browsing routes too). Created by the
-  // first upload from the project's Deliverables tab, with the same
+  // first letter from the project's Letters tab, with the same
   // deterministic id as Skills; also creatable from the Vault.
-  deliverables: {
-    label: "Deliverables",
+  letters: {
+    label: "Letters",
     description:
-      "Pages a guide uploads for the client: one markdown file each, shared by its own link from the project's Deliverables tab.",
+      "Letters a guide writes to the client: one markdown file each, shared by its own link from the project's Letters tab.",
     writable: "owner",
     shareable: false,
     publishable: false,
   },
+  // `deliverables` — what `letters` was stored as before 2026-10-27.
+  // Same policy, read as `letters` everywhere (`isLettersFolderType`);
+  // the admin script `migrate-deliverables-to-letters` rewrites the
+  // stored rows, and this entry goes with it.
+  deliverables: {
+    label: "Letters",
+    description: "A Letters folder stored under its old name.",
+    writable: "owner",
+    shareable: false,
+    publishable: false,
+    legacyOf: "letters",
+  },
 };
+
+/** What a stored folder type means today: a legacy name reads as the
+ * type it was renamed to, every other value as itself. */
+export function canonicalFolderType(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const def = isSpaceFolderTypeKey(value) ? SPACE_FOLDER_TYPES[value] : null;
+  return def?.legacyOf ?? value;
+}
+
+/** A Letters folder's type, under either of its stored names. Takes any
+ * value so a stored string compares without a cast. */
+export function isLettersFolderType(value: unknown): boolean {
+  return typeof value === "string" && canonicalFolderType(value) === "letters";
+}
 
 export const CONTAINER_FOLDER_TYPES: Record<ContainerFolderTypeKey, VaultFolderTypeDef> = {
   // `project-n02` — GraphLog-managed (see the `graphlog` skill). The

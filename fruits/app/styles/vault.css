@@ -946,6 +946,19 @@
   cursor: pointer;
 }
 
+/* The autosave editor's save row: a word in place of the button, in the
+   button's own type so the row keeps its height. */
+.vault-website-editor-save-status {
+  align-self: center;
+  min-height: 1.2em;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  color: var(--text-subtle);
+  @media (prefers-color-scheme: dark) {
+    color: var(--text-subtle-dark);
+  }
+}
+
 /* Disabled reads as "the surface it's sitting on, just darker" -- NOT a
    desaturated purple (which still looks clickable-ish) or a hardcoded
    gray (which wouldn't adapt across light/dark) -- per this feature's

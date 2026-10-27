@@ -1,4 +1,4 @@
-/* The public deliverable page (`routes/public.deliverable.$fileId.tsx`).
+/* The public letter page (`routes/public.letter.$fileId.tsx`).
    Its PDF is this page printed by the worker, so the print rules here are
    what the PDF looks like: no download links (the file carries no button
    to itself), headings that keep their first lines, pictures that don't
@@ -6,7 +6,7 @@
    with webapp, and nothing there needs these. */
 
 @media print {
-  .deliverable-actions {
+  .letter-actions {
     display: none;
   }
   h1, h2, h3, h4 {

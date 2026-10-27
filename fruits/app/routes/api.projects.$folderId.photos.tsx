@@ -12,8 +12,8 @@ import { isReachablePhoto, rowsForReader } from "robustness-core/data/projectVie
  *
  * The project's photos as the Photos tab shows them (`fileFolders.server.ts`:
  * a projection of what has been documented on the daily logs, each served
- * by the project's own copy), for the deliverable editor's picture picker
- * (`ProjectPhotoPicker`): a Guide building a deliverable here draws on
+ * by the project's own copy), for the letter editor's picture picker
+ * (`ProjectPhotoPicker`): a Guide building a letter here draws on
  * what is already uploaded rather than uploading it twice. The Photos
  * tab's own feature gates it (`photos` on the viewer's role; staff read as
  * a Guide), and the rows are the reader's rows, never more. A refusal

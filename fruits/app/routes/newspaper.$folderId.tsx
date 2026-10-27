@@ -58,16 +58,16 @@ import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
 import { ownLatestReading } from "robustness-core/data/dashboard.server";
 import { navFor } from "../data/nav.server";
 import { SteepGauge } from "../components/SteepGauge";
-import { DeliverablesTile } from "../components/DeliverablesTile";
+import { LettersTile } from "../components/LettersTile";
 import { AppLayout } from "../components/AppLayout";
 import { CardTabs } from "../components/stamps-candidates/CardTabs";
 import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
 import OxRenderer from "../components/OxRenderer";
 import { ProjectFilesView } from "../components/ProjectFilesView";
-import { DeliverablesView } from "../components/DeliverablesView";
+import { LettersView } from "../components/LettersView";
 import { ShareLinkControl } from "../components/ShareLinkControl";
-import { canManageDeliverables, listDeliverables, sharedDeliverableLinks } from "robustness-core/data/deliverables.server";
-import { deliverablePdfState } from "robustness-core/data/deliverablePdf.server";
+import { canManageLetters, listLetters, sharedLetterLinks } from "robustness-core/data/letters.server";
+import { letterPdfState } from "robustness-core/data/letterPdf.server";
 import { ProjectView } from "../components/ProjectView";
 import type { CitedLogsForPen, MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
 import { sprinkles } from "stamps/sprinkles.css";
@@ -124,23 +124,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const files: ProjectFileRow[] | null =
     tabFolders && folder.folder_type === "project-n02" ? rowsForReader(await loadProjectFiles(folder), features) : null;
   const logbook = tab === "logbook" ? await projectLogbook(folder) : null;
-  // The Deliverables tab (`deliverables.server.ts`): the list for
+  // The Letters tab (`letters.server.ts`): the list for
   // everyone with the tab; upload, replace and the share switch for a
   // Guide on the project or staff. The server refuses the rest anyway.
-  const manageDeliverables = tab === "deliverables" && canManageDeliverables(user, role);
+  const manageLetters = tab === "letters" && canManageLetters(user, role);
   // A manager also sees each shared file's PDF state (ready, preparing,
   // failed with the worker's reason): the outcome of a worker job shows
-  // on the page that asked for it, not in a log (`deliverablePdf.server.ts`).
+  // on the page that asked for it, not in a log (`letterPdf.server.ts`).
   // Read on every tab: the banner's tile lists the shared ones for
   // everyone on the project, a Client included (they have no tab).
-  const deliverableRows = await listDeliverables(folder);
-  const sharedDeliverables = sharedDeliverableLinks(deliverableRows);
-  const deliverables =
-    tab === "deliverables"
+  const letterRows = await listLetters(folder);
+  const sharedLetters = sharedLetterLinks(letterRows);
+  const letters =
+    tab === "letters"
       ? await Promise.all(
-          deliverableRows.map(async (row) => ({
+          letterRows.map(async (row) => ({
             ...row,
-            pdf: manageDeliverables && row.sharedAt ? await deliverablePdfState(row.fileId, row.contentHash) : null,
+            pdf: manageLetters && row.sharedAt ? await letterPdfState(row.fileId, row.contentHash) : null,
           })),
         )
       : null;
@@ -288,9 +288,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     fileKinds: FILING_KINDS.filter((k) => k !== "video"),
     logbook,
     logbookFileIds,
-    deliverables,
-    manageDeliverables,
-    sharedDeliverables,
+    letters,
+    manageLetters,
+    sharedLetters,
     sensorData,
     seeding,
     budgetView,
@@ -477,7 +477,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, deliverables, manageDeliverables, sharedDeliverables, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, sharedLetters, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders } = project;
@@ -664,14 +664,14 @@ export default function NewspaperRoute() {
               ← My Projects
             </Link>
           )}
-          {(steep || seeding?.mine || sharedDeliverables.length > 0) && (
+          {(steep || seeding?.mine || sharedLetters.length > 0) && (
             <Cluster gap={6} align="flex-start" style={{ justifyContent: "space-between" }}>
               {steep && <SteepGauge projectFolderId={folder._id} mine={steep.mine} size="compact" />}
               <Stack gap={4} align="flex-end" style={{ flex: 1 }}>
                 {/* The seeding tile, only while a round is open. */}
                 {seeding?.mine && <SeedPacket projectFolderId={folder._id} files={seeding.mine} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
                 {/* What a guide has shared, only when something is. */}
-                <DeliverablesTile links={sharedDeliverables} />
+                <LettersTile links={sharedLetters} />
               </Stack>
             </Cluster>
           )}
@@ -732,8 +732,8 @@ export default function NewspaperRoute() {
               canFile={canEdit}
             />
           )}
-          {deliverables && (
-            <DeliverablesView projectFolderId={folder._id} rows={deliverables} manage={manageDeliverables} openInVault={openInVault} onChanged={() => revalidator.revalidate()} />
+          {letters && (
+            <LettersView projectFolderId={folder._id} rows={letters} manage={manageLetters} openInVault={openInVault} onChanged={() => revalidator.revalidate()} />
           )}
           {tab === "sensorData" && sensorData && (
             <SensorDataView projectFolderId={folder._id} data={sensorData} />

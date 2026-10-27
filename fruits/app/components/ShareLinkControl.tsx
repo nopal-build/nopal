@@ -1,5 +1,5 @@
 // A public link's switch: share, copy, stop. One element for every
-// export view (the Efforts page, a deliverable); the caller says what is
+// export view (the Efforts page, a letter); the caller says what is
 // being shared, where its public page is and which route flips it.
 // Quiet: an occasional control, not part of the page's headline. The
 // server decides who may flip it; the caller decides who sees it.
@@ -15,9 +15,9 @@ export function ShareLinkControl({
   sharedAt,
   onChanged,
 }: {
-  /** Named in the confirm: "this project's Efforts page", "this deliverable". */
+  /** Named in the confirm: "this project's Efforts page", "this letter". */
   what: string;
-  /** The public page's path, e.g. `/public/deliverable/<id>`. */
+  /** The public page's path, e.g. `/public/letter/<id>`. */
   path: string;
   /** POST turns the link on, DELETE off. */
   endpoint: string;

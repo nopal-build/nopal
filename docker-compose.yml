@@ -213,7 +213,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
-      # The deliverable PDF: the worker prints the public page from the
+      # The letter PDF: the worker prints the public page from the
       # fruits service (its container port; see fruits' `allowedHosts`),
       # with the Chromium Dockerfile.dev installs.
       APP_BASE_URL: http://fruits:3000

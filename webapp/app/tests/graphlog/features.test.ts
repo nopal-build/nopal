@@ -38,12 +38,12 @@ describe("the groups", () => {
   it("test 9: a Guide reaches what an Owner did, a Crafter what a Crafter did", () => {
     const guide = resolveRole("Owner");
     expect(guide).toMatchObject({ isOwner: true, guiding: true });
-    expect(tabsFor(guide.features)).toEqual(["efforts", "deliverables", "photos", "files", "sensorData", "costs", "logbook", "suggestions"]);
+    expect(tabsFor(guide.features)).toEqual(["efforts", "letters", "photos", "files", "sensorData", "costs", "logbook", "suggestions"]);
     expect(guide.features).toEqual(expect.arrayContaining(["marks", "steepTap", "steepReadings", "dailyLog"]));
 
     const crafter = resolveRole("Crafter");
     expect(crafter).toMatchObject({ isOwner: true, guiding: false });
-    expect(tabsFor(crafter.features)).toEqual(["efforts", "deliverables", "photos", "files", "sensorData", "costs", "logbook"]);
+    expect(tabsFor(crafter.features)).toEqual(["efforts", "letters", "photos", "files", "sensorData", "costs", "logbook"]);
     expect(crafter.features).not.toContain("steepReadings");
   });
 
@@ -72,7 +72,7 @@ describe("the groups", () => {
 
   it("a Client gets Efforts, Photos, the pen, their own tap and their own log, and runs nothing", () => {
     const client = resolveRole("Client");
-    // No Deliverables tab (Austin, 2026-10-22): the tab is where guides
+    // No Letters tab (Austin, 2026-10-22): the tab is where guides
     // work; a client reaches what is shared through the banner's tile.
     expect(tabsFor(client.features)).toEqual(["efforts", "photos"]);
     expect(client.features).toEqual(expect.arrayContaining(["steepTap", "dailyLog"]));

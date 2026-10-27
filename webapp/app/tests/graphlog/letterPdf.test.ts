@@ -1,23 +1,23 @@
 /**
- * A deliverable's PDF is the public page printed, keyed by the file's
- * content hash (`deliverablePdf.server.ts`, 2026-10-21): the key moves
+ * A letter's PDF is the public page printed, keyed by the file's
+ * content hash (`letterPdf.server.ts`, 2026-10-21): the key moves
  * with the content, the job id is one BullMQ accepts, and a file from
  * before hashing still gets a key.
  */
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { deliverablePdfFileName, deliverablePdfJobId, deliverablePdfKey, pdfFingerprint, pdfStateFromJob } from "robustness-core/data/deliverablePdf.server";
+import { letterPdfFileName, letterPdfJobId, letterPdfKey, pdfFingerprint, pdfStateFromJob } from "robustness-core/data/letterPdf.server";
 
 describe("the PDF's key", () => {
-  it("sits under the deliverable's id and changes with the content hash", () => {
-    expect(deliverablePdfKey("d3l1v", "abc")).toBe("deliverables/d3l1v/abc.pdf");
-    expect(deliverablePdfKey("d3l1v", "abc")).not.toBe(deliverablePdfKey("d3l1v", "abd"));
-    expect(deliverablePdfKey("d3l1v", "abc")).not.toBe(deliverablePdfKey("d3l1w", "abc"));
+  it("sits under the letter's id and changes with the content hash", () => {
+    expect(letterPdfKey("d3l1v", "abc")).toBe("letters/d3l1v/abc.pdf");
+    expect(letterPdfKey("d3l1v", "abc")).not.toBe(letterPdfKey("d3l1v", "abd"));
+    expect(letterPdfKey("d3l1v", "abc")).not.toBe(letterPdfKey("d3l1w", "abc"));
   });
 
   it("is a job id with no colon in it", () => {
-    expect(deliverablePdfJobId("d3l1v", "abc")).toBe("pdf-d3l1v-abc");
-    expect(deliverablePdfJobId("d3l1v", "abc")).not.toContain(":");
+    expect(letterPdfJobId("d3l1v", "abc")).toBe("pdf-d3l1v-abc");
+    expect(letterPdfJobId("d3l1v", "abc")).not.toContain(":");
   });
 
   it("uses the stored content hash, and hashes the content when a record has none", () => {
@@ -28,8 +28,8 @@ describe("the PDF's key", () => {
   });
 
   it("names the download after the markdown file", () => {
-    expect(deliverablePdfFileName("madison-attic.md")).toBe("madison-attic.pdf");
-    expect(deliverablePdfFileName("notes")).toBe("notes.pdf");
+    expect(letterPdfFileName("madison-attic.md")).toBe("madison-attic.pdf");
+    expect(letterPdfFileName("notes")).toBe("notes.pdf");
   });
 });
 

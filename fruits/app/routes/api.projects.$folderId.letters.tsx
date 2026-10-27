@@ -6,31 +6,31 @@ import { uploadFileToS3 } from "robustness-core/data/file.server";
 import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { getProjectRole, isProjectFolder } from "robustness-core/data/projectSharing.server";
 import {
-  canManageDeliverables,
-  deliverableFileName,
-  ensureDeliverablesFolder,
-  newDeliverableContent,
+  canManageLetters,
+  letterFileName,
+  ensureLettersFolder,
+  newLetterContent,
   rewriteLocalImagePaths,
   splitUploadBundle,
   type UploadedPicture,
-} from "robustness-core/data/deliverables.server";
+} from "robustness-core/data/letters.server";
 
 // Same cap as /api/vault/upload: markdown is stored as the record's own
 // content, never as an S3 object (see that route's doc).
 const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
 
 /**
- * POST /api/projects/:folderId/deliverables
+ * POST /api/projects/:folderId/letters
  *
- * Two forms, one folder (`ensureDeliverablesFolder` makes it on first use):
+ * Two forms, one folder (`ensureLettersFolder` makes it on first use):
  * - multipart with `file` (repeatable): one markdown file and its
  *   pictures. The pictures are stored first, beside the file; then every
  *   local image path in the markdown that names one of them is pointed at
  *   it (`rewriteLocalImagePaths`), and the ones that matched nothing are
  *   returned as `unmatched` so the tab can name them.
- * - multipart with `name` and no file: a new, empty deliverable with that
- *   title (`newDeliverableContent`), for the Vault's split editor to open.
- * A Guide on the project or staff (`canManageDeliverables`). Replacing an
+ * - multipart with `name` and no file: a new, empty letter with that
+ *   title (`newLetterContent`), for the Vault's split editor to open.
+ * A Guide on the project or staff (`canManageLetters`). Replacing an
  * existing one is `/api/vault/replace/:fileId`, which keeps the id and so
  * the link. Nothing is shared by this route: the link is a separate
  * switch.
@@ -42,8 +42,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const project = params.folderId ? await getFolderById(params.folderId) : null;
   if (!project || !(await isProjectFolder(project))) return Response.json({ error: "Project not found" }, { status: 404 });
-  if (!canManageDeliverables(user, await getProjectRole(project, user._id))) {
-    return Response.json({ error: "Only a Guide on this project can add a deliverable" }, { status: 403 });
+  if (!canManageLetters(user, await getProjectRole(project, user._id))) {
+    return Response.json({ error: "Only a Guide on this project can add a letter" }, { status: 403 });
   }
 
   const form = await request.formData();
@@ -52,27 +52,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (files.length === 0) {
     if (!name) return Response.json({ error: "No file provided" }, { status: 400 });
-    const folder = await ensureDeliverablesFolder(project);
-    const content = newDeliverableContent(name);
+    const folder = await ensureLettersFolder(project);
+    const content = newLetterContent(name);
     const fileRef = await createFileRef({
       human_id: folder.human_id,
-      name: deliverableFileName(name),
+      name: letterFileName(name),
       content,
       content_type: "text/markdown",
       content_hash: sha256(content),
       size: Buffer.byteLength(content, "utf8"),
       folder_id: folder._id,
     });
-    if (!fileRef) return Response.json({ error: "The deliverable didn't save. Try again." }, { status: 500 });
+    if (!fileRef) return Response.json({ error: "The letter didn't save. Try again." }, { status: 500 });
     return Response.json({ fileId: fileRef._id, pictures: 0, unmatched: [] }, { status: 201 });
   }
 
   const split = splitUploadBundle(files);
   if (!split.ok) return Response.json({ error: split.error }, { status: 400 });
   const { markdown, pictures } = split.bundle;
-  if (markdown.size > MAX_INLINE_MARKDOWN_BYTES) return Response.json({ error: "That file is too large for a deliverable (5 MB)" }, { status: 400 });
+  if (markdown.size > MAX_INLINE_MARKDOWN_BYTES) return Response.json({ error: "That file is too large for a letter (5 MB)" }, { status: 400 });
 
-  const folder = await ensureDeliverablesFolder(project);
+  const folder = await ensureLettersFolder(project);
   // Filed under the folder's owner, as every upload is, so the folder's
   // own listing finds it (see `api.vault.upload`).
   const ownerHumanId = folder.human_id;
@@ -109,7 +109,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const rewritten = rewriteLocalImagePaths(text, uploaded);
   const fileRef = await createFileRef({
     human_id: ownerHumanId,
-    name: deliverableFileName(markdown.name),
+    name: letterFileName(markdown.name),
     content: rewritten.markdown,
     content_type: "text/markdown",
     content_hash: sha256(rewritten.markdown),

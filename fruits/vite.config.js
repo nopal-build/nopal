@@ -15,7 +15,7 @@ export default defineConfig({
     // request, since the browser's Host header is `o.nopal.dev`, not
     // `localhost`.
     // `fruits` is the compose service name: the worker's headless browser
-    // opens the public deliverable page at http://fruits:3000 to print it.
+    // opens the public letter page at http://fruits:3000 to print it.
     allowedHosts: ["o.nopal.dev", "nopal.dev", "fruits"],
   },
   ssr: {

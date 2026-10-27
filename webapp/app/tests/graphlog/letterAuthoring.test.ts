@@ -1,16 +1,16 @@
 /**
- * Making a deliverable (2026-10-21): a document brought from outside has
+ * Making a letter (2026-10-21): a document brought from outside has
  * its local picture paths pointed at the uploaded pictures by name, and
  * the ones that matched nothing are named back; an upload is one
  * markdown file with pictures; a new one starts with a title.
  */
 import { describe, expect, it } from "vitest";
 import {
-  deliverableFileName,
-  newDeliverableContent,
+  letterFileName,
+  newLetterContent,
   rewriteLocalImagePaths,
   splitUploadBundle,
-} from "robustness-core/data/deliverables.server";
+} from "robustness-core/data/letters.server";
 
 const pictures = [
   { name: "kitchen.jpg", fileId: "k1" },
@@ -86,16 +86,16 @@ describe("splitUploadBundle", () => {
   });
 });
 
-describe("a new deliverable", () => {
+describe("a new letter", () => {
   it("starts with its title in front matter and as the heading the page opens on", () => {
-    expect(newDeliverableContent(" Madison attic ")).toBe("---\ntitle: Madison attic\n---\n\n# Madison attic\n\n");
-    expect(newDeliverableContent('Say "hi"')).toContain("title: Say 'hi'");
+    expect(newLetterContent(" Madison attic ")).toBe("---\ntitle: Madison attic\n---\n\n# Madison attic\n\n");
+    expect(newLetterContent('Say "hi"')).toContain("title: Say 'hi'");
   });
 
   it("is named after its title, as a markdown file", () => {
-    expect(deliverableFileName("Madison attic")).toBe("Madison attic.md");
-    expect(deliverableFileName("notes.md")).toBe("notes.md");
-    expect(deliverableFileName("a/b")).toBe("a-b.md");
-    expect(deliverableFileName("  ")).toBe("Untitled.md");
+    expect(letterFileName("Madison attic")).toBe("Madison attic.md");
+    expect(letterFileName("notes.md")).toBe("notes.md");
+    expect(letterFileName("a/b")).toBe("a-b.md");
+    expect(letterFileName("  ")).toBe("Untitled.md");
   });
 });

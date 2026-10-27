@@ -1,13 +1,13 @@
 /**
- * A deliverable's PDF: the public page printed (Austin, 2026-10-21: "an
+ * A letter's PDF: the public page printed (Austin, 2026-10-21: "an
  * output option for the displayed page, nothing more"). The worker opens
- * `/public/deliverable/<fileId>` in a headless browser and saves what it
- * sees (`deliverablePdfRender.server.ts`, which only the worker imports;
+ * `/public/letter/<fileId>` in a headless browser and saves what it
+ * sees (`letterPdfRender.server.ts`, which only the worker imports;
  * the web server never renders, ADR-021). This module is the queue, the
  * key and the status, with no browser in it, so the app can ask for a
  * PDF without carrying a browser driver into its bundle.
  *
- * Keyed by the file's content hash (`deliverables/<fileId>/<hash>.pdf`):
+ * Keyed by the file's content hash (`letters/<fileId>/<hash>.pdf`):
  * a replace makes a new one, an unchanged file reuses the old one, the
  * same "live" rule the page follows. Rendered ahead of the click, when
  * the link turns on and after each replace while shared, so the click
@@ -22,7 +22,7 @@
 
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
-import { contentFingerprint, deliverableHome, isDeliverableShared, isMarkdownFileName } from "./deliverables.server";
+import { contentFingerprint, letterHome, isLetterShared, isMarkdownFileName } from "./letters.server";
 import { objectExists } from "./file.server";
 import type { FileRef } from "./vault.types";
 
@@ -34,14 +34,14 @@ function getConnection(): IORedis {
   return connection;
 }
 
-export const DELIVERABLE_PDF_QUEUE_NAME = "deliverable-pdf";
+export const LETTER_PDF_QUEUE_NAME = "letter-pdf";
 
-export type DeliverablePdfJobData = { fileId: string; contentHash: string };
-export type DeliverablePdfJobResult = { s3Key: string; size: number } | { skipped: string };
+export type LetterPdfJobData = { fileId: string; contentHash: string };
+export type LetterPdfJobResult = { s3Key: string; size: number } | { skipped: string };
 
-let queue: Queue<DeliverablePdfJobData, DeliverablePdfJobResult, string> | undefined;
-function getQueue(): Queue<DeliverablePdfJobData, DeliverablePdfJobResult, string> {
-  if (!queue) queue = new Queue(DELIVERABLE_PDF_QUEUE_NAME, { connection: getConnection() });
+let queue: Queue<LetterPdfJobData, LetterPdfJobResult, string> | undefined;
+function getQueue(): Queue<LetterPdfJobData, LetterPdfJobResult, string> {
+  if (!queue) queue = new Queue(LETTER_PDF_QUEUE_NAME, { connection: getConnection() });
   return queue;
 }
 
@@ -57,21 +57,21 @@ export function pdfFingerprint(file: Pick<FileRef, "content" | "content_hash">):
 }
 
 /** Where the PDF for one version of the file lives. */
-export function deliverablePdfKey(fileId: string, contentHash: string): string {
-  return `deliverables/${fileId}/${contentHash}.pdf`;
+export function letterPdfKey(fileId: string, contentHash: string): string {
+  return `letters/${fileId}/${contentHash}.pdf`;
 }
 
 /** No `:`: BullMQ uses it as its own key delimiter and refuses it in a
  * custom id. */
-export function deliverablePdfJobId(fileId: string, contentHash: string): string {
+export function letterPdfJobId(fileId: string, contentHash: string): string {
   return `pdf-${fileId}-${contentHash}`;
 }
 
 /** Asks the worker for this version's PDF unless the same ask is already
  * waiting, running or done. A failed one is removed and asked again. */
-export async function ensureDeliverablePdfJob(file: Pick<FileRef, "_id" | "content" | "content_hash">): Promise<string> {
+export async function ensureLetterPdfJob(file: Pick<FileRef, "_id" | "content" | "content_hash">): Promise<string> {
   const contentHash = pdfFingerprint(file);
-  const jobId = deliverablePdfJobId(file._id, contentHash);
+  const jobId = letterPdfJobId(file._id, contentHash);
   const q = getQueue();
   const existing = await q.getJob(jobId);
   if (existing) {
@@ -83,25 +83,25 @@ export async function ensureDeliverablePdfJob(file: Pick<FileRef, "_id" | "conte
   return jobId;
 }
 
-export type DeliverablePdfStatus = { ready: true; s3Key: string } | { ready: false; s3Key: string };
+export type LetterPdfStatus = { ready: true; s3Key: string } | { ready: false; s3Key: string };
 
 /** Whether this version's PDF is in storage. */
-export async function deliverablePdfStatus(file: Pick<FileRef, "_id" | "content" | "content_hash">): Promise<DeliverablePdfStatus> {
-  const s3Key = deliverablePdfKey(file._id, pdfFingerprint(file));
+export async function letterPdfStatus(file: Pick<FileRef, "_id" | "content" | "content_hash">): Promise<LetterPdfStatus> {
+  const s3Key = letterPdfKey(file._id, pdfFingerprint(file));
   return { ready: await objectExists(s3Key), s3Key };
 }
 
 /** The hook the share switch and the replace route call: a render ahead
- * of the click, only for a shared markdown deliverable. Returns the job
+ * of the click, only for a shared markdown letter. Returns the job
  * id, or null when nothing was asked for. */
-export async function enqueueDeliverablePdfIfShared(file: FileRef | null | undefined): Promise<string | null> {
-  if (!file || !isDeliverableShared(file) || file.archived_at || !isMarkdownFileName(file.name)) return null;
-  if (!(await deliverableHome(file))) return null;
-  return ensureDeliverablePdfJob(file);
+export async function enqueueLetterPdfIfShared(file: FileRef | null | undefined): Promise<string | null> {
+  if (!file || !isLetterShared(file) || file.archived_at || !isMarkdownFileName(file.name)) return null;
+  if (!(await letterHome(file))) return null;
+  return ensureLetterPdfJob(file);
 }
 
 /** The file name the download carries: the markdown name with `.pdf`. */
-export function deliverablePdfFileName(name: string): string {
+export function letterPdfFileName(name: string): string {
   return `${name.replace(/\.md$/i, "")}.pdf`;
 }
 
@@ -130,13 +130,13 @@ export function preparingPage(): string {
 }
 
 /**
- * What a Guide sees on the Deliverables tab about a shared file's PDF
+ * What a Guide sees on the Letters tab about a shared file's PDF
  * (Austin, 2026-10-21: nobody reads the worker's logs; the outcome
  * belongs on the page that asked for it). Ready when the file is in
  * storage; otherwise what the queue knows: preparing, failed with the
  * worker's own reason, or nothing asked for.
  */
-export type DeliverablePdfState =
+export type LetterPdfState =
   | { state: "ready" }
   | { state: "preparing" }
   | { state: "failed"; reason: string; at: string | null }
@@ -147,7 +147,7 @@ export type DeliverablePdfState =
 export function pdfStateFromJob(
   ready: boolean,
   job: { state: string; failedReason?: string; finishedOn?: number; returnvalue?: unknown } | null,
-): DeliverablePdfState {
+): LetterPdfState {
   if (ready) return { state: "ready" };
   if (!job) return { state: "none" };
   if (job.state === "waiting" || job.state === "active" || job.state === "delayed" || job.state === "prioritized") return { state: "preparing" };
@@ -159,10 +159,10 @@ export function pdfStateFromJob(
   return { state: "none" };
 }
 
-export async function deliverablePdfState(fileId: string, contentHash: string): Promise<DeliverablePdfState> {
-  const ready = await objectExists(deliverablePdfKey(fileId, contentHash));
+export async function letterPdfState(fileId: string, contentHash: string): Promise<LetterPdfState> {
+  const ready = await objectExists(letterPdfKey(fileId, contentHash));
   if (ready) return { state: "ready" };
-  const job = await getQueue().getJob(deliverablePdfJobId(fileId, contentHash));
+  const job = await getQueue().getJob(letterPdfJobId(fileId, contentHash));
   if (!job) return pdfStateFromJob(false, null);
   return pdfStateFromJob(false, { state: await job.getState(), failedReason: job.failedReason, finishedOn: job.finishedOn, returnvalue: job.returnvalue });
 }

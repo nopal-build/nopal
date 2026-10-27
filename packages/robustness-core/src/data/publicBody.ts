@@ -3,7 +3,7 @@
  *
  * Markdown in the vault points its pictures at `/api/vault/view/<id>`,
  * which needs a session. A public page (the shared Efforts page,
- * `newspaperShare.server.ts`; a deliverable, `deliverables.server.ts`)
+ * `newspaperShare.server.ts`; a letter, `letters.server.ts`)
  * rewrites every one of those to its own file route, and serves under
  * that route exactly the ids the body names right now, nothing else.
  * Both pages use these two functions so there is one definition of
