@@ -119,11 +119,12 @@ import type { Role } from "./humans.server";
 export type ContainerFolderTypeKey = "project-n02" | "website";
 
 /** `deliverables` is the name `letters` was stored under until
- * 2026-10-27. It stays a key so a folder written before the rename keeps
- * its policy (writable, label) until `migrate-deliverables-to-letters`
- * has rewritten it; nothing creates one (`validateFolderTypeForParent`)
- * and the picker never offers it (`legacyOf`). Retire it with the
- * script. */
+ * 2026-10-27. Production's one such folder was rewritten that day and the
+ * one-time script removed (Austin: nothing to keep in the admin scripts
+ * for a job that ran once). The key stays so a folder still stored that
+ * way on a local or staging database keeps its policy (writable, label);
+ * nothing creates one (`validateFolderTypeForParent`) and the picker
+ * never offers it (`legacyOf`). */
 export type LegacyLettersFolderTypeKey = "deliverables";
 
 export type SpaceFolderTypeKey = "skills" | "syncs" | "graph" | "letters" | LegacyLettersFolderTypeKey;
@@ -244,9 +245,9 @@ export const SPACE_FOLDER_TYPES: Record<SpaceFolderTypeKey, VaultFolderTypeDef> 
     publishable: false,
   },
   // `deliverables` — what `letters` was stored as before 2026-10-27.
-  // Same policy, read as `letters` everywhere (`isLettersFolderType`);
-  // the admin script `migrate-deliverables-to-letters` rewrites the
-  // stored rows, and this entry goes with it.
+  // Same policy, read as `letters` everywhere (`isLettersFolderType`).
+  // Production was rewritten that day; this entry covers any database
+  // that wasn't (see `LegacyLettersFolderTypeKey`).
   deliverables: {
     label: "Letters",
     description: "A Letters folder stored under its old name.",

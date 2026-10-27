@@ -11,9 +11,11 @@
  * - The folder is a `letters` folder type (`vaultFolderTypes.ts`),
  *   one per project, made by the first upload with a deterministic id so
  *   two uploads can't make two folders (the Skills pattern). A folder
- *   made before the rename is stored as `deliverables` and reads as the
- *   same folder (`isLettersFolderType`) until the admin script
- *   `migrate-deliverables-to-letters` has rewritten it.
+ *   made before the rename was stored as `deliverables`; production's
+ *   one such folder was rewritten on 2026-10-27 and the script removed.
+ *   The code still reads the old name as the same folder
+ *   (`isLettersFolderType`), so a local or staging database from before
+ *   then keeps working.
  * - A letter is one markdown file. Its pictures are vault files it
  *   names by `/api/vault/view/<id>`; the public page serves exactly
  *   those ids (`publicBody.ts`), and a picture the file doesn't name

@@ -19,8 +19,8 @@ const files: Record<string, Record<string, unknown>> = {
 const folders: Record<string, Record<string, unknown>> = {
   delivs: { _id: "delivs", folder_type: "letters", is_folder_type_root: true, parent_folder_id: "proj" },
   delivsTrashed: { _id: "delivsTrashed", folder_type: "letters", is_folder_type_root: true, parent_folder_id: "projTrashed" },
-  // A folder from before the rename (2026-10-27), not yet rewritten by
-  // `migrate-deliverables-to-letters`.
+  // A folder from before the rename (2026-10-27), as a local or staging
+  // database may still hold one.
   delivsLegacy: { _id: "delivsLegacy", folder_type: "deliverables", is_folder_type_root: true, parent_folder_id: "proj" },
   docs: { _id: "docs", folder_type: "project-n02", is_folder_type_root: false, parent_folder_id: "proj" },
   proj: { _id: "proj", project_status: "active" },
