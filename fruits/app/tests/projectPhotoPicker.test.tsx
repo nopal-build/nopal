@@ -1,5 +1,5 @@
 /**
- * The deliverable editor's picture picker (2026-10-21): the project's own
+ * The letter editor's picture picker (2026-10-21): the project's own
  * photos first, upload second; a pick is a standard markdown image on the
  * project's copy, captioned by the log.
  */

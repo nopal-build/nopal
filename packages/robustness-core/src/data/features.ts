@@ -20,13 +20,13 @@ export const CLIENT: Group = "Client";
 export const FEATURE_NAMES = [
   /** The Efforts page (the project README the skills write). */
   "efforts",
-  /** The Deliverables tab: where a guide works on the pages a client
-   * gets, each with its own public link (`deliverables.server.ts`).
+  /** The Letters tab: where a guide works on the pages a client
+   * gets, each with its own public link (`letters.server.ts`).
    * Reading only; uploading, replacing and the share switch are a
    * Guide's. A Client has no tab: what is shared reaches them as the
-   * Deliverables tile in the project's banner (Austin, 2026-10-22: "the
+   * Letters tile in the project's banner (Austin, 2026-10-22: "the
    * tab is for deliverables that are being worked"). */
-  "deliverables",
+  "letters",
   /** The Photos tab, and the photos themselves, never a cost file. */
   "photos",
   /** The Files tab. */
@@ -70,7 +70,7 @@ export const FEATURE_NAMES = [
 ] as const;
 export type Feature = (typeof FEATURE_NAMES)[number];
 
-const READING: Feature[] = ["efforts", "deliverables", "photos", "files", "costs", "logbook", "sensorData"];
+const READING: Feature[] = ["efforts", "letters", "photos", "files", "costs", "logbook", "sensorData"];
 
 /** The list. Guide is what Owner reached, Crafter what Crafter reached;
  * Observer reads what a Crafter reads, writes Cards and notes, and doesn't

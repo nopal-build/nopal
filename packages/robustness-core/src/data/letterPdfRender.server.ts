@@ -1,5 +1,5 @@
 /**
- * The worker's half of a deliverable's PDF (`deliverablePdf.server.ts`
+ * The worker's half of a letter's PDF (`letterPdf.server.ts`
  * has the queue and the key): open the public page in headless Chromium
  * and print it. Imported by `packages/worker/worker.ts` and nothing in
  * the web app: the app does not declare `playwright-core`, and Vite
@@ -19,8 +19,8 @@
  */
 
 import { chromium } from "playwright-core";
-import { deliverablePdfKey, pdfFingerprint, type DeliverablePdfJobData, type DeliverablePdfJobResult } from "./deliverablePdf.server";
-import { deliverablePublicPath, resolveSharedDeliverable } from "./deliverables.server";
+import { letterPdfKey, pdfFingerprint, type LetterPdfJobData, type LetterPdfJobResult } from "./letterPdf.server";
+import { letterPublicPath, resolveSharedLetter } from "./letters.server";
 import { uploadPrivateFileToS3 } from "./file.server";
 
 /** Where the worker finds the app: `https://o.nopal.build` in
@@ -32,19 +32,19 @@ export function appBaseUrl(): string {
   return url.replace(/\/$/, "");
 }
 
-export async function renderDeliverablePdf(
-  data: DeliverablePdfJobData,
+export async function renderLetterPdf(
+  data: LetterPdfJobData,
   log: (line: string) => void = () => {},
-): Promise<DeliverablePdfJobResult> {
+): Promise<LetterPdfJobResult> {
   // Re-checked here, not trusted from whoever enqueued: the link may have
   // gone off, or the file changed, between the ask and this job.
-  const shared = await resolveSharedDeliverable(data.fileId);
-  if (!shared) return { skipped: "the link is off, or this is no longer a deliverable" };
+  const shared = await resolveSharedLetter(data.fileId);
+  if (!shared) return { skipped: "the link is off, or this is no longer a letter" };
   const currentHash = pdfFingerprint(shared.file);
   if (currentHash !== data.contentHash) return { skipped: "superseded: the file changed since this render was asked for" };
 
-  const url = `${appBaseUrl()}${deliverablePublicPath(data.fileId)}`;
-  const s3Key = deliverablePdfKey(data.fileId, data.contentHash);
+  const url = `${appBaseUrl()}${letterPublicPath(data.fileId)}`;
+  const s3Key = letterPdfKey(data.fileId, data.contentHash);
   log(`rendering ${url}`);
 
   const browser = await chromium.launch({

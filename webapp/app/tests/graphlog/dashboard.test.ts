@@ -181,10 +181,12 @@ import { isOwnCard } from "robustness-core/data/dailyLog.server";
 
 describe("the project view's tabs", () => {
   it("everyone who reaches the page gets every tab; a Client never reaches it (see access.test.ts)", () => {
-    expect(PROJECT_TABS).toEqual(["efforts", "deliverables", "photos", "files", "sensorData", "costs", "logbook", "suggestions"]);
+    expect(PROJECT_TABS).toEqual(["efforts", "letters", "photos", "files", "sensorData", "costs", "logbook", "suggestions"]);
     expect(resolveProjectTab("costs")).toBe("costs");
     expect(resolveProjectTab("nonsense")).toBe("efforts");
     expect(resolveProjectTab(null)).toBe("efforts");
+    // The tab's name until 2026-10-27; a bookmark opens the same tab.
+    expect(resolveProjectTab("deliverables")).toBe("letters");
   });
 });
 

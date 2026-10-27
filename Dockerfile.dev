@@ -18,8 +18,8 @@
 ARG NODE_VERSION=22.23.2
 FROM node:${NODE_VERSION}-slim
 
-# chromium is for the worker service: the deliverable PDF prints the
-# public page in a headless browser (`deliverablePdfRender.server.ts`;
+# chromium is for the worker service: the letter PDF prints the
+# public page in a headless browser (`letterPdfRender.server.ts`;
 # `CHROMIUM_PATH` in docker-compose.yml points at it). Production gets its
 # browser from Playwright's own image instead (packages/worker/Dockerfile).
 #

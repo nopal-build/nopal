@@ -25,8 +25,8 @@ primary_region = 'dfw'
 
 [build]
 
-# Where the worker finds the app, to print a deliverable's public page
-# (`deliverablePdfRender.server.ts`).
+# Where the worker finds the app, to print a letter's public page
+# (`letterPdfRender.server.ts`).
 [env]
 APP_BASE_URL = 'https://o.nopal.build'
 

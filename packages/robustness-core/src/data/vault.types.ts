@@ -62,7 +62,7 @@ export type FileRef = {
   is_public?: boolean;
   /** ISO timestamp set when the file is archived; null/absent when not archived. */
   archived_at?: string | null;
-  /** A deliverable's public link is on (`deliverables.server.ts`, its
+  /** A letter's public link is on (`letters.server.ts`, its
    * only writer). The link is the file's own id, so off then on gives
    * the same URL. Not `is_public`: that opens the folder-browsing routes
    * too. */

@@ -30,6 +30,7 @@ import {
 import {
   canCreateFolderType,
   canWriteToFolderType,
+  canonicalFolderType,
   CONTAINER_FOLDER_TYPES,
   isContainerFolderTypeKey,
   isFolderTypePublishable,
@@ -209,7 +210,7 @@ export async function updateFileRef(
     is_public: boolean;
     /** ISO timestamp to archive the file; null to unarchive. */
     archived_at: string | null;
-    /** See `deliverables.server.ts`'s `setDeliverableShared`, its only
+    /** See `letters.server.ts`'s `setLetterShared`, its only
      * intended writer. */
     shared_at: string | null;
     /** Same field `createFileRef` already accepts at creation (e.g.
@@ -470,6 +471,12 @@ export async function validateFolderTypeForParent(
   if (isSpaceFolderTypeKey(folderType)) {
     const def = SPACE_FOLDER_TYPES[folderType];
 
+    // An old stored name (`deliverables` for `letters`) is read, never
+    // made: a new folder gets the current name.
+    if (def.legacyOf) {
+      return `Make a ${SPACE_FOLDER_TYPES[def.legacyOf].label} folder instead`;
+    }
+
     // Every project and `personal` is itself tagged `project-n02` (see
     // `ensureProjectN02`, the `graphlog` skill) — a space type may only be
     // created directly inside one, never nested any deeper.
@@ -486,7 +493,9 @@ export async function validateFolderTypeForParent(
       parent.human_id,
       parent._id,
     );
-    if (siblings.some((f) => f.is_folder_type_root && f.folder_type === folderType)) {
+    // Singleton under either stored name: a project with a `deliverables`
+    // folder already has its Letters folder.
+    if (siblings.some((f) => f.is_folder_type_root && canonicalFolderType(f.folder_type) === folderType)) {
       return `A ${def.label} folder already exists here`;
     }
     return null;

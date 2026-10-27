@@ -12,9 +12,9 @@ const VIEW_URL = /^\/api\/vault\/view\/([A-Za-z0-9]+)(?:[?#].*)?$/;
 // (`newspaperShare.server.ts`): the same file, served by the folder's link
 // instead of a session, with its own rendition route beside it.
 const SHARED_VIEW_URL = /^\/api\/newspaper\/([A-Za-z0-9]+)\/view\/([A-Za-z0-9]+)(?:[?#].*)?$/;
-// A public deliverable's copy (`deliverables.server.ts`): the same file,
-// served by the deliverable's own link, with its own rendition route.
-const DELIVERABLE_VIEW_URL = /^\/api\/deliverable\/([A-Za-z0-9]+)\/view\/([A-Za-z0-9]+)(?:[?#].*)?$/;
+// A public letter's copy (`letters.server.ts`): the same file,
+// served by the letter's own link, with its own rendition route.
+const LETTER_VIEW_URL = /^\/api\/letter\/([A-Za-z0-9]+)\/view\/([A-Za-z0-9]+)(?:[?#].*)?$/;
 
 /** `/api/vault/view/<id>` becomes `/api/vault/rendition/<id>?size=<size>`.
  * Any other URL (an external image, a public-view link) is returned as
@@ -24,8 +24,8 @@ export function renditionUrl(url: string, size: MediaRenditionSize): string {
   if (m) return `/api/vault/rendition/${m[1]}?size=${size}`;
   const shared = SHARED_VIEW_URL.exec(url);
   if (shared) return `/api/newspaper/${shared[1]}/rendition/${shared[2]}?size=${size}`;
-  const deliverable = DELIVERABLE_VIEW_URL.exec(url);
-  if (deliverable) return `/api/deliverable/${deliverable[1]}/rendition/${deliverable[2]}?size=${size}`;
+  const letter = LETTER_VIEW_URL.exec(url);
+  if (letter) return `/api/letter/${letter[1]}/rendition/${letter[2]}?size=${size}`;
   return url;
 }
 
@@ -33,5 +33,5 @@ export function renditionUrl(url: string, size: MediaRenditionSize): string {
  * handing `<video poster>` the video's own URL makes the browser fetch
  * the whole clip as an image. */
 export function posterUrl(url: string): string | undefined {
-  return VIEW_URL.test(url) || SHARED_VIEW_URL.test(url) || DELIVERABLE_VIEW_URL.test(url) ? renditionUrl(url, "poster") : undefined;
+  return VIEW_URL.test(url) || SHARED_VIEW_URL.test(url) || LETTER_VIEW_URL.test(url) ? renditionUrl(url, "poster") : undefined;
 }

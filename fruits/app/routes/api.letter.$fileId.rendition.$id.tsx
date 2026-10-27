@@ -1,20 +1,20 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
-import { deliverablePageFile } from "robustness-core/data/deliverables.server";
+import { letterPageFile } from "robustness-core/data/letters.server";
 import { getPresignedViewUrl, objectExists } from "robustness-core/data/file.server";
 import { isImageRenditionSize, renditionContentType, renditionKey } from "robustness-core/data/mediaKeys";
 
 /**
- * GET /api/deliverable/:fileId/rendition/:id?size=thumb|display|poster
+ * GET /api/letter/:fileId/rendition/:id?size=thumb|display|poster
  *
- * `/api/vault/rendition/:id` for a public deliverable page: the same
+ * `/api/vault/rendition/:id` for a public letter page: the same
  * worker-made rendition (or the original while there is none yet), gated
- * by `deliverablePageFile` instead of a session. Never decodes anything;
+ * by `letterPageFile` instead of a session. Never decodes anything;
  * the web server never processes media (ADR-021). GET only.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { fileId, id } = params;
-  const file = fileId && id ? await deliverablePageFile(fileId, id) : null;
+  const file = fileId && id ? await letterPageFile(fileId, id) : null;
   if (!file) return Response.json({ error: "Not found" }, { status: 404 });
   if (!file.s3_key) return Response.json({ error: "No viewable file attached" }, { status: 400 });
 
