@@ -101,10 +101,15 @@ const BASECAMP = {
   kickoff: "Sep 2, 2026",
   targetFinish: "Jun 2027 (estimate)",
   // The first item is derived, not manually checked — see `anySeedContent`.
-  checklist: ["Upload project info / files", "Initial Guide meeting", "Contract / payment"],
+  // The second IS the Kickoff date above — same event, not two separate
+  // things to track (Gerald, 2026-10-28). Usually already set: the
+  // kickoff is picked during intake, before the project exists at all —
+  // the exception is a project an Admin/Super creates by hand, skipping
+  // that flow.
+  checklist: ["Upload project info / files", "Initial Guide meeting (the Kickoff date above)", "Contract / payment"],
 };
 
-const FINAL_GOAL = "Move-in ready";
+const DEFAULT_FINAL_GOAL = "Move-in ready";
 
 const PHASE_DEFS: PhaseDef[] = [
   {
@@ -251,6 +256,62 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** A `Stat` a Client or Guide/staff can edit inline — Target finish and
+ * Final goal both use this (Gerald, 2026-10-28); Observer/Crafter get the
+ * plain read-only `Stat` instead. */
+function EditableStat({
+  label,
+  value,
+  fieldName,
+  canEdit,
+  editing,
+  draft,
+  onDraftChange,
+  onEdit,
+  onSave,
+  onCancel,
+}: {
+  label: string;
+  value: string;
+  fieldName: string;
+  canEdit: boolean;
+  editing: boolean;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onEdit: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  if (!canEdit) return <Stat label={label} value={value} />;
+  if (editing) {
+    return (
+      <div className="pm-stat">
+        <span className="pm-stat__label">{label}</span>
+        <Cluster gap={1} align="center" wrap>
+          <Input label={label} hideLabel name={fieldName} value={draft} onChange={(e) => onDraftChange(e.target.value)} autoFocus />
+          <button type="button" className={button({ variant: "primary", size: "compact" })} disabled={!draft.trim()} onClick={onSave}>
+            Save
+          </button>
+          <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={onCancel}>
+            Cancel
+          </button>
+        </Cluster>
+      </div>
+    );
+  }
+  return (
+    <div className="pm-stat">
+      <span className="pm-stat__label">{label}</span>
+      <Cluster gap={2} align="baseline">
+        <span className="pm-stat__value">{value}</span>
+        <button type="button" className={button({ variant: "quiet" })} onClick={onEdit}>
+          Edit
+        </button>
+      </Cluster>
+    </div>
+  );
+}
+
 function CampNode({
   kind,
   label,
@@ -324,16 +385,28 @@ export function ProjectMapMockup() {
   const [draftDescription, setDraftDescription] = useState("");
   const formId = useId();
 
-  // The project's own name — editable by Client or Guide/staff (see
-  // `canEditName` below), everyone else just reads it.
+  // The project's own editable details — Client or Guide/staff (see
+  // `canEditDetails` below), everyone else just reads them. Each follows
+  // the same inline edit/save/cancel shape.
   const [projectName, setProjectName] = useState("Casa Verde Remodel");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(projectName);
 
+  const [targetFinish, setTargetFinish] = useState(BASECAMP.targetFinish);
+  const [editingTargetFinish, setEditingTargetFinish] = useState(false);
+  const [targetFinishDraft, setTargetFinishDraft] = useState(targetFinish);
+
+  const [finalGoal, setFinalGoal] = useState(DEFAULT_FINAL_GOAL);
+  const [editingFinalGoal, setEditingFinalGoal] = useState(false);
+  const [finalGoalDraft, setFinalGoalDraft] = useState(finalGoal);
+
   // Empty-stage-only state: a seeding round (per-person packets, open
   // until a Guide closes it) and the phase list a Guide/staff plans ahead
-  // of starting Basecamp. Both scoped to `stage === "empty"` only.
-  const [seedRoundOpen, setSeedRoundOpen] = useState(false);
+  // of starting Basecamp. Both scoped to `stage === "empty"` only. A new
+  // project's seeding round starts OPEN (Gerald, 2026-10-28: "they should
+  // always be open") — a Guide closing it, not opening it, is the real
+  // action here.
+  const [seedRoundOpen, setSeedRoundOpen] = useState(true);
   const [seedPackets, setSeedPackets] = useState<Record<string, SeedPacketState>>({});
   const [plannedPhaseNames, setPlannedPhaseNames] = useState<string[]>(PHASE_DEFS.map((p) => p.name));
   const [newPhaseName, setNewPhaseName] = useState("");
@@ -360,9 +433,9 @@ export function ProjectMapMockup() {
   // Guide, or an Admin/Super human regardless of their project group —
   // the only two ways to define Basecamp/Phases/Camps (Gerald, 2026-10-28).
   const canDefine = role === "Guide" || staffOverride;
-  // Client or Guide (or staff) can rename the project; Observer/Crafter
-  // can't (Gerald, 2026-10-28).
-  const canEditName = role === "Client" || canDefine;
+  // Client or Guide (or staff) can edit the project's own details (name,
+  // target finish, final goal); Observer/Crafter can't (Gerald, 2026-10-28).
+  const canEditDetails = role === "Client" || canDefine;
   // Client and Crafter each get their own seed packet before Basecamp
   // exists; Observer and Guide/staff don't (Guide/staff manage the round
   // instead — see the empty-stage view).
@@ -410,7 +483,7 @@ export function ProjectMapMockup() {
       setChecklist(BASECAMP.checklist.map(() => false));
       setExtraCamps([]);
       setSeedPackets({});
-      setSeedRoundOpen(false);
+      setSeedRoundOpen(true);
       return;
     }
     if (key === "complete") {
@@ -484,6 +557,26 @@ export function ProjectMapMockup() {
     if (!nameDraft.trim()) return;
     setProjectName(nameDraft.trim());
     setEditingName(false);
+  };
+
+  const saveTargetFinish = () => {
+    if (!targetFinishDraft.trim()) return;
+    setTargetFinish(targetFinishDraft.trim());
+    setEditingTargetFinish(false);
+  };
+  const cancelTargetFinish = () => {
+    setTargetFinishDraft(targetFinish);
+    setEditingTargetFinish(false);
+  };
+
+  const saveFinalGoal = () => {
+    if (!finalGoalDraft.trim()) return;
+    setFinalGoal(finalGoalDraft.trim());
+    setEditingFinalGoal(false);
+  };
+  const cancelFinalGoal = () => {
+    setFinalGoalDraft(finalGoal);
+    setEditingFinalGoal(false);
   };
 
   const updateMyNote = (value: string) => {
@@ -580,7 +673,7 @@ export function ProjectMapMockup() {
             ) : (
               <Cluster gap={3} align="baseline">
                 <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>{projectName}</h1>
-                {canEditName && (
+                {canEditDetails && (
                   <button type="button" className={button({ variant: "quiet" })} onClick={() => setEditingName(true)}>
                     Edit name
                   </button>
@@ -610,9 +703,31 @@ export function ProjectMapMockup() {
               </Cluster>
               <p className={textSize.sm}>{BASECAMP.overview}</p>
               <Cluster gap={8} wrap>
-                <Stat label="Kickoff" value={established ? BASECAMP.kickoff : "Not started"} />
-                <Stat label="Target finish" value={BASECAMP.targetFinish} />
-                <Stat label="Final goal" value={FINAL_GOAL} />
+                <Stat label="Kickoff (= Initial Guide meeting below)" value={established ? BASECAMP.kickoff : "Not started"} />
+                <EditableStat
+                  label="Target finish"
+                  value={targetFinish}
+                  fieldName={`${formId}-target-finish`}
+                  canEdit={canEditDetails}
+                  editing={editingTargetFinish}
+                  draft={targetFinishDraft}
+                  onDraftChange={setTargetFinishDraft}
+                  onEdit={() => setEditingTargetFinish(true)}
+                  onSave={saveTargetFinish}
+                  onCancel={cancelTargetFinish}
+                />
+                <EditableStat
+                  label="Final goal"
+                  value={finalGoal}
+                  fieldName={`${formId}-final-goal`}
+                  canEdit={canEditDetails}
+                  editing={editingFinalGoal}
+                  draft={finalGoalDraft}
+                  onDraftChange={setFinalGoalDraft}
+                  onEdit={() => setEditingFinalGoal(true)}
+                  onSave={saveFinalGoal}
+                  onCancel={cancelFinalGoal}
+                />
               </Cluster>
               {stage === "empty" ? (
                 <Stack gap={2}>
@@ -706,14 +821,10 @@ export function ProjectMapMockup() {
                           </ul>
                         )}
                       </>
-                    ) : myPacket.note || myPacket.files.length > 0 ? (
+                    ) : (
                       <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
                         Seed round closed — your packet is read-only now. It's the start of
                         GraphLog's process from here.
-                      </p>
-                    ) : (
-                      <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                        No seeding round open yet — check back once a Guide starts one.
                       </p>
                     )}
                   </Stack>
@@ -874,7 +985,7 @@ export function ProjectMapMockup() {
                               </Fragment>
                             );
                           })}
-                          <CampNode kind={stage === "complete" ? "done" : "final"} label={FINAL_GOAL} />
+                          <CampNode kind={stage === "complete" ? "done" : "final"} label={finalGoal} />
                         </div>
                       </div>
                     </Surface>
