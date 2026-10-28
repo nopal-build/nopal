@@ -56,6 +56,38 @@ export function briefJobLine(job: NonNullable<LetterBriefForPage["job"]>, now: n
   return "";
 }
 
+/** The brief is its first half; Reference is there to look things up in
+ * while writing, and nobody has to read it (Austin, 2026-10-28: the
+ * first production brief's Reference ran to 2,100 words). Split on the
+ * `# Reference` heading the skill names. Pure. */
+export function splitBriefHalves(content: string): { first: string; reference: string | null } {
+  const at = content.search(/^#\s+Reference\s*$/m);
+  if (at === -1) return { first: content, reference: null };
+  const first = content.slice(0, at).replace(/\n---\s*$/, "").trimEnd();
+  const reference = content.slice(at).replace(/^#\s+Reference\s*$/m, "").trim();
+  return { first, reference: reference || null };
+}
+
+/** Reference, folded: closed until wanted. */
+function BriefReference({ markdown }: { markdown: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div data-brief-reference data-open={open ? "true" : "false"}>
+      <button type="button" className={`${textSize.sm} ${sprinkles({ fontWeight: "semibold" })}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "inherit" }}>
+        Reference {open ? "▾" : "▸"}
+      </button>
+      <span className={textSize.xs} style={{ marginLeft: 8, color: semanticColors.textSubtle }}>
+        For looking things up while you write. Nobody has to read it.
+      </span>
+      {open && (
+        <div className="ox-plain" data-brief-reference-body style={{ marginTop: 8 }}>
+          <OxRenderer markdown={markdown} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function LetterBrief({
   fileId,
   initial,
@@ -126,6 +158,7 @@ export function LetterBrief({
   };
 
   const failed = state.job?.state === "failed" ? state.job.error : null;
+  const halves = state.brief ? splitBriefHalves(state.brief.content) : { first: "", reference: null };
   const button_ = (label: string) => (
     <button
       type="button"
@@ -183,8 +216,11 @@ export function LetterBrief({
             </p>
           )}
           <div className="ox-plain" data-brief-body>
-            <OxRenderer markdown={state.brief.content} />
+            <OxRenderer markdown={halves.first} />
           </div>
+          {halves.reference && (
+            <BriefReference markdown={halves.reference} />
+          )}
         </Stack>
       )}
     </section>

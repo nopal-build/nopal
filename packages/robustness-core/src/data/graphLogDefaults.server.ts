@@ -745,13 +745,9 @@ A guide's notes on the project, including what they said while reading an earlie
 
 # How you write
 
-Three tools, and nothing outside them: no planning, no preamble, no summary.
+One tool, and nothing outside it: no planning, no preamble, no summary. \`write_brief\` takes the whole brief as one markdown document: the first half in the shape's order, then \`---\`, \`# Reference\`, and the Reference half. Write it whole, as one descent; the guide reads it that way.
 
-- \`write_section\`: one call per first-half section, in the shape's order, the heading exactly as the shape names it and the one free heading named plainly. Its \`###\` pieces travel inside it. Calling it again for the same heading replaces what you wrote.
-- \`write_reference\`: once, the whole Reference half.
-- \`finish_brief\`: when every section is written.
-
-Code assembles the brief in the shape's order whatever order your calls arrive in, and holds the headings: a heading the shape doesn't name, beyond the one free heading, is refused and the list is given back.
+Code holds the headings: the shape's own, spelled as the shape spells them, and one free heading named plainly. A second free heading is named back to you; put it under one of the shape's headings or inside the free section as a \`###\` piece.
 
 # The shape
 
@@ -832,9 +828,7 @@ Ordering and grouping are your judgment; the facts in them are only what was log
 
 # Length
 
-Code holds the first half's length, section by section; Reference is not counted. You are not given the numbers; write each section as it needs to be. When a section comes back with its count, cut it, or move what you cut to Reference, and call \`write_section\` for it again. The resend is accepted as written, even if it is still over. Each section comes back at most once.
-
-\`finish_brief\` answers once with what is missing from the shape, what is named otherwise, and any citation that matches no node. Put right what you can and call it again; the second call finishes whatever stands.
+Code holds the first half's length, section by section; Reference is not counted. You are not given the numbers; write each section as it needs to be. When the brief comes back, it comes back once, with every section's count that is over, anything missing from the shape or named otherwise, and any citation that matches no node. Cut, or move what you cut to Reference, put right what you can, and call \`write_brief\` again with the whole brief. The resend is accepted as written, even if a section is still over.
 
 # Evidence
 

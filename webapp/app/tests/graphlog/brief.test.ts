@@ -1,11 +1,10 @@
 /**
  * The brief (2026-10-28): what code decides around the model's words. A
  * section over its budget comes back once with its count and the resend
- * is kept whatever its length; the shape's headings are held and the one
- * free heading is one; the brief is assembled in the shape's order
- * whatever order the calls arrive in; finish is asked once more when
- * something is missing or a citation matches no node; the trigger is a
- * guide's click and never the pipeline. The model's half is a scripted
+ * is kept whatever its length; the whole brief is one call and comes back
+ * once with every count; the shape's headings are held and the one free
+ * heading is one; the brief is assembled in the shape's order; the
+ * trigger is a guide's click and never the pipeline. The model's half is a scripted
  * provider here, as in `sow.test.ts`.
  */
 import { readFileSync } from "node:fs";
@@ -14,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   BRIEF_ABOUT_KEY,
+  BRIEF_MAX_OUTPUT_TOKENS,
   BRIEF_SECTION_BUDGETS,
   BRIEF_TOOLS,
   assembleBrief,
@@ -23,6 +23,7 @@ import {
   briefText,
   buildBriefSystemPrompt,
   emptyBriefDraft,
+  parseBriefDocument,
 } from "robustness-core/data/brief.server";
 import type { GraphLogNode } from "robustness-core/data/graphNodeIndex.server";
 import type { LlmProvider, LlmResponse, ToolCall } from "robustness-core/data/llmProvider";
@@ -68,7 +69,6 @@ describe("the shape, held by code", () => {
   it("seven first-half sections in order, one of them the free heading, The ask required", () => {
     expect(BRIEF_SECTION_BUDGETS.map((s) => s.key)).toEqual(["the ask", "the bigger picture", BRIEF_ABOUT_KEY, "where it doesn't fit", "people, timing and money", "what's been explored, and where we lean", "not logged"]);
     expect(BRIEF_SECTION_BUDGETS.filter((s) => s.required).map((s) => s.key)).toEqual(["the ask"]);
-    expect(BRIEF_TOOLS.map((t) => t.name)).toEqual(["write_section", "write_reference", "finish_brief"]);
   });
 
   it("a heading is read as the shape names it: marks, curly quotes and spacing aside", () => {
@@ -101,60 +101,84 @@ describe("the shape, held by code", () => {
   });
 });
 
-describe("one pass, section by section", () => {
-  it("sends an over-budget section back once with its count, keeps the resend whatever its length, and finishes", async () => {
+describe("one pass, the whole brief", () => {
+  const doc = (ask: string, extra = "") => `## The ask\n\n${ask}\n\n## The attic floor\n\n- floor ${REF}\n\n### The joists\n\n- joists ${REF}\n${extra}\n---\n\n# Reference\n\n## The client's questions\n\n- q ${REF}\n`;
+  const write = (markdown: string) => ({ name: "write_brief", input: { markdown } });
+
+  it("reads the document into the shape: fixed headings, the one free heading, the Reference half", () => {
+    const { draft, unknown } = parseBriefDocument(doc(`- p ${REF}`));
+    expect([...draft.sections.keys()]).toEqual(["the ask", BRIEF_ABOUT_KEY]);
+    expect(draft.sections.get(BRIEF_ABOUT_KEY)?.heading).toBe("The attic floor");
+    expect(draft.sections.get(BRIEF_ABOUT_KEY)?.markdown).toContain("### The joists");
+    expect(draft.reference).toBe(`## The client's questions\n\n- q ${REF}`);
+    expect(unknown).toEqual([]);
+  });
+
+  it("sends the whole brief back once with every count over, keeps the resend whatever its length, and writes", async () => {
     const long = `- ${words(120)} ${REF}`;
-    const provider = scripted([
-      response([section("The ask", long)]),
-      response([section("The ask", `- ${words(110)} ${REF}`), section("The attic floor", `- floor ${REF}`), { name: "write_reference", input: { markdown: "## The client's questions\n\n- q" } }]),
-      response([finish]),
-      response([finish]),
-    ]);
+    const provider = scripted([response([write(doc(long))]), response([write(doc(`- ${words(110)} ${REF}`))])]);
     const result = await briefText({ ...base, provider });
-    expect(provider.seen[1][0]).toMatch(/^Written for now, but "The ask" is 120 words against a budget of 90/);
-    // `seen[n]` is every tool result in the conversation at turn n; the resend's is the next one.
-    expect(provider.seen[2][1]).toBe('Written: "The ask".');
+    expect(provider.seen[1][0]).toMatch(/^Not written yet\. The brief as sent:\n- "The ask" is 120 words against a budget of 90/);
+    expect(provider.seen[1][0]).toMatch(/call write_brief again with the whole brief; the resend is accepted as written/);
     expect(result.bounced).toEqual(["The ask"]);
     expect(result.content).toContain(`- ${words(110)}`);
     expect(result.content.startsWith("## The ask\n")).toBe(true);
-    expect(result.content).toContain("## The attic floor");
-    expect(result.content).toContain("# Reference");
-    // Finish was asked once more (optional sections missing), then stood.
-    expect(provider.seen[3].at(-1)).toMatch(/^Not finished yet:/);
+    expect(result.content).toContain("## The attic floor\n\n- floor");
+    expect(result.content).toContain("---\n\n# Reference\n\n## The client's questions");
     expect(result.incomplete).toEqual([]);
     expect(result.unmatched).toEqual([]);
-    expect(result.turns).toBe(4);
+    expect(result.turns).toBe(2);
   });
 
-  it("refuses a second free heading and names the shape", async () => {
-    const provider = scripted([
-      response([section("The ask", `- p ${REF}`), section("The attic floor", `- a ${REF}`), section("The roof", `- r ${REF}`)]),
-      response([finish]),
-      response([finish]),
-    ]);
+  it("a brief inside every budget is written on the first call", async () => {
+    const provider = scripted([response([write(doc(`- p ${REF}`))])]);
     const result = await briefText({ ...base, provider });
-    expect(provider.seen[1][2]).toMatch(/^Not written: the shape has one free heading, and it is already "The attic floor"/);
-    expect(result.content).not.toContain("## The roof");
+    expect(provider.seen.length).toBe(1);
+    expect(result.turns).toBe(1);
+    expect(result.bounced).toEqual([]);
   });
 
-  it("a brief that ends without finish keeps what stands and says it was not finished; The ask missing is a refusal that stands after the second finish", async () => {
-    const ended = await briefText({ ...base, provider: scripted([response([section("The bigger picture", `- b ${REF}`)]), response([], "end_turn")]) });
-    expect(ended.incomplete).toEqual(['"The ask" is not written, and the brief opens with it', "the model ended without calling finish_brief"]);
-    expect(ended.content).toContain("## The bigger picture");
-
-    const twice = await briefText({ ...base, provider: scripted([response([section("The bigger picture", `- b ${REF}`)]), response([finish]), response([finish])]) });
-    expect(twice.incomplete).toEqual(['"The ask" is not written, and the brief opens with it']);
-  });
-
-  it("a cut-off turn keeps the calls it finished and asks the model to go on", async () => {
-    const provider = scripted([
-      response([section("The ask", `- p ${REF}`), section("The bigger picture", `- half`)], "max_tokens"),
-      response([finish]),
-      response([finish]),
-    ]);
+  it("a second free heading is named back and kept after the first; a citation matching no node and a missing The ask are named too", async () => {
+    const bad = `## The bigger picture\n\n- b :ref{name="Nobody" datetime="2026-01-01T12:00:00Z" location="/vault?file=zzz"}\n\n## The attic floor\n\n- a ${REF}\n\n## The roof\n\n- r ${REF}\n`;
+    const provider = scripted([response([write(bad)]), response([write(bad)])]);
     const result = await briefText({ ...base, provider });
-    expect(result.content).toContain("## The ask");
-    expect(result.content).not.toContain("## The bigger picture");
+    const back = provider.seen[1][0];
+    expect(back).toMatch(/"The roof" is not a heading the shape names/);
+    expect(back).toMatch(/"The ask" is not written, and the brief opens with it/);
+    expect(back).toMatch(/a citation matches no node: :ref\{name="Nobody"/);
+    expect(result.content).toMatch(/## The attic floor[\s\S]*## The roof/);
+    expect(result.incomplete).toEqual([]);
+    expect(result.unmatched.length).toBe(1);
+  });
+
+  it("sent back once and never resent: the first version stands and the brief says so", async () => {
+    const provider = scripted([response([write(doc(`- ${words(120)} ${REF}`))]), response([], "end_turn")]);
+    const result = await briefText({ ...base, provider });
+    expect(result.content).toContain(words(120));
+    expect(result.incomplete).toEqual(["the brief was sent back once and not sent again; the first version stands"]);
+  });
+
+  it("a cut-off response loses the brief and is asked once more, whole; a second cut is reported", async () => {
+    const once = scripted([response([], "max_tokens"), response([write(doc(`- p ${REF}`))])]);
+    const ok = await briefText({ ...base, provider: once });
+    expect(ok.content).toContain("## The ask");
+    expect(ok.incomplete).toEqual([]);
+    const twice = scripted([response([], "max_tokens"), response([], "max_tokens")]);
+    const lost = await briefText({ ...base, provider: twice });
+    expect(lost.incomplete).toEqual(["the brief was cut off twice before it finished"]);
+  });
+
+  it("asks the provider for a whole brief's worth of output", async () => {
+    let seenMax: number | undefined;
+    const provider: LlmProvider = {
+      async complete(input) {
+        seenMax = input.maxTokens;
+        return response([write(doc(`- p ${REF}`))]);
+      },
+    };
+    await briefText({ ...base, provider });
+    expect(seenMax).toBe(BRIEF_MAX_OUTPUT_TOKENS);
+    expect(BRIEF_TOOLS.map((t) => t.name)).toEqual(["write_brief"]);
   });
 
   it("hands the model the letter, the people, the map and every node verbatim with its citation", () => {

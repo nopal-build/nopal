@@ -29,7 +29,7 @@ import { WebsitePageContent } from "stamps/WebsitePageContent";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { LettersView, NewLetterModal, pdfLine } from "../components/LettersView";
-import { LetterBrief, isLetterOnlyItsHeading } from "../components/LetterBrief";
+import { LetterBrief, isLetterOnlyItsHeading, splitBriefHalves } from "../components/LetterBrief";
 import { LettersTile } from "../components/LettersTile";
 import { preparingPage } from "robustness-core/data/letterPdf.server";
 
@@ -312,6 +312,7 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     expect(ready).toContain("The problem.");
     expect(ready).toContain("data-brief-body");
     expect(ready).toContain('data-brief-state="ready"');
+    expect(ready).not.toContain("data-brief-reference");
 
     const failed = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: { state: "failed", error: "the graph holds no nodes", startedAt: null, waitingOnAnotherRun: false } }} hasPurpose openByDefault />);
     expect(failed).toMatch(/The brief didn(&#x27;|')t get written: the graph holds no nodes/);
@@ -319,6 +320,22 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     const running = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: { state: "active", error: null, startedAt: null, waitingOnAnotherRun: false } }} hasPurpose openByDefault />);
     expect(running).toContain("Writing the brief…");
     expect(running).not.toContain("Write the brief");
+  });
+
+  it("Reference is folded under its own twirl, closed, and the first half reads as the brief", () => {
+    const content = `## The ask\n\n- The problem.\n\n---\n\n# Reference\n\n## The client's questions\n\n- A question nobody has to read.\n`;
+    expect(splitBriefHalves(content)).toEqual({ first: "## The ask\n\n- The problem.", reference: "## The client's questions\n\n- A question nobody has to read." });
+    expect(splitBriefHalves("## The ask\n\n- p\n")).toEqual({ first: "## The ask\n\n- p\n", reference: null });
+    const html = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: { content, writtenAt: "2026-10-28T10:00:00Z", byName: "Austin", incomplete: [] }, job: null }} hasPurpose openByDefault />);
+    expect(html).toContain("The problem.");
+    expect(html).toContain('data-brief-reference');
+    expect(html).toContain("Nobody has to read it.");
+    expect(html).not.toContain("A question nobody has to read.");
+  });
+
+  it("the New letter form asks for a sentence or three", () => {
+    const html = renderToStaticMarkup(<NewLetterModal open busy={false} error={null} onClose={() => {}} onStart={() => {}} />);
+    expect(html).toContain("A sentence or three, in your words");
   });
 
   it("without a purpose line the button is disabled and says why", () => {
