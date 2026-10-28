@@ -100,6 +100,15 @@
   margin: 0;
 }
 
+/* A real in-product notice (not a mockup annotation, so deliberately NOT
+   the red/hand treatment) -- carries from "Start Project" through an
+   established project until marked paid. */
+.pm-payment-banner {
+  padding: 12px 16px;
+  border-color: var(--yellow);
+  background: var(--yellow-light);
+}
+
 .pm-empty {
   padding: 36px 20px;
   border-style: dashed;

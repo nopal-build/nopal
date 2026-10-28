@@ -24,7 +24,7 @@
 // Admin/Super override checkbox, since those are two independent axes in
 // the real permission system (project-level group vs. account-level
 // staff tier). Only a Guide (or staff override) can touch the
-// Basecamp checklist/"Start a Basecamp" button or "+ Define a future
+// Basecamp checklist/"Start Project" button or "+ Define a future
 // camp" — everyone else sees the same thing read-only. Deliberately kept
 // SEPARATE from the lifecycle scrubber: the scrubber is a reviewer-only
 // convenience for exploring every state regardless of role, not a
@@ -100,13 +100,18 @@ const BASECAMP = {
     "This is the one spot everyone can always return to if a camp stalls — established once the project's info is in, the team has met, and the contract is signed.",
   kickoff: "Sep 2, 2026",
   targetFinish: "Jun 2027 (estimate)",
-  // The first item is derived, not manually checked — see `anySeedContent`.
-  // The second IS the Kickoff date above — same event, not two separate
-  // things to track (Gerald, 2026-10-28). Usually already set: the
-  // kickoff is picked during intake, before the project exists at all —
-  // the exception is a project an Admin/Super creates by hand, skipping
-  // that flow.
-  checklist: ["Upload project info / files", "Initial Guide meeting (the Kickoff date above)", "Contract / payment"],
+  // Items 1 and 4 are derived, not manually checked — see `anySeedContent`
+  // and `firstCamp` respectively. The second IS the Kickoff date above —
+  // same event, not two separate things to track (Gerald, 2026-10-28).
+  // Usually already set: the kickoff is picked during intake, before the
+  // project exists at all — the exception is a project an Admin/Super
+  // creates by hand, skipping that flow.
+  checklist: [
+    "Upload project info / files",
+    "Initial Guide meeting (the Kickoff date above)",
+    "Contract / payment",
+    "First camp established",
+  ],
 };
 
 const DEFAULT_FINAL_GOAL = "Move-in ready";
@@ -200,7 +205,7 @@ function isRole(x: unknown): x is Role {
 type SeedFile = { name: string; sown: boolean };
 type SeedPacketState = { note: string; files: SeedFile[] };
 const EMPTY_PACKET: SeedPacketState = { note: "", files: [] };
-const SEEDING_ROLES: Role[] = ["Client", "Crafter"];
+const SEEDING_ROLES: Role[] = ["Client", "Crafter", "Guide"];
 
 const VIEWER_STORAGE_KEY = "nopal:project-map-mockup:viewer";
 type ViewerPref = { role: Role; staff: boolean };
@@ -411,6 +416,24 @@ export function ProjectMapMockup() {
   const [plannedPhaseNames, setPlannedPhaseNames] = useState<string[]>(PHASE_DEFS.map((p) => p.name));
   const [newPhaseName, setNewPhaseName] = useState("");
 
+  // The Guide-defined first camp (Gerald, 2026-10-28) — the actual camp
+  // the team works toward first, once the project starts. Counts toward
+  // the Basecamp checklist's "First camp established" item; prepended
+  // onto the real camps array below as its own tiny "Getting Started"
+  // phase, ahead of Discovery.
+  const [firstCamp, setFirstCamp] = useState<{ name: string; description: string } | null>(null);
+  const [editingFirstCamp, setEditingFirstCamp] = useState(false);
+  const [firstCampNameDraft, setFirstCampNameDraft] = useState("");
+  const [firstCampDescriptionDraft, setFirstCampDescriptionDraft] = useState("");
+
+  // Starting the project optionally attaches billing — an email (mocked)
+  // goes to the client for payment, and a pending-payment notice carries
+  // into the started project regardless of stage until marked paid.
+  const [billingEnabled, setBillingEnabled] = useState(false);
+  const [billingAmount, setBillingAmount] = useState("");
+  const [billingEmail, setBillingEmail] = useState("");
+  const [paymentPending, setPaymentPending] = useState(false);
+
   // "Viewing as" — defaults to Guide (every control visible) until the
   // client-only localStorage read below resolves, same hydration pattern
   // as `useSchemePref`: a brief default render is fine, a server/client
@@ -436,20 +459,25 @@ export function ProjectMapMockup() {
   // Client or Guide (or staff) can edit the project's own details (name,
   // target finish, final goal); Observer/Crafter can't (Gerald, 2026-10-28).
   const canEditDetails = role === "Client" || canDefine;
-  // Client and Crafter each get their own seed packet before Basecamp
-  // exists; Observer and Guide/staff don't (Guide/staff manage the round
-  // instead — see the empty-stage view).
-  const participatesInSeeding = role === "Client" || role === "Crafter";
+  // Client, Crafter, and Guide each get their own seed packet before
+  // Basecamp exists (Gerald, 2026-10-28: "seed round should show them the
+  // editor+file uploader too"); Observer doesn't. Guide ALSO manages the
+  // round (open/sow/end) separately — see the empty-stage view.
+  const participatesInSeeding = role === "Client" || role === "Crafter" || role === "Guide";
   const myPacket: SeedPacketState = seedPackets[role] ?? EMPTY_PACKET;
   const anySeedContent = Object.values(seedPackets).some((p) => p.note.trim() !== "" || p.files.length > 0);
   const waitingSeedCount = Object.values(seedPackets).reduce((n, p) => n + p.files.filter((f) => !f.sown).length, 0);
   const totalSeedFiles = Object.values(seedPackets).reduce((n, p) => n + p.files.length, 0);
 
-  const camps: Camp[] = [...BASE_CAMPS, ...extraCamps];
+  // The Guide-defined first camp, prepended ahead of Discovery once set.
+  const firstCampEntry: Camp | null = firstCamp
+    ? { id: "first-camp", phaseId: "kickoff", name: firstCamp.name, description: firstCamp.description, stepLabels: [] }
+    : null;
+  const camps: Camp[] = [...(firstCampEntry ? [firstCampEntry] : []), ...BASE_CAMPS, ...extraCamps];
   const established = stage === "active" || stage === "complete";
-  // The first checklist item is derived from the seed packets, not a
-  // manual checkbox — see the BASECAMP comment above.
-  const effectiveChecklist = checklist.map((c, i) => (i === 0 ? anySeedContent : c));
+  // Checklist items 1 and 4 are derived, not manual checkboxes — see the
+  // BASECAMP comment above.
+  const effectiveChecklist = checklist.map((c, i) => (i === 0 ? anySeedContent : i === 3 ? firstCamp !== null : c));
   const allChecked = effectiveChecklist.every(Boolean);
 
   function statusFor(index: number): CampStatus {
@@ -469,10 +497,27 @@ export function ProjectMapMockup() {
       return next;
     });
 
-  const startBasecamp = () => {
+  const startEditFirstCamp = () => {
+    setFirstCampNameDraft(firstCamp?.name ?? "");
+    setFirstCampDescriptionDraft(firstCamp?.description ?? "");
+    setEditingFirstCamp(true);
+  };
+  const saveFirstCamp = () => {
+    if (!firstCampNameDraft.trim()) return;
+    setFirstCamp({ name: firstCampNameDraft.trim(), description: firstCampDescriptionDraft.trim() || "(no description yet)" });
+    setEditingFirstCamp(false);
+  };
+  const cancelFirstCamp = () => setEditingFirstCamp(false);
+
+  // Replaces the old "Start a Basecamp" button (Gerald, 2026-10-28: it
+  // "doesn't make sense" as its own step) — one "Start Project" action,
+  // gated on the whole checklist including the first camp, that both
+  // establishes Basecamp and optionally kicks off billing.
+  const startProject = () => {
     if (!allChecked) return;
     setStage("active");
     setCursor(0);
+    if (billingEnabled) setPaymentPending(true);
   };
 
   const jumpTo = (key: (typeof MILESTONES)[number]["key"]) => {
@@ -484,6 +529,10 @@ export function ProjectMapMockup() {
       setExtraCamps([]);
       setSeedPackets({});
       setSeedRoundOpen(true);
+      setFirstCamp(null);
+      setEditingFirstCamp(false);
+      setBillingEnabled(false);
+      setPaymentPending(false);
       return;
     }
     if (key === "complete") {
@@ -517,8 +566,8 @@ export function ProjectMapMockup() {
   const advance = () => {
     if (stage === "empty") {
       // Deliberately bypasses the Basecamp checklist gate — this is the
-      // demo scrubber's "time machine," not the real "Start a Basecamp"
-      // button above, which DOES require every item checked. See Finding
+      // demo scrubber's "time machine," not the real "Start Project"
+      // button below, which DOES require every item checked. See Finding
       // 2 in the sidebar.
       setStage("active");
       setCursor(0);
@@ -623,7 +672,9 @@ export function ProjectMapMockup() {
 
   // --- Phase groups for the trail ---
   const indexed = camps.map((camp, index) => ({ camp, index }));
-  const phaseGroups = PHASE_DEFS.map((p) => ({ id: p.id, name: p.name, items: indexed.filter((x) => x.camp.phaseId === p.id) }));
+  const phaseGroups: { id: string; name: string; items: { camp: Camp; index: number }[] }[] = [];
+  if (firstCampEntry) phaseGroups.push({ id: "kickoff", name: "Getting Started", items: indexed.filter((x) => x.camp.phaseId === "kickoff") });
+  phaseGroups.push(...PHASE_DEFS.map((p) => ({ id: p.id, name: p.name, items: indexed.filter((x) => x.camp.phaseId === p.id) })));
   if (extraCamps.length > 0) phaseGroups.push({ id: "extra", name: "Added camps", items: indexed.filter((x) => x.camp.phaseId === "extra") });
 
   const phaseStatusOf = (items: { index: number }[]): "done" | "current" | "upcoming" => {
@@ -644,6 +695,22 @@ export function ProjectMapMockup() {
       <div className="pm-page">
         {/* ================= LEFT: the simulated product, nothing else ================= */}
         <div className="pm-page__main">
+          {paymentPending && (
+            <Surface className="pm-payment-banner">
+              <Cluster gap={3} align="center" style={{ justifyContent: "space-between" }} wrap>
+                <Cluster gap={2} align="center">
+                  <Badge variant="warning">Payment pending</Badge>
+                  <span className={textSize.sm}>
+                    {billingAmount ? `${billingAmount} due` : "Payment due"} before work continues.
+                  </span>
+                </Cluster>
+                <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={() => setPaymentPending(false)}>
+                  {canDefine ? "Mark as paid (mock)" : "Pay now (mock)"}
+                </button>
+              </Cluster>
+            </Surface>
+          )}
+
           <header>
             <p className="pm-eyebrow">PROJECT · STANDARD</p>
             {editingName ? (
@@ -736,11 +803,12 @@ export function ProjectMapMockup() {
                   </p>
                   <Stack gap={2}>
                     {BASECAMP.checklist.map((item, i) => {
-                      const derived = i === 0;
+                      const derivedHint = i === 0 ? " (from seed packets below)" : i === 3 ? " (see \u201cDefine the first camp\u201d below)" : "";
+                      const derived = i === 0 || i === 3;
                       return (
                         <Checkbox
                           key={item}
-                          label={derived ? `${item} (from seed packets below)` : item}
+                          label={`${item}${derivedHint}`}
                           checked={effectiveChecklist[i]}
                           disabled={derived || !canDefine}
                           onChange={(v) => setChecklist((cs) => cs.map((c, ci) => (ci === i ? v : c)))}
@@ -748,15 +816,9 @@ export function ProjectMapMockup() {
                       );
                     })}
                   </Stack>
-                  {canDefine ? (
-                    <Cluster>
-                      <button type="button" className={button({ variant: "primary" })} disabled={!allChecked} onClick={startBasecamp}>
-                        Start a Basecamp
-                      </button>
-                    </Cluster>
-                  ) : (
+                  {!canDefine && (
                     <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                      Only a Guide (or Admin/Super) can check these off and start Basecamp.{" "}
+                      Only a Guide (or Admin/Super) can check these off and start the project.{" "}
                       {role} can see progress here, not change it.
                     </p>
                   )}
@@ -834,6 +896,63 @@ export function ProjectMapMockup() {
               {canDefine && (
                 <Surface className={sprinkles({ p: 4 })}>
                   <Stack gap={3}>
+                    <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Define the first camp</p>
+                    <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                      The camp the team actually works toward first, once the project starts
+                      — counts toward "First camp established" above.
+                    </p>
+                    {firstCamp && !editingFirstCamp ? (
+                      <Stack gap={2}>
+                        <p className={textSize.sm}>
+                          <strong>{firstCamp.name}</strong> — {firstCamp.description}
+                        </p>
+                        <Cluster>
+                          <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={startEditFirstCamp}>
+                            Edit
+                          </button>
+                        </Cluster>
+                      </Stack>
+                    ) : (
+                      <Stack gap={2}>
+                        <Input
+                          label="Camp name"
+                          name={`${formId}-first-camp-name`}
+                          value={firstCampNameDraft}
+                          onChange={(e) => setFirstCampNameDraft(e.target.value)}
+                          placeholder="e.g. Kickoff Call"
+                        />
+                        <Input
+                          label="Description"
+                          name={`${formId}-first-camp-description`}
+                          type="textarea"
+                          value={firstCampDescriptionDraft}
+                          onChange={(e) => setFirstCampDescriptionDraft(e.target.value)}
+                          placeholder="What this first push covers"
+                        />
+                        <Cluster gap={2}>
+                          <button
+                            type="button"
+                            className={button({ variant: "primary", size: "compact" })}
+                            disabled={!firstCampNameDraft.trim()}
+                            onClick={saveFirstCamp}
+                          >
+                            Establish first camp
+                          </button>
+                          {firstCamp && (
+                            <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={cancelFirstCamp}>
+                              Cancel
+                            </button>
+                          )}
+                        </Cluster>
+                      </Stack>
+                    )}
+                  </Stack>
+                </Surface>
+              )}
+
+              {canDefine && (
+                <Surface className={sprinkles({ p: 4 })}>
+                  <Stack gap={3}>
                     <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Define phases</p>
                     <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
                       Defaults to the usual Standard-project pipeline — add or remove to fit
@@ -879,8 +998,8 @@ export function ProjectMapMockup() {
                     {!seedRoundOpen ? (
                       <>
                         <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                          Open a round so Client/Crafter can add what they already have before
-                          Basecamp starts.
+                          Open a round so everyone (you included) can add what they already have
+                          before the project starts.
                         </p>
                         <Cluster>
                           <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={() => setSeedRoundOpen(true)}>
@@ -921,6 +1040,55 @@ export function ProjectMapMockup() {
                         )}
                       </>
                     )}
+                  </Stack>
+                </Surface>
+              )}
+
+              {canDefine && (
+                <Surface className={sprinkles({ p: 4 })}>
+                  <Stack gap={3}>
+                    <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Start the project</p>
+                    {!allChecked && (
+                      <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                        Everything in the checklist above needs to be checked off first —
+                        including the first camp.
+                      </p>
+                    )}
+                    <Checkbox
+                      label="Require payment before work begins"
+                      checked={billingEnabled}
+                      onChange={setBillingEnabled}
+                    />
+                    {billingEnabled && (
+                      <Cluster gap={2} wrap>
+                        <Input
+                          label="Amount"
+                          name={`${formId}-billing-amount`}
+                          value={billingAmount}
+                          onChange={(e) => setBillingAmount(e.target.value)}
+                          placeholder="e.g. $2,500 deposit"
+                        />
+                        <Input
+                          label="Client email (optional)"
+                          name={`${formId}-billing-email`}
+                          value={billingEmail}
+                          onChange={(e) => setBillingEmail(e.target.value)}
+                          placeholder="client@example.com"
+                        />
+                      </Cluster>
+                    )}
+                    {billingEnabled && (
+                      <p className={textSize.sm} style={{ color: semanticColors.textSubtle, fontStyle: "italic" }}>
+                        Mockup: starting the project with this checked would email the client a
+                        payment link and show a pending-payment notice at the top of the project
+                        — carrying over even after work starts, until marked paid.
+                      </p>
+                    )}
+                    <Cluster>
+                      <button type="button" className={button({ variant: "primary" })} disabled={!allChecked} onClick={startProject}>
+                        Start Project
+                      </button>
+                    </Cluster>
                   </Stack>
                 </Surface>
               )}
@@ -1198,7 +1366,7 @@ export function ProjectMapMockup() {
           </Callout>
 
           <Callout kind="finding" n={2} summary="The real gate (checklist) and the demo-only scrubber need to stay visibly distinct.">
-            The checklist-gated "Start a Basecamp" button is the real workflow
+            The checklist-gated "Start Project" button is the real workflow
             (disabled until every item is checked). The "Advance" scrubber and milestone
             chips deliberately bypass that gate so this mockup stays navigable — worth
             deciding whether a real "jump ahead" shortcut should ever exist for staff, or
