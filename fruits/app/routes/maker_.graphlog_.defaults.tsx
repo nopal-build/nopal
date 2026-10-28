@@ -67,7 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 }
 
-const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice", "sow"]);
+const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice", "sow", "brief"]);
 
 /**
  * Saves or resets one stage's default-skill override -- see
@@ -177,6 +177,11 @@ const STAGE_META: Record<GraphLogDefaultStage, { title: string; file: string; bl
     title: "Sow",
     file: "skills/SOW.md",
     blurb: "Seeded into a brand new project's SOW.md: how one file from someone's seed packet becomes seed, the day it was said, the person's words exactly, chatter and AI framing left out, plain facts under Noted. Read by the sow stage alone, when a guide presses Sow. A project with no SOW.md uses this default.",
+  },
+  brief: {
+    title: "Brief",
+    file: "skills/BRIEF.md",
+    blurb: "Seeded into a brand new project's BRIEF.md: the brief a guide reads before writing one letter, from the whole graph, in a descent from the problem to the pieces, ending on what has been explored and who leaned which way. Read by the brief stage alone, when a guide starts a letter or asks again. Length is counted by code, never stated here. A project with no BRIEF.md uses this default.",
   },
 };
 
@@ -365,6 +370,11 @@ export default function FruitsMakerGraphLogDefaults() {
             stage="sow"
             initialContent={defaultSkills.sow.content}
             overridden={defaultSkills.sow.overridden}
+          />
+          <DefaultSkillEditor
+            stage="brief"
+            initialContent={defaultSkills.brief.content}
+            overridden={defaultSkills.brief.overridden}
           />
         </div>
       </div>

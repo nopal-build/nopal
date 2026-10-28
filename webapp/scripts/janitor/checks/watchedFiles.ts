@@ -20,6 +20,7 @@ export const RUNTIME_SKILL_FILE_NAMES: Record<string, string> = {
   DEFAULT_PROJECT_VIEW_SKILL: "EFFORTS.md",
   DEFAULT_VOICE_SKILL: "VOICE.md",
   DEFAULT_SOW_SKILL: "SOW.md",
+  DEFAULT_BRIEF_SKILL: "BRIEF.md",
 };
 
 /**

@@ -29,6 +29,7 @@ import { WebsitePageContent } from "stamps/WebsitePageContent";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { LettersView, NewLetterModal, pdfLine } from "../components/LettersView";
+import { LetterBrief, isLetterOnlyItsHeading } from "../components/LetterBrief";
 import { LettersTile } from "../components/LettersTile";
 import { preparingPage } from "robustness-core/data/letterPdf.server";
 
@@ -281,6 +282,63 @@ describe("the purpose line (2026-10-28)", () => {
     { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", pdf: null },
     { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, pdf: null },
   ];
+});
+
+describe("the brief on the letter's page (2026-10-28)", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+
+  it("the New letter form says that starting the letter runs the model", () => {
+    const html = renderToStaticMarkup(<NewLetterModal open busy={false} error={null} onClose={() => {}} onStart={() => {}} />);
+    expect(html).toContain("Starting the letter writes its brief");
+    expect(html).toContain("costs a run");
+  });
+
+  it("no brief yet: the first line and the button; a brief: rendered, with its citation marker and Write it again; failed: the reason", () => {
+    const none = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: null }} hasPurpose openByDefault />);
+    expect(none).toContain("This letter has no brief yet.");
+    expect(none).toContain("Write the brief");
+    expect(none).toContain('data-brief-state="none"');
+
+    const ready = renderToStaticMarkup(
+      <LetterBrief
+        fileId="l1"
+        initial={{ brief: { content: '## The ask\n\n- The problem. :ref{name="Susan" datetime="2026-08-05T12:00:00Z" location="/vault?file=abc"}\n', writtenAt: "2026-10-28T10:00:00Z", byName: "Austin", incomplete: [] }, job: null }}
+        hasPurpose
+        openByDefault
+      />,
+    );
+    expect(ready).toContain("Write it again");
+    expect(ready).toContain("Written Oct 28, 2026 by Austin");
+    expect(ready).toContain("The problem.");
+    expect(ready).toContain("data-brief-body");
+    expect(ready).toContain('data-brief-state="ready"');
+
+    const failed = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: { state: "failed", error: "the graph holds no nodes", startedAt: null, waitingOnAnotherRun: false } }} hasPurpose openByDefault />);
+    expect(failed).toMatch(/The brief didn(&#x27;|')t get written: the graph holds no nodes/);
+
+    const running = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: { state: "active", error: null, startedAt: null, waitingOnAnotherRun: false } }} hasPurpose openByDefault />);
+    expect(running).toContain("Writing the brief…");
+    expect(running).not.toContain("Write the brief");
+  });
+
+  it("without a purpose line the button is disabled and says why", () => {
+    const html = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: null }} hasPurpose={false} openByDefault />);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*data-brief-button|<button[^>]*data-brief-button[^>]*disabled=""/);
+    expect(html).toContain("Say what it is for first");
+  });
+
+  it("the page hands the brief to a guide only, and the public page and the tab carry none of it", () => {
+    const vault = readFileSync(path.join(here, "../routes/vault.tsx"), "utf8");
+    expect(vault).toMatch(/if \(canManageLetters\(user, roleForLetter\)\) \{\s*letterBrief = /);
+    expect(vault).toContain("{letterBrief && (");
+    expect(readFileSync(path.join(here, "../routes/public.letter.$fileId.tsx"), "utf8")).not.toMatch(/brief/i);
+    expect(readFileSync(path.join(here, "../../../packages/robustness-core/src/data/letters.server.ts"), "utf8")).not.toMatch(/letter_briefs|brief\.server/);
+  });
+
+  it("a letter that is only its heading opens the brief by itself", () => {
+    expect(isLetterOnlyItsHeading("---\ntitle: Attic\n---\n\n# Attic\n\n")).toBe(true);
+    expect(isLetterOnlyItsHeading("# Attic\n\nDear Susan,")).toBe(false);
+  });
 });
 
 describe("read only", () => {

@@ -26,6 +26,7 @@ import { runGraphStructure } from "robustness-core/data/graphStructure.server";
 import { coverageFromJobResult, readmeChangedFromJobResult, runGraphProjectView, syncReadmeIncompleteBanner } from "robustness-core/data/graphProjectView.server";
 import { runGraphLogPipeline } from "robustness-core/data/graphLogAgent.server";
 import { runSow } from "robustness-core/data/sow.server";
+import { runBrief } from "robustness-core/data/brief.server";
 import {
   resetProjectView,
   resetGraph,
@@ -115,6 +116,13 @@ async function runGraphLogJob(
     }
     case "sow": {
       const result = await perf.time("sow", "fn", "runSow", null, () => runSow(projectFolder, job.data.actingHumanId, { log: onProgress, runId: perf.runId }));
+      if (!result.ok) throw new Error(result.error);
+      return result;
+    }
+    case "brief": {
+      const fileId = job.data.fileId;
+      if (!fileId) throw new Error("A brief job names the letter it is for");
+      const result = await perf.time("brief", "fn", "runBrief", null, () => runBrief(projectFolder, fileId, job.data.actingHumanId, { log: onProgress, runId: perf.runId }));
       if (!result.ok) throw new Error(result.error);
       return result;
     }

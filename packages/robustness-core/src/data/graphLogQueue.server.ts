@@ -57,6 +57,10 @@ export type GraphLogJobName =
   /** Turns the project's seed packets into seed (`sow.server.ts`). Its
    * own job, pressed by a guide: never part of `run`. */
   | "sow"
+  /** A letter's brief (`brief.server.ts`): one letter's brief from the
+   * whole graph, pressed by a guide (starting a letter, or "Write it
+   * again"). Never part of `run`. Carries `fileId`, the letter. */
+  | "brief"
   | "reset"
   | "reset-project-view"
   | "reset-graph"
@@ -65,6 +69,8 @@ export type GraphLogJobName =
 export type GraphLogJobData = {
   actingHumanId: string;
   projectFolderId: string;
+  /** The letter a `brief` job is for; absent on every other job. */
+  fileId?: string;
 };
 
 const JOB_OPTIONS = {
@@ -80,7 +86,7 @@ const JOB_OPTIONS = {
  * a person watching; everything else is background. Every job carries a
  * priority because BullMQ takes a job with none before any job with one. */
 export function graphLogJobPriority(name: GraphLogJobName): number {
-  return name === "print" || name === "sow" ? 1 : 10;
+  return name === "print" || name === "sow" || name === "brief" ? 1 : 10;
 }
 
 /** A job id that is unique without Redis's help. A job's id doubles as

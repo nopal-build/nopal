@@ -64,6 +64,8 @@ import {
   listFolderChildren,
 } from "robustness-core/data/vault.server";
 import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { canManageLetters } from "robustness-core/data/letters.server";
+import { getLetterBriefForPage, type LetterBriefForPage } from "robustness-core/data/brief.server";
 import { nameSyncedAuthors, type ListedFile } from "robustness-core/data/syncedAuthors.server";
 // Pilot route for server request-performance tracing (see the
 // `fruits-performance-monitoring` garden seed) -- the Vault loader is the
@@ -110,6 +112,7 @@ import { LayoutFlipIcon } from "stamps/LayoutFlipIcon";
 import { useStickyPaneMaxHeight } from "stamps/useStickyPaneMaxHeight";
 import OxEditor from "../components/OxEditor";
 import OxRenderer from "../components/OxRenderer";
+import { LetterBrief, isLetterOnlyItsHeading } from "../components/LetterBrief";
 import { ProjectView } from "../components/ProjectView";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
@@ -299,6 +302,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let viewerIsOwnerTierOnProject = false;
   // Runs its people (`people`, a Guide): the "People…" item goes to the Maker.
   let viewerGuidesProject = false;
+  // A letter's page, for a guide (`canManageLetters`, staff or guiding;
+  // asked for every viewer, the owner too, since `viewerGuidesProject`
+  // above is only computed when the viewer isn't the file's owner and
+  // a letter is owned by the project's creator): the brief, and the
+  // controls around it. Null on any other file, and for anyone else.
+  let letterBrief: LetterBriefForPage | null = null;
 
   if (fileParam) {
     const file = await timeRequestPerf("fn", "getFileRefById", { fileId: fileParam }, () =>
@@ -351,6 +360,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
       viewerGuidesProject = Boolean(role?.guiding);
+    }
+    if (fileFolderId && isLettersFolderType(ancestry[ancestry.length - 1]?.folder_type) && isMarkdownFile(file)) {
+      const roleForLetter = await timeRequestPerf("fn", "getProjectRoleForFolderId", { folderId: fileFolderId }, () =>
+        getProjectRoleForFolderId(fileFolderId, user._id),
+      );
+      if (canManageLetters(user, roleForLetter)) {
+        letterBrief = await timeRequestPerf("fn", "getLetterBriefForPage", { fileId: file._id }, () => getLetterBriefForPage(file._id));
+      }
     }
     const websiteAnchorForFile = findWebsiteAnchor(ancestry);
     const websitePageMetaForFile =
@@ -452,6 +469,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
     viewerGuidesProject,
+    letterBrief,
     // The nav: a Guide's Maker tab stays lit while they're in here.
     ...(await navFor(user._id, memberships)),
   };
@@ -2535,6 +2553,7 @@ export default function VaultV2Page() {
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
     viewerGuidesProject,
+    letterBrief,
   } = useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
@@ -4604,7 +4623,19 @@ export default function VaultV2Page() {
             ) : isLettersFolderType(fileFolderType) && isMarkdownFile(current.file) ? (
               // A letter (see `LetterSplitEditor` above): the
               // website page's split editor, previewing what the client's
-              // public page shows.
+              // public page shows. Above it, for a guide, the brief: the
+              // chain (purpose, brief, talk-through, outline, letter)
+              // lives on this page.
+              <>
+              {letterBrief && (
+                <LetterBrief
+                  key={`brief-${current.file._id}`}
+                  fileId={current.file._id}
+                  initial={letterBrief}
+                  hasPurpose={!!current.file.purpose?.trim()}
+                  openByDefault={isLetterOnlyItsHeading(current.file.content ?? "")}
+                />
+              )}
               <LetterSplitEditor
                 key={`${current.file._id}-${current.file.updated_at}`}
                 fileId={current.file._id}
@@ -4617,6 +4648,7 @@ export default function VaultV2Page() {
                 toolbarRight={letterToolbarRight}
                 purpose={current.file.purpose ?? null}
               />
+              </>
             ) : fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (
               // A sync-api analysis run's own `<run>.md` (see the `vault`
               // skill's "Sync types" section) -- same reasoning as the
