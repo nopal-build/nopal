@@ -407,7 +407,7 @@ export function ProjectMapMockup() {
       </div>
 
       <header>
-        <p className="pm-eyebrow">PROJECT \u00b7 STANDARD</p>
+        <p className="pm-eyebrow">PROJECT · STANDARD</p>
         <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>Casa Verde Remodel</h1>
         <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
           Demo data only — stands in for the real Project page rework this seed feeds
@@ -427,13 +427,13 @@ export function ProjectMapMockup() {
           </Cluster>
           <Cluster gap={3} align="center">
             <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={goBack}>
-              \u2190 Back
+              ← Back
             </button>
             <span className={textSize.sm} style={{ color: semanticColors.textSubtle, minWidth: 220 }}>
               {progressLabel()}
             </span>
             <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={advance}>
-              Advance \u2192
+              Advance →
             </button>
           </Cluster>
           <Cluster gap={2} wrap>
@@ -525,7 +525,7 @@ export function ProjectMapMockup() {
                 <Cluster gap={2} wrap>
                   {phaseGroups.map((p) => (
                     <span key={p.id} className="pm-phase-pill pm-phase-pill--locked">
-                      {p.name} \u00b7 {p.items.length} camps
+                      {p.name} · {p.items.length} camps
                     </span>
                   ))}
                   <span className="pm-phase-pill pm-phase-pill--locked">{FINAL_GOAL}</span>
