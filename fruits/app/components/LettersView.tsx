@@ -234,7 +234,7 @@ export function NewLetterModal({
           <Input name="name" label="Title" required autoFocus />
           <Input type="textarea" name="purpose" label="What is this letter for?" required />
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
-            One sentence, in your words. It goes into the project's record as yours, today.
+            A sentence or three, in your words: what the letter is about, what it has to settle, and for whom. It goes into the project's record as yours, today, and the brief is written from it.
           </p>
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-run-note>
             {BRIEF_RUN_NOTE}

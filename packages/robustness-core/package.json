@@ -35,6 +35,7 @@
     "./data/newspaperShare.server": "./src/data/newspaperShare.server.ts",
     "./data/letters.server": "./src/data/letters.server.ts",
     "./data/brief.server": "./src/data/brief.server.ts",
+    "./data/outline.server": "./src/data/outline.server.ts",
     "./data/letterPdf.server": "./src/data/letterPdf.server.ts",
     "./data/letterPdfRender.server": "./src/data/letterPdfRender.server.ts",
     "./data/publicBody": "./src/data/publicBody.ts",

@@ -124,6 +124,7 @@ export const SKILL_FILE_NAMES: Record<GraphLogDefaultStage, string> = {
   voice: "VOICE.md",
   sow: "SOW.md",
   brief: "BRIEF.md",
+  outline: "OUTLINE.md",
 };
 
 /** Retired skill file names, each mapped to what replaced it, deleted by
@@ -412,6 +413,8 @@ export const RESERVED_SKILL_FILE_NAMES = new Set([
   // Read by the brief stage alone (`brief.server.ts`): a letter's brief
   // from the graph. Reserved for the same reason as filing.md.
   "brief.md",
+  // Read by the brief stage's outline call alone (`outline.server.ts`).
+  "outline.md",
   "skill.md",
   // PhyLog's retired files (`LEGACY_SKILL_FILE_NAMES`): never an extra,
   // even before a reseed deletes them.

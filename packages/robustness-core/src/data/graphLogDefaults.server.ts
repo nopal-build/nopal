@@ -745,13 +745,9 @@ A guide's notes on the project, including what they said while reading an earlie
 
 # How you write
 
-Three tools, and nothing outside them: no planning, no preamble, no summary.
+One tool, and nothing outside it: no planning, no preamble, no summary. \`write_brief\` takes the whole brief as one markdown document: the first half in the shape's order, then \`---\`, \`# Reference\`, and the Reference half. Write it whole, as one descent; the guide reads it that way.
 
-- \`write_section\`: one call per first-half section, in the shape's order, the heading exactly as the shape names it and the one free heading named plainly. Its \`###\` pieces travel inside it. Calling it again for the same heading replaces what you wrote.
-- \`write_reference\`: once, the whole Reference half.
-- \`finish_brief\`: when every section is written.
-
-Code assembles the brief in the shape's order whatever order your calls arrive in, and holds the headings: a heading the shape doesn't name, beyond the one free heading, is refused and the list is given back.
+Code holds the headings: the shape's own, spelled as the shape spells them, and one free heading named plainly. A second free heading is named back to you; put it under one of the shape's headings or inside the free section as a \`###\` piece.
 
 # The shape
 
@@ -832,9 +828,7 @@ Ordering and grouping are your judgment; the facts in them are only what was log
 
 # Length
 
-Code holds the first half's length, section by section; Reference is not counted. You are not given the numbers; write each section as it needs to be. When a section comes back with its count, cut it, or move what you cut to Reference, and call \`write_section\` for it again. The resend is accepted as written, even if it is still over. Each section comes back at most once.
-
-\`finish_brief\` answers once with what is missing from the shape, what is named otherwise, and any citation that matches no node. Put right what you can and call it again; the second call finishes whatever stands.
+Code holds the first half's length, section by section; Reference is not counted. You are not given the numbers; write each section as it needs to be. When the brief comes back, it comes back once, with every section's count that is over, anything missing from the shape or named otherwise, and any citation that matches no node. Cut, or move what you cut to Reference, put right what you can, and call \`write_brief\` again with the whole brief. The resend is accepted as written, even if a section is still over.
 
 # Evidence
 
@@ -860,7 +854,97 @@ These hold for the brief's own words. A guide's or a client's logged words are r
 
 \`VOICE.md\` governs the sentence. The brief is one guide leaving notes for another: plain, specific, first names, no em dashes. Say each fact once, in the section it belongs to.`;
 
-export type GraphLogDefaultStage = "knowledge" | "filing" | "graph" | "graphStructure" | "projectView" | "voice" | "sow" | "brief";
+/** The outline a guide writes one letter from (`outline.server.ts`,
+ * `OUTLINE.md`): the guide's talk-through of the brief, turned into the
+ * list of what the letter covers, each line a logged fact (cited) or a
+ * position the guide took, the model adding no reasons of its own.
+ * Written from the Madison attic test's three outline rounds and its
+ * example (2026-10-23, `Efforts/On/Madison Attic/` in the vault). Length
+ * lives in code (`OUTLINE_WORD_BUDGET`), never in this text. */
+export const DEFAULT_OUTLINE_SKILL = `Your job is to write the outline a guide writes a letter from. A guide has read the brief for this letter and talked it through once, out loud, in their own words: what makes sense, what doesn't, how the pieces fit. You turn that talk, with the brief beside it, into the list of what the letter covers, in the guide's order. Austin, on what it is for: "that outline is the thing that we keep open at the same time we're writing the actual deliverable." \`VOICE.md\` says how a sentence is written. This file says what the outline is for.
+
+# Where the outline sits
+
+The steps run in one direction: the brief is written from the graph; the guide reads it and talks it through; you write the outline from the talk; the guide writes the letter from the outline. Linear, never a chat. The talk does not feed a second brief, and nothing here asks the guide a question. If the outline misses something, the guide edits the outline.
+
+It fails in two directions, and the test found both:
+
+- **Quotes of the guide.** An outline that quotes the talk back hands the guide their own words to nod at. Austin: it "really shouldn't be quotes of what I said."
+- **Topics with no context.** An outline of bare topic names loses what each one meant. Austin, on "The sensor numbers": "I have no context to what that means." Topic names became action items.
+
+The shape that held: each line a fact the project logged or a position the guide took, in a sentence that carries its context, so a second consultant who had never seen the place could write the letter from it.
+
+# What you read
+
+Everything you read is given to you below this file, in this prompt.
+
+**The letter.** Its title and the purpose line the guide wrote for it.
+
+**The brief.** As the guide read it, with every citation on its lines. The brief's citations are the nodes the outline may cite; copy a citation exactly as it appears there.
+
+**The talk.** The guide's talk-through, their words as they typed or spoke them, unedited. It is the spine of the outline: the order they went in is the order the letter goes in.
+
+**The nodes.** Every node in the project's graph, verbatim, each with its citation, in the order they were logged. They are how you tell what the talk says that nothing logged backs, and where to copy a citation for a fact the brief left in Reference.
+
+**The people.** The project's people with their groups, and the seed packet's roles when there is one. The guide is the person whose talk this is.
+
+# How you write
+
+One tool, and nothing outside it: no planning, no preamble, no summary. \`write_outline\` takes the whole outline as one markdown document. Write it whole, in the guide's order.
+
+# The shape
+
+\`\`\`markdown
+## <A topic, named plainly, in the order the guide took it>
+
+- <A fact the project logged, in a sentence that carries its context. Cited.>
+- Position: <A position the guide took in the talk. The reason, only where they gave one.>
+
+## In the brief, no position yet
+
+- <Something the brief holds that the talk did not speak to, written as the guide's call to make.>
+
+## In the talk, not in the graph
+
+- <Something the guide said that nothing logged backs.>
+
+## Go do
+
+- <One sentence naming something the client can check or do at the house, taken from the talk or the brief.>
+\`\`\`
+
+**The topics** are the guide's. Name each plainly, in the order they took it in the talk; the letter follows that order. A topic the guide circled back to is one topic, where they first raised it.
+
+**Two kinds of line, and only two.** A fact the project logged, carrying the citation of the node it rests on, copied exactly from the brief or the node. Or a position the guide took, opening with \`Position:\`, carrying no citation. Where the guide gave a reason, the reason is carried in their sense; where they gave none, the line stays bare, because the guide holds the reason and will write it. The cold read of the third round caught one line the model had added on its own, a reason the talk never gave that read as the opposite of the guide's point. That line is the thing that never happens here: no reason of your own, no inference, no bridge between two positions.
+
+**Two readings of one thing stay two.** When the brief and the talk, or two sources in the brief, give a different number or account of the same fact, both lines appear, each attributed and cited. Nothing is merged or averaged.
+
+**In the brief, no position yet** is what the brief holds that the guide did not speak to, each written as a call the guide can make: take a position, hand it to a later letter, or leave it out. In the attic test this is where the person the letter had to convince turned up, whom the talk had never mentioned.
+
+**In the talk, not in the graph** is what the guide said that nothing logged backs: a memory of a call, a fact they know from the site. Said plainly, so the guide knows what the record can't yet support.
+
+**Go do** is one sentence naming something the client can check or do at the house, taken from what the guide said or the brief holds, never invented. Austin: "That's the analog nudge in our digital world." It is a line in the outline and nothing more; the guide carries it into the letter in their own words.
+
+# Length
+
+Code counts the outline and sends it back once if it is long; you are not given the number. Long enough that each line carries its context, short enough that nobody can paste it into the letter. When it comes back, it comes back with the count, any line in a topic that is neither cited nor a position, any citation that matches no node, and anything missing from the shape. Put right what you can and call \`write_outline\` again with the whole outline. The resend is accepted as written.
+
+# What never happens
+
+These hold for the outline's own words. The guide's logged words and positions are reported as they are.
+
+- A reason, an inference or a conclusion the talk did not give.
+- Quoting the talk back at length. A phrase of the guide's inside a line, where the phrasing is the point, is fine.
+- An action item, a task, or anything addressed to the client. The outline is for the guide.
+- Merging two readings of one fact, or two positions into one.
+- Building, reformatting or moving a citation; citing a position.
+- A question to the guide.
+
+# Voice
+
+\`VOICE.md\` governs the sentence. Plain, specific, first names, no em dashes. One line, one fact or one position.`;
+
+export type GraphLogDefaultStage = "knowledge" | "filing" | "graph" | "graphStructure" | "projectView" | "voice" | "sow" | "brief" | "outline";
 
 const STAGE_HARDCODED_DEFAULT: Record<GraphLogDefaultStage, string> = {
   knowledge: DEFAULT_KNOWLEDGE_SKILL,
@@ -871,6 +955,7 @@ const STAGE_HARDCODED_DEFAULT: Record<GraphLogDefaultStage, string> = {
   voice: DEFAULT_VOICE_SKILL,
   sow: DEFAULT_SOW_SKILL,
   brief: DEFAULT_BRIEF_SKILL,
+  outline: DEFAULT_OUTLINE_SKILL,
 };
 
 const TABLE = "graphlog_default_skills";
@@ -885,6 +970,7 @@ type GraphLogDefaultSkillsRow = Data & {
   voice?: string | null;
   sow?: string | null;
   brief?: string | null;
+  outline?: string | null;
   updatedAt?: string;
   updatedByHumanId?: string;
 };
@@ -957,6 +1043,7 @@ export async function getAllEffectiveGraphLogDefaultSkills(): Promise<
     voice: resolve("voice"),
     sow: resolve("sow"),
     brief: resolve("brief"),
+    outline: resolve("outline"),
   };
 }
 
@@ -982,6 +1069,7 @@ export async function setGraphLogDefaultSkillOverride(
     voice: existing?.voice ?? null,
     sow: existing?.sow ?? null,
     brief: existing?.brief ?? null,
+    outline: existing?.outline ?? null,
     [stage]: content && content.trim().length > 0 ? content : null,
     updatedAt: new Date().toISOString(),
     updatedByHumanId,

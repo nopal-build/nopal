@@ -17,9 +17,12 @@
  * and judging every brief.
  *
  * `briefText` is the model's half and touches no database: the letter,
- * the nodes and the people in, a brief out. The sections arrive one tool
- * call each (the Efforts page's shape): a cut-off turn loses one section,
- * never the brief, and each count has its natural unit.
+ * the nodes and the people in, a brief out. The brief arrives whole, in
+ * one call, the way the test wrote it (Austin, 2026-10-28: it reads as
+ * one descent and is written as one); code sends the whole document back
+ * once with every count. A first build wrote it section by section, for
+ * safety against a cut-off response, and the first production brief read
+ * as points stitched from nodes; the output budget is raised instead.
  *
  * Where it lives. Not on the letter's record (the Vault hands the whole
  * record to every reader in the sharing cache, and a write there remounts
@@ -44,7 +47,7 @@ import { getHumansById } from "./humans.server";
 import { letterHome, letterTitle } from "./letters.server";
 import { completedToolCalls } from "./llmProvider";
 import type { LlmMessage, LlmProvider, LlmUsage, ToolDefinition } from "./llmProvider";
-import { splitFrontmatter } from "./project.types";
+import { splitFrontmatter, splitReadmeSections } from "./project.types";
 import { composeStageSkill, findProjectGraphFolder, getProjectStageSkill, isSkipInstruction, listExtraSkillFiles } from "./projectN02.server";
 import { getProjectSharing } from "./projectSharing.server";
 import { groupOf } from "./features";
@@ -89,11 +92,14 @@ export type BriefSection = { heading: string; markdown: string };
 /** What the model has written so far, keyed as the shape is. */
 export type BriefDraft = {
   sections: Map<string, BriefSection>;
+  /** Sections under headings the shape doesn't name, beyond the one free
+   * heading: kept after it, named back once. */
+  extras: BriefSection[];
   reference: string | null;
 };
 
 export function emptyBriefDraft(): BriefDraft {
-  return { sections: new Map(), reference: null };
+  return { sections: new Map(), extras: [], reference: null };
 }
 
 /** The brief as a person reads it: the first half in the shape's order,
@@ -104,6 +110,7 @@ export function assembleBrief(draft: BriefDraft): string {
     const section = draft.sections.get(s.key);
     if (!section) continue;
     parts.push(`## ${section.heading.replace(/^#+\s*/, "").trim()}\n\n${section.markdown.trim()}`);
+    if (s.key === BRIEF_ABOUT_KEY) for (const extra of draft.extras) parts.push(`## ${extra.heading.replace(/^#+\s*/, "").trim()}\n\n${extra.markdown.trim()}`);
   }
   if (draft.reference?.trim()) parts.push(`---\n\n# Reference\n\n${draft.reference.trim()}`);
   return parts.join("\n\n") + "\n";
@@ -119,8 +126,8 @@ export function briefSectionNote(key: string, markdown: string): string | null {
   return `${words} words against a budget of ${shape.budget} (citations and photos not counted)`;
 }
 
-/** What `finish_brief` says once: the required section missing, optional
- * ones left out (a note, never a refusal: the skill lets them go when
+/** What the shape has to say about a written brief: the required section
+ * missing, optional ones left out (a note: the skill lets them go when
  * nothing is true), and citations that match no node. */
 export function briefFinishNotes(draft: BriefDraft, allNodesById: Map<string, GraphLogNode>): { refusals: string[]; notes: string[]; unmatched: string[] } {
   const refusals: string[] = [];
@@ -140,37 +147,83 @@ export function briefFinishNotes(draft: BriefDraft, allNodesById: Map<string, Gr
 
 export const BRIEF_TOOLS: ToolDefinition[] = [
   {
-    name: "write_section",
+    name: "write_brief",
     description:
-      "One first-half section of the brief, whole: its heading exactly as the shape names it (or the one free heading, named plainly), and its markdown with any ### pieces inside. Code counts it and may send it back once with its count; calling again for the same heading replaces it, and the resend is accepted as written.",
+      "The whole brief, once: the first half in the shape's order, then `---`, `# Reference` and the Reference half. Code counts each first-half section and may send the whole brief back once with every count; send it again whole, and the resend is accepted as written.",
     inputSchema: {
       type: "object",
-      properties: {
-        heading: { type: "string", description: "The section heading, without the ## marks." },
-        markdown: { type: "string", description: "The section's bullets, ### pieces and galleries, with every citation copied from its node." },
-      },
-      required: ["heading", "markdown"],
-    },
-  },
-  {
-    name: "write_reference",
-    description: "The Reference half, whole and once: The client's questions, then the More on sections. Not counted. Calling again replaces it.",
-    inputSchema: {
-      type: "object",
-      properties: { markdown: { type: "string", description: "Everything under # Reference, without that heading." } },
+      properties: { markdown: { type: "string", description: "The brief as a markdown document, every citation copied from its node." } },
       required: ["markdown"],
     },
   },
-  {
-    name: "finish_brief",
-    description: "When every section is written. Answers once with what is missing, named otherwise, or cited to no node; the second call finishes whatever stands.",
-    inputSchema: { type: "object", properties: {} },
-  },
 ];
 
-/** Bounds one brief's conversation: eight writes, each sent back at most
- * once, a finish asked twice, and room for a cut-off turn or two. */
-const MAX_TURNS = 30;
+/** A whole brief is written in one response: about three thousand words
+ * with its citations, and the model's own deliberation on top. The
+ * provider's default leaves too little room for both; this is generous
+ * because tokens are billed as used, and a cut here loses the brief. */
+export const BRIEF_MAX_OUTPUT_TOKENS = 65_536;
+
+/** One write, one bounce, one resend, and a cut-off turn or two. */
+const MAX_TURNS = 5;
+
+/** The document as the model sent it, read into the shape: the first
+ * half's sections by the shape's key, the one free heading, anything the
+ * shape doesn't name, and the Reference half. Pure. */
+export function parseBriefDocument(markdown: string): { draft: BriefDraft; unknown: string[] } {
+  const body = splitFrontmatter(markdown).body;
+  const at = body.search(/^#\s+Reference\s*$/m);
+  const first = at === -1 ? body : body.slice(0, at);
+  const reference = at === -1 ? null : body.slice(at).replace(/^#\s+Reference\s*$/m, "").trim();
+  const draft = emptyBriefDraft();
+  draft.reference = reference || null;
+  const unknown: string[] = [];
+  let aboutKey: string | null = null;
+  for (const section of splitReadmeSections(first.replace(/^\s*---\s*$/m, ""))) {
+    if (section.heading === "") continue;
+    const key = briefHeadingKey(section.heading);
+    const markdown = section.content.trim();
+    if (FIXED_KEYS.has(key)) draft.sections.set(key, { heading: section.heading, markdown });
+    else if (aboutKey === null || aboutKey === key) {
+      aboutKey = key;
+      draft.sections.set(BRIEF_ABOUT_KEY, { heading: section.heading, markdown });
+    } else {
+      unknown.push(section.heading);
+      draft.extras.push({ heading: section.heading, markdown });
+    }
+  }
+  return { draft, unknown };
+}
+
+/** Everything code has to say about one write of the brief. `hard` is
+ * what sends the brief back: a count over budget, a heading the shape
+ * doesn't name, The ask missing, Reference missing, a citation matching
+ * no node. `soft` rides along when it does: an optional section left
+ * out, which the skill allows when nothing true belongs there, so on its
+ * own it never costs a resend. */
+export function briefWriteNotes(draft: BriefDraft, unknown: string[], allNodesById: Map<string, GraphLogNode>): { hard: string[]; soft: string[]; over: string[] } {
+  const hard: string[] = [];
+  const over: string[] = [];
+  for (const s of BRIEF_SECTION_BUDGETS) {
+    const section = draft.sections.get(s.key);
+    if (!section) continue;
+    const note = briefSectionNote(s.key, section.markdown);
+    if (note) {
+      hard.push(`"${section.heading}" is ${note}`);
+      over.push(section.heading);
+    }
+  }
+  const named = BRIEF_SECTION_BUDGETS.filter((s) => s.key !== BRIEF_ABOUT_KEY).map((s) => `"${s.heading}"`).join(", ");
+  for (const h of unknown) hard.push(`"${h}" is not a heading the shape names, and the one free heading is taken: the others are ${named}; put it under one of them or inside the free section as a ### piece`);
+  const finish = briefFinishNotes(draft, allNodesById);
+  hard.push(...finish.refusals, ...finish.unmatched.map((r) => `a citation matches no node: ${r}`));
+  const soft: string[] = [];
+  for (const n of finish.notes) {
+    if (n.startsWith("Reference is not written")) hard.push(n);
+    else soft.push(n);
+  }
+  return { hard, soft, over };
+}
 
 export function buildBriefSystemPrompt(skill: string, input: Pick<BriefTextInput, "today" | "letterTitle" | "purpose" | "peopleLines" | "structureBody" | "nodes">): string {
   const nodesBlock =
@@ -178,7 +231,7 @@ export function buildBriefSystemPrompt(skill: string, input: Pick<BriefTextInput
       ? input.nodes.map((n) => formatNodeVerbatim(n, input.today)).join("\n\n")
       : "(The graph holds no nodes yet.)";
   return [
-    "You are GraphLog's brief step, writing the brief a guide reads before writing one letter to the client, from the project's graph, per the project's own instructions below. You work only through the tools: write_section for each first-half section in the shape's order, write_reference once, then finish_brief. Copy every citation exactly from its node; code checks each against the graph. Write nothing outside a tool call.",
+    "You are GraphLog's brief step, writing the brief a guide reads before writing one letter to the client, from the project's graph, per the project's own instructions below. You work only through the tool: write_brief, the whole brief in one call. Copy every citation exactly from its node; code checks each against the graph. Write nothing outside the tool call.",
     "",
     skill,
     "",
@@ -223,9 +276,9 @@ export type BriefTextInput = {
 export type BriefTextResult = {
   content: string;
   sections: string[];
-  /** Sections sent back once with their count. */
+  /** Sections over budget on the first write, sent back once. */
   bounced: string[];
-  /** Citations that match no node, after the finish. */
+  /** Citations that match no node, after the resend. */
   unmatched: string[];
   incomplete: string[];
   usage: LlmUsage;
@@ -233,83 +286,74 @@ export type BriefTextResult = {
   turns: number;
 };
 
+/** What a whole-document write has to say back, split by what sends the
+ * document back (`hard`) and what only rides along (`soft`). */
+export type WriteNotes = { hard: string[]; soft: string[] };
+
+export type WholeDocumentResult = {
+  /** The last document the model sent, or null when none arrived. */
+  markdown: string | null;
+  /** Whether the first write was sent back (and with what). */
+  bouncedWith: string[];
+  incomplete: string[];
+  usage: LlmUsage;
+  model: string | null;
+  turns: number;
+};
+
 /**
- * One brief from one conversation. The tools collect in memory; nothing
- * is written here.
+ * One document from one conversation: the whole thing in one tool call,
+ * the whole thing back once with everything code has to say, the resend
+ * kept as written. One retry if the single response is cut off. The
+ * brief and the outline both write this way; each brings its own tool,
+ * its own first message and its own `notes`.
  */
-export async function briefText(input: BriefTextInput): Promise<BriefTextResult> {
-  const provider = input.provider ?? AnthropicProvider.forStage("brief");
+export async function writeWholeDocument(input: {
+  provider: LlmProvider;
+  system: string;
+  firstMessage: string;
+  tool: ToolDefinition;
+  /** What to send back for a document: hard notes send it back once. */
+  notes: (markdown: string) => WriteNotes;
+  /** The one word for what is being written, for the log and the resend ask. */
+  what: string;
+  maxTokens?: number;
+  log?: (line: string) => void;
+  checkCancelled?: () => Promise<void>;
+}): Promise<WholeDocumentResult> {
   const log = input.log ?? (() => {});
-  const system = buildBriefSystemPrompt(input.skill, input);
-  const allNodesById = new Map(input.nodes.map((n) => [n.id, n]));
-  const draft = emptyBriefDraft();
-  const turnedBack = new Set<string>();
-  const bounced: string[] = [];
+  let markdown: string | null = null;
+  let bounced = false;
+  let bouncedWith: string[] = [];
   const incomplete: string[] = [];
-  let aboutKeyOf: string | null = null;
-  let finishAsked = false;
   let finished = false;
 
   const execute = (name: string, args: Record<string, unknown>): string => {
-    if (name === "write_section") {
-      const heading = typeof args.heading === "string" ? args.heading.trim() : "";
-      const markdown = typeof args.markdown === "string" ? args.markdown : "";
-      if (!heading) return "Not written: a section needs its heading.";
-      if (!markdown.trim()) return `Not written: "${heading}" is empty. A section with nothing true to say is left out instead.`;
-      const key = briefHeadingKey(heading);
-      let shapeKey: string;
-      if (FIXED_KEYS.has(key)) shapeKey = key;
-      else if (aboutKeyOf === null || aboutKeyOf === key) {
-        aboutKeyOf = key;
-        shapeKey = BRIEF_ABOUT_KEY;
-      } else {
-        const named = BRIEF_SECTION_BUDGETS.filter((s) => s.key !== BRIEF_ABOUT_KEY).map((s) => `"${s.heading}"`).join(", ");
-        return `Not written: the shape has one free heading, and it is already "${draft.sections.get(BRIEF_ABOUT_KEY)?.heading ?? aboutKeyOf}". The others are ${named}. Put this under one of them, or inside the free section as a ### piece.`;
-      }
-      draft.sections.set(shapeKey, { heading, markdown });
-      const note = briefSectionNote(shapeKey, markdown);
-      if (note && !turnedBack.has(shapeKey)) {
-        turnedBack.add(shapeKey);
-        bounced.push(heading);
-        log(`brief: sent back "${heading}" once: ${note}.`);
-        return `Written for now, but "${heading}" is ${note}. Cut it, or move what you cut to Reference, and call write_section for it again; the resend replaces this and is accepted as written.`;
-      }
-      return `Written: "${heading}".`;
+    if (name !== input.tool.name) return `Error: no tool named ${name}.`;
+    const sent = typeof args.markdown === "string" ? args.markdown : "";
+    if (!sent.trim()) return `Not written: the ${input.what} is empty.`;
+    markdown = sent;
+    const { hard, soft } = input.notes(sent);
+    if (hard.length > 0 && !bounced) {
+      bounced = true;
+      bouncedWith = hard;
+      const notes = [...hard, ...soft];
+      log(`${input.what}: sent back once: ${hard.join("; ")}.`);
+      return `Not written yet. The ${input.what} as sent:\n- ${notes.join("\n- ")}\nPut right what you can and call ${input.tool.name} again with the whole ${input.what}; the resend is accepted as written.`;
     }
-    if (name === "write_reference") {
-      const markdown = typeof args.markdown === "string" ? args.markdown : "";
-      if (!markdown.trim()) return "Not written: Reference is empty.";
-      draft.reference = markdown;
-      return "Written: Reference.";
-    }
-    if (name === "finish_brief") {
-      const { refusals, notes, unmatched } = briefFinishNotes(draft, allNodesById);
-      const lines = [...refusals, ...notes, ...unmatched.map((r) => `a citation matches no node: ${r}`)];
-      if (lines.length > 0 && !finishAsked) {
-        finishAsked = true;
-        log(`brief: finish asked once more: ${lines.join("; ")}.`);
-        return `Not finished yet:\n- ${lines.join("\n- ")}\nPut right what you can, then call finish_brief again; the second call finishes whatever stands.`;
-      }
-      if (refusals.length > 0) incomplete.push(...refusals);
-      finished = true;
-      return "Finished.";
-    }
-    return `Error: no tool named ${name}.`;
+    finished = true;
+    return "Written.";
   };
 
-  const messages: LlmMessage[] = [
-    {
-      role: "user",
-      content: `Write the brief for the letter "${input.letterTitle}". Start with write_section for "The ask", then each section in the shape's order, then write_reference, then finish_brief.`,
-    },
-  ];
+  const messages: LlmMessage[] = [{ role: "user", content: input.firstMessage }];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   let model: string | null = null;
   let turns = 0;
+  let cutOff = 0;
 
   for (let turn = 0; turn < MAX_TURNS && !finished; turn++) {
     await input.checkCancelled?.();
-    const response = await provider.complete({ system, messages, tools: BRIEF_TOOLS, cacheSystemPrompt: true });
+    const response = await input.provider.complete({ system: input.system, messages, tools: [input.tool], cacheSystemPrompt: true, maxTokens: input.maxTokens ?? BRIEF_MAX_OUTPUT_TOKENS });
     turns += 1;
     model = response.model;
     usage.inputTokens += response.usage.inputTokens;
@@ -318,12 +362,17 @@ export async function briefText(input: BriefTextInput): Promise<BriefTextResult>
     usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + (response.usage.cacheWriteTokens ?? 0);
     const calls = completedToolCalls(response.toolCalls, response.stopReason);
     if (calls.length === 0) {
-      if (response.stopReason === "max_tokens") {
+      if (response.stopReason === "max_tokens" && cutOff < 1) {
+        // The one call was cut off: the document is lost with it. Asked
+        // once more, whole; a second cut is reported, not retried.
+        cutOff += 1;
+        log(`${input.what}: the response was cut off before it finished; asked once more.`);
         messages.push({ role: "assistant", content: response.text ?? "", toolCalls: [] });
-        messages.push({ role: "user", content: "That turn was cut off before a tool call finished. Go on from where you were, one section per call." });
+        messages.push({ role: "user", content: `That response was cut off before ${input.tool.name} finished, so none of it arrived. Send the whole ${input.what} again in one ${input.tool.name} call, with less deliberation first.` });
         continue;
       }
-      if (response.stopReason === "other") incomplete.push("the model stopped before finishing the brief (declined or interrupted)");
+      if (response.stopReason === "max_tokens") incomplete.push(`the ${input.what} was cut off twice before it finished`);
+      else if (response.stopReason === "other") incomplete.push(`the model stopped before writing the ${input.what} (declined or interrupted)`);
       break;
     }
     messages.push({ role: "assistant", content: response.text ?? "", toolCalls: calls });
@@ -334,25 +383,55 @@ export async function briefText(input: BriefTextInput): Promise<BriefTextResult>
   }
 
   if (!finished) {
-    // Ended without finish_brief: what stands is kept, and the brief says
-    // it was not finished so a guide knows to ask again.
-    const { refusals } = briefFinishNotes(draft, allNodesById);
-    incomplete.push(...refusals);
-    if (turns >= MAX_TURNS) incomplete.push(`still writing after ${MAX_TURNS} turns`);
-    else if (!incomplete.some((l) => l.includes("stopped before"))) incomplete.push("the model ended without calling finish_brief");
+    if (markdown !== null) incomplete.push(`the ${input.what} was sent back once and not sent again; the first version stands`);
+    else if (incomplete.length === 0) incomplete.push(`the model ended without writing the ${input.what}`);
   }
+  return { markdown, bouncedWith, incomplete, usage, model, turns };
+}
 
+/**
+ * One brief from one conversation: the whole document in one call, the
+ * whole document back once with every count, the resend kept as
+ * written. Nothing is written here; the tool collects in memory.
+ */
+export async function briefText(input: BriefTextInput): Promise<BriefTextResult> {
+  const provider = input.provider ?? AnthropicProvider.forStage("brief");
+  const allNodesById = new Map(input.nodes.map((n) => [n.id, n]));
+  let over: string[] = [];
+  let firstWrite = true;
+  const result = await writeWholeDocument({
+    provider,
+    system: buildBriefSystemPrompt(input.skill, input),
+    firstMessage: `Write the brief for the letter "${input.letterTitle}", whole, in one write_brief call.`,
+    tool: BRIEF_TOOLS[0],
+    what: "brief",
+    maxTokens: BRIEF_MAX_OUTPUT_TOKENS,
+    log: input.log,
+    checkCancelled: input.checkCancelled,
+    notes: (markdown) => {
+      const parsed = parseBriefDocument(markdown);
+      const { hard, soft, over: overNow } = briefWriteNotes(parsed.draft, parsed.unknown, allNodesById);
+      if (firstWrite) {
+        over = overNow;
+        firstWrite = false;
+      }
+      return { hard, soft };
+    },
+  });
+  const draft = result.markdown ? parseBriefDocument(result.markdown).draft : emptyBriefDraft();
+  const incomplete = [...result.incomplete];
+  if (result.markdown) incomplete.push(...briefFinishNotes(draft, allNodesById).refusals.filter((r) => !incomplete.includes(r)));
   const content = assembleBrief(draft);
   const { unmatched } = countCitations(content, allNodesById);
   return {
     content,
     sections: [...draft.sections.values()].map((s) => s.heading),
-    bounced,
+    bounced: over,
     unmatched,
     incomplete,
-    usage,
-    model,
-    turns,
+    usage: result.usage,
+    model: result.model,
+    turns: result.turns,
   };
 }
 
@@ -379,6 +458,25 @@ export type LetterBriefRow = Data & {
   unmatched: string[];
   /** The job asked for and not yet finished, so a second click waits. */
   pending_job_id: string | null;
+  // ── The talk-through and the outline (`outline.server.ts`) ──
+  /** What the guide has typed and not yet put on the record. */
+  talk_draft?: string | null;
+  /** The talk as it went onto the guide's Card, when they asked for the outline. */
+  talk_through?: string | null;
+  talk_through_at?: string | null;
+  talk_through_by_human_id?: string | null;
+  /** The day it was written to, the device's date clamped by `markDate`. */
+  talk_through_date?: string | null;
+  talk_through_card_file_id?: string | null;
+  outline?: string | null;
+  outline_written_at?: string | null;
+  outline_by_human_id?: string | null;
+  outline_run_id?: string | null;
+  outline_incomplete?: string[];
+  outline_bounced?: string[];
+  /** The guide's own edit of the outline; it re-runs nothing. */
+  outline_edited_at?: string | null;
+  outline_pending_job_id?: string | null;
 };
 
 export async function getLetterBriefRow(letterFileId: string): Promise<LetterBriefRow | null> {
@@ -391,7 +489,7 @@ export async function getLetterBriefRow(letterFileId: string): Promise<LetterBri
  * spread a read record back into an upsert: the record carries its own
  * `id`, and SurrealDB refuses the write, quietly (the first dev walk's
  * second ask kept pointing at the first job). */
-async function writeLetterBriefRow(letterFileId: string, patch: Partial<Omit<LetterBriefRow, "_id">> & { letter_file_id: string; project_folder_id: string }): Promise<void> {
+export async function writeLetterBriefRow(letterFileId: string, patch: Partial<Omit<LetterBriefRow, "_id">> & { letter_file_id: string; project_folder_id: string }): Promise<void> {
   await ensureTable();
   const existing = await getLetterBriefRow(letterFileId);
   if (existing) await merge(TABLE, letterFileId, patch);
@@ -532,18 +630,6 @@ export async function runBrief(projectFolder: VaultFolder, letterFileId: string,
 
 export type RequestBriefResult = { ok: true; jobId: string } | { ok: false; status: 400 | 409; error: string };
 
-/** Whether the job a row names is still ahead of us. */
-async function pendingJob(row: LetterBriefRow | null): Promise<{ state: string; error: string | null } | null> {
-  if (!row?.pending_job_id) return null;
-  const status = await getGraphLogJobStatus(row.pending_job_id);
-  if (!status.ok) return null;
-  return { state: status.state, error: status.state === "failed" ? (status.error ?? "The brief stopped on an error.") : null };
-}
-
-function isRunning(state: string | undefined): boolean {
-  return state === "waiting" || state === "active" || state === "delayed";
-}
-
 /**
  * Asks the worker for this letter's brief. The two callers are the two
  * controls a guide has: starting a letter, and "Write it again". The
@@ -552,39 +638,56 @@ function isRunning(state: string | undefined): boolean {
 export async function requestBrief(projectFolder: VaultFolder, letter: FileRef, actingHumanId: string): Promise<RequestBriefResult> {
   if (!letter.purpose?.trim()) return { ok: false, status: 400, error: "Say what this letter is for first." };
   const row = await getLetterBriefRow(letter._id);
-  const job = await pendingJob(row);
-  if (job && isRunning(job.state)) return { ok: false, status: 409, error: "The brief is being written. Give it a few minutes." };
+  if (await jobIsRunning(row?.pending_job_id)) return { ok: false, status: 409, error: "The brief is being written. Give it a few minutes." };
   const jobId = await enqueueGraphLogJob("brief", { actingHumanId, projectFolderId: projectFolder._id, fileId: letter._id });
   await writeLetterBriefRow(letter._id, { letter_file_id: letter._id, project_folder_id: projectFolder._id, pending_job_id: jobId });
   return { ok: true, jobId };
 }
 
-/** What the letter's page shows a guide about the brief. */
+/** A job a row names, as the page reads it. */
+export type LetterJobForPage = { state: "waiting" | "active" | "failed" | "completed" | "unknown"; error: string | null; startedAt: string | null; waitingOnAnotherRun: boolean };
+
+/** What the letter's page shows a guide: the brief, the talk-through and
+ * the outline, each with the job writing it when one is. */
 export type LetterBriefForPage = {
   brief: { content: string; writtenAt: string; byName: string; incomplete: string[] } | null;
-  job: { state: "waiting" | "active" | "failed" | "completed" | "unknown"; error: string | null; startedAt: string | null; waitingOnAnotherRun: boolean } | null;
+  job: LetterJobForPage | null;
+  talk: { draft: string | null; sent: { text: string; at: string; date: string; byName: string } | null };
+  outline: { content: string; writtenAt: string; byName: string; incomplete: string[]; editedAt: string | null } | null;
+  outlineJob: LetterJobForPage | null;
 };
+
+async function jobForPage(jobId: string | null | undefined): Promise<LetterJobForPage | null> {
+  if (!jobId) return null;
+  const status = await getGraphLogJobStatus(jobId);
+  if (!status.ok) return null;
+  const state = status.state === "delayed" ? "waiting" : status.state === "waiting" || status.state === "active" || status.state === "failed" || status.state === "completed" ? status.state : "unknown";
+  const startedAt = state === "active" || state === "completed" || state === "failed" ? await getGraphLogRunStartedAt(jobId) : null;
+  return {
+    state,
+    error: state === "failed" ? (status.error ?? "It stopped on an error.") : null,
+    startedAt,
+    waitingOnAnotherRun: state === "active" && (status.log ?? []).some((l) => /waiting for another GraphLog run/i.test(l)),
+  };
+}
 
 export async function getLetterBriefForPage(letterFileId: string): Promise<LetterBriefForPage> {
   const row = await getLetterBriefRow(letterFileId);
-  let brief: LetterBriefForPage["brief"] = null;
-  if (row?.content && row.written_at) {
-    const author = row.by_human_id ? (await getHumansById([row.by_human_id]))[0] : undefined;
-    brief = { content: row.content, writtenAt: row.written_at, byName: author ? firstName(author) : "a guide", incomplete: row.incomplete ?? [] };
-  }
-  let job: LetterBriefForPage["job"] = null;
-  if (row?.pending_job_id) {
-    const status = await getGraphLogJobStatus(row.pending_job_id);
-    if (status.ok) {
-      const state = status.state === "delayed" ? "waiting" : status.state === "waiting" || status.state === "active" || status.state === "failed" || status.state === "completed" ? status.state : "unknown";
-      const startedAt = state === "active" || state === "completed" || state === "failed" ? await getGraphLogRunStartedAt(row.pending_job_id) : null;
-      job = {
-        state,
-        error: state === "failed" ? (status.error ?? "The brief stopped on an error.") : null,
-        startedAt,
-        waitingOnAnotherRun: state === "active" && (status.log ?? []).some((l) => /waiting for another GraphLog run/i.test(l)),
-      };
-    }
-  }
-  return { brief, job };
+  const ids = [row?.by_human_id, row?.talk_through_by_human_id, row?.outline_by_human_id].filter((v): v is string => !!v);
+  const names = new Map((await getHumansById([...new Set(ids)])).map((h) => [h._id, firstName(h)]));
+  const nameOf = (id: string | null | undefined) => (id && names.get(id)) || "a guide";
+  const brief = row?.content && row.written_at ? { content: row.content, writtenAt: row.written_at, byName: nameOf(row.by_human_id), incomplete: row.incomplete ?? [] } : null;
+  const talk = {
+    draft: row?.talk_draft ?? null,
+    sent: row?.talk_through && row.talk_through_at ? { text: row.talk_through, at: row.talk_through_at, date: row.talk_through_date ?? row.talk_through_at.slice(0, 10), byName: nameOf(row.talk_through_by_human_id) } : null,
+  };
+  const outline = row?.outline && row.outline_written_at ? { content: row.outline, writtenAt: row.outline_written_at, byName: nameOf(row.outline_by_human_id), incomplete: row.outline_incomplete ?? [], editedAt: row.outline_edited_at ?? null } : null;
+  return { brief, job: await jobForPage(row?.pending_job_id), talk, outline, outlineJob: await jobForPage(row?.outline_pending_job_id) };
+}
+
+/** Whether a job a row names is still ahead of us. */
+export async function jobIsRunning(jobId: string | null | undefined): Promise<boolean> {
+  if (!jobId) return false;
+  const status = await getGraphLogJobStatus(jobId);
+  return status.ok && (status.state === "waiting" || status.state === "active" || status.state === "delayed");
 }
