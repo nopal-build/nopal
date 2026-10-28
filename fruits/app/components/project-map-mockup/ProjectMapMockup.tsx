@@ -24,7 +24,7 @@
 // Admin/Super override checkbox, since those are two independent axes in
 // the real permission system (project-level group vs. account-level
 // staff tier). Only a Guide (or staff override) can touch the
-// Basecamp-prep checklist/"Establish" button or "+ Define a future
+// Basecamp checklist/"Start a Basecamp" button or "+ Define a future
 // camp" — everyone else sees the same thing read-only. Deliberately kept
 // SEPARATE from the lifecycle scrubber: the scrubber is a reviewer-only
 // convenience for exploring every state regardless of role, not a
@@ -38,6 +38,18 @@
 // convention the real GraphLog mark notes use (`oxmarkdown.css`). Nothing
 // about simulating or reviewing this mockup should ever appear mixed
 // into the left column.
+//
+// v7 (2026-10-28): the "Basecamp prep" stage is gone — folded into the
+// empty stage entirely (Gerald: "we can safely merge Basecamp Prep screen
+// into the empty screen"). The locked-phases preview is gone too (the
+// Guide's own phase editor already shows this). The planning-stage
+// notes/files are no longer a daily-log stand-in: they're modeled on the
+// REAL seed packet feature (`SeedPacket.tsx`, `seedPackets.server.ts`) —
+// per-person, open/editable only while a seeding round is open, and once
+// a Guide closes it, read-only and (conceptually) the start of GraphLog's
+// process. The Basecamp checklist's first item is no longer a manual
+// checkbox: it's derived from whether anyone's seed packet actually has
+// content.
 import { useEffect, useId, useState, type ReactNode, Fragment } from "react";
 import { Surface } from "stamps/Surface";
 import { Badge } from "stamps/Badge";
@@ -85,15 +97,11 @@ type PhaseDef = { id: string; name: string; camps: Omit<Camp, "phaseId">[] };
 
 const BASECAMP = {
   overview:
-    "Contract signed, budget approved, site access confirmed, and the design packet handed to the crew. This is the one spot everyone can always return to if a camp stalls.",
+    "This is the one spot everyone can always return to if a camp stalls — established once the project's info is in, the team has met, and the contract is signed.",
   kickoff: "Sep 2, 2026",
   targetFinish: "Jun 2027 (estimate)",
-  checklist: [
-    "Contract signed",
-    "Budget approved",
-    "Site access confirmed",
-    "Design packet delivered to crew",
-  ],
+  // The first item is derived, not manually checked — see `anySeedContent`.
+  checklist: ["Upload project info / files", "Initial Guide meeting", "Contract / payment"],
 };
 
 const FINAL_GOAL = "Move-in ready";
@@ -162,7 +170,6 @@ const BASE_CAMPS: Camp[] = PHASE_DEFS.flatMap((phase) => phase.camps.map((c) => 
 
 const MILESTONES = [
   { key: "empty", label: "Empty" },
-  { key: "prep", label: "Basecamp prep" },
   { key: "discovery", label: "Discovery" },
   { key: "design", label: "Design" },
   { key: "sourcing", label: "Sourcing" },
@@ -170,7 +177,7 @@ const MILESTONES = [
   { key: "complete", label: "Complete" },
 ] as const;
 
-type Stage = "empty" | "prep" | "active" | "complete";
+type Stage = "empty" | "active" | "complete";
 
 /** The real project-level groups (`GROUPS` in `robustness-core/data/
  * features.ts`), kept in the same order the human asked for here rather
@@ -180,6 +187,15 @@ const ROLES: Role[] = ["Observer", "Client", "Crafter", "Guide"];
 function isRole(x: unknown): x is Role {
   return typeof x === "string" && (ROLES as string[]).includes(x);
 }
+
+/** A seed packet (`SeedPacket.tsx`, `seedPackets.server.ts`): while a
+ * seeding round is open, each person adds whatever they already have.
+ * Only Client/Crafter author one here (Gerald, 2026-10-28); Guide/staff
+ * manage the round instead (open/sow/end) rather than contributing one. */
+type SeedFile = { name: string; sown: boolean };
+type SeedPacketState = { note: string; files: SeedFile[] };
+const EMPTY_PACKET: SeedPacketState = { note: "", files: [] };
+const SEEDING_ROLES: Role[] = ["Client", "Crafter"];
 
 const VIEWER_STORAGE_KEY = "nopal:project-map-mockup:viewer";
 type ViewerPref = { role: Role; staff: boolean };
@@ -260,151 +276,6 @@ function TrailLink({ last }: { last?: boolean }) {
   return last ? null : <span className="pm-link" aria-hidden="true" />;
 }
 
-/** The empty-lifecycle view (`stage === "empty"`) — deliberately different
- * per role (Gerald, 2026-10-28), not the one-size-fits-all placeholder v1
- * through v5 showed everyone:
- * - Observer: a status line, nothing to do.
- * - Client/Crafter: a daily-log-style place to leave notes/files before
- *   Basecamp exists.
- * - Guide (or Admin/Super): the real planning controls — a phase list
- *   (add/remove, defaults to the usual Standard pipeline) and the
- *   "Start a Basecamp" button. */
-function EmptyLifecycleState({
-  role,
-  canDefine,
-  seesPlanningNotes,
-  planningNote,
-  onPlanningNoteChange,
-  planningFiles,
-  onAddPlanningFile,
-  plannedPhaseNames,
-  onRemovePhase,
-  newPhaseName,
-  onNewPhaseNameChange,
-  onAddPhase,
-  onStart,
-}: {
-  role: Role;
-  canDefine: boolean;
-  seesPlanningNotes: boolean;
-  planningNote: string;
-  onPlanningNoteChange: (v: string) => void;
-  planningFiles: string[];
-  onAddPlanningFile: () => void;
-  plannedPhaseNames: string[];
-  onRemovePhase: (index: number) => void;
-  newPhaseName: string;
-  onNewPhaseNameChange: (v: string) => void;
-  onAddPhase: () => void;
-  onStart: () => void;
-}) {
-  return (
-    <Stack gap={4}>
-      <Surface className="pm-empty">
-        <Stack gap={2} align="center">
-          <p className="pm-eyebrow">PROJECT STATUS</p>
-          <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold" })}`}>This project is currently in planning.</h2>
-          {role === "Observer" && (
-            <p className={textSize.sm} style={{ color: semanticColors.textSubtle, textAlign: "center", maxWidth: 420 }}>
-              Nothing needs your attention yet — check back once Basecamp is established and work starts.
-            </p>
-          )}
-        </Stack>
-      </Surface>
-
-      {seesPlanningNotes && (
-        <Surface className={sprinkles({ p: 4 })}>
-          <Stack gap={3}>
-            <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Notes while we get set up</p>
-            <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-              Basecamp isn't established yet, but you can leave a note or a file for the
-              team now, daily-log style.
-            </p>
-            <textarea
-              className="pm-note-editor"
-              value={planningNote}
-              onChange={(e) => onPlanningNoteChange(e.target.value)}
-              placeholder="Write a quick update for the team..."
-            />
-            <Cluster gap={2} align="center" wrap>
-              <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={onAddPlanningFile}>
-                + Attach a file (mockup)
-              </button>
-              {planningFiles.length > 0 && (
-                <span className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                  {planningFiles.length} file(s) attached
-                </span>
-              )}
-            </Cluster>
-            {planningFiles.length > 0 && (
-              <ul className="pm-file-list">
-                {planningFiles.map((f) => (
-                  <li key={f}>{f}</li>
-                ))}
-              </ul>
-            )}
-          </Stack>
-        </Surface>
-      )}
-
-      {canDefine && (
-        <Surface className={sprinkles({ p: 4 })}>
-          <Stack gap={3}>
-            <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Define phases</p>
-            <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-              Defaults to the usual Standard-project pipeline — add or remove to fit this
-              project.
-            </p>
-            <Cluster gap={2} wrap>
-              {plannedPhaseNames.map((name, i) => (
-                <span key={`${name}-${i}`} className="pm-phase-editable">
-                  {name}
-                  <button type="button" onClick={() => onRemovePhase(i)} aria-label={`Remove ${name}`}>
-                    ×
-                  </button>
-                </span>
-              ))}
-            </Cluster>
-            <Cluster gap={2} align="center">
-              <Input
-                label="New phase name"
-                hideLabel
-                name="new-phase-name"
-                value={newPhaseName}
-                onChange={(e) => onNewPhaseNameChange(e.target.value)}
-                placeholder="e.g. Permitting"
-              />
-              <button type="button" className={button({ variant: "outline", size: "compact" })} disabled={!newPhaseName.trim()} onClick={onAddPhase}>
-                + Add phase
-              </button>
-            </Cluster>
-            <p className={textSize.sm} style={{ color: semanticColors.textSubtle, fontStyle: "italic" }}>
-              Mockup limitation: this list is illustrative only — once Basecamp starts, the
-              rest of this mockup still uses the fixed Discovery/Design/Sourcing/
-              Construction dataset built earlier. Regenerating camps per custom phase is
-              out of scope for this pass.
-            </p>
-          </Stack>
-        </Surface>
-      )}
-
-      {canDefine ? (
-        <div>
-          <button type="button" className={button({ variant: "primary" })} onClick={onStart}>
-            Start a Basecamp
-          </button>
-        </div>
-      ) : (
-        role !== "Observer" && (
-          <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-            Only a Guide (or Admin/Super) can start Basecamp for this project.
-          </p>
-        )
-      )}
-    </Stack>
-  );
-}
-
 type ContentFilter = "steps" | "effort" | "file" | "logbook";
 
 function stepsForCamp(camp: Camp, status: CampStatus): Step[] {
@@ -459,12 +330,11 @@ export function ProjectMapMockup() {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(projectName);
 
-  // Planning-stage-only state: notes/files anyone without `canDefine` can
-  // leave before Basecamp exists, and the phase list a Guide/staff plans
-  // ahead of starting one. See "Empty Lifecycle State" in the mockup's
-  // own notes for why these are scoped to the empty stage specifically.
-  const [planningNote, setPlanningNote] = useState("");
-  const [planningFiles, setPlanningFiles] = useState<string[]>([]);
+  // Empty-stage-only state: a seeding round (per-person packets, open
+  // until a Guide closes it) and the phase list a Guide/staff plans ahead
+  // of starting Basecamp. Both scoped to `stage === "empty"` only.
+  const [seedRoundOpen, setSeedRoundOpen] = useState(false);
+  const [seedPackets, setSeedPackets] = useState<Record<string, SeedPacketState>>({});
   const [plannedPhaseNames, setPlannedPhaseNames] = useState<string[]>(PHASE_DEFS.map((p) => p.name));
   const [newPhaseName, setNewPhaseName] = useState("");
 
@@ -493,14 +363,21 @@ export function ProjectMapMockup() {
   // Client or Guide (or staff) can rename the project; Observer/Crafter
   // can't (Gerald, 2026-10-28).
   const canEditName = role === "Client" || canDefine;
-  // Client and Crafter get a daily-log-style place to leave notes/files
-  // before Basecamp exists; Observer and Guide/staff don't (Guide/staff
-  // get the real planning controls instead — see the empty-stage view).
-  const seesPlanningNotes = role === "Client" || role === "Crafter";
+  // Client and Crafter each get their own seed packet before Basecamp
+  // exists; Observer and Guide/staff don't (Guide/staff manage the round
+  // instead — see the empty-stage view).
+  const participatesInSeeding = role === "Client" || role === "Crafter";
+  const myPacket: SeedPacketState = seedPackets[role] ?? EMPTY_PACKET;
+  const anySeedContent = Object.values(seedPackets).some((p) => p.note.trim() !== "" || p.files.length > 0);
+  const waitingSeedCount = Object.values(seedPackets).reduce((n, p) => n + p.files.filter((f) => !f.sown).length, 0);
+  const totalSeedFiles = Object.values(seedPackets).reduce((n, p) => n + p.files.length, 0);
 
   const camps: Camp[] = [...BASE_CAMPS, ...extraCamps];
   const established = stage === "active" || stage === "complete";
-  const allChecked = checklist.every(Boolean);
+  // The first checklist item is derived from the seed packets, not a
+  // manual checkbox — see the BASECAMP comment above.
+  const effectiveChecklist = checklist.map((c, i) => (i === 0 ? anySeedContent : c));
+  const allChecked = effectiveChecklist.every(Boolean);
 
   function statusFor(index: number): CampStatus {
     if (stage === "complete") return "done";
@@ -519,7 +396,7 @@ export function ProjectMapMockup() {
       return next;
     });
 
-  const establish = () => {
+  const startBasecamp = () => {
     if (!allChecked) return;
     setStage("active");
     setCursor(0);
@@ -532,10 +409,8 @@ export function ProjectMapMockup() {
       setCursor(0);
       setChecklist(BASECAMP.checklist.map(() => false));
       setExtraCamps([]);
-      return;
-    }
-    if (key === "prep") {
-      setStage("prep");
+      setSeedPackets({});
+      setSeedRoundOpen(false);
       return;
     }
     if (key === "complete") {
@@ -549,7 +424,6 @@ export function ProjectMapMockup() {
 
   const currentMilestoneKey = (): string => {
     if (stage === "empty") return "empty";
-    if (stage === "prep") return "prep";
     if (stage === "complete") return "complete";
     return camps[cursor]?.phaseId ?? "discovery";
   };
@@ -562,22 +436,17 @@ export function ProjectMapMockup() {
     }
     if (stage === "active") {
       if (cursor > 0) setCursor(cursor - 1);
-      else setStage("prep");
-      return;
+      else setStage("empty");
     }
-    if (stage === "prep") setStage("empty");
+    // stage === "empty": already at the start, nothing to go back to.
   };
 
   const advance = () => {
     if (stage === "empty") {
-      setStage("prep");
-      return;
-    }
-    if (stage === "prep") {
-      // Deliberately bypasses the checklist gate — this is the demo
-      // scrubber's "time machine," not the real "Establish Basecamp"
-      // button above, which DOES require every item checked. See
-      // Finding 2 in the sidebar.
+      // Deliberately bypasses the Basecamp checklist gate — this is the
+      // demo scrubber's "time machine," not the real "Start a Basecamp"
+      // button above, which DOES require every item checked. See Finding
+      // 2 in the sidebar.
       setStage("active");
       setCursor(0);
       return;
@@ -590,7 +459,6 @@ export function ProjectMapMockup() {
 
   const progressLabel = (): string => {
     if (stage === "empty") return "Not started";
-    if (stage === "prep") return `Basecamp prep (${checklist.filter(Boolean).length}/${checklist.length})`;
     if (stage === "complete") return "Project complete";
     const camp = camps[cursor];
     const phase = PHASE_DEFS.find((p) => p.id === camp.phaseId);
@@ -618,8 +486,29 @@ export function ProjectMapMockup() {
     setEditingName(false);
   };
 
-  const addPlanningFile = () => {
-    setPlanningFiles((prev) => [...prev, `attachment-${prev.length + 1}.jpg (mockup only)`]);
+  const updateMyNote = (value: string) => {
+    setSeedPackets((prev) => ({ ...prev, [role]: { ...(prev[role] ?? EMPTY_PACKET), note: value } }));
+  };
+
+  const addMyFile = () => {
+    setSeedPackets((prev) => {
+      const mine = prev[role] ?? EMPTY_PACKET;
+      const n = mine.files.length + 1;
+      return { ...prev, [role]: { ...mine, files: [...mine.files, { name: `attachment-${n}.jpg (mockup only)`, sown: false }] } };
+    });
+  };
+
+  const sowSeeds = () => {
+    setSeedPackets((prev) => {
+      const next: Record<string, SeedPacketState> = {};
+      for (const [key, packet] of Object.entries(prev)) next[key] = { ...packet, files: packet.files.map((f) => ({ ...f, sown: true })) };
+      return next;
+    });
+  };
+
+  const endSeedRound = () => {
+    sowSeeds();
+    setSeedRoundOpen(false);
   };
 
   const addPlannedPhase = () => {
@@ -704,106 +593,230 @@ export function ProjectMapMockup() {
             </p>
           </header>
 
-          {stage === "empty" ? (
-            <EmptyLifecycleState
-              role={role}
-              canDefine={canDefine}
-              seesPlanningNotes={seesPlanningNotes}
-              planningNote={planningNote}
-              onPlanningNoteChange={setPlanningNote}
-              planningFiles={planningFiles}
-              onAddPlanningFile={addPlanningFile}
-              plannedPhaseNames={plannedPhaseNames}
-              onRemovePhase={removePlannedPhase}
-              newPhaseName={newPhaseName}
-              onNewPhaseNameChange={setNewPhaseName}
-              onAddPhase={addPlannedPhase}
-              onStart={() => setStage("prep")}
-            />
-          ) : (
-            <>
-              {/* --- Basecamp --- */}
-              <Surface className="pm-basecamp">
-                <Stack gap={4}>
-                  <Cluster style={{ justifyContent: "space-between" }} align="flex-start">
-                    <Stack gap={1}>
-                      <Badge variant="accent">BASECAMP</Badge>
-                      <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold" })}`}>
-                        Home base — the overall plan &amp; timeline
-                      </h2>
-                    </Stack>
-                    <Badge variant={established ? "success" : "warning"}>
-                      {established ? "Established" : "Not yet established"}
-                    </Badge>
-                  </Cluster>
-                  <p className={textSize.sm}>{BASECAMP.overview}</p>
-                  <Cluster gap={8} wrap>
-                    <Stat label="Kickoff" value={established ? BASECAMP.kickoff : "Not started"} />
-                    <Stat label="Target finish" value={BASECAMP.targetFinish} />
-                    <Stat label="Final goal" value={FINAL_GOAL} />
-                  </Cluster>
-                  {stage === "prep" ? (
-                    <Stack gap={2}>
-                      <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>
-                        What's needed to move forward ({checklist.filter(Boolean).length}/{checklist.length})
-                      </p>
-                      <Stack gap={2}>
-                        {BASECAMP.checklist.map((item, i) => (
-                          <Checkbox
-                            key={item}
-                            label={item}
-                            checked={checklist[i]}
-                            disabled={!canDefine}
-                            onChange={(v) => setChecklist((cs) => cs.map((c, ci) => (ci === i ? v : c)))}
-                          />
-                        ))}
-                      </Stack>
-                      {canDefine ? (
-                        <Cluster>
-                          <button type="button" className={button({ variant: "primary" })} disabled={!allChecked} onClick={establish}>
-                            Establish Basecamp &amp; start Discovery
-                          </button>
-                        </Cluster>
-                      ) : (
-                        <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                          Only a Guide (or Admin/Super) can check these off and establish
-                          Basecamp. {role} can see progress here, not change it.
-                        </p>
-                      )}
-                    </Stack>
+          {/* --- Basecamp: always shown, "not yet established" doubles as
+              the merged former "prep" screen --- */}
+          <Surface className="pm-basecamp">
+            <Stack gap={4}>
+              <Cluster style={{ justifyContent: "space-between" }} align="flex-start">
+                <Stack gap={1}>
+                  <Badge variant="accent">BASECAMP</Badge>
+                  <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold" })}`}>
+                    Home base — the overall plan &amp; timeline
+                  </h2>
+                </Stack>
+                <Badge variant={established ? "success" : "warning"}>
+                  {established ? "Established" : "Not yet established"}
+                </Badge>
+              </Cluster>
+              <p className={textSize.sm}>{BASECAMP.overview}</p>
+              <Cluster gap={8} wrap>
+                <Stat label="Kickoff" value={established ? BASECAMP.kickoff : "Not started"} />
+                <Stat label="Target finish" value={BASECAMP.targetFinish} />
+                <Stat label="Final goal" value={FINAL_GOAL} />
+              </Cluster>
+              {stage === "empty" ? (
+                <Stack gap={2}>
+                  <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>
+                    What's needed to move forward ({effectiveChecklist.filter(Boolean).length}/{effectiveChecklist.length})
+                  </p>
+                  <Stack gap={2}>
+                    {BASECAMP.checklist.map((item, i) => {
+                      const derived = i === 0;
+                      return (
+                        <Checkbox
+                          key={item}
+                          label={derived ? `${item} (from seed packets below)` : item}
+                          checked={effectiveChecklist[i]}
+                          disabled={derived || !canDefine}
+                          onChange={(v) => setChecklist((cs) => cs.map((c, ci) => (ci === i ? v : c)))}
+                        />
+                      );
+                    })}
+                  </Stack>
+                  {canDefine ? (
+                    <Cluster>
+                      <button type="button" className={button({ variant: "primary" })} disabled={!allChecked} onClick={startBasecamp}>
+                        Start a Basecamp
+                      </button>
+                    </Cluster>
                   ) : (
-                    <Disclosure summary={`What's in place to move forward (${BASECAMP.checklist.length}/${BASECAMP.checklist.length})`}>
-                      <ul className="pm-checklist">
-                        {BASECAMP.checklist.map((item) => (
-                          <li key={item}>
-                            <span className="pm-check">{"\u2713"}</span> {item}
-                          </li>
-                        ))}
-                      </ul>
-                    </Disclosure>
+                    <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                      Only a Guide (or Admin/Super) can check these off and start Basecamp.{" "}
+                      {role} can see progress here, not change it.
+                    </p>
                   )}
                 </Stack>
-              </Surface>
+              ) : (
+                <Disclosure summary={`What's in place to move forward (${BASECAMP.checklist.length}/${BASECAMP.checklist.length})`}>
+                  <ul className="pm-checklist">
+                    {BASECAMP.checklist.map((item) => (
+                      <li key={item}>
+                        <span className="pm-check">{"\u2713"}</span> {item}
+                      </li>
+                    ))}
+                  </ul>
+                </Disclosure>
+              )}
+            </Stack>
+          </Surface>
 
-              {stage === "prep" && (
-                <Surface className={sprinkles({ p: 3 })}>
-                  <Stack gap={2}>
-                    <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                      Planned phases (locked until Basecamp is established):
+          {stage === "empty" && (
+            <>
+              {role === "Observer" && (
+                <Surface className="pm-empty">
+                  <Stack gap={1} align="center">
+                    <p className="pm-eyebrow">PROJECT STATUS</p>
+                    <p className={textSize.sm} style={{ color: semanticColors.textSubtle, textAlign: "center", maxWidth: 420 }}>
+                      This project is currently in planning. Nothing needs your attention yet —
+                      check back once Basecamp is established and work starts.
                     </p>
-                    <Cluster gap={2} wrap>
-                      {phaseGroups.map((p) => (
-                        <span key={p.id} className="pm-phase-pill pm-phase-pill--locked">
-                          {p.name} · {p.items.length} camps
-                        </span>
-                      ))}
-                      <span className="pm-phase-pill pm-phase-pill--locked">{FINAL_GOAL}</span>
-                    </Cluster>
                   </Stack>
                 </Surface>
               )}
 
-              {(stage === "active" || stage === "complete") && (
+              {participatesInSeeding && (
+                <Surface className={sprinkles({ p: 4 })}>
+                  <Stack gap={3}>
+                    <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Your seed packet</p>
+                    {seedRoundOpen ? (
+                      <>
+                        <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                          Upload any existing info you have: threads, emails, notes, documents,
+                          photos, etc. Stays open and editable until a Guide closes the seed
+                          round — once closed, this becomes the start of GraphLog's process.
+                        </p>
+                        <textarea
+                          className="pm-note-editor"
+                          value={myPacket.note}
+                          onChange={(e) => updateMyNote(e.target.value)}
+                          placeholder="Add a note to your packet..."
+                        />
+                        <Cluster gap={2} align="center" wrap>
+                          <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={addMyFile}>
+                            + Add a file (mockup)
+                          </button>
+                        </Cluster>
+                        {myPacket.files.length > 0 && (
+                          <ul className="pm-file-list">
+                            {myPacket.files.map((f, i) => (
+                              <li key={i}>
+                                {f.name} <span style={{ color: semanticColors.textSubtle }}>· {f.sown ? "sown" : "waiting"}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </>
+                    ) : myPacket.note || myPacket.files.length > 0 ? (
+                      <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                        Seed round closed — your packet is read-only now. It's the start of
+                        GraphLog's process from here.
+                      </p>
+                    ) : (
+                      <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                        No seeding round open yet — check back once a Guide starts one.
+                      </p>
+                    )}
+                  </Stack>
+                </Surface>
+              )}
+
+              {canDefine && (
+                <Surface className={sprinkles({ p: 4 })}>
+                  <Stack gap={3}>
+                    <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Define phases</p>
+                    <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                      Defaults to the usual Standard-project pipeline — add or remove to fit
+                      this project.
+                    </p>
+                    <Cluster gap={2} wrap>
+                      {plannedPhaseNames.map((name, i) => (
+                        <span key={`${name}-${i}`} className="pm-phase-editable">
+                          {name}
+                          <button type="button" onClick={() => removePlannedPhase(i)} aria-label={`Remove ${name}`}>
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </Cluster>
+                    <Cluster gap={2} align="center">
+                      <Input
+                        label="New phase name"
+                        hideLabel
+                        name="new-phase-name"
+                        value={newPhaseName}
+                        onChange={(e) => setNewPhaseName(e.target.value)}
+                        placeholder="e.g. Permitting"
+                      />
+                      <button type="button" className={button({ variant: "outline", size: "compact" })} disabled={!newPhaseName.trim()} onClick={addPlannedPhase}>
+                        + Add phase
+                      </button>
+                    </Cluster>
+                    <p className={textSize.sm} style={{ color: semanticColors.textSubtle, fontStyle: "italic" }}>
+                      Mockup limitation: this list is illustrative only — once Basecamp
+                      starts, the rest of this mockup still uses the fixed Discovery/Design/
+                      Sourcing/Construction dataset built earlier. Regenerating camps per
+                      custom phase is out of scope for this pass.
+                    </p>
+                  </Stack>
+                </Surface>
+              )}
+
+              {canDefine && (
+                <Surface className={sprinkles({ p: 4 })}>
+                  <Stack gap={3}>
+                    <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Seed round</p>
+                    {!seedRoundOpen ? (
+                      <>
+                        <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                          Open a round so Client/Crafter can add what they already have before
+                          Basecamp starts.
+                        </p>
+                        <Cluster>
+                          <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={() => setSeedRoundOpen(true)}>
+                            Open a seeding round
+                          </button>
+                        </Cluster>
+                      </>
+                    ) : (
+                      <>
+                        <Cluster gap={3} align="center" wrap>
+                          <button type="button" className={button({ variant: "outline", size: "compact" })} disabled={waitingSeedCount === 0} onClick={sowSeeds}>
+                            Sow ({waitingSeedCount} waiting)
+                          </button>
+                          <button type="button" className={button({ variant: "quiet" })} onClick={endSeedRound}>
+                            End the seeding round
+                          </button>
+                        </Cluster>
+                        {totalSeedFiles > 0 && (
+                          <Disclosure summary={`Seed packets · ${totalSeedFiles} file${totalSeedFiles === 1 ? "" : "s"}`}>
+                            <Stack gap={2}>
+                              {SEEDING_ROLES.filter((r) => (seedPackets[r]?.files.length ?? 0) > 0 || seedPackets[r]?.note).map((r) => (
+                                <div key={r} className={textSize.sm}>
+                                  <span className={sprinkles({ fontWeight: "semibold" })}>{r}</span>
+                                  {seedPackets[r]?.note && (
+                                    <p style={{ color: semanticColors.textSubtle, margin: "2px 0" }}>{seedPackets[r]?.note}</p>
+                                  )}
+                                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                                    {seedPackets[r]?.files.map((f, i) => (
+                                      <li key={i} style={{ color: semanticColors.textSubtle }}>
+                                        {f.name} · {f.sown ? "sown" : "waiting"}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ))}
+                            </Stack>
+                          </Disclosure>
+                        )}
+                      </>
+                    )}
+                  </Stack>
+                </Surface>
+              )}
+            </>
+          )}
+
+          {(stage === "active" || stage === "complete") && (
                 <>
                   {/* --- Camps trail --- */}
                   <section>
@@ -994,8 +1007,6 @@ export function ProjectMapMockup() {
                   )}
                 </>
               )}
-            </>
-          )}
         </div>
 
         {/* ================= RIGHT: our control panel + running notes ================= */}
@@ -1062,7 +1073,7 @@ export function ProjectMapMockup() {
             Guides (or Admin/Super humans, regardless of their project group) are the
             only ones who can define Basecamp, Phases, or Camps — confirmed by Gerald,
             2026-10-28, not an open question anymore. Switch "Viewing as" to
-            Observer/Client/Crafter to see the Basecamp-prep checklist and "+ Define a
+            Observer/Client/Crafter to see the Basecamp checklist and "+ Define a
             future camp" become read-only. This doesn't gate the scrubber above — that's
             a reviewer-only convenience for exploring every state as any role, not a
             simulation of a real in-product control.
@@ -1076,7 +1087,7 @@ export function ProjectMapMockup() {
           </Callout>
 
           <Callout kind="finding" n={2} summary="The real gate (checklist) and the demo-only scrubber need to stay visibly distinct.">
-            The checklist-gated "Establish Basecamp" button is the real workflow
+            The checklist-gated "Start a Basecamp" button is the real workflow
             (disabled until every item is checked). The "Advance" scrubber and milestone
             chips deliberately bypass that gate so this mockup stays navigable — worth
             deciding whether a real "jump ahead" shortcut should ever exist for staff, or
