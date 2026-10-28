@@ -178,40 +178,40 @@
 .pm-checklist li { display: flex; gap: 8px; align-items: baseline; font-size: 0.88rem; }
 .pm-checklist .pm-check { color: var(--green); flex: 0 0 auto; }
 
-/* --- Camp trail --- */
-.pm-trail {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  overflow-x: auto;
-  padding: 10px 4px 6px;
-}
-.pm-trail-row {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-}
-.pm-phase-group {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  border: 1px dashed var(--color-surface-border);
+/* --- Camps: Basecamp and each phase stacked vertically; the camps
+   WITHIN one phase run horizontally (Gerald, 2026-10-28). --- */
+.pm-trail-anchor { display: flex; }
+.pm-phase-row {
+  border: 1px solid var(--color-surface-border);
   border-radius: 12px;
-  padding: 18px 10px 10px;
-  margin: 0 2px;
-  position: relative;
+  padding: 12px 14px;
 }
-.pm-phase-group__label {
-  position: absolute;
-  top: -9px;
-  left: 10px;
-  background: var(--color-surface-page);
-  padding: 0 6px;
-  font-size: 0.68rem;
+.pm-phase-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.pm-phase-row__name {
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-subtle);
-  white-space: nowrap;
+  font-weight: 700;
+}
+.pm-phase-row__camps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.pm-phase-row__unknown {
+  margin: 0;
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--color-text-subtle);
 }
 .pm-link {
   width: 24px;
@@ -230,12 +230,11 @@
   border: 1px solid var(--color-surface-border);
   background: var(--color-surface-card);
   color: var(--color-text-subtle);
-  cursor: pointer;
   align-self: center;
 }
-.pm-phase-pill--done { border-color: var(--green); color: var(--purple); background: var(--green-light); }
+.pm-phase-pill--done { border-color: var(--green); color: var(--purple); background: var(--green-light); cursor: pointer; }
 .pm-phase-pill--current { border-color: var(--purple); color: var(--purple); }
-.pm-phase-pill--upcoming { opacity: 0.8; }
+.pm-phase-pill--upcoming { opacity: 0.7; }
 .pm-phase-pill--locked { cursor: default; opacity: 0.6; }
 
 .pm-node {

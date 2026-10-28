@@ -50,6 +50,17 @@
 // process. The Basecamp checklist's first item is no longer a manual
 // checkbox: it's derived from whether anyone's seed packet actually has
 // content.
+//
+// v10 (2026-10-28): the "empty" stage is now the "Project Seed" view
+// (Gerald: ties into the seeding-round idea already here); everything
+// after Basecamp is established is the "Project Map" view — same page,
+// new name per what's being looked at (see the dynamic eyebrow). One
+// Basecamp only, never one per Phase (open question, now decided). The
+// camps trail is vertical now — Basecamp, then each Phase as its own row,
+// that Phase's camps running horizontally inside it — and a Phase ahead
+// of the current one shows no camps at all ("Not yet defined"), since
+// the seed's own idea is that a future Phase's shape isn't known until
+// the team actually gets there.
 import { useEffect, useId, useState, type ReactNode, Fragment } from "react";
 import { Surface } from "stamps/Surface";
 import { Badge } from "stamps/Badge";
@@ -179,7 +190,7 @@ const PHASE_DEFS: PhaseDef[] = [
 const BASE_CAMPS: Camp[] = PHASE_DEFS.flatMap((phase) => phase.camps.map((c) => ({ ...c, phaseId: phase.id })));
 
 const MILESTONES = [
-  { key: "empty", label: "Empty" },
+  { key: "seed", label: "Project Seed" },
   { key: "discovery", label: "Discovery" },
   { key: "design", label: "Design" },
   { key: "sourcing", label: "Sourcing" },
@@ -187,7 +198,12 @@ const MILESTONES = [
   { key: "complete", label: "Complete" },
 ] as const;
 
-type Stage = "empty" | "active" | "complete";
+// "seed" is the "Project Seed" view (Gerald, 2026-10-28): before Basecamp
+// exists, named for how it ties into the seeding-round idea already on
+// this screen. Once Basecamp is established, the page becomes the
+// "Project Map" view -- same page, same state machine, just a new name
+// for what's being looked at.
+type Stage = "seed" | "active" | "complete";
 
 /** The real project-level groups (`GROUPS` in `robustness-core/data/
  * features.ts`), kept in the same order the human asked for here rather
@@ -375,14 +391,13 @@ function contentForCamp(camp: Camp, status: CampStatus): ContentItem[] {
 }
 
 export function ProjectMapMockup() {
-  const [stage, setStage] = useState<Stage>("empty");
+  const [stage, setStage] = useState<Stage>("seed");
   const [cursor, setCursor] = useState(0);
   const [checklist, setChecklist] = useState<boolean[]>(BASECAMP.checklist.map(() => false));
   const [extraCamps, setExtraCamps] = useState<Camp[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
   const [expandAll, setExpandAll] = useState(false);
-  const [resetPerPhase, setResetPerPhase] = useState(false);
   const [twoInFocus, setTwoInFocus] = useState(false);
   const [contentFilter, setContentFilter] = useState<ContentFilter>("steps");
   const [showAddCamp, setShowAddCamp] = useState(false);
@@ -405,9 +420,9 @@ export function ProjectMapMockup() {
   const [editingFinalGoal, setEditingFinalGoal] = useState(false);
   const [finalGoalDraft, setFinalGoalDraft] = useState(finalGoal);
 
-  // Empty-stage-only state: a seeding round (per-person packets, open
+  // Project-Seed-only state: a seeding round (per-person packets, open
   // until a Guide closes it) and the phase list a Guide/staff plans ahead
-  // of starting Basecamp. Both scoped to `stage === "empty"` only. A new
+  // of starting Basecamp. Both scoped to `stage === "seed"` only. A new
   // project's seeding round starts OPEN (Gerald, 2026-10-28: "they should
   // always be open") — a Guide closing it, not opening it, is the real
   // action here.
@@ -522,8 +537,8 @@ export function ProjectMapMockup() {
 
   const jumpTo = (key: (typeof MILESTONES)[number]["key"]) => {
     setPreviewId(null);
-    if (key === "empty") {
-      setStage("empty");
+    if (key === "seed") {
+      setStage("seed");
       setCursor(0);
       setChecklist(BASECAMP.checklist.map(() => false));
       setExtraCamps([]);
@@ -545,7 +560,7 @@ export function ProjectMapMockup() {
   };
 
   const currentMilestoneKey = (): string => {
-    if (stage === "empty") return "empty";
+    if (stage === "seed") return "seed";
     if (stage === "complete") return "complete";
     return camps[cursor]?.phaseId ?? "discovery";
   };
@@ -558,13 +573,13 @@ export function ProjectMapMockup() {
     }
     if (stage === "active") {
       if (cursor > 0) setCursor(cursor - 1);
-      else setStage("empty");
+      else setStage("seed");
     }
-    // stage === "empty": already at the start, nothing to go back to.
+    // stage === "seed": already at the start, nothing to go back to.
   };
 
   const advance = () => {
-    if (stage === "empty") {
+    if (stage === "seed") {
       // Deliberately bypasses the Basecamp checklist gate — this is the
       // demo scrubber's "time machine," not the real "Start Project"
       // button below, which DOES require every item checked. See Finding
@@ -580,7 +595,7 @@ export function ProjectMapMockup() {
   };
 
   const progressLabel = (): string => {
-    if (stage === "empty") return "Not started";
+    if (stage === "seed") return "Project Seed";
     if (stage === "complete") return "Project complete";
     const camp = camps[cursor];
     const phase = PHASE_DEFS.find((p) => p.id === camp.phaseId);
@@ -712,7 +727,7 @@ export function ProjectMapMockup() {
           )}
 
           <header>
-            <p className="pm-eyebrow">PROJECT · STANDARD</p>
+            <p className="pm-eyebrow">{stage === "seed" ? "PROJECT SEED" : "PROJECT MAP"} · STANDARD</p>
             {editingName ? (
               <Cluster gap={2} align="center" wrap>
                 <Input
@@ -796,7 +811,7 @@ export function ProjectMapMockup() {
                   onCancel={cancelFinalGoal}
                 />
               </Cluster>
-              {stage === "empty" ? (
+              {stage === "seed" ? (
                 <Stack gap={2}>
                   <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>
                     What's needed to move forward ({effectiveChecklist.filter(Boolean).length}/{effectiveChecklist.length})
@@ -837,7 +852,7 @@ export function ProjectMapMockup() {
             </Stack>
           </Surface>
 
-          {stage === "empty" && (
+          {stage === "seed" && (
             <>
               {role === "Observer" && (
                 <Surface className="pm-empty">
@@ -1105,30 +1120,37 @@ export function ProjectMapMockup() {
                     >
                       Camps ({camps.length} across {phaseGroups.length} phase{phaseGroups.length === 1 ? "" : "s"})
                     </h3>
-                    <Surface className={sprinkles({ p: 2 })}>
-                      <div className="pm-trail">
-                        <div className="pm-trail-row">
-                          {!resetPerPhase && (
-                            <>
-                              <CampNode kind="basecamp" label="Basecamp" />
-                              <TrailLink />
-                            </>
-                          )}
-                          {phaseGroups.map((phase) => {
-                            const pStatus = phaseStatusOf(phase.items);
-                            const isExpanded = expandAll || pStatus === "current" || expandedPhases.has(phase.id);
-                            return (
-                              <Fragment key={phase.id}>
-                                <div className="pm-phase-group">
-                                  <span className="pm-phase-group__label">{phase.name}</span>
-                                  {resetPerPhase && (
-                                    <>
-                                      <CampNode kind="basecamp" label="Basecamp" />
-                                      <TrailLink />
-                                    </>
-                                  )}
-                                  {isExpanded ? (
-                                    phase.items.map(({ camp, index }, i) => (
+                    <Surface className={sprinkles({ p: 3 })}>
+                      <Stack gap={3}>
+                        <div className="pm-trail-anchor">
+                          <CampNode kind="basecamp" label="Basecamp" />
+                        </div>
+                        {phaseGroups.map((phase) => {
+                          const pStatus = phaseStatusOf(phase.items);
+                          const toggleable = pStatus === "done";
+                          const isExpanded = expandAll || pStatus === "current" || (toggleable && expandedPhases.has(phase.id));
+                          const statusLabel =
+                            pStatus === "done" ? `\u2713 ${phase.items.length}/${phase.items.length} done` : pStatus === "current" ? "In focus" : "Not yet defined";
+                          return (
+                            <div className="pm-phase-row" key={phase.id}>
+                              <div className="pm-phase-row__header">
+                                <span className="pm-phase-row__name">{phase.name}</span>
+                                {toggleable ? (
+                                  <button
+                                    type="button"
+                                    className={`pm-phase-pill pm-phase-pill--${pStatus}`}
+                                    onClick={() => toggleExpandedPhase(phase.id)}
+                                  >
+                                    {statusLabel}
+                                  </button>
+                                ) : (
+                                  <span className={`pm-phase-pill pm-phase-pill--${pStatus}`}>{statusLabel}</span>
+                                )}
+                              </div>
+                              {isExpanded ? (
+                                phase.items.length > 0 ? (
+                                  <div className="pm-phase-row__camps">
+                                    {phase.items.map(({ camp, index }, i) => (
                                       <Fragment key={camp.id}>
                                         <CampNode
                                           kind={statusFor(index)}
@@ -1138,24 +1160,25 @@ export function ProjectMapMockup() {
                                         />
                                         <TrailLink last={i === phase.items.length - 1} />
                                       </Fragment>
-                                    ))
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      className={`pm-phase-pill pm-phase-pill--${pStatus}`}
-                                      onClick={() => toggleExpandedPhase(phase.id)}
-                                    >
-                                      {pStatus === "done" ? `\u2713 ${phase.items.length}/${phase.items.length} done` : `${phase.items.length} camps`}
-                                    </button>
-                                  )}
-                                </div>
-                                <TrailLink />
-                              </Fragment>
-                            );
-                          })}
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="pm-phase-row__unknown">No camps defined for this phase yet.</p>
+                                )
+                              ) : (
+                                pStatus === "upcoming" && (
+                                  <p className="pm-phase-row__unknown">
+                                    Shape not known yet — camps get defined once the team actually gets here.
+                                  </p>
+                                )
+                              )}
+                            </div>
+                          );
+                        })}
+                        <div className="pm-trail-anchor">
                           <CampNode kind={stage === "complete" ? "done" : "final"} label={finalGoal} />
                         </div>
-                      </div>
+                      </Stack>
                     </Surface>
                   </section>
 
@@ -1334,14 +1357,11 @@ export function ProjectMapMockup() {
                   </button>
                 </Cluster>
                 <Cluster gap={2} wrap>
-                  <Chip active={resetPerPhase} onClick={() => setResetPerPhase((v) => !v)}>
-                    Basecamp resets per Phase
-                  </Chip>
                   <Chip active={twoInFocus} onClick={() => setTwoInFocus((v) => !v)}>
                     Experimental: 2 camps in focus
                   </Chip>
                   <Chip active={expandAll} onClick={() => setExpandAll((v) => !v)}>
-                    Expand all phases (dense view)
+                    Reveal future phases (reviewer-only peek)
                   </Chip>
                 </Cluster>
               </Stack>
@@ -1358,11 +1378,21 @@ export function ProjectMapMockup() {
             simulation of a real in-product control.
           </Callout>
 
-          <Callout n={2} summary="Does Basecamp reset per Phase, or stay one for the whole project?">
-            Camps vs. Phases: toggling "Basecamp resets per Phase" shows the two live
-            options from the seed — one shared Basecamp for the whole project (off), or
-            a Basecamp re-established at the start of each Phase (on). Genuinely
-            unresolved per the seed; needs Austin's input.
+          <Callout kind="decision" n={2} summary="One Basecamp for the whole project — not one per Phase.">
+            Camps vs. Phases open question — resolved by Gerald, 2026-10-28: there's one
+            Basecamp for the whole project, not a fresh one per Phase. The trail below no
+            longer has a per-phase reset toggle to explore; Basecamp sits once, at the top,
+            above every phase.
+          </Callout>
+
+          <Callout kind="finding" n={4} summary="Future phases show no camps at all until the team gets there.">
+            Per Gerald, 2026-10-28: a phase ahead of the current one shouldn't show camps
+            yet — "we don't know what shape we'll be in when we get to those phases." The
+            trail now shows "Not yet defined" for any phase that isn't done or current,
+            with no way to peek in except the reviewer-only "Reveal future phases" toggle
+            (which exists only because this mockup already authored all 4 phases' camps
+            up front, for the scale stress-test — a real build might not have that data
+            sitting there to reveal at all).
           </Callout>
 
           <Callout kind="finding" n={2} summary="The real gate (checklist) and the demo-only scrubber need to stay visibly distinct.">
@@ -1380,13 +1410,13 @@ export function ProjectMapMockup() {
             the data model) actually needs to support that for a complex build.
           </Callout>
 
-          <Callout kind="finding" n={1} summary="A flat trail doesn't scale — Phases, not Camps, likely need to collapse.">
-            At a believable scale (~33 camps across 4 phases), a flat trail of every camp
-            is unwieldy — so by default this mockup collapses any phase that isn't the
-            current one into a single summary pill ("8/8 done" or "9 camps"), expanding
-            only on click. Toggle "Expand all phases" to see the dense version for
-            comparison. This suggests Phases, not Camps, may need to be the primary
-            collapse/navigation unit on the real Project page.
+          <Callout kind="finding" n={1} summary="A flat trail doesn't scale — Phases, not Camps, are now the collapse unit.">
+            At a believable scale (~33 camps across 4 phases), a single flat row of every
+            camp was unwieldy — now Basecamp and each Phase stack vertically, with that
+            Phase's own camps running horizontally inside it, and a done Phase collapses
+            to a single "8/8 done" pill until clicked. This suggests Phases, not Camps,
+            are the primary collapse/navigation unit on the real Project page — now also
+            reinforced by Finding 4: a future Phase has no camps to show at all yet.
           </Callout>
 
           <Callout kind="finding" n={3} summary="Per-camp authoring cost makes GraphLog auto-sorting feel load-bearing, not optional.">
