@@ -36,6 +36,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { ShareLinkControl } from "./ShareLinkControl";
+import { BRIEF_RUN_NOTE } from "./LetterBrief";
 import { localDateString } from "./TodayLog";
 
 export function letterPublicPath(fileId: string): string {
@@ -234,6 +235,9 @@ export function NewLetterModal({
           <Input type="textarea" name="purpose" label="What is this letter for?" required />
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
             One sentence, in your words. It goes into the project's record as yours, today.
+          </p>
+          <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-run-note>
+            {BRIEF_RUN_NOTE}
           </p>
           {error && (
             <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert">

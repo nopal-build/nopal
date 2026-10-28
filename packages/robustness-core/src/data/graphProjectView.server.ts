@@ -1626,10 +1626,11 @@ export function describeUncited(t: UncitedThread): string {
  * and both used to vanish here without a line anywhere.
  *
  * Shared by the stage's main path and its up-to-date path, which measures
- * coverage against the README it is leaving alone. One loader so the two
- * can never disagree about which nodes exist.
+ * coverage against the README it is leaving alone, and by the brief stage
+ * (`brief.server.ts`), which reads the same nodes for a letter. One loader
+ * so none of them can disagree about which nodes exist.
  */
-async function loadGraphNodes(
+export async function loadGraphNodes(
   files: { _id: string; name: string }[],
 ): Promise<{ allNodes: GraphLogNode[]; issues: string[] }> {
   const graphLogListings = files

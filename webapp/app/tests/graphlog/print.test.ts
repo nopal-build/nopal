@@ -89,5 +89,7 @@ describe("a print goes ahead of background work", () => {
     const background = ["run", "sync-knowledge", "sync-graph", "graph-structure", "graph-project-view", "rerun-outputs", "reset", "reset-project-view", "reset-graph", "reset-knowledge"] as const;
     for (const name of background) expect(graphLogJobPriority(name)).toBeGreaterThan(graphLogJobPriority("print"));
     expect(graphLogJobPriority("sow")).toBe(graphLogJobPriority("print"));
+    // A guide is watching a brief too.
+    expect(graphLogJobPriority("brief")).toBe(graphLogJobPriority("print"));
   });
 });

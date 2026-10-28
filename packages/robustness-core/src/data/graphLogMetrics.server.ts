@@ -18,10 +18,12 @@ import { query, upsert, remove, formatRecord, defineTable, type Data } from "./g
 import type { LlmUsage } from "./llmProvider";
 import { estimateCostUsd, isPricingStale, pricingAgeDays } from "./llmPricing";
 
-export type GraphLogStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view" | "sow";
+export type GraphLogStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view" | "sow" | "brief";
 export type GraphLogEventKind =
   /** One seed packet file read by the sow stage. */
   | "sow"
+  /** One letter's brief, written by the brief stage from the whole graph. */
+  | "brief"
   | "photo-knowledge"
   /** A video described from a few still frames -- its own kind so the
    * cost of a clip (several images in one call) is visible on its own. */
@@ -368,6 +370,7 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
       "graph-structure": emptyStageTotals(),
       "graph-project-view": emptyStageTotals(),
       sow: emptyStageTotals(),
+      brief: emptyStageTotals(),
     },
     nodesWrittenInRange: 0,
     runCount: 0,
@@ -467,6 +470,7 @@ export async function getGraphLogUsageSummary(days: number): Promise<GraphLogUsa
       "graph-project-view":
         summary.byStage["graph-project-view"].estimatedCostUsd / summary.nodesWrittenInRange,
       sow: summary.byStage.sow.estimatedCostUsd / summary.nodesWrittenInRange,
+      brief: summary.byStage.brief.estimatedCostUsd / summary.nodesWrittenInRange,
     };
   }
 
@@ -552,7 +556,7 @@ export type GraphLogRunSpend = {
   pricingAgeDays: number;
 };
 
-const STAGE_ORDER: GraphLogStage[] = ["sow", "sync-knowledge", "sync-graph", "graph-structure", "graph-project-view"];
+const STAGE_ORDER: GraphLogStage[] = ["sow", "sync-knowledge", "sync-graph", "graph-structure", "graph-project-view", "brief"];
 
 /** Picks one run's rows out of a candidate set. Pure, see
  * `RunSpendAttribution` for the rule. */

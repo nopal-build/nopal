@@ -218,6 +218,10 @@ services:
       # with the Chromium Dockerfile.dev installs.
       APP_BASE_URL: http://fruits:3000
       CHROMIUM_PATH: /usr/bin/chromium
+      # The model key, from the host's `.env`, so a GraphLog stage can run
+      # on the dev stack (a letter's brief, 2026-10-28). Empty when the
+      # host has none: the stage then says GraphLog isn't configured.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     command: /app/bin/dev-as-host-user.sh sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter worker run dev"
     # worker has no HTTP server to curl, so this checks for vite-node's
     # bin instead — a reliable stand-in for "pnpm install finished" (the
