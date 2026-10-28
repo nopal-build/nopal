@@ -13,26 +13,37 @@
   line-height: 1.4;
 }
 
-/* Two columns: the mockup on the left, our notes about it on the right,
-   in the hand (red is the pen, Indie Flower is the hand -- same
-   convention as the real GraphLog mark notes, oxmarkdown.css, so this
-   reads as "a note", not a new one-off style). Stacks to one column
-   under 900px. */
-.pm-row {
+/* A persistent two-column page: LEFT is only ever the simulated product
+   (what a real viewer would see); RIGHT is a sticky sidebar holding every
+   piece of mockup-only chrome -- the "Viewing as" switcher, the
+   lifecycle scrubber, and the running notes, in the hand (red is the
+   pen, Indie Flower is the hand -- same convention as the real GraphLog
+   mark notes, oxmarkdown.css). Stacks to one column (sidebar after the
+   product, no longer sticky) under 900px. */
+.pm-page {
   display: grid;
-  grid-template-columns: 1fr minmax(240px, 300px);
-  gap: 24px;
+  grid-template-columns: 1fr minmax(280px, 340px);
+  gap: 32px;
   align-items: start;
 }
-.pm-row__notes {
+.pm-page__main {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding-top: 6px;
+  gap: 24px;
+  min-width: 0;
+}
+.pm-page__side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 @media (max-width: 900px) {
-  .pm-row { grid-template-columns: 1fr; }
-  .pm-row__notes { padding-top: 0; }
+  .pm-page { grid-template-columns: 1fr; }
+  .pm-page__side { position: static; max-height: none; }
 }
 
 .pm-flag {
