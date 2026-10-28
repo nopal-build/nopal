@@ -36,6 +36,13 @@
   white-space: nowrap;
 }
 .pm-flag p { margin: 0; }
+.pm-flag--finding { border-color: var(--green); background: var(--green-light); }
+.pm-flag--finding .pm-flag__tag { background: var(--white); color: var(--green); }
+
+.pm-empty {
+  padding: 36px 20px;
+  border-style: dashed;
+}
 
 .pm-eyebrow {
   font-family: ui-monospace, SFMono-Regular, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
@@ -104,6 +111,24 @@
   background: var(--color-surface-border);
   flex: 0 0 auto;
 }
+
+.pm-phase-pill {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  border-radius: 9999px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-surface-border);
+  background: var(--color-surface-card);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  align-self: center;
+}
+.pm-phase-pill--done { border-color: var(--green); color: var(--purple); background: var(--green-light); }
+.pm-phase-pill--current { border-color: var(--purple); color: var(--purple); }
+.pm-phase-pill--upcoming { opacity: 0.8; }
+.pm-phase-pill--locked { cursor: default; opacity: 0.6; }
 
 .pm-node {
   flex: 0 0 auto;

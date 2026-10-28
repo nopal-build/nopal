@@ -3,18 +3,28 @@
 // Throwaway visual exploration for `garden/1-seeds/project-map.md` —
 // built to make the seed's open questions clickable, not to answer them.
 // Everything here is local React state over hardcoded mock data; nothing
-// reads or writes real projects. Meant to be deleted or replaced once the
+// reads or writes a real project. Meant to be deleted or replaced once the
 // seed's open questions are resolved and real work starts (see the seed's
 // "Next step").
 //
-// The toggles at the top exist ONLY to let the open questions be seen
-// side-by-side, not because both options are seriously being proposed as
-// final designs. `pm-flag` callouts throughout point back at the exact
-// open question in the seed each piece of UI is standing in for.
+// v2 (2026-10-28): expanded from a single fixed "which camp is focused"
+// toggle into a full lifecycle SIMULATION — empty project -> Basecamp
+// prep/onboarding -> Discovery -> Design -> Sourcing -> Construction ->
+// complete — with realistic per-phase camp counts (5-10 each, ~33 total)
+// to stress-test whether the Basecamp/Camps navigation actually holds up
+// at a believable scale, not just with the 4 toy camps v1 had.
+//
+// The controls at the top exist ONLY to let open questions (and a few new
+// findings this larger simulation surfaced) be seen side-by-side, not
+// because every option shown is seriously proposed as a final design.
+// `pm-flag` callouts point at an exact open question from the seed;
+// `pm-flag--finding` callouts point at something this exercise itself
+// surfaced that the seed didn't anticipate.
 import { Fragment, useId, useState, type ReactNode } from "react";
 import { Surface } from "stamps/Surface";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
+import { Checkbox } from "stamps/Checkbox";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
 import { Disclosure } from "stamps/Disclosure";
@@ -40,23 +50,26 @@ type Step = {
 
 type ContentItem = { id: string; type: "effort" | "file" | "logbook"; label: string; when: string };
 
+/** A camp's static definition — everything ABOUT it. Its live status
+ * (done/focused/upcoming) is deliberately NOT stored here: it's derived
+ * from where the simulated "cursor" sits, so moving through the
+ * lifecycle recomputes the whole page instead of needing to hand-edit
+ * 30+ status fields. */
 type Camp = {
   id: string;
+  phaseId: string;
   name: string;
   description: string;
-  eta: string;
-  status: CampStatus;
-  steps: Step[];
-  content: ContentItem[];
+  stepLabels: string[];
 };
 
-type Phase = { id: string; name: string; campIds: string[] };
+type PhaseDef = { id: string; name: string; camps: Omit<Camp, "phaseId">[] };
 
 const BASECAMP = {
   overview:
     "Contract signed, budget approved, site access confirmed, and the design packet handed to the crew. This is the one spot everyone can always return to if a camp stalls.",
   kickoff: "Sep 2, 2026",
-  targetFinish: "Mar 2027 (estimate)",
+  targetFinish: "Jun 2027 (estimate)",
   checklist: [
     "Contract signed",
     "Budget approved",
@@ -67,97 +80,84 @@ const BASECAMP = {
 
 const FINAL_GOAL = "Move-in ready";
 
-const INITIAL_CAMPS: Camp[] = [
+const PHASE_DEFS: PhaseDef[] = [
   {
-    id: "foundation",
-    name: "Foundation",
-    description: "Demo, excavation, footings and slab.",
-    eta: "Done — Oct 2026",
-    status: "done",
-    steps: [
-      { id: "s1", label: "Demo existing slab", done: true, source: "manual" },
-      {
-        id: "s2",
-        label: "Pour footings",
-        done: true,
-        source: "graphlog",
-        graphNode: "Footing inspection passed (daily log, Oct 14)",
-      },
-      { id: "s3", label: "Slab cured & inspected", done: true, source: "manual" },
-    ],
-    content: [
-      { id: "c1", type: "effort", label: "Foundation inspection passed", when: "Oct 14" },
-      { id: "c2", type: "file", label: "Slab inspection photos (12)", when: "Oct 14" },
-      { id: "c3", type: "logbook", label: "Austin: \u201cFootings poured, inspector signed off\u201d", when: "Oct 14" },
+    id: "discovery",
+    name: "Discovery",
+    camps: [
+      { id: "disc-kickoff", name: "Kickoff Call", description: "Intro call to align on expectations and timeline.", stepLabels: ["Schedule kickoff call", "Confirm scope & goals", "Share welcome packet"] },
+      { id: "disc-site-walk", name: "Site Walk & Measurements", description: "Walk the space and record as-built measurements.", stepLabels: ["Walk the site", "Record measurements", "Photograph existing conditions"] },
+      { id: "disc-interview", name: "Lifestyle Interview", description: "Understand how the family actually uses the space.", stepLabels: ["Send intake questionnaire", "Hold interview", "Summarize needs"] },
+      { id: "disc-inspiration", name: "Inspiration Gathering", description: "Collect references and build a shared style direction.", stepLabels: ["Review client references", "Build mood board", "Align on style direction"] },
+      { id: "disc-conditions", name: "Existing Conditions Survey", description: "Document structure, utilities, and constraints.", stepLabels: ["Draft as-built plan", "Flag structural concerns", "Confirm utility locations"] },
+      { id: "disc-budget", name: "Budget Conversation", description: "Set a realistic budget range before design starts.", stepLabels: ["Share ballpark ranges", "Discuss priorities vs. budget", "Confirm comfortable range"] },
+      { id: "disc-program", name: "Program Definition", description: "Lock the room and scope list.", stepLabels: ["Draft scope list", "Review with client", "Finalize program"] },
+      { id: "disc-signoff", name: "Discovery Sign-off", description: "Wrap discovery and hand off to design.", stepLabels: ["Compile discovery summary", "Client sign-off", "Hand off to design team"] },
     ],
   },
   {
-    id: "framing",
-    name: "Framing & Roof",
-    description: "Wall framing, roof trusses, dry-in.",
-    eta: "ETA Dec 2026",
-    status: "focused",
-    steps: [
-      { id: "s4", label: "Wall framing", done: true, source: "manual" },
-      {
-        id: "s5",
-        label: "Roof trusses set",
-        done: true,
-        source: "graphlog",
-        graphNode: "Truss delivery + crane day (daily log, Oct 24)",
-      },
-      {
-        id: "s6",
-        label: "Roof dry-in",
-        done: false,
-        source: "graphlog",
-        graphNode: "\u201cStarting felt + flashing tomorrow\u201d (daily log, Oct 27)",
-      },
-      { id: "s7", label: "Rough window openings framed", done: false, source: "manual" },
-    ],
-    content: [
-      { id: "c4", type: "effort", label: "Framing 60% complete", when: "Oct 24" },
-      { id: "c5", type: "file", label: "Truss delivery photos (8)", when: "Oct 24" },
-      { id: "c6", type: "logbook", label: "Lucas: \u201cTrusses are up, starting dry-in this week\u201d", when: "Oct 27" },
+    id: "design",
+    name: "Design",
+    camps: [
+      { id: "des-concept", name: "Concept Sketches", description: "First-pass layout ideas.", stepLabels: ["Sketch 2-3 concepts", "Internal review", "Present to client"] },
+      { id: "des-floorplan", name: "Floor Plan Options", description: "Develop layout options worth pursuing.", stepLabels: ["Draft plan options", "Client walkthrough", "Narrow to one direction"] },
+      { id: "des-palette", name: "Material & Finish Palette", description: "Choose the overall look.", stepLabels: ["Pull material samples", "Build palette board", "Client approval"] },
+      { id: "des-renderings", name: "3D Renderings", description: "Visualize the chosen direction.", stepLabels: ["Model the space", "Render key views", "Share with client"] },
+      { id: "des-rev1", name: "Design Revisions — Round 1", description: "Incorporate the first round of feedback.", stepLabels: ["Collect feedback", "Revise drawings", "Re-share for review"] },
+      { id: "des-structural", name: "Structural & Engineering Review", description: "Confirm the design is actually buildable.", stepLabels: ["Send plans to engineer", "Resolve structural notes", "Update drawings"] },
+      { id: "des-permitprep", name: "Permit Drawing Prep", description: "Prepare drawings for permit submission.", stepLabels: ["Draft permit set", "Internal QA pass", "Package for submission"] },
+      { id: "des-rev2", name: "Design Revisions — Round 2", description: "Final polish before lock.", stepLabels: ["Incorporate engineer notes", "Final client walkthrough", "Lock drawings"] },
+      { id: "des-signoff", name: "Design Sign-off", description: "Final approval before sourcing starts.", stepLabels: ["Compile final design packet", "Client sign-off", "Hand off to sourcing"] },
     ],
   },
   {
-    id: "systems",
-    name: "Interior Systems",
-    description: "Rough electrical, plumbing, HVAC.",
-    eta: "ETA Jan 2027",
-    status: "upcoming",
-    steps: [
-      { id: "s8", label: "Rough electrical", done: false, source: "manual" },
-      { id: "s9", label: "Rough plumbing", done: false, source: "manual" },
-      { id: "s10", label: "HVAC rough-in", done: false, source: "manual" },
+    id: "sourcing",
+    name: "Sourcing",
+    camps: [
+      { id: "src-spec", name: "Scope & Spec Finalization", description: "Lock exact specs before pricing goes out.", stepLabels: ["Finalize spec sheet", "Confirm quantities", "Share with vendors"] },
+      { id: "src-bids", name: "Contractor Bids", description: "Collect and compare bids.", stepLabels: ["Send out for bid", "Compare proposals", "Select contractor"] },
+      { id: "src-cabinetry", name: "Cabinetry & Countertop Selections", description: "Choose cabinetry and countertop material.", stepLabels: ["Review cabinet lines", "Select countertop material", "Place order"] },
+      { id: "src-tile", name: "Tile & Fixture Selections", description: "Choose tile, plumbing & lighting fixtures.", stepLabels: ["Select tile", "Select fixtures", "Confirm lead times"] },
+      { id: "src-longlead", name: "Long-Lead Item Ordering", description: "Order windows, appliances, anything slow to arrive.", stepLabels: ["Confirm long-lead items", "Place orders", "Track confirmations"] },
+      { id: "src-permit", name: "Permit Submission", description: "Submit for permit approval.", stepLabels: ["Submit permit application", "Respond to plan check", "Receive approval"] },
+      { id: "src-contract", name: "Contract & Schedule Finalization", description: "Lock the contract and the start date.", stepLabels: ["Finalize contract", "Set start date", "Confirm crew schedule"] },
     ],
-    content: [],
   },
   {
-    id: "finishes",
-    name: "Finishes",
-    description: "Drywall, paint, flooring, fixtures.",
-    eta: "ETA Feb 2027",
-    status: "upcoming",
-    steps: [
-      { id: "s11", label: "Drywall & paint", done: false, source: "manual" },
-      { id: "s12", label: "Flooring", done: false, source: "manual" },
-      { id: "s13", label: "Fixtures & final punch list", done: false, source: "manual" },
+    id: "construction",
+    name: "Construction",
+    camps: [
+      { id: "con-demo", name: "Demo", description: "Remove existing materials.", stepLabels: ["Protect adjacent areas", "Demo existing space", "Haul debris"] },
+      { id: "con-foundation", name: "Foundation & Structural", description: "Footings and structural framing prep.", stepLabels: ["Pour/repair footings", "Structural framing", "Inspection"] },
+      { id: "con-framing", name: "Framing", description: "Walls and roof structure.", stepLabels: ["Frame walls", "Set roof structure", "Framing inspection"] },
+      { id: "con-rough", name: "Rough Mechanicals", description: "Electrical, plumbing, HVAC rough-in.", stepLabels: ["Rough electrical", "Rough plumbing", "Rough HVAC"] },
+      { id: "con-insulation", name: "Insulation & Drywall", description: "Close up the walls.", stepLabels: ["Insulate", "Hang drywall", "Tape & finish"] },
+      { id: "con-finishes", name: "Interior Finishes", description: "Paint and flooring.", stepLabels: ["Paint", "Install flooring", "Trim & millwork"] },
+      { id: "con-cabinetry", name: "Cabinetry & Fixture Install", description: "Install cabinets, counters, fixtures.", stepLabels: ["Install cabinetry", "Install countertops", "Install fixtures"] },
+      { id: "con-inspections", name: "Final Inspections", description: "Pass remaining inspections.", stepLabels: ["Schedule inspections", "Address punch items", "Pass final inspection"] },
+      { id: "con-punchlist", name: "Punch List & Closeout", description: "Final walkthrough and handoff.", stepLabels: ["Walkthrough with client", "Complete punch list", "Project handoff"] },
     ],
-    content: [],
   },
 ];
 
-const PHASES: Phase[] = [
-  { id: "design", name: "Design", campIds: ["foundation"] },
-  { id: "sourcing-construction", name: "Sourcing & Construction", campIds: ["framing", "systems", "finishes"] },
-];
+const BASE_CAMPS: Camp[] = PHASE_DEFS.flatMap((phase) => phase.camps.map((c) => ({ ...c, phaseId: phase.id })));
 
-function Flag({ n, children }: { n: number; children: ReactNode }) {
+const MILESTONES = [
+  { key: "empty", label: "Empty" },
+  { key: "prep", label: "Basecamp prep" },
+  { key: "discovery", label: "Discovery" },
+  { key: "design", label: "Design" },
+  { key: "sourcing", label: "Sourcing" },
+  { key: "construction", label: "Construction" },
+  { key: "complete", label: "Complete" },
+] as const;
+
+type Stage = "empty" | "prep" | "active" | "complete";
+
+function Callout({ kind = "question", n, children }: { kind?: "question" | "finding"; n: number; children: ReactNode }) {
   return (
-    <div className="pm-flag">
-      <span className="pm-flag__tag">Open Q{n}</span>
+    <div className={`pm-flag ${kind === "finding" ? "pm-flag--finding" : ""}`.trim()}>
+      <span className="pm-flag__tag">{kind === "finding" ? `Finding ${n}` : `Open Q${n}`}</span>
       <p>{children}</p>
     </div>
   );
@@ -197,66 +197,217 @@ function TrailLink({ last }: { last?: boolean }) {
   return last ? null : <span className="pm-link" aria-hidden="true" />;
 }
 
+function EmptyState({ onStart }: { onStart: () => void }) {
+  return (
+    <Surface className="pm-empty">
+      <Stack gap={3} align="center">
+        <p className="pm-eyebrow">NEW PROJECT</p>
+        <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold" })}`}>No project map yet</h2>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, textAlign: "center", maxWidth: 420 }}>
+          Before any camp can start, Basecamp needs to be established — contract signed, budget approved, site
+          access confirmed, design packet handed off to the crew.
+        </p>
+        <button type="button" className={button({ variant: "primary" })} onClick={onStart}>
+          Start Basecamp prep
+        </button>
+      </Stack>
+    </Surface>
+  );
+}
+
 type ContentFilter = "steps" | "effort" | "file" | "logbook";
 
+function stepsForCamp(camp: Camp, status: CampStatus): Step[] {
+  const n = camp.stepLabels.length;
+  const doneCount = status === "done" ? n : status === "focused" ? Math.ceil(n / 2) : 0;
+  return camp.stepLabels.map((label, i) => {
+    const done = i < doneCount;
+    // The one step right at the done/not-done boundary of the focused
+    // camp stands in for "GraphLog just auto-identified this" (open Q5)
+    // — deliberately only one per camp, not every step, since this is
+    // meant to illustrate the idea, not simulate a real classifier.
+    const isBoundary = status === "focused" && i === doneCount - 1;
+    return {
+      id: `${camp.id}-step-${i}`,
+      label,
+      done,
+      source: isBoundary ? "graphlog" : "manual",
+      graphNode: isBoundary ? `Auto-identified from recent activity on \u201c${camp.name}\u201d` : undefined,
+    };
+  });
+}
+
+function contentForCamp(camp: Camp, status: CampStatus): ContentItem[] {
+  if (status === "upcoming") return [];
+  const items: ContentItem[] = [
+    { id: `${camp.id}-effort`, type: "effort", label: `${camp.name} progress update`, when: status === "done" ? "Completed" : "This week" },
+    { id: `${camp.id}-log`, type: "logbook", label: `Note: progress on ${camp.name}`, when: status === "done" ? "Completed" : "Recently" },
+  ];
+  if (status === "done") items.push({ id: `${camp.id}-file`, type: "file", label: `${camp.name} completion photos`, when: "Completed" });
+  return items;
+}
+
 export function ProjectMapMockup() {
-  const [showPhases, setShowPhases] = useState(false);
+  const [stage, setStage] = useState<Stage>("empty");
+  const [cursor, setCursor] = useState(0);
+  const [checklist, setChecklist] = useState<boolean[]>(BASECAMP.checklist.map(() => false));
+  const [extraCamps, setExtraCamps] = useState<Camp[]>([]);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
+  const [expandAll, setExpandAll] = useState(false);
   const [resetPerPhase, setResetPerPhase] = useState(false);
   const [twoInFocus, setTwoInFocus] = useState(false);
-  const [previewId, setPreviewId] = useState<string | null>(null);
   const [contentFilter, setContentFilter] = useState<ContentFilter>("steps");
-  const [camps, setCamps] = useState<Camp[]>(INITIAL_CAMPS);
   const [showAddCamp, setShowAddCamp] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
-  const [draftEta, setDraftEta] = useState("");
   const formId = useId();
 
-  const effectiveCamps = camps.map((c) =>
-    twoInFocus && c.id === "systems" ? { ...c, status: "focused" as CampStatus } : c,
-  );
+  const camps: Camp[] = [...BASE_CAMPS, ...extraCamps];
+  const established = stage === "active" || stage === "complete";
+  const allChecked = checklist.every(Boolean);
 
-  const focusedCamps = effectiveCamps.filter((c) => c.status === "focused");
-  const primaryFocus = focusedCamps[0] ?? effectiveCamps[0];
-  const selected = effectiveCamps.find((c) => c.id === previewId) ?? primaryFocus;
-  const isPreviewing = selected.id !== primaryFocus.id;
+  function statusFor(index: number): CampStatus {
+    if (stage === "complete") return "done";
+    if (stage !== "active") return "upcoming";
+    if (index === cursor) return "focused";
+    if (twoInFocus && index === cursor + 1) return "focused";
+    if (index < cursor) return "done";
+    return "upcoming";
+  }
+
+  const toggleExpandedPhase = (id: string) =>
+    setExpandedPhases((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const establish = () => {
+    if (!allChecked) return;
+    setStage("active");
+    setCursor(0);
+  };
+
+  const jumpTo = (key: (typeof MILESTONES)[number]["key"]) => {
+    setPreviewId(null);
+    if (key === "empty") {
+      setStage("empty");
+      setCursor(0);
+      setChecklist(BASECAMP.checklist.map(() => false));
+      setExtraCamps([]);
+      return;
+    }
+    if (key === "prep") {
+      setStage("prep");
+      return;
+    }
+    if (key === "complete") {
+      setStage("complete");
+      return;
+    }
+    const idx = camps.findIndex((c) => c.phaseId === key);
+    setStage("active");
+    setCursor(idx >= 0 ? idx : 0);
+  };
+
+  const currentMilestoneKey = (): string => {
+    if (stage === "empty") return "empty";
+    if (stage === "prep") return "prep";
+    if (stage === "complete") return "complete";
+    return camps[cursor]?.phaseId ?? "discovery";
+  };
+
+  const goBack = () => {
+    if (stage === "complete") {
+      setStage("active");
+      setCursor(camps.length - 1);
+      return;
+    }
+    if (stage === "active") {
+      if (cursor > 0) setCursor(cursor - 1);
+      else setStage("prep");
+      return;
+    }
+    if (stage === "prep") setStage("empty");
+  };
+
+  const advance = () => {
+    if (stage === "empty") {
+      setStage("prep");
+      return;
+    }
+    if (stage === "prep") {
+      // Deliberately bypasses the checklist gate — this is the demo
+      // scrubber's "time machine," not the real "Establish Basecamp"
+      // button above, which DOES require every item checked. See
+      // Finding 2 below.
+      setStage("active");
+      setCursor(0);
+      return;
+    }
+    if (stage === "active") {
+      if (cursor < camps.length - 1) setCursor(cursor + 1);
+      else setStage("complete");
+    }
+  };
+
+  const progressLabel = (): string => {
+    if (stage === "empty") return "Not started";
+    if (stage === "prep") return `Basecamp prep (${checklist.filter(Boolean).length}/${checklist.length})`;
+    if (stage === "complete") return "Project complete";
+    const camp = camps[cursor];
+    const phase = PHASE_DEFS.find((p) => p.id === camp.phaseId);
+    const siblings = camps.filter((c) => c.phaseId === camp.phaseId);
+    const posInPhase = siblings.findIndex((c) => c.id === camp.id) + 1;
+    return `${phase?.name ?? camp.phaseId} \u2014 camp ${posInPhase} of ${siblings.length}: ${camp.name}`;
+  };
 
   const addCamp = () => {
     if (!draftName.trim()) return;
     const id = `draft-${Date.now()}`;
-    const newCamp: Camp = {
-      id,
-      name: draftName.trim(),
-      description: draftDescription.trim() || "(no description yet)",
-      eta: draftEta.trim() || "ETA not set",
-      status: "upcoming",
-      steps: [],
-      content: [],
-    };
-    setCamps((prev) => [...prev, newCamp]);
+    setExtraCamps((prev) => [
+      ...prev,
+      { id, phaseId: "extra", name: draftName.trim(), description: draftDescription.trim() || "(no description yet)", stepLabels: [] },
+    ]);
     setPreviewId(id);
     setDraftName("");
     setDraftDescription("");
-    setDraftEta("");
     setShowAddCamp(false);
   };
 
-  const campsByPhase = (phase: Phase) => effectiveCamps.filter((c) => phase.campIds.includes(c.id));
-  const phasedIds = new Set(PHASES.flatMap((p) => p.campIds));
-  const unphased = effectiveCamps.filter((c) => !phasedIds.has(c.id));
+  // --- Derived selection for the detail panel ---
+  const focusIndex = stage === "active" ? cursor : stage === "complete" ? camps.length - 1 : -1;
+  const selectedIndex = previewId ? camps.findIndex((c) => c.id === previewId) : focusIndex;
+  const selected = selectedIndex >= 0 ? camps[selectedIndex] : null;
+  const selectedStatus: CampStatus = selectedIndex >= 0 ? statusFor(selectedIndex) : "upcoming";
+  const isPreviewing = stage === "active" && selectedIndex >= 0 && selectedIndex !== focusIndex;
+
+  // --- Phase groups for the trail ---
+  const indexed = camps.map((camp, index) => ({ camp, index }));
+  const phaseGroups = PHASE_DEFS.map((p) => ({ id: p.id, name: p.name, items: indexed.filter((x) => x.camp.phaseId === p.id) }));
+  if (extraCamps.length > 0) phaseGroups.push({ id: "extra", name: "Added camps", items: indexed.filter((x) => x.camp.phaseId === "extra") });
+
+  const phaseStatusOf = (items: { index: number }[]): "done" | "current" | "upcoming" => {
+    if (items.every((x) => statusFor(x.index) === "done")) return "done";
+    if (items.some((x) => statusFor(x.index) === "focused")) return "current";
+    return "upcoming";
+  };
 
   return (
     <div className={sprinkles({ display: "flex", flexDirection: "column", gap: 6 })}>
       <div className="pm-banner">
         <strong>Mockup — Project Map.</strong> Exploring{" "}
         <code>garden/1-seeds/project-map.md</code>. Nothing here reads or writes a real
-        project; the toggles below exist to make the seed's open questions visible
-        side-by-side, not to declare an answer. See the "Open questions in this mockup"
-        section at the bottom for the full list.
+        project. v2 adds a realistic 4-phase / ~33-camp dataset (Discovery, Design,
+        Sourcing, Construction) and a lifecycle scrubber, so the empty-&rarr;complete
+        progression and the navigation's behavior at real scale can both be seen, not
+        just imagined.
       </div>
 
       <header>
-        <p className="pm-eyebrow">PROJECT · STANDARD</p>
+        <p className="pm-eyebrow">PROJECT \u00b7 STANDARD</p>
         <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>Casa Verde Remodel</h1>
         <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
           Demo data only — stands in for the real Project page rework this seed feeds
@@ -265,289 +416,382 @@ export function ProjectMapMockup() {
       </header>
 
       <Surface className={sprinkles({ p: 4 })}>
-        <Cluster gap={4} wrap>
-          <Chip active={showPhases} onClick={() => setShowPhases((v) => !v)}>
-            Show Phases wrapper
-          </Chip>
-          <Chip active={resetPerPhase} onClick={() => setResetPerPhase((v) => !v)}>
-            Basecamp resets per Phase
-          </Chip>
-          <Chip active={twoInFocus} onClick={() => setTwoInFocus((v) => !v)}>
-            Experimental: 2 camps in focus
-          </Chip>
-        </Cluster>
-      </Surface>
-
-      {/* --- Basecamp --- */}
-      <Surface className="pm-basecamp">
-        <Stack gap={4}>
-          <Cluster style={{ justifyContent: "space-between" }} align="flex-start">
-            <Stack gap={1}>
-              <Badge variant="accent">BASECAMP</Badge>
-              <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold" })}`}>
-                Home base — the overall plan &amp; timeline
-              </h2>
-            </Stack>
-            <Badge variant="success">Established</Badge>
+        <Stack gap={3}>
+          <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Simulate the project lifecycle</p>
+          <Cluster gap={2} wrap>
+            {MILESTONES.map((m) => (
+              <Chip key={m.key} active={currentMilestoneKey() === m.key} onClick={() => jumpTo(m.key)}>
+                {m.label}
+              </Chip>
+            ))}
           </Cluster>
-          <p className={textSize.sm}>{BASECAMP.overview}</p>
-          <Cluster gap={8} wrap>
-            <Stat label="Kickoff" value={BASECAMP.kickoff} />
-            <Stat label="Target finish" value={BASECAMP.targetFinish} />
-            <Stat label="Final goal" value={FINAL_GOAL} />
+          <Cluster gap={3} align="center">
+            <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={goBack}>
+              \u2190 Back
+            </button>
+            <span className={textSize.sm} style={{ color: semanticColors.textSubtle, minWidth: 220 }}>
+              {progressLabel()}
+            </span>
+            <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={advance}>
+              Advance \u2192
+            </button>
           </Cluster>
-          <Disclosure summary={`What's in place to move forward (${BASECAMP.checklist.length}/${BASECAMP.checklist.length})`}>
-            <ul className="pm-checklist">
-              {BASECAMP.checklist.map((item) => (
-                <li key={item}>
-                  <span className="pm-check">{"\u2713"}</span> {item}
-                </li>
-              ))}
-            </ul>
-          </Disclosure>
+          <Cluster gap={2} wrap>
+            <Chip active={resetPerPhase} onClick={() => setResetPerPhase((v) => !v)}>
+              Basecamp resets per Phase
+            </Chip>
+            <Chip active={twoInFocus} onClick={() => setTwoInFocus((v) => !v)}>
+              Experimental: 2 camps in focus
+            </Chip>
+            <Chip active={expandAll} onClick={() => setExpandAll((v) => !v)}>
+              Expand all phases (dense view)
+            </Chip>
+          </Cluster>
         </Stack>
       </Surface>
 
-      <Flag n={2}>
-        Camps vs. Phases: toggling "Basecamp resets per Phase" shows the two live
-        options from the seed — one shared Basecamp for the whole project (off), or a
-        Basecamp re-established at the start of each Phase (on). Genuinely unresolved
-        per the seed; needs Austin's input.
-      </Flag>
+      {stage === "empty" ? (
+        <EmptyState onStart={() => setStage("prep")} />
+      ) : (
+        <>
+          {/* --- Basecamp --- */}
+          <Surface className="pm-basecamp">
+            <Stack gap={4}>
+              <Cluster style={{ justifyContent: "space-between" }} align="flex-start">
+                <Stack gap={1}>
+                  <Badge variant="accent">BASECAMP</Badge>
+                  <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold" })}`}>
+                    Home base — the overall plan &amp; timeline
+                  </h2>
+                </Stack>
+                <Badge variant={established ? "success" : "warning"}>
+                  {established ? "Established" : "Not yet established"}
+                </Badge>
+              </Cluster>
+              <p className={textSize.sm}>{BASECAMP.overview}</p>
+              <Cluster gap={8} wrap>
+                <Stat label="Kickoff" value={established ? BASECAMP.kickoff : "Not started"} />
+                <Stat label="Target finish" value={BASECAMP.targetFinish} />
+                <Stat label="Final goal" value={FINAL_GOAL} />
+              </Cluster>
+              {stage === "prep" ? (
+                <Stack gap={2}>
+                  <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>
+                    What's needed to move forward ({checklist.filter(Boolean).length}/{checklist.length})
+                  </p>
+                  <Stack gap={2}>
+                    {BASECAMP.checklist.map((item, i) => (
+                      <Checkbox
+                        key={item}
+                        label={item}
+                        checked={checklist[i]}
+                        onChange={(v) => setChecklist((cs) => cs.map((c, ci) => (ci === i ? v : c)))}
+                      />
+                    ))}
+                  </Stack>
+                  <Cluster>
+                    <button type="button" className={button({ variant: "primary" })} disabled={!allChecked} onClick={establish}>
+                      Establish Basecamp &amp; start Discovery
+                    </button>
+                  </Cluster>
+                </Stack>
+              ) : (
+                <Disclosure summary={`What's in place to move forward (${BASECAMP.checklist.length}/${BASECAMP.checklist.length})`}>
+                  <ul className="pm-checklist">
+                    {BASECAMP.checklist.map((item) => (
+                      <li key={item}>
+                        <span className="pm-check">{"\u2713"}</span> {item}
+                      </li>
+                    ))}
+                  </ul>
+                </Disclosure>
+              )}
+            </Stack>
+          </Surface>
 
-      {/* --- Camps trail --- */}
-      <section>
-        <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold", mb: 2 })}`} style={{ textTransform: "uppercase", letterSpacing: "0.04em", color: semanticColors.textSubtle }}>
-          Camps
-        </h3>
-        <Surface className={sprinkles({ p: 2 })}>
-          <div className="pm-trail">
-            {!showPhases && (
-              <div className="pm-trail-row">
-                <CampNode kind="basecamp" label="Basecamp" />
-                <TrailLink />
-                {effectiveCamps.map((camp, i) => (
-                  <Fragment key={camp.id}>
-                    <CampNode
-                      kind={camp.status}
-                      label={camp.name}
-                      selected={camp.id === selected.id}
-                      onClick={() => setPreviewId(camp.id)}
-                    />
-                    <TrailLink last={i === effectiveCamps.length - 1} />
-                  </Fragment>
-                ))}
-                <CampNode kind="final" label={FINAL_GOAL} />
-              </div>
-            )}
+          <Callout n={2}>
+            Camps vs. Phases: toggling "Basecamp resets per Phase" shows the two live
+            options from the seed — one shared Basecamp for the whole project (off), or
+            a Basecamp re-established at the start of each Phase (on). Genuinely
+            unresolved per the seed; needs Austin's input.
+          </Callout>
 
-            {showPhases && (
-              <div className="pm-trail-row">
-                {!resetPerPhase && (
-                  <>
-                    <CampNode kind="basecamp" label="Basecamp" />
-                    <TrailLink />
-                  </>
-                )}
-                {PHASES.map((phase, pi) => (
-                  <Fragment key={phase.id}>
-                    <div className="pm-phase-group">
-                      <span className="pm-phase-group__label">{phase.name}</span>
-                      {resetPerPhase && (
+          {stage === "prep" && (
+            <Surface className={sprinkles({ p: 3 })}>
+              <Stack gap={2}>
+                <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                  Planned phases (locked until Basecamp is established):
+                </p>
+                <Cluster gap={2} wrap>
+                  {phaseGroups.map((p) => (
+                    <span key={p.id} className="pm-phase-pill pm-phase-pill--locked">
+                      {p.name} \u00b7 {p.items.length} camps
+                    </span>
+                  ))}
+                  <span className="pm-phase-pill pm-phase-pill--locked">{FINAL_GOAL}</span>
+                </Cluster>
+              </Stack>
+            </Surface>
+          )}
+
+          {(stage === "active" || stage === "complete") && (
+            <>
+              {/* --- Camps trail --- */}
+              <section>
+                <h3
+                  className={`${textSize.sm} ${sprinkles({ fontWeight: "bold", mb: 2 })}`}
+                  style={{ textTransform: "uppercase", letterSpacing: "0.04em", color: semanticColors.textSubtle }}
+                >
+                  Camps ({camps.length} across {phaseGroups.length} phase{phaseGroups.length === 1 ? "" : "s"})
+                </h3>
+                <Surface className={sprinkles({ p: 2 })}>
+                  <div className="pm-trail">
+                    <div className="pm-trail-row">
+                      {!resetPerPhase && (
                         <>
                           <CampNode kind="basecamp" label="Basecamp" />
                           <TrailLink />
                         </>
                       )}
-                      {campsByPhase(phase).map((camp, i, arr) => (
-                        <Fragment key={camp.id}>
-                          <CampNode
-                            kind={camp.status}
-                            label={camp.name}
-                            selected={camp.id === selected.id}
-                            onClick={() => setPreviewId(camp.id)}
-                          />
-                          <TrailLink last={i === arr.length - 1} />
-                        </Fragment>
-                      ))}
+                      {phaseGroups.map((phase) => {
+                        const pStatus = phaseStatusOf(phase.items);
+                        const isExpanded = expandAll || pStatus === "current" || expandedPhases.has(phase.id);
+                        return (
+                          <Fragment key={phase.id}>
+                            <div className="pm-phase-group">
+                              <span className="pm-phase-group__label">{phase.name}</span>
+                              {resetPerPhase && (
+                                <>
+                                  <CampNode kind="basecamp" label="Basecamp" />
+                                  <TrailLink />
+                                </>
+                              )}
+                              {isExpanded ? (
+                                phase.items.map(({ camp, index }, i) => (
+                                  <Fragment key={camp.id}>
+                                    <CampNode
+                                      kind={statusFor(index)}
+                                      label={camp.name}
+                                      selected={index === selectedIndex}
+                                      onClick={() => setPreviewId(camp.id)}
+                                    />
+                                    <TrailLink last={i === phase.items.length - 1} />
+                                  </Fragment>
+                                ))
+                              ) : (
+                                <button
+                                  type="button"
+                                  className={`pm-phase-pill pm-phase-pill--${pStatus}`}
+                                  onClick={() => toggleExpandedPhase(phase.id)}
+                                >
+                                  {pStatus === "done" ? `\u2713 ${phase.items.length}/${phase.items.length} done` : `${phase.items.length} camps`}
+                                </button>
+                              )}
+                            </div>
+                            <TrailLink />
+                          </Fragment>
+                        );
+                      })}
+                      <CampNode kind={stage === "complete" ? "done" : "final"} label={FINAL_GOAL} />
                     </div>
-                    {pi < PHASES.length - 1 && <TrailLink />}
-                  </Fragment>
-                ))}
-                {unphased.length > 0 && (
-                  <>
-                    <TrailLink />
-                    {unphased.map((camp, i) => (
-                      <Fragment key={camp.id}>
-                        <CampNode
-                          kind={camp.status}
-                          label={camp.name}
-                          selected={camp.id === selected.id}
-                          onClick={() => setPreviewId(camp.id)}
-                        />
-                        <TrailLink last={i === unphased.length - 1} />
-                      </Fragment>
-                    ))}
-                  </>
-                )}
-                <TrailLink />
-                <CampNode kind="final" label={FINAL_GOAL} />
+                  </div>
+                </Surface>
+              </section>
+
+              <Callout n={1}>
+                "Only one camp in focus at a time" is flagged in the seed as an
+                assumption to validate, not a decision. Toggle "2 camps in focus" above
+                to see the camp right after the current one light up too — worth asking
+                whether the UI (and the data model) actually needs to support that for a
+                complex build.
+              </Callout>
+
+              <Callout kind="finding" n={1}>
+                At a believable scale (~33 camps across 4 phases), a flat trail of every
+                camp is unwieldy — so by default this mockup collapses any phase that
+                isn't the current one into a single summary pill ("8/8 done" or "9
+                camps"), expanding only on click. Toggle "Expand all phases" to see the
+                dense version for comparison. This suggests Phases, not Camps, may need
+                to be the primary collapse/navigation unit on the real Project page.
+              </Callout>
+
+              {/* --- Camp detail / filtered content --- */}
+              {selected && (
+                <Surface className="pm-camp-detail">
+                  <Stack gap={4}>
+                    {isPreviewing && (
+                      <div className="pm-preview-banner">
+                        <span>
+                          Previewing <strong>{selected.name}</strong> — the team's focus is still on{" "}
+                          <strong>{camps[focusIndex]?.name}</strong>.
+                        </span>
+                        <button type="button" onClick={() => setPreviewId(null)}>
+                          Jump to focus
+                        </button>
+                      </div>
+                    )}
+                    <Cluster style={{ justifyContent: "space-between" }} align="flex-start" wrap>
+                      <Stack gap={1}>
+                        <Cluster gap={2}>
+                          <Badge variant={selectedStatus === "done" ? "success" : selectedStatus === "focused" ? "accent" : "neutral"}>
+                            {selectedStatus === "done" ? "Done" : selectedStatus === "focused" ? "In focus" : "Upcoming"}
+                          </Badge>
+                          <span className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                            {PHASE_DEFS.find((p) => p.id === selected.phaseId)?.name ?? "Added"}
+                          </span>
+                        </Cluster>
+                        <h2 className={`${textSize.xl} ${sprinkles({ fontWeight: "bold" })}`}>{selected.name}</h2>
+                        <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                          {selected.description}
+                        </p>
+                      </Stack>
+                    </Cluster>
+
+                    <Cluster gap={2} wrap>
+                      <Chip active={contentFilter === "steps"} onClick={() => setContentFilter("steps")}>
+                        Steps ({selected.stepLabels.length})
+                      </Chip>
+                      <Chip active={contentFilter === "effort"} onClick={() => setContentFilter("effort")}>
+                        Efforts ({contentForCamp(selected, selectedStatus).filter((c) => c.type === "effort").length})
+                      </Chip>
+                      <Chip active={contentFilter === "file"} onClick={() => setContentFilter("file")}>
+                        Files ({contentForCamp(selected, selectedStatus).filter((c) => c.type === "file").length})
+                      </Chip>
+                      <Chip active={contentFilter === "logbook"} onClick={() => setContentFilter("logbook")}>
+                        Logbook ({contentForCamp(selected, selectedStatus).filter((c) => c.type === "logbook").length})
+                      </Chip>
+                    </Cluster>
+
+                    <Callout n={4}>
+                      This nests a tab-like content-type picker INSIDE the selected camp
+                      (one option from the seed: "camps pick a camp, tabs still pick a
+                      content type within it"). The alternative — camp selection
+                      replacing tabs entirely — is the other live option
+                      `stamps-tab-system` would need to reconcile with.
+                    </Callout>
+
+                    {contentFilter === "steps" ? (
+                      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                        {selected.stepLabels.length === 0 && (
+                          <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                            No steps defined for this camp yet.
+                          </p>
+                        )}
+                        {stepsForCamp(selected, selectedStatus).map((step) => (
+                          <li key={step.id} className={`pm-step-row ${step.done ? "pm-step-row--done" : ""}`}>
+                            <span className="pm-step-row__box">{step.done ? "\u2713" : ""}</span>
+                            <span className="pm-step-row__label">{step.label}</span>
+                            {step.source === "graphlog" && (
+                              <Badge variant="accent" title={step.graphNode}>
+                                {"\u2726 GraphLog"}
+                              </Badge>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                        {contentForCamp(selected, selectedStatus).filter((c) => c.type === contentFilter).length === 0 && (
+                          <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                            Nothing filed under this camp yet.
+                          </p>
+                        )}
+                        {contentForCamp(selected, selectedStatus)
+                          .filter((c) => c.type === contentFilter)
+                          .map((item) => (
+                            <li key={item.id} className="pm-content-row">
+                              <span>{item.label}</span>
+                              <span className="pm-content-row__when">{item.when}</span>
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+
+                    <Callout n={5}>
+                      The GraphLog badges above are hand-authored mock text, not a real
+                      integration — today's `graph-structure` clustering has no concept
+                      of camp sequencing or focus to extend (confirmed in the seed).
+                      Teaching it to recognize "this node's work belongs to Camp N" is
+                      real, separate work.
+                    </Callout>
+                  </Stack>
+                </Surface>
+              )}
+
+              <Callout kind="finding" n={2}>
+                The checklist-gated "Establish Basecamp" button above is the real
+                workflow (disabled until every item is checked). The "Advance" scrubber
+                and milestone chips deliberately bypass that gate so this mockup is
+                navigable — worth deciding whether a real "jump ahead" shortcut should
+                ever exist for staff, or whether Basecamp should always hard-block
+                camp progress.
+              </Callout>
+
+              <Callout kind="finding" n={3}>
+                Hand-authoring steps/content for 33 camps already felt like a lot of
+                data entry for one demo project — a real project at this grain would
+                make GraphLog's "AI-identified and sorted" piece (open Q5) less of a
+                nice-to-have and more of a requirement for this to stay usable without
+                heavy manual upkeep per camp.
+              </Callout>
+
+              {/* --- Define a future camp workflow --- */}
+              <div>
+                <button type="button" className={button({ variant: "outline" })} onClick={() => setShowAddCamp((v) => !v)}>
+                  {showAddCamp ? "Cancel" : "+ Define a future camp"}
+                </button>
               </div>
-            )}
-          </div>
-        </Surface>
-      </section>
-
-      <Flag n={1}>
-        "Only one camp in focus at a time" is flagged in the seed as an assumption to
-        validate, not a decision. Toggle "2 camps in focus" above to see Framing &amp;
-        Roof and Interior Systems both lit up — worth asking whether the UI (and the
-        data model) actually needs to support that for a complex build.
-      </Flag>
-
-      {/* --- Camp detail / filtered content --- */}
-      <Surface className="pm-camp-detail">
-        <Stack gap={4}>
-          {isPreviewing && (
-            <div className="pm-preview-banner">
-              <span>
-                Previewing <strong>{selected.name}</strong> — the team's focus is still on{" "}
-                <strong>{primaryFocus.name}</strong>.
-              </span>
-              <button type="button" onClick={() => setPreviewId(null)}>
-                Jump to focus
-              </button>
-            </div>
-          )}
-          <Cluster style={{ justifyContent: "space-between" }} align="flex-start" wrap>
-            <Stack gap={1}>
-              <Cluster gap={2}>
-                <Badge variant={selected.status === "done" ? "success" : selected.status === "focused" ? "accent" : "neutral"}>
-                  {selected.status === "done" ? "Done" : selected.status === "focused" ? "In focus" : "Upcoming"}
-                </Badge>
-                <span className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                  {selected.eta}
-                </span>
-              </Cluster>
-              <h2 className={`${textSize.xl} ${sprinkles({ fontWeight: "bold" })}`}>{selected.name}</h2>
-              <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                {selected.description}
-              </p>
-            </Stack>
-          </Cluster>
-
-          <Cluster gap={2} wrap>
-            <Chip active={contentFilter === "steps"} onClick={() => setContentFilter("steps")}>
-              Steps ({selected.steps.length})
-            </Chip>
-            <Chip active={contentFilter === "effort"} onClick={() => setContentFilter("effort")}>
-              Efforts ({selected.content.filter((c) => c.type === "effort").length})
-            </Chip>
-            <Chip active={contentFilter === "file"} onClick={() => setContentFilter("file")}>
-              Files ({selected.content.filter((c) => c.type === "file").length})
-            </Chip>
-            <Chip active={contentFilter === "logbook"} onClick={() => setContentFilter("logbook")}>
-              Logbook ({selected.content.filter((c) => c.type === "logbook").length})
-            </Chip>
-          </Cluster>
-
-          <Flag n={4}>
-            This nests a tab-like content-type picker INSIDE the selected camp (one
-            option from the seed: "camps pick a camp, tabs still pick a content type
-            within it"). The alternative — camp selection replacing tabs entirely — is
-            the other live option `stamps-tab-system` would need to reconcile with.
-          </Flag>
-
-          {contentFilter === "steps" ? (
-            <ul className={sprinkles({ display: "flex", flexDirection: "column" })} style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {selected.steps.length === 0 && (
-                <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                  No steps defined for this camp yet.
-                </p>
+              {showAddCamp && (
+                <Surface className="pm-add-camp">
+                  <Stack gap={4}>
+                    <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                      Per the seed: "Camps can be defined ahead of when they start, but
+                      only one is ever in focus." Saving here only updates this browser
+                      tab's state — it appends a new, upcoming camp after Construction.
+                    </p>
+                    <Input label="Name" name={`${formId}-name`} value={draftName} onChange={(e) => setDraftName(e.target.value)} placeholder="e.g. Landscaping" />
+                    <Input
+                      label="Description / overview"
+                      name={`${formId}-description`}
+                      type="textarea"
+                      value={draftDescription}
+                      onChange={(e) => setDraftDescription(e.target.value)}
+                      placeholder="What this camp covers"
+                    />
+                    <Cluster gap={2}>
+                      <button type="button" className={button({ variant: "primary" })} disabled={!draftName.trim()} onClick={addCamp}>
+                        Save camp (mockup only)
+                      </button>
+                    </Cluster>
+                  </Stack>
+                </Surface>
               )}
-              {selected.steps.map((step) => (
-                <li key={step.id} className={`pm-step-row ${step.done ? "pm-step-row--done" : ""}`}>
-                  <span className="pm-step-row__box">{step.done ? "\u2713" : ""}</span>
-                  <span className="pm-step-row__label">{step.label}</span>
-                  {step.source === "graphlog" && (
-                    <Badge variant="accent" title={step.graphNode}>
-                      {"\u2726 GraphLog"}
-                    </Badge>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {selected.content.filter((c) => c.type === contentFilter).length === 0 && (
-                <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-                  Nothing filed under this camp yet.
-                </p>
-              )}
-              {selected.content
-                .filter((c) => c.type === contentFilter)
-                .map((item) => (
-                  <li key={item.id} className="pm-content-row">
-                    <span>{item.label}</span>
-                    <span className="pm-content-row__when">{item.when}</span>
-                  </li>
-                ))}
-            </ul>
+            </>
           )}
-
-          <Flag n={5}>
-            The GraphLog badges above are hand-authored mock text, not a real
-            integration — today's `graph-structure` clustering has no concept of camp
-            sequencing or focus to extend (confirmed in the seed). Teaching it to
-            recognize "this node's work belongs to Camp N" is real, separate work.
-          </Flag>
-        </Stack>
-      </Surface>
-
-      {/* --- Define a future camp workflow --- */}
-      <div>
-        <button type="button" className={button({ variant: "outline" })} onClick={() => setShowAddCamp((v) => !v)}>
-          {showAddCamp ? "Cancel" : "+ Define a future camp"}
-        </button>
-      </div>
-      {showAddCamp && (
-        <Surface className="pm-add-camp">
-          <Stack gap={4}>
-            <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-              Per the seed: "Camps can be defined ahead of when they start, but only
-              one is ever in focus." Saving here only updates this browser tab's state
-              — it appends a new, upcoming camp to the trail above.
-            </p>
-            <Input label="Name" name={`${formId}-name`} value={draftName} onChange={(e) => setDraftName(e.target.value)} placeholder="e.g. Landscaping" />
-            <Input
-              label="Description / overview"
-              name={`${formId}-description`}
-              type="textarea"
-              value={draftDescription}
-              onChange={(e) => setDraftDescription(e.target.value)}
-              placeholder="What this camp covers"
-            />
-            <Input label="ETA" name={`${formId}-eta`} value={draftEta} onChange={(e) => setDraftEta(e.target.value)} placeholder="e.g. ETA Apr 2027" />
-            <Cluster gap={2}>
-              <button type="button" className={button({ variant: "primary" })} disabled={!draftName.trim()} onClick={addCamp}>
-                Save camp (mockup only)
-              </button>
-            </Cluster>
-          </Stack>
-        </Surface>
+        </>
       )}
 
-      {/* --- Open questions recap --- */}
+      {/* --- Open questions + findings recap --- */}
       <Surface className={sprinkles({ p: 4 })}>
-        <Stack gap={2}>
-          <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Open questions flagged in this mockup</h3>
-          <ol className={textSize.sm} style={{ color: semanticColors.textSubtle, paddingLeft: "1.2em" }}>
-            <li>Is "only one camp in focus at a time" actually right? (toggle above)</li>
-            <li>Camps vs. Phases — does Basecamp reset per Phase, or stay one for the whole project? (toggle above)</li>
-            <li>How does camp selection actually filter the main content below it?</li>
-            <li>Relationship to <code>stamps-tab-system</code> — reshaped, absorbed, or independent of camp filtering?</li>
-            <li>What would "AI-identified and sorted" actually require from GraphLog's <code>graph-structure</code> stage?</li>
-          </ol>
+        <Stack gap={4}>
+          <Stack gap={2}>
+            <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Open questions flagged in this mockup</h3>
+            <ol className={textSize.sm} style={{ color: semanticColors.textSubtle, paddingLeft: "1.2em" }}>
+              <li>Is "only one camp in focus at a time" actually right? (toggle above)</li>
+              <li>Camps vs. Phases — does Basecamp reset per Phase, or stay one for the whole project? (toggle above)</li>
+              <li>How does camp selection actually filter the main content below it?</li>
+              <li>Relationship to <code>stamps-tab-system</code> — reshaped, absorbed, or independent of camp filtering?</li>
+              <li>What would "AI-identified and sorted" actually require from GraphLog's <code>graph-structure</code> stage?</li>
+            </ol>
+          </Stack>
+          <Stack gap={2}>
+            <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>New findings from simulating 4 phases / ~33 camps</h3>
+            <ol className={textSize.sm} style={{ color: semanticColors.textSubtle, paddingLeft: "1.2em" }}>
+              <li>A flat trail doesn't scale — Phases likely need to be the primary collapse unit, Camps the drill-in.</li>
+              <li>The real onboarding gate (checklist) and a "jump ahead" demo/admin shortcut are two different things that need to stay visibly distinct in any real UI.</li>
+              <li>Per-camp step/content authoring at this volume is a real cost — makes GraphLog auto-sorting look more load-bearing than "nice to have."</li>
+            </ol>
+          </Stack>
         </Stack>
       </Surface>
     </div>
