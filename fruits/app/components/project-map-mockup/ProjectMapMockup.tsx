@@ -19,8 +19,20 @@
 // because every option shown is seriously proposed as a final design.
 // `pm-flag` callouts point at an exact open question from the seed;
 // `pm-flag--finding` callouts point at something this exercise itself
-// surfaced that the seed didn't anticipate.
-import { Fragment, useId, useState, type ReactNode } from "react";
+// surfaced that the seed didn't anticipate; `pm-flag--decision` points at
+// something Gerald has already settled (not open anymore).
+//
+// v3 (2026-10-28): adds a "Viewing as" role switcher (Observer / Client /
+// Crafter / Guide, the real `GROUPS` from `features.ts`) plus an
+// Admin/Super override checkbox, since those are two independent axes in
+// the real permission system (project-level group vs. account-level
+// staff tier). Only a Guide (or staff override) can touch the
+// Basecamp-prep checklist/"Establish" button or "+ Define a future
+// camp" — everyone else sees the same thing read-only. Deliberately kept
+// SEPARATE from the lifecycle scrubber above: the scrubber is a
+// reviewer-only convenience for exploring every state regardless of
+// role, not a simulation of a real control any role would see.
+import { Fragment, useEffect, useId, useState, type ReactNode } from "react";
 import { Surface } from "stamps/Surface";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
@@ -154,10 +166,42 @@ const MILESTONES = [
 
 type Stage = "empty" | "prep" | "active" | "complete";
 
-function Callout({ kind = "question", n, children }: { kind?: "question" | "finding"; n: number; children: ReactNode }) {
+/** The real project-level groups (`GROUPS` in `robustness-core/data/
+ * features.ts`), kept in the same order the human asked for here rather
+ * than that file's own order — purely a display choice, same 4 values. */
+type Role = "Observer" | "Client" | "Crafter" | "Guide";
+const ROLES: Role[] = ["Observer", "Client", "Crafter", "Guide"];
+function isRole(x: unknown): x is Role {
+  return typeof x === "string" && (ROLES as string[]).includes(x);
+}
+
+const VIEWER_STORAGE_KEY = "nopal:project-map-mockup:viewer";
+type ViewerPref = { role: Role; staff: boolean };
+function loadViewerPref(): ViewerPref | null {
+  try {
+    const raw = window.localStorage.getItem(VIEWER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return isRole(parsed?.role) ? { role: parsed.role, staff: !!parsed.staff } : null;
+  } catch {
+    return null;
+  }
+}
+
+function Callout({
+  kind = "question",
+  n,
+  children,
+}: {
+  kind?: "question" | "finding" | "decision";
+  n: number;
+  children: ReactNode;
+}) {
+  const modifier = kind === "finding" ? "pm-flag--finding" : kind === "decision" ? "pm-flag--decision" : "";
+  const tag = kind === "finding" ? `Finding ${n}` : kind === "decision" ? `Decided ${n}` : `Open Q${n}`;
   return (
-    <div className={`pm-flag ${kind === "finding" ? "pm-flag--finding" : ""}`.trim()}>
-      <span className="pm-flag__tag">{kind === "finding" ? `Finding ${n}` : `Open Q${n}`}</span>
+    <div className={`pm-flag ${modifier}`.trim()}>
+      <span className="pm-flag__tag">{tag}</span>
       <p>{children}</p>
     </div>
   );
@@ -262,6 +306,29 @@ export function ProjectMapMockup() {
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const formId = useId();
+
+  // "Viewing as" — defaults to Guide (every control visible) until the
+  // client-only localStorage read below resolves, same hydration pattern
+  // as `useSchemePref`: a brief default render is fine, a server/client
+  // mismatch isn't.
+  const [role, setRole] = useState<Role>("Guide");
+  const [staffOverride, setStaffOverride] = useState(false);
+  const [viewerHydrated, setViewerHydrated] = useState(false);
+  useEffect(() => {
+    const pref = loadViewerPref();
+    if (pref) {
+      setRole(pref.role);
+      setStaffOverride(pref.staff);
+    }
+    setViewerHydrated(true);
+  }, []);
+  useEffect(() => {
+    if (!viewerHydrated) return;
+    window.localStorage.setItem(VIEWER_STORAGE_KEY, JSON.stringify({ role, staff: staffOverride }));
+  }, [role, staffOverride, viewerHydrated]);
+  // Guide, or an Admin/Super human regardless of their project group —
+  // the only two ways to define Basecamp/Phases/Camps (Gerald, 2026-10-28).
+  const canDefine = role === "Guide" || staffOverride;
 
   const camps: Camp[] = [...BASE_CAMPS, ...extraCamps];
   const established = stage === "active" || stage === "complete";
@@ -417,6 +484,37 @@ export function ProjectMapMockup() {
 
       <Surface className={sprinkles({ p: 4 })}>
         <Stack gap={3}>
+          <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Viewing as</p>
+          <Cluster gap={2} wrap>
+            {ROLES.map((r) => (
+              <Chip key={r} active={role === r} onClick={() => setRole(r)}>
+                {r}
+              </Chip>
+            ))}
+            <Chip active={staffOverride} onClick={() => setStaffOverride((v) => !v)}>
+              Also Admin/Super (site staff)
+            </Chip>
+          </Cluster>
+          <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+            {canDefine
+              ? "This role can define Basecamp, Phases, and Camps."
+              : "This role can only VIEW the map \u2014 defining Basecamp, Phases, or Camps is Guide-only (or an Admin/Super override)."}
+          </p>
+        </Stack>
+      </Surface>
+
+      <Callout kind="decision" n={1}>
+        Guides (or Admin/Super humans, regardless of their project group) are the
+        only ones who can define Basecamp, Phases, or Camps — confirmed by Gerald,
+        2026-10-28, not an open question anymore. Switch "Viewing as" above to
+        Observer/Client/Crafter to see the Basecamp-prep checklist and "+ Define a
+        future camp" become read-only. This choice doesn't gate the lifecycle
+        scrubber below — that's a reviewer-only convenience for exploring every
+        state as any role, not a simulation of a real in-product control.
+      </Callout>
+
+      <Surface className={sprinkles({ p: 4 })}>
+        <Stack gap={3}>
           <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Simulate the project lifecycle</p>
           <Cluster gap={2} wrap>
             {MILESTONES.map((m) => (
@@ -485,15 +583,23 @@ export function ProjectMapMockup() {
                         key={item}
                         label={item}
                         checked={checklist[i]}
+                        disabled={!canDefine}
                         onChange={(v) => setChecklist((cs) => cs.map((c, ci) => (ci === i ? v : c)))}
                       />
                     ))}
                   </Stack>
-                  <Cluster>
-                    <button type="button" className={button({ variant: "primary" })} disabled={!allChecked} onClick={establish}>
-                      Establish Basecamp &amp; start Discovery
-                    </button>
-                  </Cluster>
+                  {canDefine ? (
+                    <Cluster>
+                      <button type="button" className={button({ variant: "primary" })} disabled={!allChecked} onClick={establish}>
+                        Establish Basecamp &amp; start Discovery
+                      </button>
+                    </Cluster>
+                  ) : (
+                    <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                      Only a Guide (or Admin/Super) can check these off and establish
+                      Basecamp. {role} can see progress here, not change it.
+                    </p>
+                  )}
                 </Stack>
               ) : (
                 <Disclosure summary={`What's in place to move forward (${BASECAMP.checklist.length}/${BASECAMP.checklist.length})`}>
@@ -735,13 +841,20 @@ export function ProjectMapMockup() {
                 heavy manual upkeep per camp.
               </Callout>
 
-              {/* --- Define a future camp workflow --- */}
-              <div>
-                <button type="button" className={button({ variant: "outline" })} onClick={() => setShowAddCamp((v) => !v)}>
-                  {showAddCamp ? "Cancel" : "+ Define a future camp"}
-                </button>
-              </div>
-              {showAddCamp && (
+              {/* --- Define a future camp workflow (Guide/Admin-Super only) --- */}
+              {canDefine ? (
+                <div>
+                  <button type="button" className={button({ variant: "outline" })} onClick={() => setShowAddCamp((v) => !v)}>
+                    {showAddCamp ? "Cancel" : "+ Define a future camp"}
+                  </button>
+                </div>
+              ) : (
+                <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                  Only a Guide (or Admin/Super) can define a new camp. Viewing as{" "}
+                  {role} — this control isn't shown to that role on a real project.
+                </p>
+              )}
+              {canDefine && showAddCamp && (
                 <Surface className="pm-add-camp">
                   <Stack gap={4}>
                     <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
@@ -771,9 +884,15 @@ export function ProjectMapMockup() {
         </>
       )}
 
-      {/* --- Open questions + findings recap --- */}
+      {/* --- Decisions + open questions + findings recap --- */}
       <Surface className={sprinkles({ p: 4 })}>
         <Stack gap={4}>
+          <Stack gap={2}>
+            <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Decided</h3>
+            <ol className={textSize.sm} style={{ color: semanticColors.textSubtle, paddingLeft: "1.2em" }}>
+              <li>Only a Guide (or an Admin/Super human, regardless of project group) can define Basecamp, Phases, or Camps (toggle "Viewing as" above).</li>
+            </ol>
+          </Stack>
           <Stack gap={2}>
             <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Open questions flagged in this mockup</h3>
             <ol className={textSize.sm} style={{ color: semanticColors.textSubtle, paddingLeft: "1.2em" }}>

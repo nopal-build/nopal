@@ -38,6 +38,8 @@
 .pm-flag p { margin: 0; }
 .pm-flag--finding { border-color: var(--green); background: var(--green-light); }
 .pm-flag--finding .pm-flag__tag { background: var(--white); color: var(--green); }
+.pm-flag--decision { border-style: solid; border-color: var(--purple); background: var(--moon); }
+.pm-flag--decision .pm-flag__tag { background: var(--purple); color: var(--white); }
 
 .pm-empty {
   padding: 36px 20px;
