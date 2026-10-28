@@ -71,6 +71,10 @@ export type GraphLogJobData = {
   projectFolderId: string;
   /** The letter a `brief` job is for; absent on every other job. */
   fileId?: string;
+  /** Which document a `brief` job writes: the brief (default) or the
+   * outline from the guide's talk-through (`outline.server.ts`). The
+   * outline is a second call on the same stage, model and effort. */
+  kind?: "brief" | "outline";
 };
 
 const JOB_OPTIONS = {

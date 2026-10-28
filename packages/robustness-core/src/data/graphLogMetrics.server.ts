@@ -24,6 +24,9 @@ export type GraphLogEventKind =
   | "sow"
   /** One letter's brief, written by the brief stage from the whole graph. */
   | "brief"
+  /** One letter's outline, the brief stage's second call: from the
+   * guide's talk-through and the brief (`outline.server.ts`). */
+  | "outline"
   | "photo-knowledge"
   /** A video described from a few still frames -- its own kind so the
    * cost of a clip (several images in one call) is visible on its own. */

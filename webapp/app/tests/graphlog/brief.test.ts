@@ -147,7 +147,8 @@ describe("one pass, the whole brief", () => {
     expect(back).toMatch(/"The ask" is not written, and the brief opens with it/);
     expect(back).toMatch(/a citation matches no node: :ref\{name="Nobody"/);
     expect(result.content).toMatch(/## The attic floor[\s\S]*## The roof/);
-    expect(result.incomplete).toEqual([]);
+    // The resend stands, and the brief says what it still lacks.
+    expect(result.incomplete).toEqual(['"The ask" is not written, and the brief opens with it']);
     expect(result.unmatched.length).toBe(1);
   });
 
@@ -202,7 +203,8 @@ describe("the trigger is a guide's click", () => {
     expect((letters.match(/requestBrief\(/g) ?? []).length).toBe(1);
     const route = source("fruits/app/routes/api.letter.$fileId.brief.tsx");
     expect((route.match(/requestBrief\(/g) ?? []).length).toBe(1);
-    expect(route).toContain("canManageLetters(user, await getProjectRole(home.project, user._id))");
+    expect(route).toContain("letterForManager(request, params.fileId)");
+    expect(source("fruits/app/data/letterManager.server.ts")).toContain("canManageLetters(user, role)");
     expect(source("fruits/app/routes/api.vault.$fileId.tsx")).not.toMatch(/requestBrief|brief\.server/);
   });
 

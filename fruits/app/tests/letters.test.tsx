@@ -294,7 +294,7 @@ describe("the brief on the letter's page (2026-10-28)", () => {
   });
 
   it("no brief yet: the first line and the button; a brief: rendered, with its citation marker and Write it again; failed: the reason", () => {
-    const none = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: null }} hasPurpose openByDefault />);
+    const none = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: null, talk: { draft: null, sent: null }, outline: null, outlineJob: null }} hasPurpose openByDefault />);
     expect(none).toContain("This letter has no brief yet.");
     expect(none).toContain("Write the brief");
     expect(none).toContain('data-brief-state="none"');
@@ -302,7 +302,7 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     const ready = renderToStaticMarkup(
       <LetterBrief
         fileId="l1"
-        initial={{ brief: { content: '## The ask\n\n- The problem. :ref{name="Susan" datetime="2026-08-05T12:00:00Z" location="/vault?file=abc"}\n', writtenAt: "2026-10-28T10:00:00Z", byName: "Austin", incomplete: [] }, job: null }}
+        initial={{ brief: { content: '## The ask\n\n- The problem. :ref{name="Susan" datetime="2026-08-05T12:00:00Z" location="/vault?file=abc"}\n', writtenAt: "2026-10-28T10:00:00Z", byName: "Austin", incomplete: [] }, job: null, talk: { draft: null, sent: null }, outline: null, outlineJob: null }}
         hasPurpose
         openByDefault
       />,
@@ -314,10 +314,10 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     expect(ready).toContain('data-brief-state="ready"');
     expect(ready).not.toContain("data-brief-reference");
 
-    const failed = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: { state: "failed", error: "the graph holds no nodes", startedAt: null, waitingOnAnotherRun: false } }} hasPurpose openByDefault />);
+    const failed = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: { state: "failed", error: "the graph holds no nodes", startedAt: null, waitingOnAnotherRun: false }, talk: { draft: null, sent: null }, outline: null, outlineJob: null }} hasPurpose openByDefault />);
     expect(failed).toMatch(/The brief didn(&#x27;|')t get written: the graph holds no nodes/);
 
-    const running = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: { state: "active", error: null, startedAt: null, waitingOnAnotherRun: false } }} hasPurpose openByDefault />);
+    const running = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: { state: "active", error: null, startedAt: null, waitingOnAnotherRun: false }, talk: { draft: null, sent: null }, outline: null, outlineJob: null }} hasPurpose openByDefault />);
     expect(running).toContain("Writing the brief…");
     expect(running).not.toContain("Write the brief");
   });
@@ -326,7 +326,7 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     const content = `## The ask\n\n- The problem.\n\n---\n\n# Reference\n\n## The client's questions\n\n- A question nobody has to read.\n`;
     expect(splitBriefHalves(content)).toEqual({ first: "## The ask\n\n- The problem.", reference: "## The client's questions\n\n- A question nobody has to read." });
     expect(splitBriefHalves("## The ask\n\n- p\n")).toEqual({ first: "## The ask\n\n- p\n", reference: null });
-    const html = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: { content, writtenAt: "2026-10-28T10:00:00Z", byName: "Austin", incomplete: [] }, job: null }} hasPurpose openByDefault />);
+    const html = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: { content, writtenAt: "2026-10-28T10:00:00Z", byName: "Austin", incomplete: [] }, job: null, talk: { draft: null, sent: null }, outline: null, outlineJob: null }} hasPurpose openByDefault />);
     expect(html).toContain("The problem.");
     expect(html).toContain('data-brief-reference');
     expect(html).toContain("Nobody has to read it.");
@@ -339,7 +339,7 @@ describe("the brief on the letter's page (2026-10-28)", () => {
   });
 
   it("without a purpose line the button is disabled and says why", () => {
-    const html = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: null }} hasPurpose={false} openByDefault />);
+    const html = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: null, talk: { draft: null, sent: null }, outline: null, outlineJob: null }} hasPurpose={false} openByDefault />);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*data-brief-button|<button[^>]*data-brief-button[^>]*disabled=""/);
     expect(html).toContain("Say what it is for first");
   });
@@ -350,6 +350,39 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     expect(vault).toContain("{letterBrief && (");
     expect(readFileSync(path.join(here, "../routes/public.letter.$fileId.tsx"), "utf8")).not.toMatch(/brief/i);
     expect(readFileSync(path.join(here, "../../../packages/robustness-core/src/data/letters.server.ts"), "utf8")).not.toMatch(/letter_briefs|brief\.server/);
+  });
+
+  it("with a brief and no talk, the talk-through space and Write the outline; after the send, the talk as text and the outline's twirl", () => {
+    const brief = { content: "## The ask\n\n- p\n", writtenAt: "2026-10-28T10:00:00Z", byName: "Austin", incomplete: [] };
+    const before = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief, job: null, talk: { draft: "so far", sent: null }, outline: null, outlineJob: null }} hasPurpose openByDefault />);
+    expect(before).toContain("data-letter-talk");
+    expect(before).toContain("Talk it through");
+    expect(before).toContain("so far");
+    expect(before).toContain("when you write the outline");
+    expect(before).toContain("Write the outline");
+    expect(before).not.toContain("data-letter-outline");
+
+    const sent = { text: "I'm trying to give just a limited deliverable.", at: "2026-10-28T11:00:00Z", date: "2026-10-28", byName: "Austin" };
+    const writing = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief, job: null, talk: { draft: null, sent }, outline: null, outlineJob: { state: "active", error: null, startedAt: null, waitingOnAnotherRun: false } }} hasPurpose openByDefault />);
+    expect(writing).toContain("data-letter-talk-sent");
+    expect(writing).toContain("limited deliverable.");
+    expect(writing).not.toContain("<textarea");
+    expect(writing).toContain("Writing the outline…");
+    expect(writing).toContain('data-outline-state="running"');
+
+    const outline = { content: "## The assembly today\n\n- Position: slow, not stop.\n\n## Go do\n\n- Check the windows.\n", writtenAt: "2026-10-28T11:05:00Z", byName: "Austin", incomplete: [], editedAt: null };
+    const done = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief, job: null, talk: { draft: null, sent }, outline, outlineJob: null }} hasPurpose openByDefault />);
+    expect(done).toContain("The outline ▾");
+    expect(done).toContain("slow, not stop.");
+    expect(done).toContain("Check the windows.");
+    expect(done).toContain("data-outline-edit");
+    expect(done).toContain("Write it again");
+    // The brief folds away once the outline exists; its words stay a click away.
+    expect(done).toContain("The brief ▸");
+    expect(done).not.toContain("data-brief-body");
+
+    const failed = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief, job: null, talk: { draft: null, sent }, outline: null, outlineJob: { state: "failed", error: "the graph holds no nodes", startedAt: null, waitingOnAnotherRun: false } }} hasPurpose openByDefault />);
+    expect(failed).toMatch(/The outline didn(&#x27;|')t get written: the graph holds no nodes/);
   });
 
   it("a letter that is only its heading opens the brief by itself", () => {

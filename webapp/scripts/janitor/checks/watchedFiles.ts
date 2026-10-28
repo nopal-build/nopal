@@ -21,6 +21,7 @@ export const RUNTIME_SKILL_FILE_NAMES: Record<string, string> = {
   DEFAULT_VOICE_SKILL: "VOICE.md",
   DEFAULT_SOW_SKILL: "SOW.md",
   DEFAULT_BRIEF_SKILL: "BRIEF.md",
+  DEFAULT_OUTLINE_SKILL: "OUTLINE.md",
 };
 
 /**

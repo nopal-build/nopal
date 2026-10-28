@@ -286,45 +286,66 @@ export type BriefTextResult = {
   turns: number;
 };
 
+/** What a whole-document write has to say back, split by what sends the
+ * document back (`hard`) and what only rides along (`soft`). */
+export type WriteNotes = { hard: string[]; soft: string[] };
+
+export type WholeDocumentResult = {
+  /** The last document the model sent, or null when none arrived. */
+  markdown: string | null;
+  /** Whether the first write was sent back (and with what). */
+  bouncedWith: string[];
+  incomplete: string[];
+  usage: LlmUsage;
+  model: string | null;
+  turns: number;
+};
+
 /**
- * One brief from one conversation: the whole document in one call, the
- * whole document back once with every count, the resend kept as
- * written. Nothing is written here; the tool collects in memory.
+ * One document from one conversation: the whole thing in one tool call,
+ * the whole thing back once with everything code has to say, the resend
+ * kept as written. One retry if the single response is cut off. The
+ * brief and the outline both write this way; each brings its own tool,
+ * its own first message and its own `notes`.
  */
-export async function briefText(input: BriefTextInput): Promise<BriefTextResult> {
-  const provider = input.provider ?? AnthropicProvider.forStage("brief");
+export async function writeWholeDocument(input: {
+  provider: LlmProvider;
+  system: string;
+  firstMessage: string;
+  tool: ToolDefinition;
+  /** What to send back for a document: hard notes send it back once. */
+  notes: (markdown: string) => WriteNotes;
+  /** The one word for what is being written, for the log and the resend ask. */
+  what: string;
+  maxTokens?: number;
+  log?: (line: string) => void;
+  checkCancelled?: () => Promise<void>;
+}): Promise<WholeDocumentResult> {
   const log = input.log ?? (() => {});
-  const system = buildBriefSystemPrompt(input.skill, input);
-  const allNodesById = new Map(input.nodes.map((n) => [n.id, n]));
-  let draft = emptyBriefDraft();
-  let written = false;
+  let markdown: string | null = null;
   let bounced = false;
-  let over: string[] = [];
+  let bouncedWith: string[] = [];
   const incomplete: string[] = [];
   let finished = false;
 
   const execute = (name: string, args: Record<string, unknown>): string => {
-    if (name !== "write_brief") return `Error: no tool named ${name}.`;
-    const markdown = typeof args.markdown === "string" ? args.markdown : "";
-    if (!markdown.trim()) return "Not written: the brief is empty.";
-    const parsed = parseBriefDocument(markdown);
-    draft = parsed.draft;
-    written = true;
-    const { hard, soft, over: overNow } = briefWriteNotes(draft, parsed.unknown, allNodesById);
+    if (name !== input.tool.name) return `Error: no tool named ${name}.`;
+    const sent = typeof args.markdown === "string" ? args.markdown : "";
+    if (!sent.trim()) return `Not written: the ${input.what} is empty.`;
+    markdown = sent;
+    const { hard, soft } = input.notes(sent);
     if (hard.length > 0 && !bounced) {
       bounced = true;
-      over = overNow;
+      bouncedWith = hard;
       const notes = [...hard, ...soft];
-      log(`brief: sent the brief back once: ${hard.join("; ")}.`);
-      return `Not written yet. The brief as sent:\n- ${notes.join("\n- ")}\nCut, or move what you cut to Reference, and call write_brief again with the whole brief; the resend is accepted as written.`;
+      log(`${input.what}: sent back once: ${hard.join("; ")}.`);
+      return `Not written yet. The ${input.what} as sent:\n- ${notes.join("\n- ")}\nPut right what you can and call ${input.tool.name} again with the whole ${input.what}; the resend is accepted as written.`;
     }
     finished = true;
     return "Written.";
   };
 
-  const messages: LlmMessage[] = [
-    { role: "user", content: `Write the brief for the letter "${input.letterTitle}", whole, in one write_brief call.` },
-  ];
+  const messages: LlmMessage[] = [{ role: "user", content: input.firstMessage }];
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   let model: string | null = null;
   let turns = 0;
@@ -332,7 +353,7 @@ export async function briefText(input: BriefTextInput): Promise<BriefTextResult>
 
   for (let turn = 0; turn < MAX_TURNS && !finished; turn++) {
     await input.checkCancelled?.();
-    const response = await provider.complete({ system, messages, tools: BRIEF_TOOLS, cacheSystemPrompt: true, maxTokens: BRIEF_MAX_OUTPUT_TOKENS });
+    const response = await input.provider.complete({ system: input.system, messages, tools: [input.tool], cacheSystemPrompt: true, maxTokens: input.maxTokens ?? BRIEF_MAX_OUTPUT_TOKENS });
     turns += 1;
     model = response.model;
     usage.inputTokens += response.usage.inputTokens;
@@ -342,16 +363,16 @@ export async function briefText(input: BriefTextInput): Promise<BriefTextResult>
     const calls = completedToolCalls(response.toolCalls, response.stopReason);
     if (calls.length === 0) {
       if (response.stopReason === "max_tokens" && cutOff < 1) {
-        // The one call was cut off: the brief is lost with it. Asked
+        // The one call was cut off: the document is lost with it. Asked
         // once more, whole; a second cut is reported, not retried.
         cutOff += 1;
-        log("brief: the response was cut off before the brief finished; asked once more.");
+        log(`${input.what}: the response was cut off before it finished; asked once more.`);
         messages.push({ role: "assistant", content: response.text ?? "", toolCalls: [] });
-        messages.push({ role: "user", content: "That response was cut off before write_brief finished, so none of it arrived. Send the whole brief again in one write_brief call, with less deliberation first." });
+        messages.push({ role: "user", content: `That response was cut off before ${input.tool.name} finished, so none of it arrived. Send the whole ${input.what} again in one ${input.tool.name} call, with less deliberation first.` });
         continue;
       }
-      if (response.stopReason === "max_tokens") incomplete.push("the brief was cut off twice before it finished");
-      else if (response.stopReason === "other") incomplete.push("the model stopped before writing the brief (declined or interrupted)");
+      if (response.stopReason === "max_tokens") incomplete.push(`the ${input.what} was cut off twice before it finished`);
+      else if (response.stopReason === "other") incomplete.push(`the model stopped before writing the ${input.what} (declined or interrupted)`);
       break;
     }
     messages.push({ role: "assistant", content: response.text ?? "", toolCalls: calls });
@@ -362,17 +383,44 @@ export async function briefText(input: BriefTextInput): Promise<BriefTextResult>
   }
 
   if (!finished) {
-    if (written) {
-      // Sent back once and never resent: what was sent stands, and the
-      // brief says so.
-      const { refusals } = briefFinishNotes(draft, allNodesById);
-      incomplete.push(...refusals);
-      incomplete.push("the brief was sent back once and not sent again; the first version stands");
-    } else if (incomplete.length === 0) {
-      incomplete.push("the model ended without writing the brief");
-    }
+    if (markdown !== null) incomplete.push(`the ${input.what} was sent back once and not sent again; the first version stands`);
+    else if (incomplete.length === 0) incomplete.push(`the model ended without writing the ${input.what}`);
   }
+  return { markdown, bouncedWith, incomplete, usage, model, turns };
+}
 
+/**
+ * One brief from one conversation: the whole document in one call, the
+ * whole document back once with every count, the resend kept as
+ * written. Nothing is written here; the tool collects in memory.
+ */
+export async function briefText(input: BriefTextInput): Promise<BriefTextResult> {
+  const provider = input.provider ?? AnthropicProvider.forStage("brief");
+  const allNodesById = new Map(input.nodes.map((n) => [n.id, n]));
+  let over: string[] = [];
+  let firstWrite = true;
+  const result = await writeWholeDocument({
+    provider,
+    system: buildBriefSystemPrompt(input.skill, input),
+    firstMessage: `Write the brief for the letter "${input.letterTitle}", whole, in one write_brief call.`,
+    tool: BRIEF_TOOLS[0],
+    what: "brief",
+    maxTokens: BRIEF_MAX_OUTPUT_TOKENS,
+    log: input.log,
+    checkCancelled: input.checkCancelled,
+    notes: (markdown) => {
+      const parsed = parseBriefDocument(markdown);
+      const { hard, soft, over: overNow } = briefWriteNotes(parsed.draft, parsed.unknown, allNodesById);
+      if (firstWrite) {
+        over = overNow;
+        firstWrite = false;
+      }
+      return { hard, soft };
+    },
+  });
+  const draft = result.markdown ? parseBriefDocument(result.markdown).draft : emptyBriefDraft();
+  const incomplete = [...result.incomplete];
+  if (result.markdown) incomplete.push(...briefFinishNotes(draft, allNodesById).refusals.filter((r) => !incomplete.includes(r)));
   const content = assembleBrief(draft);
   const { unmatched } = countCitations(content, allNodesById);
   return {
@@ -381,9 +429,9 @@ export async function briefText(input: BriefTextInput): Promise<BriefTextResult>
     bounced: over,
     unmatched,
     incomplete,
-    usage,
-    model,
-    turns,
+    usage: result.usage,
+    model: result.model,
+    turns: result.turns,
   };
 }
 
@@ -410,6 +458,25 @@ export type LetterBriefRow = Data & {
   unmatched: string[];
   /** The job asked for and not yet finished, so a second click waits. */
   pending_job_id: string | null;
+  // ── The talk-through and the outline (`outline.server.ts`) ──
+  /** What the guide has typed and not yet put on the record. */
+  talk_draft?: string | null;
+  /** The talk as it went onto the guide's Card, when they asked for the outline. */
+  talk_through?: string | null;
+  talk_through_at?: string | null;
+  talk_through_by_human_id?: string | null;
+  /** The day it was written to, the device's date clamped by `markDate`. */
+  talk_through_date?: string | null;
+  talk_through_card_file_id?: string | null;
+  outline?: string | null;
+  outline_written_at?: string | null;
+  outline_by_human_id?: string | null;
+  outline_run_id?: string | null;
+  outline_incomplete?: string[];
+  outline_bounced?: string[];
+  /** The guide's own edit of the outline; it re-runs nothing. */
+  outline_edited_at?: string | null;
+  outline_pending_job_id?: string | null;
 };
 
 export async function getLetterBriefRow(letterFileId: string): Promise<LetterBriefRow | null> {
@@ -422,7 +489,7 @@ export async function getLetterBriefRow(letterFileId: string): Promise<LetterBri
  * spread a read record back into an upsert: the record carries its own
  * `id`, and SurrealDB refuses the write, quietly (the first dev walk's
  * second ask kept pointing at the first job). */
-async function writeLetterBriefRow(letterFileId: string, patch: Partial<Omit<LetterBriefRow, "_id">> & { letter_file_id: string; project_folder_id: string }): Promise<void> {
+export async function writeLetterBriefRow(letterFileId: string, patch: Partial<Omit<LetterBriefRow, "_id">> & { letter_file_id: string; project_folder_id: string }): Promise<void> {
   await ensureTable();
   const existing = await getLetterBriefRow(letterFileId);
   if (existing) await merge(TABLE, letterFileId, patch);
@@ -563,18 +630,6 @@ export async function runBrief(projectFolder: VaultFolder, letterFileId: string,
 
 export type RequestBriefResult = { ok: true; jobId: string } | { ok: false; status: 400 | 409; error: string };
 
-/** Whether the job a row names is still ahead of us. */
-async function pendingJob(row: LetterBriefRow | null): Promise<{ state: string; error: string | null } | null> {
-  if (!row?.pending_job_id) return null;
-  const status = await getGraphLogJobStatus(row.pending_job_id);
-  if (!status.ok) return null;
-  return { state: status.state, error: status.state === "failed" ? (status.error ?? "The brief stopped on an error.") : null };
-}
-
-function isRunning(state: string | undefined): boolean {
-  return state === "waiting" || state === "active" || state === "delayed";
-}
-
 /**
  * Asks the worker for this letter's brief. The two callers are the two
  * controls a guide has: starting a letter, and "Write it again". The
@@ -583,39 +638,56 @@ function isRunning(state: string | undefined): boolean {
 export async function requestBrief(projectFolder: VaultFolder, letter: FileRef, actingHumanId: string): Promise<RequestBriefResult> {
   if (!letter.purpose?.trim()) return { ok: false, status: 400, error: "Say what this letter is for first." };
   const row = await getLetterBriefRow(letter._id);
-  const job = await pendingJob(row);
-  if (job && isRunning(job.state)) return { ok: false, status: 409, error: "The brief is being written. Give it a few minutes." };
+  if (await jobIsRunning(row?.pending_job_id)) return { ok: false, status: 409, error: "The brief is being written. Give it a few minutes." };
   const jobId = await enqueueGraphLogJob("brief", { actingHumanId, projectFolderId: projectFolder._id, fileId: letter._id });
   await writeLetterBriefRow(letter._id, { letter_file_id: letter._id, project_folder_id: projectFolder._id, pending_job_id: jobId });
   return { ok: true, jobId };
 }
 
-/** What the letter's page shows a guide about the brief. */
+/** A job a row names, as the page reads it. */
+export type LetterJobForPage = { state: "waiting" | "active" | "failed" | "completed" | "unknown"; error: string | null; startedAt: string | null; waitingOnAnotherRun: boolean };
+
+/** What the letter's page shows a guide: the brief, the talk-through and
+ * the outline, each with the job writing it when one is. */
 export type LetterBriefForPage = {
   brief: { content: string; writtenAt: string; byName: string; incomplete: string[] } | null;
-  job: { state: "waiting" | "active" | "failed" | "completed" | "unknown"; error: string | null; startedAt: string | null; waitingOnAnotherRun: boolean } | null;
+  job: LetterJobForPage | null;
+  talk: { draft: string | null; sent: { text: string; at: string; date: string; byName: string } | null };
+  outline: { content: string; writtenAt: string; byName: string; incomplete: string[]; editedAt: string | null } | null;
+  outlineJob: LetterJobForPage | null;
 };
+
+async function jobForPage(jobId: string | null | undefined): Promise<LetterJobForPage | null> {
+  if (!jobId) return null;
+  const status = await getGraphLogJobStatus(jobId);
+  if (!status.ok) return null;
+  const state = status.state === "delayed" ? "waiting" : status.state === "waiting" || status.state === "active" || status.state === "failed" || status.state === "completed" ? status.state : "unknown";
+  const startedAt = state === "active" || state === "completed" || state === "failed" ? await getGraphLogRunStartedAt(jobId) : null;
+  return {
+    state,
+    error: state === "failed" ? (status.error ?? "It stopped on an error.") : null,
+    startedAt,
+    waitingOnAnotherRun: state === "active" && (status.log ?? []).some((l) => /waiting for another GraphLog run/i.test(l)),
+  };
+}
 
 export async function getLetterBriefForPage(letterFileId: string): Promise<LetterBriefForPage> {
   const row = await getLetterBriefRow(letterFileId);
-  let brief: LetterBriefForPage["brief"] = null;
-  if (row?.content && row.written_at) {
-    const author = row.by_human_id ? (await getHumansById([row.by_human_id]))[0] : undefined;
-    brief = { content: row.content, writtenAt: row.written_at, byName: author ? firstName(author) : "a guide", incomplete: row.incomplete ?? [] };
-  }
-  let job: LetterBriefForPage["job"] = null;
-  if (row?.pending_job_id) {
-    const status = await getGraphLogJobStatus(row.pending_job_id);
-    if (status.ok) {
-      const state = status.state === "delayed" ? "waiting" : status.state === "waiting" || status.state === "active" || status.state === "failed" || status.state === "completed" ? status.state : "unknown";
-      const startedAt = state === "active" || state === "completed" || state === "failed" ? await getGraphLogRunStartedAt(row.pending_job_id) : null;
-      job = {
-        state,
-        error: state === "failed" ? (status.error ?? "The brief stopped on an error.") : null,
-        startedAt,
-        waitingOnAnotherRun: state === "active" && (status.log ?? []).some((l) => /waiting for another GraphLog run/i.test(l)),
-      };
-    }
-  }
-  return { brief, job };
+  const ids = [row?.by_human_id, row?.talk_through_by_human_id, row?.outline_by_human_id].filter((v): v is string => !!v);
+  const names = new Map((await getHumansById([...new Set(ids)])).map((h) => [h._id, firstName(h)]));
+  const nameOf = (id: string | null | undefined) => (id && names.get(id)) || "a guide";
+  const brief = row?.content && row.written_at ? { content: row.content, writtenAt: row.written_at, byName: nameOf(row.by_human_id), incomplete: row.incomplete ?? [] } : null;
+  const talk = {
+    draft: row?.talk_draft ?? null,
+    sent: row?.talk_through && row.talk_through_at ? { text: row.talk_through, at: row.talk_through_at, date: row.talk_through_date ?? row.talk_through_at.slice(0, 10), byName: nameOf(row.talk_through_by_human_id) } : null,
+  };
+  const outline = row?.outline && row.outline_written_at ? { content: row.outline, writtenAt: row.outline_written_at, byName: nameOf(row.outline_by_human_id), incomplete: row.outline_incomplete ?? [], editedAt: row.outline_edited_at ?? null } : null;
+  return { brief, job: await jobForPage(row?.pending_job_id), talk, outline, outlineJob: await jobForPage(row?.outline_pending_job_id) };
+}
+
+/** Whether a job a row names is still ahead of us. */
+export async function jobIsRunning(jobId: string | null | undefined): Promise<boolean> {
+  if (!jobId) return false;
+  const status = await getGraphLogJobStatus(jobId);
+  return status.ok && (status.state === "waiting" || status.state === "active" || status.state === "delayed");
 }

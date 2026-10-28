@@ -27,6 +27,7 @@ import { coverageFromJobResult, readmeChangedFromJobResult, runGraphProjectView,
 import { runGraphLogPipeline } from "robustness-core/data/graphLogAgent.server";
 import { runSow } from "robustness-core/data/sow.server";
 import { runBrief } from "robustness-core/data/brief.server";
+import { runOutline } from "robustness-core/data/outline.server";
 import {
   resetProjectView,
   resetGraph,
@@ -122,7 +123,12 @@ async function runGraphLogJob(
     case "brief": {
       const fileId = job.data.fileId;
       if (!fileId) throw new Error("A brief job names the letter it is for");
-      const result = await perf.time("brief", "fn", "runBrief", null, () => runBrief(projectFolder, fileId, job.data.actingHumanId, { log: onProgress, runId: perf.runId }));
+      // One stage, two documents: the brief, or the outline from the
+      // guide's talk-through (`job.data.kind`).
+      const result =
+        job.data.kind === "outline"
+          ? await perf.time("brief", "fn", "runOutline", null, () => runOutline(projectFolder, fileId, job.data.actingHumanId, { log: onProgress, runId: perf.runId }))
+          : await perf.time("brief", "fn", "runBrief", null, () => runBrief(projectFolder, fileId, job.data.actingHumanId, { log: onProgress, runId: perf.runId }));
       if (!result.ok) throw new Error(result.error);
       return result;
     }
