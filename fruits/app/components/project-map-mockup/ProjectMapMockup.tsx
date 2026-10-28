@@ -207,6 +207,21 @@ function Callout({
   );
 }
 
+/** Left: the actual simulated mockup. Right: our notes about how it
+ * functions, in the handwritten red hand (see `pm-flag`'s CSS) so the
+ * two are never visually confused with each other. `notes` is optional —
+ * most mockup-only control panels (the lifecycle scrubber, the "define a
+ * future camp" form) have nothing to annotate and render with an empty
+ * right column. Stacks to one column under 900px. */
+function Row({ main, notes }: { main: ReactNode; notes?: ReactNode }) {
+  return (
+    <div className="pm-row">
+      <div className="pm-row__main">{main}</div>
+      <div className="pm-row__notes">{notes}</div>
+    </div>
+  );
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="pm-stat">
@@ -482,36 +497,41 @@ export function ProjectMapMockup() {
         </p>
       </header>
 
-      <Surface className={sprinkles({ p: 4 })}>
-        <Stack gap={3}>
-          <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Viewing as</p>
-          <Cluster gap={2} wrap>
-            {ROLES.map((r) => (
-              <Chip key={r} active={role === r} onClick={() => setRole(r)}>
-                {r}
-              </Chip>
-            ))}
-            <Chip active={staffOverride} onClick={() => setStaffOverride((v) => !v)}>
-              Also Admin/Super (site staff)
-            </Chip>
-          </Cluster>
-          <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-            {canDefine
-              ? "This role can define Basecamp, Phases, and Camps."
-              : "This role can only VIEW the map \u2014 defining Basecamp, Phases, or Camps is Guide-only (or an Admin/Super override)."}
-          </p>
-        </Stack>
-      </Surface>
-
-      <Callout kind="decision" n={1}>
-        Guides (or Admin/Super humans, regardless of their project group) are the
-        only ones who can define Basecamp, Phases, or Camps — confirmed by Gerald,
-        2026-10-28, not an open question anymore. Switch "Viewing as" above to
-        Observer/Client/Crafter to see the Basecamp-prep checklist and "+ Define a
-        future camp" become read-only. This choice doesn't gate the lifecycle
-        scrubber below — that's a reviewer-only convenience for exploring every
-        state as any role, not a simulation of a real in-product control.
-      </Callout>
+      <Row
+        main={
+          <Surface className={sprinkles({ p: 4 })}>
+            <Stack gap={3}>
+              <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Viewing as</p>
+              <Cluster gap={2} wrap>
+                {ROLES.map((r) => (
+                  <Chip key={r} active={role === r} onClick={() => setRole(r)}>
+                    {r}
+                  </Chip>
+                ))}
+                <Chip active={staffOverride} onClick={() => setStaffOverride((v) => !v)}>
+                  Also Admin/Super (site staff)
+                </Chip>
+              </Cluster>
+              <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+                {canDefine
+                  ? "This role can define Basecamp, Phases, and Camps."
+                  : "This role can only VIEW the map \u2014 defining Basecamp, Phases, or Camps is Guide-only (or an Admin/Super override)."}
+              </p>
+            </Stack>
+          </Surface>
+        }
+        notes={
+          <Callout kind="decision" n={1}>
+            Guides (or Admin/Super humans, regardless of their project group) are the
+            only ones who can define Basecamp, Phases, or Camps — confirmed by Gerald,
+            2026-10-28, not an open question anymore. Switch "Viewing as" to
+            Observer/Client/Crafter to see the Basecamp-prep checklist and "+ Define a
+            future camp" become read-only. This doesn't gate the lifecycle scrubber
+            below — that's a reviewer-only convenience for exploring every state as
+            any role, not a simulation of a real in-product control.
+          </Callout>
+        }
+      />
 
       <Surface className={sprinkles({ p: 4 })}>
         <Stack gap={3}>
@@ -552,8 +572,10 @@ export function ProjectMapMockup() {
         <EmptyState onStart={() => setStage("prep")} />
       ) : (
         <>
-          {/* --- Basecamp --- */}
-          <Surface className="pm-basecamp">
+          <Row
+            main={
+              /* --- Basecamp --- */
+              <Surface className="pm-basecamp">
             <Stack gap={4}>
               <Cluster style={{ justifyContent: "space-between" }} align="flex-start">
                 <Stack gap={1}>
@@ -613,14 +635,27 @@ export function ProjectMapMockup() {
                 </Disclosure>
               )}
             </Stack>
-          </Surface>
-
-          <Callout n={2}>
-            Camps vs. Phases: toggling "Basecamp resets per Phase" shows the two live
-            options from the seed — one shared Basecamp for the whole project (off), or
-            a Basecamp re-established at the start of each Phase (on). Genuinely
-            unresolved per the seed; needs Austin's input.
-          </Callout>
+              </Surface>
+            }
+            notes={
+              <>
+                <Callout n={2}>
+                  Camps vs. Phases: toggling "Basecamp resets per Phase" shows the two live
+                  options from the seed — one shared Basecamp for the whole project (off), or
+                  a Basecamp re-established at the start of each Phase (on). Genuinely
+                  unresolved per the seed; needs Austin's input.
+                </Callout>
+                <Callout kind="finding" n={2}>
+                  The checklist-gated "Establish Basecamp" button is the real workflow
+                  (disabled until every item is checked). The "Advance" scrubber and
+                  milestone chips deliberately bypass that gate so this mockup stays
+                  navigable — worth deciding whether a real "jump ahead" shortcut should
+                  ever exist for staff, or whether Basecamp should always hard-block
+                  camp progress.
+                </Callout>
+              </>
+            }
+          />
 
           {stage === "prep" && (
             <Surface className={sprinkles({ p: 3 })}>
@@ -642,8 +677,10 @@ export function ProjectMapMockup() {
 
           {(stage === "active" || stage === "complete") && (
             <>
-              {/* --- Camps trail --- */}
-              <section>
+              <Row
+                main={
+                  /* --- Camps trail --- */
+                  <section>
                 <h3
                   className={`${textSize.sm} ${sprinkles({ fontWeight: "bold", mb: 2 })}`}
                   style={{ textTransform: "uppercase", letterSpacing: "0.04em", color: semanticColors.textSubtle }}
@@ -701,29 +738,42 @@ export function ProjectMapMockup() {
                       <CampNode kind={stage === "complete" ? "done" : "final"} label={FINAL_GOAL} />
                     </div>
                   </div>
-                </Surface>
-              </section>
-
-              <Callout n={1}>
-                "Only one camp in focus at a time" is flagged in the seed as an
-                assumption to validate, not a decision. Toggle "2 camps in focus" above
-                to see the camp right after the current one light up too — worth asking
-                whether the UI (and the data model) actually needs to support that for a
-                complex build.
-              </Callout>
-
-              <Callout kind="finding" n={1}>
-                At a believable scale (~33 camps across 4 phases), a flat trail of every
-                camp is unwieldy — so by default this mockup collapses any phase that
-                isn't the current one into a single summary pill ("8/8 done" or "9
-                camps"), expanding only on click. Toggle "Expand all phases" to see the
-                dense version for comparison. This suggests Phases, not Camps, may need
-                to be the primary collapse/navigation unit on the real Project page.
-              </Callout>
+                  </Surface>
+                  </section>
+                }
+                notes={
+                  <>
+                    <Callout n={1}>
+                      "Only one camp in focus at a time" is flagged in the seed as an
+                      assumption to validate, not a decision. Toggle "2 camps in focus" above
+                      to see the camp right after the current one light up too — worth asking
+                      whether the UI (and the data model) actually needs to support that for a
+                      complex build.
+                    </Callout>
+                    <Callout kind="finding" n={1}>
+                      At a believable scale (~33 camps across 4 phases), a flat trail of every
+                      camp is unwieldy — so by default this mockup collapses any phase that
+                      isn't the current one into a single summary pill ("8/8 done" or "9
+                      camps"), expanding only on click. Toggle "Expand all phases" to see the
+                      dense version for comparison. This suggests Phases, not Camps, may need
+                      to be the primary collapse/navigation unit on the real Project page.
+                    </Callout>
+                    <Callout kind="finding" n={3}>
+                      Hand-authoring steps/content for 33 camps already felt like a lot of
+                      data entry for one demo project — a real project at this grain would
+                      make GraphLog's "AI-identified and sorted" piece (open Q5) less of a
+                      nice-to-have and more of a requirement for this to stay usable without
+                      heavy manual upkeep per camp.
+                    </Callout>
+                  </>
+                }
+              />
 
               {/* --- Camp detail / filtered content --- */}
               {selected && (
-                <Surface className="pm-camp-detail">
+                <Row
+                  main={
+                    <Surface className="pm-camp-detail">
                   <Stack gap={4}>
                     {isPreviewing && (
                       <div className="pm-preview-banner">
@@ -768,14 +818,6 @@ export function ProjectMapMockup() {
                       </Chip>
                     </Cluster>
 
-                    <Callout n={4}>
-                      This nests a tab-like content-type picker INSIDE the selected camp
-                      (one option from the seed: "camps pick a camp, tabs still pick a
-                      content type within it"). The alternative — camp selection
-                      replacing tabs entirely — is the other live option
-                      `stamps-tab-system` would need to reconcile with.
-                    </Callout>
-
                     {contentFilter === "steps" ? (
                       <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
                         {selected.stepLabels.length === 0 && (
@@ -812,34 +854,35 @@ export function ProjectMapMockup() {
                           ))}
                       </ul>
                     )}
-
-                    <Callout n={5}>
-                      The GraphLog badges above are hand-authored mock text, not a real
-                      integration — today's `graph-structure` clustering has no concept
-                      of camp sequencing or focus to extend (confirmed in the seed).
-                      Teaching it to recognize "this node's work belongs to Camp N" is
-                      real, separate work.
-                    </Callout>
-                  </Stack>
-                </Surface>
+                      </Stack>
+                    </Surface>
+                  }
+                  notes={
+                    <>
+                      <Callout n={3}>
+                        How camp selection actually filters the main content below it is
+                        still genuinely open — this mockup's answer (a content-type picker
+                        nested inside the selected camp) is only one option it tries out,
+                        not a settled design.
+                      </Callout>
+                      <Callout n={4}>
+                        This nests a tab-like content-type picker INSIDE the selected camp
+                        (one option from the seed: "camps pick a camp, tabs still pick a
+                        content type within it"). The alternative — camp selection
+                        replacing tabs entirely — is the other live option
+                        `stamps-tab-system` would need to reconcile with.
+                      </Callout>
+                      <Callout n={5}>
+                        The GraphLog badges above are hand-authored mock text, not a real
+                        integration — today's `graph-structure` clustering has no concept
+                        of camp sequencing or focus to extend (confirmed in the seed).
+                        Teaching it to recognize "this node's work belongs to Camp N" is
+                        real, separate work.
+                      </Callout>
+                    </>
+                  }
+                />
               )}
-
-              <Callout kind="finding" n={2}>
-                The checklist-gated "Establish Basecamp" button above is the real
-                workflow (disabled until every item is checked). The "Advance" scrubber
-                and milestone chips deliberately bypass that gate so this mockup is
-                navigable — worth deciding whether a real "jump ahead" shortcut should
-                ever exist for staff, or whether Basecamp should always hard-block
-                camp progress.
-              </Callout>
-
-              <Callout kind="finding" n={3}>
-                Hand-authoring steps/content for 33 camps already felt like a lot of
-                data entry for one demo project — a real project at this grain would
-                make GraphLog's "AI-identified and sorted" piece (open Q5) less of a
-                nice-to-have and more of a requirement for this to stay usable without
-                heavy manual upkeep per camp.
-              </Callout>
 
               {/* --- Define a future camp workflow (Guide/Admin-Super only) --- */}
               {canDefine ? (
@@ -884,35 +927,6 @@ export function ProjectMapMockup() {
         </>
       )}
 
-      {/* --- Decisions + open questions + findings recap --- */}
-      <Surface className={sprinkles({ p: 4 })}>
-        <Stack gap={4}>
-          <Stack gap={2}>
-            <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Decided</h3>
-            <ol className={textSize.sm} style={{ color: semanticColors.textSubtle, paddingLeft: "1.2em" }}>
-              <li>Only a Guide (or an Admin/Super human, regardless of project group) can define Basecamp, Phases, or Camps (toggle "Viewing as" above).</li>
-            </ol>
-          </Stack>
-          <Stack gap={2}>
-            <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Open questions flagged in this mockup</h3>
-            <ol className={textSize.sm} style={{ color: semanticColors.textSubtle, paddingLeft: "1.2em" }}>
-              <li>Is "only one camp in focus at a time" actually right? (toggle above)</li>
-              <li>Camps vs. Phases — does Basecamp reset per Phase, or stay one for the whole project? (toggle above)</li>
-              <li>How does camp selection actually filter the main content below it?</li>
-              <li>Relationship to <code>stamps-tab-system</code> — reshaped, absorbed, or independent of camp filtering?</li>
-              <li>What would "AI-identified and sorted" actually require from GraphLog's <code>graph-structure</code> stage?</li>
-            </ol>
-          </Stack>
-          <Stack gap={2}>
-            <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>New findings from simulating 4 phases / ~33 camps</h3>
-            <ol className={textSize.sm} style={{ color: semanticColors.textSubtle, paddingLeft: "1.2em" }}>
-              <li>A flat trail doesn't scale — Phases likely need to be the primary collapse unit, Camps the drill-in.</li>
-              <li>The real onboarding gate (checklist) and a "jump ahead" demo/admin shortcut are two different things that need to stay visibly distinct in any real UI.</li>
-              <li>Per-camp step/content authoring at this volume is a real cost — makes GraphLog auto-sorting look more load-bearing than "nice to have."</li>
-            </ol>
-          </Stack>
-        </Stack>
-      </Surface>
     </div>
   );
 }
