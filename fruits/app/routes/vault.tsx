@@ -94,6 +94,8 @@ import {
   withReadmeBody,
 } from "robustness-core/data/project.types";
 import { Badge } from "stamps/Badge";
+import { textSize } from "stamps/typography.css";
+import { semanticColors } from "stamps/tokens";
 import { Select } from "stamps/Select";
 import { Surface } from "stamps/Surface";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
@@ -2052,14 +2054,22 @@ function MarkdownSplitEditor({
             Add picture
           </button>
         )}
-        <button
-          type="button"
-          className="vault-website-editor-mobile-save"
-          onClick={handleSave}
-          disabled={!editable || !isDirty || isSaving}
-        >
-          {saveButtonLabel}
-        </button>
+        {/* With autosave there is nothing to click here either: the same
+            status the desktop save row shows. */}
+        {autosave ? (
+          <span className="vault-website-editor-save-status" aria-live="polite">
+            {saveStatus}
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="vault-website-editor-mobile-save"
+            onClick={handleSave}
+            disabled={!editable || !isDirty || isSaving}
+          >
+            {saveButtonLabel}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2228,6 +2238,7 @@ function LetterSplitEditor({
   onSave,
   headerLeft,
   toolbarRight,
+  purpose,
 }: {
   fileId: string;
   folderId: string | null;
@@ -2239,6 +2250,10 @@ function LetterSplitEditor({
   onSave: (fileId: string, content: string) => Promise<unknown>;
   headerLeft?: ReactNode;
   toolbarRight?: ReactNode;
+  /** What the letter is for, in the guide's words (`FileRef.purpose`):
+   * read under the header while writing, since the chain (purpose,
+   * brief, talk-through, outline, letter) lives on this page. */
+  purpose?: string | null;
 }) {
   // The project's photos, fetched the first time the picker opens.
   const [photos, setPhotos] = useState<ProjectPhoto[] | null>(null);
@@ -2283,13 +2298,27 @@ function LetterSplitEditor({
   // which directives a letter gets, against what stays website-only,
   // is a later, deliberate pass. Light/Dark stays: the public link follows
   // the reader's scheme, only the PDF is pinned to light.
+  // The purpose line sits under the breadcrumb in the toolbar's left
+  // slot, so the toolbar keeps its two sides and the sentence wraps on
+  // its own line.
+  const headerWithPurpose = purpose ? (
+    <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
+      {headerLeft}
+      <span className={textSize.sm} style={{ color: semanticColors.textSubtle }} data-letter-purpose>
+        {purpose}
+      </span>
+    </div>
+  ) : (
+    headerLeft
+  );
+
   return (
     <MarkdownSplitEditor
       fileId={fileId}
       initialContent={initialContent}
       editable={editable}
       onSave={onSave}
-      headerLeft={headerLeft}
+      headerLeft={headerWithPurpose}
       toolbarRight={toolbarRight}
       onInsertFiles={insertPictures}
       spellCheck
@@ -4586,6 +4615,7 @@ export default function VaultV2Page() {
                 onSave={handleSaveWebsitePage}
                 headerLeft={breadcrumbNode}
                 toolbarRight={letterToolbarRight}
+                purpose={current.file.purpose ?? null}
               />
             ) : fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (
               // A sync-api analysis run's own `<run>.md` (see the `vault`

@@ -28,7 +28,7 @@ import { SPACE_FOLDER_TYPES, canonicalFolderType, isLettersFolderType } from "ro
 import { WebsitePageContent } from "stamps/WebsitePageContent";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
-import { LettersView, pdfLine } from "../components/LettersView";
+import { LettersView, NewLetterModal, pdfLine } from "../components/LettersView";
 import { LettersTile } from "../components/LettersTile";
 import { preparingPage } from "robustness-core/data/letterPdf.server";
 
@@ -193,8 +193,8 @@ describe("the tab", () => {
   });
 
   const rows = [
-    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", pdf: { state: "failed" as const, reason: "the public page answered 500", at: "2026-10-21T09:01:00Z" } },
-    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", pdf: null },
+    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", pdf: { state: "failed" as const, reason: "the public page answered 500", at: "2026-10-21T09:01:00Z" } },
+    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, pdf: null },
   ];
 
   it("a reader sees the list and no controls; a shared page is the client's link, an unshared one is not a link", () => {
@@ -241,6 +241,46 @@ describe("the tab", () => {
     expect(reader).not.toContain(">Edit<");
     expect(reader).not.toContain("New letter");
   });
+});
+
+describe("the purpose line (2026-10-28)", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+
+  it("shows under the row that has one, to anyone with the tab, and nothing under one that doesn't", () => {
+    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={false} openInVault={false} onChanged={() => {}} />);
+    expect((html.match(/data-letter-purpose/g) ?? []).length).toBe(1);
+    expect(html).toContain("Tell Susan what the attic floor should be.");
+  });
+
+  it("New letter asks for a title and what the letter is for, both required, and never through window.prompt", () => {
+    const html = renderToStaticMarkup(<NewLetterModal open busy={false} error={null} onClose={() => {}} onStart={() => {}} />);
+    expect(html).toContain('name="name"');
+    expect(html).toContain("What is this letter for?");
+    expect(html).toMatch(/<textarea[^>]*name="purpose"[^>]*required/);
+    expect(html).toContain("Start the letter");
+    expect(html).toContain("in your words");
+    expect(readFileSync(path.join(here, "../components/LettersView.tsx"), "utf8")).not.toContain("window.prompt");
+  });
+
+  it("the route refuses a new letter with no purpose, keeps the line on the record, and marks it in the guide's name on their day", () => {
+    const src = readFileSync(path.join(here, "../routes/api.projects.$folderId.letters.tsx"), "utf8");
+    expect(src).toContain('"Say what this letter is for first."');
+    expect(src).toContain("updateFileRef(fileRef._id, { purpose })");
+    expect(src).toMatch(/createMark\(\{[\s\S]*authorHumanId: user\._id,[\s\S]*unit: letterPurposeMark\(fileRef\),[\s\S]*suggestion: false,/);
+    expect(src).toMatch(/const date = markDate\(/);
+    expect((src.match(/createMark\(/g) ?? []).length).toBe(1);
+  });
+
+  it("never leaves the server for the public page: the page's fields are the same as before", () => {
+    const page = letterPage({ _id: FILE, name: "madison-attic.md", content: PAGE, updated_at: "2026-10-21T08:00:00Z", purpose: "secret-ish" } as never, "https://o.nopal.build");
+    expect(Object.keys(page)).not.toContain("purpose");
+    expect(JSON.stringify(page)).not.toContain("secret-ish");
+  });
+
+  const rows = [
+    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", pdf: null },
+    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, pdf: null },
+  ];
 });
 
 describe("read only", () => {

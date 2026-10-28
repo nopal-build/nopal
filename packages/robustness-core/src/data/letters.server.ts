@@ -65,6 +65,7 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import type { FileRef } from "./vault.types";
+import type { MarkUnitSnapshot } from "./graphLogMarks.server";
 import { isLettersFolderType } from "./vaultFolderTypes";
 import { parseWebsitePageMeta } from "./website.server";
 
@@ -114,11 +115,36 @@ export type LetterRow = {
   sharedAt: string | null;
   /** `contentFingerprint`: what this version's PDF is keyed by. */
   contentHash: string;
+  /** The guide's one sentence of what the letter is for (`FileRef.purpose`);
+   * null for a letter brought from outside or started before 2026-10-28. */
+  purpose: string | null;
 };
 
 export function letterTitle(file: Pick<FileRef, "name" | "content">): string {
   const meta = parseWebsitePageMeta(file.content ?? "");
   return meta.title ?? file.name.replace(/\.md$/i, "");
+}
+
+/**
+ * The purpose line as a mark on the letter, so it reaches the graph the
+ * way a note on a file does: in `Syncs/Marks/<date>-<humanId>.md` in the
+ * guide's name on the day they started the letter, highlighted, and
+ * guaranteed a node by `marksNotCaptured` when the model passes it over
+ * (`syncGraph.server.ts`). A file unit with no citation: a letter is a
+ * Vault file, attached to no entry, so the context line reads
+ * `On the file "<title>":` and nothing else. The route calls `createMark`
+ * with this; the shape is here so the test reads it without a database.
+ */
+export function letterPurposeMark(file: Pick<FileRef, "_id" | "name" | "content">): MarkUnitSnapshot {
+  return {
+    key: `file:${file._id}`,
+    kind: "file",
+    section: "",
+    effort: "",
+    text: letterTitle(file),
+    refs: [],
+    attachmentId: file._id,
+  };
 }
 
 export function isLetterShared(file: Pick<FileRef, "shared_at">): boolean {
@@ -147,6 +173,7 @@ export async function listLetters(project: VaultFolder): Promise<LetterRow[]> {
       size: f.size,
       sharedAt: f.shared_at ?? null,
       contentHash: contentFingerprint(f),
+      purpose: f.purpose ?? null,
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
