@@ -1,19 +1,22 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { createFileRef, getFileRefsByFolderIds, getFolderById } from "robustness-core/data/vault.server";
+import { createFileRef, getFileRefsByFolderIds, getFolderById, updateFileRef } from "robustness-core/data/vault.server";
 import { uploadFileToS3 } from "robustness-core/data/file.server";
 import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { getProjectRole, isProjectFolder } from "robustness-core/data/projectSharing.server";
+import { createMark, markDate } from "robustness-core/data/graphLogMarks.server";
 import {
   canManageLetters,
   letterFileName,
+  letterPurposeMark,
   ensureLettersFolder,
   newLetterContent,
   rewriteLocalImagePaths,
   splitUploadBundle,
   type UploadedPicture,
 } from "robustness-core/data/letters.server";
+import type { FileRef } from "robustness-core/data/vault.types";
 
 // Same cap as /api/vault/upload: markdown is stored as the record's own
 // content, never as an S3 object (see that route's doc).
@@ -28,8 +31,16 @@ const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
  *   local image path in the markdown that names one of them is pointed at
  *   it (`rewriteLocalImagePaths`), and the ones that matched nothing are
  *   returned as `unmatched` so the tab can name them.
- * - multipart with `name` and no file: a new, empty letter with that
- *   title (`newLetterContent`), for the Vault's split editor to open.
+ * - multipart with `name`, `purpose` and `date`, no file: a new, empty
+ *   letter with that title (`newLetterContent`), for the Vault's split
+ *   editor to open. The purpose line is the guide's one sentence of what
+ *   the letter is for (Austin, 2026-10-22: "there's a prompt that asks
+ *   what the deliverable is going to be"). It is written on the record
+ *   (`FileRef.purpose`) and, as the guide's own words, into the graph as
+ *   a mark on the letter (`letterPurposeMark`) dated the writer's day
+ *   (`markDate`, the daily log's rule). Refused without one. An upload
+ *   may carry `purpose` too; without it the letter has none until the
+ *   brief asks.
  * A Guide on the project or staff (`canManageLetters`). Replacing an
  * existing one is `/api/vault/replace/:fileId`, which keeps the id and so
  * the link. Nothing is shared by this route: the link is a separate
@@ -49,9 +60,26 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const form = await request.formData();
   const files = form.getAll("file").filter((f): f is File => f instanceof File);
   const name = typeof form.get("name") === "string" ? String(form.get("name")).trim() : "";
+  const purpose = typeof form.get("purpose") === "string" ? String(form.get("purpose")).trim() : "";
+  const date = markDate(typeof form.get("date") === "string" ? String(form.get("date")) : undefined);
+
+  /** The purpose line, on the record and in the graph as the guide's words. */
+  const recordPurpose = async (fileRef: FileRef): Promise<void> => {
+    await updateFileRef(fileRef._id, { purpose });
+    await createMark({
+      projectFolderId: project._id,
+      authorHumanId: user._id,
+      date,
+      text: purpose,
+      pageHash: null,
+      unit: letterPurposeMark(fileRef),
+      suggestion: false,
+    });
+  };
 
   if (files.length === 0) {
     if (!name) return Response.json({ error: "No file provided" }, { status: 400 });
+    if (!purpose) return Response.json({ error: "Say what this letter is for first." }, { status: 400 });
     const folder = await ensureLettersFolder(project);
     const content = newLetterContent(name);
     const fileRef = await createFileRef({
@@ -64,6 +92,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       folder_id: folder._id,
     });
     if (!fileRef) return Response.json({ error: "The letter didn't save. Try again." }, { status: 500 });
+    await recordPurpose(fileRef);
     return Response.json({ fileId: fileRef._id, pictures: 0, unmatched: [] }, { status: 201 });
   }
 
@@ -117,6 +146,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     folder_id: folder._id,
   });
   if (!fileRef) return Response.json({ error: "The upload didn't save. Try again." }, { status: 500 });
+  if (purpose) await recordPurpose(fileRef);
   return Response.json({ fileId: fileRef._id, pictures: uploaded.length, unmatched: rewritten.unmatched }, { status: 201 });
 }
 

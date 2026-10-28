@@ -67,6 +67,12 @@ export type FileRef = {
    * the same URL. Not `is_public`: that opens the folder-browsing routes
    * too. */
   shared_at?: string | null;
+  /** A letter's purpose line: the guide's one sentence of what the
+   * letter is for, typed when the letter is started and written once by
+   * the letters route (`letters.server.ts`). On the record, never in the
+   * content, so the download, the PDF and the public page never carry
+   * it; the same words go into the graph as a mark in the guide's name. */
+  purpose?: string | null;
 };
 
 /**

@@ -27,11 +27,16 @@ export function pdfLine(pdf: LetterPdfState): string {
   }
 }
 import { Badge } from "stamps/Badge";
+import { Input } from "stamps/Input";
+import { Modal } from "stamps/Modal";
+import { Stack } from "stamps/Stack";
 import { button } from "stamps/button.css";
+import { link } from "stamps/link.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { ShareLinkControl } from "./ShareLinkControl";
+import { localDateString } from "./TodayLog";
 
 export function letterPublicPath(fileId: string): string {
   return `/public/letter/${fileId}`;
@@ -95,12 +100,18 @@ export function LettersView({
     void send(`/api/projects/${projectFolderId}/letters`, form);
   };
 
-  /** An empty letter with a title, opened in the editor. */
-  const create = async () => {
-    const name = window.prompt("What is this letter called?", "")?.trim();
-    if (!name) return;
+  // "New letter" asks for a title and what the letter is for (Austin,
+  // 2026-10-22). The purpose line is the guide's words: the route keeps
+  // it on the letter and puts it in the graph in their name, dated the
+  // day on this device, the daily log's rule.
+  const [starting, setStarting] = useState(false);
+
+  /** An empty letter with a title and a purpose, opened in the editor. */
+  const create = async (name: string, purpose: string) => {
     const form = new FormData();
     form.append("name", name);
+    form.append("purpose", purpose);
+    form.append("date", localDateString());
     const data = await send(`/api/projects/${projectFolderId}/letters`, form);
     if (data?.fileId) window.location.assign(`/vault?file=${data.fileId}`);
   };
@@ -132,7 +143,7 @@ export function LettersView({
               upload(files);
             }}
           />
-          <button type="button" className={button({ variant: "secondary", size: "compact" })} disabled={busy} onClick={() => void create()}>
+          <button type="button" className={button({ variant: "secondary", size: "compact" })} disabled={busy} onClick={() => setStarting(true)}>
             New letter
           </button>
           <button type="button" className={button({ variant: "secondary", size: "compact" })} disabled={busy} onClick={() => uploadInput.current?.click()}>
@@ -143,7 +154,16 @@ export function LettersView({
           </span>
         </div>
       )}
-      {error && (
+      {manage && (
+        <NewLetterModal
+          open={starting}
+          busy={busy}
+          error={error}
+          onClose={() => setStarting(false)}
+          onStart={(name, purpose) => void create(name, purpose)}
+        />
+      )}
+      {error && !starting && (
         <p className={textSize.sm} style={{ color: semanticColors.textDanger }} role="alert">
           {error}
         </p>
@@ -177,6 +197,60 @@ export function LettersView({
         </ul>
       )}
     </section>
+  );
+}
+
+/** Two fields and one button. The title names the file; the purpose line
+ * is one sentence the guide writes, and it is theirs in the project's
+ * record from that day. Both are required: a letter starts with what it
+ * is for. */
+export function NewLetterModal({
+  open,
+  busy,
+  error,
+  onClose,
+  onStart,
+}: {
+  open: boolean;
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onStart: (name: string, purpose: string) => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title="New letter">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const form = new FormData(e.currentTarget);
+          const name = String(form.get("name") ?? "").trim();
+          const purpose = String(form.get("purpose") ?? "").trim();
+          if (!name || !purpose) return;
+          onStart(name, purpose);
+        }}
+      >
+        <Stack gap={3}>
+          <Input name="name" label="Title" required autoFocus />
+          <Input type="textarea" name="purpose" label="What is this letter for?" required />
+          <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
+            One sentence, in your words. It goes into the project's record as yours, today.
+          </p>
+          {error && (
+            <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert">
+              {error}
+            </p>
+          )}
+          <div className={sprinkles({ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 })}>
+            <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className={button({ variant: "primary" })} disabled={busy}>
+              {busy ? "Starting…" : "Start the letter"}
+            </button>
+          </div>
+        </Stack>
+      </form>
+    </Modal>
   );
 }
 
@@ -219,6 +293,11 @@ function LetterRowView({
         </span>
         {row.sharedAt && <Badge variant="success">Shared</Badge>}
       </div>
+      {row.purpose && (
+        <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textSubtle }} data-letter-purpose>
+          {row.purpose}
+        </p>
+      )}
       {manage && row.pdf && (
         <p className={textSize.xs} style={{ margin: 0, color: row.pdf.state === "failed" ? semanticColors.textDanger : semanticColors.textSubtle }} data-pdf-state={row.pdf.state}>
           {pdfLine(row.pdf)}

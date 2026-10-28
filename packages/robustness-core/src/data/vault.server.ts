@@ -213,6 +213,9 @@ export async function updateFileRef(
     /** See `letters.server.ts`'s `setLetterShared`, its only
      * intended writer. */
     shared_at: string | null;
+    /** A letter's purpose line, written once by the letters route when
+     * the letter is started (`FileRef.purpose`). */
+    purpose: string | null;
     /** Same field `createFileRef` already accepts at creation (e.g.
      * `dailyLogSync.server.ts`'s own `date: entryDate` stamp) -- also
      * settable here so a file COPIED in after the fact (an attachment,

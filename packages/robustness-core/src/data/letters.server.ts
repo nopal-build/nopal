@@ -11,9 +11,11 @@
  * - The folder is a `letters` folder type (`vaultFolderTypes.ts`),
  *   one per project, made by the first upload with a deterministic id so
  *   two uploads can't make two folders (the Skills pattern). A folder
- *   made before the rename is stored as `deliverables` and reads as the
- *   same folder (`isLettersFolderType`) until the admin script
- *   `migrate-deliverables-to-letters` has rewritten it.
+ *   made before the rename was stored as `deliverables`; production's
+ *   one such folder was rewritten on 2026-10-27 and the script removed.
+ *   The code still reads the old name as the same folder
+ *   (`isLettersFolderType`), so a local or staging database from before
+ *   then keeps working.
  * - A letter is one markdown file. Its pictures are vault files it
  *   names by `/api/vault/view/<id>`; the public page serves exactly
  *   those ids (`publicBody.ts`), and a picture the file doesn't name
@@ -63,6 +65,7 @@ import {
   type VaultFolder,
 } from "./vault.server";
 import type { FileRef } from "./vault.types";
+import type { MarkUnitSnapshot } from "./graphLogMarks.server";
 import { isLettersFolderType } from "./vaultFolderTypes";
 import { parseWebsitePageMeta } from "./website.server";
 
@@ -112,11 +115,36 @@ export type LetterRow = {
   sharedAt: string | null;
   /** `contentFingerprint`: what this version's PDF is keyed by. */
   contentHash: string;
+  /** The guide's one sentence of what the letter is for (`FileRef.purpose`);
+   * null for a letter brought from outside or started before 2026-10-28. */
+  purpose: string | null;
 };
 
 export function letterTitle(file: Pick<FileRef, "name" | "content">): string {
   const meta = parseWebsitePageMeta(file.content ?? "");
   return meta.title ?? file.name.replace(/\.md$/i, "");
+}
+
+/**
+ * The purpose line as a mark on the letter, so it reaches the graph the
+ * way a note on a file does: in `Syncs/Marks/<date>-<humanId>.md` in the
+ * guide's name on the day they started the letter, highlighted, and
+ * guaranteed a node by `marksNotCaptured` when the model passes it over
+ * (`syncGraph.server.ts`). A file unit with no citation: a letter is a
+ * Vault file, attached to no entry, so the context line reads
+ * `On the file "<title>":` and nothing else. The route calls `createMark`
+ * with this; the shape is here so the test reads it without a database.
+ */
+export function letterPurposeMark(file: Pick<FileRef, "_id" | "name" | "content">): MarkUnitSnapshot {
+  return {
+    key: `file:${file._id}`,
+    kind: "file",
+    section: "",
+    effort: "",
+    text: letterTitle(file),
+    refs: [],
+    attachmentId: file._id,
+  };
 }
 
 export function isLetterShared(file: Pick<FileRef, "shared_at">): boolean {
@@ -145,6 +173,7 @@ export async function listLetters(project: VaultFolder): Promise<LetterRow[]> {
       size: f.size,
       sharedAt: f.shared_at ?? null,
       contentHash: contentFingerprint(f),
+      purpose: f.purpose ?? null,
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }

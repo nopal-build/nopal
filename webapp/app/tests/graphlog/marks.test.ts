@@ -22,6 +22,7 @@ import {
   refLineFileId,
   type MarkUnitSnapshot,
 } from "robustness-core/data/graphLogMarks.server";
+import { letterPurposeMark } from "robustness-core/data/letters.server";
 import {
   addChunk,
   cardChunks,
@@ -158,6 +159,16 @@ describe("a mark on a file (2026-09-22): a person's act, recorded like any mark"
     expect(marksNotCaptured([parseMarkTexts(file)], ["The wall unit was approved on Friday."])).toEqual([
       { text: "Confirmed correct: Ace Hardware, 25.16 USD, 2026-06-19.", sourceIndex: 0 },
     ]);
+  });
+
+  it("a letter's purpose line (2026-10-28) is a file mark with no entry to cite, read and guaranteed the same way", () => {
+    const unitOnLetter = letterPurposeMark({ _id: "l3tt3r", name: "attic.md", content: "---\ntitle: Attic assembly report\n---\n" });
+    expect(markContextLine(unitOnLetter)).toBe('On the file "Attic assembly report":');
+    const purpose = "Tell Susan what the attic floor assembly should be and why the moisture risk is acceptable.";
+    const file = buildMarksFileContent([{ unit: unitOnLetter, text: purpose }]);
+    expect(parseMarkTexts(file)).toEqual([purpose]);
+    expect(marksNotCaptured([parseMarkTexts(file)], [])).toEqual([{ text: purpose, sourceIndex: 0 }]);
+    expect(marksNotCaptured([parseMarkTexts(file)], [`### Node 1\n==${purpose}==\n:ref{name="Austin"}`])).toEqual([]);
   });
 
   it("is a file mark by its missing page hash, and never a page mark", () => {

@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   letterFileName,
+  letterPurposeMark,
   newLetterContent,
   rewriteLocalImagePaths,
   splitUploadBundle,
@@ -97,5 +98,21 @@ describe("a new letter", () => {
     expect(letterFileName("notes.md")).toBe("notes.md");
     expect(letterFileName("a/b")).toBe("a-b.md");
     expect(letterFileName("  ")).toBe("Untitled.md");
+  });
+});
+
+describe("the purpose line (2026-10-28)", () => {
+  it("is a mark on the letter: a file unit named by the letter's title, cited to no entry", () => {
+    const file = { _id: "l3tt3r", name: "attic.md", content: "---\ntitle: Attic assembly report\n---\n\n# Attic\n" };
+    expect(letterPurposeMark(file)).toEqual({
+      key: "file:l3tt3r",
+      kind: "file",
+      section: "",
+      effort: "",
+      text: "Attic assembly report",
+      refs: [],
+      attachmentId: "l3tt3r",
+    });
+    expect(letterPurposeMark({ _id: "x", name: "notes.md", content: "# no front matter" }).text).toBe("notes");
   });
 });
