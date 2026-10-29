@@ -41,6 +41,8 @@
     "./data/letterPdf.server": "./src/data/letterPdf.server.ts",
     "./data/letterPdfRender.server": "./src/data/letterPdfRender.server.ts",
     "./data/letterRenderPass.server": "./src/data/letterRenderPass.server.ts",
+    "./data/letterRecordingQueue.server": "./src/data/letterRecordingQueue.server.ts",
+    "./data/letterRecording.server": "./src/data/letterRecording.server.ts",
     "./data/publicBody": "./src/data/publicBody.ts",
     "./data/pageBody.server": "./src/data/pageBody.server.ts",
     "./data/graphLogSchedule.server": "./src/data/graphLogSchedule.server.ts",
