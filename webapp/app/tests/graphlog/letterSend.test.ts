@@ -74,9 +74,9 @@ describe("the sent fields' one writer", () => {
     }
   });
 
-  it("the PDF is of the sent copy and is asked for on send while the link is on", () => {
+  it("the PDF is of the sent copy and is asked for on every send, link on or off (2026-10-29)", () => {
     const send = read("letterSend.server.ts");
-    expect(send).toContain("await enqueueLetterPdfIfShared(after)");
+    expect(send).toContain("await enqueueLetterPdfIfSent(after)");
     const pdf = read("letterPdf.server.ts");
     expect(pdf).toContain("return sentCopyOf(file)?.hash ?? contentFingerprint(file)");
     expect(pdf).toContain("!isLetterSent(file)");

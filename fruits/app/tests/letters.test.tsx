@@ -5,7 +5,7 @@
  * What leaves the server is a fixed set of fields; the only files served
  * are the ones the page names; the page takes no writes.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -140,10 +140,11 @@ describe("the sent copy (2026-10-28)", () => {
     expect(preview.linkOn).toBe(false);
   });
 
-  it("the PDF and the source are offered only while the link is on", () => {
+  it("the PDF and the source are offered on any sent copy, link on or off, never on a preview (2026-10-29)", () => {
     expect(letterPage({ ...SENT, shared_at: null }, "https://o.nopal.build").linkOn).toBe(false);
     const src = readFileSync(path.join(here, "../routes/public.letter.$fileId.tsx"), "utf8");
-    expect(src).toContain("{!preview && linkOn && (");
+    expect(src).toContain("{!preview && (");
+    expect(src).not.toContain("linkOn &&");
     expect(src).toContain("Sent ${updated}");
   });
 
@@ -162,7 +163,7 @@ describe("the sent copy (2026-10-28)", () => {
     expect(send).toContain("letterForManager(");
     expect(send).toContain("sendLetter(");
     for (const file of ["api.vault.$fileId.tsx", "api.vault.replace.$fileId.tsx"]) {
-      expect(readFileSync(path.join(here, "../routes", file), "utf8"), file).not.toContain("enqueueLetterPdfIfShared");
+      expect(readFileSync(path.join(here, "../routes", file), "utf8"), file).not.toMatch(/enqueueLetterPdfIf(Shared|Sent)/);
     }
   });
 });
@@ -428,7 +429,7 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     // Stamps and OxMarkdown draw the chain; no stylesheet of its own.
     const src = readFileSync(path.join(here, "../components/LetterBrief.tsx"), "utf8");
     expect(src).not.toMatch(/import "\.\.\/styles\//);
-    expect(readFileSync(path.join(here, "../styles/letter.css"), "utf8")).not.toContain("letter-chain");
+    expect(existsSync(path.join(here, "../styles/letter.css"))).toBe(false);
   });
 
   it("the send control reads the record's three states and asks before each send", () => {
@@ -523,35 +524,60 @@ describe("read only", () => {
     }
   });
 
-  it("the PDF route serves nothing unless the link is on, and its waiting page has no script", () => {
+  it("the PDF route serves whoever may read the sent copy, and its waiting page has no script", () => {
     const src = readFileSync(path.join(here, "../routes/api.letter.$fileId.pdf.tsx"), "utf8");
-    expect(src).toContain("resolveSharedLetter(");
+    expect(src).toContain("resolveReadableLetter(params.fileId, { viewerHumanId: viewer?._id ?? null })");
+    // A reader's PDF route never takes the worker's pass: only the page and its files do.
+    expect(src).not.toContain("requestHasRenderPass");
     const html = preparingPage();
     expect(html).toMatch(/<meta http-equiv="refresh" content="\d+">/);
     expect(html).not.toMatch(/<script|<form|<button|<a /);
   });
 
-  it("the PDF is the page printed: both download links sit in the wrapper the print rules hide", () => {
+  it("the PDF is the page printed: the download links take Stamps' print-hide, and the page has no stylesheet of its own", () => {
     const src = readFileSync(path.join(here, "../routes/public.letter.$fileId.tsx"), "utf8");
-    expect(src).toContain('className="letter-actions"');
-    expect(src).toContain("letter.css");
-    const css = readFileSync(path.join(here, "../styles/letter.css"), "utf8");
-    expect(css).toMatch(/@media print \{[^}]*\.letter-actions \{\s*display: none;/);
+    expect(src).toContain("className={hideInPrint}");
+    expect(src).toContain('from "stamps/print.css"');
+    expect(src).not.toMatch(/import "\.\.\/styles\//);
+    const stamp = readFileSync(path.join(here, "../../../packages/stamps/src/print.css.ts"), "utf8");
+    expect(stamp).toMatch(/"@media":\s*\{\s*print:\s*\{\s*display:\s*"none"/);
   });
 
-  it("with the link off, the public route admits someone on the project once sent, else a manager as a preview", () => {
+  it("paper is decided in OxMarkdown, the same block in both copies, scoped to .ox-content", () => {
+    const paperBlock = (file: string) => {
+      const css = readFileSync(file, "utf8");
+      const at = css.indexOf("/* ── Paper ");
+      expect(at).toBeGreaterThan(-1);
+      return css.slice(at);
+    };
+    const fruits = paperBlock(path.join(here, "../styles/oxmarkdown.css"));
+    const webapp = paperBlock(path.join(here, "../../../webapp/app/styles/oxmarkdown.css"));
+    expect(webapp).toBe(fruits);
+    const print = fruits.slice(fruits.indexOf("@media print"));
+    expect(print).toMatch(/\.ox-content \{[^}]*--ox-grid:/);
+    expect(print).toMatch(/max-width:/);
+    expect(print).toMatch(/orphans: 2;[^}]*widows: 2;/);
+    expect(print).toMatch(/break-after: avoid;/);
+    expect(print).toMatch(/break-inside: avoid;/);
+    expect(print).not.toMatch(/:root|@page/);
+  });
+
+  it("with the link off, the public route admits the worker's render, then someone on the project once sent, else a manager as a preview", () => {
     const src = readFileSync(path.join(here, "../routes/public.letter.$fileId.tsx"), "utf8");
     const shared = src.indexOf("resolveSharedLetter(");
+    const printing = src.indexOf("requestHasRenderPass(request, params.fileId)");
     const member = src.indexOf("resolveSentLetterForMember(");
     const manager = src.indexOf("resolveLetterForManager(");
     expect(shared).toBeGreaterThan(-1);
-    expect(shared).toBeLessThan(member);
+    expect(shared).toBeLessThan(printing);
+    expect(printing).toBeLessThan(member);
     expect(member).toBeLessThan(manager);
+    expect(src).toContain("letterPage(printing.file, origin)");
     expect(src).toContain("letterPage(sent.file, origin)");
     expect(src).toContain("letterPage(mine.file, origin, true)");
-    // The letter's file routes open the same two doors.
+    // The letter's file routes open the same doors.
     for (const file of ["api.letter.$fileId.view.$id.tsx", "api.letter.$fileId.rendition.$id.tsx"]) {
-      expect(readFileSync(path.join(here, "../routes", file), "utf8"), file).toContain("letterPageFile(fileId, id, viewer?._id ?? null)");
+      expect(readFileSync(path.join(here, "../routes", file), "utf8"), file).toContain("letterPageFile(fileId, id, viewer?._id ?? null, rendering)");
     }
     const download = readFileSync(path.join(here, "../routes/api.letter.$fileId.download.tsx"), "utf8");
     expect(download).toContain("resolveSentLetterForMember(");

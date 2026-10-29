@@ -1,16 +1,17 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
-import { resolveSharedLetter } from "robustness-core/data/letters.server";
+import { resolveReadableLetter } from "robustness-core/data/letters.server";
+import { getUser } from "../modules/auth/auth.server";
 import { letterPdfFileName, letterPdfStatus, ensureLetterPdfJob, preparingPage } from "robustness-core/data/letterPdf.server";
 import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
 
 /**
  * GET /api/letter/:fileId/pdf
  *
- * The letter's PDF, with no session: only while its link is on
- * (`resolveSharedLetter`), 404 otherwise. The worker prints the public
- * page with no session, so there is no PDF for a sent letter whose link
- * is off; the print seed can revisit. The PDF is of the sent copy
+ * The letter's PDF, for whoever may read the sent copy
+ * (`resolveReadableLetter`): anyone while the link is on, or someone on
+ * the project once it is sent; 404 otherwise. The worker prints a
+ * link-off letter under a render pass. The PDF is of the sent copy
  * (`letterPdf.server.ts`), keyed by the sent copy's hash and rendered
  * ahead of the click (share-on, each send while the link is on). When it is there,
  * this redirects to a short-lived presigned download. When it is not
@@ -19,8 +20,9 @@ import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
  * every few seconds until the file is ready: no script, nothing to
  * click. GET only; this route renders nothing itself (ADR-021).
  */
-export async function loader({ params }: LoaderFunctionArgs) {
-  const shared = params.fileId ? await resolveSharedLetter(params.fileId) : null;
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  const viewer = params.fileId ? await getUser(request) : null;
+  const shared = params.fileId ? await resolveReadableLetter(params.fileId, { viewerHumanId: viewer?._id ?? null }) : null;
   if (!shared) return Response.json({ error: "Not found" }, { status: 404 });
 
   const status = await letterPdfStatus(shared.file);

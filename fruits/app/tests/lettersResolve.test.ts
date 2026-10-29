@@ -62,8 +62,8 @@ vi.mock("robustness-core/data/generic.server", async (importOriginal) => {
   };
 });
 
-const { letterPageFile, resolveSentLetterForMember, resolveSharedLetter } = await import("robustness-core/data/letters.server");
-const { enqueueLetterPdfIfShared } = await import("robustness-core/data/letterPdf.server");
+const { letterPageFile, resolveReadableLetter, resolveSentLetterForMember, resolveSharedLetter } = await import("robustness-core/data/letters.server");
+const { enqueueLetterPdfIfSent } = await import("robustness-core/data/letterPdf.server");
 
 describe("resolveSharedLetter", () => {
   it("finds a shared markdown file in a Letters folder of a live project", async () => {
@@ -100,6 +100,25 @@ describe("letterPageFile", () => {
     expect(await letterPageFile("sent1", "pic1")).toBeNull();
     expect(await letterPageFile("off1", "pic1", "client1")).toBeNull();
   });
+
+  it("under a render pass, serves the sent copy's pictures with no session, never the draft's or a draft letter's", async () => {
+    expect((await letterPageFile("sent1", "pic1", null, true))?._id).toBe("pic1");
+    expect(await letterPageFile("sent1", "pic2", null, true)).toBeNull();
+    expect(await letterPageFile("off1", "pic1", null, true)).toBeNull();
+    expect(await letterPageFile("gone1", "pic1", null, true)).toBeNull();
+  });
+});
+
+describe("resolveReadableLetter (2026-10-29)", () => {
+  it("opens a sent letter whatever its link to someone on the project or a render, and a draft to neither", async () => {
+    expect((await resolveReadableLetter("shared1", {}))?.file._id).toBe("shared1");
+    expect((await resolveReadableLetter("sent1", { viewerHumanId: "client1" }))?.file._id).toBe("sent1");
+    expect((await resolveReadableLetter("sent1", { rendering: true }))?.file._id).toBe("sent1");
+    expect(await resolveReadableLetter("sent1", {})).toBeNull();
+    expect(await resolveReadableLetter("sent1", { viewerHumanId: "stranger" })).toBeNull();
+    expect(await resolveReadableLetter("off1", { viewerHumanId: "guide1", rendering: true })).toBeNull();
+    expect(await resolveReadableLetter("gone1", { rendering: true })).toBeNull();
+  });
 });
 
 describe("the member's door (2026-10-28)", () => {
@@ -125,11 +144,13 @@ describe("the member's door (2026-10-28)", () => {
 });
 
 describe("a render ahead of the click", () => {
-  it("is asked for only for a sent markdown file in a Letters folder with its link on", async () => {
-    // Nothing reaches the queue in these: the gate answers first.
-    expect(await enqueueLetterPdfIfShared(files.off1 as never)).toBeNull();
-    expect(await enqueueLetterPdfIfShared(files.stray1 as never)).toBeNull();
-    expect(await enqueueLetterPdfIfShared(files.sent1 as never)).toBeNull();
-    expect(await enqueueLetterPdfIfShared(null)).toBeNull();
+  it("is asked for only for a sent markdown file in a Letters folder, link on or off", async () => {
+    // Nothing reaches the queue in these: the gate answers first. A sent
+    // letter with its link off now does reach it (2026-10-29), so it is
+    // not here.
+    expect(await enqueueLetterPdfIfSent(files.off1 as never)).toBeNull();
+    expect(await enqueueLetterPdfIfSent(files.stray1 as never)).toBeNull();
+    expect(await enqueueLetterPdfIfSent({ ...files.sent1, archived_at: "2026-10-29T00:00:00Z" } as never)).toBeNull();
+    expect(await enqueueLetterPdfIfSent(null)).toBeNull();
   });
 });

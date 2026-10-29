@@ -6,17 +6,17 @@
  */
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { letterPdfFileName, letterPdfJobId, letterPdfKey, pdfFingerprint, pdfStateFromJob } from "robustness-core/data/letterPdf.server";
+import { LETTER_PDF_RENDER_VERSION, letterPdfFileName, letterPdfJobId, letterPdfKey, pdfFingerprint, pdfStateFromJob } from "robustness-core/data/letterPdf.server";
 
 describe("the PDF's key", () => {
-  it("sits under the letter's id and changes with the content hash", () => {
-    expect(letterPdfKey("d3l1v", "abc")).toBe("letters/d3l1v/abc.pdf");
+  it("sits under the letter's id and changes with the content hash and the render version (2026-10-29)", () => {
+    expect(letterPdfKey("d3l1v", "abc")).toBe(`letters/d3l1v/abc-r${LETTER_PDF_RENDER_VERSION}.pdf`);
     expect(letterPdfKey("d3l1v", "abc")).not.toBe(letterPdfKey("d3l1v", "abd"));
     expect(letterPdfKey("d3l1v", "abc")).not.toBe(letterPdfKey("d3l1w", "abc"));
   });
 
   it("is a job id with no colon in it", () => {
-    expect(letterPdfJobId("d3l1v", "abc")).toBe("pdf-d3l1v-abc");
+    expect(letterPdfJobId("d3l1v", "abc")).toBe(`pdf-d3l1v-abc-r${LETTER_PDF_RENDER_VERSION}`);
     expect(letterPdfJobId("d3l1v", "abc")).not.toContain(":");
   });
 

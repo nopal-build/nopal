@@ -332,14 +332,38 @@ export async function ensureSentCopy(file: FileRef): Promise<FileRef> {
  * or for a trashed project.
  */
 export async function resolveSentLetterForMember(fileId: string, humanId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
+  const sent = await resolveSentLetter(fileId);
+  if (!sent) return null;
+  if (!(await getProjectRole(sent.project, humanId))) return null;
+  return sent;
+}
+
+/** A sent letter whatever its link, for whoever the caller has already
+ * let in: someone on the project (`resolveSentLetterForMember`), or the
+ * worker printing it under a render pass (`letterRenderPass.server.ts`).
+ * Null for a draft, a non-letter, or a trashed project. */
+export async function resolveSentLetter(fileId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
   const file = await getFileRefById(fileId);
   if (!file || file.archived_at || !isMarkdownFileName(file.name)) return null;
   const home = await letterHome(file);
   if (!home || getProjectStatus(home.project) === "trashed") return null;
   const withCopy = await ensureSentCopy(file);
   if (!isLetterSent(withCopy)) return null;
-  if (!(await getProjectRole(home.project, humanId))) return null;
   return { file: withCopy, project: home.project };
+}
+
+/** Who may read a letter's sent copy, and its files, in one place: the
+ * link on, with no session; the worker under a render pass (the route
+ * checks the header and says so); or someone on the project once sent.
+ * The routes that serve the page, its files and its PDF all ask this. */
+export async function resolveReadableLetter(
+  fileId: string,
+  reader: { viewerHumanId?: string | null; rendering?: boolean },
+): Promise<{ file: FileRef; project: VaultFolder } | null> {
+  const shared = await resolveSharedLetter(fileId);
+  if (shared) return shared;
+  if (reader.rendering) return resolveSentLetter(fileId);
+  return reader.viewerHumanId ? resolveSentLetterForMember(fileId, reader.viewerHumanId) : null;
 }
 
 /** Where the public page loads one of the letter's files from. */
@@ -380,11 +404,12 @@ export function letterFileIds(markdown: string): Set<string> {
   return viewFileIds(splitFrontmatter(markdown).body);
 }
 
-/** The file a letter's page may load, or null: the link is on, or the
- * viewer is on the project and the letter is sent; and the sent copy
- * names the id. The draft's pictures are never served this way. */
-export async function letterPageFile(fileId: string, id: string, viewerHumanId?: string | null): Promise<FileRef | null> {
-  const found = (await resolveSharedLetter(fileId)) ?? (viewerHumanId ? await resolveSentLetterForMember(fileId, viewerHumanId) : null);
+/** The file a letter's page may load, or null: the letter is readable
+ * (`resolveReadableLetter`: the link on, a render pass, or the viewer on
+ * the project and the letter sent); and the sent copy names the id. The
+ * draft's pictures are never served this way. */
+export async function letterPageFile(fileId: string, id: string, viewerHumanId?: string | null, rendering = false): Promise<FileRef | null> {
+  const found = await resolveReadableLetter(fileId, { viewerHumanId, rendering });
   if (!found) return null;
   const sent = sentCopyOf(found.file);
   if (!sent || !letterFileIds(sent.content).has(id)) return null;
@@ -414,9 +439,9 @@ export interface LetterPage {
    * as the client will see it, with the session serving the pictures
    * and no downloads. */
   preview: boolean;
-  /** The public link is on: the PDF and the source are offered (the
-   * worker prints the public page with no session, so neither exists
-   * for a sent letter whose link is off). */
+  /** The public link is on. The PDF and the source are offered on any
+   * sent copy, link on or off (the worker prints a link-off letter under
+   * a render pass, and both routes admit someone on the project). */
   linkOn: boolean;
 }
 
