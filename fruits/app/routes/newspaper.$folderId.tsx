@@ -731,6 +731,7 @@ export default function NewspaperRoute() {
               onOpen={(row) => (openInVault ? navigate(`/vault?file=${row.serveId}`) : window.open(row.urls.display, "_blank"))}
               onChanged={() => revalidator.revalidate()}
               canFile={canEdit}
+              canCaption={canMark}
             />
           )}
           {letters && (
