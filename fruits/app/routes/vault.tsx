@@ -65,7 +65,7 @@ import {
 } from "robustness-core/data/vault.server";
 import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
 import { canManageLetters, letterEditedSinceSent, sentCopyOf } from "robustness-core/data/letters.server";
-import { LetterSendControl, type LetterSendState } from "../components/LetterSendControl";
+import { LetterSendControl, sendStateAfterSaves, type LetterSendState } from "../components/LetterSendControl";
 import { getLetterBriefForPage, type LetterBriefForPage } from "robustness-core/data/brief.server";
 import { nameSyncedAuthors, type ListedFile } from "robustness-core/data/syncedAuthors.server";
 // Pilot route for server request-performance tracing (see the
@@ -3655,6 +3655,23 @@ export default function VaultV2Page() {
     [apiJson],
   );
 
+  // A letter's save, which also says it landed: the send control's
+  // "edited since" comes with the loader and the save doesn't revalidate
+  // (above), so without this a sent letter edited in place kept saying
+  // "Sent" until a reload (Austin, 2026-10-29). A send leaves the draft's
+  // `updated_at` alone (`letterSend.server.ts`), so the send clears this
+  // itself rather than waiting for a new load key.
+  const [letterSavedOver, setLetterSavedOver] = useState<string | null>(null);
+  const loadedLetterKey = current.kind === "file" ? `${current.file._id}-${current.file.updated_at}` : null;
+  const handleSaveLetter = useCallback(
+    async (fileId: string, content: string) => {
+      const saved = await handleSaveWebsitePage(fileId, content);
+      if (saved) setLetterSavedOver(loadedLetterKey);
+      return saved;
+    },
+    [handleSaveWebsitePage, loadedLetterKey],
+  );
+
   // A sync-api run's own `.md` notes save (see `SyncApiRunEditor` above) --
   // identical shape/behavior to `handleSaveWebsitePage` (returns the
   // promise so the shared `MarkdownSplitEditor` Save button can await it),
@@ -4167,11 +4184,19 @@ export default function VaultV2Page() {
   // A letter's toolbar: the send (for a guide: the brief is on the page
   // only for one), the public link while it is on (the switch itself
   // lives on the project's Letters tab), then Actions. The sent fields
-  // come with the loader, so a send revalidates to read them back.
+  // come with the loader, so a send revalidates to read them back; a
+  // save since the load moves them on (`handleSaveLetter`).
   const letterToolbarRight = (
     <>
       {current.kind === "file" && letterSend && (
-        <LetterSendControl fileId={current.file._id} state={letterSend} onSent={() => revalidator.revalidate()} />
+        <LetterSendControl
+          fileId={current.file._id}
+          state={sendStateAfterSaves(letterSend, loadedLetterKey, letterSavedOver)}
+          onSent={() => {
+            setLetterSavedOver(null);
+            revalidator.revalidate();
+          }}
+        />
       )}
       {current.kind === "file" && current.file.shared_at && (
         <CopyLinkButton path={`/public/letter/${current.file._id}`} />
@@ -4683,7 +4708,7 @@ export default function VaultV2Page() {
                 projectFolderId={current.ancestry.find((f) => isProjectAnchor(f))?._id ?? null}
                 initialContent={current.file.content ?? ""}
                 editable={canWriteCurrentFile}
-                onSave={handleSaveWebsitePage}
+                onSave={handleSaveLetter}
                 headerLeft={breadcrumbNode}
                 toolbarRight={letterToolbarRight}
                 purpose={current.file.purpose ?? null}

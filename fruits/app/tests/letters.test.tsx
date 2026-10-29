@@ -34,7 +34,7 @@ import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { LettersView, NewLetterModal, pdfLine } from "../components/LettersView";
 import { LetterBrief, isLetterOnlyItsHeading, splitBriefHalves } from "../components/LetterBrief";
 import { LettersTile } from "../components/LettersTile";
-import { LetterSendControl, SEND_AGAIN_ASK, SEND_ASK } from "../components/LetterSendControl";
+import { LetterSendControl, SEND_AGAIN_ASK, SEND_ASK, sendStateAfterSaves } from "../components/LetterSendControl";
 import { preparingPage } from "robustness-core/data/letterPdf.server";
 
 const FILE = "d3l1v3r4bl3";
@@ -447,6 +447,26 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     expect(SEND_ASK).toMatch(/Nothing you change after reaches them until you send again/);
     expect(SEND_AGAIN_ASK).toMatch(/marked as updated/);
     expect(SEND_ASK + SEND_AGAIN_ASK).not.toMatch(/—/);
+  });
+
+  // Austin, 2026-10-29: autosave doesn't reload the page, so a sent letter
+  // edited in place kept saying "Sent" with no way to send the update.
+  it("a save that lands after the load offers Send again without a reload", () => {
+    const sent = { sentDate: "2026-10-28", sentCount: 1, editedSinceSent: false };
+    const after = sendStateAfterSaves(sent, "l1-t1", "l1-t1");
+    expect(after.editedSinceSent).toBe(true);
+    expect(renderToStaticMarkup(<LetterSendControl fileId="l1" state={after} onSent={() => {}} />)).toContain(">Send again<");
+    // No save since this load, or a save over an older load: the loader's read stands.
+    expect(sendStateAfterSaves(sent, "l1-t1", null)).toBe(sent);
+    expect(sendStateAfterSaves(sent, "l1-t2", "l1-t1")).toBe(sent);
+    // Never sent: the first send is already on offer, nothing to move.
+    const never = { sentDate: null, sentCount: 0, editedSinceSent: false };
+    expect(sendStateAfterSaves(never, "l1-t1", "l1-t1")).toBe(never);
+    // The page wires it: the letter's saves go through the handler that says they landed, and a send clears it.
+    const page = readFileSync(path.join(here, "../routes/vault.tsx"), "utf8");
+    expect(page).toMatch(/<LetterSplitEditor[\s\S]*?onSave=\{handleSaveLetter\}/);
+    expect(page).toMatch(/state=\{sendStateAfterSaves\(letterSend, loadedLetterKey, letterSavedOver\)\}/);
+    expect(page).toMatch(/onSent=\{\(\) => \{\s*setLetterSavedOver\(null\);/);
   });
 
   it("the New letter form asks for a sentence or three", () => {

@@ -16,6 +16,17 @@ export const SEND_AGAIN_ASK = "Send the update? The client sees the letter as it
 /** `sentDate` is the sender's day (YYYY-MM-DD), null before the first send. */
 export type LetterSendState = { sentDate: string | null; sentCount: number; editedSinceSent: boolean };
 
+/** The page reads "edited since" once per load, and a letter's autosave
+ * doesn't reload the page (`vault.tsx`), so a save that lands after the
+ * load moves the state on here: a sent letter saved over since this load
+ * offers "Send again" without a reload. `savedOver` is the load (file id
+ * and `updated_at`) the last save landed on; a fresh load has a new key,
+ * and its own read wins. */
+export function sendStateAfterSaves(state: LetterSendState, loadedKey: string | null, savedOver: string | null): LetterSendState {
+  if (!state.sentDate || !loadedKey || savedOver !== loadedKey) return state;
+  return { ...state, editedSinceSent: true };
+}
+
 export function LetterSendControl({ fileId, state, onSent }: { fileId: string; state: LetterSendState; onSent: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
