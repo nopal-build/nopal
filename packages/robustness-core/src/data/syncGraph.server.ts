@@ -212,7 +212,8 @@ import {
   type SeedSource,
 } from "./seed.server";
 import { splitFrontmatter } from "./project.types";
-import { isInsideMarkText, MARKS_SYNC_FOLDER_NAME, parseMarkTexts } from "./graphLogMarks.server";
+import { isInsideMarkText, listMarksForProject, MARKS_SYNC_FOLDER_NAME, parseMarkTexts, type GraphLogMark } from "./graphLogMarks.server";
+import { loadProjectFiles, type ProjectFileRow } from "./fileFolders.server";
 import {
   createFileRef,
   deleteFileRef,
@@ -728,6 +729,47 @@ const DESCRIPTION_ONLY_PROVENANCE =
 
 type SourceFileInfo = { fileId: string; name: string; caption?: string; contentType: string };
 
+/** A person's own words on one file (a file mark with no act: a caption
+ * written on the Photos tab, 2026-10-29), and the file as a node shows
+ * it. A marks file holds a person's whole day of marks, so the file a
+ * node carries is found by the words the node quotes, not by the source. */
+export type MarkedFile = { text: string; file: SourceFileInfo };
+
+/** The file a node's words were written on, or null: the first marked
+ * file whose mark holds one of the node's paragraphs or list items. */
+export function markedFileFor(rawBlocks: unknown, marked: readonly MarkedFile[]): SourceFileInfo | null {
+  if (marked.length === 0 || !Array.isArray(rawBlocks)) return null;
+  const texts: string[] = [];
+  for (const raw of rawBlocks) {
+    if (!raw || typeof raw !== "object") continue;
+    const block = raw as Record<string, unknown>;
+    if (block.type === "paragraph") texts.push(String(block.text ?? ""));
+    else if (block.type === "list" && Array.isArray(block.items)) texts.push(...block.items.map((i) => String(i)));
+  }
+  const words = texts.map((t) => t.trim()).filter(Boolean);
+  return marked.find((m) => words.some((w) => isInsideMarkText(w, [m.text])))?.file ?? null;
+}
+
+/** The marked files for one person's marks on one day, from the marks
+ * themselves and the project's files view (which knows the id a file is
+ * served by: the synced copy of a Card attachment, or the seed document
+ * itself). Pure, so the test reads it. */
+export function markedFilesOf(
+  marks: readonly Pick<GraphLogMark, "date" | "author_human_id" | "text" | "unit" | "act">[],
+  rowsById: ReadonlyMap<string, Pick<ProjectFileRow, "serveId" | "name" | "contentType">>,
+  date: string,
+  humanId: string,
+): MarkedFile[] {
+  const out: MarkedFile[] = [];
+  for (const m of marks) {
+    if (m.date !== date || m.author_human_id !== humanId || m.act || m.unit?.kind !== "file" || !m.unit.attachmentId) continue;
+    const row = rowsById.get(m.unit.attachmentId);
+    if (!row || !m.text.trim()) continue;
+    out.push({ text: m.text, file: { fileId: row.serveId, name: row.name, caption: m.text.trim(), contentType: row.contentType } });
+  }
+  return out;
+}
+
 /** Escapes characters that would otherwise break markdown image/link
  * syntax if they showed up in a filename or a human-written caption --
  * substitution, not a real escape (no markdown syntax lets `[`/`]` occur
@@ -869,7 +911,7 @@ export function capNodeLinks(
   return { sameDay: cappedSameDay, backward: cappedBackward, droppedCount };
 }
 
-function createSyncGraphExecutors(input: {
+export function createSyncGraphExecutors(input: {
   date: string;
   sourceCitations: string[];
   sourceFiles: (SourceFileInfo | null)[];
@@ -877,6 +919,9 @@ function createSyncGraphExecutors(input: {
    * marker's own words, the only part of it that may be highlighted.
    * Null for every other source. */
   sourceMarkTexts?: (string[] | null)[];
+  /** Parallel to `sourceFiles`: for a marks file, the files its marks were
+   * written on, so a node quoting a caption carries the photo. */
+  sourceMarkFiles?: (MarkedFile[] | null)[];
   /** Parallel to `sourceFiles`: for a source that came from seeded
    * history (`seed.server.ts`), whether its words are a person's own. A
    * noted-at-seeding source is nobody's words and is never highlighted,
@@ -950,7 +995,11 @@ function createSyncGraphExecutors(input: {
       // photo inline in its own permanent text, so every later stage
       // (graph-structure's pre-fetch, graph-project-view) sees it
       // automatically.
-      const attachedMedia = fileInfo ? buildAttachedMediaMarkdown(fileInfo) : null;
+      // A caption written as a mark (the Photos tab): the photo comes with
+      // the node the same way, found by the words the node quotes. Kept
+      // apart from `fileInfo`, which would make the node description-only.
+      const markedFile = fileInfo ? null : markedFileFor(toolInput.blocks, input.sourceMarkFiles?.[sourceIndex] ?? []);
+      const attachedMedia = fileInfo ? buildAttachedMediaMarkdown(fileInfo) : markedFile ? buildAttachedMediaMarkdown(markedFile) : null;
       const quote = [
         setup || null,
         quoteBody,
@@ -1021,7 +1070,9 @@ function createSyncGraphExecutors(input: {
       // A mark is a person's words and is highlighted; a noted-at-seeding
       // line is nobody's and never is (ADR-012).
       const body = quoted ? `==${text.trim()}==` : `${text.trim()}\n\n${SEED_NOTED_PROVENANCE}`;
-      nodeBlocks.push([`### Node ${number}`, body, input.sourceCitations[sourceIndex]].join("\n"));
+      const markedFile = quoted ? markedFileFor([{ type: "paragraph", text }], input.sourceMarkFiles?.[sourceIndex] ?? []) : null;
+      const media = markedFile ? `\n\n${buildAttachedMediaMarkdown(markedFile)}` : "";
+      nodeBlocks.push([`### Node ${number}`, `${body}${media}`, input.sourceCitations[sourceIndex]].join("\n"));
       capturedSummaries.push(`Node ${number} (from Source ${sourceIndex}): "${capturedPreview(text)}"`);
       nextNumber++;
       return number;
@@ -1457,6 +1508,16 @@ export async function runSyncGraph(
     (await listFolderChildren(projectFolder.human_id, syncsFolder._id)).folders.find(
       (f) => f.name === MARKS_SYNC_FOLDER_NAME,
     )?._id ?? null;
+  // The files people's marks were written on, read once and only when a
+  // day has a marks source (`markedFilesOf`).
+  let projectMarks: GraphLogMark[] | null = null;
+  let rowsById: Map<string, ProjectFileRow> | null = null;
+  const markedFiles = async (date: string, humanId: string): Promise<MarkedFile[]> => {
+    projectMarks ??= await listMarksForProject(projectFolder._id);
+    if (!projectMarks.some((m) => m.date === date && m.author_human_id === humanId && !m.act && m.unit?.kind === "file")) return [];
+    rowsById ??= new Map((await loadProjectFiles(projectFolder)).map((r) => [r.fileId, r]));
+    return markedFilesOf(projectMarks, rowsById, date, humanId);
+  };
   if (candidates.length === 0) {
     log("sync-graph: no dated files under syncs/ yet — nothing to do.");
     return { ok: true, skipped: false, days: [], nodesWritten: 0, incomplete: [] };
@@ -1628,6 +1689,7 @@ export async function runSyncGraph(
     // carried a `date` and was never offered as a source here).
     const sourceFiles: (SourceFileInfo | null)[] = [];
     const sourceMarkTexts: (string[] | null)[] = [];
+    const sourceMarkFiles: (MarkedFile[] | null)[] = [];
     // Parallel too: seed sources (see `seed.server.ts`), and for a
     // noted-at-seeding source its bullets, each written verbatim by code
     // if the model passes it over, the rule marks already follow.
@@ -1700,6 +1762,7 @@ export async function runSyncGraph(
           const sourceIndex = sourceBlocks.length;
           sourceCitations.push(buildRefDirectiveMarkdown(seedSource.ref));
           sourceMarkTexts.push(null);
+          sourceMarkFiles.push(null);
           sourceFiles.push(seedFileInfo);
           sourceSeed.push({ humanAuthored: seedSource.humanAuthored });
           sourceNotedTexts.push(seedSource.verbatimFallback);
@@ -1754,9 +1817,9 @@ export async function runSyncGraph(
           verbose: true,
         }),
       );
-      sourceMarkTexts.push(
-        marksFolderId !== null && candidate.folderId === marksFolderId ? parseMarkTexts(source.content ?? "") : null,
-      );
+      const isMarksSource = marksFolderId !== null && candidate.folderId === marksFolderId;
+      sourceMarkTexts.push(isMarksSource ? parseMarkTexts(source.content ?? "") : null);
+      sourceMarkFiles.push(isMarksSource && attribution.humanId ? await markedFiles(date, attribution.humanId) : null);
       sourceFiles.push(
         attribution.isAttachment
           ? { fileId: source._id, name: displayName, caption: caption ?? undefined, contentType: source.content_type }
@@ -1864,6 +1927,7 @@ export async function runSyncGraph(
       sourceCitations,
       sourceFiles,
       sourceMarkTexts,
+      sourceMarkFiles,
       sourceSeed,
       knownBackwardIds,
     });
