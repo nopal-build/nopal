@@ -64,7 +64,8 @@ import {
   listFolderChildren,
 } from "robustness-core/data/vault.server";
 import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
-import { canManageLetters } from "robustness-core/data/letters.server";
+import { canManageLetters, letterEditedSinceSent, sentCopyOf } from "robustness-core/data/letters.server";
+import { LetterSendControl, type LetterSendState } from "../components/LetterSendControl";
 import { getLetterBriefForPage, type LetterBriefForPage } from "robustness-core/data/brief.server";
 import { nameSyncedAuthors, type ListedFile } from "robustness-core/data/syncedAuthors.server";
 // Pilot route for server request-performance tracing (see the
@@ -308,6 +309,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // a letter is owned by the project's creator): the brief, and the
   // controls around it. Null on any other file, and for anyone else.
   let letterBrief: LetterBriefForPage | null = null;
+  // The send's three states, read here (`sentCopyOf` is server-only) and
+  // handed to the toolbar; a send revalidates to read them back.
+  let letterSend: LetterSendState | null = null;
 
   if (fileParam) {
     const file = await timeRequestPerf("fn", "getFileRefById", { fileId: fileParam }, () =>
@@ -367,6 +371,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
       if (canManageLetters(user, roleForLetter)) {
         letterBrief = await timeRequestPerf("fn", "getLetterBriefForPage", { fileId: file._id }, () => getLetterBriefForPage(file._id));
+        letterSend = { sentDate: sentCopyOf(file)?.date ?? null, sentCount: sentCopyOf(file)?.count ?? 0, editedSinceSent: letterEditedSinceSent(file) };
       }
     }
     const websiteAnchorForFile = findWebsiteAnchor(ancestry);
@@ -470,6 +475,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     viewerIsOwnerTierOnProject,
     viewerGuidesProject,
     letterBrief,
+    letterSend,
     // The nav: a Guide's Maker tab stays lit while they're in here.
     ...(await navFor(user._id, memberships)),
   };
@@ -2554,6 +2560,7 @@ export default function VaultV2Page() {
     viewerIsOwnerTierOnProject,
     viewerGuidesProject,
     letterBrief,
+    letterSend,
   } = useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
@@ -4129,10 +4136,15 @@ export default function VaultV2Page() {
   // above), and there's no equivalent "create a new run" action this
   // header could trigger (runs are created via the analysis's own CLI/API
   // flow — see the `vault` skill's "Sync types" section).
-  // A letter's toolbar: the public link while it is shared (the
-  // switch itself lives on the project's Letters tab), then Actions.
+  // A letter's toolbar: the send (for a guide: the brief is on the page
+  // only for one), the public link while it is on (the switch itself
+  // lives on the project's Letters tab), then Actions. The sent fields
+  // come with the loader, so a send revalidates to read them back.
   const letterToolbarRight = (
     <>
+      {current.kind === "file" && letterSend && (
+        <LetterSendControl fileId={current.file._id} state={letterSend} onSent={() => revalidator.revalidate()} />
+      )}
       {current.kind === "file" && current.file.shared_at && (
         <CopyLinkButton path={`/public/letter/${current.file._id}`} />
       )}

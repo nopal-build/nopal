@@ -7,7 +7,6 @@ import { fileReplaceRefusal, repointFileRef } from "robustness-core/data/fileRep
 import { merge } from "robustness-core/data/generic.server";
 import { cacheDailyLog } from "robustness-core/data/dailyLog.server";
 import { invalidateWebsiteCacheForFile } from "robustness-core/data/website.server";
-import { enqueueLetterPdfIfShared } from "robustness-core/data/letterPdf.server";
 
 /**
  * POST /api/vault/replace/:fileId
@@ -131,11 +130,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       if (updated) {
         await invalidateWebsiteCacheForFile(updated as unknown as Parameters<typeof invalidateWebsiteCacheForFile>[0]);
       }
-      // A shared letter's PDF is the page printed, keyed by the
-      // content hash: a replace is what makes it stale, so this asks the
-      // worker for the new one now, ahead of the click
-      // (`letterPdf.server.ts`). Nothing for any other file.
-      await enqueueLetterPdfIfShared(await getFileRefById(fileId));
+      // A letter's PDF is of its sent copy, remade on send
+      // (`letterSend.server.ts`); a replace changes the draft only.
       return Response.json({ fileRef: updated });
     }
 

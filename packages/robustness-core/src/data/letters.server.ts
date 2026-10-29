@@ -52,6 +52,7 @@ import crypto from "node:crypto";
 import { isStaff, type Human } from "./humans.server";
 import { findOwningProjectFolder, getProjectRole, type ResolvedProjectRole } from "./projectSharing.server";
 import { getProjectStatus } from "./projectStatus.server";
+import { merge } from "./generic.server";
 import { splitFrontmatter } from "./project.types";
 import { rewriteViewUrls, viewFileIds } from "./publicBody";
 import {
@@ -113,12 +114,57 @@ export type LetterRow = {
   updatedAt: string;
   size: number | null;
   sharedAt: string | null;
-  /** `contentFingerprint`: what this version's PDF is keyed by. */
+  /** `contentFingerprint` of the draft. */
   contentHash: string;
   /** The guide's one sentence of what the letter is for (`FileRef.purpose`);
    * null for a letter brought from outside or started before 2026-10-28. */
   purpose: string | null;
+  /** The sender's day of the last send (YYYY-MM-DD, `sentCopyOf`): null
+   * for a draft nobody has sent. */
+  sentDate: string | null;
+  sentCount: number;
+  /** The sent copy's hash: what its PDF is keyed by. */
+  sentHash: string | null;
+  /** The draft differs from what the client has. */
+  editedSinceSent: boolean;
 };
+
+/** The client's copy of a letter: what was sent, when, and how many
+ * times. A letter whose public link was turned on before letters had a
+ * send moment (2026-10-28) counts as sent with its live content, so
+ * nothing in a client's hands went dark; `ensureSentCopy` writes that
+ * down the first time such a letter is read. Pure. */
+/** `at` is the instant; `date` the sender's day (YYYY-MM-DD). */
+export type SentCopy = { content: string; hash: string; at: string; date: string; count: number; byHumanId: string | null };
+
+export type SentFields = Pick<FileRef, "content" | "content_hash" | "shared_at" | "sent_content" | "sent_content_hash" | "sent_at" | "sent_date" | "sent_by_human_id" | "sent_count">;
+
+export function sentCopyOf(file: SentFields): SentCopy | null {
+  if (file.sent_at && typeof file.sent_content === "string") {
+    return {
+      content: file.sent_content,
+      hash: file.sent_content_hash ?? crypto.createHash("sha256").update(file.sent_content, "utf8").digest("hex"),
+      at: file.sent_at,
+      date: file.sent_date ?? file.sent_at.slice(0, 10),
+      count: file.sent_count ?? 1,
+      byHumanId: file.sent_by_human_id ?? null,
+    };
+  }
+  if (file.shared_at) {
+    return { content: file.content ?? "", hash: contentFingerprint(file), at: file.shared_at, date: file.shared_at.slice(0, 10), count: 1, byHumanId: null };
+  }
+  return null;
+}
+
+export function isLetterSent(file: SentFields): boolean {
+  return sentCopyOf(file) !== null;
+}
+
+/** Whether the guide has changed the draft since the client's copy. */
+export function letterEditedSinceSent(file: SentFields): boolean {
+  const sent = sentCopyOf(file);
+  return !!sent && sent.hash !== contentFingerprint(file);
+}
 
 export function letterTitle(file: Pick<FileRef, "name" | "content">): string {
   const meta = parseWebsitePageMeta(file.content ?? "");
@@ -163,6 +209,7 @@ export async function listLetters(project: VaultFolder): Promise<LetterRow[]> {
   const folder = await findLettersFolder(project);
   if (!folder) return [];
   const files = await getFileRefsByFolderIds([folder._id]);
+  for (const f of files) await ensureSentCopy(f);
   return files
     .filter((f) => isMarkdownFileName(f.name) && !f.archived_at)
     .map((f) => ({
@@ -174,6 +221,10 @@ export async function listLetters(project: VaultFolder): Promise<LetterRow[]> {
       sharedAt: f.shared_at ?? null,
       contentHash: contentFingerprint(f),
       purpose: f.purpose ?? null,
+      sentDate: sentCopyOf(f)?.date ?? null,
+      sentCount: sentCopyOf(f)?.count ?? 0,
+      sentHash: sentCopyOf(f)?.hash ?? null,
+      editedSinceSent: letterEditedSinceSent(f),
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
@@ -190,10 +241,21 @@ export type LetterRefusal = { status: 400 | 403; error: string };
 
 /** The one place the share switch's refusals are decided. Pure, so the
  * test reads every branch without a database. */
-export function letterShareRefusal(input: { manages: boolean; inLetters: boolean; isMarkdown: boolean }): LetterRefusal | null {
+export function letterShareRefusal(input: { manages: boolean; inLetters: boolean; isMarkdown: boolean; sent?: boolean; on?: boolean }): LetterRefusal | null {
   if (!input.inLetters) return { status: 400, error: "Only a file in the project's Letters folder can be shared" };
   if (!input.isMarkdown) return { status: 400, error: "Only a markdown letter can be shared" };
   if (!input.manages) return { status: 403, error: "Only a Guide on this project can share a letter" };
+  // The link is a second step on a sent letter (Austin, 2026-10-27):
+  // turning it on publishes the client's copy, so there has to be one.
+  if (input.on && input.sent === false) return { status: 400, error: "Send the letter first. The link is a second step." };
+  return null;
+}
+
+/** The send's own refusals: the same three, pure. */
+export function letterSendRefusal(input: { manages: boolean; inLetters: boolean; isMarkdown: boolean }): LetterRefusal | null {
+  if (!input.inLetters) return { status: 400, error: "Only a file in the project's Letters folder can be sent" };
+  if (!input.isMarkdown) return { status: 400, error: "Only a markdown letter can be sent" };
+  if (!input.manages) return { status: 403, error: "Only a Guide on this project can send a letter" };
   return null;
 }
 
@@ -221,6 +283,8 @@ export async function setLetterShared(
     manages: canManageLetters(actor, role),
     inLetters: !!home,
     isMarkdown: isMarkdownFileName(file.name),
+    sent: isLetterSent(file),
+    on,
   });
   if (refusal) return { ok: false, ...refusal };
   const sharedAt = on ? (file.shared_at ?? new Date().toISOString()) : null;
@@ -236,7 +300,46 @@ export async function resolveSharedLetter(fileId: string): Promise<{ file: FileR
   if (!file || !isLetterShared(file) || file.archived_at || !isMarkdownFileName(file.name)) return null;
   const home = await letterHome(file);
   if (!home || getProjectStatus(home.project) === "trashed") return null;
-  return { file, project: home.project };
+  return { file: await ensureSentCopy(file), project: home.project };
+}
+
+/**
+ * A letter with a public link from before letters had a send moment
+ * reads as sent with its live content (`sentCopyOf`); the first time
+ * such a letter is read after 2026-10-28, that copy is written down, so
+ * the client keeps what they had while the guide goes on editing. One
+ * `merge`, once; nothing for a letter already sent or never shared.
+ * A write in a read path, on purpose, in place of a one-time script.
+ */
+export async function ensureSentCopy(file: FileRef): Promise<FileRef> {
+  if (file.sent_at || !file.shared_at) return file;
+  const sent: Pick<FileRef, "sent_content" | "sent_content_hash" | "sent_at" | "sent_date" | "sent_by_human_id" | "sent_count"> = {
+    sent_content: file.content ?? "",
+    sent_content_hash: contentFingerprint(file),
+    sent_at: file.shared_at,
+    sent_date: file.shared_at.slice(0, 10),
+    sent_by_human_id: null,
+    sent_count: 1,
+  };
+  await merge("file_refs", file._id, sent);
+  return { ...file, ...sent };
+}
+
+/**
+ * A sent letter, for someone on the project (any group, a Client
+ * included: ADR-023 keeps them out of the cache, so this is their door)
+ * when the link is off. Null for a draft, for someone off the project,
+ * or for a trashed project.
+ */
+export async function resolveSentLetterForMember(fileId: string, humanId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
+  const file = await getFileRefById(fileId);
+  if (!file || file.archived_at || !isMarkdownFileName(file.name)) return null;
+  const home = await letterHome(file);
+  if (!home || getProjectStatus(home.project) === "trashed") return null;
+  const withCopy = await ensureSentCopy(file);
+  if (!isLetterSent(withCopy)) return null;
+  if (!(await getProjectRole(home.project, humanId))) return null;
+  return { file: withCopy, project: home.project };
 }
 
 /** Where the public page loads one of the letter's files from. */
@@ -248,11 +351,14 @@ export function letterPublicPath(fileId: string): string {
   return `/public/letter/${fileId}`;
 }
 
-/** What the banner's Letters tile lists: the shared ones only, by
- * title, each to its public page. Everyone on the project sees the same
- * tile, so a Guide sees what the client sees. Pure. */
-export function sharedLetterLinks(rows: Pick<LetterRow, "fileId" | "title" | "sharedAt">[]): { fileId: string; title: string; path: string }[] {
-  return rows.filter((r) => !!r.sharedAt).map((r) => ({ fileId: r.fileId, title: r.title, path: letterPublicPath(r.fileId) }));
+/** What the banner's Letters tile lists: the sent ones, by title, each
+ * to the letter's page, where a member reads the sent copy logged in.
+ * Everyone on the project sees the same tile, so a Guide sees what the
+ * client sees. Pure. */
+export function sentLetterLinks(rows: Pick<LetterRow, "fileId" | "title" | "sentDate" | "sentCount">[]): { fileId: string; title: string; path: string; sentDate: string; updated: boolean }[] {
+  return rows
+    .filter((r): r is typeof r & { sentDate: string } => !!r.sentDate)
+    .map((r) => ({ fileId: r.fileId, title: r.title, path: letterPublicPath(r.fileId), sentDate: r.sentDate, updated: r.sentCount > 1 }));
 }
 
 /** The file as the public page shows it: no front matter, every file URL
@@ -274,20 +380,25 @@ export function letterFileIds(markdown: string): Set<string> {
   return viewFileIds(splitFrontmatter(markdown).body);
 }
 
-/** The file a public letter page may load, or null: the link is on,
- * and the letter names the id right now. */
-export async function letterPageFile(fileId: string, id: string): Promise<FileRef | null> {
-  const shared = await resolveSharedLetter(fileId);
-  if (!shared) return null;
-  if (!letterFileIds(shared.file.content ?? "").has(id)) return null;
+/** The file a letter's page may load, or null: the link is on, or the
+ * viewer is on the project and the letter is sent; and the sent copy
+ * names the id. The draft's pictures are never served this way. */
+export async function letterPageFile(fileId: string, id: string, viewerHumanId?: string | null): Promise<FileRef | null> {
+  const found = (await resolveSharedLetter(fileId)) ?? (viewerHumanId ? await resolveSentLetterForMember(fileId, viewerHumanId) : null);
+  if (!found) return null;
+  const sent = sentCopyOf(found.file);
+  if (!sent || !letterFileIds(sent.content).has(id)) return null;
   return (await getFileRefById(id)) ?? null;
 }
 
 /** Everything the public page receives, and nothing else. */
 export interface LetterPage {
   title: string;
-  /** The last change, as a date (UTC, so the server and browser agree). */
+  /** The sender's day of the send, as "Oct 28, 2026"; for a preview,
+   * the draft's last change (UTC, so the server and browser agree). */
   updated: string;
+  /** The client is reading an update: sent more than once. */
+  resent: boolean;
   body: string;
   url: string;
   /** The markdown source, the quieter second option. */
@@ -299,19 +410,28 @@ export interface LetterPage {
    * (`bodyOpensWithTitle`), so the header doesn't repeat it. Decided here
    * because the page component can't import this server module. */
   showTitle: boolean;
-  /** True when a Guide is looking at a letter whose link is off:
-   * the page as the client would see it, with the session serving the
-   * pictures and no downloads (there is no PDF until the link is on). */
+  /** True when a Guide is looking at a letter not yet sent: the draft
+   * as the client will see it, with the session serving the pictures
+   * and no downloads. */
   preview: boolean;
+  /** The public link is on: the PDF and the source are offered (the
+   * worker prints the public page with no session, so neither exists
+   * for a sent letter whose link is off). */
+  linkOn: boolean;
 }
 
-export function letterPage(file: Pick<FileRef, "_id" | "name" | "content" | "updated_at">, origin: string, preview = false): LetterPage {
-  // A preview keeps the session view URLs: the Guide has a session, and
-  // the public file routes refuse an unshared letter.
-  const body = preview ? splitFrontmatter(file.content ?? "").body : publicLetterBody(file.content ?? "", file._id);
+export function letterPage(file: Pick<FileRef, "_id" | "name" | "updated_at"> & SentFields, origin: string, preview = false): LetterPage {
+  // A preview is the draft with the session's view URLs: the Guide has a
+  // session, and the letter's file routes serve only the sent copy. The
+  // page itself is the sent copy, rewritten to the letter's own routes.
+  const sent = preview ? null : sentCopyOf(file);
+  const source = sent ? sent.content : (file.content ?? "");
+  const body = preview ? splitFrontmatter(source).body : publicLetterBody(source, file._id);
+  const dated = sent ? `${sent.date}T00:00:00Z` : file.updated_at;
   return {
-    title: letterTitle(file),
-    updated: new Date(file.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }),
+    title: letterTitle({ name: file.name, content: source }),
+    updated: new Date(dated).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }),
+    resent: !!sent && sent.count > 1,
     body,
     showTitle: !bodyOpensWithTitle(body),
     url: `${origin}${letterPublicPath(file._id)}`,
@@ -319,6 +439,7 @@ export function letterPage(file: Pick<FileRef, "_id" | "name" | "content" | "upd
     pdfUrl: `/api/letter/${file._id}/pdf`,
     fileName: file.name,
     preview,
+    linkOn: !preview && !!file.shared_at,
   };
 }
 
