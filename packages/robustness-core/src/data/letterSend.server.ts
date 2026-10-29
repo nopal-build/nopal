@@ -16,7 +16,7 @@
 
 import { merge } from "./generic.server";
 import { markDate } from "./graphLogMarks.server";
-import { enqueueLetterPdfIfShared } from "./letterPdf.server";
+import { enqueueLetterPdfIfSent } from "./letterPdf.server";
 import { syncLettersProjection } from "./letterSync.server";
 import { canManageLetters, contentFingerprint, isMarkdownFileName, letterHome, letterSendRefusal, sentCopyOf, type LetterRefusal } from "./letters.server";
 import { getProjectRole } from "./projectSharing.server";
@@ -52,6 +52,6 @@ export async function sendLetter(actor: Pick<Human, "_id" | "role">, file: FileR
   await syncLettersProjection(home.project);
   // The PDF is of the sent copy, made when the link is on and after each
   // send while it is (`letterPdf.server.ts`).
-  await enqueueLetterPdfIfShared(after);
+  await enqueueLetterPdfIfSent(after);
   return { ok: true, sentAt, count: sent.sent_count };
 }

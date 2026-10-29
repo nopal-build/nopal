@@ -1810,3 +1810,48 @@ iframe.ox-video-media {
   margin: 0;
   line-height: 1.3;
 }
+
+/* ── Paper ──────────────────────────────────────────────────────────────── */
+
+/* The second medium. The screen rhythm above favors the phone; printed,
+   the same content favors 8.5 by 11 (Austin, 2026-10-27: "nothing should
+   be a custom.css; these are all things that need to come out of
+   Oxmarkdown and the stamps"). Every Ox render prints this way, the
+   website included, on purpose. Scoped to `.ox-content`, never `:root`.
+
+   The whole vertical rhythm hangs off `--ox-grid` (paragraphs, blank
+   rows, heading lines), so paper is that one variable and the base type:
+   11.5pt body on a 22px grid is about 1.45 leading. The worker's
+   `page.pdf` options are the paper (Letter, 0.6in margins), not the
+   type; the measure is a `max-width` here, not the margins.
+
+   `orphans`/`widows` at 2: no page opens with a paragraph's last line
+   and none ends on its first. A heading keeps its first lines with it;
+   a picture never splits. Nothing more: no pagination pass. The values
+   are the builder's, judged by a person on paper. */
+@media print {
+  .ox-content {
+    --ox-grid: 22px;
+    font-size: 11.5pt;
+    max-width: 70ch;
+    orphans: 2;
+    widows: 2;
+  }
+  .ox-content h1 {
+    font-size: 20px;
+  }
+  .ox-content h2 {
+    font-size: 17.5px;
+  }
+  .ox-content h3 {
+    font-size: 16px;
+  }
+  .ox-content :is(h1, h2, h3, h4, h5, h6) {
+    break-after: avoid;
+    break-inside: avoid;
+  }
+  .ox-content :is(img, figure, video, .ox-gallery-item) {
+    break-inside: avoid;
+    max-width: 100%;
+  }
+}

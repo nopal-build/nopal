@@ -40,6 +40,7 @@
     "./data/letterSync.server": "./src/data/letterSync.server.ts",
     "./data/letterPdf.server": "./src/data/letterPdf.server.ts",
     "./data/letterPdfRender.server": "./src/data/letterPdfRender.server.ts",
+    "./data/letterRenderPass.server": "./src/data/letterRenderPass.server.ts",
     "./data/publicBody": "./src/data/publicBody.ts",
     "./data/pageBody.server": "./src/data/pageBody.server.ts",
     "./data/graphLogSchedule.server": "./src/data/graphLogSchedule.server.ts",

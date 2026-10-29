@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { letterPageFile } from "robustness-core/data/letters.server";
 import { getUser } from "../modules/auth/auth.server";
+import { requestHasRenderPass } from "robustness-core/data/letterRenderPass.server";
 import { getPresignedViewUrl, objectExists } from "robustness-core/data/file.server";
 import { isImageRenditionSize, renditionContentType, renditionKey } from "robustness-core/data/mediaKeys";
 
@@ -15,10 +16,12 @@ import { isImageRenditionSize, renditionContentType, renditionKey } from "robust
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { fileId, id } = params;
-  // Two doors, the page's own (`letterPageFile`): the link on, with no
-  // session; or a session on the project and the letter sent.
+  // The page's own doors (`letterPageFile`): the link on, with no
+  // session; the worker printing it under a render pass; or a session on
+  // the project and the letter sent.
   const viewer = fileId && id ? await getUser(request) : null;
-  const file = fileId && id ? await letterPageFile(fileId, id, viewer?._id ?? null) : null;
+  const rendering = fileId && id ? await requestHasRenderPass(request, fileId) : false;
+  const file = fileId && id ? await letterPageFile(fileId, id, viewer?._id ?? null, rendering) : null;
   if (!file) return Response.json({ error: "Not found" }, { status: 404 });
   if (!file.s3_key) return Response.json({ error: "No viewable file attached" }, { status: 400 });
 
