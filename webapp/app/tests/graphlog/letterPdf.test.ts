@@ -1,8 +1,8 @@
 /**
- * A letter's PDF is the public page printed, keyed by the file's
- * content hash (`letterPdf.server.ts`, 2026-10-21): the key moves
- * with the content, the job id is one BullMQ accepts, and a file from
- * before hashing still gets a key.
+ * A letter's PDF is the public page printed, keyed by the sent copy's
+ * hash (`letterPdf.server.ts`; by the draft's until 2026-10-28): the
+ * key moves with a send and never with an edit, the job id is one
+ * BullMQ accepts, and a file from before hashing still gets a key.
  */
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
@@ -20,7 +20,16 @@ describe("the PDF's key", () => {
     expect(letterPdfJobId("d3l1v", "abc")).not.toContain(":");
   });
 
-  it("uses the stored content hash, and hashes the content when a record has none", () => {
+  it("is the sent copy's hash, and moves with a send, not an edit", () => {
+    const sent = { content: "# A", content_hash: "draft", sent_content: "# A", sent_content_hash: "sent", sent_at: "2026-10-28T10:00:00Z", sent_date: "2026-10-28", sent_count: 1 };
+    expect(pdfFingerprint(sent)).toBe("sent");
+    expect(pdfFingerprint({ ...sent, content: "# A edited", content_hash: "draft2" })).toBe("sent");
+    expect(pdfFingerprint({ ...sent, sent_content: "# A edited", sent_content_hash: "sent2" })).toBe("sent2");
+    const expected = createHash("sha256").update("# A", "utf8").digest("hex");
+    expect(pdfFingerprint({ ...sent, sent_content_hash: null })).toBe(expected);
+  });
+
+  it("falls back to the draft's hash for a letter never sent, hashing the content when a record has none", () => {
     expect(pdfFingerprint({ content: "# A", content_hash: "stored" })).toBe("stored");
     const expected = createHash("sha256").update("# A", "utf8").digest("hex");
     expect(pdfFingerprint({ content: "# A", content_hash: null })).toBe(expected);

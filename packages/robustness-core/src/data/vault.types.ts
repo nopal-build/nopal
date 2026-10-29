@@ -73,6 +73,22 @@ export type FileRef = {
    * content, so the download, the PDF and the public page never carry
    * it; the same words go into the graph as a mark in the guide's name. */
   purpose?: string | null;
+  /** A letter as it was sent (`letterSend.server.ts`, its only writer):
+   * the client's copy, frozen at the click, the way a suggestion Card's
+   * `taken_content` freezes what a Guide took. The draft (`content`)
+   * keeps changing; nothing reaches the client until the guide sends
+   * again, which replaces these. `sent_count` says whether the client is
+   * reading an update. Null until the first send. */
+  sent_content?: string | null;
+  sent_content_hash?: string | null;
+  /** The instant of the send. */
+  sent_at?: string | null;
+  /** The sender's own day (YYYY-MM-DD, `markDate`): what the letter says
+   * it was sent and the day its words enter the graph. Kept apart from
+   * `sent_at` the way a mark's `date` is, so no timezone shifts it. */
+  sent_date?: string | null;
+  sent_by_human_id?: string | null;
+  sent_count?: number | null;
 };
 
 /**

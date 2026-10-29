@@ -23,7 +23,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const result = await setLetterShared(user, file, request.method === "POST");
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
   // The PDF is rendered ahead of the click: turning the link on asks the
-  // worker for it now (`letterPdf.server.ts`).
+  // worker for it now (`letterPdf.server.ts`). Only a sent letter gets
+  // this far (`letterShareRefusal`), so there is a sent copy to print.
   if (result.sharedAt) await enqueueLetterPdfIfShared({ ...file, shared_at: result.sharedAt });
   return Response.json({ sharedAt: result.sharedAt, path: letterPublicPath(file._id) });
 }

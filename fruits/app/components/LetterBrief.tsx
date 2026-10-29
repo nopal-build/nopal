@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LetterBriefForPage, LetterJobForPage } from "robustness-core/data/brief.server";
 import { splitFrontmatter } from "robustness-core/data/project.types";
 import { Cluster } from "stamps/Cluster";
+import { Grid } from "stamps/Grid";
 import { Input } from "stamps/Input";
 import { Stack } from "stamps/Stack";
 import { button } from "stamps/button.css";
@@ -120,6 +121,11 @@ export function LetterBrief({
   // The brief stays open until the outline exists; then the outline is
   // what the guide keeps open while writing.
   const [briefOpen, setBriefOpen] = useState(openByDefault && !initial.outline);
+  const briefHeading = useRef<HTMLDivElement>(null);
+  const foldBrief = () => {
+    setBriefOpen(false);
+    briefHeading.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -231,7 +237,7 @@ export function LetterBrief({
   return (
     <section className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 })} aria-label="The brief, the talk-through and the outline" data-letter-brief data-brief-state={briefState} data-outline-state={outlineState}>
       {/* ── The brief ── */}
-      <Cluster gap={3} align="center">
+      <Cluster gap={3} align="center" ref={briefHeading}>
         <button type="button" className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} onClick={() => setBriefOpen((o) => !o)} aria-expanded={briefOpen} style={twirlStyle}>
           The brief {briefOpen ? "▾" : "▸"}
         </button>
@@ -262,8 +268,19 @@ export function LetterBrief({
           {hasPurpose ? "This letter has no brief yet." : "This letter has no brief yet. Say what it is for first."}
         </p>
       )}
+      {/* The brief and the talk-through side by side while both are up
+          (Austin, 2026-10-28: the space to talk should be there while
+          reading the brief): Stamps' Grid, two columns when the page is
+          wide enough for both, one when it isn't; the talk pinned so it
+          stays in view as the brief scrolls. A Stack once the talk is on
+          the record. */}
+      {(() => {
+        const sideBySide = !!(briefOpen && state.brief && !state.talk.sent);
+        const Chain = sideBySide ? Grid : Stack;
+        return (
+      <Chain gap={sideBySide ? 6 : 4} {...(sideBySide ? { minColumnWidth: 320, style: { alignItems: "start" } } : {})} data-chain-layout={sideBySide ? "side-by-side" : "stacked"}>
       {briefOpen && state.brief && (
-        <Stack gap={2}>
+        <Stack gap={2} data-chain-brief>
           {state.brief.incomplete.length > 0 && (
             <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-incomplete>
               Not finished: {state.brief.incomplete.join("; ")}. Writing it again may finish it.
@@ -273,12 +290,19 @@ export function LetterBrief({
             <OxRenderer markdown={halves.first} className="ox-no-dots ox-no-heading-marks" />
           </div>
           {halves.reference && <BriefReference markdown={halves.reference} />}
+          {/* Folds from the bottom too, so a long brief doesn't have to be
+              scrolled back up to close (Austin, 2026-10-28). */}
+          <div>
+            <button type="button" className={textSize.xs} style={{ ...twirlStyle, color: semanticColors.textSubtle }} onClick={foldBrief} data-brief-fold>
+              Fold the brief ▴
+            </button>
+          </div>
         </Stack>
       )}
 
       {/* ── The talk-through ── */}
       {state.brief && !state.talk.sent && (
-        <Stack gap={2} data-letter-talk>
+        <Stack gap={2} data-letter-talk style={sideBySide ? { position: "sticky", top: 12 } : undefined}>
           <Input
             type="textarea"
             name="talk"
@@ -307,6 +331,9 @@ export function LetterBrief({
           </div>
         </Stack>
       )}
+      </Chain>
+        );
+      })()}
       {state.talk.sent && (
         <Stack gap={1} data-letter-talk-sent>
           <span className={`${textSize.sm} ${sprinkles({ fontWeight: "semibold" })}`}>

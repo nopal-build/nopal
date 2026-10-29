@@ -22,7 +22,7 @@
 
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
-import { contentFingerprint, letterHome, isLetterShared, isMarkdownFileName } from "./letters.server";
+import { contentFingerprint, isLetterSent, isLetterShared, isMarkdownFileName, letterHome, sentCopyOf, type SentFields } from "./letters.server";
 import { objectExists } from "./file.server";
 import type { FileRef } from "./vault.types";
 
@@ -51,9 +51,15 @@ const JOB_OPTIONS = {
   removeOnFail: { age: 60 * 60 },
 };
 
-/** What the PDF is keyed by (`contentFingerprint`). */
-export function pdfFingerprint(file: Pick<FileRef, "content" | "content_hash">): string {
-  return contentFingerprint(file);
+/** A file as the PDF reads it: the sent copy's fields, or the draft's
+ * for a letter never sent (which gets no PDF: `enqueueLetterPdfIfShared`). */
+export type LetterForPdf = Pick<FileRef, "_id"> & SentFields;
+
+/** What the PDF is keyed by: the sent copy's hash (`sentCopyOf`), which
+ * has one writer, `sendLetter`. The draft's hash only for a letter never
+ * sent, and such a letter never gets a PDF. */
+export function pdfFingerprint(file: Omit<LetterForPdf, "_id">): string {
+  return sentCopyOf(file)?.hash ?? contentFingerprint(file);
 }
 
 /** Where the PDF for one version of the file lives. */
@@ -69,7 +75,7 @@ export function letterPdfJobId(fileId: string, contentHash: string): string {
 
 /** Asks the worker for this version's PDF unless the same ask is already
  * waiting, running or done. A failed one is removed and asked again. */
-export async function ensureLetterPdfJob(file: Pick<FileRef, "_id" | "content" | "content_hash">): Promise<string> {
+export async function ensureLetterPdfJob(file: LetterForPdf): Promise<string> {
   const contentHash = pdfFingerprint(file);
   const jobId = letterPdfJobId(file._id, contentHash);
   const q = getQueue();
@@ -86,16 +92,18 @@ export async function ensureLetterPdfJob(file: Pick<FileRef, "_id" | "content" |
 export type LetterPdfStatus = { ready: true; s3Key: string } | { ready: false; s3Key: string };
 
 /** Whether this version's PDF is in storage. */
-export async function letterPdfStatus(file: Pick<FileRef, "_id" | "content" | "content_hash">): Promise<LetterPdfStatus> {
+export async function letterPdfStatus(file: LetterForPdf): Promise<LetterPdfStatus> {
   const s3Key = letterPdfKey(file._id, pdfFingerprint(file));
   return { ready: await objectExists(s3Key), s3Key };
 }
 
-/** The hook the share switch and the replace route call: a render ahead
- * of the click, only for a shared markdown letter. Returns the job
- * id, or null when nothing was asked for. */
+/** The hook the share switch and the send call: a render ahead of the
+ * click, only for a sent markdown letter whose link is on. The PDF is of
+ * the sent copy, so a saved edit never asks for one (the save and
+ * replace routes did until 2026-10-28). Returns the job id, or null
+ * when nothing was asked for. */
 export async function enqueueLetterPdfIfShared(file: FileRef | null | undefined): Promise<string | null> {
-  if (!file || !isLetterShared(file) || file.archived_at || !isMarkdownFileName(file.name)) return null;
+  if (!file || !isLetterShared(file) || !isLetterSent(file) || file.archived_at || !isMarkdownFileName(file.name)) return null;
   if (!(await letterHome(file))) return null;
   return ensureLetterPdfJob(file);
 }

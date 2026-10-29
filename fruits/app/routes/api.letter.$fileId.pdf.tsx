@@ -8,10 +8,11 @@ import { getPresignedDownloadUrl } from "robustness-core/data/file.server";
  * GET /api/letter/:fileId/pdf
  *
  * The letter's PDF, with no session: only while its link is on
- * (`resolveSharedLetter`), 404 otherwise, the same as the page.
- * The PDF is the public page printed by the worker
- * (`letterPdf.server.ts`), keyed by the file's content hash and
- * rendered ahead of the click (share-on, replace). When it is there,
+ * (`resolveSharedLetter`), 404 otherwise. The worker prints the public
+ * page with no session, so there is no PDF for a sent letter whose link
+ * is off; the print seed can revisit. The PDF is of the sent copy
+ * (`letterPdf.server.ts`), keyed by the sent copy's hash and rendered
+ * ahead of the click (share-on, each send while the link is on). When it is there,
  * this redirects to a short-lived presigned download. When it is not
  * (the first ask after a change, a render that failed), this asks the
  * worker for it and answers with a plain page that refreshes itself
