@@ -358,6 +358,41 @@ function TrailLink({ last }: { last?: boolean }) {
   return last ? null : <span className="pm-link" aria-hidden="true" />;
 }
 
+/** The compact "Design → Sourcing → Construction" row (Gerald, 2026-10-28):
+ * no camp counts or status, just names — click one to open it (collapsing
+ * whatever was open before). Used both above and below the one open
+ * phase, for past and future phases alike. */
+function PhaseRail({
+  phases,
+  currentId,
+  onSelect,
+}: {
+  phases: { id: string; name: string }[];
+  currentId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="pm-phase-rail">
+      {phases.map((phase, i) => (
+        <Fragment key={phase.id}>
+          <button
+            type="button"
+            className={`pm-phase-rail__item${phase.id === currentId ? " pm-phase-rail__item--current" : ""}`}
+            onClick={() => onSelect(phase.id)}
+          >
+            {phase.name}
+          </button>
+          {i < phases.length - 1 && (
+            <span className="pm-phase-rail__arrow" aria-hidden="true">
+              →
+            </span>
+          )}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
 type ContentFilter = "steps" | "effort" | "file" | "logbook";
 
 function stepsForCamp(camp: Camp, status: CampStatus): Step[] {
@@ -396,7 +431,12 @@ export function ProjectMapMockup() {
   const [checklist, setChecklist] = useState<boolean[]>(BASECAMP.checklist.map(() => false));
   const [extraCamps, setExtraCamps] = useState<Camp[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set());
+  // Which phase's camps are shown open right now — null means "follow
+  // whichever phase the real cursor is in" (Gerald, 2026-10-28: clicking a
+  // phase name expands it and collapses whatever was open before; only
+  // one open at a time, Basecamp/phases/Final goal stay a simple list
+  // otherwise).
+  const [expandedPhaseId, setExpandedPhaseId] = useState<string | null>(null);
   const [expandAll, setExpandAll] = useState(false);
   const [twoInFocus, setTwoInFocus] = useState(false);
   const [contentFilter, setContentFilter] = useState<ContentFilter>("steps");
@@ -504,13 +544,6 @@ export function ProjectMapMockup() {
     return "upcoming";
   }
 
-  const toggleExpandedPhase = (id: string) =>
-    setExpandedPhases((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   const startEditFirstCamp = () => {
     setFirstCampNameDraft(firstCamp?.name ?? "");
@@ -537,6 +570,7 @@ export function ProjectMapMockup() {
 
   const jumpTo = (key: (typeof MILESTONES)[number]["key"]) => {
     setPreviewId(null);
+    setExpandedPhaseId(null);
     if (key === "seed") {
       setStage("seed");
       setCursor(0);
@@ -566,6 +600,7 @@ export function ProjectMapMockup() {
   };
 
   const goBack = () => {
+    setExpandedPhaseId(null);
     if (stage === "complete") {
       setStage("active");
       setCursor(camps.length - 1);
@@ -579,6 +614,7 @@ export function ProjectMapMockup() {
   };
 
   const advance = () => {
+    setExpandedPhaseId(null);
     if (stage === "seed") {
       // Deliberately bypasses the Basecamp checklist gate — this is the
       // demo scrubber's "time machine," not the real "Start Project"
@@ -697,6 +733,17 @@ export function ProjectMapMockup() {
     if (items.some((x) => statusFor(x.index) === "focused")) return "current";
     return "upcoming";
   };
+
+  // Which phase is open: whatever was clicked, or else the phase the real
+  // cursor is in, or else (nothing "current" once the project is complete)
+  // the last phase — "where you ended up".
+  const currentPhaseId = stage === "active" ? camps[cursor]?.phaseId : null;
+  const fallbackPhaseId = currentPhaseId ?? phaseGroups[phaseGroups.length - 1]?.id ?? null;
+  const openPhaseId = expandedPhaseId ?? fallbackPhaseId;
+  const openPhaseIndex = phaseGroups.findIndex((p) => p.id === openPhaseId);
+  const beforePhases = openPhaseIndex >= 0 ? phaseGroups.slice(0, openPhaseIndex) : [];
+  const openPhase = openPhaseIndex >= 0 ? phaseGroups[openPhaseIndex] : null;
+  const afterPhases = openPhaseIndex >= 0 ? phaseGroups.slice(openPhaseIndex + 1) : [];
 
   return (
     <div className={sprinkles({ display: "flex", flexDirection: "column", gap: 6 })}>
@@ -1122,35 +1169,47 @@ export function ProjectMapMockup() {
                     </h3>
                     <Surface className={sprinkles({ p: 3 })}>
                       <Stack gap={3}>
-                        <div className="pm-trail-anchor">
-                          <CampNode kind="basecamp" label="Basecamp" />
-                        </div>
-                        {phaseGroups.map((phase) => {
-                          const pStatus = phaseStatusOf(phase.items);
-                          const toggleable = pStatus === "done";
-                          const isExpanded = expandAll || pStatus === "current" || (toggleable && expandedPhases.has(phase.id));
-                          const statusLabel =
-                            pStatus === "done" ? `\u2713 ${phase.items.length}/${phase.items.length} done` : pStatus === "current" ? "In focus" : "Not yet defined";
-                          return (
+                        {expandAll ? (
+                          // Reviewer-only dense view: every phase's row, regardless of
+                          // status — the one escape hatch back to seeing everything at
+                          // once (Finding 1/4).
+                          phaseGroups.map((phase) => (
                             <div className="pm-phase-row" key={phase.id}>
                               <div className="pm-phase-row__header">
                                 <span className="pm-phase-row__name">{phase.name}</span>
-                                {toggleable ? (
-                                  <button
-                                    type="button"
-                                    className={`pm-phase-pill pm-phase-pill--${pStatus}`}
-                                    onClick={() => toggleExpandedPhase(phase.id)}
-                                  >
-                                    {statusLabel}
-                                  </button>
-                                ) : (
-                                  <span className={`pm-phase-pill pm-phase-pill--${pStatus}`}>{statusLabel}</span>
-                                )}
                               </div>
-                              {isExpanded ? (
-                                phase.items.length > 0 ? (
+                              {phase.items.length > 0 ? (
+                                <div className="pm-phase-row__camps">
+                                  {phase.items.map(({ camp, index }, i) => (
+                                    <Fragment key={camp.id}>
+                                      <CampNode
+                                        kind={statusFor(index)}
+                                        label={camp.name}
+                                        selected={index === selectedIndex}
+                                        onClick={() => setPreviewId(camp.id)}
+                                      />
+                                      <TrailLink last={i === phase.items.length - 1} />
+                                    </Fragment>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="pm-phase-row__unknown">No camps defined for this phase yet.</p>
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          <>
+                            {beforePhases.length > 0 && (
+                              <PhaseRail phases={beforePhases} currentId={currentPhaseId} onSelect={setExpandedPhaseId} />
+                            )}
+                            {openPhase && (
+                              <div className="pm-phase-row">
+                                <div className="pm-phase-row__header">
+                                  <span className="pm-phase-row__name">{openPhase.name}</span>
+                                </div>
+                                {openPhase.items.length > 0 ? (
                                   <div className="pm-phase-row__camps">
-                                    {phase.items.map(({ camp, index }, i) => (
+                                    {openPhase.items.map(({ camp, index }, i) => (
                                       <Fragment key={camp.id}>
                                         <CampNode
                                           kind={statusFor(index)}
@@ -1158,23 +1217,24 @@ export function ProjectMapMockup() {
                                           selected={index === selectedIndex}
                                           onClick={() => setPreviewId(camp.id)}
                                         />
-                                        <TrailLink last={i === phase.items.length - 1} />
+                                        <TrailLink last={i === openPhase.items.length - 1} />
                                       </Fragment>
                                     ))}
                                   </div>
                                 ) : (
-                                  <p className="pm-phase-row__unknown">No camps defined for this phase yet.</p>
-                                )
-                              ) : (
-                                pStatus === "upcoming" && (
                                   <p className="pm-phase-row__unknown">
-                                    Shape not known yet — camps get defined once the team actually gets here.
+                                    {phaseStatusOf(openPhase.items) === "upcoming"
+                                      ? "Shape not known yet — camps get defined once the team actually gets here."
+                                      : "No camps defined for this phase yet."}
                                   </p>
-                                )
-                              )}
-                            </div>
-                          );
-                        })}
+                                )}
+                              </div>
+                            )}
+                            {afterPhases.length > 0 && (
+                              <PhaseRail phases={afterPhases} currentId={currentPhaseId} onSelect={setExpandedPhaseId} />
+                            )}
+                          </>
+                        )}
                         <div className="pm-trail-anchor">
                           <CampNode kind={stage === "complete" ? "done" : "final"} label={finalGoal} />
                         </div>

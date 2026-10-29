@@ -220,22 +220,28 @@
   flex: 0 0 auto;
 }
 
-.pm-phase-pill {
-  flex: 0 0 auto;
-  font-family: ui-monospace, SFMono-Regular, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
-  font-size: 0.72rem;
-  white-space: nowrap;
-  border-radius: 9999px;
-  padding: 6px 12px;
-  border: 1px solid var(--color-surface-border);
-  background: var(--color-surface-card);
-  color: var(--color-text-subtle);
-  align-self: center;
+/* The compact "Design → Sourcing → Construction" row, above and/or below
+   the one open phase — names only, no status or counts (Gerald,
+   2026-10-28: "I don't think we need any information"). */
+.pm-phase-rail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 2px;
 }
-.pm-phase-pill--done { border-color: var(--green); color: var(--purple); background: var(--green-light); cursor: pointer; }
-.pm-phase-pill--current { border-color: var(--purple); color: var(--purple); }
-.pm-phase-pill--upcoming { opacity: 0.7; }
-.pm-phase-pill--locked { cursor: default; opacity: 0.6; }
+.pm-phase-rail__item {
+  background: none;
+  border: none;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+.pm-phase-rail__item:hover { background: var(--color-surface-inset); color: var(--color-text-primary); }
+.pm-phase-rail__item--current { color: var(--purple); font-weight: 700; }
+.pm-phase-rail__arrow { color: var(--color-surface-border); font-size: 0.78rem; }
 
 .pm-node {
   flex: 0 0 auto;
