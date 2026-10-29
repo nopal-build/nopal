@@ -189,6 +189,38 @@ const PHASE_DEFS: PhaseDef[] = [
 
 const BASE_CAMPS: Camp[] = PHASE_DEFS.flatMap((phase) => phase.camps.map((c) => ({ ...c, phaseId: phase.id })));
 
+/** The Map Timeline's two "what makes it a map, not just a line"
+ * features (Gerald, 2026-10-28): a side-quest branches off the main camp
+ * path and rejoins it; a fork is the main path itself shifting to a new
+ * direction. Both just attach to the camp they happened after — mockup
+ * data only, nothing computed. */
+type SideQuest = { id: string; afterCampId: string; name: string; description: string };
+type Fork = { id: string; afterCampId: string; name: string; description: string };
+
+const SIDE_QUESTS: SideQuest[] = [
+  {
+    id: "sq-hoa",
+    afterCampId: "disc-site-walk",
+    name: "Neighbor HOA approval",
+    description: "Unplanned detour to get the HOA's sign-off before design could proceed — resolved, then back on the main path.",
+  },
+  {
+    id: "sq-permit-rush",
+    afterCampId: "src-permit",
+    name: "Expedited permit review",
+    description: "Paid a rush fee to avoid a 6-week plan-check backlog.",
+  },
+];
+
+const FORKS: Fork[] = [
+  {
+    id: "fork-adu",
+    afterCampId: "des-signoff",
+    name: "Client added an ADU to scope",
+    description: "Mid-project pivot — the plan itself shifted to include a detached accessory dwelling unit, not just a detour off it.",
+  },
+];
+
 const MILESTONES = [
   { key: "seed", label: "Project Seed" },
   { key: "discovery", label: "Discovery" },
@@ -333,62 +365,83 @@ function EditableStat({
   );
 }
 
-function CampNode({
-  kind,
-  label,
-  selected,
-  onClick,
-}: {
-  kind: "basecamp" | CampStatus | "final";
-  label: string;
-  selected?: boolean;
-  onClick?: () => void;
-}) {
-  const glyph = kind === "done" ? "\u2713" : kind === "basecamp" ? "B" : kind === "final" ? "\u2605" : "";
-  const classes = ["pm-node", `pm-node--${kind}`, selected && "pm-node--selected"].filter(Boolean).join(" ");
-  return (
-    <button type="button" className={classes} onClick={onClick} disabled={!onClick} aria-pressed={selected}>
-      <span className="pm-node__dot">{glyph}</span>
-      <span className="pm-node__label">{label}</span>
-    </button>
-  );
-}
 
-function TrailLink({ last }: { last?: boolean }) {
-  return last ? null : <span className="pm-link" aria-hidden="true" />;
-}
-
-/** The compact "Design → Sourcing → Construction" row (Gerald, 2026-10-28):
- * no camp counts or status, just names — click one to open it (collapsing
- * whatever was open before). Used both above and below the one open
- * phase, for past and future phases alike. */
-function PhaseRail({
-  phases,
-  currentId,
-  onSelect,
+/** The Map Timeline (Gerald, 2026-10-28): camps are always linear — top
+ * of the column is the start, bottom is `finalGoal`. A side-quest
+ * branches off its camp and rejoins; a fork is the path itself shifting.
+ * Neither changes the main vertical sequence, they just attach to
+ * whichever camp they happened after. */
+function MapTimeline({
+  camps,
+  visibleIndexes,
+  statusFor,
+  selectedIndex,
+  onSelectCamp,
+  finalGoal,
 }: {
-  phases: { id: string; name: string }[];
-  currentId: string | null;
-  onSelect: (id: string) => void;
+  camps: Camp[];
+  visibleIndexes: number[];
+  statusFor: (index: number) => CampStatus;
+  selectedIndex: number;
+  onSelectCamp: (id: string) => void;
+  finalGoal: string;
 }) {
   return (
-    <div className="pm-phase-rail">
-      {phases.map((phase, i) => (
-        <Fragment key={phase.id}>
-          <button
-            type="button"
-            className={`pm-phase-rail__item${phase.id === currentId ? " pm-phase-rail__item--current" : ""}`}
-            onClick={() => onSelect(phase.id)}
-          >
-            {phase.name}
-          </button>
-          {i < phases.length - 1 && (
-            <span className="pm-phase-rail__arrow" aria-hidden="true">
-              →
-            </span>
-          )}
-        </Fragment>
-      ))}
+    <div className="pm-timeline">
+      <div className="pm-timeline-row pm-timeline-row--anchor">
+        <div className="pm-timeline-row__rail">
+          <span className="pm-timeline-dot pm-timeline-dot--anchor" />
+        </div>
+        <div className="pm-timeline-row__content">Basecamp</div>
+      </div>
+      {visibleIndexes.map((index) => {
+        const camp = camps[index];
+        const status = statusFor(index);
+        const sideQuests = SIDE_QUESTS.filter((sq) => sq.afterCampId === camp.id);
+        const forks = FORKS.filter((f) => f.afterCampId === camp.id);
+        return (
+          <Fragment key={camp.id}>
+            <div className={`pm-timeline-row pm-timeline-row--${status}`}>
+              <div className="pm-timeline-row__rail">
+                <span className={`pm-timeline-dot pm-timeline-dot--${status}`} />
+              </div>
+              <button
+                type="button"
+                className={`pm-timeline-row__content pm-timeline-row__content--clickable${index === selectedIndex ? " pm-timeline-row__content--selected" : ""}`}
+                onClick={() => onSelectCamp(camp.id)}
+              >
+                {camp.name}
+              </button>
+            </div>
+            {sideQuests.map((sq) => (
+              <div className="pm-timeline-branch pm-timeline-branch--sidequest" key={sq.id}>
+                <span className="pm-timeline-branch__connector" aria-hidden="true" />
+                <div className="pm-timeline-branch__content">
+                  <span className="pm-timeline-branch__tag">Side-quest</span>
+                  <strong className="pm-timeline-branch__name">{sq.name}</strong>
+                  <p className="pm-timeline-branch__description">{sq.description}</p>
+                </div>
+              </div>
+            ))}
+            {forks.map((f) => (
+              <div className="pm-timeline-branch pm-timeline-branch--fork" key={f.id}>
+                <span className="pm-timeline-branch__connector" aria-hidden="true" />
+                <div className="pm-timeline-branch__content">
+                  <span className="pm-timeline-branch__tag">Fork</span>
+                  <strong className="pm-timeline-branch__name">{f.name}</strong>
+                  <p className="pm-timeline-branch__description">{f.description}</p>
+                </div>
+              </div>
+            ))}
+          </Fragment>
+        );
+      })}
+      <div className="pm-timeline-row pm-timeline-row--anchor">
+        <div className="pm-timeline-row__rail">
+          <span className="pm-timeline-dot pm-timeline-dot--anchor" />
+        </div>
+        <div className="pm-timeline-row__content">{finalGoal}</div>
+      </div>
     </div>
   );
 }
@@ -431,16 +484,14 @@ export function ProjectMapMockup() {
   const [checklist, setChecklist] = useState<boolean[]>(BASECAMP.checklist.map(() => false));
   const [extraCamps, setExtraCamps] = useState<Camp[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  // Which phase's camps are shown open right now — null means "follow
-  // whichever phase the real cursor is in" (Gerald, 2026-10-28: clicking a
-  // phase name expands it and collapses whatever was open before; only
-  // one open at a time, Basecamp/phases/Final goal stay a simple list
-  // otherwise).
-  const [expandedPhaseId, setExpandedPhaseId] = useState<string | null>(null);
-  const [expandAll, setExpandAll] = useState(false);
   const [twoInFocus, setTwoInFocus] = useState(false);
   const [contentFilter, setContentFilter] = useState<ContentFilter>("steps");
   const [showAddCamp, setShowAddCamp] = useState(false);
+  // The floating reviewer panel (Gerald, 2026-10-28: "a fixed chat box
+  // type thing in the bottom right that can be minimized") and the
+  // mobile-only full-screen Map Timeline takeover.
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [showMobileTimeline, setShowMobileTimeline] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const formId = useId();
@@ -570,7 +621,6 @@ export function ProjectMapMockup() {
 
   const jumpTo = (key: (typeof MILESTONES)[number]["key"]) => {
     setPreviewId(null);
-    setExpandedPhaseId(null);
     if (key === "seed") {
       setStage("seed");
       setCursor(0);
@@ -600,7 +650,6 @@ export function ProjectMapMockup() {
   };
 
   const goBack = () => {
-    setExpandedPhaseId(null);
     if (stage === "complete") {
       setStage("active");
       setCursor(camps.length - 1);
@@ -614,7 +663,6 @@ export function ProjectMapMockup() {
   };
 
   const advance = () => {
-    setExpandedPhaseId(null);
     if (stage === "seed") {
       // Deliberately bypasses the Basecamp checklist gate — this is the
       // demo scrubber's "time machine," not the real "Start Project"
@@ -721,29 +769,22 @@ export function ProjectMapMockup() {
   const selectedStatus: CampStatus = selectedIndex >= 0 ? statusFor(selectedIndex) : "upcoming";
   const isPreviewing = stage === "active" && selectedIndex >= 0 && selectedIndex !== focusIndex;
 
-  // --- Phase groups for the trail ---
+  // --- Which camps the Map Timeline can show ---
+  // A phase still shapeless ("upcoming", per the seed's own idea) has no
+  // camps to show yet — except "kickoff" (the Guide-defined first camp)
+  // and "extra" (deliberately pre-defined future camps), which are known
+  // by definition rather than inherited from a not-yet-reached phase.
   const indexed = camps.map((camp, index) => ({ camp, index }));
-  const phaseGroups: { id: string; name: string; items: { camp: Camp; index: number }[] }[] = [];
-  if (firstCampEntry) phaseGroups.push({ id: "kickoff", name: "Getting Started", items: indexed.filter((x) => x.camp.phaseId === "kickoff") });
-  phaseGroups.push(...PHASE_DEFS.map((p) => ({ id: p.id, name: p.name, items: indexed.filter((x) => x.camp.phaseId === p.id) })));
-  if (extraCamps.length > 0) phaseGroups.push({ id: "extra", name: "Added camps", items: indexed.filter((x) => x.camp.phaseId === "extra") });
-
-  const phaseStatusOf = (items: { index: number }[]): "done" | "current" | "upcoming" => {
+  const phaseStatusOf = (phaseId: string): "done" | "current" | "upcoming" => {
+    const items = indexed.filter((x) => x.camp.phaseId === phaseId);
+    if (items.length === 0) return "upcoming";
     if (items.every((x) => statusFor(x.index) === "done")) return "done";
     if (items.some((x) => statusFor(x.index) === "focused")) return "current";
     return "upcoming";
   };
-
-  // Which phase is open: whatever was clicked, or else the phase the real
-  // cursor is in, or else (nothing "current" once the project is complete)
-  // the last phase — "where you ended up".
-  const currentPhaseId = stage === "active" ? camps[cursor]?.phaseId : null;
-  const fallbackPhaseId = currentPhaseId ?? phaseGroups[phaseGroups.length - 1]?.id ?? null;
-  const openPhaseId = expandedPhaseId ?? fallbackPhaseId;
-  const openPhaseIndex = phaseGroups.findIndex((p) => p.id === openPhaseId);
-  const beforePhases = openPhaseIndex >= 0 ? phaseGroups.slice(0, openPhaseIndex) : [];
-  const openPhase = openPhaseIndex >= 0 ? phaseGroups[openPhaseIndex] : null;
-  const afterPhases = openPhaseIndex >= 0 ? phaseGroups.slice(openPhaseIndex + 1) : [];
+  const visibleIndexes = indexed
+    .filter((x) => x.camp.phaseId === "kickoff" || x.camp.phaseId === "extra" || phaseStatusOf(x.camp.phaseId) !== "upcoming")
+    .map((x) => x.index);
 
   return (
     <div className={sprinkles({ display: "flex", flexDirection: "column", gap: 6 })}>
@@ -1159,89 +1200,6 @@ export function ProjectMapMockup() {
 
           {(stage === "active" || stage === "complete") && (
                 <>
-                  {/* --- Camps trail --- */}
-                  <section>
-                    <h3
-                      className={`${textSize.sm} ${sprinkles({ fontWeight: "bold", mb: 2 })}`}
-                      style={{ textTransform: "uppercase", letterSpacing: "0.04em", color: semanticColors.textSubtle }}
-                    >
-                      Camps ({camps.length} across {phaseGroups.length} phase{phaseGroups.length === 1 ? "" : "s"})
-                    </h3>
-                    <Surface className={sprinkles({ p: 3 })}>
-                      <Stack gap={3}>
-                        {expandAll ? (
-                          // Reviewer-only dense view: every phase's row, regardless of
-                          // status — the one escape hatch back to seeing everything at
-                          // once (Finding 1/4).
-                          phaseGroups.map((phase) => (
-                            <div className="pm-phase-row" key={phase.id}>
-                              <div className="pm-phase-row__header">
-                                <span className="pm-phase-row__name">{phase.name}</span>
-                              </div>
-                              {phase.items.length > 0 ? (
-                                <div className="pm-phase-row__camps">
-                                  {phase.items.map(({ camp, index }, i) => (
-                                    <Fragment key={camp.id}>
-                                      <CampNode
-                                        kind={statusFor(index)}
-                                        label={camp.name}
-                                        selected={index === selectedIndex}
-                                        onClick={() => setPreviewId(camp.id)}
-                                      />
-                                      <TrailLink last={i === phase.items.length - 1} />
-                                    </Fragment>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="pm-phase-row__unknown">No camps defined for this phase yet.</p>
-                              )}
-                            </div>
-                          ))
-                        ) : (
-                          <>
-                            {beforePhases.length > 0 && (
-                              <PhaseRail phases={beforePhases} currentId={currentPhaseId} onSelect={setExpandedPhaseId} />
-                            )}
-                            {openPhase && (
-                              <div className="pm-phase-row">
-                                <div className="pm-phase-row__header">
-                                  <span className="pm-phase-row__name">{openPhase.name}</span>
-                                </div>
-                                {openPhase.items.length > 0 ? (
-                                  <div className="pm-phase-row__camps">
-                                    {openPhase.items.map(({ camp, index }, i) => (
-                                      <Fragment key={camp.id}>
-                                        <CampNode
-                                          kind={statusFor(index)}
-                                          label={camp.name}
-                                          selected={index === selectedIndex}
-                                          onClick={() => setPreviewId(camp.id)}
-                                        />
-                                        <TrailLink last={i === openPhase.items.length - 1} />
-                                      </Fragment>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="pm-phase-row__unknown">
-                                    {phaseStatusOf(openPhase.items) === "upcoming"
-                                      ? "Shape not known yet — camps get defined once the team actually gets here."
-                                      : "No camps defined for this phase yet."}
-                                  </p>
-                                )}
-                              </div>
-                            )}
-                            {afterPhases.length > 0 && (
-                              <PhaseRail phases={afterPhases} currentId={currentPhaseId} onSelect={setExpandedPhaseId} />
-                            )}
-                          </>
-                        )}
-                        <div className="pm-trail-anchor">
-                          <CampNode kind={stage === "complete" ? "done" : "final"} label={finalGoal} />
-                        </div>
-                      </Stack>
-                    </Surface>
-                  </section>
-
                   {/* --- Camp detail / filtered content --- */}
                   {selected && (
                     <Surface className="pm-camp-detail">
@@ -1371,8 +1329,74 @@ export function ProjectMapMockup() {
               )}
         </div>
 
-        {/* ================= RIGHT: our control panel + running notes ================= */}
-        <aside className="pm-page__side">
+        {/* ================= RIGHT: the Map Timeline (Project Map view only) ================= */}
+        {(stage === "active" || stage === "complete") && (
+          <aside className="pm-timeline-column">
+            <Stack gap={2}>
+              <Cluster style={{ justifyContent: "space-between" }} align="center">
+                <h3
+                  className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}
+                  style={{ textTransform: "uppercase", letterSpacing: "0.04em", color: semanticColors.textSubtle }}
+                >
+                  Map Timeline
+                </h3>
+                <button
+                  type="button"
+                  className={`${button({ variant: "outline", size: "compact" })} pm-timeline-mobile-btn`}
+                  onClick={() => setShowMobileTimeline(true)}
+                >
+                  View Map Timeline
+                </button>
+              </Cluster>
+              <Surface className={`${sprinkles({ p: 3 })} pm-timeline-desktop-only`}>
+                <MapTimeline
+                  camps={camps}
+                  visibleIndexes={visibleIndexes}
+                  statusFor={statusFor}
+                  selectedIndex={selectedIndex}
+                  onSelectCamp={setPreviewId}
+                  finalGoal={finalGoal}
+                />
+              </Surface>
+            </Stack>
+          </aside>
+        )}
+      </div>
+
+      {showMobileTimeline && (
+        <div className="pm-mobile-timeline-overlay">
+          <Cluster style={{ justifyContent: "space-between" }} align="center" className={sprinkles({ mb: 4 })}>
+            <h3 className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`} style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Map Timeline
+            </h3>
+            <button type="button" className={button({ variant: "outline", size: "compact" })} onClick={() => setShowMobileTimeline(false)}>
+              Close
+            </button>
+          </Cluster>
+          <MapTimeline
+            camps={camps}
+            visibleIndexes={visibleIndexes}
+            statusFor={statusFor}
+            selectedIndex={selectedIndex}
+            onSelectCamp={(id) => {
+              setPreviewId(id);
+              setShowMobileTimeline(false);
+            }}
+            finalGoal={finalGoal}
+          />
+        </div>
+      )}
+
+      {/* ================= Floating: our control panel + running notes ================= */}
+      <div className={`pm-floating-panel${panelOpen ? "" : " pm-floating-panel--collapsed"}`}>
+        <button type="button" className="pm-floating-panel__header" onClick={() => setPanelOpen((v) => !v)}>
+          <span>Reviewer notes &amp; controls</span>
+          <span className="pm-floating-panel__toggle" aria-hidden="true">
+            {panelOpen ? "\u2212" : "+"}
+          </span>
+        </button>
+        {panelOpen && (
+          <div className="pm-floating-panel__body">
           <Surface className={sprinkles({ p: 4 })}>
             <Stack gap={4}>
               <Stack gap={3}>
@@ -1419,9 +1443,6 @@ export function ProjectMapMockup() {
                 <Cluster gap={2} wrap>
                   <Chip active={twoInFocus} onClick={() => setTwoInFocus((v) => !v)}>
                     Experimental: 2 camps in focus
-                  </Chip>
-                  <Chip active={expandAll} onClick={() => setExpandAll((v) => !v)}>
-                    Reveal future phases (reviewer-only peek)
                   </Chip>
                 </Cluster>
               </Stack>
@@ -1506,7 +1527,8 @@ export function ProjectMapMockup() {
             sequencing or focus to extend (confirmed in the seed). Teaching it to
             recognize "this node's work belongs to Camp N" is real, separate work.
           </Callout>
-        </aside>
+          </div>
+        )}
       </div>
     </div>
   );
