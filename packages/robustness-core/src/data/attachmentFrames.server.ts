@@ -125,6 +125,15 @@ export function parseFfmpegDuration(stderr: string): number | null {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
 }
 
+/** The last `time=` a decode reported: how much of the clip it read. */
+export function parseFfmpegDecodedTime(stderr: string): number | null {
+  const all = [...stderr.matchAll(/time=\s*(\d+):(\d+):(\d+(?:\.\d+)?)/g)];
+  const m = all[all.length - 1];
+  if (!m) return null;
+  const seconds = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+  return seconds > 0 ? seconds : null;
+}
+
 /** Whether this process can run ffmpeg at all. The worker image has it;
  * an app process may not, and a caller that would download a whole
  * video first should ask this before it does. */
@@ -135,6 +144,12 @@ export function hasFfmpeg(): boolean {
 function ffmpeg(): string {
   if (!ffmpegPath) throw new Error("ffmpeg binary is not available on this platform (ffmpeg-static returned null)");
   return ffmpegPath;
+}
+
+/** The same binary, for another worker-only module that runs ffmpeg
+ * (`letterRecording.server.ts`). */
+export function ffmpegBinary(): string {
+  return ffmpeg();
 }
 
 /**
@@ -158,7 +173,10 @@ export async function videoToStills(
     const probe = await run(ffmpeg(), ["-hide_banner", "-i", input, "-f", "null", "-"], { maxBuffer: 1 << 24 }).catch(
       (e: { stderr?: string }) => e,
     );
-    const durationSeconds = parseFfmpegDuration(String(probe.stderr ?? ""));
+    // A browser's MediaRecorder WebM carries no duration in its header
+    // ("Duration: N/A"); the decode to null that printed the banner also
+    // printed how far it got, which is the length.
+    const durationSeconds = parseFfmpegDuration(String(probe.stderr ?? "")) ?? parseFfmpegDecodedTime(String(probe.stderr ?? ""));
     if (!durationSeconds) throw new Error("could not read the video's duration");
 
     const stills: Still[] = [];

@@ -4,6 +4,7 @@ import { completeMultipartUpload } from "robustness-core/data/file.server";
 import { createFileRef, explainWriteRefusal, getFileRefById, getFolderById, isFolderUnderSyncs, canWriteToFolderId } from "robustness-core/data/vault.server";
 import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 import { fileReplaceRefusal, repointFileRef } from "robustness-core/data/fileReplace.server";
+import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 
 /**
  * POST /api/vault/multipart-complete
@@ -127,6 +128,11 @@ export async function action({ request }: ActionFunctionArgs) {
       size: size ?? null,
       folder_id: folderId ?? null,
     });
+    // The same ask `upload.tsx` makes: a large video got no poster until
+    // a GraphLog run backfilled it (2026-10-29).
+    if (fileRef?._id && (contentType.startsWith("image/") || contentType.startsWith("video/"))) {
+      await enqueueRenditionsJob(fileRef._id).catch((err) => console.error("Could not enqueue renditions:", err));
+    }
 
     return Response.json({ url, fileRef }, { status: 201 });
   } catch (err) {

@@ -114,6 +114,8 @@ import { useStickyPaneMaxHeight } from "stamps/useStickyPaneMaxHeight";
 import OxEditor from "../components/OxEditor";
 import OxRenderer from "../components/OxRenderer";
 import { LetterBrief, isLetterOnlyItsHeading } from "../components/LetterBrief";
+import { LetterRecorder } from "../components/LetterRecorder";
+import { setLeadingRecording } from "../components/letterRecording";
 import { ProjectView } from "../components/ProjectView";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
@@ -1629,6 +1631,7 @@ function MarkdownSplitEditor({
   renderPicturePicker,
   spellCheck = false,
   autosave = false,
+  toolbarTools,
 }: {
   fileId: string;
   initialContent: string;
@@ -1690,8 +1693,14 @@ function MarkdownSplitEditor({
    * changes outside the render-prop `renderPreview` already gets them
    * through (e.g. `SyncApiRunEditor`). */
   onBodyChange?: (body: string) => void;
+  /** Rendered in the toolbar before `toolbarRight`, with the live body, a
+   * way to change it (the change autosaves like typing), and the preview
+   * pane's element. `LetterSplitEditor`'s "Read it to them": the
+   * recording records the preview and lands as the letter's first block. */
+  toolbarTools?: (ctx: { body: string; updateBody: (update: (prev: string) => string) => void; previewElement: () => HTMLElement | null }) => ReactNode;
 }) {
   const initialBody = useMemo(() => splitFrontmatter(initialContent).body, [initialContent]);
+  const previewBodyRef = useRef<HTMLDivElement | null>(null);
   const [body, setBody] = useState(initialBody);
   const [isSaving, setIsSaving] = useState(false);
   const lastSavedBodyRef = useRef(initialBody);
@@ -1925,6 +1934,7 @@ function MarkdownSplitEditor({
               </ActionBarGroup>
             )}
           </ActionBar>
+          {toolbarTools?.({ body, updateBody: setBody, previewElement: () => previewBodyRef.current })}
           {toolbarRight}
         </div>
       </div>
@@ -2033,6 +2043,7 @@ function MarkdownSplitEditor({
               <span className="vault-website-editor-mobile-expand">{expandButton}</span>
             </div>
             <div
+              ref={previewBodyRef}
               className={`vault-website-editor-preview-body ${
                 previewScheme === "dark" ? "website-preview-force-dark" : "website-preview-force-light"
               }`}
@@ -2263,6 +2274,7 @@ function LetterSplitEditor({
   headerLeft,
   toolbarRight,
   purpose,
+  recordable = false,
 }: {
   fileId: string;
   folderId: string | null;
@@ -2278,6 +2290,9 @@ function LetterSplitEditor({
    * read under the header while writing, since the chain (purpose,
    * brief, talk-through, outline, letter) lives on this page. */
   purpose?: string | null;
+  /** "Read it to them" in the toolbar: guides only, on a letter they can
+   * edit (`LetterRecorder`). */
+  recordable?: boolean;
 }) {
   // The project's photos, fetched the first time the picker opens.
   const [photos, setPhotos] = useState<ProjectPhoto[] | null>(null);
@@ -2350,6 +2365,19 @@ function LetterSplitEditor({
       renderPicturePicker={({ insert, upload, close }) => (
         <PhotoPickerLoader photos={photos} error={photosError} load={loadPhotos} insert={insert} upload={upload} close={close} />
       )}
+      toolbarTools={
+        recordable && editable && folderId
+          ? ({ body, updateBody, previewElement }) => (
+              <LetterRecorder
+                letterFileId={fileId}
+                folderId={folderId}
+                body={body}
+                previewElement={previewElement}
+                onRecorded={(recordingFileId) => updateBody((prev) => setLeadingRecording(prev, recordingFileId))}
+              />
+            )
+          : undefined
+      }
       renderPreview={(body, previewScheme) => (
         <WebsitePageContent>
           <OxRenderer
@@ -4659,6 +4687,7 @@ export default function VaultV2Page() {
                 headerLeft={breadcrumbNode}
                 toolbarRight={letterToolbarRight}
                 purpose={current.file.purpose ?? null}
+                recordable={!!letterSend}
               />
               </>
             ) : fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (

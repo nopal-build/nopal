@@ -1854,4 +1854,10 @@ iframe.ox-video-media {
     break-inside: avoid;
     max-width: 100%;
   }
+  /* A video can't play on paper, and its poster frame printed is a
+     picture nobody chose (a letter's recording is its first block). */
+  .ox-content .ox-gallery-item:has(video),
+  .ox-content video {
+    display: none;
+  }
 }

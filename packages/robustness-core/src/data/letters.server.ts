@@ -393,9 +393,12 @@ export function publicLetterBody(markdown: string, fileId: string): string {
 
 /** Whether the page's body opens with its own `# ` heading. The public
  * page then shows no header title of its own, so the title isn't read
- * twice; the author's page is shown as written. */
+ * twice; the author's page is shown as written. A recording on top
+ * (a one-video gallery, `record-the-letter`) is looked past: the
+ * letter's heading is still its first words. */
 export function bodyOpensWithTitle(body: string): boolean {
-  return /^\s*#\s+\S/.test(body);
+  const rest = body.replace(/^\s*:::gallery[^\n]*\n\s*\[[^\]\n]*\]\([^)\s]*type=video\)\s*\n:::[ \t]*\n/, "");
+  return /^\s*#\s+\S/.test(rest);
 }
 
 /** Every file id the letter names. Nothing else is served under
