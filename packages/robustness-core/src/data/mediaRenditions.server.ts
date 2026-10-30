@@ -16,8 +16,9 @@
  * never processes media. The worker already decodes every attachment to
  * describe it, and has ffmpeg, so it does this too: once at upload
  * (`mediaQueue.server.ts`), and as a backfill from sync-knowledge's own
- * decode. Decodes are bounded here because a burst of uploads can do to
- * the worker what a page did to the app.
+ * decode. Decodes are bounded because a burst of uploads can do to the
+ * worker what a page did to the app: one HEIC at a time, in a child
+ * process (`heicToJpeg`), and a few resizes at a time here.
  */
 
 import sharp from "sharp";
@@ -51,9 +52,6 @@ export function createLimiter(limit: number): <T>(work: () => Promise<T>) => Pro
   };
 }
 
-/** One HEIC decode at a time: the WebAssembly decoder's memory is the
- * whole reason this module is bounded. */
-const heicLimiter = createLimiter(1);
 /** A few resizes at a time: libvips is fast and frugal, but a decoded
  * 12-megapixel JPEG is still tens of MB while it is being resized. */
 const resizeLimiter = createLimiter(3);
@@ -123,7 +121,7 @@ export async function makeRenditionsForFile(fileId: string): Promise<RenditionsO
     if (await imageRenditionsExist(file.s3_key)) return { written: 0, skipped: "already made" };
     const bytes = await downloadFileBytes(file.s3_key);
     const decoded = isHeicContentType(file.content_type)
-      ? await heicLimiter(() => heicToJpeg(bytes))
+      ? await heicToJpeg(bytes)
       : Buffer.from((await normalizeImageForVision(bytes, file.content_type)).base64, "base64");
     return { written: await writeImageRenditions(file.s3_key, decoded), skipped: null };
   }
