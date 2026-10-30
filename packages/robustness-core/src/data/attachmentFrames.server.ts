@@ -53,8 +53,18 @@ export function isVideoContentType(contentType: string): boolean {
   return contentType.startsWith("video/");
 }
 
-/** One JPEG from a HEIC/HEIF photo. */
+/** A HEIF container (HEIC included) opens with an ISO-BMFF `ftyp` box. */
+function isHeifContainer(bytes: Buffer): boolean {
+  return bytes.length >= 12 && bytes.toString("latin1", 4, 8) === "ftyp";
+}
+
+/** One JPEG from a HEIC/HEIF photo. The type comes from the file's name,
+ * and a photo exported as JPEG can keep its `.HEIC` one: 81 of a
+ * project's iPhone photos were JPEG bytes the HEIC decoder refused
+ * ("input buffer is not a HEIC image"), so none were described and none
+ * got renditions (2026-10-30). Bytes that are not HEIF go to `sharp`. */
 export async function heicToJpeg(bytes: Buffer): Promise<Buffer> {
+  if (!isHeifContainer(bytes)) return sharp(bytes).rotate().jpeg({ quality: 85 }).toBuffer();
   const out = await heicConvert({ buffer: new Uint8Array(bytes), format: "JPEG", quality: 0.85 });
   return Buffer.from(out);
 }
