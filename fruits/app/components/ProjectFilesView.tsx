@@ -52,6 +52,7 @@ export function ProjectFilesView({
   onOpen,
   onChanged,
   canFile = true,
+  canCaption = false,
 }: {
   projectFolderId: string;
   rows: ProjectFileRow[];
@@ -64,6 +65,9 @@ export function ProjectFilesView({
   /** The viewer's group gets `edit`: without it, no File as, Correct or
    * Accepted (the server refuses them anyway). */
   canFile?: boolean;
+  /** The viewer's group gets `marks`: a "Caption" control on each photo
+   * in the Gallery (the server refuses without it anyway). */
+  canCaption?: boolean;
 }) {
   const [params, setParams] = useSearchParams();
   const requested = params.get(FILES_PARAM);
@@ -116,7 +120,7 @@ export function ProjectFilesView({
           {q ? `${FOLDER_WORDS[active].noMatch} “${q}”.` : FOLDER_WORDS[active].none}
         </p>
       ) : active === "gallery" ? (
-        <GalleryGrid rows={shown} onOpen={onOpen} />
+        <GalleryGrid rows={shown} onOpen={onOpen} projectFolderId={projectFolderId} canCaption={canCaption} onChanged={onChanged} />
       ) : (
         <ul className={sprinkles({ display: "flex", flexDirection: "column", gap: 6 })} style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {shown.map((row) => (
@@ -129,24 +133,138 @@ export function ProjectFilesView({
 }
 
 /** The Vault's own gallery grid (`vault.css`, `.vault-gallery-grid`). A
- * photo opens in the viewer; a video plays here, with its poster. */
-function GalleryGrid({ rows, onOpen }: { rows: ProjectFileRow[]; onOpen: (row: ProjectFileRow) => void }) {
+ * photo opens in the viewer; a video plays here, with its poster. Under
+ * each, the captions people have written on it, and for anyone who can
+ * mark the project, a control to write one (`PhotoCaptions`). */
+function GalleryGrid({
+  rows,
+  onOpen,
+  projectFolderId,
+  canCaption,
+  onChanged,
+}: {
+  rows: ProjectFileRow[];
+  onOpen: (row: ProjectFileRow) => void;
+  projectFolderId: string;
+  canCaption: boolean;
+  onChanged: () => void;
+}) {
   return (
     <div className="vault-gallery-grid">
-      {rows.map((row) =>
-        row.contentType.startsWith("video/") ? (
-          <figure key={row.fileId} className="vault-gallery-item" style={{ margin: 0 }}>
-            <video controls preload="metadata" poster={row.urls.poster ?? undefined} src={row.urls.original} style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", borderRadius: 4, background: "var(--farground)" }} />
-            <span className="vault-gallery-item-name">{row.caption || row.name}</span>
-          </figure>
-        ) : (
-          <button key={row.fileId} type="button" className="vault-gallery-item" onClick={() => onOpen(row)} style={{ background: "none", border: 0, padding: 0, textAlign: "left", cursor: "pointer" }}>
-            <Thumb src={row.urls.thumb} alt={row.caption || row.name} missingStyle={{ width: "100%", aspectRatio: "1 / 1", borderRadius: 4 }} />
-            <span className="vault-gallery-item-name">{row.caption || row.name}</span>
-          </button>
-        ),
-      )}
+      {rows.map((row) => (
+        <figure key={row.fileId} className="vault-gallery-item" style={{ margin: 0 }}>
+          {row.contentType.startsWith("video/") ? (
+            <>
+              <video controls preload="metadata" poster={row.urls.poster ?? undefined} src={row.urls.original} style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", borderRadius: 4, background: "var(--farground)" }} />
+              <span className="vault-gallery-item-name">{row.caption || row.name}</span>
+            </>
+          ) : (
+            <button type="button" onClick={() => onOpen(row)} style={{ background: "none", border: 0, padding: 0, textAlign: "left", cursor: "pointer", color: "inherit" }}>
+              <Thumb src={row.urls.thumb} alt={row.caption || row.name} missingStyle={{ width: "100%", aspectRatio: "1 / 1", borderRadius: 4 }} />
+              <span className="vault-gallery-item-name">{row.caption || row.name}</span>
+            </button>
+          )}
+          <PhotoCaptions row={row} projectFolderId={projectFolderId} canCaption={canCaption} onChanged={onChanged} />
+        </figure>
+      ))}
     </div>
+  );
+}
+
+/** A person's own words on a photo already on the project (Austin,
+ * 2026-10-22 and 2026-10-29): "that person's comment about the photo,
+ * not a statement about the photo from the person who uploaded it". Each
+ * is a file mark with no act (`/api/graphlog/file-marks`, `text`), dated
+ * the day it was written and credited to its writer, so several people
+ * can each caption one photo, a seeded one included. It reaches the
+ * graph through the marks projection, as that person's highlighted
+ * words, and sync-graph puts the photo on the node it makes
+ * (`markedFileFor`). Not Card text: a Card can't carry a photo its
+ * writer doesn't own without copying it a second time (ADR-019). */
+export function PhotoCaptions({
+  row,
+  projectFolderId,
+  canCaption,
+  onChanged,
+}: {
+  row: Pick<ProjectFileRow, "fileId" | "acts">;
+  projectFolderId: string;
+  canCaption: boolean;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const captions = row.acts.filter((a) => !a.act);
+
+  const save = async () => {
+    const words = text.trim();
+    if (!words) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/graphlog/file-marks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectFolderId, fileId: row.fileId, date: localDate(), text: words }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "The caption didn't save. Try again.");
+        return;
+      }
+      setText("");
+      setOpen(false);
+      onChanged();
+    } catch {
+      setError("The caption didn't save. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (captions.length === 0 && !canCaption) return null;
+  return (
+    <figcaption className={`${textSize.xs} ${sprinkles({ display: "flex", flexDirection: "column", gap: 1, marginTop: 1 })}`} data-photo-captions>
+      {captions.map((c) => (
+        <span key={c.id}>
+          <span style={{ color: semanticColors.textSubtle }}>{c.authorName}:</span> {c.text}
+        </span>
+      ))}
+      {canCaption && !open && (
+        <button type="button" onClick={() => setOpen(true)} style={{ alignSelf: "flex-start", background: "none", border: 0, padding: 0, cursor: "pointer", color: semanticColors.textSubtle, textDecoration: "underline" }}>
+          Caption
+        </button>
+      )}
+      {canCaption && open && (
+        <>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={3}
+            placeholder="What does this show?"
+            aria-label="Caption this photo"
+            className={textSize.sm}
+            style={{ width: "100%", boxSizing: "border-box" }}
+            autoFocus
+          />
+          <span className={sprinkles({ display: "flex", gap: 2 })}>
+            <button type="button" disabled={busy || !text.trim()} className={button({ variant: "outline" })} onClick={() => void save()}>
+              Save
+            </button>
+            <button type="button" disabled={busy} onClick={() => setOpen(false)} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: semanticColors.textSubtle }}>
+              Cancel
+            </button>
+          </span>
+        </>
+      )}
+      {error && (
+        <span style={{ color: semanticColors.textDanger }} role="alert">
+          {error}
+        </span>
+      )}
+    </figcaption>
   );
 }
 

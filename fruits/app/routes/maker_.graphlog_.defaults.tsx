@@ -67,7 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 }
 
-const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice", "sow"]);
+const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice", "sow", "brief", "outline"]);
 
 /**
  * Saves or resets one stage's default-skill override -- see
@@ -177,6 +177,16 @@ const STAGE_META: Record<GraphLogDefaultStage, { title: string; file: string; bl
     title: "Sow",
     file: "skills/SOW.md",
     blurb: "Seeded into a brand new project's SOW.md: how one file from someone's seed packet becomes seed, the day it was said, the person's words exactly, chatter and AI framing left out, plain facts under Noted. Read by the sow stage alone, when a guide presses Sow. A project with no SOW.md uses this default.",
+  },
+  brief: {
+    title: "Brief",
+    file: "skills/BRIEF.md",
+    blurb: "Seeded into a brand new project's BRIEF.md: the brief a guide reads before writing one letter, from the whole graph, in a descent from the problem to the pieces, ending on what has been explored and who leaned which way. Read by the brief stage alone, when a guide starts a letter or asks again. Length is counted by code, never stated here. A project with no BRIEF.md uses this default.",
+  },
+  outline: {
+    title: "Outline",
+    file: "skills/OUTLINE.md",
+    blurb: "Seeded into a brand new project's OUTLINE.md: the outline a guide writes one letter from, built from their talk-through of the brief: each line a logged fact, cited, or a position the guide took, the model adding no reasons of its own; then what the brief holds that the talk skipped, what the talk said that nothing logged backs, and one thing for the client to go do. Read by the brief stage's outline call alone, when a guide writes the outline. Length is counted by code. A project with no OUTLINE.md uses this default.",
   },
 };
 
@@ -365,6 +375,16 @@ export default function FruitsMakerGraphLogDefaults() {
             stage="sow"
             initialContent={defaultSkills.sow.content}
             overridden={defaultSkills.sow.overridden}
+          />
+          <DefaultSkillEditor
+            stage="brief"
+            initialContent={defaultSkills.brief.content}
+            overridden={defaultSkills.brief.overridden}
+          />
+          <DefaultSkillEditor
+            stage="outline"
+            initialContent={defaultSkills.outline.content}
+            overridden={defaultSkills.outline.overridden}
           />
         </div>
       </div>

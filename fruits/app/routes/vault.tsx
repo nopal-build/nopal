@@ -64,6 +64,9 @@ import {
   listFolderChildren,
 } from "robustness-core/data/vault.server";
 import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { canManageLetters, letterEditedSinceSent, sentCopyOf } from "robustness-core/data/letters.server";
+import { LetterSendControl, sendStateAfterSaves, type LetterSendState } from "../components/LetterSendControl";
+import { getLetterBriefForPage, type LetterBriefForPage } from "robustness-core/data/brief.server";
 import { nameSyncedAuthors, type ListedFile } from "robustness-core/data/syncedAuthors.server";
 // Pilot route for server request-performance tracing (see the
 // `fruits-performance-monitoring` garden seed) -- the Vault loader is the
@@ -110,6 +113,10 @@ import { LayoutFlipIcon } from "stamps/LayoutFlipIcon";
 import { useStickyPaneMaxHeight } from "stamps/useStickyPaneMaxHeight";
 import OxEditor from "../components/OxEditor";
 import OxRenderer from "../components/OxRenderer";
+import { LetterBrief, isLetterOnlyItsHeading } from "../components/LetterBrief";
+import { LetterRecorder } from "../components/LetterRecorder";
+import { setLeadingRecording } from "../components/letterRecording";
+import { letterLengthLabel } from "../components/letterLength";
 import { ProjectView } from "../components/ProjectView";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
@@ -299,6 +306,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let viewerIsOwnerTierOnProject = false;
   // Runs its people (`people`, a Guide): the "People…" item goes to the Maker.
   let viewerGuidesProject = false;
+  // A letter's page, for a guide (`canManageLetters`, staff or guiding;
+  // asked for every viewer, the owner too, since `viewerGuidesProject`
+  // above is only computed when the viewer isn't the file's owner and
+  // a letter is owned by the project's creator): the brief, and the
+  // controls around it. Null on any other file, and for anyone else.
+  let letterBrief: LetterBriefForPage | null = null;
+  // The send's three states, read here (`sentCopyOf` is server-only) and
+  // handed to the toolbar; a send revalidates to read them back.
+  let letterSend: LetterSendState | null = null;
 
   if (fileParam) {
     const file = await timeRequestPerf("fn", "getFileRefById", { fileId: fileParam }, () =>
@@ -351,6 +367,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
       viewerGuidesProject = Boolean(role?.guiding);
+    }
+    if (fileFolderId && isLettersFolderType(ancestry[ancestry.length - 1]?.folder_type) && isMarkdownFile(file)) {
+      const roleForLetter = await timeRequestPerf("fn", "getProjectRoleForFolderId", { folderId: fileFolderId }, () =>
+        getProjectRoleForFolderId(fileFolderId, user._id),
+      );
+      if (canManageLetters(user, roleForLetter)) {
+        letterBrief = await timeRequestPerf("fn", "getLetterBriefForPage", { fileId: file._id }, () => getLetterBriefForPage(file._id));
+        letterSend = { sentDate: sentCopyOf(file)?.date ?? null, sentCount: sentCopyOf(file)?.count ?? 0, editedSinceSent: letterEditedSinceSent(file) };
+      }
     }
     const websiteAnchorForFile = findWebsiteAnchor(ancestry);
     const websitePageMetaForFile =
@@ -452,6 +477,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
     viewerGuidesProject,
+    letterBrief,
+    letterSend,
     // The nav: a Guide's Maker tab stays lit while they're in here.
     ...(await navFor(user._id, memberships)),
   };
@@ -1605,6 +1632,8 @@ function MarkdownSplitEditor({
   renderPicturePicker,
   spellCheck = false,
   autosave = false,
+  showLength = false,
+  toolbarTools,
 }: {
   fileId: string;
   initialContent: string;
@@ -1620,9 +1649,14 @@ function MarkdownSplitEditor({
    * log does (`TodayLog`'s `scheduleSave`), instead of waiting for the
    * Save button. Off by default; `LetterSplitEditor` turns it on
    * (Austin, 2026-10-27: a letter "should auto save, like the daily
-   * log, not need a click like the website"). The Save button goes away;
-   * the row shows "Saving…" or "Unsaved" and nothing when clean. */
+   * log, not need a click like the website"). The Save button goes away
+   * and nothing takes its place: like the log, the save is silent
+   * (Austin, 2026-10-29). */
   autosave?: boolean;
+  /** Show the body's word count and read time in the save row, updating
+   * as the guide types. Off by default; `LetterSplitEditor` turns it on
+   * (Austin, 2026-10-29). */
+  showLength?: boolean;
   /** Pictures dropped, pasted or picked into the Markdown pane: given the
    * files, stores them and returns the markdown to put at the cursor,
    * one string per file (`LetterSplitEditor` uploads each beside the
@@ -1666,8 +1700,19 @@ function MarkdownSplitEditor({
    * changes outside the render-prop `renderPreview` already gets them
    * through (e.g. `SyncApiRunEditor`). */
   onBodyChange?: (body: string) => void;
+  /** Rendered in the toolbar before `toolbarRight`, with the live body, a
+   * way to change it (the change autosaves like typing), and the preview
+   * pane's element. `LetterSplitEditor`'s "Read it to them": the
+   * recording records the preview and lands as the letter's first block. */
+  toolbarTools?: (ctx: {
+    body: string;
+    updateBody: (update: (prev: string) => string) => void;
+    previewElement: () => HTMLElement | null;
+    setReading: (reading: boolean) => void;
+  }) => ReactNode;
 }) {
   const initialBody = useMemo(() => splitFrontmatter(initialContent).body, [initialContent]);
+  const previewBodyRef = useRef<HTMLDivElement | null>(null);
   const [body, setBody] = useState(initialBody);
   const [isSaving, setIsSaving] = useState(false);
   const lastSavedBodyRef = useRef(initialBody);
@@ -1761,6 +1806,13 @@ function MarkdownSplitEditor({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [expanded]);
 
+  // Reading: the rendered page alone, filling the window, with only the
+  // toolbar tools above it. `LetterRecorder` turns it on for a recording
+  // so the guide reads the letter as the client will see it and the
+  // video is the letter, not the editor (Austin, 2026-10-29). The page
+  // scrolls inside the preview body, so the recorded region holds still.
+  const [reading, setReading] = useState(false);
+
   const isMobile = useIsMobileWebsiteEditor();
   const markdownPaneRef = useRef<HTMLDivElement | null>(null);
   // A real `height` (below), not a `max-height` -- the pane should always
@@ -1829,91 +1881,100 @@ function MarkdownSplitEditor({
   );
 
   const saveButtonLabel = isSaving ? "Saving\u2026" : "Save";
-  // With autosave there is nothing to click: the row says what the
-  // editor is doing, and says nothing while the text is clean.
-  const saveStatus = isSaving ? "Saving\u2026" : isDirty ? "Unsaved" : "";
+  const lengthLabel = useMemo(() => (showLength ? letterLengthLabel(body) : null), [showLength, body]);
 
   return (
-    <div className={`vault-website-editor${expanded ? " vault-website-editor--expanded" : ""}`}>
+    <div
+      className={`vault-website-editor${expanded || reading ? " vault-website-editor--expanded" : ""}`}
+      style={reading ? { display: "flex", flexDirection: "column", overflow: "hidden" } : undefined}
+    >
       <div className="vault-website-editor-toolbar">
-        {headerLeft}
+        {!reading && headerLeft}
         <div className="vault-website-editor-toolbar-actions">
-          {toolbarLeft}
-          <ActionBar>
-            <ActionBarGroup>
-              <ActionBarButton
-                active={previewScheme === "light"}
-                onClick={() => setPreviewScheme("light")}
-                aria-label="Preview in light mode"
-              >
-                Light
-              </ActionBarButton>
-              <ActionBarButton
-                active={previewScheme === "dark"}
-                onClick={() => setPreviewScheme("dark")}
-                aria-label="Preview in dark mode"
-              >
-                Dark
-              </ActionBarButton>
-            </ActionBarGroup>
-            {showScratchPadLink && (
+          {!reading && toolbarLeft}
+          {!reading && (
+            <ActionBar>
               <ActionBarGroup>
-                {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
-                    itself uses (`stamps/actionBar.css`), rather than extending
-                    that shared component with an `href` variant -- matches this
-                    codebase's own established convention (`button.css`'s own
-                    recipe, `link.css`, `surfaceBase`, ...) of applying a
-                    recipe's className polymorphically at each call site instead
-                    of baking router-awareness into a router-agnostic `stamps`
-                    component. Opens in a new tab -- this is a REFERENCE jump
-                    (going to look up/try a directive's own vocabulary), not a
-                    navigation away from the file currently being edited here.
-                    Website pages only -- not relevant to a non-website
-                    markdown editor like `SyncApiRunEditor`. */}
-                <Link
-                  to="/maker/stamps/scratch"
-                  className={actionBarButtonClass({ active: false })}
-                  aria-label="Open the website directives scratch pad in a new tab"
+                <ActionBarButton
+                  active={previewScheme === "light"}
+                  onClick={() => setPreviewScheme("light")}
+                  aria-label="Preview in light mode"
                 >
-                  Scratch pad
-                </Link>
-              </ActionBarGroup>
-            )}
-            {/* Flip layout is genuinely inert on mobile (one pane shows at a
-                time regardless, controlled by the bottom bar's own Preview/
-                Markdown toggle, not `mdSide`) and Expand already has its own
-                mobile equivalent inside each pane's own label row
-                (`.vault-website-editor-mobile-expand`, below) -- rendering
-                BOTH here too on mobile would just be a confusing, partly-
-                inert duplicate. Checked in JS (`isMobile`), not hidden via
-                CSS media query like the rest of this toolbar's surroundings
-                used to be -- this group is the ONE part of the merged row
-                that's genuinely desktop-only; everything else (Light/Dark,
-                Scratch pad, `headerLeft`, `toolbarLeft`, `toolbarRight`)
-                stays reachable on every width now, wrapping instead of
-                disappearing -- see `vault.css`'s own comment on this. */}
-            {!isMobile && (
-              <ActionBarGroup>
-                <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">
-                  <LayoutFlipIcon mdSide={mdSide} />
+                  Light
                 </ActionBarButton>
-                {expandButton}
+                <ActionBarButton
+                  active={previewScheme === "dark"}
+                  onClick={() => setPreviewScheme("dark")}
+                  aria-label="Preview in dark mode"
+                >
+                  Dark
+                </ActionBarButton>
               </ActionBarGroup>
-            )}
-          </ActionBar>
-          {toolbarRight}
+              {showScratchPadLink && (
+                <ActionBarGroup>
+                  {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
+                      itself uses (`stamps/actionBar.css`), rather than extending
+                      that shared component with an `href` variant -- matches this
+                      codebase's own established convention (`button.css`'s own
+                      recipe, `link.css`, `surfaceBase`, ...) of applying a
+                      recipe's className polymorphically at each call site instead
+                      of baking router-awareness into a router-agnostic `stamps`
+                      component. Opens in a new tab -- this is a REFERENCE jump
+                      (going to look up/try a directive's own vocabulary), not a
+                      navigation away from the file currently being edited here.
+                      Website pages only -- not relevant to a non-website
+                      markdown editor like `SyncApiRunEditor`. */}
+                  <Link
+                    to="/maker/stamps/scratch"
+                    className={actionBarButtonClass({ active: false })}
+                    aria-label="Open the website directives scratch pad in a new tab"
+                  >
+                    Scratch pad
+                  </Link>
+                </ActionBarGroup>
+              )}
+              {/* Flip layout is genuinely inert on mobile (one pane shows at a
+                  time regardless, controlled by the bottom bar's own Preview/
+                  Markdown toggle, not `mdSide`) and Expand already has its own
+                  mobile equivalent inside each pane's own label row
+                  (`.vault-website-editor-mobile-expand`, below) -- rendering
+                  BOTH here too on mobile would just be a confusing, partly-
+                  inert duplicate. Checked in JS (`isMobile`), not hidden via
+                  CSS media query like the rest of this toolbar's surroundings
+                  used to be -- this group is the ONE part of the merged row
+                  that's genuinely desktop-only; everything else (Light/Dark,
+                  Scratch pad, `headerLeft`, `toolbarLeft`, `toolbarRight`)
+                  stays reachable on every width now, wrapping instead of
+                  disappearing -- see `vault.css`'s own comment on this. */}
+              {!isMobile && (
+                <ActionBarGroup>
+                  <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">
+                    <LayoutFlipIcon mdSide={mdSide} />
+                  </ActionBarButton>
+                  {expandButton}
+                </ActionBarGroup>
+              )}
+            </ActionBar>
+          )}
+          {toolbarTools?.({ body, updateBody: setBody, previewElement: () => previewBodyRef.current, setReading })}
+          {!reading && toolbarRight}
         </div>
       </div>
 
       <div
         className="vault-website-editor-panes"
-        data-mobile-view={mobileView}
-        style={{ flexDirection: mdSide === "left" ? "row" : "row-reverse" }}
+        data-mobile-view={reading ? "preview" : mobileView}
+        style={{
+          flexDirection: mdSide === "left" ? "row" : "row-reverse",
+          ...(reading && { flex: "1 1 auto", minHeight: 0, alignItems: "stretch" }),
+        }}
       >
+        {/* Hidden, not unmounted, while reading: the textarea keeps its
+            cursor and undo history for when the recording ends. */}
         <div
           ref={markdownPaneRef}
           className="vault-website-editor-markdown"
-          style={measuredHeight != null ? { height: measuredHeight } : undefined}
+          style={reading ? { display: "none" } : measuredHeight != null ? { height: measuredHeight } : undefined}
         >
           <div className="vault-website-editor-pane-label">
             <span>Markdown</span>
@@ -1961,11 +2022,12 @@ function MarkdownSplitEditor({
             }
           />
           <div className="vault-website-editor-save-row">
-            {autosave ? (
-              <span className="vault-website-editor-save-status" aria-live="polite">
-                {saveStatus}
+            {lengthLabel && (
+              <span className="text-xs font-mono subtle-text" style={{ alignSelf: "center", marginRight: "auto" }}>
+                {lengthLabel}
               </span>
-            ) : (
+            )}
+            {!autosave && (
               <button
                 type="button"
                 className="vault-website-editor-save-btn"
@@ -2002,13 +2064,17 @@ function MarkdownSplitEditor({
           </div>
         </div>
 
-        <div className="vault-website-editor-preview">
-          <Surface className="vault-website-editor-preview-surface">
-            <div className="vault-website-editor-pane-label">
+        <div className="vault-website-editor-preview" style={reading ? { display: "flex", flexDirection: "column" } : undefined}>
+          <Surface
+            className="vault-website-editor-preview-surface"
+            style={reading ? { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" } : undefined}
+          >
+            <div className="vault-website-editor-pane-label" style={reading ? { display: "none" } : undefined}>
               <span>Preview</span>
               <span className="vault-website-editor-mobile-expand">{expandButton}</span>
             </div>
             <div
+              ref={previewBodyRef}
               className={`vault-website-editor-preview-body ${
                 previewScheme === "dark" ? "website-preview-force-dark" : "website-preview-force-light"
               }`}
@@ -2022,7 +2088,12 @@ function MarkdownSplitEditor({
               // `SyncApiRunEditor`) never opts into the `--website-*` tokens
               // at all in its own `renderPreview`, so this is simply inert
               // for it.
-              style={{ background: "var(--website-bg-page)" }}
+              style={{
+                background: "var(--website-bg-page)",
+                // `isolation`: Element Capture records only an element that
+                // makes its own stacking context.
+                ...(reading && { flex: "1 1 auto", minHeight: 0, overflowY: "auto", isolation: "isolate" }),
+              }}
             >
               {renderPreview(body, previewScheme)}
             </div>
@@ -2030,7 +2101,7 @@ function MarkdownSplitEditor({
         </div>
       </div>
 
-      <div className="vault-website-editor-mobile-bar">
+      <div className="vault-website-editor-mobile-bar" style={reading ? { display: "none" } : undefined}>
         <ActionBarGroup>
           <ActionBarButton
             active={mobileView === "preview"}
@@ -2047,20 +2118,19 @@ function MarkdownSplitEditor({
             Markdown
           </ActionBarButton>
         </ActionBarGroup>
-        {/* The same picture button the desktop save row has; that row is
-            hidden on narrow screens (`vault.css`). */}
+        {/* The same length and picture button the desktop save row has;
+            that row is hidden on narrow screens (`vault.css`). */}
+        {lengthLabel && (
+          <span className="text-xs font-mono subtle-text" style={{ alignSelf: "center" }}>
+            {lengthLabel}
+          </span>
+        )}
         {onInsertFiles && editable && (
           <button type="button" className="vault-toolbar-btn" onClick={openAddPicture} disabled={insertStatus?.startsWith("Adding") ?? false} aria-expanded={pickerOpen}>
             Add picture
           </button>
         )}
-        {/* With autosave there is nothing to click here either: the same
-            status the desktop save row shows. */}
-        {autosave ? (
-          <span className="vault-website-editor-save-status" aria-live="polite">
-            {saveStatus}
-          </span>
-        ) : (
+        {!autosave && (
           <button
             type="button"
             className="vault-website-editor-mobile-save"
@@ -2239,6 +2309,7 @@ function LetterSplitEditor({
   headerLeft,
   toolbarRight,
   purpose,
+  recordable = false,
 }: {
   fileId: string;
   folderId: string | null;
@@ -2254,6 +2325,9 @@ function LetterSplitEditor({
    * read under the header while writing, since the chain (purpose,
    * brief, talk-through, outline, letter) lives on this page. */
   purpose?: string | null;
+  /** "Read it to them" in the toolbar: guides only, on a letter they can
+   * edit (`LetterRecorder`). */
+  recordable?: boolean;
 }) {
   // The project's photos, fetched the first time the picker opens.
   const [photos, setPhotos] = useState<ProjectPhoto[] | null>(null);
@@ -2323,9 +2397,24 @@ function LetterSplitEditor({
       onInsertFiles={insertPictures}
       spellCheck
       autosave
+      showLength
       renderPicturePicker={({ insert, upload, close }) => (
         <PhotoPickerLoader photos={photos} error={photosError} load={loadPhotos} insert={insert} upload={upload} close={close} />
       )}
+      toolbarTools={
+        recordable && editable && folderId
+          ? ({ body, updateBody, previewElement, setReading }) => (
+              <LetterRecorder
+                letterFileId={fileId}
+                folderId={folderId}
+                body={body}
+                previewElement={previewElement}
+                setReading={setReading}
+                onRecorded={(recordingFileId) => updateBody((prev) => setLeadingRecording(prev, recordingFileId))}
+              />
+            )
+          : undefined
+      }
       renderPreview={(body, previewScheme) => (
         <WebsitePageContent>
           <OxRenderer
@@ -2535,6 +2624,8 @@ export default function VaultV2Page() {
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
     viewerGuidesProject,
+    letterBrief,
+    letterSend,
   } = useLoaderData<typeof loader>();
 
   const revalidator = useRevalidator();
@@ -3601,6 +3692,23 @@ export default function VaultV2Page() {
     [apiJson],
   );
 
+  // A letter's save, which also says it landed: the send control's
+  // "edited since" comes with the loader and the save doesn't revalidate
+  // (above), so without this a sent letter edited in place kept saying
+  // "Sent" until a reload (Austin, 2026-10-29). A send leaves the draft's
+  // `updated_at` alone (`letterSend.server.ts`), so the send clears this
+  // itself rather than waiting for a new load key.
+  const [letterSavedOver, setLetterSavedOver] = useState<string | null>(null);
+  const loadedLetterKey = current.kind === "file" ? `${current.file._id}-${current.file.updated_at}` : null;
+  const handleSaveLetter = useCallback(
+    async (fileId: string, content: string) => {
+      const saved = await handleSaveWebsitePage(fileId, content);
+      if (saved) setLetterSavedOver(loadedLetterKey);
+      return saved;
+    },
+    [handleSaveWebsitePage, loadedLetterKey],
+  );
+
   // A sync-api run's own `.md` notes save (see `SyncApiRunEditor` above) --
   // identical shape/behavior to `handleSaveWebsitePage` (returns the
   // promise so the shared `MarkdownSplitEditor` Save button can await it),
@@ -4110,10 +4218,23 @@ export default function VaultV2Page() {
   // above), and there's no equivalent "create a new run" action this
   // header could trigger (runs are created via the analysis's own CLI/API
   // flow — see the `vault` skill's "Sync types" section).
-  // A letter's toolbar: the public link while it is shared (the
-  // switch itself lives on the project's Letters tab), then Actions.
+  // A letter's toolbar: the send (for a guide: the brief is on the page
+  // only for one), the public link while it is on (the switch itself
+  // lives on the project's Letters tab), then Actions. The sent fields
+  // come with the loader, so a send revalidates to read them back; a
+  // save since the load moves them on (`handleSaveLetter`).
   const letterToolbarRight = (
     <>
+      {current.kind === "file" && letterSend && (
+        <LetterSendControl
+          fileId={current.file._id}
+          state={sendStateAfterSaves(letterSend, loadedLetterKey, letterSavedOver)}
+          onSent={() => {
+            setLetterSavedOver(null);
+            revalidator.revalidate();
+          }}
+        />
+      )}
       {current.kind === "file" && current.file.shared_at && (
         <CopyLinkButton path={`/public/letter/${current.file._id}`} />
       )}
@@ -4604,7 +4725,19 @@ export default function VaultV2Page() {
             ) : isLettersFolderType(fileFolderType) && isMarkdownFile(current.file) ? (
               // A letter (see `LetterSplitEditor` above): the
               // website page's split editor, previewing what the client's
-              // public page shows.
+              // public page shows. Above it, for a guide, the brief: the
+              // chain (purpose, brief, talk-through, outline, letter)
+              // lives on this page.
+              <>
+              {letterBrief && (
+                <LetterBrief
+                  key={`brief-${current.file._id}`}
+                  fileId={current.file._id}
+                  initial={letterBrief}
+                  hasPurpose={!!current.file.purpose?.trim()}
+                  openByDefault={isLetterOnlyItsHeading(current.file.content ?? "")}
+                />
+              )}
               <LetterSplitEditor
                 key={`${current.file._id}-${current.file.updated_at}`}
                 fileId={current.file._id}
@@ -4612,11 +4745,13 @@ export default function VaultV2Page() {
                 projectFolderId={current.ancestry.find((f) => isProjectAnchor(f))?._id ?? null}
                 initialContent={current.file.content ?? ""}
                 editable={canWriteCurrentFile}
-                onSave={handleSaveWebsitePage}
+                onSave={handleSaveLetter}
                 headerLeft={breadcrumbNode}
                 toolbarRight={letterToolbarRight}
                 purpose={current.file.purpose ?? null}
+                recordable={!!letterSend}
               />
+              </>
             ) : fileFolderType === "sync-api" && isMarkdownFile(current.file) ? (
               // A sync-api analysis run's own `<run>.md` (see the `vault`
               // skill's "Sync types" section) -- same reasoning as the

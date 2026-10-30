@@ -36,6 +36,8 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { ShareLinkControl } from "./ShareLinkControl";
+import { dayLabel } from "./dayLabel";
+import { BRIEF_RUN_NOTE } from "./LetterBrief";
 import { localDateString } from "./TodayLog";
 
 export function letterPublicPath(fileId: string): string {
@@ -233,7 +235,10 @@ export function NewLetterModal({
           <Input name="name" label="Title" required autoFocus />
           <Input type="textarea" name="purpose" label="What is this letter for?" required />
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
-            One sentence, in your words. It goes into the project's record as yours, today.
+            A sentence or three, in your words: what the letter is about, what it has to settle, and for whom. It goes into the project's record as yours, today, and the brief is written from it.
+          </p>
+          <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-run-note>
+            {BRIEF_RUN_NOTE}
           </p>
           {error && (
             <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert">
@@ -273,10 +278,10 @@ function LetterRowView({
   const publicPath = letterPublicPath(row.fileId);
   const vaultPath = `/vault?file=${row.fileId}`;
   // The title opens exactly what the client sees (Austin, 2026-10-21): the
-  // public page. With the link off that page admits a manager as a
+  // letter's page. Before the send that page admits a manager as a
   // preview, so a manager's title always goes there; a reader's title is
-  // a link only once it's shared. The raw file is "Edit".
-  const href = row.sharedAt || manage ? publicPath : null;
+  // a link only once it's sent. The raw file is "Edit".
+  const href = row.sentDate || manage ? publicPath : null;
   const title = href ? (
     <a href={href} className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} style={{ color: "inherit" }}>
       {row.title}
@@ -291,7 +296,18 @@ function LetterRowView({
         <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
           {row.name} · updated {longDate(row.updatedAt)}
         </span>
-        {row.sharedAt && <Badge variant="success">Shared</Badge>}
+        {row.sentDate && (
+          <Badge variant="success">
+            Sent {dayLabel(row.sentDate)}
+            {row.sentCount > 1 && ", updated"}
+          </Badge>
+        )}
+        {manage && row.editedSinceSent && (
+          <span className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-letter-edited-since>
+            edited since
+          </span>
+        )}
+        {row.sharedAt && <Badge variant="neutral">Link on</Badge>}
       </div>
       {row.purpose && (
         <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textSubtle }} data-letter-purpose>
@@ -305,7 +321,13 @@ function LetterRowView({
       )}
       {manage && (
         <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 })}>
-          <ShareLinkControl what="this letter" path={publicPath} endpoint={`/api/letter/${row.fileId}/share`} sharedAt={row.sharedAt} onChanged={onChanged} />
+          {row.sentDate ? (
+            <ShareLinkControl what="this letter" path={publicPath} endpoint={`/api/letter/${row.fileId}/share`} sharedAt={row.sharedAt} onChanged={onChanged} />
+          ) : (
+            <span className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-letter-send-first>
+              Send it first. The link is a second step.
+            </span>
+          )}
           <input
             ref={replaceInput}
             type="file"

@@ -39,6 +39,7 @@ import {
   moveTraceLine,
 } from "./graphLogMarks.server";
 import { createHash } from "node:crypto";
+import { syncLettersProjection } from "./letterSync.server";
 
 /** The reserved folder name daily-log-sync's own copies land in, directly
  * inside a project's `syncs` folder — a plain, ordinary folder (no
@@ -443,6 +444,9 @@ export async function runDailyLogSync(
   // extracted once with everything in it.
   const projected = await syncMarksProjection(projectFolder);
   result.marksWritten = projected.written;
+  // Sent letters are entries too (`letterSync.server.ts`): rebuilt here as
+  // well as on send, so an archived letter's file empties on the next sync.
+  await syncLettersProjection(projectFolder);
 
   if (uncopied.length > 0) {
     result.incomplete.push(

@@ -34,7 +34,17 @@ import { navFor } from "../data/nav.server";
 
 export const meta: MetaFunction = () => [{ title: "O.No · M.GraphLog" }];
 
-const RECENT_RUNS_LIMIT = 20;
+/** Runs shown at first and added per "Show more"; the ceiling keeps a
+ * hand-edited `?runs=` from pulling the whole table. */
+const RECENT_RUNS_STEP = 20;
+const RECENT_RUNS_MAX = 200;
+
+/** `?runs=` as a whole number of steps between one step and the ceiling. */
+function recentRunsLimit(param: string | null): number {
+  const n = Number(param);
+  if (!Number.isFinite(n) || n <= RECENT_RUNS_STEP) return RECENT_RUNS_STEP;
+  return Math.min(RECENT_RUNS_MAX, Math.ceil(n / RECENT_RUNS_STEP) * RECENT_RUNS_STEP);
+}
 
 type MakerRangeDays = 7 | 30;
 
@@ -59,7 +69,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const days: MakerRangeDays = url.searchParams.get("range") === "30" ? 30 : 7;
   const usage = await getGraphLogUsageSummary(days);
 
-  const recentRuns = await listRecentGraphLogRuns(RECENT_RUNS_LIMIT);
+  const runsLimit = recentRunsLimit(url.searchParams.get("runs"));
+  const recentRuns = await listRecentGraphLogRuns(runsLimit);
   const spendByRunId = await getGraphLogRunSpends(recentRuns);
 
   const projectFolderIds = new Set([
@@ -84,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     humanById[h._id] = { name: h.name, email: h.email };
   });
 
-  return { user, ...nav, days, usage, recentRuns, spendByRunId, projectNameById, humanById };
+  return { user, ...nav, days, runsLimit, usage, recentRuns, spendByRunId, projectNameById, humanById };
     },
   );
 }
@@ -177,6 +188,7 @@ const STAGE_LABELS: Record<GraphLogStage, string> = {
   "graph-structure": "Graph Structure",
   "graph-project-view": "Graph Project View",
   sow: "Sow",
+  brief: "Brief",
 };
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -253,11 +265,15 @@ function RunStatusBadge({ run }: { run: GraphLogRun }) {
 }
 
 function RecentRunsSection({
+  days,
+  runsLimit,
   runs,
   spendByRunId,
   projectNameById,
   humanNameById,
 }: {
+  days: MakerRangeDays;
+  runsLimit: number;
   runs: GraphLogRun[];
   spendByRunId: Record<string, GraphLogRunSpend>;
   projectNameById: Record<string, string>;
@@ -274,7 +290,9 @@ function RecentRunsSection({
           Default Prompts →
         </Link>
       </div>
-      <div className={`${surfaceBase} p-5`}>
+      {/* Scrolls inside its own box, so more runs never push the usage
+          sections down the page. */}
+      <div className={`${surfaceBase} p-5`} style={{ maxHeight: "560px", overflowY: "auto" }}>
         {runs.length === 0 ? (
           <p className="text-sm subtle-text" style={{ margin: 0 }}>
             No GraphLog runs recorded yet.
@@ -309,6 +327,18 @@ function RecentRunsSection({
             </Link>
           ))
         )}
+        {/* A full page means there may be older runs; the ceiling ends it. */}
+        {runs.length === runsLimit && runsLimit < RECENT_RUNS_MAX && (
+          <div className="pt-3">
+            <Link
+              to={`/maker/graphlog?range=${days}&runs=${runsLimit + RECENT_RUNS_STEP}`}
+              preventScrollReset
+              className={`${link} ${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
+            >
+              Show {RECENT_RUNS_STEP} more
+            </Link>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -317,7 +347,7 @@ function RecentRunsSection({
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 export default function FruitsMakerGraphLog() {
-  const { days, usage, recentRuns, spendByRunId, projectNameById, humanById } = useLoaderData<typeof loader>();
+  const { days, runsLimit, usage, recentRuns, spendByRunId, projectNameById, humanById } = useLoaderData<typeof loader>();
   const humanNameById: Record<string, string> = Object.fromEntries(
     Object.entries(humanById).map(([id, h]) => [id, h.name]),
   );
@@ -355,6 +385,8 @@ export default function FruitsMakerGraphLog() {
         </div>
 
         <RecentRunsSection
+          days={days}
+          runsLimit={runsLimit}
           runs={recentRuns}
           spendByRunId={spendByRunId}
           projectNameById={projectNameById}

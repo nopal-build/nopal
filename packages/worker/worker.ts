@@ -26,6 +26,8 @@ import { runGraphStructure } from "robustness-core/data/graphStructure.server";
 import { coverageFromJobResult, readmeChangedFromJobResult, runGraphProjectView, syncReadmeIncompleteBanner } from "robustness-core/data/graphProjectView.server";
 import { runGraphLogPipeline } from "robustness-core/data/graphLogAgent.server";
 import { runSow } from "robustness-core/data/sow.server";
+import { runBrief } from "robustness-core/data/brief.server";
+import { runOutline } from "robustness-core/data/outline.server";
 import {
   resetProjectView,
   resetGraph,
@@ -53,6 +55,12 @@ import {
   type LetterPdfJobResult,
 } from "robustness-core/data/letterPdf.server";
 import { renderLetterPdf } from "robustness-core/data/letterPdfRender.server";
+import {
+  LETTER_RECORDING_QUEUE_NAME,
+  type LetterRecordingJobData,
+  type LetterRecordingJobResult,
+} from "robustness-core/data/letterRecordingQueue.server";
+import { prepareLetterRecording } from "robustness-core/data/letterRecording.server";
 import {
   PUBLIC_ZIP_QUEUE_NAME,
   runPublicFolderZip,
@@ -115,6 +123,18 @@ async function runGraphLogJob(
     }
     case "sow": {
       const result = await perf.time("sow", "fn", "runSow", null, () => runSow(projectFolder, job.data.actingHumanId, { log: onProgress, runId: perf.runId }));
+      if (!result.ok) throw new Error(result.error);
+      return result;
+    }
+    case "brief": {
+      const fileId = job.data.fileId;
+      if (!fileId) throw new Error("A brief job names the letter it is for");
+      // One stage, two documents: the brief, or the outline from the
+      // guide's talk-through (`job.data.kind`).
+      const result =
+        job.data.kind === "outline"
+          ? await perf.time("brief", "fn", "runOutline", null, () => runOutline(projectFolder, fileId, job.data.actingHumanId, { log: onProgress, runId: perf.runId }))
+          : await perf.time("brief", "fn", "runBrief", null, () => runBrief(projectFolder, fileId, job.data.actingHumanId, { log: onProgress, runId: perf.runId }));
       if (!result.ok) throw new Error(result.error);
       return result;
     }
@@ -497,6 +517,36 @@ letterPdfWorker.on("failed", (job, err) => {
 });
 console.log(`[worker] Letter PDF worker listening on queue "${LETTER_PDF_QUEUE_NAME}" (concurrency ${LETTER_PDF_CONCURRENCY}).`);
 
+// ── Letter recordings ─────────────────────────────────────────────
+// A guide's recording of a letter, read aloud, made into the `.web.mp4`
+// the CLI's video prep makes (`letterRecording.server.ts`). Its own
+// queue so a transcode never holds up the media queue's posters; one at
+// a time, and a long lock, because a ten-minute recording takes minutes.
+const LETTER_RECORDING_CONCURRENCY = 1;
+
+const letterRecordingWorker = new Worker<LetterRecordingJobData, LetterRecordingJobResult, string>(
+  LETTER_RECORDING_QUEUE_NAME,
+  (job) =>
+    prepareLetterRecording(job.data.fileId, (line) => {
+      job.log(line).catch((err) => console.error("Failed to write job log line:", err));
+    }),
+  {
+    connection: { url: REDIS_URL, maxRetriesPerRequest: null },
+    concurrency: LETTER_RECORDING_CONCURRENCY,
+    lockDuration: 30 * 60 * 1000,
+  },
+);
+letterRecordingWorker.on("completed", (job) => {
+  const r = job.returnvalue;
+  console.log(
+    `[worker] letter recording ${job.data.fileId}: ${"skipped" in r ? `skipped (${r.skipped})` : `${r.size} bytes at ${r.s3Key}${r.poster ? ", poster written" : ""}`}.`,
+  );
+});
+letterRecordingWorker.on("failed", (job, err) => {
+  console.error(`[worker] letter recording ${job?.data.fileId} failed:`, err);
+});
+console.log(`[worker] Letter recording worker listening on queue "${LETTER_RECORDING_QUEUE_NAME}" (concurrency ${LETTER_RECORDING_CONCURRENCY}).`);
+
 // Graceful shutdown — let an in-flight job finish (or fail cleanly) rather
 // than abandon it mid-run: GraphLog's own idempotency makes a clean
 // re-run of an ABANDONED job safe, but an UNGRACEFULLY killed one can
@@ -506,7 +556,7 @@ async function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[worker] received ${signal}, finishing in-flight jobs before exit…`);
-  await Promise.all([graphLogWorker.close(), adminScriptsWorker.close(), publicZipWorker.close(), mediaWorker.close(), letterPdfWorker.close()]);
+  await Promise.all([graphLogWorker.close(), adminScriptsWorker.close(), publicZipWorker.close(), mediaWorker.close(), letterPdfWorker.close(), letterRecordingWorker.close()]);
   process.exit(0);
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));

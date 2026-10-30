@@ -66,7 +66,7 @@ import OxRenderer from "../components/OxRenderer";
 import { ProjectFilesView } from "../components/ProjectFilesView";
 import { LettersView } from "../components/LettersView";
 import { ShareLinkControl } from "../components/ShareLinkControl";
-import { canManageLetters, listLetters, sharedLetterLinks } from "robustness-core/data/letters.server";
+import { canManageLetters, listLetters, sentLetterLinks } from "robustness-core/data/letters.server";
 import { letterPdfState } from "robustness-core/data/letterPdf.server";
 import { ProjectView } from "../components/ProjectView";
 import type { CitedLogsForPen, MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
@@ -134,13 +134,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Read on every tab: the banner's tile lists the shared ones for
   // everyone on the project, a Client included (they have no tab).
   const letterRows = await listLetters(folder);
-  const sharedLetters = sharedLetterLinks(letterRows);
+  const sharedLetters = sentLetterLinks(letterRows);
   const letters =
     tab === "letters"
       ? await Promise.all(
           letterRows.map(async (row) => ({
             ...row,
-            pdf: manageLetters && row.sharedAt ? await letterPdfState(row.fileId, row.contentHash) : null,
+            // The PDF is of the sent copy and exists only while the link is on.
+            pdf: manageLetters && row.sharedAt && row.sentHash ? await letterPdfState(row.fileId, row.sentHash) : null,
           })),
         )
       : null;
@@ -730,6 +731,7 @@ export default function NewspaperRoute() {
               onOpen={(row) => (openInVault ? navigate(`/vault?file=${row.serveId}`) : window.open(row.urls.display, "_blank"))}
               onChanged={() => revalidator.revalidate()}
               canFile={canEdit}
+              canCaption={canMark}
             />
           )}
           {letters && (

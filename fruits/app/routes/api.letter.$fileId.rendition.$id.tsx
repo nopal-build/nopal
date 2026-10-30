@@ -1,20 +1,27 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { letterPageFile } from "robustness-core/data/letters.server";
+import { getUser } from "../modules/auth/auth.server";
+import { requestHasRenderPass } from "robustness-core/data/letterRenderPass.server";
 import { getPresignedViewUrl, objectExists } from "robustness-core/data/file.server";
 import { isImageRenditionSize, renditionContentType, renditionKey } from "robustness-core/data/mediaKeys";
 
 /**
  * GET /api/letter/:fileId/rendition/:id?size=thumb|display|poster
  *
- * `/api/vault/rendition/:id` for a public letter page: the same
+ * `/api/vault/rendition/:id` for a letter's page: the same
  * worker-made rendition (or the original while there is none yet), gated
- * by `letterPageFile` instead of a session. Never decodes anything;
+ * by `letterPageFile` (the link on, or on the project and sent). Never decodes anything;
  * the web server never processes media (ADR-021). GET only.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { fileId, id } = params;
-  const file = fileId && id ? await letterPageFile(fileId, id) : null;
+  // The page's own doors (`letterPageFile`): the link on, with no
+  // session; the worker printing it under a render pass; or a session on
+  // the project and the letter sent.
+  const viewer = fileId && id ? await getUser(request) : null;
+  const rendering = fileId && id ? await requestHasRenderPass(request, fileId) : false;
+  const file = fileId && id ? await letterPageFile(fileId, id, viewer?._id ?? null, rendering) : null;
   if (!file) return Response.json({ error: "Not found" }, { status: 404 });
   if (!file.s3_key) return Response.json({ error: "No viewable file attached" }, { status: 400 });
 

@@ -16,13 +16,14 @@
  * `publicZip.server.ts`: the job id doubles as the cache key, and BullMQ
  * keeps a finished job for a day so a repeat ask converges on it.
  *
- * A PDF only exists while the link is on: the worker reaches the page
- * through the public URL, and re-checks the share before writing.
+ * Any sent letter has one, link on or off: the worker reaches the page
+ * through the public URL, under a render pass when the link is off
+ * (`letterRenderPass.server.ts`), and re-checks the send before writing.
  */
 
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
-import { contentFingerprint, letterHome, isLetterShared, isMarkdownFileName } from "./letters.server";
+import { contentFingerprint, isLetterSent, isMarkdownFileName, letterHome, sentCopyOf, type SentFields } from "./letters.server";
 import { objectExists } from "./file.server";
 import type { FileRef } from "./vault.types";
 
@@ -51,25 +52,40 @@ const JOB_OPTIONS = {
   removeOnFail: { age: 60 * 60 },
 };
 
-/** What the PDF is keyed by (`contentFingerprint`). */
-export function pdfFingerprint(file: Pick<FileRef, "content" | "content_hash">): string {
-  return contentFingerprint(file);
+/** A file as the PDF reads it: the sent copy's fields, or the draft's
+ * for a letter never sent (which gets no PDF: `enqueueLetterPdfIfSent`). */
+export type LetterForPdf = Pick<FileRef, "_id"> & SentFields;
+
+/** What the PDF is keyed by: the sent copy's hash (`sentCopyOf`), which
+ * has one writer, `sendLetter`. The draft's hash only for a letter never
+ * sent, and such a letter never gets a PDF. */
+export function pdfFingerprint(file: Omit<LetterForPdf, "_id">): string {
+  return sentCopyOf(file)?.hash ?? contentFingerprint(file);
 }
 
-/** Where the PDF for one version of the file lives. */
+/** Which way of printing made a PDF. The key is the sent copy's hash,
+ * which a change to the paper (`oxmarkdown.css`'s print block, the
+ * worker's page options) never moves; without this, every letter sent
+ * before such a change would serve its old PDF forever. Raise it when
+ * the printed page changes. 2: paper type and page numbers, 2026-10-29. */
+export const LETTER_PDF_RENDER_VERSION = 2;
+
+/** Where the PDF for one version of the file lives. Version 1 had no
+ * suffix. */
 export function letterPdfKey(fileId: string, contentHash: string): string {
-  return `letters/${fileId}/${contentHash}.pdf`;
+  return `letters/${fileId}/${contentHash}-r${LETTER_PDF_RENDER_VERSION}.pdf`;
 }
 
 /** No `:`: BullMQ uses it as its own key delimiter and refuses it in a
- * custom id. */
+ * custom id. Carries the render version so a finished job from before a
+ * paper change isn't taken for this one. */
 export function letterPdfJobId(fileId: string, contentHash: string): string {
-  return `pdf-${fileId}-${contentHash}`;
+  return `pdf-${fileId}-${contentHash}-r${LETTER_PDF_RENDER_VERSION}`;
 }
 
 /** Asks the worker for this version's PDF unless the same ask is already
  * waiting, running or done. A failed one is removed and asked again. */
-export async function ensureLetterPdfJob(file: Pick<FileRef, "_id" | "content" | "content_hash">): Promise<string> {
+export async function ensureLetterPdfJob(file: LetterForPdf): Promise<string> {
   const contentHash = pdfFingerprint(file);
   const jobId = letterPdfJobId(file._id, contentHash);
   const q = getQueue();
@@ -86,16 +102,18 @@ export async function ensureLetterPdfJob(file: Pick<FileRef, "_id" | "content" |
 export type LetterPdfStatus = { ready: true; s3Key: string } | { ready: false; s3Key: string };
 
 /** Whether this version's PDF is in storage. */
-export async function letterPdfStatus(file: Pick<FileRef, "_id" | "content" | "content_hash">): Promise<LetterPdfStatus> {
+export async function letterPdfStatus(file: LetterForPdf): Promise<LetterPdfStatus> {
   const s3Key = letterPdfKey(file._id, pdfFingerprint(file));
   return { ready: await objectExists(s3Key), s3Key };
 }
 
-/** The hook the share switch and the replace route call: a render ahead
- * of the click, only for a shared markdown letter. Returns the job
- * id, or null when nothing was asked for. */
-export async function enqueueLetterPdfIfShared(file: FileRef | null | undefined): Promise<string | null> {
-  if (!file || !isLetterShared(file) || file.archived_at || !isMarkdownFileName(file.name)) return null;
+/** The hook the share switch and the send call: a render ahead of the
+ * click, for a sent markdown letter, link on or off. The PDF is of the
+ * sent copy, so a saved edit never asks for one (the save and replace
+ * routes did until 2026-10-28). Returns the job id, or null when
+ * nothing was asked for. */
+export async function enqueueLetterPdfIfSent(file: FileRef | null | undefined): Promise<string | null> {
+  if (!file || !isLetterSent(file) || file.archived_at || !isMarkdownFileName(file.name)) return null;
   if (!(await letterHome(file))) return null;
   return ensureLetterPdfJob(file);
 }
