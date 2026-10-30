@@ -6,6 +6,7 @@ import { uploadFileToS3 } from "robustness-core/data/file.server";
 import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { getProjectRole, isProjectFolder } from "robustness-core/data/projectSharing.server";
 import { createMark, markDate } from "robustness-core/data/graphLogMarks.server";
+import { requestBrief } from "robustness-core/data/brief.server";
 import {
   canManageLetters,
   letterFileName,
@@ -41,6 +42,10 @@ const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
  *   (`markDate`, the daily log's rule). Refused without one. An upload
  *   may carry `purpose` too; without it the letter has none until the
  *   brief asks.
+ *   Starting a letter is also the click that writes its brief (Austin,
+ *   2026-10-28; the form says so): the new-letter path asks the worker
+ *   for it (`requestBrief`) once the letter and its purpose exist. The
+ *   upload path does not; "Write it again" on the letter's page does.
  * A Guide on the project or staff (`canManageLetters`). Replacing an
  * existing one is `/api/vault/replace/:fileId`, which keeps the id and so
  * the link. Nothing is shared by this route: the link is a separate
@@ -93,7 +98,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
     if (!fileRef) return Response.json({ error: "The letter didn't save. Try again." }, { status: 500 });
     await recordPurpose(fileRef);
-    return Response.json({ fileId: fileRef._id, pictures: 0, unmatched: [] }, { status: 201 });
+    // The brief starts as the letter opens. A queue that refuses leaves a
+    // letter with no brief and the page's own button; never a lost letter.
+    let briefJobId: string | null = null;
+    try {
+      const asked = await requestBrief(project, { ...fileRef, purpose }, user._id);
+      if (asked.ok) briefJobId = asked.jobId;
+    } catch (err) {
+      console.error("Brief enqueue error:", err);
+    }
+    return Response.json({ fileId: fileRef._id, pictures: 0, unmatched: [], briefJobId }, { status: 201 });
   }
 
   const split = splitUploadBundle(files);

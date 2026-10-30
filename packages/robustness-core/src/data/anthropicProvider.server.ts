@@ -56,7 +56,7 @@ const DEFAULT_MAX_TOKENS = 32768;
 const DEFAULT_EFFORT: LlmEffort | undefined = undefined;
 
 /** The GraphLog stages that call a model. */
-export type GraphLogModelStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view" | "sow";
+export type GraphLogModelStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view" | "sow" | "brief";
 
 /**
  * Which model, at what effort, each stage runs on when nothing overrides
@@ -111,6 +111,12 @@ const STAGE_DEFAULTS: Record<GraphLogModelStage, { model: string; effort?: LlmEf
   // tokens here the way Fable does on the page. SOW.md is written for
   // Opus 5.5.
   sow: { model: "claude-opus-5-5", effort: "medium" },
+  // A letter's brief (`brief.server.ts`): one run per click, over every
+  // node of one project. The Madison attic test (2026-10-22 to 27, four
+  // rounds of BRIEF.md read by Austin) ran on Fable at high, and the
+  // skill's prose was tuned against that reader; the pairing is kept
+  // until a grid says otherwise (ADR-017).
+  brief: { model: "claude-fable-5-1", effort: "high" },
 };
 
 /** The model and effort `stage` runs on, after env overrides. Exported

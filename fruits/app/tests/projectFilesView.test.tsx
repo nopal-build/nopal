@@ -3,6 +3,9 @@
  * gallery grid, a video is a real player with its poster (never a link
  * that downloads), and a file kept as a file says so.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -63,5 +66,49 @@ describe("the files view in the Vault", () => {
     expect(html).toContain("Unsorted · 1");
     expect(html).toContain("OT L22 Type.zip");
     expect(html).toContain("kept as a file, not read");
+  });
+});
+
+describe("captions on a photo already on the project (2026-10-29)", () => {
+  const captioned: ProjectFileRow = {
+    ...photo,
+    fileId: "seed1",
+    serveId: "seed1",
+    caption: "",
+    acts: [
+      { id: "m1", authorHumanId: "austin", authorName: "Austin", date: "2026-10-29", createdAt: "2026-10-29T10:00:00Z", text: "This is the removable cover.", act: null },
+      { id: "m2", authorHumanId: "lucas", authorName: "Lucas J", date: "2026-10-29", createdAt: "2026-10-29T11:00:00Z", text: "Cover screws are stripped.", act: null },
+      { id: "m3", authorHumanId: "austin", authorName: "Austin", date: "2026-10-29", createdAt: "2026-10-29T12:00:00Z", text: "Filed as photo.", act: { kind: "file-as", fileKind: "photo" } },
+    ],
+  };
+  const gallery = (canCaption: boolean) =>
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/vault?folder=p"]}>
+        <ProjectFilesView projectFolderId="p" rows={[captioned]} folders={["gallery"]} kinds={["photo"]} onOpen={() => {}} onChanged={() => {}} canCaption={canCaption} />
+      </MemoryRouter>,
+    );
+
+  it("shows each person's own words under the photo, by name, and not a tap's sentence", () => {
+    const html = gallery(false);
+    expect(html).toContain("Austin:</span> This is the removable cover.");
+    expect(html).toContain("Lucas J:</span> Cover screws are stripped.");
+    expect(html).not.toContain("Filed as photo.");
+    expect(html).not.toContain(">Caption<");
+  });
+
+  it("offers Caption to someone who can mark the project", () => {
+    expect(gallery(true)).toContain(">Caption<");
+  });
+
+  it("writes a file mark with no act, the person's own words, through the route that admits by marks", () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const view = readFileSync(path.join(here, "../components/ProjectFilesView.tsx"), "utf8");
+    expect(view).toMatch(/fetch\("\/api\/graphlog\/file-marks"[\s\S]{0,300}text: words/);
+    const route = readFileSync(path.join(here, "../routes/api.graphlog.file-marks.tsx"), "utf8");
+    expect(route).toContain('if (!features.includes("marks"))');
+    expect(route).toContain("date: markDate(body.date)");
+    expect(route).toContain("authorHumanId: user._id");
+    const tab = readFileSync(path.join(here, "../routes/newspaper.$folderId.tsx"), "utf8");
+    expect(tab).toContain("canCaption={canMark}");
   });
 });

@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { enqueueLetterPdfIfShared } from "robustness-core/data/letterPdf.server";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   getScopedUserFromRequest,
@@ -259,16 +258,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
       updates.content = content;
       updates.md_versions = md_versions;
       // The hash is the basis for change detection (sync) and for a
-      // letter's PDF key (`letterPdf.server.ts`): an edit that
-      // left it stale would keep serving the old PDF.
+      // letter's "edited since you sent it" (`letterEditedSinceSent`).
       updates.content_hash = crypto.createHash("sha256").update(content, "utf8").digest("hex");
     }
 
     const updated = await updateFileRef(fileId, updates);
-    // A shared letter's PDF is the page printed: a saved edit asks
-    // the worker for the new one ahead of the click. Nothing for any
-    // other file (the hook's own gate).
-    if (body.content !== undefined) await enqueueLetterPdfIfShared(updated);
+    // A letter's PDF is of its sent copy, remade on send
+    // (`letterSend.server.ts`); a saved edit is the draft and asks for
+    // nothing.
     if (
       file.source === "daily_log" &&
       file.date &&

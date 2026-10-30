@@ -1,8 +1,10 @@
 // app/routes/public.letter.$fileId.tsx
-// A letter, shared by link: anyone with the URL reads it, no login.
-// On only while a Guide has turned the file's link on
-// (`letters.server.ts`); 404 otherwise, the same as a file that
-// doesn't exist. Rendered the way the website renders a page
+// A letter as it was sent (`sentCopyOf`). Four doors, in order: the
+// link on, anyone with the URL, no login; the worker printing a sent
+// letter under a render pass (`letterRenderPass.server.ts`); someone on
+// the project (a Client included) logged in, once the letter is sent; a
+// Guide logged in, the draft as a preview. 404 for anyone else, the same as a file
+// that doesn't exist. Rendered the way the website renders a page
 // (`WebsitePageContent` + the website directive registry), with no Vault
 // chrome: a contractor sees the finished page and nothing else.
 //
@@ -15,11 +17,12 @@
 // page does).
 //
 // The PDF is this page, printed by the worker (`letterPdf.server.ts`);
-// `letter.css` hides the download links under print so the file
-// carries no button to itself.
+// the download links take Stamps' `hideInPrint` so the file carries no
+// button to itself, and `oxmarkdown.css` sets the type for paper.
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
-import { letterPage, resolveLetterForManager, resolveSharedLetter } from "robustness-core/data/letters.server";
+import { letterPage, resolveLetterForManager, resolveSentLetter, resolveSentLetterForMember, resolveSharedLetter } from "robustness-core/data/letters.server";
+import { requestHasRenderPass } from "robustness-core/data/letterRenderPass.server";
 import { getUser } from "../modules/auth/auth.server";
 import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
@@ -28,17 +31,24 @@ import { WebsitePageContent } from "stamps/WebsitePageContent";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
-import "../styles/letter.css";
+import { hideInPrint } from "stamps/print.css";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const origin = new URL(request.url).origin;
   const shared = params.fileId ? await resolveSharedLetter(params.fileId) : null;
   // The whole of what leaves the server (`letterPage`).
   if (shared) return letterPage(shared.file, origin);
-  // Link off: a Guide on the project still sees the page as the client
-  // would (the tab's title always opens this), with the session serving
-  // the pictures and no downloads. Anyone else: not found, as before.
+  // Link off, sent: the worker printing it, with no session.
+  const printing = params.fileId && (await requestHasRenderPass(request, params.fileId)) ? await resolveSentLetter(params.fileId) : null;
+  if (printing) return letterPage(printing.file, origin);
   const user = await getUser(request);
+  // Link off, sent: someone on the project reads the sent copy logged
+  // in, the pictures served by the letter's own routes with the session.
+  const sent = user && params.fileId ? await resolveSentLetterForMember(params.fileId, user._id) : null;
+  if (sent) return letterPage(sent.file, origin);
+  // Not sent: a Guide on the project still sees the page as the client
+  // will (the tab's title always opens this), with the session serving
+  // the pictures and no downloads. Anyone else: not found, as before.
   const mine = user && params.fileId ? await resolveLetterForManager(params.fileId, user) : null;
   if (!mine) throw new Response("Not Found", { status: 404 });
   return letterPage(mine.file, origin, true);
@@ -46,7 +56,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: "Not found" }];
-  const description = `Updated ${data.updated}`;
+  const description = data.preview ? `Updated ${data.updated}` : `Sent ${data.updated}`;
   return [
     { title: data.title },
     { name: "description", content: description },
@@ -59,7 +69,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicLetterPage() {
-  const { title, showTitle, updated, body, downloadUrl, pdfUrl, preview } = useLoaderData<typeof loader>();
+  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview } = useLoaderData<typeof loader>();
   return (
     <AuthShell maxWidth="820px">
       {/* The file's own `# ` heading is the title when it has one; the
@@ -67,12 +77,15 @@ export default function PublicLetterPage() {
       <header className={sprinkles({ mb: 8 })}>
         {showTitle && <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>{title}</h1>}
         <p className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
-          Updated {updated}
-          {preview ? (
-            <span data-preview-note>{" · "}Only Guides can see this until its link is turned on.</span>
-          ) : (
-            /* The PDF is the download; the source is the quieter second option. */
-            <span className="letter-actions">
+          {preview ? `Updated ${updated}` : `Sent ${updated}`}
+          {resent && <span data-resent>{" · "}updated</span>}
+          {preview && <span data-preview-note>{" · "}Only Guides can see this until it's sent.</span>}
+          {!preview && (
+            /* The PDF is the download; the source is the quieter second
+               option. Offered on any sent copy: the worker prints a
+               link-off letter under a render pass, and both routes admit
+               someone on the project. */
+            <span className={hideInPrint}>
               {" · "}
               <a href={pdfUrl}>Download PDF</a>
               {" · "}
@@ -103,7 +116,7 @@ export function ErrorBoundary() {
           Not found
         </h1>
         <p className="text-sm font-mono" style={{ color: semanticColors.textSubtle }}>
-          This page doesn't exist, or isn't shared.
+          This page doesn't exist, or hasn't been sent.
         </p>
       </div>
     </AuthShell>

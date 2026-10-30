@@ -10,6 +10,7 @@ import { PRICING_AS_OF } from "robustness-core/data/llmPricing";
 
 const STAGE_LABEL: Record<string, string> = {
   sow: "sow (seed packets)",
+  brief: "brief (a letter's brief)",
   "sync-knowledge": "sync-knowledge (reading files)",
   "sync-graph": "sync-graph (extraction)",
   "graph-structure": "graph-structure (threads)",

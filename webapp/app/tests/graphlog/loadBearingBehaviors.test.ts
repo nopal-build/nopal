@@ -1167,6 +1167,8 @@ describe("each stage runs on its measured model and effort", () => {
     expect(modelForStage("graph-structure")).toEqual({ model: "claude-sonnet-5", effort: "high" });
     expect(modelForStage("graph-project-view")).toEqual({ model: "claude-fable-5-1", effort: "high" });
     expect(modelForStage("sync-knowledge")).toEqual({ model: "claude-sonnet-5" });
+    // The Madison attic test's pairing (2026-10-23): BRIEF.md was tuned on it.
+    expect(modelForStage("brief")).toEqual({ model: "claude-fable-5-1", effort: "high" });
   });
 
   it("a per-stage env override beats the global one, which beats the table", () => {

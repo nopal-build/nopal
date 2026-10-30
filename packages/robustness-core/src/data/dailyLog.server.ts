@@ -11,7 +11,8 @@ import {
   resolveDailyLogsFolder,
 } from "./vault.server";
 import type { FileRef, VaultFolder } from "./vault.types";
-import { cardFileName } from "oxmarkdown-core";
+import { appendCardDirectiveMarkdown, cardFileName } from "oxmarkdown-core";
+import type { Feature } from "./features";
 
 export type DailyLog = Data & {
   humanId: string;
@@ -620,6 +621,53 @@ export function isOwnCard(cards: Pick<DailyLogCard, "fileId">[], cardFileId: str
 
 export async function saveDailyLogCard(fileId: string, content: string): Promise<void> {
   await updateFileRef(fileId, { content });
+}
+
+/** The Card with that chunk added, after whatever it already held. */
+export function addChunk(content: string, text: string): string {
+  return [content.trim(), text.trim()].filter(Boolean).join("\n\n");
+}
+
+/** The day page shows the Cards its readme mounts, so a Card written by
+ * code has to be mounted there or the person never sees the entry
+ * arrive. Idempotent: a readme that already names the Card's file is
+ * left alone. */
+export async function mountCardOnDay(humanId: string, date: string, projectFolderId: string): Promise<void> {
+  const file = cardFileName(projectFolderId);
+  const day = await getDailyLogByDate(humanId, date);
+  const content = day?.content ?? "";
+  if (content.includes(file)) return;
+  await saveDailyLog(humanId, date, appendCardDirectiveMarkdown(content, { file, projectFolderId }));
+}
+
+/**
+ * Puts a person's words onto their Card for a project on a day, as if
+ * they had typed them in the daily log: the Card made if the day has
+ * none, the words added after what it holds, the Card mounted on their
+ * day page. The next GraphLog run reads it as their words on that day.
+ * The door a moved chunk takes (`applyMove`) and a letter's
+ * talk-through takes (`outline.server.ts`). The daily-log route's own
+ * rules, kept here so a server-side writer can't skip them: `dailyLog`
+ * on the project to write at all; without `feeds` the Card waits for a
+ * Guide as a suggestion. No sync here: the caller decides when the day
+ * is copied into the project (`runDailyLogSync`).
+ */
+export async function appendToCard(input: {
+  humanId: string;
+  date: string;
+  projectFolderId: string;
+  text: string;
+  /** The writer's features on the project (`getProjectRole`). */
+  features: readonly Feature[];
+}): Promise<{ fileId: string; suggestion: boolean }> {
+  if (!input.features.includes("dailyLog")) throw new Error("You're not on this project's log");
+  const text = input.text.trim();
+  if (!text) throw new Error("Nothing to add");
+  const suggestion = !input.features.includes("feeds");
+  const card = await createDailyLogCard(input.humanId, input.date, input.projectFolderId, { suggestion });
+  await saveDailyLogCard(card.fileId, addChunk(card.content, text));
+  await mountCardOnDay(input.humanId, input.date, input.projectFolderId);
+  return { fileId: card.fileId, suggestion };
 }
 
 const SAMPLE_LOG_MARKDOWN = `# Welcome to your Daily Log

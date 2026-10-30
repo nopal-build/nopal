@@ -31,6 +31,9 @@ const FORBIDDEN = [
   // the queue module and never carries the browser driver.
   /from "playwright(-core)?"/,
   /from "robustness-core\/data\/letterPdfRender\.server"/,
+  // A letter's recording is transcoded there too; the app asks through
+  // `letterRecordingQueue.server.ts`.
+  /from "robustness-core\/data\/letterRecording\.server"/,
 ];
 
 function files(dir: string): string[] {

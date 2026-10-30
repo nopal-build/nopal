@@ -31,13 +31,12 @@ import { RecordId } from "surrealdb";
 import { createHash } from "node:crypto";
 import { defineTable, formatRecord, merge, query, upsert, type Data } from "./generic.server";
 import {
+  addChunk,
   createDailyLogCard,
-  getDailyLogByDate,
   getDailyLogCards,
-  saveDailyLog,
+  mountCardOnDay,
   saveDailyLogCard,
 } from "./dailyLog.server";
-import { appendCardDirectiveMarkdown, cardFileName } from "oxmarkdown-core";
 import {
   deleteFileRef,
   getAccessibleProjectFolders,
@@ -165,10 +164,9 @@ export function removeChunk(content: string, ref: ChunkRef): string {
     .trim();
 }
 
-/** The Card with that chunk added, after whatever it already held. */
-export function addChunk(content: string, text: string): string {
-  return [content.trim(), text.trim()].filter(Boolean).join("\n\n");
-}
+// `addChunk` lives in `dailyLog.server.ts` with the Card door it belongs
+// to (`appendToCard`); re-exported here for its readers and tests.
+export { addChunk } from "./dailyLog.server";
 
 /**
  * The Card without exactly those words, for undo.
@@ -514,16 +512,6 @@ export async function undoMove(move: GraphLogMove, byHumanId: string): Promise<M
   } catch (err) {
     return { ok: false, reason: `putting it back failed (${err instanceof Error ? err.message : String(err)})` };
   }
-}
-
-/** The day page shows the Cards its readme mounts, so a Card written by
- * code has to be mounted there or the person never sees the entry arrive. */
-async function mountCardOnDay(humanId: string, date: string, projectFolderId: string): Promise<void> {
-  const file = cardFileName(projectFolderId);
-  const day = await getDailyLogByDate(humanId, date);
-  const content = day?.content ?? "";
-  if (content.includes(file)) return;
-  await saveDailyLog(humanId, date, appendCardDirectiveMarkdown(content, { file, projectFolderId }));
 }
 
 /** A photo that travelled with the words is no longer this project's: its
