@@ -8,11 +8,22 @@
 //
 // The capture is the browser's own screen share of this tab, which it
 // always asks for: there is no way to record a page without the person
-// choosing it. Where the browser can crop a tab share to one element
-// (Chrome's Region Capture), the video is the preview pane alone; where
-// it can't (Safari, Firefox), it is the whole tab. The camera, when on,
+// choosing it. For the length of a recording the editor shows the
+// rendered letter alone, filling the window (`setReading`), so the guide
+// reads what the client will see. Where the browser can crop a tab share
+// to one element (Chrome's Region Capture), the video is that letter
+// alone; where it can't (Safari, Firefox), it is the whole tab, which is
+// now the letter with the recording controls above it. The camera, when on,
 // is drawn onto the same canvas, so nothing about the face is separable.
+//
+// While recording, the guide's face floats over the letter where the
+// video puts it, with the clock and Stop beside it (Austin, 2026-10-29).
+// Where Chrome can restrict a share to one element (Element Capture),
+// the bubble is outside that element, so the video has the drawn face
+// and no Stop button; where it can only crop, the drawn face covers the
+// bubble and the Stop button shows in the corner of the video.
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { localDateString } from "./TodayLog";
@@ -52,6 +63,7 @@ export function LetterRecorder({
   folderId,
   body,
   previewElement,
+  setReading,
   onRecorded,
 }: {
   letterFileId: string;
@@ -60,12 +72,19 @@ export function LetterRecorder({
   body: string;
   /** The editor's preview pane, cropped to where the browser can. */
   previewElement: () => HTMLElement | null;
+  /** Shows the rendered letter alone, filling the window, or puts the
+   * editor back. */
+  setReading: (reading: boolean) => void;
   /** Puts the recording on top of the letter in the editor. */
   onRecorded: (recordingFileId: string) => void;
 }) {
   const [phase, setPhase] = useState<Phase>({ at: "idle" });
   const [camera, setCamera] = useState(true);
   const session = useRef<Session | null>(null);
+  // The floating bubble: the camera on its own (the canvas has its own
+  // copy), and where on the screen the video's face circle lands.
+  const [faceStream, setFaceStream] = useState<MediaStream | null>(null);
+  const [bubble, setBubble] = useState<{ left: number; top: number; size: number } | null>(null);
 
   const release = () => {
     const s = session.current;
@@ -74,8 +93,27 @@ export function LetterRecorder({
     if (s.timer) clearInterval(s.timer);
     for (const t of s.tracks) t.stop();
     session.current = null;
+    setReading(false);
+    setFaceStream(null);
+    setBubble(null);
   };
   useEffect(() => release, []);
+
+  // The bubble follows the letter's pane if the window changes size.
+  const recording = phase.at === "recording";
+  useEffect(() => {
+    if (!recording) return;
+    const place = () => {
+      const pane = previewElement();
+      if (!pane) return;
+      const rect = pane.getBoundingClientRect();
+      const c = faceCircle(rect.width, rect.height);
+      setBubble({ left: rect.left + c.cx - c.r, top: rect.top + c.cy - c.r, size: c.r * 2 });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [recording, previewElement]);
 
   const store = async (blob: Blob, mimeType: string) => {
     try {
@@ -114,6 +152,9 @@ export function LetterRecorder({
       return;
     }
     const tracks: MediaStreamTrack[] = [];
+    // Before the share starts, so the browser's picker and the crop both
+    // see the letter as it will be recorded.
+    setReading(true);
     try {
       const display = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: 30 },
@@ -126,12 +167,29 @@ export function LetterRecorder({
       const [screenTrack] = display.getVideoTracks();
       tracks.push(...display.getTracks());
 
-      // Region Capture: the preview pane alone, where the browser can.
+      // The preview pane alone, where the browser can: Element Capture
+      // first (the pane and nothing drawn over it, so not the bubble),
+      // then Region Capture (whatever is on screen in the pane's box).
       const pane = previewElement();
-      const CropTarget = (window as unknown as { CropTarget?: { fromElement: (el: Element) => Promise<unknown> } }).CropTarget;
-      const croppable = screenTrack as MediaStreamTrack & { cropTo?: (target: unknown) => Promise<void> };
-      if (pane && CropTarget && croppable.cropTo) {
-        await croppable.cropTo(await CropTarget.fromElement(pane)).catch(() => {});
+      const targets = window as unknown as {
+        RestrictionTarget?: { fromElement: (el: Element) => Promise<unknown> };
+        CropTarget?: { fromElement: (el: Element) => Promise<unknown> };
+      };
+      const narrowable = screenTrack as MediaStreamTrack & {
+        restrictTo?: (target: unknown) => Promise<void>;
+        cropTo?: (target: unknown) => Promise<void>;
+      };
+      if (pane) {
+        const restricted =
+          targets.RestrictionTarget && narrowable.restrictTo
+            ? await narrowable.restrictTo(await targets.RestrictionTarget.fromElement(pane)).then(
+                () => true,
+                () => false,
+              )
+            : false;
+        if (!restricted && targets.CropTarget && narrowable.cropTo) {
+          await narrowable.cropTo(await targets.CropTarget.fromElement(pane)).catch(() => {});
+        }
       }
 
       const user = await navigator.mediaDevices.getUserMedia({
@@ -209,10 +267,12 @@ export function LetterRecorder({
       // The browser's own "Stop sharing" ends the recording too.
       screenTrack.addEventListener("ended", () => stop());
       recorder.start(1000);
+      if (camera) setFaceStream(new MediaStream(user.getVideoTracks()));
       setPhase({ at: "recording", seconds: 0 });
     } catch (err) {
       for (const t of tracks) t.stop();
       release();
+      setReading(false);
       const denied = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError");
       setPhase({
         at: "failed",
@@ -256,16 +316,62 @@ export function LetterRecorder({
           </button>
         </>
       )}
-      {phase.at === "recording" && (
-        <>
-          <span style={{ color: semanticColors.textDanger }} role="status">
-            Recording {clock(phase.seconds)} of {RECORDING_MINUTES_LIMIT}:00
-          </span>
-          <button type="button" className="vault-toolbar-btn" onClick={stop}>
-            Stop
-          </button>
-        </>
-      )}
+      {phase.at === "recording" &&
+        bubble &&
+        createPortal(
+          <div
+            data-letter-recording-bubble
+            style={{
+              position: "fixed",
+              left: bubble.left,
+              top: bubble.top,
+              width: bubble.size,
+              height: bubble.size,
+              zIndex: 400,
+            }}
+          >
+            {faceStream && (
+              <video
+                autoPlay
+                muted
+                playsInline
+                ref={(el) => {
+                  if (el && el.srcObject !== faceStream) el.srcObject = faceStream;
+                }}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  borderRadius: "50%",
+                  border: "3px solid #ffffff",
+                  boxSizing: "border-box",
+                  display: "block",
+                }}
+              />
+            )}
+            <span
+              className={textSize.xs}
+              style={{
+                position: "absolute",
+                right: 0,
+                bottom: "100%",
+                marginBottom: 8,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span style={{ color: semanticColors.textDanger }} role="status">
+                {clock(phase.seconds)} of {RECORDING_MINUTES_LIMIT}:00
+              </span>
+              <button type="button" className="vault-toolbar-btn" onClick={stop}>
+                Stop
+              </button>
+            </span>
+          </div>,
+          document.body,
+        )}
       {phase.at === "uploading" && <span style={note}>Saving the recording, {Math.round(phase.fraction * 100)}%</span>}
       {phase.at === "preparing" && <span style={note}>On the letter. Preparing it to play on any phone…</span>}
       {phase.at === "ready" && <span style={note}>On top of the letter. Send to share it.</span>}

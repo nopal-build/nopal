@@ -116,6 +116,7 @@ import OxRenderer from "../components/OxRenderer";
 import { LetterBrief, isLetterOnlyItsHeading } from "../components/LetterBrief";
 import { LetterRecorder } from "../components/LetterRecorder";
 import { setLeadingRecording } from "../components/letterRecording";
+import { letterLengthLabel } from "../components/letterLength";
 import { ProjectView } from "../components/ProjectView";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
@@ -1631,6 +1632,7 @@ function MarkdownSplitEditor({
   renderPicturePicker,
   spellCheck = false,
   autosave = false,
+  showLength = false,
   toolbarTools,
 }: {
   fileId: string;
@@ -1647,9 +1649,14 @@ function MarkdownSplitEditor({
    * log does (`TodayLog`'s `scheduleSave`), instead of waiting for the
    * Save button. Off by default; `LetterSplitEditor` turns it on
    * (Austin, 2026-10-27: a letter "should auto save, like the daily
-   * log, not need a click like the website"). The Save button goes away;
-   * the row shows "Saving…" or "Unsaved" and nothing when clean. */
+   * log, not need a click like the website"). The Save button goes away
+   * and nothing takes its place: like the log, the save is silent
+   * (Austin, 2026-10-29). */
   autosave?: boolean;
+  /** Show the body's word count and read time in the save row, updating
+   * as the guide types. Off by default; `LetterSplitEditor` turns it on
+   * (Austin, 2026-10-29). */
+  showLength?: boolean;
   /** Pictures dropped, pasted or picked into the Markdown pane: given the
    * files, stores them and returns the markdown to put at the cursor,
    * one string per file (`LetterSplitEditor` uploads each beside the
@@ -1697,7 +1704,12 @@ function MarkdownSplitEditor({
    * way to change it (the change autosaves like typing), and the preview
    * pane's element. `LetterSplitEditor`'s "Read it to them": the
    * recording records the preview and lands as the letter's first block. */
-  toolbarTools?: (ctx: { body: string; updateBody: (update: (prev: string) => string) => void; previewElement: () => HTMLElement | null }) => ReactNode;
+  toolbarTools?: (ctx: {
+    body: string;
+    updateBody: (update: (prev: string) => string) => void;
+    previewElement: () => HTMLElement | null;
+    setReading: (reading: boolean) => void;
+  }) => ReactNode;
 }) {
   const initialBody = useMemo(() => splitFrontmatter(initialContent).body, [initialContent]);
   const previewBodyRef = useRef<HTMLDivElement | null>(null);
@@ -1794,6 +1806,13 @@ function MarkdownSplitEditor({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [expanded]);
 
+  // Reading: the rendered page alone, filling the window, with only the
+  // toolbar tools above it. `LetterRecorder` turns it on for a recording
+  // so the guide reads the letter as the client will see it and the
+  // video is the letter, not the editor (Austin, 2026-10-29). The page
+  // scrolls inside the preview body, so the recorded region holds still.
+  const [reading, setReading] = useState(false);
+
   const isMobile = useIsMobileWebsiteEditor();
   const markdownPaneRef = useRef<HTMLDivElement | null>(null);
   // A real `height` (below), not a `max-height` -- the pane should always
@@ -1862,92 +1881,100 @@ function MarkdownSplitEditor({
   );
 
   const saveButtonLabel = isSaving ? "Saving\u2026" : "Save";
-  // With autosave there is nothing to click: the row says what the
-  // editor is doing, and says nothing while the text is clean.
-  const saveStatus = isSaving ? "Saving\u2026" : isDirty ? "Unsaved" : "";
+  const lengthLabel = useMemo(() => (showLength ? letterLengthLabel(body) : null), [showLength, body]);
 
   return (
-    <div className={`vault-website-editor${expanded ? " vault-website-editor--expanded" : ""}`}>
+    <div
+      className={`vault-website-editor${expanded || reading ? " vault-website-editor--expanded" : ""}`}
+      style={reading ? { display: "flex", flexDirection: "column", overflow: "hidden" } : undefined}
+    >
       <div className="vault-website-editor-toolbar">
-        {headerLeft}
+        {!reading && headerLeft}
         <div className="vault-website-editor-toolbar-actions">
-          {toolbarLeft}
-          <ActionBar>
-            <ActionBarGroup>
-              <ActionBarButton
-                active={previewScheme === "light"}
-                onClick={() => setPreviewScheme("light")}
-                aria-label="Preview in light mode"
-              >
-                Light
-              </ActionBarButton>
-              <ActionBarButton
-                active={previewScheme === "dark"}
-                onClick={() => setPreviewScheme("dark")}
-                aria-label="Preview in dark mode"
-              >
-                Dark
-              </ActionBarButton>
-            </ActionBarGroup>
-            {showScratchPadLink && (
+          {!reading && toolbarLeft}
+          {!reading && (
+            <ActionBar>
               <ActionBarGroup>
-                {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
-                    itself uses (`stamps/actionBar.css`), rather than extending
-                    that shared component with an `href` variant -- matches this
-                    codebase's own established convention (`button.css`'s own
-                    recipe, `link.css`, `surfaceBase`, ...) of applying a
-                    recipe's className polymorphically at each call site instead
-                    of baking router-awareness into a router-agnostic `stamps`
-                    component. Opens in a new tab -- this is a REFERENCE jump
-                    (going to look up/try a directive's own vocabulary), not a
-                    navigation away from the file currently being edited here.
-                    Website pages only -- not relevant to a non-website
-                    markdown editor like `SyncApiRunEditor`. */}
-                <Link
-                  to="/maker/stamps/scratch"
-                  className={actionBarButtonClass({ active: false })}
-                  aria-label="Open the website directives scratch pad in a new tab"
+                <ActionBarButton
+                  active={previewScheme === "light"}
+                  onClick={() => setPreviewScheme("light")}
+                  aria-label="Preview in light mode"
                 >
-                  Scratch pad
-                </Link>
-              </ActionBarGroup>
-            )}
-            {/* Flip layout is genuinely inert on mobile (one pane shows at a
-                time regardless, controlled by the bottom bar's own Preview/
-                Markdown toggle, not `mdSide`) and Expand already has its own
-                mobile equivalent inside each pane's own label row
-                (`.vault-website-editor-mobile-expand`, below) -- rendering
-                BOTH here too on mobile would just be a confusing, partly-
-                inert duplicate. Checked in JS (`isMobile`), not hidden via
-                CSS media query like the rest of this toolbar's surroundings
-                used to be -- this group is the ONE part of the merged row
-                that's genuinely desktop-only; everything else (Light/Dark,
-                Scratch pad, `headerLeft`, `toolbarLeft`, `toolbarRight`)
-                stays reachable on every width now, wrapping instead of
-                disappearing -- see `vault.css`'s own comment on this. */}
-            {!isMobile && (
-              <ActionBarGroup>
-                <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">
-                  <LayoutFlipIcon mdSide={mdSide} />
+                  Light
                 </ActionBarButton>
-                {expandButton}
+                <ActionBarButton
+                  active={previewScheme === "dark"}
+                  onClick={() => setPreviewScheme("dark")}
+                  aria-label="Preview in dark mode"
+                >
+                  Dark
+                </ActionBarButton>
               </ActionBarGroup>
-            )}
-          </ActionBar>
-          {toolbarTools?.({ body, updateBody: setBody, previewElement: () => previewBodyRef.current })}
-          {toolbarRight}
+              {showScratchPadLink && (
+                <ActionBarGroup>
+                  {/* Plain `<Link>` styled with the SAME recipe `ActionBarButton`
+                      itself uses (`stamps/actionBar.css`), rather than extending
+                      that shared component with an `href` variant -- matches this
+                      codebase's own established convention (`button.css`'s own
+                      recipe, `link.css`, `surfaceBase`, ...) of applying a
+                      recipe's className polymorphically at each call site instead
+                      of baking router-awareness into a router-agnostic `stamps`
+                      component. Opens in a new tab -- this is a REFERENCE jump
+                      (going to look up/try a directive's own vocabulary), not a
+                      navigation away from the file currently being edited here.
+                      Website pages only -- not relevant to a non-website
+                      markdown editor like `SyncApiRunEditor`. */}
+                  <Link
+                    to="/maker/stamps/scratch"
+                    className={actionBarButtonClass({ active: false })}
+                    aria-label="Open the website directives scratch pad in a new tab"
+                  >
+                    Scratch pad
+                  </Link>
+                </ActionBarGroup>
+              )}
+              {/* Flip layout is genuinely inert on mobile (one pane shows at a
+                  time regardless, controlled by the bottom bar's own Preview/
+                  Markdown toggle, not `mdSide`) and Expand already has its own
+                  mobile equivalent inside each pane's own label row
+                  (`.vault-website-editor-mobile-expand`, below) -- rendering
+                  BOTH here too on mobile would just be a confusing, partly-
+                  inert duplicate. Checked in JS (`isMobile`), not hidden via
+                  CSS media query like the rest of this toolbar's surroundings
+                  used to be -- this group is the ONE part of the merged row
+                  that's genuinely desktop-only; everything else (Light/Dark,
+                  Scratch pad, `headerLeft`, `toolbarLeft`, `toolbarRight`)
+                  stays reachable on every width now, wrapping instead of
+                  disappearing -- see `vault.css`'s own comment on this. */}
+              {!isMobile && (
+                <ActionBarGroup>
+                  <ActionBarButton onClick={toggleMdSide} aria-label="Flip layout">
+                    <LayoutFlipIcon mdSide={mdSide} />
+                  </ActionBarButton>
+                  {expandButton}
+                </ActionBarGroup>
+              )}
+            </ActionBar>
+          )}
+          {toolbarTools?.({ body, updateBody: setBody, previewElement: () => previewBodyRef.current, setReading })}
+          {!reading && toolbarRight}
         </div>
       </div>
 
       <div
         className="vault-website-editor-panes"
-        data-mobile-view={mobileView}
-        style={{ flexDirection: mdSide === "left" ? "row" : "row-reverse" }}
+        data-mobile-view={reading ? "preview" : mobileView}
+        style={{
+          flexDirection: mdSide === "left" ? "row" : "row-reverse",
+          ...(reading && { flex: "1 1 auto", minHeight: 0, alignItems: "stretch" }),
+        }}
       >
+        {/* Hidden, not unmounted, while reading: the textarea keeps its
+            cursor and undo history for when the recording ends. */}
         <div
           ref={markdownPaneRef}
           className="vault-website-editor-markdown"
-          style={measuredHeight != null ? { height: measuredHeight } : undefined}
+          style={reading ? { display: "none" } : measuredHeight != null ? { height: measuredHeight } : undefined}
         >
           <div className="vault-website-editor-pane-label">
             <span>Markdown</span>
@@ -1995,11 +2022,12 @@ function MarkdownSplitEditor({
             }
           />
           <div className="vault-website-editor-save-row">
-            {autosave ? (
-              <span className="vault-website-editor-save-status" aria-live="polite">
-                {saveStatus}
+            {lengthLabel && (
+              <span className="text-xs font-mono subtle-text" style={{ alignSelf: "center", marginRight: "auto" }}>
+                {lengthLabel}
               </span>
-            ) : (
+            )}
+            {!autosave && (
               <button
                 type="button"
                 className="vault-website-editor-save-btn"
@@ -2036,9 +2064,12 @@ function MarkdownSplitEditor({
           </div>
         </div>
 
-        <div className="vault-website-editor-preview">
-          <Surface className="vault-website-editor-preview-surface">
-            <div className="vault-website-editor-pane-label">
+        <div className="vault-website-editor-preview" style={reading ? { display: "flex", flexDirection: "column" } : undefined}>
+          <Surface
+            className="vault-website-editor-preview-surface"
+            style={reading ? { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" } : undefined}
+          >
+            <div className="vault-website-editor-pane-label" style={reading ? { display: "none" } : undefined}>
               <span>Preview</span>
               <span className="vault-website-editor-mobile-expand">{expandButton}</span>
             </div>
@@ -2057,7 +2088,12 @@ function MarkdownSplitEditor({
               // `SyncApiRunEditor`) never opts into the `--website-*` tokens
               // at all in its own `renderPreview`, so this is simply inert
               // for it.
-              style={{ background: "var(--website-bg-page)" }}
+              style={{
+                background: "var(--website-bg-page)",
+                // `isolation`: Element Capture records only an element that
+                // makes its own stacking context.
+                ...(reading && { flex: "1 1 auto", minHeight: 0, overflowY: "auto", isolation: "isolate" }),
+              }}
             >
               {renderPreview(body, previewScheme)}
             </div>
@@ -2065,7 +2101,7 @@ function MarkdownSplitEditor({
         </div>
       </div>
 
-      <div className="vault-website-editor-mobile-bar">
+      <div className="vault-website-editor-mobile-bar" style={reading ? { display: "none" } : undefined}>
         <ActionBarGroup>
           <ActionBarButton
             active={mobileView === "preview"}
@@ -2082,20 +2118,19 @@ function MarkdownSplitEditor({
             Markdown
           </ActionBarButton>
         </ActionBarGroup>
-        {/* The same picture button the desktop save row has; that row is
-            hidden on narrow screens (`vault.css`). */}
+        {/* The same length and picture button the desktop save row has;
+            that row is hidden on narrow screens (`vault.css`). */}
+        {lengthLabel && (
+          <span className="text-xs font-mono subtle-text" style={{ alignSelf: "center" }}>
+            {lengthLabel}
+          </span>
+        )}
         {onInsertFiles && editable && (
           <button type="button" className="vault-toolbar-btn" onClick={openAddPicture} disabled={insertStatus?.startsWith("Adding") ?? false} aria-expanded={pickerOpen}>
             Add picture
           </button>
         )}
-        {/* With autosave there is nothing to click here either: the same
-            status the desktop save row shows. */}
-        {autosave ? (
-          <span className="vault-website-editor-save-status" aria-live="polite">
-            {saveStatus}
-          </span>
-        ) : (
+        {!autosave && (
           <button
             type="button"
             className="vault-website-editor-mobile-save"
@@ -2362,17 +2397,19 @@ function LetterSplitEditor({
       onInsertFiles={insertPictures}
       spellCheck
       autosave
+      showLength
       renderPicturePicker={({ insert, upload, close }) => (
         <PhotoPickerLoader photos={photos} error={photosError} load={loadPhotos} insert={insert} upload={upload} close={close} />
       )}
       toolbarTools={
         recordable && editable && folderId
-          ? ({ body, updateBody, previewElement }) => (
+          ? ({ body, updateBody, previewElement, setReading }) => (
               <LetterRecorder
                 letterFileId={fileId}
                 folderId={folderId}
                 body={body}
                 previewElement={previewElement}
+                setReading={setReading}
                 onRecorded={(recordingFileId) => updateBody((prev) => setLeadingRecording(prev, recordingFileId))}
               />
             )
