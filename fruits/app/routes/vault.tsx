@@ -4690,6 +4690,7 @@ export default function VaultV2Page() {
                     <ProjectView
                       body={current.projectManifest.body}
                       galleryFolders={current.projectManifest.galleryFolders}
+                      loadCellGraphs={current.projectManifest.loadCellGraphs}
                     />
                   ) : (
                     <OxRenderer markdown={current.readme.content ?? ""} />
@@ -4797,6 +4798,7 @@ export default function VaultV2Page() {
                   <ProjectView
                     body={current.projectManifest.body}
                     galleryFolders={current.projectManifest.galleryFolders}
+                    loadCellGraphs={current.projectManifest.loadCellGraphs}
                   />
                 ) : (
                   <OxRenderer markdown={current.file.content ?? ""} />

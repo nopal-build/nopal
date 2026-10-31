@@ -481,7 +481,7 @@ export default function NewspaperRoute() {
   const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, sharedLetters, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
-  const { manifest, body, galleryFolders } = project;
+  const { manifest, body, galleryFolders, loadCellGraphs } = project;
   const revalidator = useRevalidator();
 
   const onSend = useCallback(
@@ -706,7 +706,7 @@ export default function NewspaperRoute() {
             <PrintUpdate projectFolderId={folder._id} print={print} onPrinted={() => revalidator.revalidate()} />
           )}
           {tab === "efforts" && (
-            <ProjectView body={body} galleryFolders={galleryFolders} annotations={annotations} />
+            <ProjectView body={body} galleryFolders={galleryFolders} loadCellGraphs={loadCellGraphs} annotations={annotations} />
           )}
           {tab === "costs" && canBudget && (
             <p className={textSize.sm} style={{ marginBottom: 12 }}>

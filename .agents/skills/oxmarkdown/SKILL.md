@@ -1150,6 +1150,57 @@ Interacting mode first, without needing that decision resolved.
       node before wrapping, rather than wrapping node-by-node as it does
       today — not attempted here since it's pre-existing and out of this
       change's actual scope (`==...==`/line-break rendering).
+18. **Done — `::LoadCellGraph{fileId="..."}`, STATIC/Interacting-mode
+    rendering only (project README/Efforts pages, via `ProjectView.tsx`).**
+    Embeds one load-cell test run's Sensor Data tab widget (summary stats,
+    raw/cleaned CSV download buttons, Force vs. Time + Force vs.
+    Displacement charts) directly into a document, e.g.:
+    ```
+    ### Test Results
+    ::LoadCellGraph{fileId="bws98xswj2t0i6ltmoec"}
+    ```
+    - A LEAF directive (`::`, own row, no children) — `fileId` is the run's
+      RAW csv vault file id, matching the already-established
+      `::file{fileId="..."}`/`::video{fileId="..."}` convention for
+      referencing one existing vault file directly by its stable id (as
+      opposed to `::gallery{folder="..."}`'s by-NAME lookup, which exists
+      because a gallery has no single stable id to reference). An optional
+      `title="..."` attribute overrides the embed's heading (defaults to
+      the run's own name).
+    - **A CALLER-REGISTERED directive, deliberately NOT a new
+      `OxRenderer.tsx`/`oxmarkdown-core` built-in** like `::gallery`/
+      `::video` — unlike those, this is `robustness-core`-specific domain
+      knowledge (the one recognized load-cell CSV shape,
+      `loadCellSensorData.server.ts`), not a generic markdown-rendering
+      concern either copy of `OxRenderer.tsx` (fruits/webapp) has any
+      reason to know about. `oxmarkdown/loadCellGraphDirective.tsx`
+      (fruits-only) builds a `DirectiveRegistry` entry from a pre-resolved
+      `Record<fileId, ResolvedLoadCellGraph>` map, passed into
+      `ProjectView`'s own `directives` prop — the same "resolve server-side
+      by scanning raw directive occurrences, hand the result down as a
+      plain data prop" shape `galleryFolders` already uses
+      (`oxmarkdown-core/loadCellGraphDirective.ts` holds the shared,
+      vault-agnostic TYPES only, mirroring `galleryDirective.ts`/
+      `cardDirective.ts`; the real resolution
+      (`resolveLoadCellGraphByFileId`) lives in `robustness-core`, called
+      from `project.server.ts`'s `resolveProjectManifest` for every
+      `::LoadCellGraph{...}` occurrence found in the README body).
+    - Renders via `LoadCellGraphCard.tsx` (fruits), the SAME component the
+      Sensor Data tab's own run view uses (extracted from
+      `SensorDataView.tsx` rather than duplicated) — minus the cleaned-rows
+      table (`showTable`, opt-in, the tab passes it but the directive
+      doesn't): a few-hundred-row table dropped into an otherwise-prose
+      document is more than "a summary of the data" calls for; download the
+      cleaned CSV for the full rows instead.
+    - Renders nothing (not an empty box, not an error marker) when the
+      fileId doesn't resolve — unknown id, not a recognized load-cell CSV
+      shape, or this render context never wired a `loadCellGraphs` map in
+      at all. **Deliberately NOT wired into the public/shared Efforts page**
+      (`public.newspaper.$folderId.tsx`) — downloading the raw/cleaned CSV
+      needs authentication (`/api/vault/download/:fileId`), same
+      restriction the Sensor Data tab itself already has, so an unresolved
+      embed there just silently renders nothing rather than a broken
+      widget.
 
 ## Testing convention — verify three things together, never one alone
 

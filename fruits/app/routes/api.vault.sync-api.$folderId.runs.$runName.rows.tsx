@@ -55,7 +55,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (isLoadCellAnalysisFolder(resolved.folder, schema)) {
     const run = (await listSyncApiRuns(resolved.folder)).find((r) => r.name === runName);
     if (run) {
-      await refreshLoadCellCleanedRun(resolved.folder, run).catch((e) =>
+      await refreshLoadCellCleanedRun(resolved.folder, run.name, run.csvFile._id).catch((e) =>
         console.error("load-cell cleaned-sidecar refresh failed:", e),
       );
     }
