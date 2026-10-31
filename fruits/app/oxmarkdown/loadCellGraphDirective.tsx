@@ -44,10 +44,18 @@
 
 import type { DirectiveRegistry } from "./directiveRegistry";
 import type { ResolvedLoadCellGraph } from "oxmarkdown-core";
-import { LoadCellGraphCard } from "../components/LoadCellGraphCard";
+import { LoadCellGraphCard, type LoadCellDownloadUrlFn } from "../components/LoadCellGraphCard";
 
 export function buildLoadCellGraphDirectiveRegistry(
   loadCellGraphs: Record<string, ResolvedLoadCellGraph>,
+  options?: {
+    /** Overrides how the download buttons fetch their bytes — omit entirely
+     * for the default, authenticated `/api/vault/download/:fileId` route
+     * (every caller except Letters). Explicit `null` hides both buttons
+     * (a letter PREVIEW, which offers no downloads at all) — see
+     * `LoadCellGraphCardProps.downloadUrl`. */
+    downloadUrl?: LoadCellDownloadUrlFn | null;
+  },
 ): DirectiveRegistry {
   return {
     LoadCellGraph: ({ attrs }) => {
@@ -62,6 +70,7 @@ export function buildLoadCellGraphDirectiveRegistry(
           rawFileId={resolved.rawFileId}
           cleanedFileId={resolved.cleanedFileId}
           downloadName={attrs.title ?? resolved.title}
+          downloadUrl={options?.downloadUrl}
         />
       );
     },

@@ -38,9 +38,9 @@
 import { findLeafDirectiveOccurrences } from "../util/nopalDirectives";
 import type { ProjectManifest, ResolvedProject } from "./project.types";
 import { parseProjectManifest } from "./project.types";
-import type { ResolvedGalleryImage, ResolvedLoadCellGraph } from "oxmarkdown-core";
+import type { ResolvedGalleryImage } from "oxmarkdown-core";
 import { getFileRefById, listFolderChildren } from "./vault.server";
-import { resolveLoadCellGraphByFileId } from "./loadCellSensorData.server";
+import { resolveLoadCellGraphsInBody } from "./loadCellSensorData.server";
 import type { VaultFolder } from "./vault.types";
 
 function fileUrl(fileId: string): string {
@@ -79,31 +79,24 @@ export async function resolveProjectManifest(
 
   const foldersByName = new Map(children.folders.map((f) => [f.name, f]));
   const galleryFolders: Record<string, ResolvedGalleryImage[]> = {};
-  const loadCellGraphs: Record<string, ResolvedLoadCellGraph> = {};
 
   for (const directive of findLeafDirectiveOccurrences(body)) {
-    if (directive.name === "gallery") {
-      const folderName = directive.attrs.folder;
-      if (!folderName || folderName in galleryFolders) continue;
-      const subfolder = foldersByName.get(folderName);
-      if (!subfolder) continue;
-      const subChildren = await listFolderChildren(humanId, subfolder._id);
-      galleryFolders[folderName] = subChildren.files
-        .filter((f) => f.content_type.startsWith("image/") || f.content_type.startsWith("video/"))
-        .map((f) => ({
-          url: fileUrl(f._id),
-          name: f.name,
-          kind: f.content_type.startsWith("video/") ? ("video" as const) : ("image" as const),
-        }));
-    } else if (directive.name === "LoadCellGraph") {
-      const fileId = directive.attrs.fileId;
-      if (!fileId || fileId in loadCellGraphs) continue;
-      const resolved = await resolveLoadCellGraphByFileId(fileId);
-      if (resolved) {
-        loadCellGraphs[fileId] = directive.attrs.title ? { ...resolved, title: directive.attrs.title } : resolved;
-      }
-    }
+    if (directive.name !== "gallery") continue;
+    const folderName = directive.attrs.folder;
+    if (!folderName || folderName in galleryFolders) continue;
+    const subfolder = foldersByName.get(folderName);
+    if (!subfolder) continue;
+    const subChildren = await listFolderChildren(humanId, subfolder._id);
+    galleryFolders[folderName] = subChildren.files
+      .filter((f) => f.content_type.startsWith("image/") || f.content_type.startsWith("video/"))
+      .map((f) => ({
+        url: fileUrl(f._id),
+        name: f.name,
+        kind: f.content_type.startsWith("video/") ? ("video" as const) : ("image" as const),
+      }));
   }
+
+  const loadCellGraphs = await resolveLoadCellGraphsInBody(body);
 
   return { manifest: resolvedManifest, body, galleryFolders, loadCellGraphs };
 }

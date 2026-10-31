@@ -21,12 +21,13 @@
 // button to itself, and `oxmarkdown.css` sets the type for paper.
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
-import { letterPage, resolveLetterForManager, resolveSentLetter, resolveSentLetterForMember, resolveSharedLetter } from "robustness-core/data/letters.server";
+import { resolveLetterPage, resolveLetterForManager, resolveSentLetter, resolveSentLetterForMember, resolveSharedLetter } from "robustness-core/data/letters.server";
 import { requestHasRenderPass } from "robustness-core/data/letterRenderPass.server";
 import { getUser } from "../modules/auth/auth.server";
 import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
+import { buildLoadCellGraphDirectiveRegistry } from "../oxmarkdown/loadCellGraphDirective";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
@@ -36,22 +37,24 @@ import { hideInPrint } from "stamps/print.css";
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const origin = new URL(request.url).origin;
   const shared = params.fileId ? await resolveSharedLetter(params.fileId) : null;
-  // The whole of what leaves the server (`letterPage`).
-  if (shared) return letterPage(shared.file, origin);
+  // The whole of what leaves the server (`letterPage`, resolved via
+  // `resolveLetterPage` so a `::LoadCellGraph{fileId="..."}` directive in
+  // the body renders for real instead of showing as an unknown block).
+  if (shared) return resolveLetterPage(shared.file, origin);
   // Link off, sent: the worker printing it, with no session.
   const printing = params.fileId && (await requestHasRenderPass(request, params.fileId)) ? await resolveSentLetter(params.fileId) : null;
-  if (printing) return letterPage(printing.file, origin);
+  if (printing) return resolveLetterPage(printing.file, origin);
   const user = await getUser(request);
   // Link off, sent: someone on the project reads the sent copy logged
   // in, the pictures served by the letter's own routes with the session.
   const sent = user && params.fileId ? await resolveSentLetterForMember(params.fileId, user._id) : null;
-  if (sent) return letterPage(sent.file, origin);
+  if (sent) return resolveLetterPage(sent.file, origin);
   // Not sent: a Guide on the project still sees the page as the client
   // will (the tab's title always opens this), with the session serving
   // the pictures and no downloads. Anyone else: not found, as before.
   const mine = user && params.fileId ? await resolveLetterForManager(params.fileId, user) : null;
   if (!mine) throw new Response("Not Found", { status: 404 });
-  return letterPage(mine.file, origin, true);
+  return resolveLetterPage(mine.file, origin, true);
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -69,7 +72,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicLetterPage() {
-  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview } = useLoaderData<typeof loader>();
+  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs } = useLoaderData<typeof loader>();
+  // The letter's own `/api/letter/:fileId/download` route already encodes
+  // its fileId (`downloadUrl` above) -- a `::LoadCellGraph{...}`'s raw/
+  // cleaned CSV downloads from the SAME route family, just one path
+  // segment deeper (`.../download/:id`, `api.letter.$fileId.download.$id.tsx`),
+  // so no separate fileId needs threading through here. `preview` (a
+  // Guide looking at an unsent draft) offers no downloads at all, same
+  // policy the rest of this page already has -- `downloadUrl: null` hides
+  // both of the widget's own buttons rather than pointing them at a route
+  // that would just 404.
+  const loadCellDirectives = buildLoadCellGraphDirectiveRegistry(loadCellGraphs, {
+    downloadUrl: preview ? null : (id) => `${downloadUrl}/${id}`,
+  });
   return (
     <AuthShell maxWidth="820px">
       {/* The file's own `# ` heading is the title when it has one; the
@@ -99,7 +114,7 @@ export default function PublicLetterPage() {
       <WebsitePageContent>
         <OxRenderer
           markdown={body}
-          directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {} })}
+          directives={{ ...buildWebsiteDirectiveRegistry({ dailyLogEntries: {} }), ...loadCellDirectives }}
           servedFileIds={{}}
           className="ox-no-dots ox-no-heading-marks website-page-ox"
         />

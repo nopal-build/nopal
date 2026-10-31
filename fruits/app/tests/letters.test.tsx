@@ -95,7 +95,8 @@ const SENT = { _id: FILE, name: "madison-attic.md", content: PAGE, updated_at: "
 describe("what leaves the server", () => {
   it("is a fixed set of fields, the link keyed by the file's own id, dated by the send", () => {
     const page = letterPage(SENT, "https://o.nopal.build");
-    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "linkOn", "pdfUrl", "preview", "resent", "showTitle", "title", "updated", "url"]);
+    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "linkOn", "loadCellGraphs", "pdfUrl", "preview", "resent", "showTitle", "title", "updated", "url"]);
+    expect(page.loadCellGraphs).toEqual({});
     expect(page.preview).toBe(false);
     expect(page.linkOn).toBe(true);
     expect(page.resent).toBe(false);

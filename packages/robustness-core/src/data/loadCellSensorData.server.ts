@@ -38,6 +38,7 @@ import {
 import { splitFrontmatter } from "./project.types";
 import { parse as parseYaml } from "yaml";
 import type { ResolvedLoadCellGraph } from "oxmarkdown-core";
+import { findLeafDirectiveOccurrences } from "../util/nopalDirectives";
 
 export const LOAD_CELL_ANALYSIS_NAME = "load-cell";
 
@@ -355,6 +356,27 @@ export async function resolveLoadCellGraphByFileId(fileId: string): Promise<Reso
     rawFileId: csvFile._id,
     cleanedFileId,
   };
+}
+
+/** Every `::LoadCellGraph{fileId="..."}` leaf directive occurrence in a
+ * piece of markdown, resolved into a `Record<fileId, ResolvedLoadCellGraph>`
+ * — the shared scanning step both `project.server.ts`'s
+ * `resolveProjectManifest` (a project README's body) and
+ * `letters.server.ts`'s `resolveLetterPage` (a letter's own body) use, so
+ * the directive resolves identically wherever it's written. An occurrence
+ * whose `fileId` doesn't resolve (missing file, wrong CSV shape) is simply
+ * left out of the map, same "renders nothing" fallback
+ * `resolveLoadCellGraphByFileId` itself already documents. */
+export async function resolveLoadCellGraphsInBody(body: string): Promise<Record<string, ResolvedLoadCellGraph>> {
+  const graphs: Record<string, ResolvedLoadCellGraph> = {};
+  for (const directive of findLeafDirectiveOccurrences(body)) {
+    if (directive.name !== "LoadCellGraph") continue;
+    const fileId = directive.attrs.fileId;
+    if (!fileId || fileId in graphs) continue;
+    const resolved = await resolveLoadCellGraphByFileId(fileId);
+    if (resolved) graphs[fileId] = directive.attrs.title ? { ...resolved, title: directive.attrs.title } : resolved;
+  }
+  return graphs;
 }
 
 function runTitle(mdContent: string, fallback: string): string {

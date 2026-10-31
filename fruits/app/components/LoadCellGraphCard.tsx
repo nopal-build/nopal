@@ -19,8 +19,15 @@ import { textSize } from "stamps/typography.css";
 import { semanticColors, colors } from "stamps/tokens";
 import { Cluster } from "stamps/Cluster";
 
-export async function downloadVaultFile(fileId: string, filename: string) {
-  const res = await fetch(`/api/vault/download/${fileId}`);
+/** Builds the URL a download button fetches from, given a raw/cleaned
+ * CSV's own fileId. Defaults to the authenticated vault route every caller
+ * except Letters' public page uses — see `LoadCellGraphCardProps.downloadUrl`. */
+export type LoadCellDownloadUrlFn = (fileId: string) => string;
+
+export const vaultDownloadUrl: LoadCellDownloadUrlFn = (fileId) => `/api/vault/download/${fileId}`;
+
+export async function downloadFromUrl(url: string, filename: string) {
+  const res = await fetch(url);
   const data = await res.json().catch(() => null);
   if (!res.ok || !data) {
     window.alert(data?.error ?? `Download failed (${res.status})`);
@@ -88,6 +95,15 @@ export interface LoadCellGraphCardProps {
    * data" asked for — download the cleaned CSV for the full rows). */
   showTable?: boolean;
   tableMaxRows?: number;
+  /** How the two download buttons fetch their bytes — omit entirely for the
+   * default, authenticated `/api/vault/download/:fileId` route (the Sensor
+   * Data tab and the `ProjectView` embed both do this). Pass a different
+   * builder for a scoped/public route instead (Letters'
+   * `/api/letter/:fileId/download/:id`), or explicit `null` to hide BOTH
+   * buttons entirely — there's no safe download in this context at all
+   * (a Guide's letter PREVIEW deliberately offers no downloads, same as the
+   * rest of that page). */
+  downloadUrl?: LoadCellDownloadUrlFn | null;
 }
 
 export function LoadCellGraphCard({
@@ -99,6 +115,7 @@ export function LoadCellGraphCard({
   downloadName,
   showTable = false,
   tableMaxRows = 500,
+  downloadUrl = vaultDownloadUrl,
 }: LoadCellGraphCardProps) {
   const timeSeries = useMemo(() => rows.map((r) => ({ x: r.elapsed_s, y: r.force_lbs })), [rows]);
   const displacementSeries = useMemo(
@@ -123,23 +140,25 @@ export function LoadCellGraphCard({
           <Stat label="Max displacement" value={`${meta.maxDisplacementIn.toFixed(3)} in`} />
           <Stat label="Duration" value={`${meta.durationS.toFixed(1)} s`} />
         </Cluster>
-        <Cluster gap={3}>
-          <button
-            type="button"
-            className={button({ variant: "secondary", size: "compact" })}
-            onClick={() => downloadVaultFile(rawFileId, `${downloadName}.csv`)}
-          >
-            Download raw CSV
-          </button>
-          <button
-            type="button"
-            className={button({ variant: "secondary", size: "compact" })}
-            disabled={!cleanedFileId}
-            onClick={() => cleanedFileId && downloadVaultFile(cleanedFileId, `${downloadName}.cleaned.csv`)}
-          >
-            Download cleaned CSV
-          </button>
-        </Cluster>
+        {downloadUrl && (
+          <Cluster gap={3}>
+            <button
+              type="button"
+              className={button({ variant: "secondary", size: "compact" })}
+              onClick={() => downloadFromUrl(downloadUrl(rawFileId), `${downloadName}.csv`)}
+            >
+              Download raw CSV
+            </button>
+            <button
+              type="button"
+              className={button({ variant: "secondary", size: "compact" })}
+              disabled={!cleanedFileId}
+              onClick={() => cleanedFileId && downloadFromUrl(downloadUrl(cleanedFileId), `${downloadName}.cleaned.csv`)}
+            >
+              Download cleaned CSV
+            </button>
+          </Cluster>
+        )}
       </Cluster>
 
       <div className={sprinkles({ display: "flex", gap: 6, flexWrap: "wrap", mt: 5 })}>
