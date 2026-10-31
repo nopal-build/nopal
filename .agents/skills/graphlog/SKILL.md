@@ -295,10 +295,17 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     description (unhighlighted, with the description-only line), the
     photo, and a link bullet to its note. The link comes from the Card
     paragraph above it when at most three photos share that paragraph,
-    otherwise from one `photo-link` call (Haiku, text only), and is kept
-    in the day file's `photoLinks` front matter until the photo or the
-    note's words change. graph-structure threads a linked photo node with
-    its note by code (`placeLinkedPhotoNodes`).
+    otherwise from one `photo-link` call (Opus 5.5 at low effort, text
+    only, "none" when in doubt), and is kept in the day file's
+    `photoLinks` front matter until the photo or the note's words change;
+    an unreadable answer is not kept. graph-structure places photo nodes
+    by code only: a linked one sits under its note (`placeLinkedPhotoNodes`),
+    an unlinked one is in no thread (`withoutPhotoNodes`), and none goes
+    to the model. A link is asked again once when the photo's caption or
+    description changes, or (for a "none") when its day's notes change.
+    graph-project-view reaches unthreaded photos with `find_photos`
+    (word match by code) and `get_node`. sync-graph removes a second day file of the same name,
+    keeping the first, which is the one every run reads.
   - **Files** (documents; photos and videos as above): an attachment becomes a numbered source once it has either
     a real `sync-knowledge` description or a human-written caption (never
     fabricated from an unseen file) — a caption alone is sufficient since

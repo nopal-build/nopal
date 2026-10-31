@@ -146,6 +146,7 @@ import {
   type EffortDescription,
 } from "./effortReadings.server";
 import { normalizeHeadingSpacing } from "oxmarkdown-core";
+import { findPhotoNodes, formatFoundPhoto, photoNodeIdsOf } from "./photoNodes.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -421,6 +422,20 @@ const TOOLS: ToolDefinition[] = [
       required: ["nodeId"],
     },
   },
+  {
+    name: "find_photos",
+    description:
+      "Search every photo in the graph by the words of its caption or description, including photos that are in no thread because nothing linked them to a note when they came in. Returns up to 8 as [id] date -- first words, best match first. Use it when a section is about something a photo could show and its gallery has none, or too few; then get_node a match to read it in full. Add a found photo to a gallery only when its own words plainly show what that section says. A wrong photo is worse than none: when unsure, leave it out.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        words: { type: "string", description: "What the photo would show, in plain words, e.g. \"stucco cracking at the roof line\"." },
+        from: { type: "string", description: "Optional earliest date, YYYY-MM-DD." },
+        to: { type: "string", description: "Optional latest date, YYYY-MM-DD." },
+      },
+      required: ["words"],
+    },
+  },
 ];
 
 /** Only offered on a run that has marks to read, so a run without any
@@ -621,13 +636,17 @@ export function introShouldWait(sections: ReadmeSection[], headingKey: string): 
   );
 }
 
-function createReadmeExecutors(input: {
+/** Exported for tests of the read-only tools (`get_node`, `find_photos`). */
+export function createReadmeExecutors(input: {
   projectFolder: VaultFolder;
   log: (line: string) => void;
   initialContent: string;
   initialFileId: string | undefined;
   allNodesById: Map<string, GraphLogNode>;
   validNodeIds: Set<string>;
+  /** Every photo node in the graph, in a thread or not: `get_node` and
+   * `find_photos` reach them all (ADR-031). */
+  photoNodeIds: ReadonlySet<string>;
   today: string;
   /** The skill's section order -- see `resolveSectionOrder`. */
   sectionOrder: readonly string[];
@@ -660,7 +679,7 @@ function createReadmeExecutors(input: {
   refusalReasons: () => readonly string[];
   getCurrent: () => { content: string; fileId: string | undefined };
 } {
-  const { projectFolder, log, allNodesById, validNodeIds, today, sectionOrder, descriptions, writerFirstNames } = input;
+  const { projectFolder, log, allNodesById, validNodeIds, photoNodeIds, today, sectionOrder, descriptions, writerFirstNames } = input;
   let currentContent = input.initialContent;
   let currentFileId = input.initialFileId;
   let refusals = 0;
@@ -840,12 +859,21 @@ function createReadmeExecutors(input: {
       // Validated against graph-structure.md's OWN node list -- same "never
       // trust an id the model claims to have" reasoning `add_node` already
       // applies to its own link candidates (see 1.1(b)'s own ask).
-      if (!validNodeIds.has(nodeId)) return `Error: "${nodeId}" is not a node id in graph-structure.md`;
+      if (!validNodeIds.has(nodeId) && !photoNodeIds.has(nodeId)) return `Error: "${nodeId}" is not a node id in graph-structure.md or a photo find_photos returns`;
       const node = allNodesById.get(nodeId);
       if (!node) return `Error: no node found with id "${nodeId}"`;
       // Same age stamp the pre-fetch applies -- a node reached via
       // get_node must not read differently from the same node pre-fetched.
       return formatNodeVerbatim(node, today);
+    },
+    find_photos: async (toolInput) => {
+      const words = String(toolInput.words ?? "").trim();
+      const date = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()) ? v.trim() : undefined);
+      const photos = [...photoNodeIds].map((id) => allNodesById.get(id)).filter((n): n is GraphLogNode => !!n);
+      const found = findPhotoNodes(photos, words, { from: date(toolInput.from), to: date(toolInput.to) });
+      log(`graph-project-view: find_photos "${words.slice(0, 60)}" -> ${found.length} photo(s).`);
+      if (found.length === 0) return `No photo's caption or description shares words with "${words}".`;
+      return found.map(formatFoundPhoto).join("\n");
     },
   };
 
@@ -1283,7 +1311,7 @@ export type ViewRunContext = {
 };
 
 export function buildSystemPrompt(skillContent: string, run: ViewRunContext): string {
-  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index, PLUS the actual verbatim text of the nodes behind its top threads). Never invent progress, dates, or facts that aren't grounded in a real node's own words or the README's own existing content -- graph-structure.md's glosses are a table of contents, never something to write prose from directly. Call get_node for any node you need that wasn't already handed to you in full. A node's own text may carry an attached file: a PHOTO or VIDEO (an ordinary markdown image or a link marked ?type=video) belongs in a :::gallery{}...::: block wherever that node's words are featured -- group several photos/videos from the same thread into ONE gallery rather than several. Anything else (a PDF, a doc, ...) is a plain [name](url) link, never put inside a gallery. Either way, that exact image/link line must appear in the same section as the words it came with -- a file is never optional and never gets its own separate section. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
+  return `You are GraphLog's graph-project-view step, keeping a project's README.md an accurate, organized synthesis of the whole graph (given to you as graph-structure.md's own clustered, weighted index, PLUS the actual verbatim text of the nodes behind its top threads). Never invent progress, dates, or facts that aren't grounded in a real node's own words or the README's own existing content -- graph-structure.md's glosses are a table of contents, never something to write prose from directly. Call get_node for any node you need that wasn't already handed to you in full. Not every photo is in a thread: find_photos searches all of them by their words, for a section whose gallery is missing a photo of what it describes; add one only when its words plainly show what the section says, and leave it out when unsure. A node's own text may carry an attached file: a PHOTO or VIDEO (an ordinary markdown image or a link marked ?type=video) belongs in a :::gallery{}...::: block wherever that node's words are featured -- group several photos/videos from the same thread into ONE gallery rather than several. Anything else (a PDF, a doc, ...) is a plain [name](url) link, never put inside a gallery. Either way, that exact image/link line must appear in the same section as the words it came with -- a file is never optional and never gets its own separate section. Only touch sections that actually need to change -- call update_section/remove_section as needed, then stop (no more tool calls) once you're done. Never target "Notes on this view" with either tool -- it's off-limits, handled outside this loop entirely. If nothing needs to change, simply make no tool calls at all.
 
 Make at most ONE update_section or remove_section call per response. Every tool call in one response is generated into that response's single output budget, and a section's whole prose travels in the call, so several writes at once is several sections' worth of text against one limit -- the response gets cut off and the work in it is lost. Write one section, wait for the result, then write the next. Reads (get_node) are free to batch: call as many as you need in one go.
 
@@ -1632,12 +1660,13 @@ export function describeUncited(t: UncitedThread): string {
  */
 export async function loadGraphNodes(
   files: { _id: string; name: string }[],
-): Promise<{ allNodes: GraphLogNode[]; issues: string[] }> {
+): Promise<{ allNodes: GraphLogNode[]; photoNodeIds: Set<string>; issues: string[] }> {
   const graphLogListings = files
     .map((f) => ({ listing: f, date: GRAPH_LOG_RE.exec(f.name)?.[1] }))
     .filter((x): x is { listing: (typeof files)[number]; date: string } => !!x.date);
   const issues: string[] = [];
   const allNodes: GraphLogNode[] = [];
+  const photoNodeIds = new Set<string>();
   const parseDiag = { malformed: 0 };
   for (const { listing, date } of graphLogListings) {
     const file = await getFileRefById(listing._id);
@@ -1646,12 +1675,14 @@ export async function loadGraphNodes(
       continue;
     }
     const before = parseDiag.malformed;
-    allNodes.push(...parseGraphLogNodes(date, splitFrontmatter(file.content).body, parseDiag));
+    const body = splitFrontmatter(file.content).body;
+    allNodes.push(...parseGraphLogNodes(date, body, parseDiag));
+    for (const id of photoNodeIdsOf(date, body)) photoNodeIds.add(id);
     if (parseDiag.malformed > before) {
       issues.push(`${listing.name}: ${parseDiag.malformed - before} node block(s) have no :ref line and cannot be cited`);
     }
   }
-  return { allNodes, issues };
+  return { allNodes, photoNodeIds, issues };
 }
 
 /**
@@ -2061,6 +2092,7 @@ export async function runGraphProjectView(
     initialFileId: readmeFileId,
     allNodesById,
     validNodeIds,
+    photoNodeIds: loaded.photoNodeIds,
     today,
     sectionOrder,
     descriptions,

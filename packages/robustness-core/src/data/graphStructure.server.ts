@@ -358,8 +358,7 @@ export function pruneStaleMembership(
  * photo was linked to the note because it shows what the note says, so
  * where the note lives is where it lives (`photoNodes.server.ts`). Each
  * goes in on the line after its note's. A photo whose note is in no
- * thread, or that links to nothing, is left for the model like any new
- * node.
+ * thread yet, or that links to nothing, is left out.
  */
 export function placeLinkedPhotoNodes(
   sections: ReadmeSection[],
@@ -385,6 +384,28 @@ export function placeLinkedPhotoNodes(
     }
   }
   return { sections: out, placed };
+}
+
+/**
+ * Every photo node's line taken out of the threads. Photos are placed by
+ * code only (ADR-031): each run takes them out and puts the linked ones
+ * back next to their note, so a photo whose link changed moves with it
+ * and one that links to nothing stays out of every thread. A wrong
+ * photo in a thread is worse than a missing one; it is what Efforts
+ * shows.
+ */
+export function withoutPhotoNodes(sections: ReadmeSection[], photoIds: ReadonlySet<string>): ReadmeSection[] {
+  if (photoIds.size === 0) return sections;
+  return sections.map((section) => ({
+    ...section,
+    content: section.content
+      .split("\n")
+      .filter((line) => {
+        const match = NODE_LINE_RE.exec(line.trim());
+        return !match || !photoIds.has(`${match[1]}#${Number(match[2])}`);
+      })
+      .join("\n"),
+  }));
 }
 
 export function buildMembershipIndex(sections: ReadmeSection[]): Set<string> {
@@ -1386,14 +1407,17 @@ export async function runGraphStructure(
     loadIssues.push(issue);
     log(`graph-structure: ${issue}.`);
   }
-  const unplaced = allNodes.filter((n) => !buildMembershipIndex(prunedSections).has(n.id));
+  const photoNodes = allNodes.filter((n) => photoNodeIds.has(n.id));
   const { sections: existingSections, placed: photosPlaced } = placeLinkedPhotoNodes(
-    prunedSections,
-    unplaced.filter((n) => photoNodeIds.has(n.id)),
+    withoutPhotoNodes(prunedSections, photoNodeIds),
+    photoNodes,
   );
   if (photosPlaced.size > 0) log(`graph-structure: ${photosPlaced.size} photo node(s) joined the thread of the note they link to, no model call.`);
   const placedIds = buildMembershipIndex(existingSections);
-  const newNodes = allNodes.filter((n) => !placedIds.has(n.id));
+  // Photo nodes never go to the model: the unplaced ones either link to
+  // nothing or to a note that has no thread yet (placed after the model
+  // below, once it has one).
+  const newNodes = allNodes.filter((n) => !placedIds.has(n.id) && !photoNodeIds.has(n.id));
 
   // Nothing genuinely new to PLACE — the graph's hash still moved (e.g. a
   // day was regenerated producing identical node ids), but there's no
@@ -1554,9 +1578,18 @@ export async function runGraphStructure(
     // Safety net, never trusting the model's own sense that it's done:
     // confirm every node in the graph actually has a home before
     // stamping this version applied.
-    const { sections: finalSections, fileId } = getCurrent();
+    const current = getCurrent();
+    const fileId = current.fileId;
+    // A photo whose note the model just placed joins it now, not a run
+    // later (a later run may have nothing new and never get here).
+    const late = placeLinkedPhotoNodes(
+      current.sections,
+      photoNodes.filter((n) => !photosPlaced.has(n.id)),
+    );
+    const finalSections = late.sections;
+    if (late.placed.size > 0) log(`graph-structure: ${late.placed.size} photo node(s) joined the thread the model just gave their note.`);
     const finalPlaced = buildMembershipIndex(finalSections);
-    const stillMissing = allNodes.filter((n) => !finalPlaced.has(n.id));
+    const stillMissing = allNodes.filter((n) => !finalPlaced.has(n.id) && !photoNodeIds.has(n.id));
     if (stillMissing.length > 0) {
       // Up to five named, then a count -- the same shape sync-knowledge and
       // daily-log-sync use, instead of one example and a discarded list.
@@ -1565,6 +1598,11 @@ export async function runGraphStructure(
         stillMissing.slice(0, 5).map((n) => n.id).join(", ") +
         (stillMissing.length > 5 ? `, and ${stillMissing.length - 5} more` : "");
       log(`graph-structure: ${reason} after this run — will retry next run.`);
+      // Keep the photos placed above; the hash is not stamped, so the
+      // next run still retries the missing nodes.
+      if (late.placed.size > 0 && fileId) {
+        await updateFileRef(fileId, { content: buildGraphStructureContent(baseMeta, joinReadmeSections(finalSections)) });
+      }
       return {
           ok: true,
           skipped: false,

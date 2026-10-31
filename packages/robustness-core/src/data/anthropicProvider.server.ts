@@ -118,9 +118,13 @@ const STAGE_DEFAULTS: Record<GraphLogModelStage, { model: string; effort?: LlmEf
   // until a grid says otherwise (ADR-017).
   brief: { model: "claude-fable-5-1", effort: "high" },
   // Which of a day's notes a photo belongs to (`photoNodes.server.ts`):
-  // text only, one number back, once per photo. A small model's job;
-  // Austin's call, 2026-10-30.
-  "photo-link": { model: "claude-haiku-4-5" },
+  // text only, one number back, once per photo. Haiku 4.5 first
+  // (2026-10-30); on Ambika Sohal's 197 photos it reached for the
+  // nearest-sounding note (a shutter to the kitchen island). A wrong
+  // link is worse than none, since it is what Efforts shows, so Opus 5.5
+  // at low effort: about 1 cent a photo against Haiku's 0.2, once per
+  // photo. Austin's call, 2026-10-31.
+  "photo-link": { model: "claude-opus-5-5", effort: "low" },
 };
 
 /** The model and effort `stage` runs on, after env overrides. Exported
