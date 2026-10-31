@@ -77,14 +77,22 @@ export default function PublicLetterPage() {
   // its fileId (`downloadUrl` above) -- a `::LoadCellGraph{...}`'s raw/
   // cleaned CSV downloads from the SAME route family, just one path
   // segment deeper (`.../download/:id`, `api.letter.$fileId.download.$id.tsx`),
-  // so no separate fileId needs threading through here. `preview` (a
-  // Guide looking at an unsent draft) offers no downloads at all, same
-  // policy the rest of this page already has -- `downloadUrl: null` hides
-  // both of the widget's own buttons rather than pointing them at a route
-  // that would just 404.
-  const loadCellDirectives = buildLoadCellGraphDirectiveRegistry(loadCellGraphs, {
-    downloadUrl: preview ? null : (id) => `${downloadUrl}/${id}`,
-  });
+  // so no separate fileId needs threading through here -- EXCEPT in
+  // `preview` (a Guide looking at an unsent draft): that letter-scoped
+  // route can't admit an unsent draft at all (`letterAttachmentFile`'s own
+  // `resolveReadableLetter` has no "manager preview" door, same as the
+  // existing `letterPageFile`), which is exactly why `preview`'s own body
+  // keeps ORDINARY `/api/vault/view/<id>` picture URLs instead of
+  // letter-scoped ones -- "the session serving the pictures" `LetterPage`
+  // itself documents. Omitting `downloadUrl` entirely here (rather than
+  // passing `null`) falls through to `LoadCellGraphCard`'s own default,
+  // the SAME ordinary authenticated `/api/vault/download/:fileId` route
+  // the Sensor Data tab uses -- works for a preview because the Guide
+  // already has real vault access to their own project's files.
+  const loadCellDirectives = buildLoadCellGraphDirectiveRegistry(
+    loadCellGraphs,
+    preview ? undefined : { downloadUrl: (id) => `${downloadUrl}/${id}` },
+  );
   return (
     <AuthShell maxWidth="820px">
       {/* The file's own `# ` heading is the title when it has one; the
