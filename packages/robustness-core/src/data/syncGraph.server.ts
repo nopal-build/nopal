@@ -1643,6 +1643,21 @@ export async function runSyncGraph(
       projectFolder.human_id,
       existingGraphFolder._id,
     );
+    // One file per day. Two runs at once (a lost project lock,
+    // 2026-10-30) each created the same day, and the Graph folder takes
+    // no writes but GraphLog's, so this is where the extra goes. Every
+    // lookup below takes the first file of a name, so that one is kept
+    // and the later ones, which nothing updates, are removed.
+    const seenDays = new Set<string>();
+    for (const f of existingFiles) {
+      if (!dateFromGraphLogFileName(f.name)) continue;
+      if (!seenDays.has(f.name)) {
+        seenDays.add(f.name);
+        continue;
+      }
+      await deleteFileRef(f._id);
+      log(`sync-graph: removed a second ${f.name} (${f._id}); the day keeps the copy every run reads.`);
+    }
     const structureListing = existingFiles.find((f) => f.name === "graph-structure.md");
     const structureFile = structureListing ? await getFileRefById(structureListing._id) : undefined;
     graphStructureBody = structureFile?.content ? splitFrontmatter(structureFile.content).body.trim() : null;
@@ -2321,6 +2336,7 @@ export async function runSyncGraph(
             durationMs: Date.now() - callStart,
             outcome: "success",
           });
+          if (chosen.unreadable) log(`sync-graph: couldn't read the link answer for "${m.name}" (${chosen.unreadable}); written unlinked, asked again next run.`);
           return chosen.node;
         } catch (err) {
           if (err instanceof GraphLogCancelledError) throw err;

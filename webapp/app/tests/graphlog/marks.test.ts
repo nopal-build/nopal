@@ -326,7 +326,7 @@ describe("which project a mark names", () => {
 describe("a page run with no marks sees exactly what it always did", () => {
   it("offers the same tools, the same array", () => {
     expect(viewTools(false)).toBe(viewTools(false));
-    expect(viewTools(false).map((t) => t.name)).toEqual(["update_section", "remove_section", "describe_effort", "get_node"]);
+    expect(viewTools(false).map((t) => t.name)).toEqual(["update_section", "remove_section", "describe_effort", "get_node", "find_photos"]);
     // Reading a mark is the only thing marks add. Refiling used to be a
     // tool here as well; a person does that from the margin now (Austin,
     // 2026-09-22), so the model classifies and never moves anybody's
@@ -336,6 +336,7 @@ describe("a page run with no marks sees exactly what it always did", () => {
       "remove_section",
       "describe_effort",
       "get_node",
+      "find_photos",
       "read_mark",
     ]);
   });

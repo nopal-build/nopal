@@ -65,7 +65,20 @@ export type PhotoLinkRecord = {
   /** The linked node's words (`quoteKey`), or null for "belongs to no node". */
   quote: string | null;
   by: "code" | "model";
+  /** For a model's link, the `PHOTO_LINK_RULE` it was asked under. */
+  rule?: number;
+  /** The photo's caption and description when decided (`aboutPhoto`):
+   * a caption added later, or a new description, asks again. */
+  about?: string;
+  /** For a "none", the day's notes when decided (`dayNotes`): a note
+   * added or changed on that day asks again. */
+  day?: string;
 };
+
+/** The version of what the link model is asked. A model's link made
+ * under another rule is asked again, once; a code link is kept. 2: Opus
+ * 5.5, "none" when in doubt (2026-10-31); 1 (unmarked): Haiku 4.5. */
+export const PHOTO_LINK_RULE = 2;
 
 export type PhotoLinks = Record<string, PhotoLinkRecord>;
 
@@ -130,6 +143,20 @@ export function nodeForContext(context: string, nodes: readonly GraphLogNode[]):
   return null;
 }
 
+function fingerprint(parts: readonly string[]): string {
+  return createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 12);
+}
+
+/** What a link was decided from on the photo's side. */
+export function aboutPhoto(media: Pick<DayMedia, "caption" | "description">): string {
+  return fingerprint([media.caption?.trim() ?? "", media.description?.trim() ?? ""]);
+}
+
+/** What a "none" was decided against: the day's notes, by their words. */
+export function dayNotes(nodes: readonly GraphLogNode[]): string {
+  return fingerprint(nodes.map((n) => quoteKey(n.quote)).sort());
+}
+
 /** The fileIds a day's text nodes already attach. */
 export function filesCarriedBy(nodes: readonly GraphLogNode[]): Set<string> {
   const ids = new Set<string>();
@@ -163,6 +190,7 @@ export async function planPhotoNodes(input: {
   const textNodes = parseGraphLogNodes(input.date, input.textBody);
   const carried = filesCarriedBy(textNodes);
   const byKey = new Map(textNodes.map((n) => [quoteKey(n.quote), n]));
+  const day = dayNotes(textNodes);
   const links: PhotoLinks = {};
   let asked = 0;
   let linkedByCode = 0;
@@ -176,7 +204,15 @@ export async function planPhotoNodes(input: {
 
     let linked: GraphLogNode | null = null;
     const stored = input.links[m.fileId];
-    if (stored && stored.hash === m.hash && (stored.quote === null || byKey.has(stored.quote))) {
+    const about = aboutPhoto(m);
+    // Kept while nothing it was decided from has changed: the rule, the
+    // photo's bytes, its caption and description, and the note it links
+    // to (or, for a "none", the day's notes). Each change asks once. A
+    // record from before a fingerprint existed counts as unchanged.
+    const current = stored?.by === "code" || stored?.rule === PHOTO_LINK_RULE;
+    const sameAbout = stored?.about === undefined || stored.about === about;
+    const stillFits = stored?.quote === null ? stored.day === undefined || stored.day === day : !!stored && byKey.has(stored.quote);
+    if (stored && current && stored.hash === m.hash && sameAbout && stillFits) {
       linked = stored.quote === null ? null : byKey.get(stored.quote)!;
       links[m.fileId] = stored;
     } else {
@@ -184,12 +220,16 @@ export async function planPhotoNodes(input: {
       if (byContext) {
         linked = byContext;
         linkedByCode++;
-        links[m.fileId] = { hash: m.hash, quote: quoteKey(byContext.quote), by: "code" };
+        links[m.fileId] = { hash: m.hash, quote: quoteKey(byContext.quote), by: "code", about };
       } else if (textNodes.length > 0) {
         asked++;
         const chosen = await input.chooseByModel(m, textNodes);
         linked = chosen ?? null;
-        if (chosen !== undefined) links[m.fileId] = { hash: m.hash, quote: chosen ? quoteKey(chosen.quote) : null, by: "model" };
+        if (chosen !== undefined) {
+          links[m.fileId] = chosen
+            ? { hash: m.hash, quote: quoteKey(chosen.quote), by: "model", rule: PHOTO_LINK_RULE, about }
+            : { hash: m.hash, quote: null, by: "model", rule: PHOTO_LINK_RULE, about, day };
+        }
       } else {
         // Nothing on the day to link to. Not stored, so a photo on a day
         // that later gets words is asked about then.
@@ -248,7 +288,14 @@ export function readPhotoLinks(content: string | null): PhotoLinks {
     for (const [id, rec] of Object.entries(raw as Record<string, unknown>)) {
       const r = rec as Record<string, unknown>;
       if (typeof r?.hash !== "string") continue;
-      out[id] = { hash: r.hash, quote: typeof r.quote === "string" ? r.quote : null, by: r.by === "code" ? "code" : "model" };
+      out[id] = {
+        hash: r.hash,
+        quote: typeof r.quote === "string" ? r.quote : null,
+        by: r.by === "code" ? "code" : "model",
+        ...(typeof r.rule === "number" ? { rule: r.rule } : {}),
+        ...(typeof r.about === "string" ? { about: r.about } : {}),
+        ...(typeof r.day === "string" ? { day: r.day } : {}),
+      };
     }
     return out;
   } catch {
@@ -258,6 +305,69 @@ export function readPhotoLinks(content: string | null): PhotoLinks {
 
 function sortedLinks(links: PhotoLinks): PhotoLinks {
   return Object.fromEntries(Object.entries(links).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/** How many photos `find_photos` hands back at once. */
+export const FIND_PHOTOS_LIMIT = 8;
+
+/** Words too common to say what a photo shows. */
+const FIND_STOPWORDS = new Set(
+  "the and for with that this from are was were has have had not but its into onto over under near some any all one two three photo image picture shows showing visible appears".split(" "),
+);
+
+function findWords(text: string): Set<string> {
+  return new Set(
+    normalizeForMatch(text)
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 3 && !FIND_STOPWORDS.has(w)),
+  );
+}
+
+/** A photo node's own words: its caption or description, without the
+ * image line, the citation, the link or the provenance line. */
+function photoWords(quote: string): string {
+  return quote
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      return t && !t.startsWith("![") && !t.startsWith(":ref") && !t.startsWith("- [") && !/^\*.*\*$/.test(t);
+    })
+    .join(" ");
+}
+
+/**
+ * Photo nodes whose words share the most words with `words`, best first,
+ * newest first on a tie, none that share none. Code finds; whoever asked
+ * judges (the Efforts writer, `find_photos`). Reaches every photo node,
+ * linked or not, so an unlinked photo can still be used once something
+ * written makes it relevant.
+ */
+export function findPhotoNodes(
+  photoNodes: readonly GraphLogNode[],
+  words: string,
+  window: { from?: string; to?: string } = {},
+  limit = FIND_PHOTOS_LIMIT,
+): GraphLogNode[] {
+  const wanted = findWords(words);
+  if (wanted.size === 0) return [];
+  return photoNodes
+    .filter((n) => (!window.from || n.date >= window.from) && (!window.to || n.date <= window.to))
+    .map((node) => {
+      const have = findWords(photoWords(node.quote));
+      let score = 0;
+      for (const w of wanted) if (have.has(w)) score++;
+      return { node, score };
+    })
+    .filter((m) => m.score > 0)
+    .sort((a, b) => b.score - a.score || (a.node.date < b.node.date ? 1 : a.node.date > b.node.date ? -1 : a.node.number - b.node.number))
+    .slice(0, limit)
+    .map((m) => m.node);
+}
+
+/** One line per found photo, for the model: id, date, first words. */
+export function formatFoundPhoto(node: GraphLogNode): string {
+  const gloss = Array.from(photoWords(node.quote).replace(/==/g, "").replace(/\s+/g, " ").trim()).slice(0, 120).join("");
+  return `[${node.id}] ${node.date} — ${gloss}`;
 }
 
 /** How long a node preview the model reads when choosing. */
@@ -272,7 +382,7 @@ export async function chooseNodeByModel(
   llm: LlmProvider,
   media: DayMedia,
   nodes: readonly GraphLogNode[],
-): Promise<{ node: GraphLogNode | null; usage: LlmUsage; model: string }> {
+): Promise<{ node: GraphLogNode | null | undefined; unreadable?: string; usage: LlmUsage; model: string }> {
   const list = nodes
     .map((n) => `Note ${n.number}: ${Array.from(normalizeForMatch(n.quote)).slice(0, NODE_PREVIEW_CHARS).join("")}`)
     .join("\n");
@@ -283,14 +393,26 @@ export async function chooseNodeByModel(
     .filter(Boolean)
     .join("\n");
   const response = await llm.complete({
-    system:
-      "You link a photo from a construction project's daily log to the one note from the same day that it shows or illustrates. Answer with the note's number only, or the word none if no note is about what the photo shows. Do not explain.",
+    system: [
+      "You link a photo from a construction project's daily log to the one note from the same day that it shows.",
+      "Link only when the photo plainly shows the specific thing the note is about: the same object, spot or problem. Being in the same room, trade or stage of work is not enough.",
+      "A wrong link is worse than none: the photo then illustrates a note it has nothing to do with. When in doubt, answer none.",
+      "Answer with the note's number only, or the word none. Do not explain.",
+    ].join(" "),
     messages: [{ role: "user", content: `Notes from the day:\n${list}\n\nThe photo:\n${about}\n\nWhich note number, or none?` }],
     tools: [],
-    maxTokens: 64,
+    // Room for the model's thinking before its one-word answer; a cut-off
+    // answer must not read as "none".
+    maxTokens: 2048,
   });
   const answer = (response.text ?? "").trim().toLowerCase();
-  const number = /\d+/.exec(answer)?.[0];
-  const node = number ? nodes.find((n) => n.number === Number(number)) ?? null : null;
-  return { node, usage: response.usage, model: response.model };
+  const number = /^\D{0,12}?(\d+)/.exec(answer)?.[1];
+  // Only a number on the list or "none" is an answer. Anything else
+  // (empty, cut off, a number not shown) comes back as undefined: not
+  // stored, asked again next run, never kept forever as "none".
+  const node = number ? nodes.find((n) => n.number === Number(number)) : undefined;
+  if (number ? !node : !/^none\b/.test(answer)) {
+    return { node: undefined, unreadable: `${JSON.stringify(answer.slice(0, 40))} (stop: ${response.stopReason})`, usage: response.usage, model: response.model };
+  }
+  return { node: node ?? null, usage: response.usage, model: response.model };
 }
