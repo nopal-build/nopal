@@ -213,7 +213,17 @@ import {
 } from "./seed.server";
 import { splitFrontmatter } from "./project.types";
 import { isInsideMarkText, listMarksForProject, MARKS_SYNC_FOLDER_NAME, parseMarkTexts, type GraphLogMark } from "./graphLogMarks.server";
-import { loadProjectFiles, type ProjectFileRow } from "./fileFolders.server";
+import { extractAttachmentsWithContext, loadProjectFiles, type ProjectFileRow } from "./fileFolders.server";
+import {
+  chooseNodeByModel,
+  photoContexts,
+  planPhotoNodes,
+  readPhotoLinks,
+  splitPhotoSection,
+  withPhotoNodes,
+  type DayMedia,
+  type PhotoLinks,
+} from "./photoNodes.server";
 import {
   createFileRef,
   deleteFileRef,
@@ -234,7 +244,7 @@ import {
   readSkillFingerprint,
 } from "./projectN02.server";
 import { parseSyncedCardFileName, parseSyncedAttachmentFileName, syncedAttachmentFileName } from "./dailyLogSync.server";
-import { extractFileAttachments } from "./sorter.server";
+import { extractFileAttachments, isImageContentType } from "./sorter.server";
 import { KNOWLEDGE_FOLDER_NAME, isDescribableAttachment } from "./syncKnowledge.server";
 import { sidecarNameToRead } from "./sidecarNames";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
@@ -340,6 +350,20 @@ export function buildGraphLogContent(input: {
     generatedAt: new Date().toISOString(),
   }).trimEnd();
   return `---\n${frontmatter}\n---\n\n${input.body.trim()}\n`;
+}
+
+/** A day file with its stored `sourceHash` replaced and nothing else. */
+export function withSourceHash(content: string, hash: string): string {
+  const { frontmatter, body } = splitFrontmatter(content);
+  const meta = ((frontmatter ? parseYaml(frontmatter) : null) as Record<string, unknown> | null) ?? {};
+  meta.sourceHash = hash;
+  return `---\n${stringifyYaml(meta).trimEnd()}\n---\n\n${(body ?? "").trim()}\n`;
+}
+
+/** Photos and videos: each its own node after the day's words, never a
+ * source of the day's extraction (`photoNodes.server.ts`). */
+function isMediaContentType(contentType: string): boolean {
+  return isImageContentType(contentType) || contentType.startsWith("video/");
 }
 
 type GraphCandidate = {
@@ -1455,6 +1479,9 @@ export type SyncGraphResult =
 
 export interface RunSyncGraphOptions {
   provider?: LlmProvider;
+  /** The model that links a photo to a note (`photoNodes.server.ts`);
+   * tests hand in a fake, a run uses the `photo-link` stage. */
+  photoLinkProvider?: LlmProvider;
   log?: (line: string) => void;
   /** Timeline recorder for this run — see `graphLogPerf.server.ts`. */
   perf?: GraphLogPerfRecorder;
@@ -1646,6 +1673,11 @@ export async function runSyncGraph(
   // reporting OK while it happens.
   const incomplete: string[] = [];
   let staleDays = 0;
+  /** Each day's photos and videos, for the photo nodes written after the
+   * words (`photoNodes.server.ts`), and the photo links its file held
+   * before this run rewrote it. */
+  const mediaByDate = new Map<string, DayMedia[]>();
+  const photoLinksByDate = new Map<string, PhotoLinks>();
 
   for (const date of dates) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
@@ -1663,6 +1695,9 @@ export async function runSyncGraph(
     // itself, so it's recovered here by re-reading each of today's Card
     // candidates and matching by the attachment's own synced name.
     const captionByAttachmentName = new Map<string, string>();
+    // The paragraph each photo was attached under: how its node finds the
+    // words it belongs to by code (`photoNodes.server.ts`).
+    const contextByAttachmentName = new Map<string, string>();
     for (const candidate of dayCandidates) {
       const asCard = parseSyncedCardFileName(candidate.name);
       if (!asCard) continue;
@@ -1675,9 +1710,24 @@ export async function runSyncGraph(
           attachment.caption,
         );
       }
+      for (const [name, context] of photoContexts(extractAttachmentsWithContext(cardFile.content))) {
+        contextByAttachmentName.set(syncedAttachmentFileName(asCard.date, asCard.humanId, name), context);
+      }
     }
 
+    // A PHOTO NEVER RE-READS ITS DAY. Photos and videos are not sources of
+    // the day's extraction and not part of its hash; each becomes its own
+    // node by code after the words (`photoNodes.server.ts`). `hashParts`
+    // is the day's words; `legacyHashParts` is the hash as it was computed
+    // before 2026-10-30, kept only so a day already extracted under it is
+    // recognised as up to date instead of re-extracted on deploy.
     const hashParts: string[] = [];
+    const legacyHashParts: string[] = [];
+    const bothHashes = (part: string) => {
+      hashParts.push(part);
+      legacyHashParts.push(part);
+    };
+    const dayMedia: DayMedia[] = [];
     const sourceBlocks: string[] = [];
     const sourceCitations: string[] = [];
     // Parallel to `sourceCitations` -- non-null exactly when that source
@@ -1735,6 +1785,23 @@ export async function runSyncGraph(
           const { links } = linkSeedNames(meta.author ? [meta.author] : [], seedMemberList);
           seedSources = [buildSeedDocumentSource({ fileId: source._id, name: candidate.name, meta, links, memberNames: seedMemberNames, fileDate: date })];
         } else {
+          if (isMediaContentType(source.content_type)) {
+            // A seeded photo or video: its own node, after the words.
+            // Waits, unreported, until it has a description.
+            if (!knowledgeContent) continue;
+            legacyHashParts.push(`${sidecar!.fileId}:${sidecar!.contentHash ?? sidecar!.fileId}`, `${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`, "seedfile");
+            dayMedia.push({
+              fileId: source._id,
+              name: candidate.name,
+              hash: candidate.contentHash ?? candidate.fileId,
+              caption: null,
+              description: splitFrontmatter(knowledgeContent).body?.trim() || knowledgeContent,
+              context: null,
+              citation: buildRefDirectiveMarkdown({ name: SEED_NOTED_NAME, datetime: `${date}T12:00:00Z`, location: `/vault?file=${source._id}`, verbose: true, origin: "seed-noted" }),
+              mediaLine: buildAttachedMediaMarkdown({ fileId: source._id, name: candidate.name, contentType: source.content_type }),
+            });
+            continue;
+          }
           if (!knowledgeContent) {
             // A seed file has no caption field, so a description is its
             // only way in.
@@ -1752,13 +1819,13 @@ export async function runSyncGraph(
               hashPart: "seedfile",
             },
           ];
-          if (sidecar) hashParts.push(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
+          if (sidecar) bothHashes(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
         }
         if (seedSources.length === 0) continue;
-        hashParts.push(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
+        bothHashes(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
         for (const seedSource of seedSources) {
           if (seedSource.content.trim()) anyContent = true;
-          hashParts.push(seedSource.hashPart);
+          bothHashes(seedSource.hashPart);
           const sourceIndex = sourceBlocks.length;
           sourceCitations.push(buildRefDirectiveMarkdown(seedSource.ref));
           sourceMarkTexts.push(null);
@@ -1775,6 +1842,34 @@ export async function runSyncGraph(
 
       const attribution = resolveCandidateAttribution(candidate.name);
       const caption = attribution.isAttachment ? captionByAttachmentName.get(candidate.name) ?? null : null;
+
+      if (attribution.isAttachment && isMediaContentType(source.content_type)) {
+        // A photo or video attached to a Card: its own node, after the
+        // words. Waits, unreported, until it has a caption or a
+        // description.
+        if (!knowledgeContent && !caption) continue;
+        legacyHashParts.push(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
+        if (sidecar) legacyHashParts.push(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
+        if (caption) legacyHashParts.push(`caption:${candidate.fileId}:${caption}`);
+        const name = attribution.originalName ?? source.name;
+        dayMedia.push({
+          fileId: source._id,
+          name,
+          hash: candidate.contentHash ?? candidate.fileId,
+          caption,
+          description: knowledgeContent ? splitFrontmatter(knowledgeContent).body?.trim() || knowledgeContent : null,
+          context: contextByAttachmentName.get(candidate.name) ?? null,
+          citation: buildRefDirectiveMarkdown({
+            name: attribution.humanId ? contributorNameOrThrow(attribution.humanId, humanNameById) : "Unknown",
+            humanId: attribution.humanId,
+            datetime: `${date}T12:00:00Z`,
+            location: `/vault?file=${source._id}`,
+            verbose: true,
+          }),
+          mediaLine: buildAttachedMediaMarkdown({ fileId: source._id, name, caption: caption ?? undefined, contentType: source.content_type }),
+        });
+        continue;
+      }
 
       // An attached file with NEITHER a real caption NOR a knowledge-
       // derived description is nothing to ground a node in -- skip it as
@@ -1793,9 +1888,9 @@ export async function runSyncGraph(
       }
 
       if (attribution.isAttachment || (source.content ?? "").trim()) anyContent = true;
-      hashParts.push(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
-      if (sidecar) hashParts.push(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
-      if (caption) hashParts.push(`caption:${candidate.fileId}:${caption}`);
+      bothHashes(`${candidate.fileId}:${candidate.contentHash ?? candidate.fileId}`);
+      if (sidecar) bothHashes(`${sidecar.fileId}:${sidecar.contentHash ?? sidecar.fileId}`);
+      if (caption) bothHashes(`caption:${candidate.fileId}:${caption}`);
 
       // A KNOWN id with no row is an error (ADR-015). NO id at all is a
       // different case entirely and is left exactly as it was: a sync
@@ -1858,7 +1953,9 @@ export async function runSyncGraph(
       log(`sync-graph: ${reason}.`);
     }
 
+    mediaByDate.set(date, dayMedia);
     const newHash = aggregateHash(hashParts);
+    const legacyHash = aggregateHash(legacyHashParts);
     const existingListing = existingGraphFolder
       ? (await listFolderChildren(projectFolder.human_id, existingGraphFolder._id)).files.find(
           (f) => f.name === graphLogFileName(date),
@@ -1867,6 +1964,7 @@ export async function runSyncGraph(
     const existing = existingListing ? await getFileRefById(existingListing._id) : undefined;
 
     const existingHash = readSourceHash(existing?.content ?? null);
+    photoLinksByDate.set(date, readPhotoLinks(existing?.content ?? null));
     if (existing && existingHash.unreadable) {
       log(`sync-graph: ${graphLogFileName(date)} has front matter this run could not read; re-extracting the day and rewriting it.`);
     }
@@ -1876,6 +1974,23 @@ export async function runSyncGraph(
       // basis alone: nodes are permanent (ADR-001) and re-extraction is
       // the expensive, deliberate `reset-graph` (see `composeStageSkill`).
       if (readSkillFingerprint(existing.content) !== skillFingerprint) staleDays += 1;
+      days.push({ date, changed: false, empty: false, nodes: 0 });
+      continue;
+    }
+    if (existing && legacyHash !== newHash && existingHash.hash === legacyHash) {
+      // Extracted before photos left the day's hash, from the same words:
+      // up to date. The stored hash is moved to the new formula with no
+      // model call, so deploying this re-extracts nothing.
+      await updateFileRef(existing._id, { content: withSourceHash(existing.content ?? "", newHash) });
+      if (readSkillFingerprint(existing.content) !== skillFingerprint) staleDays += 1;
+      days.push({ date, changed: false, empty: false, nodes: 0 });
+      continue;
+    }
+    if (sourceBlocks.length === 0) {
+      // Only photos and videos today: nothing for the agent to read, and
+      // their nodes are written after the words. Any words already on the
+      // day are left exactly as they are: nodes are permanent (ADR-001),
+      // and a day whose Cards are missing looks like this too.
       days.push({ date, changed: false, empty: false, nodes: 0 });
       continue;
     }
@@ -2165,6 +2280,84 @@ export async function runSyncGraph(
         outcome: "error",
       });
     }
+  }
+
+  // PHOTO NODES, after every day's words (`photoNodes.server.ts`). Code
+  // writes them; the only model call is linking a photo that no Card
+  // paragraph places, once per photo, and the answer is kept.
+  let photoLlm: LlmProvider | undefined;
+  let photoNodesWritten = 0;
+  let photosAsked = 0;
+  let photosLinkedByCode = 0;
+  const photoDays = [...mediaByDate].filter(([date, media]) => media.length > 0 || Object.keys(photoLinksByDate.get(date) ?? {}).length > 0);
+  const photoGraphFolder = photoDays.length > 0 ? await ensureProjectGraphFolder(projectFolder) : null;
+  const photoDayFiles = photoGraphFolder ? (await listFolderChildren(projectFolder.human_id, photoGraphFolder._id)).files : [];
+  for (const [date, media] of photoDays) {
+    await throwIfGraphLogCancelled(projectFolder._id);
+    const graphFolder = photoGraphFolder!;
+    const listing = photoDayFiles.find((f) => f.name === graphLogFileName(date));
+    const file = listing ? await getFileRefById(listing._id) : undefined;
+    const content = file?.content ?? null;
+    const body = content ? splitFrontmatter(content).body ?? "" : "";
+    const plan = await planPhotoNodes({
+      date,
+      textBody: splitPhotoSection(body).text,
+      media,
+      links: { ...(photoLinksByDate.get(date) ?? {}), ...readPhotoLinks(content) },
+      descriptionOnlyProvenance: DESCRIPTION_ONLY_PROVENANCE,
+      chooseByModel: async (m, nodes) => {
+        const callStart = Date.now();
+        try {
+          photoLlm ??= opts.photoLinkProvider ?? AnthropicProvider.forStage("photo-link");
+          const chosen = await chooseNodeByModel(photoLlm, m, nodes);
+          await recordGraphLogUsage({
+            runId: perf.runId,
+            humanId: actingHumanId,
+            projectFolderId: projectFolder._id,
+            stage: "sync-graph",
+            kind: "photo-link",
+            model: chosen.model,
+            usage: chosen.usage,
+            durationMs: Date.now() - callStart,
+            outcome: "success",
+          });
+          return chosen.node;
+        } catch (err) {
+          if (err instanceof GraphLogCancelledError) throw err;
+          log(`sync-graph: couldn't link "${m.name}" to a note (${err instanceof Error ? err.message : "unknown error"}); written unlinked, asked again next run.`);
+          await recordGraphLogUsage({
+            runId: perf.runId,
+            humanId: actingHumanId,
+            projectFolderId: projectFolder._id,
+            stage: "sync-graph",
+            kind: "photo-link",
+            durationMs: Date.now() - callStart,
+            outcome: "error",
+            errorKind: classifyGraphLogError(err),
+          });
+          return undefined;
+        }
+      },
+    });
+    photosAsked += plan.asked;
+    photosLinkedByCode += plan.linkedByCode;
+    const next = withPhotoNodes({ date, existingContent: content, section: plan.section, links: plan.links });
+    if (!next) continue;
+    if (file) await updateFileRef(file._id, { content: next });
+    else
+      await createFileRef({
+        human_id: projectFolder.human_id,
+        name: graphLogFileName(date),
+        content: next,
+        content_type: "text/markdown",
+        folder_id: graphFolder._id,
+      });
+    photoNodesWritten++;
+  }
+  if (photoNodesWritten > 0) {
+    log(
+      `sync-graph: photo nodes written on ${photoNodesWritten} day(s); ${photosLinkedByCode} photo(s) linked by their Card paragraph, ${photosAsked} asked of the photo-link model.`,
+    );
   }
 
   if (staleDays > 0) {

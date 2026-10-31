@@ -137,6 +137,7 @@ import {
   type BacklinkInfo,
   type GraphLogNode,
 } from "./graphNodeIndex.server";
+import { photoNodeIdsOf } from "./photoNodes.server";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
@@ -350,6 +351,40 @@ export function pruneStaleMembership(
     pruned.push(kept.length === lines.length ? section : { heading: section.heading, content: kept.join("\n") });
   }
   return { sections: pruned, dropped, droppedThreads };
+}
+
+/**
+ * Photo nodes that link to a note join that note's thread, by code: the
+ * photo was linked to the note because it shows what the note says, so
+ * where the note lives is where it lives (`photoNodes.server.ts`). Each
+ * goes in on the line after its note's. A photo whose note is in no
+ * thread, or that links to nothing, is left for the model like any new
+ * node.
+ */
+export function placeLinkedPhotoNodes(
+  sections: ReadmeSection[],
+  photoNodes: readonly GraphLogNode[],
+): { sections: ReadmeSection[]; placed: Set<string> } {
+  const placed = new Set<string>();
+  const out = sections.map((section) => ({ ...section }));
+  for (const photo of photoNodes) {
+    const target = photo.links[0];
+    if (!target) continue;
+    for (const section of out) {
+      const lines = section.content.split("\n");
+      const at = lines.findIndex((line) => {
+        const match = NODE_LINE_RE.exec(line.trim());
+        return !!match && match[1] === target.date && Number(match[2]) === target.number;
+      });
+      if (at === -1) continue;
+      const gloss = Array.from(photo.quote.split("\n")[0].replace(/==/g, "").replace(/\s+/g, " ").trim()).slice(0, 80).join("");
+      lines.splice(at + 1, 0, `- ${photo.date} Node ${photo.number} (${photo.authorName ?? "Unknown"}) — photo: ${gloss}`);
+      section.content = lines.join("\n");
+      placed.add(photo.id);
+      break;
+    }
+  }
+  return { sections: out, placed };
 }
 
 export function buildMembershipIndex(sections: ReadmeSection[]): Set<string> {
@@ -1180,6 +1215,7 @@ export async function runGraphStructure(
   // used to vanish from the graph, the README, and every weight.
   const loadIssues: string[] = [];
   const allNodes: GraphLogNode[] = [];
+  const photoNodeIds = new Set<string>();
   const hashParts: string[] = [];
   const parseDiag = { malformed: 0 };
   for (const { listing, date } of graphLogListings) {
@@ -1192,6 +1228,7 @@ export async function runGraphStructure(
     hashParts.push(`${date}:${frontmatter ?? file.content_hash ?? listing._id}`);
     const before = parseDiag.malformed;
     allNodes.push(...parseGraphLogNodes(date, body, parseDiag));
+    for (const id of photoNodeIdsOf(date, body)) photoNodeIds.add(id);
     if (parseDiag.malformed > before) {
       loadIssues.push(`${listing.name}: ${parseDiag.malformed - before} node block(s) have no :ref line and were left out of the graph`);
     }
@@ -1329,7 +1366,7 @@ export async function runGraphStructure(
   const rawExistingSections =
     existing && !rethread ? splitReadmeSections(splitFrontmatter(existing.content ?? "").body) : [];
   const {
-    sections: existingSections,
+    sections: prunedSections,
     dropped: staleIds,
     droppedThreads,
   } = pruneStaleMembership(rawExistingSections, allNodesById);
@@ -1349,6 +1386,12 @@ export async function runGraphStructure(
     loadIssues.push(issue);
     log(`graph-structure: ${issue}.`);
   }
+  const unplaced = allNodes.filter((n) => !buildMembershipIndex(prunedSections).has(n.id));
+  const { sections: existingSections, placed: photosPlaced } = placeLinkedPhotoNodes(
+    prunedSections,
+    unplaced.filter((n) => photoNodeIds.has(n.id)),
+  );
+  if (photosPlaced.size > 0) log(`graph-structure: ${photosPlaced.size} photo node(s) joined the thread of the note they link to, no model call.`);
   const placedIds = buildMembershipIndex(existingSections);
   const newNodes = allNodes.filter((n) => !placedIds.has(n.id));
 
