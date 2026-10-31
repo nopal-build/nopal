@@ -17,6 +17,7 @@ import {
   GRAPHLOG_QUEUE_NAME,
   acquireProjectGraphLogLock,
   clearGraphLogCancellation,
+  graphLogPoisonFiles,
   type GraphLogJobData,
   type GraphLogJobName,
 } from "robustness-core/data/graphLogQueue.server";
@@ -330,6 +331,9 @@ async function processGraphLogJob(job: Job<GraphLogJobData, unknown, GraphLogJob
     // project's very next run too (see `graphLogQueue.server.ts`'s own
     // "Cooperative cancellation" section).
     await clearGraphLogCancellation(job.data.projectFolderId);
+    // Same reason: only a dead process may leave a file marked in flight
+    // (`poisonFiles.server.ts`), or a clean ending would count a strike.
+    await graphLogPoisonFiles(job.data.projectFolderId).finish();
   }
 }
 
