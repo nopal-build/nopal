@@ -593,9 +593,9 @@ describe("read only", () => {
     expect(shared).toBeLessThan(printing);
     expect(printing).toBeLessThan(member);
     expect(member).toBeLessThan(manager);
-    expect(src).toContain("letterPage(printing.file, origin)");
-    expect(src).toContain("letterPage(sent.file, origin)");
-    expect(src).toContain("letterPage(mine.file, origin, true)");
+    expect(src).toContain("resolveLetterPage(printing.file, origin)");
+    expect(src).toContain("resolveLetterPage(sent.file, origin)");
+    expect(src).toContain("resolveLetterPage(mine.file, origin, true)");
     // The letter's file routes open the same doors.
     for (const file of ["api.letter.$fileId.view.$id.tsx", "api.letter.$fileId.rendition.$id.tsx"]) {
       expect(readFileSync(path.join(here, "../routes", file), "utf8"), file).toContain("letterPageFile(fileId, id, viewer?._id ?? null, rendering)");
