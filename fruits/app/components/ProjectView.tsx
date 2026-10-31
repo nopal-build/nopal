@@ -3,7 +3,14 @@
  * page. The README's body IS the page, rendered via `OxRenderer`, with
  * `::gallery{folder="..."}` leaf directives resolved against
  * `galleryFolders` (see `oxmarkdown-core/galleryDirective.ts` and
- * `project.server.ts`'s `resolveProjectManifest`).
+ * `project.server.ts`'s `resolveProjectManifest`), and
+ * `::LoadCellGraph{fileId="..."}` leaf directives resolved against
+ * `loadCellGraphs` the same way (see
+ * `oxmarkdown-core/loadCellGraphDirective.ts` and
+ * `oxmarkdown/loadCellGraphDirective.tsx`'s registry entry) — unlike
+ * gallery, this one is a caller-registered `directives` entry rather than
+ * an `OxRenderer.tsx` built-in, since it's project/vault-specific domain
+ * knowledge, not a generic markdown-rendering concern.
  *
  * Used to also resolve `::csv-table{...}`/`::svg{...}`/`:::note{...}`
  * directives (the old `MdxEditorView`/`nopalDirectives.ts` extension
@@ -17,9 +24,10 @@
  * built-in once it was noticed PhyLog's capture stage still writes it.
  */
 
-import type { ResolvedGalleryImage } from "oxmarkdown-core";
+import type { ResolvedGalleryImage, ResolvedLoadCellGraph } from "oxmarkdown-core";
 import OxRenderer from "./OxRenderer";
 import type { OxAnnotations } from "../oxmarkdown/marks";
+import { buildLoadCellGraphDirectiveRegistry } from "../oxmarkdown/loadCellGraphDirective";
 
 export interface ProjectViewProps {
   /** The README body (front matter already stripped). */
@@ -27,6 +35,11 @@ export interface ProjectViewProps {
   /** Keyed by a `::gallery{folder="..."}` directive's `folder` attribute
    * value. Omit for a plain body with no gallery resolution at all. */
   galleryFolders?: Record<string, ResolvedGalleryImage[]>;
+  /** Keyed by a `::LoadCellGraph{fileId="..."}` directive's `fileId`
+   * attribute value. Omit for a plain body with no load-cell embeds at all
+   * (e.g. the public/shared page, which doesn't resolve this — downloading
+   * the raw/cleaned CSV requires authentication). */
+  loadCellGraphs?: Record<string, ResolvedLoadCellGraph>;
   /** The pen: marks on this version of the page, and whether a new one
    * can be written. See `oxmarkdown/marks.tsx`. */
   annotations?: OxAnnotations;
@@ -35,7 +48,7 @@ export interface ProjectViewProps {
   servedFileIds?: Record<string, string>;
 }
 
-export function ProjectView({ body, galleryFolders, annotations, servedFileIds }: ProjectViewProps) {
+export function ProjectView({ body, galleryFolders, loadCellGraphs, annotations, servedFileIds }: ProjectViewProps) {
   return (
     <OxRenderer
       markdown={body}
@@ -46,6 +59,7 @@ export function ProjectView({ body, galleryFolders, annotations, servedFileIds }
       resolveGalleryFolder={
         galleryFolders ? (folderName) => galleryFolders[folderName] : undefined
       }
+      directives={loadCellGraphs ? buildLoadCellGraphDirectiveRegistry(loadCellGraphs) : undefined}
     />
   );
 }

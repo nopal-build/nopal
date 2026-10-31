@@ -39,7 +39,7 @@
  */
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import type { ResolvedGalleryImage } from "oxmarkdown-core";
+import type { ResolvedGalleryImage, ResolvedLoadCellGraph } from "oxmarkdown-core";
 import { groupOf } from "./features";
 
 /**
@@ -103,7 +103,9 @@ export type ProjectSharingEntry = { human: string; role: string };
  * directives at all — see the `oxmarkdown` skill's Build status.
  * `galleryFolders` survives (re-added, this time built the right way) for
  * OxMarkdown's own real `::gallery{folder="..."}` leaf directive — see
- * `oxmarkdown-core/galleryDirective.ts`. */
+ * `oxmarkdown-core/galleryDirective.ts`. `loadCellGraphs` is the same idea
+ * for `::LoadCellGraph{fileId="..."}` — see
+ * `oxmarkdown-core/loadCellGraphDirective.ts`. */
 export type ResolvedProject = {
   manifest: ProjectManifest;
   /** The README's body, with front matter stripped — rendered as-is via
@@ -113,6 +115,13 @@ export type ResolvedProject = {
    * value — every image found directly inside that subfolder. What
    * `ProjectView.tsx`'s `resolveGalleryFolder` closes over. */
   galleryFolders: Record<string, ResolvedGalleryImage[]>;
+  /** Keyed by a `::LoadCellGraph{fileId="..."}` directive's `fileId`
+   * attribute value — that run's summary/chart data, resolved via
+   * `resolveLoadCellGraphByFileId`
+   * (`robustness-core/data/loadCellSensorData.server.ts`). What
+   * `ProjectView.tsx`'s registered `LoadCellGraph` directive renderer
+   * looks up by fileId. */
+  loadCellGraphs: Record<string, ResolvedLoadCellGraph>;
 };
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;

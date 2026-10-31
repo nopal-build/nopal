@@ -13,6 +13,7 @@
 export * from "./document";
 export * from "./cardDirective";
 export * from "./galleryDirective";
+export * from "./loadCellGraphDirective";
 export * from "./mention";
 export * from "./refDirective";
 export * from "./swatchDirective";

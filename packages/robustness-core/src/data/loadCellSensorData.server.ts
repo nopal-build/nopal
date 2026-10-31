@@ -23,6 +23,7 @@ import {
   createFileRef,
   createVaultFolder,
   getFileRefById,
+  getFolderById,
   listFolderChildren,
   updateFileRef,
   type VaultFolder,
@@ -36,6 +37,7 @@ import {
 } from "./syncApi.server";
 import { splitFrontmatter } from "./project.types";
 import { parse as parseYaml } from "yaml";
+import type { ResolvedLoadCellGraph } from "oxmarkdown-core";
 
 export const LOAD_CELL_ANALYSIS_NAME = "load-cell";
 
@@ -269,23 +271,26 @@ async function ensureCleanedFolder(humanId: string, analysisFolderId: string): P
   return created;
 }
 
-/** Recomputes `<run>.cleaned.csv` from the run's CURRENT raw CSV and
- * (over)writes it into the analysis's `_cleaned/` sidecar folder, creating
- * both on first use. Returns the cleaned result so a caller can use it
- * immediately without re-reading the file just written. Call sites:
- * right after a row append (`api.vault.sync-api.$folderId.runs.$runName.rows.tsx`,
- * best-effort), and whenever the Sensor Data tab is viewed (self-healing
- * backfill for runs that predate this feature). */
+/** Recomputes `<runName>.cleaned.csv` from `csvFileId`'s CURRENT raw content
+ * and (over)writes it into the analysis's `_cleaned/` sidecar folder,
+ * creating both on first use. Returns the cleaned result so a caller can
+ * use it immediately without re-reading the file just written. Call
+ * sites: right after a row append
+ * (`api.vault.sync-api.$folderId.runs.$runName.rows.tsx`, best-effort),
+ * whenever the Sensor Data tab is viewed (self-healing backfill for runs
+ * that predate this feature), and `resolveLoadCellGraphByFileId` (same
+ * self-healing backfill, for a `::LoadCellGraph{fileId="..."}` embed). */
 export async function refreshLoadCellCleanedRun(
   analysisFolder: VaultFolder,
-  run: SyncApiRun,
+  runName: string,
+  csvFileId: string,
 ): Promise<LoadCellCleanedResult> {
-  const csvFile = await getFileRefById(run.csvFile._id);
+  const csvFile = await getFileRefById(csvFileId);
   const cleaned = cleanLoadCellRows(parseLoadCellCsv(csvFile?.content ?? ""));
 
   const cleanedFolder = await ensureCleanedFolder(analysisFolder.human_id, analysisFolder._id);
   const { files } = await listFolderChildren(analysisFolder.human_id, cleanedFolder._id);
-  const name = cleanedCsvFileName(run.name);
+  const name = cleanedCsvFileName(runName);
   const existing = files.find((f) => f.name === name);
   const content = cleanedRowsToCsv(cleaned.rows);
   if (existing) {
@@ -302,12 +307,54 @@ export async function refreshLoadCellCleanedRun(
   return cleaned;
 }
 
-async function getLoadCellCleanedFileId(analysisFolder: VaultFolder, runName: string): Promise<string | null> {
+export async function getLoadCellCleanedFileId(analysisFolder: VaultFolder, runName: string): Promise<string | null> {
   const { folders } = await listFolderChildren(analysisFolder.human_id, analysisFolder._id);
   const cleanedFolder = folders.find((f) => f.name === CLEANED_FOLDER_NAME);
   if (!cleanedFolder) return null;
   const { files } = await listFolderChildren(analysisFolder.human_id, cleanedFolder._id);
   return files.find((f) => f.name === cleanedCsvFileName(runName))?._id ?? null;
+}
+
+/** Resolves a `::LoadCellGraph{fileId="..."}` directive's `fileId`
+ * attribute (a load-cell run's RAW csv vault file id) into everything the
+ * directive needs to render — see `oxmarkdown-core`'s
+ * `ResolvedLoadCellGraph`. Deliberately independent of the "recognized
+ * `load-cell` analysis folder" gate (`isLoadCellAnalysisFolder`) that the
+ * Sensor Data tab itself requires: this only needs ONE csv in the known
+ * load-cell schema shape, not a whole folder full of them, so a test CSV
+ * can be embedded in a README/Letter even if it was never synced through
+ * (or has since been moved out of) a folder named "load-cell". Returns
+ * `null` for anything that doesn't resolve to real rows (missing file,
+ * empty/wrong-shape CSV) rather than guessing. Self-healing, same as
+ * `loadSensorDataTab`: refreshes the `_cleaned/` sidecar on every call so
+ * the "Download cleaned CSV" button works immediately even for a run that
+ * predates this feature or has never been viewed on the Sensor Data tab. */
+export async function resolveLoadCellGraphByFileId(fileId: string): Promise<ResolvedLoadCellGraph | null> {
+  const csvFile = await getFileRefById(fileId);
+  if (!csvFile || !csvFile.folder_id) return null;
+  const raw = parseLoadCellCsv(csvFile.content ?? "");
+  if (raw.length === 0) return null;
+  const cleaned = cleanLoadCellRows(raw);
+
+  const runName = csvFile.name.replace(/\.csv$/i, "");
+  const analysisFolder = await getFolderById(csvFile.folder_id);
+  let cleanedFileId: string | null = null;
+  if (analysisFolder) {
+    try {
+      await refreshLoadCellCleanedRun(analysisFolder, runName, csvFile._id);
+      cleanedFileId = await getLoadCellCleanedFileId(analysisFolder, runName);
+    } catch (e) {
+      console.error("load-cell cleaned-sidecar refresh failed:", e);
+    }
+  }
+
+  return {
+    title: runName,
+    meta: cleaned.meta,
+    rows: cleaned.rows,
+    rawFileId: csvFile._id,
+    cleanedFileId,
+  };
 }
 
 function runTitle(mdContent: string, fallback: string): string {
@@ -355,7 +402,7 @@ export async function loadSensorDataTab(
   const cleanedByName = new Map<string, LoadCellCleanedResult>();
 
   for (const run of runs) {
-    const cleaned = await refreshLoadCellCleanedRun(analysisFolder, run);
+    const cleaned = await refreshLoadCellCleanedRun(analysisFolder, run.name, run.csvFile._id);
     cleanedByName.set(run.name, cleaned);
     const mdFile = await getFileRefById(run.mdFile._id);
     summaries.push({
