@@ -327,19 +327,27 @@ function RecentRunsSection({
             </Link>
           ))
         )}
-        {/* A full page means there may be older runs; the ceiling ends it. */}
-        {runs.length === runsLimit && runsLimit < RECENT_RUNS_MAX && (
-          <div className="pt-3">
+      </div>
+      {/* Under the box, not inside it: at the bottom of the scroll it was
+          out of sight. A full page means there may be older runs; the
+          ceiling ends it. */}
+      {runs.length > 0 && (
+        <div className={`flex items-center gap-2 pt-2 ${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}>
+          <span className="subtle-text">{runs.length} runs</span>
+          {runs.length === runsLimit && runsLimit < RECENT_RUNS_MAX && (
+            <span className="subtle-text">·</span>
+          )}
+          {runs.length === runsLimit && runsLimit < RECENT_RUNS_MAX && (
             <Link
               to={`/maker/graphlog?range=${days}&runs=${runsLimit + RECENT_RUNS_STEP}`}
               preventScrollReset
-              className={`${link} ${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
+              className={link}
             >
               Show {RECENT_RUNS_STEP} more
             </Link>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

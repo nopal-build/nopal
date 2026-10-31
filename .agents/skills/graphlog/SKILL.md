@@ -227,8 +227,12 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   near-verbatim statements worth remembering on their own — into
   `Graph/graph-log-YYYY-MM-DD.md`, one file per day with new content (no
   file for a day with nothing worth capturing). Groups files by date, and
-  regenerates any day whose aggregate hash (every candidate's
-  `content_hash` plus its `_knowledge/` sidecar's hash, if any) changed.
+  regenerates any day whose aggregate hash (every text or document
+  candidate's `content_hash` plus its `_knowledge/` sidecar's hash, if
+  any) changed. Photos and videos are not in that hash and not sources
+  of the extraction (ADR-031): each becomes its own node by code after
+  the day's words (`photoNodes.server.ts`), linked to the note it belongs
+  to, so a new photo never re-reads its day.
   Runs a bounded tool loop per day (`add_node`, `MAX_TURNS = 30`,
   `runSyncGraphDayLoop`) rather than one non-tool completion — the
   earlier whole-day-in-one-completion design truncated on busy days once
@@ -286,7 +290,16 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
     live in the cached system prompt (`cacheSystemPrompt`), so a
     multi-day catch-up run pays full price for that block once, then
     cache-reads it for the rest.
-  - **Files**: an attachment becomes a numbered source once it has either
+  - **Photos and videos** (ADR-031): one node per photo, written by code
+    below the `PHOTO_NODES_MARKER` line: caption (highlighted) or
+    description (unhighlighted, with the description-only line), the
+    photo, and a link bullet to its note. The link comes from the Card
+    paragraph above it when at most three photos share that paragraph,
+    otherwise from one `photo-link` call (Haiku, text only), and is kept
+    in the day file's `photoLinks` front matter until the photo or the
+    note's words change. graph-structure threads a linked photo node with
+    its note by code (`placeLinkedPhotoNodes`).
+  - **Files** (documents; photos and videos as above): an attachment becomes a numbered source once it has either
     a real `sync-knowledge` description or a human-written caption (never
     fabricated from an unseen file) — a caption alone is sufficient since
     it's the uploader's own words, no `sync-knowledge` needed. GraphLog's

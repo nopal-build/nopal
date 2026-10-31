@@ -200,6 +200,8 @@ services:
     environment:
       NODE_ENV: development
       CI: "true"
+      # As in packages/worker/Dockerfile: keeps libvips' memory from climbing.
+      MALLOC_ARENA_MAX: "2"
       # Who the container runs as (bin/dev-as-host-user.sh); set by the Makefile.
       HOST_UID: ${HOST_UID:-1000}
       HOST_GID: ${HOST_GID:-1000}

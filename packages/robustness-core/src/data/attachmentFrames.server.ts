@@ -139,19 +139,36 @@ function decodeHeicInChild(bytes: Buffer): Promise<Buffer> {
  * `anthropicProvider.server.ts`'s own set; anything else is converted. */
 const VISION_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
+/** What the bytes say they are, from their first few: one of the four the
+ * model takes, HEIF, or null for anything else. */
+export function imageTypeFromBytes(bytes: Buffer): string | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (bytes.length >= 6 && /^GIF8[79]a$/.test(bytes.toString("latin1", 0, 6))) return "image/gif";
+  if (bytes.length >= 12 && bytes.toString("latin1", 0, 4) === "RIFF" && bytes.toString("latin1", 8, 12) === "WEBP") return "image/webp";
+  if (isHeifContainer(bytes)) return "image/heif";
+  return null;
+}
+
 /**
  * An image the vision model will accept: a JPEG/PNG/GIF/WebP passes
  * through untouched; a HEIC/HEIF is decoded with `heic-convert`; anything
  * else `sharp` can read (TIFF, BMP, AVIF, ...) is re-encoded as JPEG.
  * Throws for a format nothing here can read, which the caller reports as
  * unsupported the way it always did.
+ *
+ * The format is read from the bytes; the stored type comes from the
+ * file's name, and a name can be wrong. Four screenshots named `.PNG`
+ * were JPEGs, sent as `image/png`, and the API refused them ("the image
+ * appears to be a image/jpeg", 2026-10-30).
  */
 export async function normalizeImageForVision(
   bytes: Buffer,
   contentType: string,
 ): Promise<{ base64: string; mediaType: string }> {
-  if (VISION_MEDIA_TYPES.has(contentType)) return { base64: bytes.toString("base64"), mediaType: contentType };
-  const jpeg = isHeicContentType(contentType)
+  const actual = imageTypeFromBytes(bytes);
+  if (actual && VISION_MEDIA_TYPES.has(actual)) return { base64: bytes.toString("base64"), mediaType: actual };
+  const jpeg = actual === "image/heif" || (!actual && isHeicContentType(contentType))
     ? await heicToJpeg(bytes)
     : await sharp(bytes).rotate().jpeg({ quality: 85 }).toBuffer();
   return { base64: jpeg.toString("base64"), mediaType: "image/jpeg" };

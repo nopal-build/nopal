@@ -86,7 +86,8 @@ import { docxText, isDocx } from "./docxText.server";
 import { resolveSidecar } from "./sidecarNames";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
-import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
+import { graphLogPoisonFiles, throwIfGraphLogCancelled } from "./graphLogQueue.server";
+import { poisonFileKey, STRIKES_TO_SKIP } from "./poisonFiles.server";
 import type { LlmProvider, PhotoDescriber } from "./llmProvider";
 
 /** The reserved subfolder name every `syncs/` folder may carry — see this
@@ -380,6 +381,14 @@ export async function runSyncKnowledge(
    * 2026-09-22: the O.No font zip was the first). */
   const kept: string[] = [];
 
+  // A file the worker died on is skipped after its second time
+  // (`poisonFiles.server.ts`); the last pass's death is counted here.
+  const poison = graphLogPoisonFiles(projectFolder._id);
+  const leftInFlight = await poison.countLeftInFlight();
+  if (leftInFlight) {
+    log(`sync-knowledge: the last run stopped while on file ${leftInFlight.file} (${leftInFlight.strikes} of ${STRIKES_TO_SKIP} before it is skipped).`);
+  }
+
   for (const candidate of candidates) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
     // cancellation" section) — once per file, so a Stop request never
@@ -393,6 +402,15 @@ export async function runSyncKnowledge(
     }
 
     const hash = sourceHash(source.content_hash ?? source.s3_key ?? source._id);
+    const poisonKey = poisonFileKey(source._id, hash);
+    if ((await poison.strikes(poisonKey)) >= STRIKES_TO_SKIP) {
+      log(
+        `sync-knowledge: "${source.name}" stopped the worker on ${STRIKES_TO_SKIP} runs while being read, so it is skipped and left unread; replacing the file gives it another try.`,
+      );
+      unsupported.push({ fileId: source._id, name: source.name });
+      continue;
+    }
+    await poison.start(poisonKey);
     const knowledgeFolder = await ensureKnowledgeFolder(source.human_id, source.folder_id);
     const { files: knowledgeFiles } = await listFolderChildren(source.human_id, knowledgeFolder._id);
     // Which sidecars are this file's own: a sibling that differs only by
@@ -765,6 +783,7 @@ export async function runSyncKnowledge(
     if (outcome === "written") filings.written += 1;
     else if (outcome === "rejected") filings.rejected += 1;
   }
+  await poison.finish();
 
   // `unsupported` has always been collected "so a human can see what's
   // being silently left behind" (see its own doc above) and has never had

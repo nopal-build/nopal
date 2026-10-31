@@ -56,7 +56,7 @@ const DEFAULT_MAX_TOKENS = 32768;
 const DEFAULT_EFFORT: LlmEffort | undefined = undefined;
 
 /** The GraphLog stages that call a model. */
-export type GraphLogModelStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view" | "sow" | "brief";
+export type GraphLogModelStage = "sync-knowledge" | "sync-graph" | "graph-structure" | "graph-project-view" | "sow" | "brief" | "photo-link";
 
 /**
  * Which model, at what effort, each stage runs on when nothing overrides
@@ -117,6 +117,10 @@ const STAGE_DEFAULTS: Record<GraphLogModelStage, { model: string; effort?: LlmEf
   // skill's prose was tuned against that reader; the pairing is kept
   // until a grid says otherwise (ADR-017).
   brief: { model: "claude-fable-5-1", effort: "high" },
+  // Which of a day's notes a photo belongs to (`photoNodes.server.ts`):
+  // text only, one number back, once per photo. A small model's job;
+  // Austin's call, 2026-10-30.
+  "photo-link": { model: "claude-haiku-4-5" },
 };
 
 /** The model and effort `stage` runs on, after env overrides. Exported
