@@ -36,10 +36,15 @@ export async function action({ request }: ActionFunctionArgs) {
      * so this is the only place the hash can come from. */
     contentHash?: string;
     replaceFileId?: string;
+    /** Daily Log attachment locking convention (`isFileRefLocked`) — only
+     * "daily_log" is accepted; see the matching check in `upload.tsx`. */
+    source?: string;
+    date?: string;
   };
 
-  const { uploadId, key, parts, name, folderId, contentType, size, contentHash, replaceFileId } =
+  const { uploadId, key, parts, name, folderId, contentType, size, contentHash, replaceFileId, date } =
     body;
+  const source = body.source === "daily_log" ? ("daily_log" as const) : undefined;
 
   if (!uploadId || !key || !parts?.length || !name || !contentType) {
     return Response.json(
@@ -127,6 +132,8 @@ export async function action({ request }: ActionFunctionArgs) {
       content_hash: validHash,
       size: size ?? null,
       folder_id: folderId ?? null,
+      source,
+      date,
     });
     // The same ask `upload.tsx` makes: a large video got no poster until
     // a GraphLog run backfilled it (2026-10-29).

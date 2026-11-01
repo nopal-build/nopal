@@ -33,6 +33,7 @@ import {
 import type { DailyLog, DailyLogCard } from "robustness-core/data/dailyLog.server";
 import type { action } from "../routes/daily-log";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
+import { uploadToVaultFolder } from "./vaultUpload";
 
 // ─── @ mentions ───────────────────────────────────────────────────────────────────────────────────
 // Module-level (not defined inside the component) since neither closes
@@ -66,19 +67,31 @@ function recordMentionSelected(item: MentionItem) {
 // `OxEditor` stays ignorant of vault/folder specifics; this is the one
 // place that knows the file belongs to a particular day.
 
-function uploadDailyLogFile(date: string, file: File): Promise<UploadedFileInfo> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("date", date);
-  return fetch("/api/daily-log/upload", { method: "POST", body: form }).then(async (res) => {
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body?.error ?? "Upload failed");
-    // This tab's own upload — the real-time `file.created` echo for this
-    // exact id shows up moments later over `/api/events`; suppress it (see
-    // `useVaultEvents`) since this tab already knows about it firsthand.
-    markOwnMutation(body?.fileId);
-    return body as UploadedFileInfo;
+// Direct-to-S3 (via `vaultUpload.ts`'s `uploadToVaultFolder`, chunked for
+// anything over 100 MB) — bytes never pass through this server's own
+// request handler the way a whole-body POST to a route like the old
+// `/api/daily-log/upload` would. That route buffered a file into memory
+// TWICE (once parsing the multipart body, again to hash it) with no size
+// cap, which OOM-killed the 1 GB app mid-request on a large video; the
+// browser only ever saw that as a hung, response-less POST. This first
+// resolves (get-or-creates) the day's own vault folder -- the one thing
+// that still has to happen server-side -- THEN uploads straight to S3.
+async function uploadDailyLogFile(date: string, file: File): Promise<UploadedFileInfo> {
+  const targetRes = await fetch("/api/daily-log/upload-target", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ date }),
   });
+  const targetBody = await targetRes.json().catch(() => ({}));
+  if (!targetRes.ok) throw new Error(targetBody?.error ?? "Could not prepare that day's folder");
+  const folderId = targetBody.folderId as string;
+
+  const fileId = await uploadToVaultFolder(file, folderId, () => {}, { source: "daily_log", date });
+  // This tab's own upload — the real-time `file.created` echo for this
+  // exact id shows up moments later over `/api/events`; suppress it (see
+  // `useVaultEvents`) since this tab already knows about it firsthand.
+  markOwnMutation(fileId);
+  return { fileId, contentType: file.type || "application/octet-stream" };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

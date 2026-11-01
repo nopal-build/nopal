@@ -77,6 +77,7 @@ app.use(
   [
     "/api/upload",
     "/api/daily-log/upload",
+    "/api/daily-log/upload-target",
     "/api/vault/upload",
     "/api/vault/presign",
     "/api/vault/multipart-init",
