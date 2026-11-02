@@ -1,18 +1,14 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { createMultipartUpload } from "robustness-core/data/file.server";
-import { getFileRefById } from "robustness-core/data/vault.server";
-import { resolveUploadTarget, uploadTargetFromBody } from "../modules/uploadTarget.server";
+import { canWriteToFolderId, explainWriteRefusal, getFileRefById, getFolderById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
+import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 import { fileReplaceRefusal } from "robustness-core/data/fileReplace.server";
 
 /**
  * POST /api/vault/multipart-init
- * Body (JSON): { filename, contentType, folderId? | target?, originalName, size, replaceFileId? }
+ * Body (JSON): { filename, contentType, folderId?, originalName, size, replaceFileId? }
  * Returns: { uploadId, key }
- *
- * `target` (see `uploadTarget.server.ts`) names a daily log day or a seed
- * packet instead of a folder; `folderId` alone is a folder. The parts then
- * go straight to storage on URLs from `multipart-sign`.
  *
  * Creates an S3 multipart upload session. The key is returned so the client
  * can reference it in subsequent part and complete requests.
@@ -26,13 +22,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const scoped = await getScopedUserFromRequest(request);
   if (!scoped)
     return Response.json({ error: "Not authenticated" }, { status: 401 });
-  const { user } = scoped;
+  const { user, syncScoped } = scoped;
 
   const body = (await request.json()) as {
     filename?: string;
     contentType?: string;
     folderId?: string | null;
-    target?: unknown;
     originalName?: string;
     replaceFileId?: string;
   };
@@ -45,6 +40,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
+  let folderId = body.folderId;
   if (replaceFileId) {
     const existing = await getFileRefById(replaceFileId);
     if (!existing) {
@@ -54,27 +50,53 @@ export async function action({ request }: ActionFunctionArgs) {
     if (refusal) {
       return Response.json({ error: refusal.error }, { status: refusal.status });
     }
-    return startSession(user._id, existing.folder_id ?? "root", filename, contentType);
+    folderId = existing.folder_id;
+    return startSession(user._id, folderId, filename, contentType);
   }
 
-  const target = uploadTargetFromBody(body);
-  if (!target) return Response.json({ error: "Invalid upload target" }, { status: 400 });
-  const resolved = await resolveUploadTarget(scoped, target);
-  if (!resolved.ok) return resolved.response;
+  // Sync-scoped tokens may only write inside syncs/.
+  if (syncScoped && !(await isFolderUnderSyncs(folderId))) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-  return startSession(user._id, resolved.target.keySegment, filename, contentType);
+  // Some root subtrees or folder TYPES (e.g. `skills`) restrict writing to
+  // Admin/Super, even inside the OWNING human's own vault — see
+  // `vaultRoots.ts` / `vaultFolderTypes.ts`.
+  if (!(await canWriteToFolderId(folderId, user.role))) {
+    return Response.json(
+      { error: await explainWriteRefusal(folderId, user.role) },
+      { status: 403 },
+    );
+  }
+
+  // Whose folder is this actually? An owner-tier project Sharing Role
+  // (Owner/Crafter) may upload into someone else's shared project exactly
+  // like its own owner could — see `canActAsProjectOwner`.
+  const folder = folderId ? await getFolderById(folderId) : null;
+  if (folderId && !folder) {
+    return Response.json({ error: "Folder not found" }, { status: 404 });
+  }
+  if (folder && !(await canActAsProjectOwner(user._id, folder.human_id, folderId))) {
+    return Response.json(
+      { error: "You don't have permission to upload files here" },
+      { status: 403 },
+    );
+  }
+
+  return startSession(user._id, folderId, filename, contentType);
 }
 
 /** Opens the S3 session under this human's own key prefix (which
  * `multipart-part`/`-complete` check) and returns what the client needs. */
 async function startSession(
   humanId: string,
-  keySegment: string,
+  folderId: string | null | undefined,
   filename: string,
   contentType: string,
 ): Promise<Response> {
   const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const key = `vault/${humanId}/${keySegment}/${Date.now()}-${safeName}`;
+  const folderSegment = folderId ?? "root";
+  const key = `vault/${humanId}/${folderSegment}/${Date.now()}-${safeName}`;
 
   try {
     const uploadId = await createMultipartUpload(key, contentType);

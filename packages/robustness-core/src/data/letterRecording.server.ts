@@ -19,14 +19,14 @@
  */
 
 import { execFile } from "node:child_process";
-import { createReadStream, createWriteStream } from "node:fs";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { ffmpegBinary } from "./attachmentFrames.server";
-import { downloadFileStream, uploadPrivateStreamToS3 } from "./file.server";
+import { downloadFileStream, uploadPrivateFileToS3 } from "./file.server";
 import { repointFileRef } from "./fileReplace.server";
 import { merge } from "./generic.server";
 import { makeRenditionsForFile } from "./mediaRenditions.server";
@@ -138,7 +138,7 @@ export async function prepareLetterRecording(fileId: string, log: (line: string)
 
     const size = (await stat(output)).size;
     const s3Key = `${file.s3_key.replace(/\.[^./]+$/, "")}.web.mp4`;
-    const s3Url = await uploadPrivateStreamToS3(createReadStream(output), s3Key);
+    const s3Url = await uploadPrivateFileToS3(await readFile(output), s3Key);
     // Same row, so the letter's link keeps working; the raw upload is
     // deleted by the repoint.
     await repointFileRef(file, { s3Key, s3Url, contentType: "video/mp4", contentHash: null, size });
