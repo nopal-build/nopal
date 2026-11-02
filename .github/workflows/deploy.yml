@@ -47,6 +47,15 @@ jobs:
           cd crates/heic-decode
           cargo build --release
 
+      # See ci.yml's own comment -- same install, same reason
+      # (`typstRenderer.test.ts` runs a real `typst compile`/`pdftotext`).
+      - name: Install typst
+        run: |
+          curl -fsSL https://github.com/typst/typst/releases/download/v0.15.1/typst-x86_64-unknown-linux-musl.tar.xz -o /tmp/typst.tar.xz
+          tar -xJf /tmp/typst.tar.xz -C /tmp
+          sudo mv /tmp/typst-x86_64-unknown-linux-musl/typst /usr/local/bin/typst
+          sudo apt-get install --no-install-recommends -y poppler-utils
+
       - run: pnpm --filter remix run test --run
       - run: pnpm --filter fruits run test --run
 

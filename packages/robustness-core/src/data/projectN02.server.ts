@@ -48,12 +48,23 @@ async function ensureSkillFile(
 ): Promise<void> {
   const { files } = await listFolderChildren(humanId, skillsFolderId);
   if (files.some((f) => f.name.toLowerCase() === name.toLowerCase())) return;
+  // Deterministic id — same check-then-create race `applyProjectN02Shape`'s
+  // own Skills-FOLDER creation already closed (see its own comment just
+  // below), but this file-level create used to be missing it: two
+  // `ensureProjectN02` calls landing close together for the same human
+  // (e.g. two server processes, or two requests racing right after a
+  // deploy) could each see "no KNOWLEDGE.md yet" before either write
+  // committed, and both create one with a fresh random id — genuine
+  // duplicate files (see the `repair-duplicate-skill-files` admin script,
+  // the cleanup for every one this already produced). A deterministic id
+  // makes concurrent creates converge on the same UPSERT instead.
   await createFileRef({
     human_id: humanId,
     name,
     content: defaultContent,
     content_type: "text/markdown",
     folder_id: skillsFolderId,
+    id: systemVaultFolderKey(humanId, name, skillsFolderId),
   });
 }
 

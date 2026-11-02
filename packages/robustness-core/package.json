@@ -122,7 +122,6 @@
     "ffmpeg-static": "^5.3.0",
     "ioredis": "^5.9.0",
     "oxmarkdown-core": "workspace:*",
-    "playwright-core": "1.62.1",
     "react-router": "^7.14.0",
     "remix-auth": "^4.2.0",
     "remix-auth-totp": "^4.0.0",
