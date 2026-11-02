@@ -2,10 +2,18 @@
  * Resolves a project folder (a folder under the `projects` vault root) into
  * a `ResolvedProject` — the manifest parsed from its `README.md` front
  * matter (defaulted, never required — see `resolveProjectManifest`'s own
- * doc below), the README's body (rendered as-is via `OxRenderer`), and
- * every folder referenced by a `::gallery{folder="..."}` leaf directive in
- * the body (see `oxmarkdown-core/galleryDirective.ts`), resolved into that
- * folder's own images.
+ * doc below), the README's body (rendered as-is via `OxRenderer`), and two
+ * leaf-directive resolutions scanned out of that body:
+ *   - every folder referenced by a `::gallery{folder="..."}` directive (see
+ *     `oxmarkdown-core/galleryDirective.ts`), resolved into that folder's
+ *     own images.
+ *   - every load-cell run CSV referenced by a
+ *     `::LoadCellGraph{fileId="..."}` directive (see
+ *     `oxmarkdown-core/loadCellGraphDirective.ts`), resolved into that
+ *     run's cleaned rows/summary/download ids via
+ *     `resolveLoadCellGraphByFileId` (`loadCellSensorData.server.ts`) — an
+ *     optional `title="..."` attribute overrides the run's own name as the
+ *     embed's heading.
  *
  * Used to also resolve `file="..."` attributes on OTHER directive names
  * (the old `::csv-table{...}`/`::svg{...}`, feeding `ProjectView.tsx`'s
@@ -14,12 +22,17 @@
  * `oxmarkdown` skill's Build status). `::gallery{folder="..."}` survives
  * (re-added, this time as a real OxMarkdown built-in — see
  * `OxRenderer.tsx`'s `resolveGalleryFolder`), since it's the one directive
- * PhyLog's capture stage actually still writes.
+ * PhyLog's capture stage actually still writes. `::LoadCellGraph{...}` is a
+ * new, CALLER-REGISTERED directive instead (`ProjectView.tsx`'s own
+ * `directives` prop, not a new `OxRenderer.tsx` built-in) — see
+ * `oxmarkdown/loadCellGraphDirective.tsx`'s own header for why.
  *
  * Deliberately shallow: a `folder` attribute value only matches a DIRECT
  * child of the project folder (no nested paths), and a gallery folder's
  * images are exactly one level deep. Revisit once a real project needs
- * more nesting.
+ * more nesting. `LoadCellGraph{fileId="..."}` has no such limitation — a
+ * vault file id is already globally stable, not a path needing a folder to
+ * resolve against.
  */
 
 import { findLeafDirectiveOccurrences } from "../util/nopalDirectives";
@@ -27,6 +40,7 @@ import type { ProjectManifest, ResolvedProject } from "./project.types";
 import { parseProjectManifest } from "./project.types";
 import type { ResolvedGalleryImage } from "oxmarkdown-core";
 import { getFileRefById, listFolderChildren } from "./vault.server";
+import { resolveLoadCellGraphsInBody } from "./loadCellSensorData.server";
 import type { VaultFolder } from "./vault.types";
 
 function fileUrl(fileId: string): string {
@@ -82,7 +96,9 @@ export async function resolveProjectManifest(
       }));
   }
 
-  return { manifest: resolvedManifest, body, galleryFolders };
+  const loadCellGraphs = await resolveLoadCellGraphsInBody(body);
+
+  return { manifest: resolvedManifest, body, galleryFolders, loadCellGraphs };
 }
 
 /** Convenience re-export so route files only need one import for the type. */

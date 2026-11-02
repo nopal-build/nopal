@@ -40,6 +40,9 @@ export type GraphLogEventKind =
    * description so its cost is visible on its own. */
   | "filing-knowledge"
   | "graph-extract"
+  /** Which of a day's notes one photo belongs to (`photoNodes.server.ts`),
+   * recorded under sync-graph: once per photo, text only. */
+  | "photo-link"
   | "graph-structure"
   | "project-view";
 export type GraphLogOutcome = "success" | "skipped" | "error";

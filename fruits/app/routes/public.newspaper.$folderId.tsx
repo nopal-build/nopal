@@ -52,7 +52,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function SharedEffortsPage() {
-  const { title, updated, body, galleryFolders } = useLoaderData<typeof loader>();
+  const { title, updated, body, galleryFolders, videoViewUrlBase } = useLoaderData<typeof loader>();
   return (
     <AuthShell maxWidth="820px">
       <header className={sprinkles({ mb: 8 })}>
@@ -63,7 +63,7 @@ export default function SharedEffortsPage() {
           </p>
         )}
       </header>
-      <ProjectView body={body} galleryFolders={galleryFolders} servedFileIds={{}} />
+      <ProjectView body={body} galleryFolders={galleryFolders} servedFileIds={{}} videoViewUrl={(id) => `${videoViewUrlBase}/${id}`} />
     </AuthShell>
   );
 }

@@ -902,6 +902,14 @@
    caption alongside it, always the full row (`display: flex`, never the
    shrink-to-fit `inline-block` every other directive gets from
    `InteractiveDirective` — this directive bypasses that wrapper entirely). */
+/* A photo/video (`.ox-file-media`: two COLUMNS — the real thumb/poster/
+   in-flight preview on the left, its name (only shown on a failure —
+   not useful otherwise), the real error reason, Retry, and the caption
+   editor below those, all stacked in the second column) and everything
+   else (`.ox-file-plain`: a small icon directly beside its name, one
+   compact line, stacked ABOVE its own caption — it doesn't need or
+   deserve the same footprint a picture gets) are the two shapes this
+   directive ever takes (2026-11-01). */
 .ox-file-directive {
   display: flex;
   align-items: flex-start;
@@ -909,6 +917,18 @@
   /* Positioning context for `.ox-file-remove-slot`, which sits OUTSIDE
      this flex row entirely (not a flex child — see that rule). */
   position: relative;
+}
+.ox-file-media {
+  flex-direction: row;
+  gap: 10px;
+}
+.ox-file-plain {
+  flex-direction: column;
+  /* The exact offset the icon+name row's own icon slot + gap produce
+     (see `.ox-file-icon-slot`'s width/margin and `.ox-file-inline`'s own
+     `gap`) — the caption below has to start at that same X, under the
+     NAME, not flush at this block's own left edge (under the icon). */
+  --ox-file-plain-indent: calc(74px + 3px + 10px - var(--ox-grid) + 2px);
 }
 .ox-file-thumb {
   width: 74px;
@@ -924,6 +944,12 @@
      at all, ignores it harmlessly) — crops rather than distorts a
      non-square photo within the fixed 74x74 box. */
   object-fit: cover;
+  /* Positioning context for the bottom progress bar (`.ox-file-progress-
+     track`) an in-flight upload carries, with or without a local preview
+     image underneath it — `overflow: hidden` keeps the bar's square
+     corners from poking out past this box's own rounded ones. */
+  position: relative;
+  overflow: hidden;
 }
 .ox-file-thumb[data-upload-error="true"] {
   border-color: var(--red, #a63b31);
@@ -933,17 +959,17 @@
   justify-content: center;
 }
 
-/* An uploaded file that is not a picture: the same 74x74 box as a photo
-   thumbnail, carrying its kind ("PDF") and name, and opening the original
-   in a new tab. `box-sizing: border-box` so the padding stays inside the
-   fixed box `.ox-file-thumb` sets. */
+/* The video "ready" tile's own shell (`.ox-file-tile--media` below) —
+   a non-picture file no longer uses this at all (2026-11-01: moved to
+   the compact `.ox-file-inline` row, see `.ox-file-directive`'s own
+   comment), but a video's poster still needs a clickable, centered,
+   fixed-size box to sit the play glyph over. `box-sizing: border-box`
+   so the padding stays inside the fixed box `.ox-file-thumb` sets. */
 .ox-file-tile {
   box-sizing: border-box;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
   padding: 6px 5px;
   overflow: hidden;
   text-decoration: none;
@@ -953,7 +979,11 @@
 .ox-file-tile:hover,
 .ox-file-tile:focus-visible {
   border-color: var(--ox-color-link);
+  color: var(--ox-color-link);
 }
+/* Still used for the plain-text "failed" badge (`ox-file-thumb`'s bare/
+   preview branches) — not for a non-picture file's kind anymore, see
+   above. */
 .ox-file-tile-kind {
   font-size: 11px;
   font-weight: 600;
@@ -961,22 +991,215 @@
   line-height: 1;
   color: var(--ox-color-link);
 }
-.ox-file-tile-name {
-  font-size: 10px;
-  line-height: 1.2;
-  text-align: center;
-  color: var(--ox-color-subtle);
-  max-width: 100%;
+
+/* A video's poster (`.ox-file-tile--media`, real upload) or the instant
+   local preview shown while uploading (`.ox-file-thumb--preview`) — both
+   fill the same fixed 74x74 box an image thumbnail would, cropped not
+   distorted, same as `.ox-file-thumb`'s own `object-fit: cover`. */
+.ox-file-tile--media {
+  padding: 0;
+  position: relative;
+}
+.ox-file-tile-media {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* The play glyph marking a video's own thumbnail as playable (opens the
+   original on click, same as any other file tile) — distinguishes it
+   from a plain photo thumbnail, which gets none. */
+.ox-file-tile-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.15);
+}
+.ox-file-tile-play svg {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+
+/* The instant local preview shown while a file is still uploading (or
+   uploaded but waiting on its rendition) — the picked photo's own
+   pixels, or a video's captured first frame, instead of a blank box. */
+.ox-file-thumb--preview {
+  position: relative;
+  padding: 0;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow-wrap: anywhere;
+}
+.ox-file-thumb--preview[data-upload-error="true"] {
+  border-color: var(--red, #a63b31);
+}
+.ox-file-thumb--preview[data-upload-error="true"] .ox-file-tile-media {
+  opacity: 0.35;
+}
+.ox-file-tile-kind--overlay {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 2px 0;
+  text-align: center;
+  color: var(--red, #a63b31);
+  background: var(--ox-color-code-bg);
+}
+/* A determinate progress bar along the bottom edge of an in-flight
+   upload's box — the visual cue that something is actively happening,
+   and (for a chunked upload) roughly how far along it is, rather than
+   the box just sitting there unexplained. Sits on top of a local preview
+   image when there is one, or directly on the plain box when there
+   isn't (a PDF/other file type never gets a preview, but gets this same
+   bar). `.ox-file-thumb`'s own `border-radius` + the preview/bare box's
+   `overflow: hidden` keep this from poking out past the box's rounded
+   corners. */
+.ox-file-progress-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  background: rgba(0, 0, 0, 0.18);
+}
+.ox-file-progress-fill {
+  height: 100%;
+  min-width: 2px;
+  background: #fff;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.5));
+  transition: width 0.2s ease-out;
 }
 
 .ox-file-caption {
-  flex: 1 1 auto;
   min-width: 0;
+}
+/* The second column beside a photo/video's thumb — fills whatever width
+   the row has left (`flex: 1 1 auto`, the same job it always did when it
+   sat in a row). A non-picture file's caption instead sits BELOW its
+   icon+name line, where a flex-grow has nothing to grow against, so it
+   takes the full width of the block instead. */
+.ox-file-media > .ox-file-caption {
+  flex: 1 1 auto;
+}
+.ox-file-plain > .ox-file-caption {
+  width: calc(100% - var(--ox-file-plain-indent));
+  margin-top: 2px;
+  margin-left: var(--ox-file-plain-indent);
+}
+/* The filename — shown for a photo/video ONLY on a failed upload
+   (2026-11-01: not useful otherwise, just visual noise beside a picture
+   that already speaks for itself), FIRST, above the real error reason
+   and Retry, with the caption editor below those. A non-picture file
+   still always shows it, beside its icon (`.ox-file-inline`'s own
+   smaller override below) — there it has nothing else nearby to read
+   instead. One line, ellipsis-truncated rather than wrapping; the full
+   name is still a title tooltip either way. Deliberately quiet (normal
+   weight, subtle color) in both places — useful, not the point. */
+.ox-file-name-label {
+  font-size: 12px;
+  font-weight: 400;
+  /* An absolute length (the grid unit itself), not a relative multiplier
+     — keeps this line's own box the same height as every other row this
+     document's vertical rhythm is built from. */
+  line-height: var(--ox-grid);
+  color: var(--ox-color-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A non-picture file's own compact row: its kind icon, in a slot the
+   exact same width as a photo/video's own thumb (`.ox-file-icon-slot`
+   below, right-aligned within it so the icon's own RIGHT edge lines up
+   with a thumb's), then its name starting at the exact same X a
+   caption/`.ox-file-name-label` does for a photo/video (2026-11-02 —
+   the two shapes share one column grid now, even though this one is
+   nowhere near as tall). Doubles as the "open the original" link once
+   uploaded (an `<a>`); a plain `<div>` while still uploading or failed
+   (nothing to open yet). */
+.ox-file-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--ox-color-text);
+}
+a.ox-file-inline:hover,
+a.ox-file-inline:focus-visible {
+  color: var(--ox-color-link);
+}
+a.ox-file-inline:hover .ox-file-name-label,
+a.ox-file-inline:focus-visible .ox-file-name-label {
+  color: var(--ox-color-link);
+}
+/* The icon tints via plain `color` inheritance (its `stroke` is
+   `currentColor`) — only the name needs an explicit override, since it
+   sets its own `color` otherwise. */
+.ox-file-inline[data-upload-error="true"] {
+  color: var(--red, #a63b31);
+}
+.ox-file-inline[data-upload-error="true"] .ox-file-name-label {
+  color: var(--red, #a63b31);
+}
+/* Same fixed width + gutter margin `.ox-file-thumb` itself uses, so a
+   photo/video's thumb and a non-picture file's icon occupy the exact
+   same column — `justify-content: flex-end` right-aligns the (much
+   smaller) icon within it, landing its right edge exactly on the
+   thumb's own. */
+.ox-file-icon-slot {
+  width: 74px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 4px 3px 4px calc(-1 * var(--ox-grid) + 2px);
+}
+.ox-file-icon-slot svg {
+  flex-shrink: 0;
+}
+/* Inline beside its icon, this is a label, not the whole point of the
+   row the way a photo/video's thumb is — quieter styling than
+   `.ox-file-name-label`'s own default base case warrants on its own. */
+.ox-file-inline .ox-file-name-label {
+  font-size: 13px;
+}
+/* `UploadProgressBar`'s own track is `position: absolute`, normally
+   overlaid on a `.ox-file-thumb`'s own `position: relative` box (the
+   media case) — a non-picture file has no such box to overlay it on, so
+   this is a small `position: relative` wrapper purely so that same
+   absolute track resolves against IT instead of the whole (tall, once a
+   caption/error exists) `.ox-file-directive`. */
+.ox-file-inline-progress-wrap {
+  position: relative;
+  width: 100%;
+  height: 5px;
+  margin-top: 4px;
+}
+/* The real reason a failed upload failed (`Error#message`, or a generic
+   fallback — see `FileDirectiveLayout`'s `uploadErrorMessage`), plus a
+   Retry action right alongside it — previously a failed upload only
+   ever said the single word "failed", with no way to retry short of
+   removing the row and re-picking the file from scratch. */
+.ox-file-error-message {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--red, #a63b31);
+  margin-top: 1px;
+}
+.ox-file-retry-link {
+  display: inline;
+  margin-left: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ox-color-link);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ox-file-retry-link:hover,
+.ox-file-retry-link:focus-visible {
+  color: var(--ox-color-text);
 }
 
 /* The remove (X) button's SLOT sits OUTSIDE the flex row entirely —

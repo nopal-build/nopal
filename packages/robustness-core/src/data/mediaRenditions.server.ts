@@ -16,13 +16,17 @@
  * never processes media. The worker already decodes every attachment to
  * describe it, and has ffmpeg, so it does this too: once at upload
  * (`mediaQueue.server.ts`), and as a backfill from sync-knowledge's own
- * decode. Decodes are bounded here because a burst of uploads can do to
- * the worker what a page did to the app.
+ * decode. Decodes are bounded because a burst of uploads can do to the
+ * worker what a page did to the app: one HEIC at a time, in a child
+ * process (`heicToJpeg`), and a few resizes at a time here.
  */
 
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import sharp from "sharp";
-import { heicToJpeg, hasFfmpeg, isHeicContentType, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
-import { downloadFileBytes, objectExists, uploadPrivateFileToS3 } from "./file.server";
+import { heicToJpeg, hasFfmpeg, isHeicContentType, isVideoContentType, normalizeImageForVision, extractStills } from "./attachmentFrames.server";
+import { downloadFileBytes, downloadFileToPath, objectExists, uploadPrivateFileToS3 } from "./file.server";
 import { renditionKey, RENDITION_SIZES, type ImageRenditionSize } from "./mediaKeys";
 import { getFileRefById } from "./vault.server";
 import { isImageContentType } from "./sorter.server";
@@ -51,9 +55,6 @@ export function createLimiter(limit: number): <T>(work: () => Promise<T>) => Pro
   };
 }
 
-/** One HEIC decode at a time: the WebAssembly decoder's memory is the
- * whole reason this module is bounded. */
-const heicLimiter = createLimiter(1);
 /** A few resizes at a time: libvips is fast and frugal, but a decoded
  * 12-megapixel JPEG is still tens of MB while it is being resized. */
 const resizeLimiter = createLimiter(3);
@@ -123,18 +124,30 @@ export async function makeRenditionsForFile(fileId: string): Promise<RenditionsO
     if (await imageRenditionsExist(file.s3_key)) return { written: 0, skipped: "already made" };
     const bytes = await downloadFileBytes(file.s3_key);
     const decoded = isHeicContentType(file.content_type)
-      ? await heicLimiter(() => heicToJpeg(bytes))
+      ? await heicToJpeg(bytes)
       : Buffer.from((await normalizeImageForVision(bytes, file.content_type)).base64, "base64");
     return { written: await writeImageRenditions(file.s3_key, decoded), skipped: null };
   }
   if (isVideoContentType(file.content_type)) {
     if (!hasFfmpeg()) return { written: 0, skipped: "no ffmpeg in this process" };
     if (await objectExists(renditionKey(file.s3_key, "poster"))) return { written: 0, skipped: "already made" };
-    const bytes = await downloadFileBytes(file.s3_key);
-    const { stills } = await videoToStills(bytes, file.name.split(".").pop() ?? "bin", 1);
-    const still = stills[0];
-    if (!still) return { written: 0, skipped: "no frame could be read" };
-    return { written: (await writeVideoPoster(file.s3_key, still.jpegBase64)) ? 1 : 0, skipped: null };
+    // Streamed straight to disk (`downloadFileToPath`), never buffered
+    // whole in memory the way `downloadFileBytes` would -- a 227 MB video
+    // OOM-killed the whole 1 GB worker process this way, before ffmpeg
+    // even started (2026-11-02). One frame is all a poster needs
+    // (`extractStills`'s own `frameCount`).
+    const dir = await mkdtemp(join(tmpdir(), "rendition-video-"));
+    try {
+      const ext = (file.name.split(".").pop() ?? "bin").replace(/[^a-z0-9]/gi, "") || "bin";
+      const input = join(dir, `in.${ext}`);
+      await downloadFileToPath(file.s3_key, input);
+      const { stills } = await extractStills(input, 1);
+      const still = stills[0];
+      if (!still) return { written: 0, skipped: "no frame could be read" };
+      return { written: (await writeVideoPoster(file.s3_key, still.jpegBase64)) ? 1 : 0, skipped: null };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
   return { written: 0, skipped: `${file.content_type} has no rendition` };
 }

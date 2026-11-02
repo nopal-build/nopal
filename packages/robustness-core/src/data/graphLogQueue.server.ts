@@ -14,6 +14,7 @@ import {
   getLatestCompletedGraphLogRun,
   finishGraphLogRun,
 } from "./graphLogPerf.server";
+import { poisonFiles } from "./poisonFiles.server";
 
 let connection: IORedis | undefined;
 
@@ -182,6 +183,13 @@ export async function getGraphLogJobOwner(jobId: string): Promise<GraphLogJobDat
 // concurrently. Key prefix: `graphlog:lock:...`.
 
 const PROJECT_LOCK_TTL_MS = 10 * 60 * 1000;
+/** How often a held lock is pushed back out to the full TTL. The TTL alone
+ * expired under any run longer than ten minutes: a seeded project's run
+ * took an hour, BullMQ retried it as stalled while it was still going,
+ * and the retry took the lazily expired lock and ran the whole pipeline
+ * beside it, every model call twice ($17 for one run, 2026-10-30). The
+ * TTL now only bounds how long a DEAD holder blocks the project. */
+const PROJECT_LOCK_RENEW_MS = 60 * 1000;
 const PROJECT_LOCK_POLL_MS = 3000;
 const PROJECT_LOCK_MAX_WAIT_MS = 30 * 60 * 1000;
 
@@ -214,7 +222,21 @@ export async function acquireProjectGraphLogLock(
     await new Promise((resolve) => setTimeout(resolve, PROJECT_LOCK_POLL_MS));
   }
 
+  // Only while this holder still owns it: a lock that was lost is never
+  // taken back from whoever holds it now.
+  const renewScript = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`;
+  const renewal = setInterval(() => {
+    redis
+      .eval(renewScript, 1, key, token, String(PROJECT_LOCK_TTL_MS))
+      .then((renewed) => {
+        if (renewed === 0) console.error(`[graphlog] lost the project lock for ${projectFolderId}; another run may hold it now.`);
+      })
+      .catch((err) => console.error("Failed to renew the project GraphLog lock:", err));
+  }, PROJECT_LOCK_RENEW_MS);
+  renewal.unref();
+
   return async () => {
+    clearInterval(renewal);
     const releaseScript = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
     await redis.eval(releaseScript, 1, key, token);
   };
@@ -272,6 +294,11 @@ export async function throwIfGraphLogCancelled(projectFolderId: string): Promise
  * run. */
 export async function clearGraphLogCancellation(projectFolderId: string): Promise<void> {
   await getConnection().del(cancelFlagKey(projectFolderId));
+}
+
+/** The poison-file guard (`poisonFiles.server.ts`) on this queue's Redis. */
+export function graphLogPoisonFiles(projectFolderId: string) {
+  return poisonFiles(getConnection(), projectFolderId);
 }
 
 // --- Live project status ---------------------------------------------------

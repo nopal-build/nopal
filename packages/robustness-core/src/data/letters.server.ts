@@ -54,7 +54,9 @@ import { findOwningProjectFolder, getProjectRole, type ResolvedProjectRole } fro
 import { getProjectStatus } from "./projectStatus.server";
 import { merge } from "./generic.server";
 import { splitFrontmatter } from "./project.types";
-import { rewriteViewUrls, viewFileIds } from "./publicBody";
+import { rewriteViewUrls, videoFileIds, viewFileIds } from "./publicBody";
+import { resolveLoadCellGraphsInBody } from "./loadCellSensorData.server";
+import type { ResolvedLoadCellGraph } from "oxmarkdown-core";
 import {
   createVaultFolder,
   getFileRefById,
@@ -401,10 +403,13 @@ export function bodyOpensWithTitle(body: string): boolean {
   return /^\s*#\s+\S/.test(rest);
 }
 
-/** Every file id the letter names. Nothing else is served under
- * its link. */
+/** Every file id the letter names — a picture's literal view URL and a
+ * `::video{fileId="..."}` directive's own attribute (`videoFileIds`, see
+ * `publicBody.ts`'s header for why that needs its own pass). Nothing else
+ * is served under its link. */
 export function letterFileIds(markdown: string): Set<string> {
-  return viewFileIds(splitFrontmatter(markdown).body);
+  const body = splitFrontmatter(markdown).body;
+  return new Set([...viewFileIds(body), ...videoFileIds(body)]);
 }
 
 /** The file a letter's page may load, or null: the letter is readable
@@ -416,6 +421,40 @@ export async function letterPageFile(fileId: string, id: string, viewerHumanId?:
   if (!found) return null;
   const sent = sentCopyOf(found.file);
   if (!sent || !letterFileIds(sent.content).has(id)) return null;
+  return (await getFileRefById(id)) ?? null;
+}
+
+/** Every file id a resolved `::LoadCellGraph{fileId="..."}` directive
+ * references INDIRECTLY (its own raw/cleaned CSV) — ids `letterFileIds`
+ * alone wouldn't allow, since they're never literally embedded as
+ * `/api/vault/view/<id>` in the body the way a picture is. Mirrors
+ * `newspaperShare.server.ts`'s own `sharedFileIds`, which takes
+ * `galleryFolders` for the exact same reason. */
+function letterAttachmentIds(loadCellGraphs: Record<string, ResolvedLoadCellGraph>): Set<string> {
+  const ids = new Set<string>();
+  for (const graph of Object.values(loadCellGraphs)) {
+    ids.add(graph.rawFileId);
+    if (graph.cleanedFileId) ids.add(graph.cleanedFileId);
+  }
+  return ids;
+}
+
+/** The file behind a resolved directive's download button (today: a
+ * `::LoadCellGraph{...}`'s raw/cleaned CSV), or null — same doors as
+ * `letterPageFile` (the letter must be readable), but allow-listed against
+ * `letterAttachmentIds` instead of `letterFileIds`, since these ids are
+ * never literally written in the body. Re-resolves the letter's
+ * `loadCellGraphs` itself (self-healing, same convention
+ * `resolveLoadCellGraphByFileId` already has, and cheap — a letter's own
+ * CSV is at most a few thousand rows) rather than trusting a caller-passed
+ * map that could be stale. */
+export async function letterAttachmentFile(fileId: string, id: string, viewerHumanId?: string | null, rendering = false): Promise<FileRef | null> {
+  const found = await resolveReadableLetter(fileId, { viewerHumanId, rendering });
+  if (!found) return null;
+  const sent = sentCopyOf(found.file);
+  if (!sent) return null;
+  const loadCellGraphs = await resolveLoadCellGraphsInBody(splitFrontmatter(sent.content).body);
+  if (!letterAttachmentIds(loadCellGraphs).has(id)) return null;
   return (await getFileRefById(id)) ?? null;
 }
 
@@ -446,9 +485,32 @@ export interface LetterPage {
    * sent copy, link on or off (the worker prints a link-off letter under
    * a render pass, and both routes admit someone on the project). */
   linkOn: boolean;
+  /** Keyed by a `::LoadCellGraph{fileId="..."}` directive's `fileId`
+   * attribute value — resolved by the caller (`resolveLetterPage`, which
+   * needs real vault/DB access `letterPage` itself deliberately doesn't
+   * touch, so it stays a pure, synchronous "shape the fields" function —
+   * see its own tests) and handed in here, same "resolved externally,
+   * passed down as a plain prop" shape `ProjectView`'s `loadCellGraphs`
+   * already uses. Empty when the body references none. */
+  loadCellGraphs: Record<string, ResolvedLoadCellGraph>;
+  /** Where a `::video{fileId="..."}` directive's own file loads from,
+   * minus the final `/<id>` (the route builds `${videoViewUrlBase}/${id}`
+   * — loader data can't carry a function across the wire, the same reason
+   * `downloadUrl`/`pdfUrl` are plain strings a `::LoadCellGraph{...}`'s own
+   * download buttons build on). `null` for a preview, same as a picture:
+   * the Guide's own session already serves `/api/vault/view/<id>` directly
+   * (`OxRenderer`'s own default when no override is given), and the letter
+   * route (`letterPageFile`) has no "manager preview" door to admit an
+   * unsent draft's files through anyway. */
+  videoViewUrlBase: string | null;
 }
 
-export function letterPage(file: Pick<FileRef, "_id" | "name" | "updated_at"> & SentFields, origin: string, preview = false): LetterPage {
+export function letterPage(
+  file: Pick<FileRef, "_id" | "name" | "updated_at"> & SentFields,
+  origin: string,
+  preview = false,
+  loadCellGraphs: Record<string, ResolvedLoadCellGraph> = {},
+): LetterPage {
   // A preview is the draft with the session's view URLs: the Guide has a
   // session, and the letter's file routes serve only the sent copy. The
   // page itself is the sent copy, rewritten to the letter's own routes.
@@ -468,7 +530,28 @@ export function letterPage(file: Pick<FileRef, "_id" | "name" | "updated_at"> & 
     fileName: file.name,
     preview,
     linkOn: !preview && !!file.shared_at,
+    loadCellGraphs,
+    videoViewUrlBase: preview ? null : `/api/letter/${file._id}/view`,
   };
+}
+
+/** `letterPage`, plus resolving any `::LoadCellGraph{fileId="..."}`
+ * directives the body references — needs real vault/DB access
+ * (`resolveLoadCellGraphsInBody`), so can't live inside `letterPage` itself
+ * (which stays a pure, synchronous "shape the fields" function — see its
+ * own tests). The one function the real route
+ * (`public.letter.$fileId.tsx`) actually calls; `letterPage` alone is for
+ * tests and anything that already has a resolved `loadCellGraphs` map in
+ * hand. */
+export async function resolveLetterPage(
+  file: Pick<FileRef, "_id" | "name" | "updated_at"> & SentFields,
+  origin: string,
+  preview = false,
+): Promise<LetterPage> {
+  const sent = preview ? null : sentCopyOf(file);
+  const source = sent ? sent.content : (file.content ?? "");
+  const loadCellGraphs = await resolveLoadCellGraphsInBody(splitFrontmatter(source).body);
+  return letterPage(file, origin, preview, loadCellGraphs);
 }
 
 /** A letter a Guide may preview before its link is on (Austin,

@@ -23,13 +23,13 @@
  * own `?type=video` link carried into the README gallery.
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
-import heicConvert from "heic-convert";
 import sharp from "sharp";
 
 const run = promisify(execFile);
@@ -65,13 +65,90 @@ function isHeifContainer(bytes: Buffer): boolean {
  * got renditions (2026-10-30). Bytes that are not HEIF go to `sharp`. */
 export async function heicToJpeg(bytes: Buffer): Promise<Buffer> {
   if (!isHeifContainer(bytes)) return sharp(bytes).rotate().jpeg({ quality: 85 }).toBuffer();
-  const out = await heicConvert({ buffer: new Uint8Array(bytes), format: "JPEG", quality: 0.85 });
-  return Buffer.from(out);
+  const turn = heicTurn.then(() => decodeHeicInChild(bytes));
+  heicTurn = turn.catch(() => {});
+  return turn;
+}
+
+/** One HEIC decode at a time in this process, whichever job asks. */
+let heicTurn: Promise<unknown> = Promise.resolve();
+
+/** Long enough for any phone photo (about a second each); a decode
+ * still going after this is stuck, not slow. */
+const HEIC_DECODE_TIMEOUT_MS = 2 * 60 * 1000;
+
+/**
+ * The decoder runs in a Node process of its own, one per photo. The
+ * WebAssembly decoder holds ~130-250 MB per decode and never gives it
+ * back, so in the worker's own process a run's memory only climbed: a
+ * GraphLog run on a project of iPhone photos died at the same photo on
+ * two runs ("Worker exited unexpectedly", 2026-10-30; ten decodes in one
+ * process measured 82 MB to a 541 MB peak). A child returns its memory
+ * when it exits, and asks the kernel to kill it first under memory
+ * pressure (`oom_score_adj`), so a photo too big for the machine fails
+ * as that one photo, unread, and the run goes on.
+ */
+const HEIC_CHILD_SCRIPT = `
+try { require("fs").writeFileSync("/proc/self/oom_score_adj", "1000"); } catch {}
+const convert = require(process.argv[1]);
+const chunks = [];
+process.stdin.on("data", (c) => chunks.push(c));
+process.stdin.on("end", async () => {
+  try {
+    const out = await convert({ buffer: new Uint8Array(Buffer.concat(chunks)), format: "JPEG", quality: 0.85 });
+    process.stdout.write(Buffer.from(out));
+  } catch (err) {
+    process.stderr.write(String((err && err.message) || err));
+    process.exitCode = 1;
+  }
+});
+`;
+
+const requireHere = createRequire(import.meta.url);
+
+function decodeHeicInChild(bytes: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["-e", HEIC_CHILD_SCRIPT, requireHere.resolve("heic-convert")], {
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: HEIC_DECODE_TIMEOUT_MS,
+    });
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    child.stdout.on("data", (c: Buffer) => out.push(c));
+    child.stderr.on("data", (c: Buffer) => err.push(c));
+    // A child that dies before reading its input closes the pipe; the
+    // exit below says why.
+    child.stdin.on("error", () => {});
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) return resolve(Buffer.concat(out));
+      const said = Buffer.concat(err).toString().trim();
+      reject(
+        new Error(
+          signal
+            ? `the HEIC decoder was stopped (${signal}), likely out of memory or time`
+            : said || `the HEIC decoder exited ${code}`,
+        ),
+      );
+    });
+    child.stdin.end(bytes);
+  });
 }
 
 /** The image formats the vision model takes as-is. Mirrors
  * `anthropicProvider.server.ts`'s own set; anything else is converted. */
 const VISION_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+/** What the bytes say they are, from their first few: one of the four the
+ * model takes, HEIF, or null for anything else. */
+export function imageTypeFromBytes(bytes: Buffer): string | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (bytes.length >= 6 && /^GIF8[79]a$/.test(bytes.toString("latin1", 0, 6))) return "image/gif";
+  if (bytes.length >= 12 && bytes.toString("latin1", 0, 4) === "RIFF" && bytes.toString("latin1", 8, 12) === "WEBP") return "image/webp";
+  if (isHeifContainer(bytes)) return "image/heif";
+  return null;
+}
 
 /**
  * An image the vision model will accept: a JPEG/PNG/GIF/WebP passes
@@ -79,13 +156,19 @@ const VISION_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "ima
  * else `sharp` can read (TIFF, BMP, AVIF, ...) is re-encoded as JPEG.
  * Throws for a format nothing here can read, which the caller reports as
  * unsupported the way it always did.
+ *
+ * The format is read from the bytes; the stored type comes from the
+ * file's name, and a name can be wrong. Four screenshots named `.PNG`
+ * were JPEGs, sent as `image/png`, and the API refused them ("the image
+ * appears to be a image/jpeg", 2026-10-30).
  */
 export async function normalizeImageForVision(
   bytes: Buffer,
   contentType: string,
 ): Promise<{ base64: string; mediaType: string }> {
-  if (VISION_MEDIA_TYPES.has(contentType)) return { base64: bytes.toString("base64"), mediaType: contentType };
-  const jpeg = isHeicContentType(contentType)
+  const actual = imageTypeFromBytes(bytes);
+  if (actual && VISION_MEDIA_TYPES.has(actual)) return { base64: bytes.toString("base64"), mediaType: actual };
+  const jpeg = actual === "image/heif" || (!actual && isHeicContentType(contentType))
     ? await heicToJpeg(bytes)
     : await sharp(bytes).rotate().jpeg({ quality: 85 }).toBuffer();
   return { base64: jpeg.toString("base64"), mediaType: "image/jpeg" };
@@ -162,12 +245,80 @@ export function ffmpegBinary(): string {
   return ffmpeg();
 }
 
+/** Fast path: a container's own declared duration, read without decoding
+ * a single frame (`-i` alone, no real output -- ffmpeg prints the banner
+ * and exits almost instantly). Most real recordings (a phone's own
+ * MOV/MP4) already carry this in their header. Returns null when the
+ * container doesn't say (a browser MediaRecorder WebM, notably), which
+ * `extractStills` falls back to a real decode for. */
+async function probeDurationFast(inputPath: string): Promise<number | null> {
+  const probe = await run(ffmpeg(), ["-hide_banner", "-i", inputPath], { maxBuffer: 1 << 24 }).catch(
+    (e: { stderr?: string }) => e,
+  );
+  return parseFfmpegDuration(String(probe.stderr ?? ""));
+}
+
+/** Slow path, reached only when the container doesn't declare its own
+ * duration: a REAL full decode to a null output, timing how far it got.
+ * This can take as long as the clip itself runs -- a 227 MB, several-
+ * minute video OOM-killed the worker partly because EVERY video used to
+ * pay this cost unconditionally, even ones whose header already had the
+ * answer (2026-11-02). */
+async function probeDurationSlow(inputPath: string): Promise<number | null> {
+  const probe = await run(ffmpeg(), ["-hide_banner", "-i", inputPath, "-f", "null", "-"], { maxBuffer: 1 << 24 }).catch(
+    (e: { stderr?: string }) => e,
+  );
+  return parseFfmpegDecodedTime(String(probe.stderr ?? ""));
+}
+
+/** `frameCount` stills (default `VIDEO_FRAME_COUNT`) from a video already
+ * on disk at `inputPath`, with the clip's duration. One frame is the
+ * midpoint, which is what a poster wants. Frame outputs are written
+ * beside `inputPath`, in its own directory -- the caller owns that
+ * directory and its cleanup (see `videoToStills`, or a caller that
+ * streamed the input there directly to avoid ever buffering it). */
+export async function extractStills(
+  inputPath: string,
+  frameCount = VIDEO_FRAME_COUNT,
+): Promise<{ stills: Still[]; durationSeconds: number }> {
+  const durationSeconds = (await probeDurationFast(inputPath)) ?? (await probeDurationSlow(inputPath));
+  if (!durationSeconds) throw new Error("could not read the video's duration");
+
+  const dir = dirname(inputPath);
+  const stills: Still[] = [];
+  for (const t of frameTimestamps(durationSeconds, frameCount)) {
+    const out = join(dir, `frame-${t}.jpg`);
+    await run(ffmpeg(), [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-ss",
+      String(t),
+      "-i",
+      inputPath,
+      "-frames:v",
+      "1",
+      "-vf",
+      `scale='min(${FRAME_MAX_EDGE},iw)':-2`,
+      "-q:v",
+      "3",
+      out,
+    ]);
+    stills.push({ jpegBase64: (await readFile(out)).toString("base64"), atSeconds: t });
+  }
+  return { stills, durationSeconds };
+}
+
 /**
- * `frameCount` stills (default `VIDEO_FRAME_COUNT`) from a video, with the
- * clip's duration. One frame is the midpoint, which is what a poster wants.
- * Writes the bytes to a temp file (ffmpeg wants a seekable input for
- * `-ss`), extracts one frame per timestamp, and cleans up whatever
- * happens.
+ * `frameCount` stills from a video given as in-memory `bytes` -- writes
+ * them to a fresh temp file first (ffmpeg wants a seekable input for
+ * `-ss`), extracts via `extractStills`, and cleans up whatever happens.
+ * Only safe for a video small enough to hold in memory at all; a large
+ * one (uploaded, not already in hand for some other reason) should be
+ * streamed straight to disk instead -- see `mediaRenditions.server.ts`'s
+ * own video branch for that path (`downloadFileToPath` + `extractStills`
+ * directly, bytes never created).
  */
 export async function videoToStills(
   bytes: Buffer,
@@ -178,40 +329,7 @@ export async function videoToStills(
   try {
     const input = join(dir, `in.${extension.replace(/[^a-z0-9]/gi, "") || "bin"}`);
     await writeFile(input, new Uint8Array(bytes));
-    // `-i` with no output prints the banner (with Duration) and exits
-    // nonzero; the banner is what we want.
-    const probe = await run(ffmpeg(), ["-hide_banner", "-i", input, "-f", "null", "-"], { maxBuffer: 1 << 24 }).catch(
-      (e: { stderr?: string }) => e,
-    );
-    // A browser's MediaRecorder WebM carries no duration in its header
-    // ("Duration: N/A"); the decode to null that printed the banner also
-    // printed how far it got, which is the length.
-    const durationSeconds = parseFfmpegDuration(String(probe.stderr ?? "")) ?? parseFfmpegDecodedTime(String(probe.stderr ?? ""));
-    if (!durationSeconds) throw new Error("could not read the video's duration");
-
-    const stills: Still[] = [];
-    for (const t of frameTimestamps(durationSeconds, frameCount)) {
-      const out = join(dir, `frame-${t}.jpg`);
-      await run(ffmpeg(), [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-ss",
-        String(t),
-        "-i",
-        input,
-        "-frames:v",
-        "1",
-        "-vf",
-        `scale='min(${FRAME_MAX_EDGE},iw)':-2`,
-        "-q:v",
-        "3",
-        out,
-      ]);
-      stills.push({ jpegBase64: (await readFile(out)).toString("base64"), atSeconds: t });
-    }
-    return { stills, durationSeconds };
+    return await extractStills(input, frameCount);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

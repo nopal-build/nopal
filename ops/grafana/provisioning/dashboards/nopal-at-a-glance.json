@@ -1,0 +1,171 @@
+{
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "description": "Quick daily-check view of one cluster at a time (default: Nopal Prod). Switch the Cluster dropdown to see Nopal Staging / Hot Box / Savage instead -- each is a hand-maintained regex over Fly app names below, since Fly's metrics have no built-in grouping concept beyond `app`.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Instances Up",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "fly_instance_up{app=~\"$cluster\"}",
+          "instant": true,
+          "legendFormat": "{{app}} ({{instance}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "down", "color": "red" }, "1": { "text": "up", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value_and_name" }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Memory Available %",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "(fly_instance_memory_mem_available{app=~\"$cluster\"} / fly_instance_memory_mem_total{app=~\"$cluster\"}) * 100",
+          "legendFormat": "{{app}} / {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "HTTP Request Rate (overall)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "sum(rate(fly_app_http_responses_count{app=~\"$cluster\"}[5m])) by (app)",
+          "legendFormat": "{{app}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "HTTP 5xx Rate",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "sum(rate(fly_app_http_responses_count{app=~\"$cluster\", status=~\"5..\"}[5m])) by (app)",
+          "legendFormat": "{{app}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "HTTP p95 Response Time",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(fly_app_http_response_time_seconds_bucket{app=~\"$cluster\"}[5m])) by (le, app))",
+          "legendFormat": "{{app}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Worker Queue Backlog (waiting + active)",
+      "description": "Per-queue breakdown of jobs currently waiting or being worked, from the worker's own /metrics endpoint (queueMetrics.ts) -- not a Fly built-in metric. Only populated for apps that expose it (currently nopal-phylog-worker).",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "max(bullmq_queue_jobs{app=~\"$cluster\", state=~\"waiting|active\"}) by (queue, state)",
+          "legendFormat": "{{queue}} ({{state}})"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Worker Job Failures",
+      "description": "When failures actually happened, per queue -- a count of NEW failures per time bucket (from the worker's own `Worker.on('failed', ...)` handlers), not the current backlog total. Collapses the two worker machines' identical counters with max() rather than sum(), since summing would double-count.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "max(increase(bullmq_job_failures_total{app=~\"$cluster\"}[$__interval])) by (queue)",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "drawStyle": "bars", "fillOpacity": 80, "lineWidth": 0, "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["nopal", "at-a-glance"],
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "type": "custom",
+        "label": "Cluster",
+        "query": "Nopal Prod : nopal-fruits|nopal-phylog-worker|webapp-billowing-meadow-8538|db-thrumming-water-5938,Nopal Staging : fruits-staging|nopal-webapp-staging,Hot Box : hot-boxed-pie|hot-mqtt,Savage : savage-.*",
+        "current": {
+          "text": "Nopal Prod",
+          "value": "nopal-fruits|nopal-phylog-worker|webapp-billowing-meadow-8538|db-thrumming-water-5938"
+        },
+        "options": [
+          { "text": "Nopal Prod", "value": "nopal-fruits|nopal-phylog-worker|webapp-billowing-meadow-8538|db-thrumming-water-5938", "selected": true },
+          { "text": "Nopal Staging", "value": "fruits-staging|nopal-webapp-staging", "selected": false },
+          { "text": "Hot Box", "value": "hot-boxed-pie|hot-mqtt", "selected": false },
+          { "text": "Savage", "value": "savage-.*", "selected": false }
+        ]
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "",
+  "title": "Nopal \u2014 At a Glance",
+  "uid": "nopal-at-a-glance",
+  "version": 1
+}

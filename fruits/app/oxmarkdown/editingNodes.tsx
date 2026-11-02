@@ -60,6 +60,8 @@ import {
   InteractiveDirective,
   OxStaticNodes,
 } from "../components/OxRenderer";
+import { useLocalFilePreview, releaseLocalFilePreview, useUploadProgress, clearUploadProgress, forgetLocalFile } from "./localFilePreview";
+import { retryFileUpload } from "./fileDirective";
 import { OxEditorContext } from "./OxEditorContext";
 
 /** Shared by every decorator's own click handling below (`OxDirectiveNode`
@@ -183,6 +185,10 @@ function OxDirectiveDecorator({
   useSelectDecoratorOnClick(nodeKey, setSelected);
 
   const attrs = directiveAttrs(mdastNode);
+  // Unconditional (rules-of-hooks) even though only the "file" branch
+  // below uses it — cheap (a `Map` read) when there's nothing to find.
+  const localPreviewSrc = useLocalFilePreview(nodeKey);
+  const uploadProgress = useUploadProgress(nodeKey);
 
   // Every hook above runs unconditionally, on every render, regardless of
   // directive kind — the "file" branch below returns early, so nothing
@@ -218,7 +224,15 @@ function OxDirectiveDecorator({
         fileId={attrs.fileId}
         contentType={attrs.contentType}
         uploadError={attrs.uploadError === "1"}
+        uploadErrorMessage={attrs.uploadErrorMessage}
+        localPreviewSrc={localPreviewSrc}
+        uploadProgress={uploadProgress}
+        onLocalPreviewConsumed={() => releaseLocalFilePreview(nodeKey)}
+        onRetry={onUploadFile ? () => retryFileUpload(editor, nodeKey, onUploadFile) : undefined}
         onRemove={() => {
+          releaseLocalFilePreview(nodeKey);
+          clearUploadProgress(nodeKey);
+          forgetLocalFile(nodeKey);
           editor.update(() => {
             const node = $getNodeByKey(nodeKey);
             node?.remove();

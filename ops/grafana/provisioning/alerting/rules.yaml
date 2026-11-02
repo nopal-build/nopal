@@ -1,0 +1,159 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana Alerting Provisioning – Fly instance health rules
+#
+# Starter set covering the gap app-level code can't self-report: a process
+# that gets OOM-killed dies before it can send its own Discord message (the
+# original motivation -- see the rendition-worker OOM investigation, worker
+# `mediaWorker`/`attachmentFrames.server.ts`). These poll Fly's managed
+# Prometheus externally instead, so they fire even when the instance itself
+# can't.
+#
+# Scoped to NOPAL PROD ONLY (Gerald, 2026-11-02: "if it doesn't deal with
+# Nopal Prod servers, then I don't want it reported to discord right now").
+# This app list is a manual copy of the "Nopal Prod" option in
+# provisioning/dashboards/nopal-at-a-glance.json's `$cluster` variable --
+# YAML has no cross-file variables, so keep the two in sync by hand if the
+# app list ever changes. To alert on Staging/Hot Box/Savage too, either
+# swap this regex or duplicate the rule group with a different one.
+#
+# Each rule uses a Prometheus instant query (refId A) feeding a Threshold
+# expression (refId B), which is what `condition:` points at. Threshold
+# (NOT "Classic condition") is required for correct behavior here --
+# Classic condition explicitly "disables multi-dimensional alerts for this
+# rule" per Grafana's own docs, collapsing every matching series (every
+# app) into ONE undifferentiated alert with no per-series labels. That bug
+# is what produced the first real Discord notification from this setup:
+# "[no value]/[no value] exited with a non-zero code" with a meaningless
+# "Value: B0=143, B1=143" dump instead of naming the actual app. Threshold
+# fires one alert instance PER app/instance, each with its own real
+# `$labels.app`/`$labels.instance` for the annotation template below. See
+# https://grafana.com/docs/grafana/latest/alerting/set-up/provision-alerting-resources/file-provisioning/
+# for the full schema if adding more rules.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: fly-instance-health
+    folder: Fly Infrastructure
+    interval: 1m
+    rules:
+      - uid: fly-oom-kill
+        title: Fly instance OOM-killed
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: fly-prometheus
+            model:
+              editorMode: code
+              expr: max(fly_instance_exit_oom{app=~"nopal-fruits|nopal-phylog-worker|webapp-billowing-meadow-8538|db-thrumming-water-5938"}) by (app, instance)
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              refId: B
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.app }}/{{ $labels.instance }} was OOM-killed"
+
+      - uid: fly-nonzero-exit
+        title: Fly instance exited non-zero
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: fly-prometheus
+            model:
+              editorMode: code
+              # != 143 excludes "stopped by SIGTERM" (128+15, standard Unix
+              # signal-exit convention) -- Fly sends SIGTERM to every machine
+              # it replaces during a normal rolling/bluegreen deploy, so
+              # without this exclusion this rule fired on EVERY deploy, for
+              # every machine replaced (Gerald, 2026-11-02: a deploy produced
+              # 7 simultaneous "exited non-zero" alerts, all routine). OOM
+              # kills are still caught separately by fly-oom-kill above,
+              # which checks the dedicated fly_instance_exit_oom flag, not
+              # this generic exit code.
+              expr: max(fly_instance_exit_code{app=~"nopal-fruits|nopal-phylog-worker|webapp-billowing-meadow-8538|db-thrumming-water-5938"} != 143) by (app, instance)
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              refId: B
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.app }}/{{ $labels.instance }} exited with a non-zero code"
+
+      - uid: fly-low-memory
+        title: Fly instance low available memory
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: fly-prometheus
+            model:
+              editorMode: code
+              expr: >-
+                min((fly_instance_memory_mem_available{app=~"nopal-fruits|nopal-phylog-worker|webapp-billowing-meadow-8538|db-thrumming-water-5938"} / fly_instance_memory_mem_total{app=~"nopal-fruits|nopal-phylog-worker|webapp-billowing-meadow-8538|db-thrumming-water-5938"}) * 100) by (app, instance)
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [10]
+              refId: B
+        noDataState: OK
+        execErrState: Error
+        # Sustained, not a blip -- avoids firing on a brief GC/build spike,
+        # and gives an early warning before fly-oom-kill actually fires.
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.app }}/{{ $labels.instance }} has less than 10% memory available"

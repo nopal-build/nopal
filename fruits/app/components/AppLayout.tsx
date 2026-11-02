@@ -121,20 +121,26 @@ function getCurrentSectionLabel(pathname: string, homeLabel: string): string {
   return homeLabel;
 }
 
-type MakerSubItem = { to: string; label: string };
+type MakerSubItem = { to: string; label: string; external?: boolean };
 
 /** The Maker's own sub-pages, gated the same way the Maker landing
  * page's own entry tiles/sections are (`maker.tsx`) -- "Manage" (Projects
  * and humans) is for anyone the Maker is shown to at all (staff or a
- * Guide); GraphLog/Performance/Stamps need Admin or Super; Admin
+ * Guide); GraphLog/Performance/Grafana/Stamps need Admin or Super; Admin
  * (Scripts) needs Super specifically. Shared between the desktop hover
  * dropdown and the mobile indented list below, so the two can never
- * silently drift apart. */
+ * silently drift apart.
+ *
+ * `external: true` items (Grafana) are a real `<a target="_blank">` to an
+ * absolute URL, not a react-router `NavLink` -- see ops/grafana/README.md
+ * for what's actually running there (self-hosted Grafana, Fly's own
+ * Prometheus data, not part of this app at all). */
 function makerSubItems(user: ReturnType<typeof useUser>): MakerSubItem[] {
   const items: MakerSubItem[] = [{ to: "/maker/projects", label: "Manage" }];
   if (permissions.isAdmin(user)) {
     items.push({ to: "/maker/graphlog", label: "GraphLog" });
     items.push({ to: "/maker/performance", label: "Performance" });
+    items.push({ to: "https://nopal-grafana.fly.dev", label: "Grafana", external: true });
   }
   if (permissions.isSuper(user)) {
     items.push({ to: "/maker/scripts", label: "Admin" });
@@ -198,19 +204,32 @@ function MakerNavDropdown({ items }: { items: MakerSubItem[] }) {
             flexDirection: "column",
           }}
         >
-          {items.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              prefetch="intent"
-              className={({ isActive }) =>
-                `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
-              }
-              style={{ padding: "8px 10px", borderRadius: "6px", whiteSpace: "nowrap" }}
-            >
-              {item.label}
-            </NavLink>
-          ))}
+          {items.map((item) =>
+            item.external ? (
+              <a
+                key={item.to}
+                href={item.to}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${navLink({ context: "topbar" })} ${navLinkFontClass}`}
+                style={{ padding: "8px 10px", borderRadius: "6px", whiteSpace: "nowrap" }}
+              >
+                {item.label}
+              </a>
+            ) : (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                prefetch="intent"
+                className={({ isActive }) =>
+                  `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+                }
+                style={{ padding: "8px 10px", borderRadius: "6px", whiteSpace: "nowrap" }}
+              >
+                {item.label}
+              </NavLink>
+            ),
+          )}
         </div>
       )}
     </div>
@@ -435,19 +454,32 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                     className={sprinkles({ display: "flex", flexDirection: "column" })}
                     style={{ paddingLeft: "20px" }}
                   >
-                    {makerItems.map((item) => (
-                      <NavLink
-                        key={item.to}
-                        to={item.to}
-                        prefetch="intent"
-                        className={({ isActive }) =>
-                          `${navLink({ context: "mobile", active: isActive })} ${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`
-                        }
-                        onClick={closeMenu}
-                      >
-                        {item.label}
-                      </NavLink>
-                    ))}
+                    {makerItems.map((item) =>
+                      item.external ? (
+                        <a
+                          key={item.to}
+                          href={item.to}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`${navLink({ context: "mobile" })} ${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`}
+                          onClick={closeMenu}
+                        >
+                          {item.label}
+                        </a>
+                      ) : (
+                        <NavLink
+                          key={item.to}
+                          to={item.to}
+                          prefetch="intent"
+                          className={({ isActive }) =>
+                            `${navLink({ context: "mobile", active: isActive })} ${textSize.xs} ${sprinkles({ fontFamily: "mono" })}`
+                          }
+                          onClick={closeMenu}
+                        >
+                          {item.label}
+                        </NavLink>
+                      ),
+                    )}
                   </div>
                 </>
               )}

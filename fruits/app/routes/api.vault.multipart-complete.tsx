@@ -4,6 +4,7 @@ import { completeMultipartUpload } from "robustness-core/data/file.server";
 import { createFileRef, explainWriteRefusal, getFileRefById, getFolderById, isFolderUnderSyncs, canWriteToFolderId } from "robustness-core/data/vault.server";
 import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
 import { fileReplaceRefusal, repointFileRef } from "robustness-core/data/fileReplace.server";
+import { dailyLogStamp } from "../modules/dailyLogStamp.server";
 import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 
 /**
@@ -36,6 +37,10 @@ export async function action({ request }: ActionFunctionArgs) {
      * so this is the only place the hash can come from. */
     contentHash?: string;
     replaceFileId?: string;
+    /** Daily Log attachment locking convention (`isFileRefLocked`), kept
+     * only when `dailyLogStamp` finds it true for this folder. */
+    source?: string;
+    date?: string;
   };
 
   const { uploadId, key, parts, name, folderId, contentType, size, contentHash, replaceFileId } =
@@ -116,6 +121,9 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const url = await completeMultipartUpload(key, uploadId, parts);
 
+    // The daily log stamp, only when it is true: the folder must be this
+    // person's own Daily Logs folder for that date (`dailyLogStamp`).
+    const stamp = await dailyLogStamp(user._id, folderId, body.source, body.date);
     // Filed under the FOLDER's own owner, not necessarily the acting
     // uploader — see the matching comment in `upload.tsx`.
     const fileRef = await createFileRef({
@@ -127,6 +135,7 @@ export async function action({ request }: ActionFunctionArgs) {
       content_hash: validHash,
       size: size ?? null,
       folder_id: folderId ?? null,
+      ...(stamp ?? {}),
     });
     // The same ask `upload.tsx` makes: a large video got no poster until
     // a GraphLog run backfilled it (2026-10-29).

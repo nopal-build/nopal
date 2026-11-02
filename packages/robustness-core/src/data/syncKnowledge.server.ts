@@ -56,12 +56,15 @@ import {
   updateFileRef,
   type VaultFolder,
 } from "./vault.server";
-import { downloadFileBytes } from "./file.server";
+import { downloadFileBytes, downloadFileToPath } from "./file.server";
 import { imageRenditionsExist, renditionKey, writeImageRenditions, writeVideoPoster } from "./mediaRenditions.server";
 import { objectExists } from "./file.server";
 import { parseSyncedCardFileName } from "./dailyLogSync.server";
 import { isSeedDayFileName, isSeedInstructionFileName, SEED_SYNC_FOLDER_NAME } from "./seed.server";
-import { fitImageForVision, formatSeconds, hasFfmpeg, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
+import { extractStills, fitImageForVision, formatSeconds, hasFfmpeg, isVideoContentType, normalizeImageForVision, type Still } from "./attachmentFrames.server";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   FILING_FRAMING,
   buildFilingContent,
@@ -86,7 +89,8 @@ import { docxText, isDocx } from "./docxText.server";
 import { resolveSidecar } from "./sidecarNames";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { noopGraphLogRunRecorder, type GraphLogPerfRecorder } from "./graphLogPerf.server";
-import { throwIfGraphLogCancelled } from "./graphLogQueue.server";
+import { graphLogPoisonFiles, throwIfGraphLogCancelled } from "./graphLogQueue.server";
+import { poisonFileKey, STRIKES_TO_SKIP } from "./poisonFiles.server";
 import type { LlmProvider, PhotoDescriber } from "./llmProvider";
 
 /** The reserved subfolder name every `syncs/` folder may carry — see this
@@ -192,16 +196,40 @@ async function ensurePosterForDescribedVideo(
   // No ffmpeg here (an app process rather than the worker): say nothing
   // and download nothing; the worker's next run writes it.
   if (!hasFfmpeg()) return;
+  // Streamed straight to disk (`downloadFileToPath`), never buffered
+  // whole in memory the way `downloadFileBytes` would -- the same OOM
+  // risk a large upload's own `makeRenditionsForFile` had (2026-11-02,
+  // see `mediaRenditions.server.ts`'s own video branch); this backfill
+  // path has an identical "just one frame" shape.
+  const dir = await mkdtemp(join(tmpdir(), "sync-knowledge-video-"));
   try {
     if (await objectExists(renditionKey(source.s3_key, "poster"))) return;
-    const bytes = await downloadFileBytes(source.s3_key);
-    const extension = source.name.split(".").pop() ?? "bin";
-    const { stills } = await videoToStills(bytes, extension, 1);
+    const extension = (source.name.split(".").pop() ?? "bin").replace(/[^a-z0-9]/gi, "") || "bin";
+    const input = join(dir, `in.${extension}`);
+    await downloadFileToPath(source.s3_key, input);
+    const { stills } = await extractStills(input, 1);
     if (stills[0] && (await writeVideoPoster(source.s3_key, stills[0].jpegBase64))) {
       log(`sync-knowledge: wrote a poster for "${source.name}".`);
     }
   } catch (err) {
     log(`sync-knowledge: no poster for "${source.name}" (${err instanceof Error ? err.message : "unknown error"}).`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** A video's description stills, streamed from storage to a temp file
+ * (`downloadFileToPath`) rather than downloaded whole: the nightly
+ * description read every video into memory before 2026-11-02, the same
+ * OOM the poster paths had. */
+async function videoStillsFromStorage(s3Key: string, extension: string): Promise<{ stills: Still[]; durationSeconds: number }> {
+  const dir = await mkdtemp(join(tmpdir(), "sync-knowledge-describe-"));
+  try {
+    const input = join(dir, `in.${extension.replace(/[^a-z0-9]/gi, "") || "bin"}`);
+    await downloadFileToPath(s3Key, input);
+    return await extractStills(input);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }
 
@@ -380,6 +408,14 @@ export async function runSyncKnowledge(
    * 2026-09-22: the O.No font zip was the first). */
   const kept: string[] = [];
 
+  // A file the worker died on is skipped after its second time
+  // (`poisonFiles.server.ts`); the last pass's death is counted here.
+  const poison = graphLogPoisonFiles(projectFolder._id);
+  const leftInFlight = await poison.countLeftInFlight();
+  if (leftInFlight) {
+    log(`sync-knowledge: the last run stopped while on file ${leftInFlight.file} (${leftInFlight.strikes} of ${STRIKES_TO_SKIP} before it is skipped).`);
+  }
+
   for (const candidate of candidates) {
     // Stop checkpoint (see `graphLogQueue.server.ts`'s own "Cooperative
     // cancellation" section) — once per file, so a Stop request never
@@ -393,6 +429,15 @@ export async function runSyncKnowledge(
     }
 
     const hash = sourceHash(source.content_hash ?? source.s3_key ?? source._id);
+    const poisonKey = poisonFileKey(source._id, hash);
+    if ((await poison.strikes(poisonKey)) >= STRIKES_TO_SKIP) {
+      log(
+        `sync-knowledge: "${source.name}" stopped the worker on ${STRIKES_TO_SKIP} runs while being read, so it is skipped and left unread; replacing the file gives it another try.`,
+      );
+      unsupported.push({ fileId: source._id, name: source.name });
+      continue;
+    }
+    await poison.start(poisonKey);
     const knowledgeFolder = await ensureKnowledgeFolder(source.human_id, source.folder_id);
     const { files: knowledgeFiles } = await listFolderChildren(source.human_id, knowledgeFolder._id);
     // Which sidecars are this file's own: a sibling that differs only by
@@ -482,7 +527,10 @@ export async function runSyncKnowledge(
         const text = isImage || isVideo || isPdf ? null : await getText();
         if (isImage || isVideo || isPdf) {
           photoLlm ??= AnthropicProvider.forStage("sync-knowledge");
-          const bytes = await getBytes();
+          // A video streams to disk below instead, as its poster does
+          // (`ensurePosterForDescribedVideo`); only a photo or a PDF is
+          // held in memory.
+          const bytes = isVideo ? null : await getBytes();
           const context = `Knowledge-extraction instructions for this project:\n\n${skillContent}`;
           let result: PhotoDescriptionResult;
           if (isVideo) {
@@ -496,7 +544,7 @@ export async function runSyncKnowledge(
               "fn",
               "videoToStills",
               { fileId: source._id, name: source.name },
-              () => videoToStills(bytes, extension),
+              () => videoStillsFromStorage(source.s3_key!, extension),
             );
             const at = stills.map((f) => formatSeconds(f.atSeconds ?? 0));
             result = await photoLlm.describeImages({
@@ -527,7 +575,7 @@ export async function runSyncKnowledge(
             if (!existing) log(`sync-knowledge: "${source.name}" is a PDF read for the first time; its day will re-extract this run.`);
             result = await photoLlm.describeImages({
               images: [],
-              documents: [{ base64: bytes.toString("base64"), mediaType: "application/pdf", label: `The attached PDF, "${source.name}":` }],
+              documents: [{ base64: bytes!.toString("base64"), mediaType: "application/pdf", label: `The attached PDF, "${source.name}":` }],
               context,
               framing: PDF_DESCRIPTION_FRAMING,
               maxTokens: PDF_DESCRIPTION_MAX_TOKENS,
@@ -537,7 +585,7 @@ export async function runSyncKnowledge(
           } else {
             // HEIC, and any other image format the model does not take, is
             // turned into a JPEG first; a plain JPEG/PNG goes through as-is.
-            const image = await normalizeImageForVision(bytes, source.content_type);
+            const image = await normalizeImageForVision(bytes!, source.content_type);
             // The decode the app would otherwise do on first view, done
             // here once; see `mediaRenditions.server.ts`. Never fails the
             // description: a rendition is only what a browser shows.
@@ -765,6 +813,7 @@ export async function runSyncKnowledge(
     if (outcome === "written") filings.written += 1;
     else if (outcome === "rejected") filings.rejected += 1;
   }
+  await poison.finish();
 
   // `unsupported` has always been collected "so a human can see what's
   // being silently left behind" (see its own doc above) and has never had

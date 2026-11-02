@@ -1,0 +1,34 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana Alerting Provisioning – Discord contact point
+#
+# Grafana has a native "discord" notifier type -- no custom webhook glue
+# needed. DISCORD_ALERT_WEBHOOK_URL is a `fly secrets set` value on THIS app
+# (nopal-grafana), deliberately separate from the repo's CI-only
+# DISCORD_WEBHOOK_URL (see root README's "Discord notifications" section) so
+# infra alerts can post to a different channel than deploy notices.
+#
+# `settings.message` overrides Grafana's default notification body (Gerald,
+# 2026-11-02: the default -- a full Labels/Annotations/Value dump plus
+# Source/Silence links -- "isn't super helpful... should be much shorter and
+# more to the point"). One line per firing/resolved alert instance instead.
+# Go template, evaluated against the same alert data as any other
+# notification template -- see
+# https://grafana.com/docs/grafana/latest/alerting/configure-notifications/template-notifications/
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: discord-ops
+    receivers:
+      - uid: discord-ops-webhook
+        type: discord
+        settings:
+          url: ${DISCORD_ALERT_WEBHOOK_URL}
+          use_discord_username: true
+          message: |-
+            {{ range .Alerts.Firing }}🔴 {{ .Labels.app }} ({{ .Labels.instance }}): {{ .Annotations.summary }}
+            {{ end -}}
+            {{ range .Alerts.Resolved }}✅ {{ .Labels.app }} ({{ .Labels.instance }}): resolved -- {{ .Annotations.summary }}
+            {{ end -}}
+        disableResolveMessage: false

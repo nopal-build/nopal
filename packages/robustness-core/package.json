@@ -78,6 +78,8 @@
     "./data/mentionHistory.server": "./src/data/mentionHistory.server.ts",
     "./data/mentionSearch.server": "./src/data/mentionSearch.server.ts",
     "./data/passkeys.server": "./src/data/passkeys.server.ts",
+    "./data/poisonFiles.server": "./src/data/poisonFiles.server.ts",
+    "./data/photoNodes.server": "./src/data/photoNodes.server.ts",
     "./data/project.server": "./src/data/project.server.ts",
     "./data/project.types": "./src/data/project.types.ts",
     "./data/projectN02.server": "./src/data/projectN02.server.ts",

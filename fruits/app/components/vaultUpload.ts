@@ -4,6 +4,8 @@
 // multipart routes at or over it. The same server checks either way.
 // Used by the letter's recording, which can pass 100 MB.
 
+import { withScreenAwake } from "../util/wakeLock";
+
 const CHUNK_SIZE = 10 * 1024 * 1024;
 const MULTIPART_THRESHOLD = 100 * 1024 * 1024;
 
@@ -12,14 +14,29 @@ async function errorOf(res: Response, fallback: string): Promise<Error> {
   return new Error(data?.error ?? fallback);
 }
 
+/** Daily Log/Card attachments pass this through so the created `file_ref`
+ * carries the same `source`/`date` locking convention
+ * `api.daily-log.upload.tsx` used to set itself (`isFileRefLocked`) --
+ * meaningless (and server-validated) for any other caller. */
+export type VaultUploadMeta = { source?: "daily_log"; date?: string };
+
 /** Stores the file in the folder and returns its file id. `onProgress`
- * gets 0 to 1. */
-export async function uploadToVaultFolder(file: File, folderId: string, onProgress: (fraction: number) => void = () => {}): Promise<string> {
+ * gets 0 to 1. Holds a screen wake lock for the duration (`wakeLock.ts`)
+ * -- a real repro on iPhone Safari: a big photo over a slow connection
+ * takes long enough that the OS's own screen-lock timeout fires
+ * mid-upload, which reliably stalls/kills the in-flight request. */
+export async function uploadToVaultFolder(file: File, folderId: string, onProgress: (fraction: number) => void = () => {}, meta: VaultUploadMeta = {}): Promise<string> {
+  return withScreenAwake(() => uploadToVaultFolderInner(file, folderId, onProgress, meta));
+}
+
+async function uploadToVaultFolderInner(file: File, folderId: string, onProgress: (fraction: number) => void, meta: VaultUploadMeta): Promise<string> {
   const contentType = file.type || "application/octet-stream";
   if (file.size < MULTIPART_THRESHOLD) {
     const form = new FormData();
     form.append("file", file);
     form.append("folderId", folderId);
+    if (meta.source) form.append("source", meta.source);
+    if (meta.date) form.append("date", meta.date);
     const res = await fetch("/api/vault/upload", { method: "POST", body: form });
     if (!res.ok) throw await errorOf(res, `The upload failed (${res.status}).`);
     const data = (await res.json().catch(() => null)) as { fileRef?: { _id?: string } } | null;
@@ -53,7 +70,7 @@ export async function uploadToVaultFolder(file: File, folderId: string, onProgre
     const done = await fetch("/api/vault/multipart-complete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uploadId, key, parts, name: file.name, folderId, contentType, size: file.size }),
+      body: JSON.stringify({ uploadId, key, parts, name: file.name, folderId, contentType, size: file.size, ...meta }),
     });
     if (!done.ok) throw await errorOf(done, `The upload didn't finish (${done.status}).`);
     const data = (await done.json().catch(() => null)) as { fileRef?: { _id?: string } } | null;

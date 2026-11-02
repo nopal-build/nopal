@@ -16,18 +16,17 @@ import {
  *   file — the File to upload
  *   date — the daily log's YYYY-MM-DD (which day's vault folder to file it under)
  *
- * The `::file{...}` interactable's real upload path (see the `oxmarkdown`
- * skill and `oxmarkdown/fileDirective.ts`'s `UploadFileFn`) — deliberately
- * a SEPARATE, small endpoint from `/api/vault/upload` rather than teaching
- * that generic one about daily-log date folders: this one only resolves
- * WHICH folder a file lands in (get-or-create the day's own vault folder,
- * exactly the same tree `upsertDailyLogReadme`/`workableSaveDailyLog`
- * already write `readme.md` into), then does the identical upload +
- * `createFileRef` work `/api/vault/upload` does. Marks the file
- * `source: "daily_log"` / `date` — the same convention `isFileRefLocked`
- * already uses to lock a past day's uploads, so an attachment added
- * today automatically becomes read-only once the day is over, just like
- * the day's `readme.md` itself.
+ * NOT the editor's real upload path anymore (2026-11-01) — this buffers
+ * the whole file into memory TWICE (once parsing the multipart body,
+ * again to hash it) with no size cap, which OOM-killed the 1 GB app
+ * mid-request on a real video attachment; the browser only ever saw that
+ * as a hung, response-less POST. `TodayLog.tsx`'s `uploadDailyLogFile`
+ * now calls `POST /api/daily-log/upload-target` (just resolves the day's
+ * folder) then uploads straight to S3 via `vaultUpload.ts`'s
+ * `uploadToVaultFolder` instead — see the `oxmarkdown` skill. This route
+ * is kept only because `scripts/campbell-walk.ts` still posts small
+ * (few-byte) test fixtures through it; do not point any real editor path
+ * at it again.
  */
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUser(request);

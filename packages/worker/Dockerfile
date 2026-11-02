@@ -55,6 +55,12 @@ FROM mcr.microsoft.com/playwright:v1.62.1-noble
 WORKDIR /app
 
 ENV NODE_ENV="production"
+# glibc gives each thread its own memory arena and rarely hands freed
+# memory back; sharp's libvips threads made the worker's memory climb
+# with every photo (30 photos: 531 MB, peak 639) until a GraphLog run on
+# a seeded project ran the 1 GB machine out (2026-10-30). Two arenas: 298
+# MB, peak 376, same work. sharp's own docs give this for glibc.
+ENV MALLOC_ARENA_MAX="2"
 
 COPY --from=build /app/deploy /app
 

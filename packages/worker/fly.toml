@@ -30,6 +30,13 @@ primary_region = 'dfw'
 [env]
 APP_BASE_URL = 'https://o.nopal.build'
 
+# Queue-depth metrics (see queueMetrics.ts) -- Fly scrapes this internal-
+# only port every 15s into the SAME org Prometheus ops/grafana's
+# dashboards query. Not a public listener; see fly.io/docs/monitoring/metrics.
+[metrics]
+port = 9091
+path = '/metrics'
+
 # No [http_service] — this app never serves HTTP, so it gets no public
 # listener at all. It just needs to stay running to drain the queue. No
 # `[deploy] strategy = 'bluegreen'` either — that requires a health check,
@@ -37,7 +44,16 @@ APP_BASE_URL = 'https://o.nopal.build'
 # the default rolling strategy (stop old, start new) is fine, since an
 # in-flight job either finishes before its machine is replaced or gets
 # retried by BullMQ.
+# Bumped 1gb -> 2gb (Gerald, 2026-11-02) after a real OOM: a GraphLog run
+# on a large project ("This Healthy House", 414 files/825MB, several
+# 40-120MB videos uploaded the same day) overlapped with a concurrent
+# media-rendition job on the same 1GB machine. Both the video-streaming
+# fix (`mediaRenditions.server.ts`) and `MALLOC_ARENA_MAX=2` above already
+# address PER-FILE memory use -- this is headroom for two memory-hungry
+# jobs legitimately landing on the same machine at once, not a fix for a
+# specific leak. See the `fly-oom-kill` Grafana alert
+# (ops/grafana/provisioning/alerting/rules.yaml) if this recurs anyway.
 [[vm]]
-memory = '1gb'
+memory = '2gb'
 cpu_kind = 'shared'
 cpus = 1

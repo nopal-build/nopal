@@ -14,7 +14,7 @@
 // other type, `CenterContent`, which the main content column below uses)
 // with the category nav living in the drawer instead of a horizontal bar
 // up top.
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import {
   Link,
@@ -56,6 +56,8 @@ import { Select } from "stamps/Select";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
 import { Grid } from "stamps/Grid";
+import { FileDirectiveLayout, PlayGlyph } from "../components/OxRenderer";
+import { FileTypePdfIcon, FileTypeDocIcon, FileTypeDocxIcon, FileTypeTxtIcon, FileTypeZipIcon, FileSmileIcon } from "../components/FileKindIcon";
 import { useScrollSpy } from "stamps/useScrollSpy";
 import { link } from "stamps/link.css";
 import { navLink } from "stamps/navLink.css";
@@ -232,6 +234,7 @@ const NAV: NavCategory[] = [
     ],
   },
   { label: "Forms", sections: [{ id: "forms", label: "Form Inputs" }] },
+  { label: "Feedback", sections: [{ id: "loading", label: "Loading" }] },
   {
     label: "Surfaces",
     sections: [
@@ -1604,6 +1607,257 @@ function RadioDemo() {
   );
 }
 
+// ─── Loading ─────────────────────────────────────────────────────────────
+// Every real state a `::file{...}` attachment (the Daily Log/Card file
+// picker, `oxmarkdown/fileDirective.ts`) moves through, for the three
+// kinds of thing people actually attach — illustrated with the REAL
+// `FileDirectiveLayout` component wherever that's possible with zero
+// backend, so this can never drift from what ships (see the `oxmarkdown`
+// skill's "Upload is real" passage). Only the two READY photo/video
+// specimens are hand-composed from the same CSS classes instead of the
+// live component — those need an actually-loaded rendition, which this
+// page has no real file/worker behind to produce; everything else here
+// (uploading, failed, and the PDF's ready tile) needs no network at all
+// and runs the exact production code path.
+
+/** A tiny, self-contained "photo"/"video frame" standing in for a real
+ * decoded image — no public asset, no backend, just enough pixels for a
+ * specimen to show a real `<img>` paint instead of an empty box. */
+function demoMediaSrc(bg: string, accent: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="${bg}"/><circle cx="148" cy="46" r="20" fill="${accent}"/><polygon points="0,200 70,105 115,150 155,95 200,200" fill="${accent}" opacity="0.85"/></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+const DEMO_PHOTO_SRC = demoMediaSrc("#cfe8ff", "#2f6fb0");
+const DEMO_VIDEO_FRAME_SRC = demoMediaSrc("#2a2a33", "#8484e8");
+
+function FileKindIconSpecimen({ label, Icon }: { label: string; Icon: ComponentType }) {
+  return (
+    <Stack gap={2} align="center" style={{ width: "88px" }}>
+      <Surface className={sprinkles({ p: 3 })}>
+        <Icon />
+      </Surface>
+      <SpecimenCaption>{label}</SpecimenCaption>
+    </Stack>
+  );
+}
+
+/** Mimics `FileDirectiveLayout`'s own row shape (`.ox-file-directive` —
+ * icon/thumb, then `.ox-file-caption` with the filename label) for a
+ * hand-composed specimen, so it reads consistently alongside the real-
+ * component specimens beside it rather than as an isolated square. */
+/** `FileDirectiveLayout`'s own two-column row (`.ox-file-media`): the
+ * thumb on the left, the caption on the right — no name label at all
+ * here, since a READY photo/video never shows one (only a FAILED one
+ * does, see `FileDirectiveLayout`'s own "ox-file-name-label" comment). */
+function DemoFileRow({ thumb, caption }: { thumb: ReactNode; caption?: ReactNode }) {
+  return (
+    <div className="ox-file-directive ox-file-media">
+      {thumb}
+      <div className="ox-file-caption">{caption}</div>
+    </div>
+  );
+}
+
+/** The ready-state photo thumbnail, hand-composed from the exact classes
+ * `FileDirectiveLayout` itself renders once a real rendition has loaded
+ * (`.ox-file-thumb`, `oxmarkdown.css`) — see this section's own header
+ * for why this one specimen isn't the live component. */
+function ReadyPhotoSpecimen() {
+  return <DemoFileRow thumb={<img className="ox-file-thumb" src={DEMO_PHOTO_SRC} alt="IMG_1788.jpeg" title="IMG_1788.jpeg" draggable={false} />} />;
+}
+
+/** The ready-state video tile (poster + play glyph), hand-composed from
+ * `FileDirectiveLayout`'s own classes/markup for the same reason. */
+function ReadyVideoSpecimen() {
+  return (
+    <DemoFileRow
+      thumb={
+        <a className="ox-file-thumb ox-file-tile ox-file-tile--media" href="#" onClick={(e) => e.preventDefault()} title="Open IMG_1788.MOV" draggable={false}>
+          <img className="ox-file-tile-media" src={DEMO_VIDEO_FRAME_SRC} alt="IMG_1788.MOV" draggable={false} />
+          <span className="ox-file-tile-play" aria-hidden="true">
+            <PlayGlyph />
+          </span>
+        </a>
+      }
+    />
+  );
+}
+
+/** One state, shown as a full ROW rather than an isolated square — the
+ * real `::file{...}` directive only ever appears inline in a document
+ * much wider than its 74px thumb, with a caption column that fills the
+ * rest of the line (`.ox-file-caption`'s own `flex: 1 1 auto`), so a
+ * narrow boxed square never showed what this actually looks like in
+ * place. */
+function LoadingStateRow({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
+  return (
+    <Stack gap={2}>
+      <SpecimenCaption>{label}</SpecimenCaption>
+      <Surface className={sprinkles({ p: 4 })}>{children}</Surface>
+      {note && (
+        <p className={textSize.xs} style={{ color: semanticColors.textSubtle, margin: 0 }}>
+          {note}
+        </p>
+      )}
+    </Stack>
+  );
+}
+
+function LoadingTypeRow({
+  label,
+  uploading,
+  uploadingNote,
+  failed,
+  failedNote,
+  ready,
+  readyNote,
+}: {
+  label: string;
+  uploading: ReactNode;
+  uploadingNote?: string;
+  failed: ReactNode;
+  failedNote?: string;
+  ready: ReactNode;
+  readyNote?: string;
+}) {
+  return (
+    <Stack gap={4}>
+      <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+        {label}
+      </div>
+      <Stack gap={6} style={{ maxWidth: "560px" }}>
+        <LoadingStateRow label="Uploading" note={uploadingNote ?? "Local preview (the file's own bytes, zero network yet), with a progress bar right below it."}>
+          {uploading}
+        </LoadingStateRow>
+        <LoadingStateRow label="Failed" note={failedNote ?? "Same preview, dimmed, red border. Second column: the name (only shown here, on failure), the real error message, Retry, then the caption editor below both."}>
+          {failed}
+        </LoadingStateRow>
+        <LoadingStateRow label="Ready" note={readyNote ?? "The real, uploaded file."}>
+          {ready}
+        </LoadingStateRow>
+      </Stack>
+    </Stack>
+  );
+}
+
+function LoadingSection() {
+  return (
+    <Section id="loading" title="Loading">
+      <Stack gap={10}>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "620px" }}>
+          Every state a <Code>::file{"{...}"}</Code> attachment (the Daily
+          Log/Card file picker, <Code>oxmarkdown/fileDirective.ts</Code>)
+          moves through, for the three kinds of thing people actually
+          attach. The Uploading/Failed specimens below are the real{" "}
+          <Code>FileDirectiveLayout</Code> component, fed a local preview
+          the same way <Code>oxmarkdown/localFilePreview.ts</Code> does in
+          production — nothing here is faked beyond the demo image itself.
+        </p>
+        <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "620px" }}>
+          Two shapes, not three (2026-11-01): a photo/video is two
+          columns — the real picture on the left, its caption editor on
+          the right, with its name (quiet, not bold) shown ONLY on a
+          failed upload, above the real error reason, since beside an
+          actual picture the filename alone was never useful; everything
+          else is one compact line — a small kind icon directly beside its
+          name, always — since a PDF doesn't need or deserve the same
+          74px footprint a picture gets. Each row below shows the FULL
+          width this looks like in place, not an isolated square, since
+          that's the only way it ever
+          actually appears in a real document.
+        </p>
+
+        <LoadingTypeRow
+          label="Photo"
+          uploading={<FileDirectiveLayout name="IMG_1788.jpeg" contentType="image/jpeg" localPreviewSrc={DEMO_PHOTO_SRC} uploadProgress={0.4} caption={null} />}
+          failed={
+            <FileDirectiveLayout
+              name="IMG_1788.jpeg"
+              contentType="image/jpeg"
+              localPreviewSrc={DEMO_PHOTO_SRC}
+              uploadError
+              uploadErrorMessage="The upload failed (500)."
+              onRetry={() => {}}
+              caption={null}
+            />
+          }
+          ready={<ReadyPhotoSpecimen />}
+          readyNote='A real thumbnail rendition, click-to-zoom. Shows the ORIGINAL (not yet cropped) for a few seconds if the worker has not made the thumb yet — correct, except a HEIC photo on Chrome briefly mis-renders as a generic file tile in that gap (Chrome cannot decode HEIC at all).'
+        />
+
+        <LoadingTypeRow
+          label="Video"
+          uploading={<FileDirectiveLayout name="IMG_1788.MOV" contentType="video/quicktime" localPreviewSrc={DEMO_VIDEO_FRAME_SRC} uploadProgress={0.72} caption={null} />}
+          failed={
+            <FileDirectiveLayout
+              name="IMG_1788.MOV"
+              contentType="video/quicktime"
+              localPreviewSrc={DEMO_VIDEO_FRAME_SRC}
+              uploadError
+              uploadErrorMessage="Failed to fetch — the connection was interrupted partway through."
+              onRetry={() => {}}
+              caption={null}
+            />
+          }
+          ready={<ReadyVideoSpecimen />}
+          readyNote="A poster rendition once the worker has made one, with a play glyph — opens the original; not an inline player. Added 2026-11-01 (previously a video never got a poster here at all, only the generic kind-label tile below)."
+        />
+
+        <LoadingTypeRow
+          label="File (PDF, etc.)"
+          uploading={<FileDirectiveLayout name="site-plan.pdf" contentType="application/pdf" uploadProgress={0.15} caption={null} />}
+          uploadingNote="No picture to preview — the icon+name row shows immediately (from the filename alone, before any network call), with a progress bar right below it."
+          failed={
+            <FileDirectiveLayout
+              name="site-plan.pdf"
+              contentType="application/pdf"
+              uploadError
+              uploadErrorMessage="The upload failed (413) — the file is larger than the server allows."
+              onRetry={() => {}}
+              caption={null}
+            />
+          }
+          failedNote="The icon+name tint red; the real error message and Retry sit below, same as every other kind."
+          ready={<FileDirectiveLayout name="site-plan.pdf" contentType="application/pdf" fileId="demo-pdf" caption={null} />}
+          readyNote="Nothing to wait on — no rendition exists for a non-image/video file, so this is correct the instant it is picked. Now a clickable link (opens the original), same row as every other state for this kind."
+        />
+
+        <Stack gap={3}>
+          <div className={groupLabelClass} style={{ color: semanticColors.textBrand }}>
+            Generic file icons
+          </div>
+          <Cluster gap={4}>
+            <FileKindIconSpecimen label="PDF" Icon={FileTypePdfIcon} />
+            <FileKindIconSpecimen label="DOC" Icon={FileTypeDocIcon} />
+            <FileKindIconSpecimen label="DOCX" Icon={FileTypeDocxIcon} />
+            <FileKindIconSpecimen label="TXT" Icon={FileTypeTxtIcon} />
+            <FileKindIconSpecimen label="ZIP" Icon={FileTypeZipIcon} />
+            <FileKindIconSpecimen label="Other" Icon={FileSmileIcon} />
+          </Cluster>
+          <p className={textSize.xs} style={{ color: semanticColors.textSubtle, margin: 0 }}>
+            Picked by the filename's extension first, falling back to
+            content type (<Code>FileKindIcon.tsx</Code>'s <Code>fileKindIcon</Code>).
+            Real glyphs from{" "}
+            <a href="https://tabler.io/icons" target="_blank" rel="noopener noreferrer" className={link}>
+              Tabler Icons
+            </a>{" "}
+            (MIT), copied directly rather than pulled in as a dependency.
+          </p>
+        </Stack>
+
+        <p className={textSize.xs} style={{ color: semanticColors.textSubtle, maxWidth: "620px" }}>
+          Known gaps, not yet addressed: the progress bar is only ever
+          REAL (smoothly filling, chunk by chunk) for a chunked upload
+          (≥100 MB, <Code>vaultUpload.ts</Code>'s own threshold) — a plain{" "}
+          <Code>fetch()</Code>-based small upload has no browser API for
+          incremental byte progress at all, so its bar just jumps from
+          empty to full right before it resolves.
+        </p>
+      </Stack>
+    </Section>
+  );
+}
+
 // ─── Boxes & Cards ───────────────────────────────────────────────────────
 
 function BoxesSection() {
@@ -1995,6 +2249,7 @@ export default function MakerStamps() {
             <LinksSection />
             <CopyActionsSection />
             <FormInputsSection />
+            <LoadingSection />
             <BoxesSection />
             <BadgesSection />
             <OverlaysSection />

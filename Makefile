@@ -1,4 +1,4 @@
-.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging restart restart-webapp restart-fruits restart-worker cli release-cli release-cli-dev update-cli-version
+.PHONY: dev start trust-local-certs seed migrate migrate-prod compact-db clone-staging-db down stop reset clean deploy deploy-staging deploy-grafana restart restart-webapp restart-fruits restart-worker cli release-cli release-cli-dev update-cli-version
 
 # The dev containers run as you, so files they write into the repo are
 # yours, not root's (see bin/dev-as-host-user.sh).
@@ -43,6 +43,13 @@ deploy-staging:
 	pnpm --filter fruits run test --run
 	fly deploy . --config webapp/fly.staging.toml --dockerfile webapp/Dockerfile
 	fly deploy . --config fruits/fly.staging.toml --dockerfile fruits/Dockerfile
+
+## Deploy the self-hosted Grafana instance (ops/grafana) -- monitoring/
+## alerting infra, not part of the product apps, so it's its own target
+## rather than folded into `deploy`. Builds from ops/grafana itself (no
+## repo-root workspace deps), unlike webapp/fruits/worker above.
+deploy-grafana:
+	cd ops/grafana && fly deploy
 
 ## Start the database, webapp, and fruits together, then seed the database.
 ## --build keeps the dev image (Dockerfile.dev) in sync whenever it

@@ -1,0 +1,172 @@
+{
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Instances Up",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "fly_instance_up{app=~\"$app\"}",
+          "instant": true,
+          "legendFormat": "{{app}} / {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "down", "color": "red" }, "1": { "text": "up", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value_and_name" }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Memory Available %",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "(fly_instance_memory_mem_available{app=~\"$app\"} / fly_instance_memory_mem_total{app=~\"$app\"}) * 100",
+          "legendFormat": "{{app}} / {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Volume Used %",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "fly_volume_used_pct",
+          "legendFormat": "volume {{id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "CPU Usage (non-idle)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "sum(rate(fly_instance_cpu{app=~\"$app\", mode!=\"idle\"}[5m])) by (app, instance)",
+          "legendFormat": "{{app}} / {{instance}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "HTTP p95 Response Time",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(fly_app_http_response_time_seconds_bucket{app=~\"$app\"}[5m])) by (le, app))",
+          "legendFormat": "{{app}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "HTTP 5xx Rate",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "sum(rate(fly_app_http_responses_count{app=~\"$app\", status=~\"5..\"}[5m])) by (app)",
+          "legendFormat": "{{app}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Recent Exit Events",
+      "description": "fly_instance_exit_oom=1 means the instance was OOM-killed. fly_instance_exit_code is the main process's exit code (0 = normal).",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "max(fly_instance_exit_code{app=~\"$app\"}) by (app, instance)",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+          "expr": "max(fly_instance_exit_oom{app=~\"$app\"}) by (app, instance)",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": { "byField": "instance", "mode": "outer" }
+        }
+      ]
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["fly", "infra"],
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
+        "query": { "query": "label_values(fly_instance_up, app)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "",
+  "title": "Fly Infrastructure Overview",
+  "uid": "fly-infra-overview",
+  "version": 1
+}

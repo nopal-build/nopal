@@ -719,6 +719,17 @@ ${v.position ? `::badge{text="${v.text}" variant="${v.variant}" position="${v.po
     buildMarkdown: (v) => `::daily-log{date="${v.date}" project="${v.project}"}`,
   },
   {
+    id: "load-cell-graph",
+    name: "Load cell graph",
+    directive: '::LoadCellGraph{fileId="..." title="..."}',
+    note: 'NOT a `/v2` website directive -- a project-page one, registered by `ProjectView.tsx` against a `loadCellGraphs` map built server-side (`project.server.ts`\'s `resolveProjectManifest`, scanning the README body for every `::LoadCellGraph{fileId="..."}` occurrence and resolving each via `resolveLoadCellGraphByFileId`, `robustness-core/data/loadCellSensorData.server.ts`) -- the SAME "resolve by scanning raw directive occurrences, hand the result down as a plain data prop" shape `::gallery{folder="..."}`\'s own `galleryFolders` already uses. `fileId` is a load-cell test run\'s RAW csv vault file id (the SAME id a Sensor Data tab run\'s own "Download raw CSV" button uses, or `nopal vault info <path>`); an optional `title="..."` overrides the embed\'s heading (defaults to the run\'s own name). Renders `LoadCellGraphCard.tsx` -- the exact same summary-stats / raw-and-cleaned-CSV-download / Force-vs-Time + Force-vs-Displacement-charts widget the Sensor Data tab\'s own run view renders (factored out so both stay pixel-identical), e.g. under a README\'s own "### Test Results" heading. Needs real vault/DB access this static playground doesn\'t have (same reason the Daily log paper above, and the folder-backed Gallery / `fileId`-backed Video papers below, aren\'t rendered live here either) -- so typing a `fileId` here renders nothing, same fail-soft fallback an unresolved reference gets on a real page. The default `fileId` below is a real one (`batten-sheer-test-7.csv` in the Sunny project\'s `load-cell` Sync folder) -- paste it into a real README\'s `::LoadCellGraph{...}` to see it actually resolve.',
+    attributes: [
+      { key: "fileId", label: "fileId", kind: "text", default: "bws98xswj2t0i6ltmoec", placeholder: "a vault file id" },
+      { key: "title", label: "title (optional)", kind: "text", default: "" },
+    ],
+    buildMarkdown: (v) => `::LoadCellGraph{fileId="${v.fileId}"${v.title ? ` title="${v.title}"` : ""}}`,
+  },
+  {
     id: "toggle",
     name: "Toggle",
     directive: ':::toggle{collapsed="true" border="..." palette="..."} (not new — the existing built-in, reused for FAQ)',
