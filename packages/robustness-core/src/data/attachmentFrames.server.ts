@@ -103,7 +103,11 @@ function heicDecodeBinaryPath(): string {
   // into it); the default is this package's own position in the local
   // monorepo checkout, which is all local dev needs.
   if (process.env.HEIC_DECODE_BIN) return process.env.HEIC_DECODE_BIN;
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "crates", "target", "release", "heic-decode");
+  // `crates/heic-decode` is a standalone crate (its own Cargo.lock, not
+  // a member of the sibling `crates/` workspace -- see that crate's own
+  // Cargo.toml comment), so its build output lands in ITS OWN
+  // `target/`, not the shared workspace one.
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "crates", "heic-decode", "target", "release", "heic-decode");
 }
 
 function decodeHeicInChild(bytes: Buffer): Promise<Buffer> {

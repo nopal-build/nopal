@@ -12,7 +12,12 @@ packages/*/node_modules
 webapp/build
 webapp/public/build
 
-crates
+# Every other crate (`cli`/`api`/`app`/`core`) and `data` (unrelated
+# load-cell CSVs) stays excluded -- `heic-decode` is a standalone crate
+# (own Cargo.lock, no workspace) the worker's Dockerfile builds on its
+# own, and is the only one any image needs.
+crates/*
+!crates/heic-decode
 target
 db
 tmp

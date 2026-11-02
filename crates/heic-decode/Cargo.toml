@@ -1,3 +1,9 @@
+# Deliberately standalone, not a member of the sibling `crates/`
+# workspace -- see that workspace's own Cargo.toml comment for why. This
+# empty table is what tells Cargo to stop walking up looking for a
+# parent workspace to join.
+[workspace]
+
 [package]
 name = "heic-decode"
 version = "0.1.0"
@@ -10,7 +16,16 @@ name = "heic-decode"
 path = "src/main.rs"
 
 [dependencies]
-libheif-rs = "3"
+# `v1_17`, not the default ("latest" -> v1_23): Ubuntu 24.04's packaged
+# `libheif-dev` is 1.17.6 (confirmed building the worker's own Docker
+# image, 2026-11-02 -- the default feature demanded >= 1.23 and failed
+# there). Nothing this crate's `main.rs` calls needs anything newer than
+# 1.17 (plain decode: `read_from_bytes`, `primary_image_handle`,
+# `LibHeif::decode`, `Image::planes()`), so pin to what's actually
+# deployed rather than the crate's own default ceiling. Builds fine
+# against a NEWER system libheif too (this only lowers the floor, e.g.
+# Homebrew's 1.23.x on macOS for local dev).
+libheif-rs = { version = "3", default-features = false, features = ["v1_17"] }
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [package.metadata.dist]

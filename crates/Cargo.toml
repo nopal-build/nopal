@@ -1,6 +1,12 @@
 
 [workspace]
-members = ["cli", "api", "core", "app", "heic-decode"]
+# `heic-decode` is deliberately NOT a member here -- it's its own
+# standalone crate (own Cargo.lock) so the worker's Dockerfile can COPY
+# and build just that one directory, without needing every other
+# crate's manifest present (and their system deps -- tonic-build's
+# protobuf compiler, eframe/rfd's GUI libs -- installed in an image that
+# only ever runs a stdin-in/stdout-out decoder).
+members = ["cli", "api", "core", "app"]
 resolver = "2"
 
 [workspace.dependencies]
