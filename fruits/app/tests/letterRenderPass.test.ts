@@ -73,19 +73,20 @@ describe("the paper", () => {
     const path = await import("node:path");
     const { fileURLToPath } = await import("node:url");
     const here = path.dirname(fileURLToPath(import.meta.url));
-    // Read as text: the renderer imports playwright-core, which the app
-    // never loads (`noMediaProcessingInApp.test.ts`).
+    // Read as text rather than importing: the module hits the database
+    // (`resolveSentLetter`) and spawns a real `typst` binary, neither of
+    // which this test stubs. The paper is now a Typst page rule
+    // (`letterPdfRender.server.ts`'s own `PAGE_PREAMBLE`), not a
+    // Chromium `page.pdf()` options object (2026-11-02: Typst replaced
+    // headless Chromium entirely -- see the `oxmarkdown-pdf-via-typst`
+    // garden seed).
     const src = readFileSync(path.join(here, "../../../packages/robustness-core/src/data/letterPdfRender.server.ts"), "utf8");
-    expect(src).toContain('format: "Letter"');
-    expect(src).toContain('margin: { top: "0.6in", right: "0.6in", bottom: "0.6in", left: "0.6in" }');
-    expect(src).toContain("displayHeaderFooter: true");
-    expect(src).toContain('headerTemplate: "<span></span>"');
-    const footer = src.match(/footerTemplate:\s*'([^']*)'/)?.[1] ?? "";
-    expect(footer).toContain('<span class="pageNumber"></span>');
+    expect(src).toContain('paper: "us-letter"');
+    expect(src).toContain("margin: 0.6in");
+    expect(src).toContain("header: none");
+    const footer = src.match(/footer: context \[([\s\S]*?)\],/)?.[1] ?? "";
+    expect(footer).toContain("counter(page).display()");
     expect(footer).not.toMatch(/title|date|url|totalPages/);
-    // The pass reaches the app's origin only, and is closed whatever happens.
-    expect(src).toMatch(/origin !== new URL\(origin\)\.origin\) return route\.continue\(\)/);
-    expect(src).toMatch(/finally \{[^}]*closeRenderPass\(pass\)/);
   });
 });
 

@@ -25,11 +25,6 @@ primary_region = 'dfw'
 
 [build]
 
-# Where the worker finds the app, to print a letter's public page
-# (`letterPdfRender.server.ts`).
-[env]
-APP_BASE_URL = 'https://o.nopal.build'
-
 # Queue-depth metrics (see queueMetrics.ts) -- Fly scrapes this internal-
 # only port every 15s into the SAME org Prometheus ops/grafana's
 # dashboards query. Not a public listener; see fly.io/docs/monitoring/metrics.

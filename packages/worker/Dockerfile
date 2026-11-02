@@ -45,19 +45,24 @@ COPY --link packages/worker packages/worker
 
 RUN pnpm --filter worker deploy --prod /app/deploy
 
-# ── heic-decode (Rust) ────────────────────────────────────────────────────────
+# ── heic-decode (Rust) + typst (static binary download) ────────────────────────
 # Built on plain Ubuntu 24.04 ("noble") to match the final stage's own
-# OS exactly (`mcr.microsoft.com/playwright:v1.62.1-noble`) -- a
-# dynamically linked binary built on a different base (this file's own
-# Debian bookworm build stage above) risks a subtly incompatible
-# glibc/libheif ABI at runtime. This stage's own size never reaches the
-# final image -- multi-stage builds discard everything not explicitly
-# COPY'd out of an earlier stage (see the `rust-heic-decode-worker`
-# garden seed for the full HEIC-decode investigation this replaces).
+# OS exactly -- a dynamically linked binary built on a different base
+# (this file's own Debian bookworm build stage above) risks a subtly
+# incompatible glibc/libheif ABI at runtime (Debian bookworm's own
+# packaged libheif is 1.15, OLDER than the 1.17 floor `crates/heic-
+# decode`'s `libheif-rs` feature flag needs -- confirmed by a real `apt-
+# cache show` against `debian:bookworm-slim`, 2026-11-02 -- so the final
+# stage below stays on Ubuntu 24.04 too, now WITHOUT Playwright, rather
+# than moving to a plain Debian-based Node image). This stage's own size
+# never reaches the final image -- multi-stage builds discard everything
+# not explicitly COPY'd out of an earlier stage (see the
+# `rust-heic-decode-worker` garden seed for the full HEIC-decode
+# investigation this replaces).
 FROM ubuntu:24.04 AS rust-build
 
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y curl build-essential pkg-config zlib1g-dev libheif-dev libheif-plugin-libde265 ca-certificates && \
+    apt-get install --no-install-recommends -y curl build-essential pkg-config zlib1g-dev libheif-dev libheif-plugin-libde265 xz-utils ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
@@ -73,12 +78,24 @@ WORKDIR /app
 COPY --link crates/heic-decode crates/heic-decode
 RUN cd crates/heic-decode && cargo build --release
 
-# The final stage is Playwright's own image at the lockfile's version
-# (`playwright-core` in `package.json` must match this tag): Node 22 plus
-# Chromium and its libraries, for the letter PDF
-# (`letterPdfRender.server.ts`). The build stage above stays on
-# node-slim; only the runtime needs a browser.
-FROM mcr.microsoft.com/playwright:v1.62.1-noble
+# Typst (the letter PDF, `letterPdfRender.server.ts`): a single static,
+# musl-linked binary with no shared-library dependencies at all -- unlike
+# heic-decode, nothing here compiles, it's a plain download+extract, so
+# it rides along in this same stage rather than getting its own. Pin
+# bumped together with `Dockerfile.dev`'s copy of this same download.
+ARG TYPST_VERSION=0.15.1
+RUN curl -fsSL "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/typst-x86_64-unknown-linux-musl.tar.xz" \
+      -o /tmp/typst.tar.xz && \
+    tar -xJf /tmp/typst.tar.xz -C /tmp && \
+    mv "/tmp/typst-x86_64-unknown-linux-musl/typst" /app/typst
+
+# The final stage WAS Playwright's own image (Node 22 plus Chromium, for
+# the letter PDF's headless-browser render) -- replaced 2026-11-02 by
+# Typst, so this is now plain Ubuntu 24.04 (matching `rust-build` above,
+# see its own comment) with Node installed the same way Playwright's
+# image itself did (NodeSource's apt repo), nothing else. No browser in
+# this image at all, for any job.
+FROM ubuntu:24.04
 
 WORKDIR /app
 
@@ -90,18 +107,25 @@ ENV NODE_ENV="production"
 # MB, peak 376, same work. sharp's own docs give this for glibc.
 ENV MALLOC_ARENA_MAX="2"
 
-# heic-decode's own runtime half: the shared libraries the compiled
-# binary above links against dynamically -- `libheif-dev` in the
-# `rust-build` stage is BUILD-time only (headers); this image needs the
-# actual `.so` files plus the real HEVC decoder plugin, which Ubuntu
-# keeps as a separate, not-installed-by-default package (see the
-# `rust-heic-decode-worker` garden seed for why).
+ARG NODE_VERSION=22
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y libheif1 libheif-plugin-libde265 && \
+    apt-get install --no-install-recommends -y curl ca-certificates gnupg && \
+    curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash - && \
+    apt-get install --no-install-recommends -y nodejs \
+    # heic-decode's own runtime half: the shared libraries the compiled
+    # binary above links against dynamically -- `libheif-dev` in the
+    # `rust-build` stage is BUILD-time only (headers); this image needs
+    # the actual `.so` files plus the real HEVC decoder plugin, which
+    # Ubuntu keeps as a separate, not-installed-by-default package (see
+    # the `rust-heic-decode-worker` garden seed for why).
+    libheif1 libheif-plugin-libde265 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=rust-build /app/crates/heic-decode/target/release/heic-decode /usr/local/bin/heic-decode
 ENV HEIC_DECODE_BIN="/usr/local/bin/heic-decode"
+
+COPY --from=rust-build /app/typst /usr/local/bin/typst
+ENV TYPST_BIN="/usr/local/bin/typst"
 
 COPY --from=build /app/deploy /app
 
