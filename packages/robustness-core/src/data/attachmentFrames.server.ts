@@ -27,7 +27,7 @@ import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
 import sharp from "sharp";
@@ -245,12 +245,80 @@ export function ffmpegBinary(): string {
   return ffmpeg();
 }
 
+/** Fast path: a container's own declared duration, read without decoding
+ * a single frame (`-i` alone, no real output -- ffmpeg prints the banner
+ * and exits almost instantly). Most real recordings (a phone's own
+ * MOV/MP4) already carry this in their header. Returns null when the
+ * container doesn't say (a browser MediaRecorder WebM, notably), which
+ * `extractStills` falls back to a real decode for. */
+async function probeDurationFast(inputPath: string): Promise<number | null> {
+  const probe = await run(ffmpeg(), ["-hide_banner", "-i", inputPath], { maxBuffer: 1 << 24 }).catch(
+    (e: { stderr?: string }) => e,
+  );
+  return parseFfmpegDuration(String(probe.stderr ?? ""));
+}
+
+/** Slow path, reached only when the container doesn't declare its own
+ * duration: a REAL full decode to a null output, timing how far it got.
+ * This can take as long as the clip itself runs -- a 227 MB, several-
+ * minute video OOM-killed the worker partly because EVERY video used to
+ * pay this cost unconditionally, even ones whose header already had the
+ * answer (2026-11-02). */
+async function probeDurationSlow(inputPath: string): Promise<number | null> {
+  const probe = await run(ffmpeg(), ["-hide_banner", "-i", inputPath, "-f", "null", "-"], { maxBuffer: 1 << 24 }).catch(
+    (e: { stderr?: string }) => e,
+  );
+  return parseFfmpegDecodedTime(String(probe.stderr ?? ""));
+}
+
+/** `frameCount` stills (default `VIDEO_FRAME_COUNT`) from a video already
+ * on disk at `inputPath`, with the clip's duration. One frame is the
+ * midpoint, which is what a poster wants. Frame outputs are written
+ * beside `inputPath`, in its own directory -- the caller owns that
+ * directory and its cleanup (see `videoToStills`, or a caller that
+ * streamed the input there directly to avoid ever buffering it). */
+export async function extractStills(
+  inputPath: string,
+  frameCount = VIDEO_FRAME_COUNT,
+): Promise<{ stills: Still[]; durationSeconds: number }> {
+  const durationSeconds = (await probeDurationFast(inputPath)) ?? (await probeDurationSlow(inputPath));
+  if (!durationSeconds) throw new Error("could not read the video's duration");
+
+  const dir = dirname(inputPath);
+  const stills: Still[] = [];
+  for (const t of frameTimestamps(durationSeconds, frameCount)) {
+    const out = join(dir, `frame-${t}.jpg`);
+    await run(ffmpeg(), [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-ss",
+      String(t),
+      "-i",
+      inputPath,
+      "-frames:v",
+      "1",
+      "-vf",
+      `scale='min(${FRAME_MAX_EDGE},iw)':-2`,
+      "-q:v",
+      "3",
+      out,
+    ]);
+    stills.push({ jpegBase64: (await readFile(out)).toString("base64"), atSeconds: t });
+  }
+  return { stills, durationSeconds };
+}
+
 /**
- * `frameCount` stills (default `VIDEO_FRAME_COUNT`) from a video, with the
- * clip's duration. One frame is the midpoint, which is what a poster wants.
- * Writes the bytes to a temp file (ffmpeg wants a seekable input for
- * `-ss`), extracts one frame per timestamp, and cleans up whatever
- * happens.
+ * `frameCount` stills from a video given as in-memory `bytes` -- writes
+ * them to a fresh temp file first (ffmpeg wants a seekable input for
+ * `-ss`), extracts via `extractStills`, and cleans up whatever happens.
+ * Only safe for a video small enough to hold in memory at all; a large
+ * one (uploaded, not already in hand for some other reason) should be
+ * streamed straight to disk instead -- see `mediaRenditions.server.ts`'s
+ * own video branch for that path (`downloadFileToPath` + `extractStills`
+ * directly, bytes never created).
  */
 export async function videoToStills(
   bytes: Buffer,
@@ -261,40 +329,7 @@ export async function videoToStills(
   try {
     const input = join(dir, `in.${extension.replace(/[^a-z0-9]/gi, "") || "bin"}`);
     await writeFile(input, new Uint8Array(bytes));
-    // `-i` with no output prints the banner (with Duration) and exits
-    // nonzero; the banner is what we want.
-    const probe = await run(ffmpeg(), ["-hide_banner", "-i", input, "-f", "null", "-"], { maxBuffer: 1 << 24 }).catch(
-      (e: { stderr?: string }) => e,
-    );
-    // A browser's MediaRecorder WebM carries no duration in its header
-    // ("Duration: N/A"); the decode to null that printed the banner also
-    // printed how far it got, which is the length.
-    const durationSeconds = parseFfmpegDuration(String(probe.stderr ?? "")) ?? parseFfmpegDecodedTime(String(probe.stderr ?? ""));
-    if (!durationSeconds) throw new Error("could not read the video's duration");
-
-    const stills: Still[] = [];
-    for (const t of frameTimestamps(durationSeconds, frameCount)) {
-      const out = join(dir, `frame-${t}.jpg`);
-      await run(ffmpeg(), [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-ss",
-        String(t),
-        "-i",
-        input,
-        "-frames:v",
-        "1",
-        "-vf",
-        `scale='min(${FRAME_MAX_EDGE},iw)':-2`,
-        "-q:v",
-        "3",
-        out,
-      ]);
-      stills.push({ jpegBase64: (await readFile(out)).toString("base64"), atSeconds: t });
-    }
-    return { stills, durationSeconds };
+    return await extractStills(input, frameCount);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

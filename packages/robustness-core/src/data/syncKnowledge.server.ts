@@ -56,12 +56,15 @@ import {
   updateFileRef,
   type VaultFolder,
 } from "./vault.server";
-import { downloadFileBytes } from "./file.server";
+import { downloadFileBytes, downloadFileToPath } from "./file.server";
 import { imageRenditionsExist, renditionKey, writeImageRenditions, writeVideoPoster } from "./mediaRenditions.server";
 import { objectExists } from "./file.server";
 import { parseSyncedCardFileName } from "./dailyLogSync.server";
 import { isSeedDayFileName, isSeedInstructionFileName, SEED_SYNC_FOLDER_NAME } from "./seed.server";
-import { fitImageForVision, formatSeconds, hasFfmpeg, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
+import { extractStills, fitImageForVision, formatSeconds, hasFfmpeg, isVideoContentType, normalizeImageForVision, videoToStills } from "./attachmentFrames.server";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   FILING_FRAMING,
   buildFilingContent,
@@ -193,16 +196,25 @@ async function ensurePosterForDescribedVideo(
   // No ffmpeg here (an app process rather than the worker): say nothing
   // and download nothing; the worker's next run writes it.
   if (!hasFfmpeg()) return;
+  // Streamed straight to disk (`downloadFileToPath`), never buffered
+  // whole in memory the way `downloadFileBytes` would -- the same OOM
+  // risk a large upload's own `makeRenditionsForFile` had (2026-11-02,
+  // see `mediaRenditions.server.ts`'s own video branch); this backfill
+  // path has an identical "just one frame" shape.
+  const dir = await mkdtemp(join(tmpdir(), "sync-knowledge-video-"));
   try {
     if (await objectExists(renditionKey(source.s3_key, "poster"))) return;
-    const bytes = await downloadFileBytes(source.s3_key);
-    const extension = source.name.split(".").pop() ?? "bin";
-    const { stills } = await videoToStills(bytes, extension, 1);
+    const extension = (source.name.split(".").pop() ?? "bin").replace(/[^a-z0-9]/gi, "") || "bin";
+    const input = join(dir, `in.${extension}`);
+    await downloadFileToPath(source.s3_key, input);
+    const { stills } = await extractStills(input, 1);
     if (stills[0] && (await writeVideoPoster(source.s3_key, stills[0].jpegBase64))) {
       log(`sync-knowledge: wrote a poster for "${source.name}".`);
     }
   } catch (err) {
     log(`sync-knowledge: no poster for "${source.name}" (${err instanceof Error ? err.message : "unknown error"}).`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }
 

@@ -4,6 +4,8 @@
 // multipart routes at or over it. The same server checks either way.
 // Used by the letter's recording, which can pass 100 MB.
 
+import { withScreenAwake } from "../util/wakeLock";
+
 const CHUNK_SIZE = 10 * 1024 * 1024;
 const MULTIPART_THRESHOLD = 100 * 1024 * 1024;
 
@@ -19,8 +21,15 @@ async function errorOf(res: Response, fallback: string): Promise<Error> {
 export type VaultUploadMeta = { source?: "daily_log"; date?: string };
 
 /** Stores the file in the folder and returns its file id. `onProgress`
- * gets 0 to 1. */
+ * gets 0 to 1. Holds a screen wake lock for the duration (`wakeLock.ts`)
+ * -- a real repro on iPhone Safari: a big photo over a slow connection
+ * takes long enough that the OS's own screen-lock timeout fires
+ * mid-upload, which reliably stalls/kills the in-flight request. */
 export async function uploadToVaultFolder(file: File, folderId: string, onProgress: (fraction: number) => void = () => {}, meta: VaultUploadMeta = {}): Promise<string> {
+  return withScreenAwake(() => uploadToVaultFolderInner(file, folderId, onProgress, meta));
+}
+
+async function uploadToVaultFolderInner(file: File, folderId: string, onProgress: (fraction: number) => void, meta: VaultUploadMeta): Promise<string> {
   const contentType = file.type || "application/octet-stream";
   if (file.size < MULTIPART_THRESHOLD) {
     const form = new FormData();
