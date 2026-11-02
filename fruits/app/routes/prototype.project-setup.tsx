@@ -18,11 +18,11 @@ import { Input } from "stamps/Input";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { button } from "stamps/button.css";
-import { semanticColors } from "stamps/tokens";
+import { Stepper } from "stamps/Stepper";
 import { AuthShell } from "../components/AuthShell";
 import {
-  FunnelSteps,
   BackLink,
+  FUNNEL_STEPS,
   ProtoNote,
   funnelQuery,
   generateProjectName,
@@ -59,7 +59,7 @@ export default function PrototypeProjectSetup() {
 
   return (
     <AuthShell maxWidth="560px">
-      <FunnelSteps current="project-setup" />
+      <Stepper steps={FUNNEL_STEPS} currentKey="project-setup" />
       <BackLink to={`/prototype/details${funnelQuery({ plan: plan?.slug, date: date ?? undefined, time: time ?? undefined })}`}>Back</BackLink>
       <Stack gap={6}>
         <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold", mt: 4 })}`}>

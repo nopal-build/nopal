@@ -5,36 +5,9 @@
    reviewed exploration. Plain CSS on stamps' semantic variables, same
    pattern as projectMapMockup.css. */
 
-.proto-steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 18px;
-  justify-content: center;
-  margin-bottom: 28px;
-  font-size: 0.78rem;
-  color: var(--color-text-subtle);
-}
-.proto-steps__item { position: relative; padding-bottom: 4px; }
-.proto-steps__item--current { color: var(--color-text-brand); font-weight: 700; }
-.proto-steps__item--done { color: var(--color-text-primary); }
-.proto-steps__item--current::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  background: var(--color-text-brand);
-}
-
-.proto-backlink {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-text-subtle);
-  text-decoration: none;
-}
-.proto-backlink:hover { color: var(--color-text-brand); }
+/* proto-steps / proto-backlink retired (2026-11-02): replaced by the
+   real stamps/Stepper component and stamps' own `link` recipe (see
+   prototype-onboarding/shared.tsx's `FUNNEL_STEPS` + `BackLink`). */
 
 /* --- /guides stand-in --- */
 .proto-plan-grid {
@@ -76,46 +49,8 @@
   gap: 8px;
 }
 
-.proto-calendar {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 2px;
-  margin-top: 8px;
-}
-.proto-calendar__weekday {
-  text-align: center;
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  color: var(--color-text-subtle);
-  padding-bottom: 2px;
-}
-.proto-calendar__cell {
-  aspect-ratio: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: none;
-  font-size: 0.72rem;
-  color: var(--color-text-subtle);
-  opacity: 0.4;
-  cursor: default;
-  padding: 0;
-}
-.proto-calendar__cell--available {
-  opacity: 1;
-  color: var(--color-text-primary);
-  border-color: var(--color-surface-border);
-  cursor: pointer;
-}
-.proto-calendar__cell--available:hover { border-color: var(--color-text-brand); color: var(--color-text-brand); }
-.proto-calendar__cell--selected {
-  background: var(--color-text-brand);
-  border-color: var(--color-text-brand);
-  color: var(--white);
-}
+/* proto-calendar retired (2026-11-02): replaced by the real
+   stamps/MiniCalendar component. */
 
 .proto-planner { display: flex; flex-direction: column; gap: 14px; max-height: 360px; overflow-y: auto; padding-right: 2px; }
 .proto-planner__day { padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; }
@@ -170,17 +105,11 @@
   font-size: 0.85rem;
   color: var(--color-text-subtle);
 }
+/* The checked/unchecked box itself is the real stamps/Checkbox
+   component now (presentational mode, 2026-11-02) — this just lays out
+   the row around it. */
 .proto-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.proto-checklist li { display: flex; gap: 8px; align-items: flex-start; font-size: 0.9rem; }
-.proto-checklist .proto-check {
-  flex: 0 0 auto;
-  width: 18px; height: 18px; border-radius: 5px; margin-top: 1px;
-  border: 2px solid var(--color-surface-border);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 0.68rem; color: var(--white);
-}
-.proto-checklist li[data-done="true"] .proto-check { background: var(--green); border-color: var(--green); }
-.proto-checklist li[data-done="true"] .proto-checklist__label { color: var(--color-text-subtle); text-decoration: line-through; }
+.proto-checklist li { display: flex; gap: 8px; align-items: flex-start; }
 
 .proto-note-editor {
   font: inherit;

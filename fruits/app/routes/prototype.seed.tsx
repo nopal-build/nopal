@@ -28,6 +28,7 @@ import { useSearchParams } from "react-router";
 import { Surface } from "stamps/Surface";
 import { Badge } from "stamps/Badge";
 import { Chip } from "stamps/Chip";
+import { Checkbox } from "stamps/Checkbox";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
 import { Input } from "stamps/Input";
@@ -188,9 +189,14 @@ export default function PrototypeSeed() {
               </p>
               <ul className="proto-checklist">
                 {checklist.map((item) => (
-                  <li key={item.label} data-done={item.done}>
-                    <span className="proto-check">{item.done ? "\u2713" : ""}</span>
-                    <span className="proto-checklist__label">{item.label}</span>
+                  <li key={item.label}>
+                    <Checkbox checked={item.done} />
+                    <span
+                      className={textSize.sm}
+                      style={item.done ? { color: semanticColors.textSubtle, textDecoration: "line-through" } : undefined}
+                    >
+                      {item.label}
+                    </span>
                   </li>
                 ))}
               </ul>

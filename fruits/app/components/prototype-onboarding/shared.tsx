@@ -13,6 +13,8 @@ import { Link } from "react-router";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
+import { link } from "stamps/link.css";
+import type { StepperStep } from "stamps/Stepper";
 import "./prototypeOnboarding.css";
 
 /** Stand-in for the real `/guides` plans — that page is Vault/OxMarkdown
@@ -102,9 +104,10 @@ export function availableDates(count = 10): Date[] {
 
 export const TIME_SLOTS = ["9:00 AM", "11:00 AM", "1:00 PM", "3:00 PM"];
 
-export function isSameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
+// Date-comparison/month-arithmetic helpers now live on `stamps/
+// MiniCalendar` (`isSameDay`, `startOfMonth`, `addMonths`) — re-exported
+// from nowhere on purpose; import them from there directly so there's
+// one copy, not two drifting apart.
 
 export function formatDay(d: Date): string {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -120,10 +123,6 @@ export function monthKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}`;
 }
 
-export function monthLabel(d: Date): string {
-  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-}
-
 /** Carries every funnel field forward as query params — only the ones
  * that are actually set. Centralized so each route doesn't hand-roll
  * its own subset and accidentally drop a field the next page needs. */
@@ -136,30 +135,16 @@ export function funnelQuery(fields: Record<string, string | undefined | null>): 
   return qs ? `?${qs}` : "";
 }
 
-const STEPS = [
+/** Passed straight to `stamps/Stepper`'s `steps` prop by every funnel
+ * page after `/guides` — one source of truth for the 5 steps, not one
+ * array per page. */
+export const FUNNEL_STEPS: StepperStep[] = [
   { key: "schedule", label: "Schedule" },
   { key: "details", label: "Your info" },
   { key: "project-setup", label: "Name it" },
   { key: "hold", label: "Setting up" },
   { key: "seed", label: "Your project" },
 ];
-
-/** A thin progress strip shared by the 5 funnel pages after `/guides` —
- * just enough continuity that this reads as one flow, not 5 unrelated
- * pages. Deliberately not a stamps component of its own yet — mockup-
- * adjacent prototype scope, not a design-system addition. */
-export function FunnelSteps({ current }: { current: "schedule" | "details" | "project-setup" | "hold" | "seed" }) {
-  const currentIdx = STEPS.findIndex((s) => s.key === current);
-  return (
-    <div className="proto-steps" aria-hidden="true">
-      {STEPS.map((step, i) => (
-        <span key={step.key} className={`proto-steps__item${i === currentIdx ? " proto-steps__item--current" : i < currentIdx ? " proto-steps__item--done" : ""}`}>
-          {step.label}
-        </span>
-      ))}
-    </div>
-  );
-}
 
 export function ProtoNote({ children }: { children: ReactNode }) {
   return (
@@ -169,9 +154,12 @@ export function ProtoNote({ children }: { children: ReactNode }) {
   );
 }
 
+/** Thin wrapper over stamps' own `link` recipe (same one `/verify` and
+ * `/login` use for their own back-links) — just prefixes the arrow glyph
+ * consistently, so callers don't repeat it. */
 export function BackLink({ to, children }: { to: string; children: ReactNode }) {
   return (
-    <Link to={to} className={`${textSize.sm} proto-backlink`}>
+    <Link to={to} className={`${textSize.sm} ${link}`} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       {"\u2190"} {children}
     </Link>
   );

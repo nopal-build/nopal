@@ -9,11 +9,12 @@
 // page — not a sign Calendly's already being replaced for real.
 //
 // Date/time only — name/email moved to its own step (`prototype.
-// details`, 2026-11-02 follow-up: "let's make this step by step thing
-// more discrete"). Two ways to pick the same date, kept in sync: a
-// month calendar (click a day) and a planner-style list grouped by day,
-// each day showing its open time slots directly. No backend: on "Next",
-// plan/date/time ride forward as search params to `/prototype/details`.
+// details`). Two ways to pick the same date, kept in sync: a small
+// `stamps/MiniCalendar` sidebar (2026-11-02 follow-up: "too big... small
+// and to the right of the times... can all live in the same box") and a
+// planner-style list grouped by day, each day showing its open time
+// slots directly. No backend: on "Next", plan/date/time ride forward as
+// search params to `/prototype/details`.
 import { useMemo, useRef, useState } from "react";
 import type { MetaFunction } from "react-router";
 import { useNavigate, useSearchParams } from "react-router";
@@ -25,33 +26,23 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { button } from "stamps/button.css";
 import { semanticColors } from "stamps/tokens";
+import { Stepper } from "stamps/Stepper";
+import { MiniCalendar, isSameDay } from "stamps/MiniCalendar";
 import { AuthShell } from "../components/AuthShell";
 import {
-  FunnelSteps,
   BackLink,
+  FUNNEL_STEPS,
   ProtoNote,
   TIME_SLOTS,
   availableDates,
   formatDay,
   formatDayHeading,
   funnelQuery,
-  isSameDay,
   monthKey,
-  monthLabel,
   planBySlug,
 } from "../components/prototype-onboarding/shared";
 
 export const meta: MetaFunction = () => [{ title: "O.No · Schedule a call" }];
-
-const WEEKDAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-
-function startOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-
-function addMonths(d: Date, n: number): Date {
-  return new Date(d.getFullYear(), d.getMonth() + n, 1);
-}
 
 export default function PrototypeSchedule() {
   const navigate = useNavigate();
@@ -60,10 +51,8 @@ export default function PrototypeSchedule() {
 
   const [availability] = useState(() => availableDates(10));
   const monthKeys = useMemo(() => Array.from(new Set(availability.map(monthKey))), [availability]);
-  const minMonth = startOfMonth(availability[0]);
-  const maxMonth = startOfMonth(availability[availability.length - 1]);
 
-  const [calendarCursor, setCalendarCursor] = useState(() => startOfMonth(availability[0]));
+  const [calendarMonth, setCalendarMonth] = useState(availability[0]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [time, setTime] = useState<string | null>(null);
 
@@ -95,21 +84,9 @@ export default function PrototypeSchedule() {
     );
   }
 
-  // --- Calendar grid for the currently-displayed month ---
-  const year = calendarCursor.getFullYear();
-  const month = calendarCursor.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstWeekday = new Date(year, month, 1).getDay();
-  const cells: (Date | null)[] = [
-    ...Array.from({ length: firstWeekday }, () => null),
-    ...Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1)),
-  ];
-  const canGoPrev = startOfMonth(addMonths(calendarCursor, -1)) >= minMonth;
-  const canGoNext = startOfMonth(addMonths(calendarCursor, 1)) <= maxMonth;
-
   return (
     <AuthShell maxWidth="760px">
-      <FunnelSteps current="schedule" />
+      <Stepper steps={FUNNEL_STEPS} currentKey="schedule" />
       <BackLink to="/prototype/guides">Back to guide levels</BackLink>
       <Stack gap={6}>
         <Stack gap={1}>
@@ -153,50 +130,15 @@ export default function PrototypeSchedule() {
             </div>
 
             <div className="proto-schedule-box__calendar">
-              <Cluster style={{ justifyContent: "space-between" }} align="center">
-                <p className={textSize.sm} style={{ fontWeight: 600 }}>{monthLabel(calendarCursor)}</p>
-                <Cluster gap={1}>
-                  <button
-                    type="button"
-                    className={button({ variant: "quiet", size: "compact" })}
-                    disabled={!canGoPrev}
-                    onClick={() => setCalendarCursor((c) => addMonths(c, -1))}
-                    aria-label="Previous month"
-                  >
-                    {"\u2039"}
-                  </button>
-                  <button
-                    type="button"
-                    className={button({ variant: "quiet", size: "compact" })}
-                    disabled={!canGoNext}
-                    onClick={() => setCalendarCursor((c) => addMonths(c, 1))}
-                    aria-label="Next month"
-                  >
-                    {"\u203a"}
-                  </button>
-                </Cluster>
-              </Cluster>
-              <div className="proto-calendar">
-                {WEEKDAY_LABELS.map((w) => (
-                  <span key={w} className="proto-calendar__weekday">{w}</span>
-                ))}
-                {cells.map((date, i) => {
-                  if (!date) return <span key={`blank-${i}`} />;
-                  const available = availability.some((a) => isSameDay(a, date));
-                  const selected = !!selectedDate && isSameDay(selectedDate, date);
-                  return (
-                    <button
-                      key={date.toISOString()}
-                      type="button"
-                      className={`proto-calendar__cell${available ? " proto-calendar__cell--available" : ""}${selected ? " proto-calendar__cell--selected" : ""}`}
-                      disabled={!available}
-                      onClick={() => pickDate(date)}
-                    >
-                      {date.getDate()}
-                    </button>
-                  );
-                })}
-              </div>
+              <MiniCalendar
+                month={calendarMonth}
+                onMonthChange={setCalendarMonth}
+                selected={selectedDate}
+                onSelect={pickDate}
+                isAvailable={(date) => availability.some((a) => isSameDay(a, date))}
+                minMonth={availability[0]}
+                maxMonth={availability[availability.length - 1]}
+              />
               {monthKeys.length > 1 && (
                 <p className={textSize.sm} style={{ color: semanticColors.textSubtle, marginTop: 6 }}>
                   Spans {monthKeys.length} months.
