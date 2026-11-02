@@ -1,4 +1,4 @@
-// app/routes/prototype.project-setup.hold.tsx
+// app/routes/prototype.project-setup_.hold.tsx
 //
 // "This might take longer than 5 seconds" holding page — cycles through
 // `PROJECT_SETUP_PHASES` (an easily-edited array; Gerald explicitly
@@ -6,6 +6,13 @@
 // `/prototype/seed`. No backend call actually happens — purely a client-
 // side timer standing in for the real create-project + notify-guides
 // work.
+//
+// The trailing underscore on `project-setup_` is load-bearing (fs-routes'
+// flat-routes convention, same as `maker_.scripts_.new.tsx` elsewhere):
+// without it, this nests as a CHILD of `prototype.project-setup.tsx`'s
+// route (since that file also exists), and since that page renders no
+// `<Outlet />`, navigating here silently re-rendered the parent page
+// instead — the "Next" button looked like it did nothing at all.
 import { useEffect, useState } from "react";
 import type { MetaFunction } from "react-router";
 import { useNavigate, useSearchParams } from "react-router";
