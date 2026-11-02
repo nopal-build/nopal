@@ -67,8 +67,8 @@ function recordMentionSelected(item: MentionItem) {
 // `OxEditor` stays ignorant of vault/folder specifics; this is the one
 // place that knows the file belongs to a particular day.
 
-// Direct-to-S3 (via `vaultUpload.ts`'s `uploadToVaultFolder`, 10 MB parts
-// PUT to presigned storage URLs) — bytes never pass through this server's own
+// Direct-to-S3 (via `vaultUpload.ts`'s `uploadToVaultFolder`, chunked for
+// anything over 100 MB) — bytes never pass through this server's own
 // request handler the way a whole-body POST to a route like the old
 // `/api/daily-log/upload` would. That route buffered a file into memory
 // TWICE (once parsing the multipart body, again to hash it) with no size
