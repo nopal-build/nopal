@@ -22,6 +22,7 @@ import { Stepper } from "stamps/Stepper";
 import { AuthShell } from "../components/AuthShell";
 import {
   BackLink,
+  FUNNEL_MAX_WIDTH,
   FUNNEL_STEPS,
   ProtoNote,
   funnelQuery,
@@ -58,7 +59,7 @@ export default function PrototypeProjectSetup() {
   }
 
   return (
-    <AuthShell maxWidth="560px">
+    <AuthShell maxWidth={FUNNEL_MAX_WIDTH}>
       <Stepper steps={FUNNEL_STEPS} currentKey="project-setup" />
       <BackLink to={`/prototype/details${funnelQuery({ plan: plan?.slug, date: date ?? undefined, time: time ?? undefined })}`}>Back</BackLink>
       <Stack gap={6}>

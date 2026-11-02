@@ -31,6 +31,7 @@ import { MiniCalendar, isSameDay } from "stamps/MiniCalendar";
 import { AuthShell } from "../components/AuthShell";
 import {
   BackLink,
+  FUNNEL_MAX_WIDTH,
   FUNNEL_STEPS,
   ProtoNote,
   TIME_SLOTS,
@@ -85,7 +86,7 @@ export default function PrototypeSchedule() {
   }
 
   return (
-    <AuthShell maxWidth="760px">
+    <AuthShell maxWidth={FUNNEL_MAX_WIDTH}>
       <Stepper steps={FUNNEL_STEPS} currentKey="schedule" />
       <BackLink to="/prototype/guides">Back to guide levels</BackLink>
       <Stack gap={6}>

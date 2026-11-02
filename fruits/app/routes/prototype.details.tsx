@@ -18,7 +18,7 @@ import { textSize } from "stamps/typography.css";
 import { button } from "stamps/button.css";
 import { Stepper } from "stamps/Stepper";
 import { AuthShell } from "../components/AuthShell";
-import { BackLink, FUNNEL_STEPS, funnelQuery, planBySlug } from "../components/prototype-onboarding/shared";
+import { BackLink, FUNNEL_MAX_WIDTH, FUNNEL_STEPS, funnelQuery, planBySlug } from "../components/prototype-onboarding/shared";
 
 export const meta: MetaFunction = () => [{ title: "O.No · Your info" }];
 
@@ -48,7 +48,7 @@ export default function PrototypeDetails() {
   }
 
   return (
-    <AuthShell maxWidth="480px">
+    <AuthShell maxWidth={FUNNEL_MAX_WIDTH}>
       <Stepper steps={FUNNEL_STEPS} currentKey="details" />
       <BackLink to={`/prototype/schedule${funnelQuery({ plan: plan?.slug })}`}>Back</BackLink>
       <Stack gap={6}>

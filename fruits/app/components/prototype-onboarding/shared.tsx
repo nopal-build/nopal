@@ -135,6 +135,15 @@ export function funnelQuery(fields: Record<string, string | undefined | null>): 
   return qs ? `?${qs}` : "";
 }
 
+/** The one `AuthShell` `maxWidth` every page that shows the `Stepper`
+ * (schedule/details/project-setup) must use — Gerald, 2026-11-02: "never
+ * want it jumping around." The `Stepper` centers itself WITHIN its
+ * parent's width, so if that width differs page to page, the centered
+ * strip still lands at a different spot on screen even though each
+ * page looks centered in isolation. One shared width fixes that; it's
+ * also wide enough for the schedule page's planner+calendar box. */
+export const FUNNEL_MAX_WIDTH = "640px";
+
 /** Passed straight to `stamps/Stepper`'s `steps` prop by every funnel
  * page after `/guides` — one source of truth for the 5 steps, not one
  * array per page. */
