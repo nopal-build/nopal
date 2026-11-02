@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["cli", "api", "core", "app"]
+members = ["cli", "api", "core", "app", "heic-decode"]
 resolver = "2"
 
 [workspace.dependencies]

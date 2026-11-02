@@ -1,0 +1,17 @@
+[package]
+name = "heic-decode"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Decodes one HEIC/HEIF image to JPEG bytes via native libheif (no WASM) -- stdin in, stdout out, a disposable one-shot process the GraphLog worker spawns per photo. Replaces the WASM-compiled `heic-convert` path's ~130-250 MB per-decode tax with libheif's real native cost."
+
+[[bin]]
+name = "heic-decode"
+path = "src/main.rs"
+
+[dependencies]
+libheif-rs = "3"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+[package.metadata.dist]
+dist = false

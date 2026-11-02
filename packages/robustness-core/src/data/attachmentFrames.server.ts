@@ -11,8 +11,13 @@
  *
  * - A HEIC/HEIF photo is decoded to one JPEG. `sharp`'s prebuilt libvips
  *   cannot decode HEVC-compressed HEIF (the iPhone default; verified on a
- *   real IMG_*.heic, "bad seek" then a decoder error), so this uses
- *   `heic-convert` (libheif compiled to wasm, HEVC included).
+ *   real IMG_*.heic, "bad seek" then a decoder error), so this shells out
+ *   to `heic-decode` (`crates/heic-decode`), a small Rust binary built on
+ *   `libheif-rs` against the real native `libheif`/`libde265` (HEVC
+ *   included) — the same decoder the old WASM path used, called through
+ *   FFI instead of a WASM sandbox (2026-11-02; see the
+ *   `rust-heic-decode-worker` garden seed for why: the WASM translation
+ *   layer, not libheif itself, was the ~130–250 MB-per-decode cost).
  * - A video becomes a few evenly spaced frames, scaled down, via the
  *   `ffmpeg-static` binary. Frames, not audio: what changes across them is
  *   what the description is asked for. Narration is lost and the sidecar
@@ -26,8 +31,8 @@
 import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import ffmpegPath from "ffmpeg-static";
 import sharp from "sharp";
@@ -78,37 +83,32 @@ let heicTurn: Promise<unknown> = Promise.resolve();
 const HEIC_DECODE_TIMEOUT_MS = 2 * 60 * 1000;
 
 /**
- * The decoder runs in a Node process of its own, one per photo. The
- * WebAssembly decoder holds ~130-250 MB per decode and never gives it
- * back, so in the worker's own process a run's memory only climbed: a
- * GraphLog run on a project of iPhone photos died at the same photo on
- * two runs ("Worker exited unexpectedly", 2026-10-30; ten decodes in one
- * process measured 82 MB to a 541 MB peak). A child returns its memory
- * when it exits, and asks the kernel to kill it first under memory
- * pressure (`oom_score_adj`), so a photo too big for the machine fails
- * as that one photo, unread, and the run goes on.
+ * The decoder runs in a process of its own, one per photo, same as
+ * before (2026-10-30's own fix) -- only WHICH process changed
+ * (2026-11-02). It used to be a Node child running a WASM-compiled
+ * `libheif` (`heic-convert`), which held ~130-250 MB per decode and
+ * never gave it back ("Worker exited unexpectedly", 2026-10-30; ten
+ * decodes in one process measured 82 MB to a 541 MB peak). It's now a
+ * small Rust binary (`crates/heic-decode`) calling the REAL native
+ * `libheif` via FFI -- no WASM sandbox, so no WASM translation tax; the
+ * isolation (one process per photo, memory returned to the OS on exit,
+ * asks the kernel to kill it first under memory pressure via
+ * `oom_score_adj`) is unchanged, since that part was never the WASM
+ * decoder's fault -- it was about what ONE process accumulates over many
+ * photos, native or not.
  */
-const HEIC_CHILD_SCRIPT = `
-try { require("fs").writeFileSync("/proc/self/oom_score_adj", "1000"); } catch {}
-const convert = require(process.argv[1]);
-const chunks = [];
-process.stdin.on("data", (c) => chunks.push(c));
-process.stdin.on("end", async () => {
-  try {
-    const out = await convert({ buffer: new Uint8Array(Buffer.concat(chunks)), format: "JPEG", quality: 0.85 });
-    process.stdout.write(Buffer.from(out));
-  } catch (err) {
-    process.stderr.write(String((err && err.message) || err));
-    process.exitCode = 1;
-  }
-});
-`;
-
-const requireHere = createRequire(import.meta.url);
+function heicDecodeBinaryPath(): string {
+  // Overridable for a packaged/deployed image (the worker's own
+  // Dockerfile build stage sets this once `crates/heic-decode` is built
+  // into it); the default is this package's own position in the local
+  // monorepo checkout, which is all local dev needs.
+  if (process.env.HEIC_DECODE_BIN) return process.env.HEIC_DECODE_BIN;
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "crates", "target", "release", "heic-decode");
+}
 
 function decodeHeicInChild(bytes: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["-e", HEIC_CHILD_SCRIPT, requireHere.resolve("heic-convert")], {
+    const child = spawn(heicDecodeBinaryPath(), [], {
       stdio: ["pipe", "pipe", "pipe"],
       timeout: HEIC_DECODE_TIMEOUT_MS,
     });
@@ -152,8 +152,9 @@ export function imageTypeFromBytes(bytes: Buffer): string | null {
 
 /**
  * An image the vision model will accept: a JPEG/PNG/GIF/WebP passes
- * through untouched; a HEIC/HEIF is decoded with `heic-convert`; anything
- * else `sharp` can read (TIFF, BMP, AVIF, ...) is re-encoded as JPEG.
+ * through untouched; a HEIC/HEIF is decoded with the native `heic-decode`
+ * Rust binary; anything else `sharp` can read (TIFF, BMP, AVIF, ...) is
+ * re-encoded as JPEG.
  * Throws for a format nothing here can read, which the caller reports as
  * unsupported the way it always did.
  *
