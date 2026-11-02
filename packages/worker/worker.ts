@@ -39,6 +39,7 @@ import { getFolderById, type VaultFolder } from "robustness-core/data/vault.serv
 import {
   startGraphLogRun,
   finishGraphLogRun,
+  memorySnapshotMb,
   type GraphLogPerfRecorder,
 } from "robustness-core/data/graphLogPerf.server";
 import {
@@ -446,7 +447,14 @@ const mediaWorker = new Worker<MediaJobData, RenditionsOutcome, MediaJobName>(
 );
 mediaWorker.on("completed", (job) => {
   const r = job.returnvalue;
-  console.log(`[worker] renditions ${job.data.fileId}: ${r.written} written${r.skipped ? ` (${r.skipped})` : ""}.`);
+  // No "run" to attach this to (unlike GraphLog's own
+  // `GraphLogPerfRecorder`, see that file's own `event()`) -- this is
+  // the narrower, no-new-table version for the two queues the
+  // `rust-heic-decode-worker`/`oxmarkdown-pdf-via-typst` garden seeds
+  // are targeting, logged plainly so it shows up in whatever already
+  // scrapes this worker's stdout, pending a decision on whether a real
+  // recorder is worth building for non-GraphLog queues too.
+  console.log(`[worker] renditions ${job.data.fileId}: ${r.written} written${r.skipped ? ` (${r.skipped})` : ""}. memory=${JSON.stringify(memorySnapshotMb())}`);
 });
 mediaWorker.on("failed", (job, err) => {
   console.error(`[worker] renditions ${job?.data.fileId} failed:`, err);
@@ -519,7 +527,11 @@ const letterPdfWorker = new Worker<LetterPdfJobData, LetterPdfJobResult, string>
 );
 letterPdfWorker.on("completed", (job) => {
   const r = job.returnvalue;
-  console.log(`[worker] letter pdf ${job.data.fileId}: ${"skipped" in r ? `skipped (${r.skipped})` : `${r.size} bytes at ${r.s3Key}`}.`);
+  // Same memory-logging convention as the media worker above -- this is
+  // the exact Chromium-per-render job `oxmarkdown-pdf-via-typst` (garden
+  // seed) is targeting; the baseline here is what that seed's own Typst
+  // replacement will need to beat.
+  console.log(`[worker] letter pdf ${job.data.fileId}: ${"skipped" in r ? `skipped (${r.skipped})` : `${r.size} bytes at ${r.s3Key}`}. memory=${JSON.stringify(memorySnapshotMb())}`);
 });
 letterPdfWorker.on("failed", (job, err) => {
   console.error(`[worker] letter pdf ${job?.data.fileId} failed:`, err);

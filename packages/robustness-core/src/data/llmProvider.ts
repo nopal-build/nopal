@@ -291,10 +291,23 @@ export type PhotoDescriptionResult = {
  * clip"), so the description can say what changes between them. */
 export type LabeledImage = { imageBase64: string; mediaType: string; label: string };
 
-/** A document the model reads whole: a PDF, as base64. Sent as a
+/** A document the model reads whole: a PDF, either as base64 (small
+ * enough to stay inline) or as a path to bytes already on local disk
+ * (large enough that the caller streamed it there instead of holding it
+ * in memory -- see `syncKnowledge.server.ts`'s PDF branch). Sent as a
  * `document` content block, which the API takes with no beta flag up to
- * 32 MB per request. */
-export type LabeledDocument = { base64: string; mediaType: "application/pdf"; label: string };
+ * 32 MB per request; a `filePath` document always goes up through the
+ * Files API instead (`anthropicProvider.server.ts`'s `describeImages`),
+ * read as a real file stream, never buffered or base64-encoded by this
+ * provider at all. A real discriminated union (`kind`), not two optional
+ * fields on one shape -- an optional-field version of this (tried first)
+ * didn't narrow cleanly on `filePath !== undefined` across the
+ * intersection with the shared `mediaType`/`label` fields, and silently
+ * left `base64` typed as possibly `undefined` in the branch that reads
+ * it. */
+export type LabeledDocument =
+  | { kind: "base64"; base64: string; mediaType: "application/pdf"; label: string }
+  | { kind: "filePath"; filePath: string; mediaType: "application/pdf"; label: string };
 
 export type ImagesDescriptionInput = {
   images: LabeledImage[];

@@ -75,7 +75,7 @@ import {
   type FilingSource,
 } from "./syncFiling.server";
 import type { GraphLogEventKind } from "./graphLogMetrics.server";
-import type { PhotoDescriptionResult } from "./llmProvider";
+import type { LabeledDocument, PhotoDescriptionResult } from "./llmProvider";
 import {
   classifyStageSkill,
   composeStageSkill,
@@ -84,7 +84,7 @@ import {
   listExtraSkillFiles,
   readSkillFingerprint,
 } from "./projectN02.server";
-import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
+import { AnthropicProvider, INLINE_DOCUMENT_MAX_BASE64, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { docxText, isDocx } from "./docxText.server";
 import { resolveSidecar } from "./sidecarNames";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
@@ -528,9 +528,10 @@ export async function runSyncKnowledge(
         if (isImage || isVideo || isPdf) {
           photoLlm ??= AnthropicProvider.forStage("sync-knowledge");
           // A video streams to disk below instead, as its poster does
-          // (`ensurePosterForDescribedVideo`); only a photo or a PDF is
-          // held in memory.
-          const bytes = isVideo ? null : await getBytes();
+          // (`ensurePosterForDescribedVideo`); a large PDF streams too
+          // (`buildPdfDocument`, below) -- only a photo still buffers
+          // whole here.
+          const bytes = isVideo || isPdf ? null : await getBytes();
           const context = `Knowledge-extraction instructions for this project:\n\n${skillContent}`;
           let result: PhotoDescriptionResult;
           if (isVideo) {
@@ -573,13 +574,18 @@ export async function runSyncKnowledge(
             // re-extracts, once. Said out loud below so the run log shows
             // why a page changed on a run with no new files.
             if (!existing) log(`sync-knowledge: "${source.name}" is a PDF read for the first time; its day will re-extract this run.`);
-            result = await photoLlm.describeImages({
-              images: [],
-              documents: [{ base64: bytes!.toString("base64"), mediaType: "application/pdf", label: `The attached PDF, "${source.name}":` }],
-              context,
-              framing: PDF_DESCRIPTION_FRAMING,
-              maxTokens: PDF_DESCRIPTION_MAX_TOKENS,
-            });
+            const { document, cleanup } = await buildPdfDocument(source, getBytes);
+            try {
+              result = await photoLlm.describeImages({
+                images: [],
+                documents: [document],
+                context,
+                framing: PDF_DESCRIPTION_FRAMING,
+                maxTokens: PDF_DESCRIPTION_MAX_TOKENS,
+              });
+            } finally {
+              await cleanup();
+            }
             extraMeta = { describedFrom: "pdf" };
             body = result.description;
           } else {
@@ -864,6 +870,49 @@ function isReadablePdf(source: { content_type: string; s3_key: string | null; si
   return source.content_type === "application/pdf" && !!source.s3_key && (source.size ?? 0) <= PDF_MAX_BYTES;
 }
 
+/** The largest raw PDF that still fits under the Files API's own inline
+ * ceiling once base64-encoded (`INLINE_DOCUMENT_MAX_BASE64`) -- a PDF
+ * under this is going inline either way, so there's nothing to gain by
+ * streaming it. Base64 expands bytes by 4/3; rounded down to stay
+ * strictly under the real ceiling. */
+const INLINE_PDF_MAX_RAW_BYTES = Math.floor((INLINE_DOCUMENT_MAX_BASE64 * 3) / 4);
+
+/**
+ * The PDF `document` block `describeImages` needs for `source`: inline
+ * base64 when small enough to stay under the Files API's own inline
+ * ceiling, or streamed to a fresh temp file and referenced by path when
+ * not -- never both a raw `Buffer` AND a base64 copy of a large PDF held
+ * in memory at once. A PDF above `INLINE_PDF_MAX_RAW_BYTES` goes through
+ * the Files API regardless (`documentNeedsUpload`), and until this fix
+ * that meant a raw `Buffer`, a base64 string built from it, AND a THIRD
+ * `Buffer` re-decoded from that base64 for the upload -- three copies at
+ * once, 300+ MB for a single large PDF. This mirrors the fix the video
+ * OOM already got (2026-11-02), just for the PDF path (see
+ * `graphlog-memory-optimization.md` item 1 in the garden).
+ *
+ * The returned `cleanup` MUST be awaited once the caller's
+ * `describeImages` call finishes, success or failure (a `finally`) --
+ * it's a real no-op when nothing was streamed to disk, so it's always
+ * safe to call.
+ */
+async function buildPdfDocument(
+  source: { name: string; s3_key: string | null; size?: number | null },
+  getBytes: () => Promise<Buffer>,
+): Promise<{ document: LabeledDocument; cleanup: () => Promise<void> }> {
+  const label = `The attached PDF, "${source.name}":`;
+  if ((source.size ?? 0) > INLINE_PDF_MAX_RAW_BYTES) {
+    const dir = await mkdtemp(join(tmpdir(), "sync-knowledge-pdf-"));
+    const filePath = join(dir, "attachment.pdf");
+    await downloadFileToPath(source.s3_key!, filePath);
+    return {
+      document: { kind: "filePath", filePath, mediaType: "application/pdf", label },
+      cleanup: () => rm(dir, { recursive: true, force: true }),
+    };
+  }
+  const base64 = (await getBytes()).toString("base64");
+  return { document: { kind: "base64", base64, mediaType: "application/pdf", label }, cleanup: async () => {} };
+}
+
 /**
  * Whether this stage can read an attachment at all: an image or a video
  * in storage, a PDF under the ceiling, a Word file, or a file with stored
@@ -948,15 +997,20 @@ async function fileAttachment(args: {
         ({ description: text, model, usage } = result);
         describedFrom = "image";
       } else if (isReadablePdf(source)) {
-        const result = await args.photoLlm.describeImages({
-          images: [],
-          documents: [{ base64: (await args.getBytes()).toString("base64"), mediaType: "application/pdf", label: `The attached PDF, "${source.name}":` }],
-          context,
-          framing,
-          maxTokens: FILING_MAX_TOKENS,
-        });
-        ({ description: text, model, usage } = result);
-        describedFrom = "pdf";
+        const { document, cleanup } = await buildPdfDocument(source, args.getBytes);
+        try {
+          const result = await args.photoLlm.describeImages({
+            images: [],
+            documents: [document],
+            context,
+            framing,
+            maxTokens: FILING_MAX_TOKENS,
+          });
+          ({ description: text, model, usage } = result);
+          describedFrom = "pdf";
+        } finally {
+          await cleanup();
+        }
       } else if (source.content) {
         const response = await args.textLlm.complete({
           system: framing,
