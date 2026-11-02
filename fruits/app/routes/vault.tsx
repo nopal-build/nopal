@@ -120,13 +120,15 @@ import { letterLengthLabel } from "../components/letterLength";
 import { ProjectView } from "../components/ProjectView";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
+import { isInlineMarkdown, uploadFile, uploadToVaultFolder } from "../components/vaultUpload";
 import { permissions } from "../hooks/useUser";
 import "../styles/vault.css";
 
 // ─── Upload constants (ported from vault v1 — the flow that “worked well”) ───
 
-const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB per S3 multipart part
-const MULTIPART_THRESHOLD = 100 * 1024 * 1024; // multipart for files ≥ 100 MB
+/** Replace posts the file at or under this, so the route can keep it as
+ * text; over it, the bytes go straight to storage. */
+const SMALL_POST_BYTES = 5 * 1024 * 1024;
 const MAX_CONCURRENT_UPLOADS = 2; // max files uploading at the same time
 
 // ─── Types ──────────────────────────────────────────────────────────────────────────────
@@ -2353,14 +2355,9 @@ function LetterSplitEditor({
       if (!folderId) throw new Error("This file has no folder to keep a picture in");
       const out: string[] = [];
       for (const file of files) {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("folderId", folderId);
-        const res = await fetch("/api/vault/upload", { method: "POST", body: form });
-        const data = (await res.json().catch(() => null)) as { fileRef?: { _id: string }; error?: string } | null;
-        if (!res.ok || !data?.fileRef?._id) throw new Error(data?.error ?? `${file.name} didn't upload. Try again.`);
+        const fileId = await uploadToVaultFolder(file, folderId);
         const alt = file.name.replace(/\.[^.]+$/, "");
-        out.push(`![${alt}](/api/vault/view/${data.fileRef._id})`);
+        out.push(`![${alt}](/api/vault/view/${fileId})`);
       }
       return out;
     },
@@ -2908,8 +2905,8 @@ export default function VaultV2Page() {
   const [siteSettingsOpen, setSiteSettingsOpen] = useState(false);
 
   // ─── Upload queue (ported from vault v1) ──────────────────────────────
-  // Multi-file, max 2 concurrent, XHR byte-progress for small files, and
-  // chunked S3 multipart (no proxy-timeout risk) for files ≥ 100 MB.
+  // Multi-file, max 2 concurrent. Bytes go straight to storage in 10 MB
+  // parts (`vaultUpload.ts`); markdown kept as text is an XHR post.
 
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   // Uploads claimed by the queue processor — survives re-renders mid-flight.
@@ -2972,104 +2969,14 @@ export default function VaultV2Page() {
     setPendingUploads((prev) => prev.filter((p) => !confirmedIds.has(p.id)));
   }, [pendingUploads, mergedCache]);
 
-  const runMultipartUpload = useCallback(
-    async (upload: PendingUpload) => {
-      const { file, targetFolderId: folderId, id } = upload;
-      const contentType = file.type || "application/octet-stream";
-
-      const initRes = await fetch("/api/vault/multipart-init", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType,
-          folderId,
-          originalName: file.name,
-          size: file.size,
-        }),
-      });
-      if (!initRes.ok) {
-        const data = (await initRes.json()) as { error?: string };
-        throw new Error(data.error ?? `Init failed (${initRes.status})`);
-      }
-      const { uploadId, key } = (await initRes.json()) as {
-        uploadId: string;
-        key: string;
-      };
-
-      const numParts = Math.ceil(file.size / CHUNK_SIZE);
-      const parts: Array<{ PartNumber: number; ETag: string }> = [];
-
-      try {
-        for (let i = 0; i < numParts; i++) {
-          const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, file.size);
-          const chunk = file.slice(start, end);
-
-          const partForm = new FormData();
-          partForm.append("uploadId", uploadId);
-          partForm.append("key", key);
-          partForm.append("partNumber", String(i + 1));
-          partForm.append("chunk", chunk);
-
-          const partRes = await fetch("/api/vault/multipart-part", {
-            method: "POST",
-            body: partForm,
-          });
-          if (!partRes.ok) {
-            const data = (await partRes.json()) as { error?: string };
-            throw new Error(
-              data.error ?? `Part ${i + 1} failed (${partRes.status})`,
-            );
-          }
-          const { ETag } = (await partRes.json()) as { ETag: string };
-          parts.push({ PartNumber: i + 1, ETag });
-          setUploadProgress(id, Math.round(((i + 1) / numParts) * 100));
-        }
-
-        const completeRes = await fetch("/api/vault/multipart-complete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            uploadId,
-            key,
-            parts,
-            name: file.name,
-            folderId,
-            contentType,
-            size: file.size,
-          }),
-        });
-        if (!completeRes.ok) {
-          const data = (await completeRes.json()) as { error?: string };
-          throw new Error(
-            data.error ?? `Complete failed (${completeRes.status})`,
-          );
-        }
-        const completeData = (await completeRes.json().catch(() => null)) as {
-          fileRef?: { _id?: string };
-        } | null;
-
-        finishUpload(id, folderId, completeData?.fileRef?._id);
-      } catch (err) {
-        // Best-effort abort so S3 never leaks partial uploads
-        fetch("/api/vault/multipart-abort", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uploadId, key }),
-        }).catch(() => {});
-        throw err;
-      }
-    },
-    [finishUpload, setUploadProgress],
-  );
-
   const startUpload = useCallback(
     (upload: PendingUpload) => {
       const { id, file, targetFolderId: folderId } = upload;
 
-      if (file.size >= MULTIPART_THRESHOLD) {
-        runMultipartUpload(upload)
+      if (!isInlineMarkdown(file)) {
+        // Straight to storage, progress per 10 MB part (`vaultUpload.ts`).
+        uploadFile(file, { kind: "folder", folderId }, { onProgress: (f) => setUploadProgress(id, Math.round(f * 100)) })
+          .then((result) => finishUpload(id, folderId, result.fileRef?._id))
           .catch((err) => {
             failUpload(
               id,
@@ -3082,7 +2989,7 @@ export default function VaultV2Page() {
         return;
       }
 
-      // Small file: XHR with byte-level progress
+      // Markdown the Vault keeps as text: XHR with byte-level progress
       const formData = new FormData();
       formData.append("file", file);
       formData.append("folderId", folderId);
@@ -3136,7 +3043,7 @@ export default function VaultV2Page() {
       xhr.open("POST", "/api/vault/upload");
       xhr.send(formData);
     },
-    [runMultipartUpload, finishUpload, failUpload, setUploadProgress],
+    [finishUpload, failUpload, setUploadProgress],
   );
 
   // Queue processor: starts queued uploads whenever a slot opens (max 2).
@@ -3644,10 +3551,20 @@ export default function VaultV2Page() {
     const file = current.file;
     setReplacing(true);
     try {
+      if (uploaded.size > SMALL_POST_BYTES) {
+        // Straight to storage (`vaultUpload.ts`), same row, new object.
+        await uploadFile(uploaded, { kind: "folder", folderId: file.folder_id ?? null }, { replaceFileId: file._id });
+        invalidateAndRevalidate([file.folder_id]);
+        return;
+      }
+      // Small enough to post: the replace route decides whether the new
+      // file is kept as text, from the existing file's own storage.
       const form = new FormData();
       form.append("file", uploaded);
       const data = await apiForm(`/api/vault/replace/${file._id}`, form);
       if (data) invalidateAndRevalidate([file.folder_id]);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "The replace didn't upload. Try again.");
     } finally {
       setReplacing(false);
     }
