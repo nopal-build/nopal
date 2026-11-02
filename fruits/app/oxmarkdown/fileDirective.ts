@@ -50,6 +50,14 @@ import {
 import { $createOxDirectiveNode, $isOxDirectiveNode } from "./editingNodes";
 import { getFileCaptionMember } from "./fileCaptionFlow";
 import { getTopLevelBlock } from "./SlashCommandPlugin";
+import {
+  captureLocalFilePreview,
+  setUploadProgress,
+  clearUploadProgress,
+  storeLocalFile,
+  getLocalFile,
+  forgetLocalFile,
+} from "./localFilePreview";
 
 /** What a real upload resolves to — enough to render a real thumbnail
  * (`fileId`, via `/api/vault/view/:fileId`) and decide whether it's even
@@ -64,48 +72,109 @@ export interface UploadedFileInfo {
  * stays ignorant of vault/folder specifics; it only knows how to call
  * this and what to do with the result. Omit entirely for a browser-only
  * preview with no server persistence (the visual mockup route does
- * this today). */
-export type UploadFileFn = (file: File) => Promise<UploadedFileInfo>;
+ * this today). `onProgress` is optional and best-effort: real, smooth
+ * byte progress for a chunked upload (`vaultUpload.ts`'s own 100 MB
+ * threshold), but a plain `fetch()`-based small upload has no browser
+ * API for incremental progress at all, so it only ever fires once, at
+ * 1, right before resolving — see `localFilePreview.ts`'s progress
+ * store for how `OxRenderer.tsx` reads this back out. */
+export type UploadFileFn = (file: File, onProgress?: (fraction: number) => void) => Promise<UploadedFileInfo>;
 
 function createFileDirectiveNode(file: File) {
   return $createOxDirectiveNode({
     type: "leafDirective",
     name: "file",
-    attributes: { name: file.name },
+    // `contentType` set optimistically from the browser's own read of the
+    // picked File, not just on success — `FileDirectiveLayout` needs to
+    // know whether this is a photo/video (the "media" card layout) or
+    // anything else (the compact icon+name row) from the very first
+    // render, not only once the upload finishes and the server echoes it
+    // back. The server's own value (`uploadAndAttach`'s success handler)
+    // overwrites this once it lands, which is the authoritative one.
+    attributes: { name: file.name, contentType: file.type || "application/octet-stream" },
     children: [],
   });
 }
 
-/** Kicks off `onUploadFile` for each freshly-inserted node and writes the
- * result back onto that SAME node once it resolves — looked up again by
- * KEY (not held as a direct reference), since a real network request
- * happens between insertion and completion, and a document mutation
- * elsewhere in the meantime would invalidate a stale node reference. */
+/** Does the actual work for one node: kicks off `onUploadFile` and writes
+ * the result back onto that SAME node once it resolves — looked up again
+ * by KEY (not held as a direct reference), since a real network request
+ * happens in between, and a document mutation elsewhere in the meantime
+ * would invalidate a stale node reference. Shared by the initial upload
+ * (`uploadAndAttach`) and a later `retryFileUpload` — identical work
+ * either way, just a different reason the file is in hand. */
+function performUpload(editor: LexicalEditor, nodeKey: string, file: File, onUploadFile: UploadFileFn): void {
+  // Instant, client-only preview from the file's own bytes -- shown by
+  // `OxRenderer.tsx`'s `FileDirectiveLayout` while this upload (and then
+  // the worker's own rendition) is in flight; see `localFilePreview.ts`.
+  captureLocalFilePreview(nodeKey, file);
+  // Retained for every file type (not just the image/video preview above)
+  // so a later Retry can re-upload the exact same bytes.
+  storeLocalFile(nodeKey, file);
+  onUploadFile(file, (fraction) => setUploadProgress(nodeKey, fraction)).then(
+    ({ fileId, contentType }) => {
+      clearUploadProgress(nodeKey);
+      forgetLocalFile(nodeKey);
+      editor.update(() => {
+        const node = $getNodeByKey(nodeKey);
+        if ($isOxDirectiveNode(node)) {
+          node.setAttribute("fileId", fileId);
+          node.setAttribute("contentType", contentType);
+        }
+      });
+    },
+    (err) => {
+      console.error("File upload failed:", err);
+      clearUploadProgress(nodeKey);
+      // Kept (not forgotten) on failure -- a Retry needs it still here.
+      const message = err instanceof Error ? err.message : String(err);
+      editor.update(() => {
+        const node = $getNodeByKey(nodeKey);
+        if ($isOxDirectiveNode(node)) {
+          node.setAttribute("uploadError", "1");
+          node.setAttribute("uploadErrorMessage", message);
+        }
+      });
+    },
+  );
+}
+
+/** Kicks off `onUploadFile` for each freshly-inserted node — see
+ * `performUpload`. */
 function uploadAndAttach(
   editor: LexicalEditor,
   entries: { file: File; nodeKey: string }[],
   onUploadFile: UploadFileFn,
 ): void {
   for (const { file, nodeKey } of entries) {
-    onUploadFile(file).then(
-      ({ fileId, contentType }) => {
-        editor.update(() => {
-          const node = $getNodeByKey(nodeKey);
-          if ($isOxDirectiveNode(node)) {
-            node.setAttribute("fileId", fileId);
-            node.setAttribute("contentType", contentType);
-          }
-        });
-      },
-      (err) => {
-        console.error("File upload failed:", err);
-        editor.update(() => {
-          const node = $getNodeByKey(nodeKey);
-          if ($isOxDirectiveNode(node)) node.setAttribute("uploadError", "1");
-        });
-      },
-    );
+    performUpload(editor, nodeKey, file, onUploadFile);
   }
+}
+
+/** Re-attempts a failed upload with the SAME file this node was given the
+ * first time (`localFilePreview.ts`'s retained-file store) — called from
+ * the "Retry" action next to a failed attachment's error message
+ * (`OxRenderer.tsx`'s `FileDirectiveLayout`). Clears the node's own
+ * `uploadError`/`uploadErrorMessage` attributes first so it immediately
+ * reads as "uploading" again, matching `performUpload`'s own first move
+ * (a fresh local preview) for a seamless-looking restart. A no-op
+ * (logged, not thrown) if the file is gone — the only way that happens
+ * is a page reload since the original failure, since nothing else ever
+ * clears it. */
+export function retryFileUpload(editor: LexicalEditor, nodeKey: string, onUploadFile: UploadFileFn): void {
+  const file = getLocalFile(nodeKey);
+  if (!file) {
+    console.error("Retry: no file in memory for this attachment (a reload since the failure clears it)");
+    return;
+  }
+  editor.update(() => {
+    const node = $getNodeByKey(nodeKey);
+    if ($isOxDirectiveNode(node)) {
+      node.setAttribute("uploadError", "");
+      node.setAttribute("uploadErrorMessage", "");
+    }
+  });
+  performUpload(editor, nodeKey, file, onUploadFile);
 }
 
 /** Focuses a just-inserted file directive's caption editor — but that

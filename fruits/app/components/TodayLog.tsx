@@ -76,7 +76,7 @@ function recordMentionSelected(item: MentionItem) {
 // browser only ever saw that as a hung, response-less POST. This first
 // resolves (get-or-creates) the day's own vault folder -- the one thing
 // that still has to happen server-side -- THEN uploads straight to S3.
-async function uploadDailyLogFile(date: string, file: File): Promise<UploadedFileInfo> {
+async function uploadDailyLogFile(date: string, file: File, onProgress?: (fraction: number) => void): Promise<UploadedFileInfo> {
   const targetRes = await fetch("/api/daily-log/upload-target", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -86,7 +86,7 @@ async function uploadDailyLogFile(date: string, file: File): Promise<UploadedFil
   if (!targetRes.ok) throw new Error(targetBody?.error ?? "Could not prepare that day's folder");
   const folderId = targetBody.folderId as string;
 
-  const fileId = await uploadToVaultFolder(file, folderId, () => {}, { source: "daily_log", date });
+  const fileId = await uploadToVaultFolder(file, folderId, onProgress ?? (() => {}), { source: "daily_log", date });
   // This tab's own upload — the real-time `file.created` echo for this
   // exact id shows up moments later over `/api/events`; suppress it (see
   // `useVaultEvents`) since this tab already knows about it firsthand.
@@ -178,7 +178,7 @@ function TodayLogEntry({
   // doesn't see it as a changing prop — `date` is only ever the CURRENT
   // day here anyway (this component always renders "today"), so a plain
   // closure is enough without needing useCallback's dependency dance.
-  const onUploadFile: UploadFileFn = (file) => uploadDailyLogFile(date, file);
+  const onUploadFile: UploadFileFn = (file, onProgress) => uploadDailyLogFile(date, file, onProgress);
 
   const resolveCard = useMemo(
     () => buildCardResolver(cards, onChangeCardContent),
