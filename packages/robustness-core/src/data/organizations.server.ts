@@ -73,6 +73,21 @@ export async function getOrganizationRole(
   return member?.role ?? null;
 }
 
+/** Every Organization id `humanId` is a Guide on — in practice today
+ * either `[]` or `[NOPAL_ORGANIZATION_ID]`, since Nopal is the only
+ * Organization, but written against the general shape so a second
+ * Organization needs no change here. Used everywhere Phase C's "an org
+ * Guide reaches every one of their Organization's projects, no
+ * `sharing` entry needed" (garden/3-growing/organizations.md) has to
+ * check several projects/folders at once rather than one. */
+export async function getOrganizationIdsWhereGuide(humanId: string): Promise<string[]> {
+  const result = await query<[OrganizationMember[]]>(
+    `SELECT * FROM organization_members WHERE human_id = $humanId AND role = "Guide"`,
+    { humanId },
+  );
+  return (result?.[0] ?? []).map(formatRecord).map((m) => m.organization_id);
+}
+
 /** Batched `getOrganizationRole` for several Humans at once — one query,
  * not one per person (e.g. a candidates list a Guide picks a collaborator
  * from). Anyone with no membership is simply absent from the returned map,

@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { canViewFolder, getFolderAncestry, getFolderById } from "robustness-core/data/vault.server";
+import { canViewFolderOrgAware, getFolderAncestry, getFolderById } from "robustness-core/data/vault.server";
 import { findWebsiteAnchor, resolveWebsiteIncludes } from "robustness-core/data/website.server";
 
 /**
@@ -34,7 +34,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   const folder = await getFolderById(folderId);
-  if (!folder || !(await canViewFolder(user._id, folder))) {
+  if (!folder || !(await canViewFolderOrgAware(user._id, folder))) {
     return Response.json({ error: "Folder not found" }, { status: 404 });
   }
 

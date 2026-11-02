@@ -41,7 +41,20 @@ async function projectFoldersMissingOrganization(): Promise<VaultFolder[]> {
   const result = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders WHERE vault_root_key = "projects"`,
   );
-  return (result?.[0] ?? []).map(formatRecord).filter((f) => !f.organization_id);
+  // `vault_root_key = "projects"` also matches the ROOT `projects`
+  // container itself (every Vault Root carries its own key on itself, not
+  // just its descendants — see vaultRoots.ts), which is NOT a project and
+  // must never get `organization_id` (only actual projects — its direct
+  // children — and their descendants do, same as `createVaultFolder`
+  // only stamps a NEW project, never the root it's created under).
+  // Caught live (2026-11-02): an earlier version of this script stamped
+  // root containers too, which broke `getAccessibleProjectFolders`'s
+  // "top-level only" filter (a project whose PARENT — the root — also
+  // carried `organization_id` read as a false-positive "nested
+  // descendant" and got silently dropped).
+  return (result?.[0] ?? [])
+    .map(formatRecord)
+    .filter((f) => !f.organization_id && !!f.parent_folder_id);
 }
 
 function defaultRoleFor(human: Human): "Guide" | "Client" {

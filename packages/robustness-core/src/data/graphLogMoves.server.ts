@@ -38,13 +38,14 @@ import {
   saveDailyLogCard,
 } from "./dailyLog.server";
 import {
+  canViewFolderOrgAware,
   deleteFileRef,
   getAccessibleProjectFolders,
   getFileRefById,
   getFolderById,
   listFolderChildren,
 } from "./vault.server";
-import { canViewFolder, type VaultFolder } from "./vault.types";
+import type { VaultFolder } from "./vault.types";
 import { extractFileAttachments } from "./sorter.server";
 import { DAILY_LOGS_SYNC_FOLDER_NAME, syncedAttachmentFileName } from "./dailyLogSync.server";
 import { MARKS_SYNC_FOLDER_NAME } from "./graphLogMarks.server";
@@ -366,7 +367,7 @@ export async function checkMove(input: {
           : `no single project the marker can see matches "${input.destName}"`,
       };
     }
-    if (!canViewFolder(parsed.humanId, dest)) {
+    if (!(await canViewFolderOrgAware(parsed.humanId, dest))) {
       return { ok: false, reason: "the entry's author cannot see the destination project" };
     }
 

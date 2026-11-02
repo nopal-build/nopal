@@ -55,6 +55,7 @@ import {
 import {
   buildOwnedFolderAncestry,
   canViewFileRef,
+  canViewFolderOrgAware,
   ensureVaultRootFolders,
   getFileRefById,
   getFolderAncestry,
@@ -394,7 +395,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const folder = await timeRequestPerf("fn", "getFolderById", { folderId: folderParam }, () =>
       getFolderById(folderParam),
     );
-    if (!folder || !canViewFolder(user._id, folder)) {
+    if (!folder || !(await canViewFolderOrgAware(user._id, folder))) {
       throw new Response("Folder not found", { status: 404 });
     }
     // Ancestry includes the folder itself (root container → … → folder).

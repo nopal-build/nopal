@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import {
-  canViewFolder,
+  canViewFolderOrgAware,
   getFolderById,
   getTopLevelSharedFolders,
   listFolderChildren,
@@ -51,7 +51,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const folder = await getFolderById(folderId);
-  if (!folder || !canViewFolder(user._id, folder)) {
+  if (!folder || !(await canViewFolderOrgAware(user._id, folder))) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 

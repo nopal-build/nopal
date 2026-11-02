@@ -19,8 +19,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, redirect, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { useCallback, useMemo, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
-import { canViewFolder } from "robustness-core/data/vault.types";
-import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
+import { getFolderById, getReadmeFileForFolder, canViewFolderOrgAware } from "robustness-core/data/vault.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
 import { listMarksOnPage, pageMarkUnits, readableMark } from "robustness-core/data/graphLogMarks.server";
 import { listSuggestions } from "robustness-core/data/suggestions.server";
@@ -28,7 +27,7 @@ import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { resolveProjectManifest } from "robustness-core/data/project.server";
 import { getProjectStatus } from "robustness-core/data/projectStatus.server";
 import { isIncompleteBannerText, splitFrontmatter } from "robustness-core/data/project.types";
-import { getProjectSharing, isProjectFolder, resolveRole } from "robustness-core/data/projectSharing.server";
+import { getProjectRole, getProjectSharing, isProjectFolder } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import { pageLogs, projectLogbook } from "robustness-core/data/citedLogs.server";
@@ -98,11 +97,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // What this page shows is the viewer's group's features (`features.ts`).
   // Someone in the cache with no role on the list (a share from before
   // roles) reads as an Observer, as they did; a Client is never in the
-  // cache and reaches the page through their features alone.
+  // cache and reaches the page through their features alone. An org
+  // Guide with no entry at all resolves to Guide here too (Phase C,
+  // garden/3-growing/organizations.md — `getProjectRole`'s own fallback).
   const sharing = await getProjectSharing(folder);
-  const own = sharing.find((e) => e.human === user._id);
-  const role = own && groupOf(own.role) ? resolveRole(own.role) : null;
-  const inCache = canViewFolder(user._id, folder);
+  const role = await getProjectRole(folder, user._id);
+  const inCache = await canViewFolderOrgAware(user._id, folder);
   const features = role ? role.features : inCache ? featuresOf("Observer") : [];
   // Sensor Data only ever shows up on a project that actually has a
   // recognized `load-cell` sync-api folder (loadCellSensorData.server.ts,
@@ -229,7 +229,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const marks = !canMark ? [] : await Promise.all(
     (await listMarksOnPage(folder._id, readme?.content ?? "", suggestionsFor)).map(async (mark) => {
       const dest = mark.moveDestFolderId ? await getFolderById(mark.moveDestFolderId) : null;
-      return readableMark(mark, !!dest && canViewFolder(user._id, dest));
+      return readableMark(mark, !!dest && (await canViewFolderOrgAware(user._id, dest)));
     }),
   );
   // Where "Read the full log" is offered (the pen, a citation's `*`):
