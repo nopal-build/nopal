@@ -2,6 +2,7 @@ import { createRequestHandler } from "@react-router/express";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import { createServer } from "http";
+import { attachDictationRelay } from "./dictation/relay.js";
 
 const app = express();
 
@@ -17,6 +18,11 @@ app.use((req, _res, next) => {
 });
 
 const httpServer = createServer(app);
+
+// The daily log's record button: a WebSocket at /ws/dictation relayed to
+// Soniox (see dictation/relay.js). Upgrades skip Express middleware, so
+// the relay checks its own signed ticket instead of the session.
+attachDictationRelay(httpServer);
 
 const viteDevServer =
   process.env.NODE_ENV === "production"

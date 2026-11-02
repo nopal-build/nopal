@@ -34,6 +34,7 @@ import type { DailyLog, DailyLogCard } from "robustness-core/data/dailyLog.serve
 import type { action } from "../routes/daily-log";
 import { useVaultEvents, markOwnMutation } from "../hooks/useVaultEvents";
 import { uploadToVaultFolder } from "./vaultUpload";
+import { startDictation, type DictationStarter } from "../oxmarkdown/dictation";
 
 // ─── @ mentions ───────────────────────────────────────────────────────────────────────────────────
 // Module-level (not defined inside the component) since neither closes
@@ -164,6 +165,7 @@ function TodayLogEntry({
   onChangeCardContent,
   projectFolders,
   onCreateCard,
+  dictation,
 }: {
   date: string;
   today: string;
@@ -173,6 +175,7 @@ function TodayLogEntry({
   onChangeCardContent: (fileId: string, content: string) => void;
   projectFolders: { id: string; name: string }[];
   onCreateCard: (projectFolderId: string) => void;
+  dictation: DictationStarter;
 }) {
   // Stable per-date reference (not re-created every render) so `OxEditor`
   // doesn't see it as a changing prop — `date` is only ever the CURRENT
@@ -203,6 +206,7 @@ function TodayLogEntry({
           onMentionSelect={recordMentionSelected}
           allowFileAttachments
           onUploadFile={onUploadFile}
+          dictation={dictation}
           resolveCard={resolveCard}
           className="ox-card-host"
         />
@@ -527,6 +531,49 @@ export function TodayLog({
     [saveCardNow],
   );
 
+  // ── Flush pending saves ─────────────────────────────────────────
+  // Sends any edit still waiting on its 2 s debounce right away: when the
+  // page is hidden (a locked phone, an app switch, a closing tab, where a
+  // timer may never fire) and when a recording ends, so dictated words
+  // never sit unsaved. The readme and Cards still share one fetcher, so
+  // two pending at once is the same race the debounce already has.
+  const todayCardsRef = useRef(todayCards);
+  useEffect(() => {
+    todayCardsRef.current = todayCards;
+  }, [todayCards]);
+
+  const flushSaves = useCallback(() => {
+    if (saveTimerRef.current) saveNow(todayContentRef.current);
+    for (const [fileId, timer] of Object.entries(cardSaveTimers.current)) {
+      clearTimeout(timer);
+      delete cardSaveTimers.current[fileId];
+      const card = todayCardsRef.current.find((c) => c.fileId === fileId);
+      if (card) saveCardNow(fileId, card.content);
+    }
+  }, [saveNow, saveCardNow]);
+
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") flushSaves();
+    };
+    document.addEventListener("visibilitychange", onHidden);
+    return () => document.removeEventListener("visibilitychange", onHidden);
+  }, [flushSaves]);
+
+  // The record button (`oxmarkdown/dictation.ts`). The last words' own
+  // editor update and onChange land just after `onEnd`, hence the tick.
+  const dictation = useCallback<DictationStarter>(
+    (target, handlers) =>
+      startDictation(today, target, {
+        ...handlers,
+        onEnd: (note) => {
+          handlers.onEnd(note);
+          setTimeout(flushSaves, 50);
+        },
+      }),
+    [today, flushSaves],
+  );
+
   // ── Add a card ──────────────────────────────────────────────────
   // OPTIMISTIC: the whole point is to not make "click a project chip"
   // wait on a real round trip before anything visible happens. On click,
@@ -670,6 +717,7 @@ export function TodayLog({
       onChangeCardContent={handleCardChange}
       projectFolders={projectFolders}
       onCreateCard={handleCreateCard}
+      dictation={dictation}
     />
   );
 }
