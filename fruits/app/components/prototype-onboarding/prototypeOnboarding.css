@@ -53,7 +53,23 @@
 .proto-plan-card__bullets li { font-size: 0.82rem; color: var(--color-text-subtle); padding-left: 14px; position: relative; }
 .proto-plan-card__bullets li::before { content: "\2022"; position: absolute; left: 0; color: var(--color-text-brand); }
 
-/* --- Scheduling --- */
+/* --- Scheduling: one box, planner list on the left, a small calendar
+   off to the right as a secondary way to jump to a date (Gerald,
+   2026-11-02: "the calendar is too big... small and to the right of
+   the times... can all live in the same box"). Calendar drops below
+   the planner on narrow screens. --- */
+.proto-schedule-box {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.proto-schedule-box__planner { flex: 1; min-width: 0; }
+.proto-schedule-box__calendar { flex: 0 0 auto; width: 190px; }
+@media (max-width: 560px) {
+  .proto-schedule-box { flex-direction: column; }
+  .proto-schedule-box__calendar { width: 100%; max-width: 240px; }
+}
+
 .proto-time-grid {
   display: flex;
   flex-wrap: wrap;
@@ -63,28 +79,30 @@
 .proto-calendar {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
+  gap: 2px;
+  margin-top: 8px;
 }
 .proto-calendar__weekday {
   text-align: center;
-  font-size: 0.7rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   color: var(--color-text-subtle);
-  padding-bottom: 4px;
+  padding-bottom: 2px;
 }
 .proto-calendar__cell {
   aspect-ratio: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid transparent;
   background: none;
-  font-size: 0.85rem;
+  font-size: 0.72rem;
   color: var(--color-text-subtle);
   opacity: 0.4;
   cursor: default;
+  padding: 0;
 }
 .proto-calendar__cell--available {
   opacity: 1;

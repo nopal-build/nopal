@@ -124,84 +124,86 @@ export default function PrototypeSchedule() {
         </Stack>
 
         <Surface className={sprinkles({ p: 4 })}>
-          <Stack gap={3}>
-            <Cluster style={{ justifyContent: "space-between" }} align="center">
-              <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>{monthLabel(calendarCursor)}</p>
-              <Cluster gap={1}>
-                <button
-                  type="button"
-                  className={button({ variant: "quiet", size: "compact" })}
-                  disabled={!canGoPrev}
-                  onClick={() => setCalendarCursor((c) => addMonths(c, -1))}
-                  aria-label="Previous month"
-                >
-                  {"\u2039"}
-                </button>
-                <button
-                  type="button"
-                  className={button({ variant: "quiet", size: "compact" })}
-                  disabled={!canGoNext}
-                  onClick={() => setCalendarCursor((c) => addMonths(c, 1))}
-                  aria-label="Next month"
-                >
-                  {"\u203a"}
-                </button>
-              </Cluster>
-            </Cluster>
-            <div className="proto-calendar">
-              {WEEKDAY_LABELS.map((w) => (
-                <span key={w} className="proto-calendar__weekday">{w}</span>
-              ))}
-              {cells.map((date, i) => {
-                if (!date) return <span key={`blank-${i}`} />;
-                const available = availability.some((a) => isSameDay(a, date));
-                const selected = !!selectedDate && isSameDay(selectedDate, date);
-                return (
-                  <button
-                    key={date.toISOString()}
-                    type="button"
-                    className={`proto-calendar__cell${available ? " proto-calendar__cell--available" : ""}${selected ? " proto-calendar__cell--selected" : ""}`}
-                    disabled={!available}
-                    onClick={() => pickDate(date)}
-                  >
-                    {date.getDate()}
-                  </button>
-                );
-              })}
-            </div>
-            {monthKeys.length > 1 && (
-              <ProtoNote>Open times span {monthKeys.length} months — use {"\u2039"}/{"\u203a"} above to see the rest.</ProtoNote>
-            )}
-          </Stack>
-        </Surface>
-
-        <Surface className={sprinkles({ p: 4 })}>
-          <Stack gap={1}>
-            <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Or pick straight from the list</p>
-            <div className="proto-planner">
-              {availability.map((date) => {
-                const isSelectedDay = !!selectedDate && isSameDay(selectedDate, date);
-                return (
-                  <div
-                    key={date.toISOString()}
-                    ref={(el) => {
-                      if (el) dayRefs.current.set(date.toDateString(), el);
-                    }}
-                    className={`proto-planner__day${isSelectedDay ? " proto-planner__day--selected" : ""}`}
-                  >
-                    <p className="proto-planner__day-heading">{formatDayHeading(date)}</p>
-                    <div className="proto-time-grid">
-                      {TIME_SLOTS.map((t) => (
-                        <Chip key={t} active={isSelectedDay && time === t} onClick={() => pickSlot(date, t)}>
-                          {t}
-                        </Chip>
-                      ))}
+          <div className="proto-schedule-box">
+            <div className="proto-schedule-box__planner">
+              <p className={`${textSize.sm} ${sprinkles({ fontWeight: "bold" })}`}>Pick a time</p>
+              <div className="proto-planner">
+                {availability.map((date) => {
+                  const isSelectedDay = !!selectedDate && isSameDay(selectedDate, date);
+                  return (
+                    <div
+                      key={date.toISOString()}
+                      ref={(el) => {
+                        if (el) dayRefs.current.set(date.toDateString(), el);
+                      }}
+                      className={`proto-planner__day${isSelectedDay ? " proto-planner__day--selected" : ""}`}
+                    >
+                      <p className="proto-planner__day-heading">{formatDayHeading(date)}</p>
+                      <div className="proto-time-grid">
+                        {TIME_SLOTS.map((t) => (
+                          <Chip key={t} active={isSelectedDay && time === t} onClick={() => pickSlot(date, t)}>
+                            {t}
+                          </Chip>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </Stack>
+
+            <div className="proto-schedule-box__calendar">
+              <Cluster style={{ justifyContent: "space-between" }} align="center">
+                <p className={textSize.sm} style={{ fontWeight: 600 }}>{monthLabel(calendarCursor)}</p>
+                <Cluster gap={1}>
+                  <button
+                    type="button"
+                    className={button({ variant: "quiet", size: "compact" })}
+                    disabled={!canGoPrev}
+                    onClick={() => setCalendarCursor((c) => addMonths(c, -1))}
+                    aria-label="Previous month"
+                  >
+                    {"\u2039"}
+                  </button>
+                  <button
+                    type="button"
+                    className={button({ variant: "quiet", size: "compact" })}
+                    disabled={!canGoNext}
+                    onClick={() => setCalendarCursor((c) => addMonths(c, 1))}
+                    aria-label="Next month"
+                  >
+                    {"\u203a"}
+                  </button>
+                </Cluster>
+              </Cluster>
+              <div className="proto-calendar">
+                {WEEKDAY_LABELS.map((w) => (
+                  <span key={w} className="proto-calendar__weekday">{w}</span>
+                ))}
+                {cells.map((date, i) => {
+                  if (!date) return <span key={`blank-${i}`} />;
+                  const available = availability.some((a) => isSameDay(a, date));
+                  const selected = !!selectedDate && isSameDay(selectedDate, date);
+                  return (
+                    <button
+                      key={date.toISOString()}
+                      type="button"
+                      className={`proto-calendar__cell${available ? " proto-calendar__cell--available" : ""}${selected ? " proto-calendar__cell--selected" : ""}`}
+                      disabled={!available}
+                      onClick={() => pickDate(date)}
+                    >
+                      {date.getDate()}
+                    </button>
+                  );
+                })}
+              </div>
+              {monthKeys.length > 1 && (
+                <p className={textSize.sm} style={{ color: semanticColors.textSubtle, marginTop: 6 }}>
+                  Spans {monthKeys.length} months.
+                </p>
+              )}
+            </div>
+          </div>
         </Surface>
 
         <Cluster style={{ justifyContent: "flex-end" }}>
