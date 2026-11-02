@@ -69,6 +69,7 @@ import {
   type PublicZipJobResult,
   type PublicZipProgress,
 } from "robustness-core/data/publicZip.server";
+import { startQueueMetricsServer } from "./queueMetrics";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 // Sequential per worker process on purpose — this worker's own
@@ -565,3 +566,9 @@ async function shutdown(signal: string) {
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+
+// Queue-depth metrics for ops/grafana's "Nopal — At a Glance" dashboard
+// (see queueMetrics.ts). Started last, after every Worker above is already
+// listening, so a failure here can never prevent actual job processing
+// from starting.
+startQueueMetricsServer();
