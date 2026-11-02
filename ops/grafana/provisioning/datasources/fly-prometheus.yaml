@@ -1,0 +1,29 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana Datasource Provisioning – Fly.io managed Prometheus
+#
+# Fly exposes a Prometheus-compatible query API per-org at
+# https://api.fly.io/prometheus/<org-slug>/, auth'd with a Fly access token
+# in the Authorization header (see https://fly.io/docs/monitoring/metrics).
+# FLY_ORG_SLUG is a non-secret `fly.toml` [env] value; FLY_PROM_TOKEN is a
+# `fly secrets set` value on THIS app (nopal-grafana) -- a read-only,
+# org-scoped token works (`fly tokens create readonly -o <org-slug>`).
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: 1
+
+datasources:
+  - name: Fly Prometheus
+    type: prometheus
+    uid: fly-prometheus
+    url: https://api.fly.io/prometheus/${FLY_ORG_SLUG}/
+    access: proxy
+    editable: true
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      httpHeaderName1: Authorization
+    secureJsonData:
+      # "FlyV1 <token>" for tokens from `fly tokens create`, or
+      # "Bearer <token>" for a `flyctl auth token` -- see Fly's docs linked
+      # above. Set FLY_PROM_TOKEN to the token value WITHOUT the scheme
+      # prefix; the prefix is hardcoded here to avoid re-deriving it.
+      httpHeaderValue1: "FlyV1 ${FLY_PROM_TOKEN}"

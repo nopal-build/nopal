@@ -30,6 +30,13 @@ primary_region = 'dfw'
 [env]
 APP_BASE_URL = 'https://o.nopal.build'
 
+# Queue-depth metrics (see queueMetrics.ts) -- Fly scrapes this internal-
+# only port every 15s into the SAME org Prometheus ops/grafana's
+# dashboards query. Not a public listener; see fly.io/docs/monitoring/metrics.
+[metrics]
+port = 9091
+path = '/metrics'
+
 # No [http_service] — this app never serves HTTP, so it gets no public
 # listener at all. It just needs to stay running to drain the queue. No
 # `[deploy] strategy = 'bluegreen'` either — that requires a health check,

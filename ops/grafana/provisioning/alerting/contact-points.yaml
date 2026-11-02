@@ -1,0 +1,21 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana Alerting Provisioning – Discord contact point
+#
+# Grafana has a native "discord" notifier type -- no custom webhook glue
+# needed. DISCORD_ALERT_WEBHOOK_URL is a `fly secrets set` value on THIS app
+# (nopal-grafana), deliberately separate from the repo's CI-only
+# DISCORD_WEBHOOK_URL (see root README's "Discord notifications" section) so
+# infra alerts can post to a different channel than deploy notices.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: discord-ops
+    receivers:
+      - uid: discord-ops-webhook
+        type: discord
+        settings:
+          url: ${DISCORD_ALERT_WEBHOOK_URL}
+          use_discord_username: true
+        disableResolveMessage: false

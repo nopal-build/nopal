@@ -8,6 +8,7 @@
     "dev": "vite-node --watch worker.ts"
   },
   "dependencies": {
+    "@prometheus-io/client": "^0.16.1",
     "bullmq": "^5.60.0",
     "playwright-core": "1.62.1",
     "robustness-core": "workspace:*",

@@ -107,3 +107,22 @@ while iterating before a PR merges):
 make deploy          # db + webapp + fruits + worker, to production
 make deploy-staging  # webapp + fruits, to staging
 ```
+
+## Monitoring and alerting
+
+**Infrastructure-level failures** (a process OOM-killed by Fly, a non-zero
+exit code, memory pressure) can't be self-reported by the app -- the
+process is killed abruptly, with no chance to run cleanup code. These are
+caught externally by `ops/grafana`: a self-hosted Grafana instance (its own
+Fly app, `nopal-grafana`) querying this org's Fly-managed Prometheus
+(`https://api.fly.io/prometheus/<org-slug>/`), with alert rules that post to
+Discord via a native contact point. Deliberately **not** Fly's own managed
+Grafana at `fly-metrics.net` -- that instance is Fly-administered and
+doesn't support alerting or Service Accounts. See `ops/grafana/README.md`
+for the full setup, required secrets, and deploy instructions
+(`make deploy-grafana`).
+
+(App-level failures a running process *can* catch before dying -- a failed
+cron job, a BullMQ job failing after retries, an uncaught exception --
+aren't wired up yet; worth a follow-up if we want those in Discord too,
+separate from this Grafana-based infra layer.)
