@@ -1,0 +1,53 @@
+# fly.toml app configuration file for nopal-grafana -- a self-hosted Grafana
+# instance, separate from Fly's own managed fly-metrics.net Grafana (which
+# doesn't support alerting or Service Accounts, see README's "Monitoring and
+# alerting" section). Queries this org's Fly-managed Prometheus
+# (https://api.fly.io/prometheus/<org-slug>/) as its only data source and
+# fires Discord alerts on infrastructure-level failures (OOM kills,
+# non-zero exit codes, memory pressure) that a dying process can't
+# self-report. Modeled on savage/services/grafana's working fly.toml.
+#
+# Deploy from THIS directory (no repo-root workspace deps, unlike
+# fruits/webapp/worker):
+#
+#   cd ops/grafana && fly deploy
+#
+# See https://fly.io/docs/reference/configuration/ for information about how
+# to use this file.
+
+app = 'nopal-grafana'
+primary_region = 'dfw' # co-located with nopal-fruits/db -- see fruits/fly.toml
+
+[build]
+
+[env]
+  # Non-secret only -- the Fly Prometheus read token and Discord webhook URL
+  # go via `fly secrets set` (FLY_PROM_TOKEN, DISCORD_ALERT_WEBHOOK_URL), see
+  # provisioning/datasources/fly-prometheus.yaml and
+  # provisioning/alerting/contact-points.yaml, which read them by name.
+  FLY_ORG_SLUG = 'personal'
+
+[[mounts]]
+  source = 'grafana_data'
+  destination = '/var/lib/grafana'
+  initial_size = '1gb'
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'suspend'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '15s'
+    grace_period = '120s'
+    method = 'GET'
+    path = '/api/health'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

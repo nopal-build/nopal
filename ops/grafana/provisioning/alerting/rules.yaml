@@ -1,0 +1,155 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana Alerting Provisioning – Fly instance health rules
+#
+# Starter set covering the gap app-level code can't self-report: a process
+# that gets OOM-killed dies before it can send its own Discord message (the
+# original motivation -- see the rendition-worker OOM investigation, worker
+# `mediaWorker`/`attachmentFrames.server.ts`). These poll Fly's managed
+# Prometheus externally instead, so they fire even when the instance itself
+# can't.
+#
+# Each rule uses a Prometheus instant query (refId A) feeding a classic
+# "is the value present and over the threshold" condition (refId B), which
+# is what `condition:` points at. See
+# https://grafana.com/docs/grafana/latest/alerting/set-up/provision-alerting-resources/file-provisioning/
+# for the full schema if adding more rules.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: fly-instance-health
+    folder: Fly Infrastructure
+    interval: 1m
+    rules:
+      - uid: fly-oom-kill
+        title: Fly instance OOM-killed
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: fly-prometheus
+            model:
+              editorMode: code
+              expr: max(fly_instance_exit_oom) by (app, instance)
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: ['A']
+                  reducer:
+                    type: last
+                  type: query
+              refId: B
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.app }}/{{ $labels.instance }} was OOM-killed"
+
+      - uid: fly-nonzero-exit
+        title: Fly instance exited non-zero
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: fly-prometheus
+            model:
+              editorMode: code
+              expr: max(fly_instance_exit_code) by (app, instance)
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: ['A']
+                  reducer:
+                    type: last
+                  type: query
+              refId: B
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.app }}/{{ $labels.instance }} exited with a non-zero code"
+
+      - uid: fly-low-memory
+        title: Fly instance low available memory
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: fly-prometheus
+            model:
+              editorMode: code
+              expr: >-
+                min((fly_instance_memory_mem_available / fly_instance_memory_mem_total) * 100) by (app, instance)
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [10]
+                  operator:
+                    type: and
+                  query:
+                    params: ['A']
+                  reducer:
+                    type: last
+                  type: query
+              refId: B
+        noDataState: OK
+        execErrState: Error
+        # Sustained, not a blip -- avoids firing on a brief GC/build spike,
+        # and gives an early warning before fly-oom-kill actually fires.
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.app }}/{{ $labels.instance }} has less than 10% memory available"

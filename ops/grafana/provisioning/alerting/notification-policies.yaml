@@ -1,0 +1,17 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana Alerting Provisioning – default notification policy
+#
+# Routes every alert (no matchers = the root/default route) to the Discord
+# contact point defined in contact-points.yaml. group_by alertname so e.g.
+# every app's OOM-kill rule firing together collapses into one Discord
+# message instead of one per app.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: discord-ops
+    group_by: ['alertname']
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

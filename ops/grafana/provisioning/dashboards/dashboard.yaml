@@ -1,0 +1,22 @@
+apiVersion: 1
+
+providers:
+  - name: nopal
+    orgId: 1
+    folder: "Fly Infrastructure"
+    # Pin to a fixed UID so a future rename of `folder:` doesn't cause the
+    # provisioner to spawn a parallel empty duplicate (same reasoning as
+    # savage/services/grafana/provisioning/dashboards/dashboard.yaml, which
+    # this was copied from). Arbitrary but fixed -- generated once, never
+    # changed.
+    folderUid: nopalflyinfra01
+    type: file
+    disableDeletion: false
+    editable: true
+    # allowUiUpdates lets Grafana persist UI edits to provisioned dashboards
+    # back to the JSON file on disk. Without this, the dashboard reverts on
+    # every container restart and the "Save" button in the UI is disabled.
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
