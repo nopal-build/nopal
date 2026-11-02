@@ -55,6 +55,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const file = form.get("file");
   const folderId = (form.get("folderId") as string | null) || null;
+  // Only "daily_log" is accepted from a caller -- `daily_log_card`/other
+  // internal `source` values stay server-only (`dailyLog.server.ts`),
+  // never settable through this generic route. See `isFileRefLocked`.
+  const rawSource = form.get("source") as string | null;
+  const source = rawSource === "daily_log" ? ("daily_log" as const) : undefined;
+  const date = (form.get("date") as string | null) || undefined;
 
   if (!(file instanceof File)) {
     return Response.json({ error: "No file provided" }, { status: 400 });
@@ -135,6 +141,8 @@ export async function action({ request }: ActionFunctionArgs) {
       content_hash: contentHash,
       size: file.size,
       folder_id: folderId,
+      source,
+      date,
     });
 
     // The worker makes the photo's thumbnail and display rendition (or a

@@ -157,7 +157,7 @@ A Card (`::card{file="..."}` — see the `oxmarkdown` skill's Build status) is a
 - `createDailyLogCard(humanId, date, projectFolderId)` — idempotent by design: always resolves to the SAME file for a given project/date, creating one only if missing. Makes one-card-per-project-per-day a property of the file layer, not just a client-side filter.
 - `saveDailyLogCard(fileId, content)` — a plain content overwrite, no `md_versions` snapshotting (a Card's own history is scoped by the day it belongs to).
 
-File attachments inside a Card use the exact same `::file{...}` upload path as the day's own prose (`POST /api/daily-log/upload`) — a Card is just another place in the same day's document that can hold one.
+File attachments inside a Card use the exact same `::file{...}` upload path as the day's own prose (`POST /api/daily-log/upload-target` to resolve the day's folder, then direct-to-S3 via `vaultUpload.ts`'s `uploadToVaultFolder` — see the `oxmarkdown` skill) — a Card is just another place in the same day's document that can hold one.
 
 ### The Sorter and the Release Log
 

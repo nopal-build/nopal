@@ -772,12 +772,22 @@ Interacting mode first, without needing that decision resolved.
       `fileDirective.ts`) — `OxEditor` itself stays ignorant of
       vault/folder specifics, just calls this and writes the result back
       onto the same node (found again by key, since async time passes
-      before the upload resolves). The Daily Log route's implementation
-      posts to `POST /api/daily-log/upload`, resolving that day's own
-      vault folder and marking `source: "daily_log"`/`date` (the same
-      convention `isFileRefLocked` uses). Omitting `onUploadFile` falls
-      back to filename-only, no-bytes-leave-the-browser behavior. A real
-      upload failure sets `uploadError="1"` rather than looking stuck.
+      before the upload resolves). The Daily Log's implementation
+      (`TodayLog.tsx`'s `uploadDailyLogFile`) resolves that day's own
+      vault folder via `POST /api/daily-log/upload-target`, then uploads
+      the bytes DIRECTLY to S3 (`vaultUpload.ts`'s `uploadToVaultFolder`,
+      chunked multipart over 100 MB), marking `source: "daily_log"`/`date`
+      (the same convention `isFileRefLocked` uses) via a passthrough
+      `meta` param both `api.vault.upload.tsx` and
+      `api.vault.multipart-complete.tsx` accept. The older
+      `POST /api/daily-log/upload` (whole file, buffered into memory
+      TWICE, no size cap) is kept only for small test-fixture uploads
+      (`scripts/campbell-walk.ts`) — a real video sent through it OOM-
+      killed the app mid-request (2026-11-01), which the browser only saw
+      as a hung, response-less POST; nothing in the actual editor UI calls
+      it anymore. Omitting `onUploadFile` falls back to filename-only,
+      no-bytes-leave-the-browser behavior. A real upload failure sets
+      `uploadError="1"` rather than looking stuck.
     - Once `fileId`/`contentType` land, the thumbnail renders as a real
       `<img src="/api/vault/view/:fileId">` (`FileDirectiveLayout` in
       `components/OxRenderer.tsx`) for image types; anything else with a

@@ -48,6 +48,7 @@ import OxPopover from "../oxmarkdown/OxPopover";
 import type { CardResolver, GalleryFolderResolver } from "oxmarkdown-core";
 import type { UploadFileFn } from "../oxmarkdown/fileDirective";
 import { posterUrl, renditionUrl } from "../oxmarkdown/mediaUrls";
+import { fileKindIcon } from "./FileKindIcon";
 import { MarkMargin } from "../oxmarkdown/MarkMargin";
 import { useLoadFailed } from "../oxmarkdown/useLoadFailed";
 import { OxEditorContext } from "../oxmarkdown/OxEditorContext";
@@ -1420,11 +1421,84 @@ export function fileKindLabel(name: string, contentType?: string): string {
   return "FILE";
 }
 
+/** Repeatedly tries to preload `src` as a real `<img>` decode (never
+ * assumed from a redirect's 200/302 alone), backing off between
+ * attempts — the only way to know a video's poster or an image's thumb
+ * rendition has actually finished (`/api/vault/rendition/:id`'s own doc
+ * comment: "the gap between an upload and its rendition is seconds",
+ * and a video has NO fallback at all until its poster exists, a plain
+ * 404). Returns the src once it has ACTUALLY LOADED — never the raw
+ * `src` itself — so a caller can swap to it with zero flash/half-loaded
+ * frame. A cache-busting `_try=N` param defeats a browser caching the
+ * EARLY 404 response for a video's not-yet-made poster. Gives up
+ * silently after the last delay; the caller's existing fallback (a local
+ * preview, or the plain kind-label tile) takes over. */
+function usePreloadableRemoteSrc(src: string | undefined): string | undefined {
+  const RETRY_DELAYS_MS = [0, 2000, 5000, 10000];
+  const [readySrc, setReadySrc] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setReadySrc(undefined);
+    if (!src) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = (i: number) => {
+      const img = new Image();
+      const tried = `${src}${src.includes("?") ? "&" : "?"}_try=${i}`;
+      img.onload = () => {
+        if (!cancelled) setReadySrc(tried);
+      };
+      img.onerror = () => {
+        if (cancelled || i + 1 >= RETRY_DELAYS_MS.length) return;
+        timer = setTimeout(() => attempt(i + 1), RETRY_DELAYS_MS[i + 1]);
+      };
+      img.src = tried;
+    };
+    attempt(0);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [src]);
+  return readySrc;
+}
+
+/** Exported for the Stamps guide's "Loading" section (`maker_.stamps.tsx`)
+ * — a static, hand-composed illustration of a video's READY tile reuses
+ * this exact glyph rather than a duplicated copy, so it can never drift. */
+export function PlayGlyph() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+/** A determinate progress bar along the bottom of an in-flight upload's
+ * thumbnail — replaces the old plain spinner (2026-11-01). `fraction` is
+ * best-effort real byte progress for a chunked (≥100 MB) upload
+ * (`vaultUpload.ts`), but a plain `fetch()`-based small upload has no
+ * browser API for incremental progress at all, so it only ever reports
+ * once, at 1, right before resolving — undefined (rendered as an empty
+ * track) covers both "hasn't reported yet" and "never wired up". */
+function UploadProgressBar({ fraction }: { fraction?: number }) {
+  const pct = Math.round(Math.max(0, Math.min(1, fraction ?? 0)) * 100);
+  return (
+    <div className="ox-file-progress-track" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Uploading">
+      <div className="ox-file-progress-fill" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
 export function FileDirectiveLayout({
   name,
   fileId,
   contentType,
   uploadError,
+  uploadErrorMessage,
+  localPreviewSrc,
+  onLocalPreviewConsumed,
+  uploadProgress,
+  onRetry,
   caption,
   onRemove,
 }: {
@@ -1438,10 +1512,32 @@ export function FileDirectiveLayout({
    * Shown as a plain placeholder with a title explaining what happened,
    * rather than looking identical to "still uploading" forever. */
   uploadError?: boolean;
+  /** The real `Error#message` (or a generic fallback) a failed upload
+   * left behind — a PERSISTED directive attribute (unlike the local
+   * preview/progress below), since it's meaningful to see later, by
+   * anyone, not just in this tab during this session. */
+  uploadErrorMessage?: string;
+  /** An instant, client-only preview of the picked file (its own object
+   * URL for a photo, a captured first frame for a video) — see
+   * `oxmarkdown/localFilePreview.ts`. Only ever present in the SAME
+   * browser tab that picked the file; undefined for a static/other-
+   * viewer render, or once no longer needed. */
+  localPreviewSrc?: string;
+  /** Called once the REAL rendition has been preloaded and swapped in —
+   * the caller's cue to release `localPreviewSrc`'s object/data URL. */
+  onLocalPreviewConsumed?: () => void;
+  /** 0 to 1 — see `UploadProgressBar`/`oxmarkdown/localFilePreview.ts`'s
+   * progress store. Undefined renders an empty (0%) track, same as
+   * omitting it entirely. */
+  uploadProgress?: number;
+  /** Re-attempts a failed upload with the same file — omitted (no Retry
+   * shown) for a static/read-only render, same as `onRemove`. */
+  onRetry?: () => void;
   caption: ReactNode;
   onRemove?: () => void;
 }) {
-  const isImage = !!fileId && !!contentType?.startsWith("image/");
+  const isImage = !!contentType?.startsWith("image/");
+  const isVideo = !!contentType?.startsWith("video/");
   // The modal owns its own "is it open" state right here rather than in
   // either caller (`FileDirectiveStatic`/`OxDirectiveDecorator`) — both
   // paths get the zoom behavior for free this way, with zero per-caller
@@ -1454,18 +1550,78 @@ export function FileDirectiveLayout({
   // typing cursor mid-caption resets), an acceptable trade-off for reusing
   // the one real editor instance instead of running two.
   const [zoomed, setZoomed] = useState(false);
-  // A picture that will not load is drawn as a file, like one that is not
-  // a picture (`useLoadFailed`).
-  const thumbSrc = isImage ? renditionUrl(`/api/vault/view/${fileId}`, "thumb") : undefined;
-  const thumb = useLoadFailed(thumbSrc);
+  const remoteSrc = !fileId
+    ? undefined
+    : isImage
+      ? renditionUrl(`/api/vault/view/${fileId}`, "thumb")
+      : isVideo
+        ? renditionUrl(`/api/vault/view/${fileId}`, "poster")
+        : undefined;
+  const preloadedRemoteSrc = usePreloadableRemoteSrc(remoteSrc);
+  useEffect(() => {
+    if (preloadedRemoteSrc) onLocalPreviewConsumed?.();
+  }, [preloadedRemoteSrc, onLocalPreviewConsumed]);
+  // The real rendition once it has actually loaded; the local preview as
+  // a bridge before then (while uploading, AND while uploaded but still
+  // waiting on the worker's own rendition — a video in particular has no
+  // other fallback at all until its poster exists). A picture that will
+  // not load at all is drawn as a file, like one that is not a picture
+  // (`useLoadFailed`).
+  const displaySrc = preloadedRemoteSrc ?? localPreviewSrc;
+  const preview = useLoadFailed(displaySrc);
+  const isMediaKind = isImage || isVideo;
+  const showRealImage = isImage && !!fileId && !!preloadedRemoteSrc && !preview.failed;
+  const showVideoTile = isVideo && !!fileId && !!displaySrc && !preview.failed;
+  // Confirmed broken (e.g. HEIC this browser can't decode at all, neither
+  // the local pick nor the server's own original-as-fallback) — the only
+  // case a photo/video still falls through to the generic file row below.
+  // NOT the same as "nothing to show YET" (`!displaySrc`), which gets the
+  // fixed-size placeholder instead (see `showMediaPlaceholder`) —
+  // `useLoadFailed` only ever reports failure for a `src` it actually
+  // tried, so this stays false while `displaySrc` is still undefined.
+  const mediaPreviewBroken = isMediaKind && !!displaySrc && preview.failed;
+  // The local preview bridges BOTH while uploading (no `fileId` yet) AND
+  // after (`fileId` landed but the worker's own rendition hasn't
+  // preloaded yet) — gating this on `!fileId` (as it once did) made the
+  // card disappear the instant upload finished, each time flashing over
+  // to the generic file row for a moment before the real thumb preloaded
+  // and swapped back in. Never gated on `fileId` at all now.
+  const showBridgingPreview = isMediaKind && !showRealImage && !showVideoTile && !!displaySrc && !preview.failed;
+  // Genuinely nothing to show yet (a different tab/session with no local
+  // preview, before the real rendition has preloaded) — a fixed-size,
+  // solid-background box in the exact same spot the real picture will
+  // take, rather than the generic file row's different shape (which is
+  // what caused the visible layout shift/flicker this was built to fix).
+  const showMediaPlaceholder = isMediaKind && !mediaPreviewBroken && !showRealImage && !showVideoTile && !showBridgingPreview;
+  // Whether there's an actual (or soon-to-be) picture to show at all —
+  // decides which of the two shapes this directive takes (see
+  // `.ox-file-directive`'s own CSS comment). Only a confirmed-broken
+  // photo/video, or an actual non-picture file, gets the compact
+  // icon+name row instead of the fixed 74px box.
+  const showMediaCard = showRealImage || showVideoTile || showBridgingPreview || showMediaPlaceholder;
+  const KindIcon = fileKindIcon(name, contentType);
+  const fileRowContent = (
+    <>
+      {/* Same 74px-wide column a photo/video's own thumb occupies, the
+          icon right-aligned within it — the icon's right edge lines up
+          with a thumb's, and the name after it starts at the same X a
+          caption does (`.ox-file-icon-slot`, `oxmarkdown.css`). */}
+      <span className="ox-file-icon-slot">
+        <KindIcon width={24} height={24} aria-hidden="true" />
+      </span>
+      <span className="ox-file-name-label" title={name}>
+        {name}
+      </span>
+    </>
+  );
   return (
-    <div className="ox-file-directive" contentEditable={false}>
-      {isImage && !thumb.failed ? (
+    <div className={`ox-file-directive ${showMediaCard ? "ox-file-media" : "ox-file-plain"}`} contentEditable={false}>
+      {showRealImage ? (
         <img
-          ref={thumb.ref}
-          onError={thumb.onError}
+          ref={preview.ref}
+          onError={preview.onError}
           className="ox-file-thumb"
-          src={thumbSrc}
+          src={displaySrc}
           alt={name}
           title={name}
           draggable={false}
@@ -1479,37 +1635,108 @@ export function FileDirectiveLayout({
             }
           }}
         />
-      ) : fileId ? (
-        // An uploaded file that is not a picture (a PDF, a spreadsheet), or
-        // a picture this browser could not draw: a tile that says what it
-        // is and opens the original. Before 2026-10-13 this was the same
-        // blank square as an upload still in flight, so a finished PDF and
-        // a stuck upload were indistinguishable.
+      ) : showVideoTile ? (
+        // A video, uploaded — its poster once the worker has made one,
+        // bridging on the local first-frame capture until then. Opens the
+        // original; purely a nicer, type-identifiable thumbnail, not an
+        // inline player (see the `graphlog`/`oxmarkdown` skills' own
+        // gallery video embed for where that already exists).
         <a
-          className="ox-file-thumb ox-file-tile"
+          className="ox-file-thumb ox-file-tile ox-file-tile--media"
           href={`/api/vault/view/${fileId}`}
           target="_blank"
           rel="noopener noreferrer"
           title={`Open ${name}`}
           draggable={false}
         >
-          <span className="ox-file-tile-kind">{fileKindLabel(name, contentType)}</span>
-          <span className="ox-file-tile-name">{name}</span>
+          <img ref={preview.ref} onError={preview.onError} className="ox-file-tile-media" src={displaySrc} alt={name} draggable={false} />
+          <span className="ox-file-tile-play" aria-hidden="true">
+            <PlayGlyph />
+          </span>
         </a>
-      ) : (
-        // No id yet: the upload is in flight, or this surface never wired
-        // one up (the visual mockup). A failed upload says so in the box
-        // rather than only on hover.
+      ) : showBridgingPreview ? (
+        // Still uploading, OR just uploaded but the worker's own rendition
+        // hasn't preloaded yet (gated on neither `fileId` alone, so this
+        // keeps showing right through that handoff instead of flashing to
+        // the generic file row for a moment — the fix for the
+        // disappear/reappear flicker) — THIS tab picked the file itself,
+        // so show its own bytes (a photo's real pixels, a video's first
+        // frame) instead of a blank box, with a progress bar along the
+        // bottom, or the same "failed" treatment as the placeholder below,
+        // overlaid on top of it.
+        <div
+          className="ox-file-thumb ox-file-thumb--preview"
+          title={uploadError ? `${name}: upload failed` : name}
+          data-upload-error={uploadError ? "true" : undefined}
+        >
+          <img ref={preview.ref} onError={preview.onError} className="ox-file-tile-media" src={displaySrc} alt={name} draggable={false} />
+          {uploadError ? (
+            <span className="ox-file-tile-kind ox-file-tile-kind--overlay">failed</span>
+          ) : (
+            <UploadProgressBar fraction={uploadProgress} />
+          )}
+        </div>
+      ) : showMediaPlaceholder ? (
+        // A photo/video with genuinely nothing to show yet — no local
+        // preview (a different tab/session watching this upload happen),
+        // and the real rendition hasn't preloaded. The exact same
+        // fixed-size box (`.ox-file-thumb`'s own solid background color
+        // doubles as the placeholder, no extra CSS needed) real content
+        // will land in, so nothing shifts when it does.
         <div
           className="ox-file-thumb"
           title={uploadError ? `${name}: upload failed` : name}
           data-upload-error={uploadError ? "true" : undefined}
-          aria-hidden={uploadError ? undefined : "true"}
         >
-          {uploadError && <span className="ox-file-tile-kind">failed</span>}
+          {uploadError ? <span className="ox-file-tile-kind">failed</span> : !fileId ? <UploadProgressBar fraction={uploadProgress} /> : null}
+        </div>
+      ) : fileId ? (
+        // Uploaded, but not a picture (a PDF, a spreadsheet), or a
+        // photo/video this browser couldn't draw at all (e.g. HEIC on
+        // Chrome) — the compact row, opening the original.
+        <a className="ox-file-inline" href={`/api/vault/view/${fileId}`} target="_blank" rel="noopener noreferrer" title={`Open ${name}`} draggable={false}>
+          {fileRowContent}
+        </a>
+      ) : (
+        // No id yet (a non-picture file uploading, or failed) — the same
+        // compact row, not yet a link. Before 2026-10-13 this kind of file
+        // was the same blank square as an upload still in flight, so a
+        // finished PDF and a stuck upload were indistinguishable; before
+        // 2026-11-01 it was a big empty 74px box either way, the same
+        // footprint a photo/video thumb gets, for a kind of attachment
+        // that never had a picture to show in the first place.
+        <div className="ox-file-inline" title={uploadError ? `${name}: upload failed` : name} data-upload-error={uploadError ? "true" : undefined}>
+          {fileRowContent}
         </div>
       )}
-      <div className="ox-file-caption">{zoomed ? null : caption}</div>
+      {!showMediaCard && !fileId && !uploadError && (
+        <div className="ox-file-inline-progress-wrap">
+          <UploadProgressBar fraction={uploadProgress} />
+        </div>
+      )}
+      <div className="ox-file-caption">
+        {/* A photo/video names itself here ONLY on a failure — not useful
+            otherwise, right beside a picture that already speaks for
+            itself. Order: name, then the real reason, then the caption
+            editor below both. A non-picture file already named itself
+            beside its icon above, so it isn't repeated here. */}
+        {showMediaCard && uploadError && (
+          <div className="ox-file-name-label" title={name}>
+            {name}
+          </div>
+        )}
+        {uploadError && (
+          <div className="ox-file-error-message">
+            {uploadErrorMessage || "Upload failed."}
+            {onRetry && (
+              <button type="button" className="ox-file-retry-link" onClick={onRetry}>
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+        {zoomed ? null : caption}
+      </div>
       {onRemove && (
         // A dedicated `--ox-grid`-wide (41px) slot, centering the 36px
         // button within it — CircleButton sets its own width/height via
@@ -1526,7 +1753,7 @@ export function FileDirectiveLayout({
           </CircleButton>
         </div>
       )}
-      {zoomed && isImage && !thumb.failed && fileId && (
+      {zoomed && showRealImage && fileId && (
         <FileImageModal
           name={name}
           fileId={fileId}
@@ -1727,6 +1954,7 @@ function FileDirectiveStatic({
       fileId={fileId}
       contentType={attrs.contentType}
       uploadError={attrs.uploadError === "1"}
+      uploadErrorMessage={attrs.uploadErrorMessage}
       caption={
         captionDoc ? <OxStaticNodes nodes={captionDoc.children} directives={directives} /> : null
       }
