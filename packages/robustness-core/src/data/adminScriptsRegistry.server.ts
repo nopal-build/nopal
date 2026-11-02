@@ -41,6 +41,7 @@
 
 import { run as runRecascadeSharedWith } from "./adminScripts/recascadeSharedWith.server";
 import { run as runRepairDuplicateSkillsFolders } from "./adminScripts/repairDuplicateSkillsFolders.server";
+import { run as runRepairDuplicateSkillFiles } from "./adminScripts/repairDuplicateSkillFiles.server";
 import { run as runDedupeDailyLogReadmes } from "./adminScripts/migrateDedupeDailyLogReadmes.server";
 import { run as runMergeDuplicateVaultFolders } from "./adminScripts/migrateMergeDuplicateVaultFolders.server";
 import { run as runBackfillSharingRoles } from "./adminScripts/migrateBackfillSharingRoles.server";
@@ -146,6 +147,13 @@ const REGISTRY: AdminScriptDefinition[] = [
     description:
       "Merges duplicate skills/syncs space folders that differ only by capitalization (e.g. 'Syncs' and 'syncs') into one properly-capitalized survivor — content merged (file-name collisions get an auto-dedupe suffix, never silently dropped), connector folders (e.g. a published sync-one-way folder) kept at their original id so a public link survives. Idempotent.",
     run: runMergeSkillsSyncsCaseVariants,
+  },
+  {
+    name: "repair-duplicate-skill-files",
+    label: "Repair duplicate Skill files",
+    description:
+      "Deletes duplicate files (KNOWLEDGE.md, GRAPH.md, ...) inside a Skills folder (any project's, or personal/skills) left by a since-fixed race in ensureSkillFile — keeps the oldest if copies are identical, or the non-default edit if one copy was hand-edited; disagreeing non-default copies are reported and skipped. Idempotent.",
+    run: runRepairDuplicateSkillFiles,
   },
 ];
 
