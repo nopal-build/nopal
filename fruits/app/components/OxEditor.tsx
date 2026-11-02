@@ -99,7 +99,7 @@ import { OxToggleNode, OxToggleSummaryNode } from "../oxmarkdown/OxToggleNode";
 import FileDirectiveArrowPlugin from "../oxmarkdown/FileDirectiveArrowPlugin";
 import NestedEditorBlurPlugin from "../oxmarkdown/NestedEditorBlurPlugin";
 import AddFileLinkPlugin from "../oxmarkdown/AddFileLinkPlugin";
-import DictateButtonPlugin from "../oxmarkdown/DictateButtonPlugin";
+import DictateButtonPlugin, { PROVISIONAL_TAG } from "../oxmarkdown/DictateButtonPlugin";
 import { DictationContext, type DictationStarter, type DictationTarget } from "../oxmarkdown/dictation";
 import FileCaptionArrowPlugin from "../oxmarkdown/FileCaptionArrowPlugin";
 import CardDirectiveArrowPlugin from "../oxmarkdown/CardDirectiveArrowPlugin";
@@ -486,11 +486,14 @@ function MarkdownSyncPlugin({
   }, [markdown]);
 
   useEffect(() => {
-    return editor.registerUpdateListener(({ editorState, dirtyElements, dirtyLeaves }) => {
+    return editor.registerUpdateListener(({ editorState, dirtyElements, dirtyLeaves, tags }) => {
       // Lexical's update listener also fires for pure selection changes —
       // only re-serialize (and notify the caller) when content actually
       // changed.
       if (dirtyElements.size === 0 && dirtyLeaves.size === 0) return;
+      // Dictated words not settled yet (`DictateButtonPlugin`): shown in
+      // the entry, never saved; the settled words that replace them are.
+      if (tags.has(PROVISIONAL_TAG)) return;
       editorState.read(() => {
         const { doc, join } = exportOxDocument($getRoot(), asideRef.current);
         const next = serializeOxDocument(doc, join);

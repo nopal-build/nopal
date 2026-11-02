@@ -1,19 +1,24 @@
 /**
- * The record button under an editor (record-in-daily-log seed). Settled
- * words go into the document at the cursor the recording started from,
- * as ordinary text: they read the same as typed words and are edited the
- * same way. Words not settled yet show below the editor, greyed, never in
- * the document, so a save mid-sentence can never store a guess.
+ * The dictate button under a daily log editor (record-in-daily-log seed).
+ * Settled words go into the document at the cursor dictation started
+ * from, as ordinary text: they read the same as typed words and are
+ * edited the same way. Words not settled yet show greyed right after
+ * them, in the entry (Austin, 2026-11-02: no line under the button).
+ * Those updates carry `PROVISIONAL_TAG`, which `OxEditor`'s markdown sync
+ * skips, so the autosave doesn't store a guess; the next settled words
+ * take them out again. The control itself is
+ * `components/DictateButton.tsx`.
  *
  * Inserts happen inside `editor.update()`'s own callback, and the next
  * insertion point is read there too (Lexical's update is queued, not run
  * on the spot; the paste-image round learned that the hard way).
  */
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useRef } from "react";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   $createParagraphNode,
   $createRangeSelection,
+  $createTextNode,
   $getNodeByKey,
   $getRoot,
   $getSelection,
@@ -21,80 +26,32 @@ import {
   $isRangeSelection,
   $isTextNode,
   $setSelection,
+  HISTORY_MERGE_TAG,
   type LexicalEditor,
 } from "lexical";
-import { DictationContext, type DictationSession, type DictationTarget } from "./dictation";
+import { DictationContext, joinWords, type DictationTarget } from "./dictation";
+import { DictateButton } from "../components/DictateButton";
 
 type Point = { key: string; offset: number; type: "text" | "element" };
+
+/** Marks an update that only placed words not settled yet. */
+export const PROVISIONAL_TAG = "dictation-provisional";
+const PROVISIONAL_STYLE = "opacity: 0.5";
 
 export default function DictateButtonPlugin({ target }: { target: DictationTarget }) {
   const start = useContext(DictationContext);
   const [editor] = useLexicalComposerContext();
-  const [state, setState] = useState<"idle" | "starting" | "recording" | "stopping">("idle");
-  const [provisional, setProvisional] = useState("");
-  const [note, setNote] = useState<string | null>(null);
-  const sessionRef = useRef<DictationSession | null>(null);
   const pointRef = useRef<Point | null>(null);
-
-  // A recording outlives nothing: leaving the page stops it.
-  useEffect(() => () => sessionRef.current?.stop(), []);
-
+  const provisionalRef = useRef<string | null>(null);
   if (!start) return null;
-
-  const onClick = async () => {
-    if (state === "recording") {
-      setState("stopping");
-      sessionRef.current?.stop();
-      return;
-    }
-    if (state !== "idle") return;
-    setNote(null);
-    setState("starting");
-    pointRef.current = readCursor(editor);
-    try {
-      sessionRef.current = await start(target, {
-        onFinal: (text) => insertFinal(editor, pointRef, text),
-        onProvisional: setProvisional,
-        onEnd: (endNote) => {
-          sessionRef.current = null;
-          setState("idle");
-          setNote(endNote);
-        },
-      });
-      setState((s) => (s === "starting" ? "recording" : s));
-    } catch (err) {
-      setState("idle");
-      setNote(err instanceof Error ? err.message : "Couldn't start recording.");
-    }
-  };
-
-  const label =
-    state === "recording" ? "stop" : state === "starting" ? "starting…" : state === "stopping" ? "finishing…" : "record";
-
   return (
-    <div>
-      <button
-        type="button"
-        className="ox-add-file-link"
-        onClick={onClick}
-        aria-pressed={state === "recording"}
-        disabled={state === "starting" || state === "stopping"}
-      >
-        <MicIcon recording={state === "recording"} />
-        {label}
-      </button>
-      {provisional && <div className="subtle-text">{provisional}</div>}
-      {note && <div className="subtle-text">{note}</div>}
-    </div>
-  );
-}
-
-function MicIcon({ recording }: { recording: boolean }) {
-  return (
-    <svg width="13" height="26" viewBox="0 0 13 26" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-      <rect x="3.5" y="2" width="6" height="13" rx="3" stroke="currentColor" strokeWidth="2" fill={recording ? "currentColor" : "none"} />
-      <path d="M1 12.5C1 15.5376 3.46243 18 6.5 18C9.53757 18 12 15.5376 12 12.5M6.5 18V23" stroke="currentColor" strokeWidth="2" />
-    </svg>
+    <DictateButton
+      start={start}
+      target={target}
+      onBegin={() => (pointRef.current = readCursor(editor))}
+      onFinal={(text) => insertFinal(editor, pointRef, text, provisionalRef)}
+      onProvisional={(text) => showProvisional(editor, pointRef, provisionalRef, text)}
+    />
   );
 }
 
@@ -109,38 +66,28 @@ function readCursor(editor: LexicalEditor): Point | null {
 }
 
 /**
- * Inserts `text` at the recording's point, then moves the point to just
+ * Inserts `text` at dictation's point, then moves the point to just
  * after it. If the point is gone (the person deleted that paragraph) the
  * words go at the end of the entry instead, so nothing heard is dropped.
  * The person's own cursor is put back afterwards, so dictating doesn't
  * pull their caret away while they fix a word elsewhere.
  */
-export function insertFinal(editor: LexicalEditor, pointRef: { current: Point | null }, text: string) {
+export function insertFinal(
+  editor: LexicalEditor,
+  pointRef: { current: Point | null },
+  text: string,
+  provisionalRef: { current: string | null } = { current: null },
+) {
   editor.update(
     () => {
+      $removeProvisional(provisionalRef);
       const before = $getSelection();
       const theirs = $isRangeSelection(before) ? before.clone() : null;
 
-      const sel = $createRangeSelection();
-      const p = pointRef.current;
-      const node = p ? $getNodeByKey(p.key) : null;
-      if (p && node && node.isAttached() && fits(node, p.offset)) {
-        sel.anchor.set(p.key, p.offset, p.type);
-        sel.focus.set(p.key, p.offset, p.type);
-      } else {
-        const root = $getRoot();
-        let last = root.getLastChild();
-        if (!$isElementNode(last) || last.isInline() || last.getType() !== "paragraph") {
-          last = $createParagraphNode();
-          root.append(last);
-        }
-        const end = last.selectEnd();
-        sel.anchor.set(end.anchor.key, end.anchor.offset, end.anchor.type);
-        sel.focus.set(end.anchor.key, end.anchor.offset, end.anchor.type);
-      }
-      $setSelection(sel);
-
-      sel.insertText(joinable(sel, text));
+      const sel = $selectionAtPoint(pointRef);
+      const anchor = sel.anchor.getNode();
+      const prevChar = $isTextNode(anchor) ? anchor.getTextContent().slice(0, sel.anchor.offset).slice(-1) : "";
+      sel.insertText(joinWords(prevChar, text));
 
       const after = $getSelection();
       if ($isRangeSelection(after)) {
@@ -153,20 +100,71 @@ export function insertFinal(editor: LexicalEditor, pointRef: { current: Point | 
   );
 }
 
+/**
+ * Shows words not settled yet, greyed, just after the settled ones,
+ * leaving the point where it was so the next settled words go in ahead
+ * of them. Empty text just takes the old ones out; that update is saved
+ * normally, so the entry's last save never holds a guess.
+ */
+export function showProvisional(
+  editor: LexicalEditor,
+  pointRef: { current: Point | null },
+  provisionalRef: { current: string | null },
+  text: string,
+) {
+  if (!text && !provisionalRef.current) return;
+  editor.update(
+    () => {
+      $removeProvisional(provisionalRef);
+      if (!text) return;
+      const before = $getSelection();
+      const theirs = $isRangeSelection(before) ? before.clone() : null;
+      const sel = $selectionAtPoint(pointRef);
+      const anchor = sel.anchor.getNode();
+      const prevChar = $isTextNode(anchor) ? anchor.getTextContent().slice(0, sel.anchor.offset).slice(-1) : "";
+      const node = $createTextNode(joinWords(prevChar, text)).setStyle(PROVISIONAL_STYLE);
+      sel.insertNodes([node]);
+      provisionalRef.current = node.getKey();
+      $setSelection(theirs);
+    },
+    { tag: text ? [PROVISIONAL_TAG, HISTORY_MERGE_TAG] : [HISTORY_MERGE_TAG] },
+  );
+}
+
+function $removeProvisional(provisionalRef: { current: string | null }) {
+  const key = provisionalRef.current;
+  provisionalRef.current = null;
+  const node = key ? $getNodeByKey(key) : null;
+  if (node && node.isAttached()) node.remove();
+}
+
+/** A collapsed selection at dictation's point, or at the end of the entry
+ * when the point is gone. */
+function $selectionAtPoint(pointRef: { current: Point | null }) {
+  const sel = $createRangeSelection();
+  const p = pointRef.current;
+  const node = p ? $getNodeByKey(p.key) : null;
+  if (p && node && node.isAttached() && fits(node, p.offset)) {
+    sel.anchor.set(p.key, p.offset, p.type);
+    sel.focus.set(p.key, p.offset, p.type);
+  } else {
+    const root = $getRoot();
+    let last = root.getLastChild();
+    if (!$isElementNode(last) || last.isInline() || last.getType() !== "paragraph") {
+      last = $createParagraphNode();
+      root.append(last);
+    }
+    const end = last.selectEnd();
+    sel.anchor.set(end.anchor.key, end.anchor.offset, end.anchor.type);
+    sel.focus.set(end.anchor.key, end.anchor.offset, end.anchor.type);
+  }
+  $setSelection(sel);
+  return sel;
+}
+
 function fits(node: ReturnType<typeof $getNodeByKey>, offset: number): boolean {
   if (!node) return false;
   if ($isTextNode(node)) return offset <= node.getTextContentSize();
   if ($isElementNode(node)) return offset <= node.getChildrenSize();
   return false;
-}
-
-// The engine's words carry their own leading space. Drop it at the start
-// of a line or after a space already there, and add one when the text
-// before ends mid-word.
-function joinable(sel: ReturnType<typeof $createRangeSelection>, text: string): string {
-  const anchor = sel.anchor.getNode();
-  const prev = $isTextNode(anchor) ? anchor.getTextContent().slice(0, sel.anchor.offset).slice(-1) : "";
-  if (prev === "" || /\s/.test(prev)) return text.replace(/^\s+/, "");
-  if (!/^\s/.test(text) && /^[\p{L}\p{N}]/u.test(text)) return ` ${text}`;
-  return text;
 }

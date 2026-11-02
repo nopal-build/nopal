@@ -13,9 +13,10 @@
 import { createContext } from "react";
 import { withScreenAwake } from "../util/wakeLock";
 
-/** Which entry a recording belongs to: a Card (its `::card{file}` name),
- * or the day's own prose when `cardFile` is absent. */
-export type DictationTarget = { cardFile?: string };
+/** What a recording is for, which decides its terms and who may start
+ * it: a daily log Card (its `::card{file}` name), a letter's brief
+ * (`letterFile`, its file id), or the day's own prose when neither is set. */
+export type DictationTarget = { cardFile?: string; letterFile?: string };
 
 export type DictationHandlers = {
   /** Settled words, fillers already removed. Append; never changes. */
@@ -81,10 +82,10 @@ export async function startDictation(
   const res = await fetch("/api/dictation/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ date, cardFile: target.cardFile }),
+    body: JSON.stringify({ date, cardFile: target.cardFile, letterFile: target.letterFile }),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || !body.ticket) throw new Error(body?.error ?? "Couldn't start recording.");
+  if (!res.ok || !body.ticket) throw new Error(body?.error ?? "Couldn't start dictating.");
 
   let stream: MediaStream;
   try {
@@ -145,7 +146,7 @@ export async function startDictation(
     else if (msg.type === "provisional") handlers.onProvisional(msg.text ?? "");
     else if (msg.type === "capped") stopped = true;
     else if (msg.type === "done") end(stopped && !userStopped ? CAPPED_NOTE : null);
-    else if (msg.type === "error") end(`${msg.message ?? "Recording stopped."} What was heard is in the entry.`);
+    else if (msg.type === "error") end(`${msg.message ?? "Dictation stopped."} What was heard is already in.`);
   };
   ws.onclose = () => end(stopped ? null : DROPPED_NOTE);
 
@@ -156,7 +157,7 @@ export async function startDictation(
     };
     ws.onerror = () => {
       end(null);
-      reject(new Error("Couldn't reach the server to record."));
+      reject(new Error("Couldn't reach the server to dictate."));
     };
   });
   ws.onerror = null;
@@ -172,5 +173,18 @@ export async function startDictation(
   };
 }
 
-export const CAPPED_NOTE = "Recording stopped at 10 minutes. Press record to keep going.";
-export const DROPPED_NOTE = "Recording stopped. What was heard is in the entry; press record to keep going.";
+export const CAPPED_NOTE = "Dictation stopped at 10 minutes. Press dictate to keep going.";
+export const DROPPED_NOTE = "Dictation stopped. What was heard is already in; press dictate to keep going.";
+
+/**
+ * How a piece of dictated text joins the text before it. The engine's
+ * words carry their own leading space: dropped at the start of a line or
+ * after a space already there, added when the text before ends mid-word.
+ * `prevChar` is the one character before the insertion point ("" at the
+ * start).
+ */
+export function joinWords(prevChar: string, text: string): string {
+  if (prevChar === "" || /\s/.test(prevChar)) return text.replace(/^\s+/, "");
+  if (!/^\s/.test(text) && /^[\p{L}\p{N}]/u.test(text)) return ` ${text}`;
+  return text;
+}
