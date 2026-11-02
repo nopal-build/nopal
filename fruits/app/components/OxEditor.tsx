@@ -38,7 +38,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { LexicalComposer, type InitialConfigType } from "@lexical/react/LexicalComposer";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
@@ -99,6 +99,8 @@ import { OxToggleNode, OxToggleSummaryNode } from "../oxmarkdown/OxToggleNode";
 import FileDirectiveArrowPlugin from "../oxmarkdown/FileDirectiveArrowPlugin";
 import NestedEditorBlurPlugin from "../oxmarkdown/NestedEditorBlurPlugin";
 import AddFileLinkPlugin from "../oxmarkdown/AddFileLinkPlugin";
+import DictateButtonPlugin, { PROVISIONAL_TAG } from "../oxmarkdown/DictateButtonPlugin";
+import { DictationContext, type DictationStarter, type DictationTarget } from "../oxmarkdown/dictation";
 import FileCaptionArrowPlugin from "../oxmarkdown/FileCaptionArrowPlugin";
 import CardDirectiveArrowPlugin from "../oxmarkdown/CardDirectiveArrowPlugin";
 import CardEditorArrowPlugin from "../oxmarkdown/CardEditorArrowPlugin";
@@ -162,6 +164,15 @@ export interface OxEditorProps {
    * caller (e.g. the Daily Log route) owns where bytes actually go. Omit
    * for a browser-only preview with no server persistence. */
   onUploadFile?: UploadFileFn;
+  /** Turns on the record button (`oxmarkdown/DictateButtonPlugin.tsx`) for
+   * this editor and every nested one (Cards) — the page owns what a
+   * recording is for, the same way it owns `onUploadFile`. Shown only
+   * where `allowFileAttachments` is on, so a file's caption gets none. */
+  dictation?: DictationStarter;
+  /** Which entry this editor's recordings belong to — see
+   * `oxmarkdown/dictation.ts`. Set by `editingNodes.tsx` for a Card;
+   * omitted for the day's own prose. */
+  dictationTarget?: DictationTarget;
   /** Resolves a `::card{file="..."}` directive's `file` attribute to real
    * project/content data — see `oxmarkdown/cardDirective.ts`'s
    * `CardResolver`. `OxEditor` itself stays ignorant of vault/project
@@ -301,6 +312,8 @@ function OxEditingSurface({
   allowFileAttachments,
   showAddFileLink,
   onUploadFile,
+  dictation,
+  dictationTarget,
   resolveCard,
   minRows,
   fileCaptionFlow,
@@ -359,6 +372,7 @@ function OxEditingSurface({
           <CardResolverContext.Provider value={resolveCard}>
           <UploadFileContext.Provider value={onUploadFile}>
           <OxEditorContext.Provider value={OxEditor}>
+          <DictationProvider value={dictation}>
             <LexicalComposer initialConfig={initialConfig}>
               <div
                 style={
@@ -416,7 +430,9 @@ function OxEditingSurface({
               {allowFileAttachments && showAddFileLink && (
                 <AddFileLinkPlugin onUploadFile={onUploadFile} />
               )}
+              {allowFileAttachments && <DictateButtonPlugin target={dictationTarget ?? NO_TARGET} />}
             </LexicalComposer>
+          </DictationProvider>
           </OxEditorContext.Provider>
           </UploadFileContext.Provider>
           </CardResolverContext.Provider>
@@ -424,6 +440,14 @@ function OxEditingSurface({
       </div>
     </div>
   );
+}
+
+const NO_TARGET: DictationTarget = {};
+
+/** Provides `dictation` only when this editor was given one, so a nested
+ * editor (a Card) keeps the page's starter from its outer editor. */
+function DictationProvider({ value, children }: { value?: DictationStarter; children: ReactNode }) {
+  return value ? <DictationContext.Provider value={value}>{children}</DictationContext.Provider> : <>{children}</>;
 }
 
 /** Bridges the controlled `markdown` string prop to/from Lexical's internal
@@ -462,11 +486,14 @@ function MarkdownSyncPlugin({
   }, [markdown]);
 
   useEffect(() => {
-    return editor.registerUpdateListener(({ editorState, dirtyElements, dirtyLeaves }) => {
+    return editor.registerUpdateListener(({ editorState, dirtyElements, dirtyLeaves, tags }) => {
       // Lexical's update listener also fires for pure selection changes —
       // only re-serialize (and notify the caller) when content actually
       // changed.
       if (dirtyElements.size === 0 && dirtyLeaves.size === 0) return;
+      // Dictated words not settled yet (`DictateButtonPlugin`): shown in
+      // the entry, never saved; the settled words that replace them are.
+      if (tags.has(PROVISIONAL_TAG)) return;
       editorState.read(() => {
         const { doc, join } = exportOxDocument($getRoot(), asideRef.current);
         const next = serializeOxDocument(doc, join);
