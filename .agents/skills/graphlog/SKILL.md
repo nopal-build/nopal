@@ -142,9 +142,19 @@ personal/syncs/Daily Logs (real Cards, one per project per day)
   sync-knowledge --project <path>`.
   - A PDF is read whole, as a `document` content block (since
     2026-09-22; before that every PDF was "unsupported" and had no path
-    into the graph). Up to 20 MB of bytes. A PDF attached before then
-    gets its first sidecar on the next run, and because a day's graph
-    hashes its sidecars, that day re-extracts once; the stage logs it.
+    into the graph). Up to about 20 MB goes to the model inline; above
+    that and up to `PDF_MAX_BYTES` (100 MB) it goes up through the
+    Anthropic Files API and is read by id instead (`INLINE_DOCUMENT_MAX_BASE64`,
+    `anthropicProvider.server.ts`, 2026-10-03) — bigger than that is kept
+    as a file, not read. A PDF big enough to need the Files API is
+    streamed straight from storage to a temp file and uploaded as a real
+    file stream (`buildPdfDocument`, `syncKnowledge.server.ts`,
+    2026-11-02); this process never buffers or base64-encodes a large
+    PDF's bytes, the same fix a buffered-whole video already got
+    (`attachmentFrames.server.ts`). A PDF attached before any of this
+    existed gets its first sidecar on the next run, and because a day's
+    graph hashes its sidecars, that day re-extracts once; the stage logs
+    it.
   - A Word file (`.docx`) is read by code (`docxText.server.ts`: the
     zip's `word/document.xml`, paragraphs only, tracked deletions left
     out, no dependency; up to 50 MB) and goes down the same text path a
@@ -962,6 +972,18 @@ record id (`worker.ts`'s `processGraphLogJob` calls
   8000 characters), specifically because it's the only record of what a
   model was mid-sentence writing when a turn hit `max_tokens` and got cut
   off.
+- **Every event's `params` also carries a `memory` snapshot**
+  (`memorySnapshotMb`, 2026-11-02) — `rssMb`/`heapUsedMb`/`heapTotalMb`/
+  `externalMb`/`arrayBuffersMb` from `process.memoryUsage()`, attached
+  automatically in `GraphLogRunRecorder.event()` itself, not by any
+  individual call site. Exists to attribute a real memory spike to a
+  specific job/project/stage rather than inferring it after the fact from
+  Fly's own whole-machine RSS graph (`ops/grafana`) — the measurement
+  scaffolding the memory-optimization and Rust-worker garden seeds (`nopal
+  garden`, `graphlog-memory-attribution`/`map-rust-workers`) need to prove
+  their own wins against a real baseline. The `media`/`letter-pdf` queues
+  (not GraphLog runs, no timeline to attach to) get the same snapshot as a
+  plain `console.log` line in `worker.ts` instead.
 - `/maker/graphlog`'s "Recent Runs" section lists recent runs
   (`listRecentGraphLogRuns`); each links to
   `/maker/graphlog/runs/$runId` (`getGraphLogRun`; a run's id is its

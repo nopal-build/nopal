@@ -855,9 +855,18 @@ export async function runSyncKnowledge(
  * (`INLINE_DOCUMENT_MAX_BASE64`, `anthropicProvider.server.ts`;
  * 2026-10-03). Before, everything over 20 MB was unsupported, which left
  * a phone scan on the "could not be read" list every night. The Files API
- * takes 500 MB; the ceiling here is the worker's memory (1 GB), which
- * holds the file several times over while it is encoded. Bigger is kept
- * as a file, not read. */
+ * itself takes 500 MB; the ceiling here is lower than that on purpose,
+ * but no longer because of the worker's own memory (2026-11-02,
+ * `buildPdfDocument`, below, streams anything over the inline threshold
+ * straight to a temp file and uploads it as a real stream -- this
+ * process never holds more than one small inline PDF's bytes at once
+ * now). The remaining reason to keep this below 500 MB is disk space and
+ * time (a 500 MB download-then-upload round trip on every unchanged-file
+ * re-check would be real cost for not much real-world benefit -- a PDF
+ * this large attached to a daily-log Card is already an unusual case).
+ * Revisit this ceiling as its own decision if a real PDF ever needs it
+ * raised; it is NOT memory-bound anymore. Bigger than this is kept as a
+ * file, not read. */
 export const PDF_MAX_BYTES = 100 * 1024 * 1024;
 /** A PDF's extraction is a bullet list that can run past a paragraph. */
 const PDF_DESCRIPTION_MAX_TOKENS = 2048;
