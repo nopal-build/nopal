@@ -22,6 +22,7 @@
  */
 
 import Anthropic, { toFile } from "@anthropic-ai/sdk";
+import { createReadStream } from "node:fs";
 import type {
   ImagesDescriptionInput,
   LlmEffort,
@@ -474,12 +475,24 @@ export class AnthropicProvider implements LlmProvider, PhotoDescriber {
     try {
       for (const document of documents) {
         if (document.label) content.push({ type: "text", text: document.label });
-        if (documentNeedsUpload(document.base64.length)) {
+        // A `filePath` document is always this large-file path, read as a
+        // real stream straight off disk -- never a `Buffer`/base64 copy of
+        // bytes the caller already chose not to hold in memory (see
+        // `syncKnowledge.server.ts`'s PDF branch, and the OOM this mirrors
+        // the fix for: a video buffered whole before streaming was fixed
+        // the same way, 2026-11-02).
+        if (document.kind === "filePath") {
+          const file = await this.client.beta.files.upload({
+            file: await toFile(createReadStream(document.filePath), "attachment.pdf", { type: "application/pdf" }),
+          });
+          uploaded.push(file.id);
+          // Only the beta message types take a file source in this SDK.
+          content.push({ type: "document", source: { type: "file", file_id: file.id } } as unknown as Anthropic.ContentBlockParam);
+        } else if (documentNeedsUpload(document.base64.length)) {
           const file = await this.client.beta.files.upload({
             file: await toFile(Buffer.from(document.base64, "base64"), "attachment.pdf", { type: "application/pdf" }),
           });
           uploaded.push(file.id);
-          // Only the beta message types take a file source in this SDK.
           content.push({ type: "document", source: { type: "file", file_id: file.id } } as unknown as Anthropic.ContentBlockParam);
         } else {
           content.push({

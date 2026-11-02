@@ -146,6 +146,28 @@ async function ensureTables(): Promise<void> {
   tablesEnsured = true;
 }
 
+/** `process.memoryUsage()`, rounded to whole MB so a run's timeline
+ * reads like the numbers already quoted in code comments elsewhere
+ * ("531 MB → peak 639 MB") rather than exact byte counts nobody needs.
+ * `rss` is the one that matters most for "did this job's memory come
+ * back down" — `external`/`arrayBuffers` are what a `Buffer` (a
+ * downloaded file, a base64 string) shows up as, which is exactly what
+ * this exists to catch (see `graphlog-memory-optimization.md` item 8 in
+ * the garden: this is the measurement scaffolding the Rust-worker seeds
+ * need to prove their own memory win, starting with a real WASM-HEIC
+ * baseline before any Rust code exists). */
+export function memorySnapshotMb(): { rssMb: number; heapUsedMb: number; heapTotalMb: number; externalMb: number; arrayBuffersMb: number } {
+  const m = process.memoryUsage();
+  const mb = (bytes: number) => Math.round((bytes / (1024 * 1024)) * 10) / 10;
+  return {
+    rssMb: mb(m.rss),
+    heapUsedMb: mb(m.heapUsed),
+    heapTotalMb: mb(m.heapTotal),
+    externalMb: mb(m.external),
+    arrayBuffersMb: mb(m.arrayBuffers),
+  };
+}
+
 /** The recorder interface every GraphLog stage function is handed
  * (`opts.perf`) — a real `GraphLogRunRecorder` when invoked from the
  * worker (see `worker.ts`), or `noopGraphLogRunRecorder` when a stage is
@@ -201,13 +223,22 @@ class GraphLogRunRecorder implements GraphLogPerfRecorder {
       await ensureTables();
       const seq = this.seq++;
       const durationMs = Math.max(0, Math.round(input.durationMs));
+      // Attached to EVERY event, not just a hand-picked few -- this is
+      // additive to params' already-freeform shape (never breaks a
+      // reader expecting a specific field), and it's exactly the
+      // broad, zero-call-site-changes coverage that makes the existing
+      // per-file/per-turn events (sync-knowledge's per-attachment
+      // describe call among them) immediately useful for spotting a
+      // real memory spike's actual location, not just the whole
+      // machine's RSS over time (which Fly's own metrics already show).
+      const params = { ...(input.params ?? {}), memory: memorySnapshotMb() };
       await upsert("graphlog_run_events", {
         run_id: this.runId,
         seq,
         process: input.process,
         type: input.type,
         name: input.name,
-        params: input.params ?? null,
+        params,
         duration_ms: durationMs,
         outcome: input.outcome ?? "ok",
         started_at: input.startedAt ?? new Date(Date.now() - durationMs).toISOString(),
