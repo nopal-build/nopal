@@ -2,11 +2,12 @@
 //
 // Shared data + small helpers for the client-facing onboarding funnel
 // prototype (garden/1-seeds/project-map.md's "Next step" — a build-
-// capable pass at a real 1:1 UI, not an annotated mockup). Five routes
+// capable pass at a real 1:1 UI, not an annotated mockup). Six routes
 // share this file: prototype.guides -> prototype.schedule ->
-// prototype.project-setup -> prototype.project-setup.hold ->
-// prototype.seed. No backend; state threads between routes entirely
-// through URL search params (see each route's own top comment).
+// prototype.details -> prototype.project-setup ->
+// prototype.project-setup.hold -> prototype.seed. No backend; state
+// threads between routes entirely through URL search params (see each
+// route's own top comment).
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { sprinkles } from "stamps/sprinkles.css";
@@ -83,9 +84,11 @@ export function generateProjectName(firstName?: string): string {
   return firstName ? `${firstName}'s ${base}` : base;
 }
 
-/** Next 5 weekdays (skips Sat/Sun), starting tomorrow — a throwaway
- * stand-in for real Guide availability. */
-export function upcomingWeekdays(count = 5): Date[] {
+/** Next N weekdays (skips Sat/Sun), starting tomorrow — a throwaway
+ * stand-in for real Guide availability. Default of 10 deliberately
+ * spans a month boundary most of the time, so the calendar's prev/next
+ * navigation actually has something to do. */
+export function availableDates(count = 10): Date[] {
   const days: Date[] = [];
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -99,8 +102,26 @@ export function upcomingWeekdays(count = 5): Date[] {
 
 export const TIME_SLOTS = ["9:00 AM", "11:00 AM", "1:00 PM", "3:00 PM"];
 
+export function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
 export function formatDay(d: Date): string {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+/** Fuller heading for the planner list's per-day section, e.g.
+ * "Monday, November 3". */
+export function formatDayHeading(d: Date): string {
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+}
+
+export function monthKey(d: Date): string {
+  return `${d.getFullYear()}-${d.getMonth()}`;
+}
+
+export function monthLabel(d: Date): string {
+  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
 /** Carries every funnel field forward as query params — only the ones
@@ -117,16 +138,17 @@ export function funnelQuery(fields: Record<string, string | undefined | null>): 
 
 const STEPS = [
   { key: "schedule", label: "Schedule" },
+  { key: "details", label: "Your info" },
   { key: "project-setup", label: "Name it" },
   { key: "hold", label: "Setting up" },
   { key: "seed", label: "Your project" },
 ];
 
-/** A thin progress strip shared by the 4 funnel pages after `/guides` —
- * just enough continuity that this reads as one flow, not 4 unrelated
+/** A thin progress strip shared by the 5 funnel pages after `/guides` —
+ * just enough continuity that this reads as one flow, not 5 unrelated
  * pages. Deliberately not a stamps component of its own yet — mockup-
  * adjacent prototype scope, not a design-system addition. */
-export function FunnelSteps({ current }: { current: "schedule" | "project-setup" | "hold" | "seed" }) {
+export function FunnelSteps({ current }: { current: "schedule" | "details" | "project-setup" | "hold" | "seed" }) {
   const currentIdx = STEPS.findIndex((s) => s.key === current);
   return (
     <div className="proto-steps" aria-hidden="true">

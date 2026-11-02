@@ -7,7 +7,8 @@
 
 .proto-steps {
   display: flex;
-  gap: 18px;
+  flex-wrap: wrap;
+  gap: 12px 18px;
   justify-content: center;
   margin-bottom: 28px;
   font-size: 0.78rem;
@@ -53,11 +54,55 @@
 .proto-plan-card__bullets li::before { content: "\2022"; position: absolute; left: 0; color: var(--color-text-brand); }
 
 /* --- Scheduling --- */
-.proto-day-grid, .proto-time-grid {
+.proto-time-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.proto-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.proto-calendar__weekday {
+  text-align: center;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-subtle);
+  padding-bottom: 4px;
+}
+.proto-calendar__cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: none;
+  font-size: 0.85rem;
+  color: var(--color-text-subtle);
+  opacity: 0.4;
+  cursor: default;
+}
+.proto-calendar__cell--available {
+  opacity: 1;
+  color: var(--color-text-primary);
+  border-color: var(--color-surface-border);
+  cursor: pointer;
+}
+.proto-calendar__cell--available:hover { border-color: var(--color-text-brand); color: var(--color-text-brand); }
+.proto-calendar__cell--selected {
+  background: var(--color-text-brand);
+  border-color: var(--color-text-brand);
+  color: var(--white);
+}
+
+.proto-planner { display: flex; flex-direction: column; gap: 14px; max-height: 360px; overflow-y: auto; padding-right: 2px; }
+.proto-planner__day { padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; }
+.proto-planner__day--selected { border-color: var(--color-text-brand); background: var(--color-surface-inset); }
+.proto-planner__day-heading { font-size: 0.85rem; font-weight: 600; margin: 0 0 6px; }
 
 /* --- Hold / loader --- */
 .proto-hold {

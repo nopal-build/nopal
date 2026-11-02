@@ -60,7 +60,7 @@ export default function PrototypeProjectSetup() {
   return (
     <AuthShell maxWidth="560px">
       <FunnelSteps current="project-setup" />
-      <BackLink to={`/prototype/schedule${funnelQuery({ plan: plan?.slug })}`}>Back</BackLink>
+      <BackLink to={`/prototype/details${funnelQuery({ plan: plan?.slug, date: date ?? undefined, time: time ?? undefined })}`}>Back</BackLink>
       <Stack gap={6}>
         <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold", mt: 4 })}`}>
           Give your project a name
