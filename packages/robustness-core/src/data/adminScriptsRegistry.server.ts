@@ -51,6 +51,7 @@ import { run as runBackfillSyncedDailyLogDates } from "./adminScripts/backfillSy
 import { run as runReseedGraphlogSkills } from "./adminScripts/reseedGraphlogSkills.server";
 import { run as runDedupeSummaries } from "./adminScripts/dedupeSummaries.server";
 import { run as runMergeSkillsSyncsCaseVariants } from "./adminScripts/migrateMergeSkillsSyncsCaseVariants.server";
+import { run as runBackfillOrganizations } from "./adminScripts/backfillOrganizations.server";
 import type { AdminScriptDefinition } from "./adminScripts/types";
 
 export type { AdminScriptDefinition, AdminScriptRunOpts, AdminScriptResult } from "./adminScripts/types";
@@ -154,6 +155,13 @@ const REGISTRY: AdminScriptDefinition[] = [
     description:
       "Deletes duplicate files (KNOWLEDGE.md, GRAPH.md, ...) inside a Skills folder (any project's, or personal/skills) left by a since-fixed race in ensureSkillFile — keeps the oldest if copies are identical, or the non-default edit if one copy was hand-edited; disagreeing non-default copies are reported and skipped. Idempotent.",
     run: runRepairDuplicateSkillFiles,
+  },
+  {
+    name: "backfill-organizations",
+    label: "Backfill Organizations",
+    description:
+      "Adds every Human with no Nopal org membership (role defaulted from platform role: Super/Admin -> Guide, Human -> Client — hand-correct any it miscategorizes), and stamps organization_id = Nopal onto every project folder that doesn't have one yet. Idempotent.",
+    run: runBackfillOrganizations,
   },
 ];
 
