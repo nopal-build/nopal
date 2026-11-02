@@ -75,15 +75,14 @@ const uploadLimiter = rateLimit({
 });
 app.use(
   [
-    "/api/upload",
     "/api/daily-log/upload",
     "/api/daily-log/upload-target",
     "/api/vault/upload",
     "/api/vault/presign",
     "/api/vault/multipart-init",
     "/api/vault/multipart-part",
+    "/api/vault/multipart-sign",
     "/api/vault/multipart-complete",
-    "/api/upload/presign",
   ],
   uploadLimiter,
 );
@@ -183,6 +182,27 @@ httpServer.listen(3000, () => {
       runPerfPrune();
       setInterval(runPerfPrune, 24 * 60 * 60 * 1000);
     }, 44_000);
+
+    // ── Abandoned uploads ────────────────────────────────────────────────
+    // Aborts multipart uploads a browser opened and never finished (a tab
+    // closed mid-upload); see api.vault.multipart-sweep.tsx. Same
+    // CRON_SECRET, staggered from the jobs above.
+    const runMultipartSweep = async () => {
+      try {
+        const res = await fetch("http://localhost:3000/api/vault/multipart-sweep", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${cronSecret}` },
+        });
+        const data = await res.json();
+        console.log("[cron] vault/multipart-sweep:", data);
+      } catch (err) {
+        console.error("[cron] vault/multipart-sweep failed:", err);
+      }
+    };
+    setTimeout(() => {
+      runMultipartSweep();
+      setInterval(runMultipartSweep, 24 * 60 * 60 * 1000);
+    }, 51_000);
 
     // ── Daily-log sort ──────────────────────────────────────────────────────────────
     // Sorts every human's closed, not-yet-sorted daily logs (mentions →

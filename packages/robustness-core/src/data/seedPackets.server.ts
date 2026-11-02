@@ -111,7 +111,9 @@ export type SeedPacketFile = Data & {
   name: string;
   content_type: string;
   size: number;
-  content_hash: string;
+  /** sha256 of the bytes (or the text). Null for a file of 100 MB or more,
+   * which the browser sends straight to storage without hashing. */
+  content_hash: string | null;
   s3_key: string | null;
   s3_url: string | null;
   /** The text itself, for a file that is text. */
@@ -135,13 +137,16 @@ export function isPacketText(name: string, contentType: string): boolean {
 
 export async function addPacketFile(input: Omit<SeedPacketFile, "_id" | "id" | "created_at" | "sown_at" | "sown_days" | "sown_file_id">): Promise<{ file: SeedPacketFile; outcome: "added" | "already" }> {
   // The same bytes under the same name from the same person are the same
-  // file: pressing Add twice adds once.
+  // file: pressing Add twice adds once. A file too large to hash in the
+  // browser is matched on its size instead.
+  const sameBytes = input.content_hash === null ? "(content_hash = NONE OR content_hash = NULL) AND size = $s" : "content_hash = $c";
   const existing = (
-    await rows<SeedPacketFile>(`SELECT * FROM ${FILES} WHERE project_folder_id = $p AND human_id = $h AND name = $n AND content_hash = $c`, {
+    await rows<SeedPacketFile>(`SELECT * FROM ${FILES} WHERE project_folder_id = $p AND human_id = $h AND name = $n AND ${sameBytes}`, {
       p: input.project_folder_id,
       h: input.human_id,
       n: input.name,
       c: input.content_hash,
+      s: input.size,
     })
   )[0];
   if (existing) return { file: existing, outcome: "already" };

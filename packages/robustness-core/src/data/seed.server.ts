@@ -760,15 +760,19 @@ export async function writeSeedDocumentFile(projectFolder: VaultFolder, name: st
 
 /** Files a standalone file (a PDF, a photo) as a seed document on the
  * bytes it already has in storage. The same name with the same hash is
- * the same document. Returns the file's id. */
+ * the same document; a file too large to have been hashed in the browser
+ * is matched on its size, as its packet row was (`addPacketFile`). Returns the
+ * file's id. */
 export async function addSeedDocumentObject(
   projectFolder: VaultFolder,
-  input: { name: string; s3Key: string; s3Url: string | null; contentType: string; size: number; contentHash: string; date: string },
+  input: { name: string; s3Key: string; s3Url: string | null; contentType: string; size: number; contentHash: string | null; date: string },
 ): Promise<string> {
   const seedFolder = await ensureSeedSyncFolder(projectFolder);
   const docs = await ensureChildFolder(projectFolder.human_id, seedFolder, SEED_DOCUMENTS_FOLDER_NAME);
   const { files } = await listFolderChildren(projectFolder.human_id, docs._id);
-  const same = files.find((f) => f.name === input.name && f.content_hash === input.contentHash);
+  const same = files.find(
+    (f) => f.name === input.name && (input.contentHash ? f.content_hash === input.contentHash : !f.content_hash && f.size === input.size),
+  );
   if (same) return same._id;
   const created = await createFileRef({
     human_id: projectFolder.human_id,

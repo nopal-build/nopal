@@ -12,6 +12,7 @@ import {
   UploadPartCommand,
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
+  ListMultipartUploadsCommand,
 } from "@aws-sdk/client-s3";
 import type { S3ClientConfig } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -460,7 +461,7 @@ export async function uploadPrivateFileToS3(
 export async function uploadPrivateStreamToS3(
   stream: Readable,
   filename: string,
-): Promise<void> {
+): Promise<string> {
   const client = createS3Client();
   const upload = new Upload({
     client,
@@ -473,6 +474,7 @@ export async function uploadPrivateStreamToS3(
   });
   try {
     await upload.done();
+    return getPublicFileUrl(filename);
   } catch (err) {
     console.error("Error streaming file to S3:", err);
     throw err;
@@ -556,6 +558,69 @@ export async function abortMultipartUpload(
     UploadId: uploadId,
   });
   await client.send(cmd);
+}
+
+/**
+ * Presigned PUT URLs for parts of an open multipart upload, so the
+ * browser sends each part straight to S3 and the app server never holds
+ * the bytes. Signed against the endpoint the browser reaches (see
+ * `createPresignS3Client`). A presigned URL is signed for one method:
+ * these accept PUT only. The bucket must allow PUT from the app's origin
+ * and expose the `ETag` header, or the browser can't read the part's ETag
+ * that `completeMultipartUpload` needs.
+ */
+export async function presignMultipartParts(
+  key: string,
+  uploadId: string,
+  partNumbers: number[],
+  expiresIn = 3600,
+): Promise<Array<{ partNumber: number; url: string }>> {
+  const client = createPresignS3Client();
+  return Promise.all(
+    partNumbers.map(async (partNumber) => {
+      const cmd = new UploadPartCommand({
+        Bucket: process.env.BUCKET_NAME,
+        Key: key,
+        UploadId: uploadId,
+        PartNumber: partNumber,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const url = await getSignedUrl(client as any, cmd, { expiresIn });
+      return { partNumber, url };
+    }),
+  );
+}
+
+/**
+ * Multipart uploads started before `olderThan` that never completed or
+ * aborted: a browser that closed mid-upload leaves its parts in storage,
+ * invisible and billed. The daily sweep aborts these.
+ */
+export async function listStaleMultipartUploads(
+  olderThan: Date,
+): Promise<Array<{ key: string; uploadId: string }>> {
+  const client = createS3Client();
+  const stale: Array<{ key: string; uploadId: string }> = [];
+  let keyMarker: string | undefined;
+  let uploadIdMarker: string | undefined;
+  for (;;) {
+    const res = await client.send(
+      new ListMultipartUploadsCommand({
+        Bucket: process.env.BUCKET_NAME,
+        Prefix: "vault/",
+        KeyMarker: keyMarker,
+        UploadIdMarker: uploadIdMarker,
+      }),
+    );
+    for (const upload of res.Uploads ?? []) {
+      if (upload.Key && upload.UploadId && upload.Initiated && upload.Initiated < olderThan) {
+        stale.push({ key: upload.Key, uploadId: upload.UploadId });
+      }
+    }
+    if (!res.IsTruncated) return stale;
+    keyMarker = res.NextKeyMarker;
+    uploadIdMarker = res.NextUploadIdMarker;
+  }
 }
 
 export function getFileContentType(filename: string): string {

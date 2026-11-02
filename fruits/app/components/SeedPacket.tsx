@@ -15,6 +15,7 @@
  * reads the files only when a Guide presses Sow.
  */
 import { useRef, useState } from "react";
+import { uploadFile } from "./vaultUpload";
 import { Stack } from "stamps/Stack";
 import { Cluster } from "stamps/Cluster";
 import { Surface } from "stamps/Surface";
@@ -23,6 +24,10 @@ import { button } from "stamps/button.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
+
+/** At or under this, a file is posted to `/api/seed-packet` (text up to
+ * this size is kept inline there); over it, the bytes go to storage. */
+const SMALL_FILE_BYTES = 5 * 1024 * 1024;
 
 export type PacketFileRow = { id: string; name: string; sown: boolean };
 
@@ -66,6 +71,14 @@ export function SeedPacket({
     setError(null);
     try {
       for (const file of Array.from(picked)) {
+        if (file.size > SMALL_FILE_BYTES) {
+          // Straight to storage (`vaultUpload.ts`); a video in a packet is
+          // more than one request to the app server can carry.
+          await uploadFile(file, { kind: "seedPacket", projectFolderId });
+          continue;
+        }
+        // Small enough to post: the server keeps text inline and stores
+        // the rest, the way it always has.
         const form = new FormData();
         form.append("file", file);
         form.append("projectFolderId", projectFolderId);
@@ -75,8 +88,8 @@ export function SeedPacket({
           break;
         }
       }
-    } catch {
-      setError("That didn't upload. Check your connection and try again.");
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "That didn't upload. Check your connection and try again.");
     } finally {
       setBusy(false);
       if (input.current) input.current.value = "";
