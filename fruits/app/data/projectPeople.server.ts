@@ -23,12 +23,23 @@ import {
 } from "robustness-core/data/projectSharing.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import type { VaultFolder } from "robustness-core/data/vault.types";
-import { GROUPS, groupOf } from "robustness-core/data/features";
+import { GROUPS, groupOf, type Group } from "robustness-core/data/features";
 import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { inviteToProject } from "./projectInvites.server";
 import { displayName } from "robustness-core/data/humanNames";
+import { getOrganizationRolesForHumans } from "robustness-core/data/organizations.server";
 
-export type PersonRow = { id: string; name: string; email: string };
+export type PersonRow = {
+  id: string;
+  name: string;
+  email: string;
+  /** Their role on the Nopal Organization (see `organizations.server.ts`),
+   * or `null` if they're not a member of it — used only as the DEFAULT
+   * group offered when a Guide adds them to a project; a project's own
+   * `sharing` list is unaffected either way (Phase B, garden/3-growing/
+   * organizations.md). */
+  organizationRole: Group | null;
+};
 export type MemberRow = PersonRow & { group: string; invited: boolean };
 export type PeopleProject = { id: string; name: string; href: string; members: MemberRow[] };
 
@@ -40,7 +51,12 @@ export async function runsPeople(viewer: Pick<Human, "_id" | "role">, folder: Va
   return isStaff(viewer) || !!(await getProjectRole(folder, viewer._id))?.guiding;
 }
 
-const personRow = (h: Human): PersonRow => ({ id: h._id, name: displayName(h), email: h.email });
+const personRow = (h: Human, organizationRoles?: Map<string, Group>): PersonRow => ({
+  id: h._id,
+  name: displayName(h),
+  email: h.email,
+  organizationRole: organizationRoles?.get(h._id) ?? null,
+});
 
 const groupOrder = (group: string) => {
   const g = groupOf(group);
@@ -75,13 +91,15 @@ export async function peopleOnMany(
 /** Whom `viewer` may pick from: an admin, everyone; a Guide, the people
  * they know (what the share modal offered), so a guide isn't handed the
  * whole directory. A full email typed still finds anyone with an account
- * (`inviteToProject` looks them up), or invites someone new. */
+ * (`inviteToProject` looks them up), or invites someone new. Each row
+ * carries its Nopal org role (one batched lookup, not one per person) so
+ * the "Add" control can default to it instead of always `Client`. */
 export async function candidatesFor(viewer: Human, everyone?: Human[]): Promise<PersonRow[]> {
-  const humans = isStaff(viewer) ? (everyone ?? (await getHumans())?.data ?? []) : await getRelatedHumans(viewer);
-  return humans
-    .filter((h) => h._id !== viewer._id)
-    .map(personRow)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const humans = (isStaff(viewer) ? (everyone ?? (await getHumans())?.data ?? []) : await getRelatedHumans(viewer)).filter(
+    (h) => h._id !== viewer._id,
+  );
+  const organizationRoles = await getOrganizationRolesForHumans(humans.map((h) => h._id));
+  return humans.map((h) => personRow(h, organizationRoles)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export type PeopleActionResult = { ok: true; invited?: string } | { error: string };

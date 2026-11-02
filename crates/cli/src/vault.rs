@@ -508,6 +508,11 @@ struct RelatedHuman {
     _id: String,
     name: String,
     email: String,
+    /// Their role on the Nopal Organization, if they're a member — used as
+    /// the default role for `--with EMAIL` (no `:ROLE`), same as the
+    /// Maker's "Add" control (Phase B, garden/3-growing/organizations.md).
+    #[serde(default, rename = "organizationRole")]
+    organization_role: Option<String>,
 }
 
 fn related_humans(client: &Client) -> Result<Vec<RelatedHuman>, Box<dyn Error + Send + Sync>> {
@@ -538,9 +543,11 @@ struct SharingGetResponse {
 /// server validates the name, this CLI doesn't). With no mode flags this
 /// prints the current sharing state. `--with EMAIL:ROLE` REPLACES the
 /// whole collaborator list (it doesn't add to it) — pass it multiple times
-/// to share with several people at once. `--private` clears the list
-/// entirely. Sharing only works on a project folder (one directly under
-/// `projects/`) — the server rejects everything else.
+/// to share with several people at once. `--with EMAIL` alone defaults to
+/// their Nopal Organization role (Phase B, garden/3-growing/
+/// organizations.md), refused if they don't have one. `--private` clears
+/// the list entirely. Sharing only works on a project folder (one
+/// directly under `projects/`) — the server rejects everything else.
 pub fn share(
     path: &str,
     private: bool,
@@ -595,16 +602,23 @@ pub fn share(
         let mut bad = Vec::new();
         for spec in with {
             let parts: Vec<&str> = spec.split(':').map(str::trim).collect();
-            let (email, role, seat) = match parts.as_slice() {
-                [email, role] => (*email, *role, None),
-                [email, role, seat] => (*email, *role, Some(seat.to_lowercase())),
+            // EMAIL alone defers the role to the person's Nopal Organization
+            // role, if they have one (Phase B, garden/3-growing/
+            // organizations.md) — resolved once the matching human is found
+            // below, since that's where `organization_role` lives.
+            let (email, explicit_role, seat) = match parts.as_slice() {
+                [email] => (*email, None, None),
+                [email, role] => (*email, Some(*role), None),
+                [email, role, seat] => (*email, Some(*role), Some(seat.to_lowercase())),
                 _ => {
-                    bad.push(format!("'{spec}' — expected EMAIL:ROLE or EMAIL:ROLE:SEAT"));
+                    bad.push(format!(
+                        "'{spec}' — expected EMAIL, EMAIL:ROLE or EMAIL:ROLE:SEAT"
+                    ));
                     continue;
                 }
             };
             let want = email.to_lowercase();
-            if role.is_empty() {
+            if explicit_role.is_some_and(str::is_empty) {
                 bad.push(format!("'{spec}' — expected EMAIL:ROLE"));
                 continue;
             }
@@ -619,6 +633,18 @@ pub fn share(
                 .find(|h| h.email.trim().to_lowercase() == want)
             {
                 Some(h) => {
+                    let role = match explicit_role {
+                        Some(role) => role.to_string(),
+                        None => match &h.organization_role {
+                            Some(role) => role.clone(),
+                            None => {
+                                bad.push(format!(
+                                    "'{email}' — no role given and they have no Nopal org role to default to (use EMAIL:ROLE)"
+                                ));
+                                continue;
+                            }
+                        },
+                    };
                     matched.push(format!(
                         "{} <{}> — {}{}",
                         h.name,
@@ -630,7 +656,7 @@ pub fn share(
                     ));
                     entries.push(SharingEntry {
                         human: h._id.clone(),
-                        role: role.to_string(),
+                        role,
                         seat,
                     });
                 }
@@ -639,8 +665,9 @@ pub fn share(
         }
         if !bad.is_empty() {
             return Err(format!(
-                "Couldn't share with:\n{}\n(Format is EMAIL:ROLE or EMAIL:ROLE:SEAT, e.g. \
-                 jane@example.com:Crafter or sam@example.com:Observer:client. They also need an account and a \
+                "Couldn't share with:\n{}\n(Format is EMAIL, EMAIL:ROLE or EMAIL:ROLE:SEAT, e.g. \
+                 jane@example.com:Crafter or sam@example.com:Observer:client, or just jane@example.com \
+                 to use her Nopal org role. They also need an account and a \
                  relationship with you — see who's available on your profile page.)",
                 bad.iter()
                     .map(|b| format!("  {b}"))

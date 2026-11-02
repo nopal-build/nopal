@@ -73,6 +73,23 @@ export async function getOrganizationRole(
   return member?.role ?? null;
 }
 
+/** Batched `getOrganizationRole` for several Humans at once — one query,
+ * not one per person (e.g. a candidates list a Guide picks a collaborator
+ * from). Anyone with no membership is simply absent from the returned map,
+ * never a `null` entry. */
+export async function getOrganizationRolesForHumans(
+  humanIds: string[],
+  organizationId: string = NOPAL_ORGANIZATION_ID,
+): Promise<Map<string, Group>> {
+  if (humanIds.length === 0) return new Map();
+  const result = await query<[OrganizationMember[]]>(
+    `SELECT * FROM organization_members WHERE organization_id = $organizationId AND human_id IN $humanIds`,
+    { organizationId, humanIds },
+  );
+  const rows = (result?.[0] ?? []).map(formatRecord);
+  return new Map(rows.map((m) => [m.human_id, m.role]));
+}
+
 export async function getOrganizationMembers(
   organizationId: string = NOPAL_ORGANIZATION_ID,
 ): Promise<OrganizationMember[]> {

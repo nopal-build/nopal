@@ -383,7 +383,9 @@ enum VaultCommand {
         /// EMAIL:ROLE:SEAT where SEAT is guide, client or observer
         /// (repeatable). Replaces the current collaborator list rather
         /// than adding to it; a person named without a seat keeps theirs.
-        #[arg(long = "with", value_name = "EMAIL:ROLE[:SEAT]")]
+        /// EMAIL alone (no `:ROLE`) uses their Nopal Organization role as
+        /// the default, if they have one.
+        #[arg(long = "with", value_name = "EMAIL[:ROLE[:SEAT]]")]
         with: Vec<String>,
     },
     /// Publish a folder to a public URL — no login required to view it.
