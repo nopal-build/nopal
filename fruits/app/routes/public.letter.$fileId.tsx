@@ -14,7 +14,11 @@
 // (`letterPage`); file URLs point at the letter's own routes,
 // and `servedFileIds={{}}` makes a `::file{}` directive draw without its
 // picture rather than through a login-only URL (as the shared Efforts
-// page does).
+// page does). A `::video{fileId="..."}` directive isn't a literal file
+// URL `servedFileIds` can intercept (its `<video src>` is built at render
+// time, `OxRenderer.tsx`'s `VideoDirectiveStatic`) -- `videoViewUrl`
+// points it at the letter's own route instead, and `letterFileIds`
+// (`letters.server.ts`) separately allows the id through server-side.
 //
 // The PDF is this page, printed by the worker (`letterPdf.server.ts`);
 // the download links take Stamps' `hideInPrint` so the file carries no
@@ -72,7 +76,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicLetterPage() {
-  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs } = useLoaderData<typeof loader>();
+  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs, videoViewUrlBase } = useLoaderData<typeof loader>();
   // The letter's own `/api/letter/:fileId/download` route already encodes
   // its fileId (`downloadUrl` above) -- a `::LoadCellGraph{...}`'s raw/
   // cleaned CSV downloads from the SAME route family, just one path
@@ -124,6 +128,7 @@ export default function PublicLetterPage() {
           markdown={body}
           directives={{ ...buildWebsiteDirectiveRegistry({ dailyLogEntries: {} }), ...loadCellDirectives }}
           servedFileIds={{}}
+          videoViewUrl={videoViewUrlBase ? (id) => `${videoViewUrlBase}/${id}` : undefined}
           className="ox-no-dots ox-no-heading-marks website-page-ox"
         />
       </WebsitePageContent>

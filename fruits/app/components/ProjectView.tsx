@@ -46,9 +46,15 @@ export interface ProjectViewProps {
   /** See `OxRendererProps.servedFileIds`. The shared link passes `{}` so a
    * `::file{}` draws without its picture (`newspaperShare.server.ts`). */
   servedFileIds?: Record<string, string>;
+  /** See `OxRendererProps.videoViewUrl`. Omitted on the authenticated
+   * project page (a `::video{fileId="..."}` loads by the ordinary,
+   * login-only `/api/vault/view/<id>`, same as everywhere else); the shared
+   * link passes its own folder-scoped, no-session route instead
+   * (`newspaperShare.server.ts`'s `sharedViewUrl`). */
+  videoViewUrl?: (fileId: string) => string;
 }
 
-export function ProjectView({ body, galleryFolders, loadCellGraphs, annotations, servedFileIds }: ProjectViewProps) {
+export function ProjectView({ body, galleryFolders, loadCellGraphs, annotations, servedFileIds, videoViewUrl }: ProjectViewProps) {
   return (
     <OxRenderer
       markdown={body}
@@ -56,6 +62,7 @@ export function ProjectView({ body, galleryFolders, loadCellGraphs, annotations,
       className="ox-plain"
       annotations={annotations}
       servedFileIds={servedFileIds}
+      videoViewUrl={videoViewUrl}
       resolveGalleryFolder={
         galleryFolders ? (folderName) => galleryFolders[folderName] : undefined
       }

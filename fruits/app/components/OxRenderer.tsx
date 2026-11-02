@@ -99,6 +99,17 @@ export interface OxRendererProps {
    * drawn without its picture. The markdown is untouched. Omitted, every
    * file loads by the id it names. */
   servedFileIds?: Record<string, string>;
+  /** Where a `::video{fileId="..."}` directive's own `<video src>` points,
+   * given its fileId — defaults to the ordinary, login-only
+   * `/api/vault/view/<id>` (`VideoDirectiveStatic`'s own prior hardcoded
+   * behavior, unchanged for every caller that omits this). A public page
+   * (a sent letter, `public.letter.$fileId.tsx`; the shared Efforts page,
+   * `newspaper.$folderId.tsx`) passes its own no-session file route instead
+   * — the server side of that route must independently allow the id too
+   * (`letterFileIds`/`sharedFileIds`, both via `publicBody.ts`'s
+   * `videoFileIds`), since this prop only changes what the browser asks
+   * for, never what the server actually serves. */
+  videoViewUrl?: (fileId: string) => string;
   className?: string;
 }
 
@@ -111,6 +122,7 @@ export default function OxRenderer({
   resolveGalleryFolder,
   annotations,
   servedFileIds,
+  videoViewUrl,
   className,
 }: OxRendererProps) {
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
@@ -164,6 +176,7 @@ export default function OxRenderer({
             resolveGalleryFolder={resolveGalleryFolder}
             annotations={annotations}
             servedFileIds={servedFileIds}
+            videoViewUrl={videoViewUrl}
             swatchRegistry={swatchRegistry}
           />
         </div>
@@ -314,6 +327,8 @@ export interface OxTreeRendererProps {
   resolveGalleryFolder?: GalleryFolderResolver;
   annotations?: OxAnnotations;
   servedFileIds?: Record<string, string>;
+  /** See `OxRendererProps.videoViewUrl`. */
+  videoViewUrl?: (fileId: string) => string;
   /** The page's `::swatch`/`::palette` registry — see `oxmarkdown-core`'s
    * `collectSwatchRegistry`. Supplied by `OxRenderer`, which both computes
    * it and owns the scope selector its generated `<style>` tag targets
@@ -336,7 +351,7 @@ const renderCardInPen = (markdown: string, servedFileIds?: Record<string, string
 
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
-export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, annotations, servedFileIds, swatchRegistry }: OxTreeRendererProps) {
+export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, annotations, servedFileIds, videoViewUrl, swatchRegistry }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
   const ambiguousRefFirstNames = useMemo(() => collectAmbiguousRefFirstNames(doc), [doc]);
   const annotationCtx = useMemo(
@@ -354,6 +369,7 @@ export function OxTreeRenderer({ doc, directives, interactive, resolveCard, reso
         ambiguousRefFirstNames,
         annotations: annotationCtx,
         servedFileIds,
+        videoViewUrl,
         swatchRegistry,
       })}
     </>
@@ -376,6 +392,8 @@ interface RenderCtx {
   annotations?: AnnotationCtx;
   /** See `OxRendererProps.servedFileIds`. */
   servedFileIds?: Record<string, string>;
+  /** See `OxRendererProps.videoViewUrl`. */
+  videoViewUrl?: (fileId: string) => string;
   /** See `OxTreeRendererProps.swatchRegistry`. */
   swatchRegistry?: SwatchRegistry;
 }
@@ -1067,7 +1085,15 @@ function YouTubeFacade({ id, poster }: { id: string; poster?: string }) {
  * here, unlike `::gallery{folder="..."}`), so it's only ever a safety net
  * against an author pointing `::video` at a non-video file, not a real
  * lookup. */
-function VideoDirectiveStatic({ node, directives }: { node: DirectiveNode; directives?: DirectiveRegistry }) {
+function VideoDirectiveStatic({
+  node,
+  directives,
+  videoViewUrl,
+}: {
+  node: DirectiveNode;
+  directives?: DirectiveRegistry;
+  videoViewUrl?: (fileId: string) => string;
+}) {
   const attrs = directiveAttrs(node);
   const orientation = parseVideoOrientation(attrs.orientation);
   const captionDoc = attrs.caption ? parseOxDocument(attrs.caption) : null;
@@ -1079,7 +1105,7 @@ function VideoDirectiveStatic({ node, directives }: { node: DirectiveNode; direc
     media = <YouTubeFacade id={youTubeId} poster={attrs.poster} />;
   } else if (attrs.fileId) {
     if (attrs.contentType && !attrs.contentType.startsWith("video/")) return null;
-    const src = `/api/vault/view/${attrs.fileId}`;
+    const src = (videoViewUrl ?? ((id: string) => `/api/vault/view/${id}`))(attrs.fileId);
     media = (
       <video className="ox-video-media" src={src} poster={attrs.poster ?? posterUrl(src)} controls preload="metadata" />
     );
@@ -1307,7 +1333,7 @@ function renderDirective(node: DirectiveNode, key: number, ctx: RenderCtx): Reac
   // "inserted" through the UI either. See `VideoDirectiveStatic`'s own
   // comment for the `url`-vs-`fileId`/"render nothing" rules.
   if (node.type === "leafDirective" && node.name === "video") {
-    return <VideoDirectiveStatic key={key} node={node} directives={ctx.directives} />;
+    return <VideoDirectiveStatic key={key} node={node} directives={ctx.directives} videoViewUrl={ctx.videoViewUrl} />;
   }
 
   const attrs = directiveAttrs(node);

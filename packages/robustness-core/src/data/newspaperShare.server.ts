@@ -32,7 +32,7 @@ import { getFileRefById, getFolderById, updateVaultFolder, type VaultFolder } fr
 import type { FileRef } from "./vault.types";
 import { resolveProjectManifest } from "./project.server";
 import { getProjectStatus } from "./projectStatus.server";
-import { rewriteViewUrls, viewFileIds } from "./publicBody";
+import { rewriteViewUrls, videoFileIds, viewFileIds } from "./publicBody";
 
 export function isNewspaperShared(folder: Pick<VaultFolder, "newspaper_shared_at">): boolean {
   return !!folder.newspaper_shared_at;
@@ -86,10 +86,13 @@ export function publicGalleryFolders(
 }
 
 /** Every file id the page shows: the view URLs in the body (photos,
- * videos, linked files) and in the galleries it resolves. Nothing else is
- * served under the link. */
+ * videos, linked files), a `::video{fileId="..."}` directive's own
+ * attribute (`videoFileIds`, see `publicBody.ts`'s header), and the
+ * galleries it resolves. Nothing else is served under the link. */
 export function sharedFileIds(body: string, galleryFolders: Record<string, ResolvedGalleryImage[]>): Set<string> {
-  const ids = viewFileIds(body.replace(REF_DIRECTIVE, ""));
+  const stripped = body.replace(REF_DIRECTIVE, "");
+  const ids = viewFileIds(stripped);
+  for (const id of videoFileIds(stripped)) ids.add(id);
   for (const images of Object.values(galleryFolders)) for (const img of images) for (const id of viewFileIds(img.url)) ids.add(id);
   return ids;
 }
@@ -103,6 +106,13 @@ export interface SharedEffortsPage {
   body: string;
   galleryFolders: Record<string, ResolvedGalleryImage[]>;
   url: string;
+  /** Where a `::video{fileId="..."}` directive's own file loads from, minus
+   * the final `/<fileId>` (`ProjectView`'s `videoViewUrl` builds
+   * `${videoViewUrlBase}/${fileId}` — loader data can't carry a function
+   * across the wire). See `letters.server.ts`'s own `videoViewUrlBase` for
+   * the same idea on a letter's page; this page has no "preview" door, so
+   * it's never `null`. */
+  videoViewUrlBase: string;
 }
 
 export function sharedEffortsPage(
@@ -119,6 +129,7 @@ export function sharedEffortsPage(
     body: publicEffortsBody(project.body, folder._id),
     galleryFolders: publicGalleryFolders(project.galleryFolders, folder._id),
     url: `${origin}/public/newspaper/${folder._id}`,
+    videoViewUrlBase: `/api/newspaper/${folder._id}/view`,
   };
 }
 

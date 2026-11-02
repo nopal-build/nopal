@@ -54,7 +54,7 @@ import { findOwningProjectFolder, getProjectRole, type ResolvedProjectRole } fro
 import { getProjectStatus } from "./projectStatus.server";
 import { merge } from "./generic.server";
 import { splitFrontmatter } from "./project.types";
-import { rewriteViewUrls, viewFileIds } from "./publicBody";
+import { rewriteViewUrls, videoFileIds, viewFileIds } from "./publicBody";
 import { resolveLoadCellGraphsInBody } from "./loadCellSensorData.server";
 import type { ResolvedLoadCellGraph } from "oxmarkdown-core";
 import {
@@ -403,10 +403,13 @@ export function bodyOpensWithTitle(body: string): boolean {
   return /^\s*#\s+\S/.test(rest);
 }
 
-/** Every file id the letter names. Nothing else is served under
- * its link. */
+/** Every file id the letter names — a picture's literal view URL and a
+ * `::video{fileId="..."}` directive's own attribute (`videoFileIds`, see
+ * `publicBody.ts`'s header for why that needs its own pass). Nothing else
+ * is served under its link. */
 export function letterFileIds(markdown: string): Set<string> {
-  return viewFileIds(splitFrontmatter(markdown).body);
+  const body = splitFrontmatter(markdown).body;
+  return new Set([...viewFileIds(body), ...videoFileIds(body)]);
 }
 
 /** The file a letter's page may load, or null: the letter is readable
@@ -490,6 +493,16 @@ export interface LetterPage {
    * passed down as a plain prop" shape `ProjectView`'s `loadCellGraphs`
    * already uses. Empty when the body references none. */
   loadCellGraphs: Record<string, ResolvedLoadCellGraph>;
+  /** Where a `::video{fileId="..."}` directive's own file loads from,
+   * minus the final `/<id>` (the route builds `${videoViewUrlBase}/${id}`
+   * — loader data can't carry a function across the wire, the same reason
+   * `downloadUrl`/`pdfUrl` are plain strings a `::LoadCellGraph{...}`'s own
+   * download buttons build on). `null` for a preview, same as a picture:
+   * the Guide's own session already serves `/api/vault/view/<id>` directly
+   * (`OxRenderer`'s own default when no override is given), and the letter
+   * route (`letterPageFile`) has no "manager preview" door to admit an
+   * unsent draft's files through anyway. */
+  videoViewUrlBase: string | null;
 }
 
 export function letterPage(
@@ -518,6 +531,7 @@ export function letterPage(
     preview,
     linkOn: !preview && !!file.shared_at,
     loadCellGraphs,
+    videoViewUrlBase: preview ? null : `/api/letter/${file._id}/view`,
   };
 }
 

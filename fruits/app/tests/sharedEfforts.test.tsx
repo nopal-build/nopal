@@ -37,6 +37,8 @@ We are at the end of the climb. ${ref("Gerald L", "/vault?file=meo")}
 [the drawings](/api/vault/view/pdf9)
 
 ::file{fileId="filedirective1" name="receipt.jpg"}
+
+::video{fileId="viddirective1"}
 `;
 const GALLERIES = {
   progress: [{ url: "/api/vault/view/gal1", name: "a.jpg" }],
@@ -76,8 +78,8 @@ describe("the shared body", () => {
 describe("the files the link serves", () => {
   const ids = sharedFileIds(PAGE, GALLERIES);
 
-  it("are exactly the ones the page names", () => {
-    expect([...ids].sort()).toEqual(["gal1", "ntfc5km0612jeex7fjiv", "pdf9", "vid42"]);
+  it("are exactly the ones the page names, including a ::video{fileId=...} directive's own fileId", () => {
+    expect([...ids].sort()).toEqual(["gal1", "ntfc5km0612jeex7fjiv", "pdf9", "vid42", "viddirective1"]);
   });
 
   it("never include a ::file directive's file, which draws without its picture", () => {
@@ -95,10 +97,13 @@ describe("what leaves the server", () => {
       "2026-10-03T08:00:00Z",
       "https://o.nopal.build",
     );
-    expect(Object.keys(page).sort()).toEqual(["body", "galleryFolders", "title", "updated", "url"]);
+    expect(Object.keys(page).sort()).toEqual(["body", "galleryFolders", "title", "updated", "url", "videoViewUrlBase"]);
     expect(page.updated).toBe("Oct 3, 2026");
     expect(page.url).toBe(`https://o.nopal.build/public/newspaper/${FOLDER}`);
     expect(page.galleryFolders.progress[0].url).toBe(`/api/newspaper/${FOLDER}/view/gal1`);
+    // A `::video{fileId="..."}` directive's own route base -- see
+    // `OxRenderer.tsx`'s `videoViewUrl` and this page's own use of it.
+    expect(page.videoViewUrlBase).toBe(`/api/newspaper/${FOLDER}/view`);
   });
 });
 

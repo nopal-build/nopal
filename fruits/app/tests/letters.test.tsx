@@ -51,6 +51,8 @@ Air seal before insulation.
 [walkthrough](/api/vault/view/vid42?type=video)
 
 ::file{fileId="filedirective1" name="receipt.jpg"}
+
+::video{fileId="viddirective1"}
 `;
 
 describe("the public body", () => {
@@ -68,14 +70,26 @@ describe("the public body", () => {
     expect(body).toContain(`/api/letter/${FILE}/view/vid42?type=video`);
   });
 
-  it("serves exactly the ids the page names; a ::file directive draws without its picture", () => {
-    expect([...letterFileIds(PAGE)].sort()).toEqual(["ntfc5km0612jeex7fjiv", "vid42"]);
+  it("serves exactly the ids the page names; a ::file directive draws without its picture; a ::video{fileId=...} directive's own fileId is served too", () => {
+    expect([...letterFileIds(PAGE)].sort()).toEqual(["ntfc5km0612jeex7fjiv", "vid42", "viddirective1"]);
     const html = renderToStaticMarkup(
       <WebsitePageContent>
-        <OxRenderer markdown={body} directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {} })} servedFileIds={{}} className="ox-no-dots ox-no-heading-marks website-page-ox" />
+        <OxRenderer
+          markdown={body}
+          directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {} })}
+          servedFileIds={{}}
+          videoViewUrl={(id) => `/api/letter/${FILE}/view/${id}`}
+          className="ox-no-dots ox-no-heading-marks website-page-ox"
+        />
       </WebsitePageContent>,
     );
     expect(html).not.toContain("filedirective1");
+    // A ::video{fileId=...} directive isn't a literal `/api/vault/view/<id>`
+    // substring `publicLetterBody` can rewrite (its URL is built at render
+    // time) -- so it draws through whatever `videoViewUrl` the page gives
+    // `OxRenderer`, which the real route builds from `videoViewUrlBase`
+    // (`letterPage`'s own test below).
+    expect(html).toContain(`/api/letter/${FILE}/view/viddirective1`);
   });
 
   it("a body that opens with its own heading carries the title; the page header then shows none", () => {
@@ -95,7 +109,7 @@ const SENT = { _id: FILE, name: "madison-attic.md", content: PAGE, updated_at: "
 describe("what leaves the server", () => {
   it("is a fixed set of fields, the link keyed by the file's own id, dated by the send", () => {
     const page = letterPage(SENT, "https://o.nopal.build");
-    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "linkOn", "loadCellGraphs", "pdfUrl", "preview", "resent", "showTitle", "title", "updated", "url"]);
+    expect(Object.keys(page).sort()).toEqual(["body", "downloadUrl", "fileName", "linkOn", "loadCellGraphs", "pdfUrl", "preview", "resent", "showTitle", "title", "updated", "url", "videoViewUrlBase"]);
     expect(page.loadCellGraphs).toEqual({});
     expect(page.preview).toBe(false);
     expect(page.linkOn).toBe(true);
@@ -105,6 +119,9 @@ describe("what leaves the server", () => {
     expect(page.pdfUrl).toBe(`/api/letter/${FILE}/pdf`);
     expect(page.updated).toBe("Oct 22, 2026");
     expect(page.title).toBe("Madison attic");
+    // A `::video{fileId="..."}` directive's own route base -- see
+    // `OxRenderer.tsx`'s `videoViewUrl` and this route's own use of it.
+    expect(page.videoViewUrlBase).toBe(`/api/letter/${FILE}/view`);
   });
 });
 
@@ -176,6 +193,12 @@ describe("a Guide's preview before the link is on", () => {
     expect(page.body).toContain("/api/vault/view/ntfc5km0612jeex7fjiv");
     expect(page.body).not.toContain("/api/letter/");
     expect(page.body).not.toContain("title: Madison attic");
+    // No letter-scoped route to admit an unsent draft's files through
+    // (`letterPageFile` has no "manager preview" door) -- a `::video{...}`
+    // directive falls through to `OxRenderer`'s own default
+    // (`/api/vault/view/<id>`), the session serving it directly, same as a
+    // plain picture already does in a preview.
+    expect(page.videoViewUrlBase).toBe(null);
   });
 
 });
