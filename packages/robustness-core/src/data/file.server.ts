@@ -1,4 +1,6 @@
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { createWriteStream } from "node:fs";
 import {
   S3Client,
   PutObjectCommand,
@@ -319,6 +321,22 @@ class S3RangeReadStream extends Readable {
 export async function downloadFileStream(s3Key: string): Promise<Readable> {
   const client = createS3Client();
   return new S3RangeReadStream(client, process.env.BUCKET_NAME, s3Key);
+}
+
+/**
+ * Streams an S3 object straight to a local file path via the same
+ * Range-chunked read path `downloadFileStream` already uses to keep
+ * memory flat, never materializing the whole object as a JS `Buffer` the
+ * way `downloadFileBytes` does. For a large file headed somewhere that
+ * wants a real file on disk anyway (ffmpeg's `-ss` needs a seekable
+ * input) rather than bytes to hold in memory -- a 227 MB video OOM-
+ * killed the whole 1 GB worker process via `downloadFileBytes` before
+ * ffmpeg even started (2026-11-02); this keeps the download itself at a
+ * flat ~8 MB regardless of the file's real size.
+ */
+export async function downloadFileToPath(s3Key: string, destPath: string): Promise<void> {
+  const stream = await downloadFileStream(s3Key);
+  await pipeline(stream, createWriteStream(destPath));
 }
 
 export async function downloadAndUploadToS3(
