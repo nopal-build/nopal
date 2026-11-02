@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { buildDictationContext, type TermsProject } from "../modules/dictationTerms";
 import { peopleOnMany } from "../data/projectPeople.server";
+import { letterForManager } from "../data/letterManager.server";
 import { getDailyLogCards } from "robustness-core/data/dailyLog.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getProjectRole, getProjectSharing, listProjectsFor } from "robustness-core/data/projectSharing.server";
@@ -11,10 +12,10 @@ import { signTicket } from "../../dictation/ticket.js";
 
 /**
  * POST /api/dictation/start
- * Body (JSON): { date, cardFile? }
+ * Body (JSON): { date, cardFile? } or { letterFile }
  * Returns: { ticket }
  *
- * The record button's first step (record-in-daily-log seed). The socket
+ * The dictate button's first step (record-in-daily-log seed). The socket
  * relay at /ws/dictation runs outside the app build and can't read the
  * session or the vault, so this route does both checks and hands back a
  * short-lived signed ticket carrying the terms for Soniox.
@@ -25,12 +26,23 @@ import { signTicket } from "../../dictation/ticket.js";
  * reach anything typing couldn't. The Card's project's terms go first.
  * In the day's own prose: the projects of that day's Cards, or every
  * project the person is on when there are none yet.
+ *
+ * For a letter's brief (`letterFile`, the letter's file id): only who may
+ * manage that letter (`letterForManager`, the talk-through route's own
+ * check), with the letter's project's terms.
  */
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUser(request);
   if (!user) return Response.json({ error: "Not authenticated" }, { status: 401 });
 
-  const body = (await request.json().catch(() => ({}))) as { date?: string; cardFile?: string };
+  const body = (await request.json().catch(() => ({}))) as { date?: string; cardFile?: string; letterFile?: string };
+
+  if (body.letterFile) {
+    const got = await letterForManager(request, body.letterFile);
+    if (got instanceof Response) return got;
+    return Response.json({ ticket: signTicket({ humanId: user._id, context: await termsFor([got.project]) }) });
+  }
+
   const date = body.date ?? "";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return Response.json({ error: "Invalid or missing date" }, { status: 400 });
@@ -54,10 +66,13 @@ export async function action({ request }: ActionFunctionArgs) {
     folders = (await listProjectsFor(user._id)).map((m) => m.folder);
   }
 
+  return Response.json({ ticket: signTicket({ humanId: user._id, context: await termsFor(folders) }) });
+}
+
+async function termsFor(folders: VaultFolder[]) {
   const people = await peopleOnMany(
     await Promise.all(folders.map(async (folder) => ({ folder, sharing: await getProjectSharing(folder) }))),
   );
   const projects: TermsProject[] = people.map((p) => ({ name: p.name, people: p.members.map((m) => m.name) }));
-
-  return Response.json({ ticket: signTicket({ humanId: user._id, context: buildDictationContext(projects) }) });
+  return buildDictationContext(projects);
 }

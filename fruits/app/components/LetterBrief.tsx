@@ -25,6 +25,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import OxRenderer from "./OxRenderer";
+import { DictateIntoText } from "./DictateButton";
 import { localDateString } from "./TodayLog";
 
 /** The sentence under the New letter form, and the confirms on the
@@ -131,6 +132,7 @@ export function LetterBrief({
   const [message, setMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [talk, setTalk] = useState(initial.talk.draft ?? "");
+  const talkFieldRef = useRef<HTMLDivElement>(null);
   const [talkSaved, setTalkSaved] = useState<"" | "Saving…" | "Saved">("");
   const [editing, setEditing] = useState(false);
   const [outlineDraft, setOutlineDraft] = useState("");
@@ -303,14 +305,19 @@ export function LetterBrief({
       {/* ── The talk-through ── */}
       {state.brief && !state.talk.sent && (
         <Stack gap={2} data-letter-talk style={sideBySide ? { position: "sticky", top: 12 } : undefined}>
-          <Input
-            type="textarea"
-            name="talk"
-            label="Talk it through"
-            value={talk}
-            onChange={(e) => onTalkChange(e.target.value)}
-            placeholder="What makes sense, what doesn't, how the pieces fit."
-          />
+          <div ref={talkFieldRef}>
+            <Input
+              type="textarea"
+              name="talk"
+              label="Talk it through"
+              value={talk}
+              onChange={(e) => onTalkChange(e.target.value)}
+              placeholder="What makes sense, what doesn't, how the pieces fit."
+            />
+          </div>
+          {/* Thinking out loud is the point here, so it can be dictated.
+              The letter itself never can (see DictateButton's header). */}
+          <DictateIntoText target={{ letterFile: fileId }} value={talk} onChange={onTalkChange} fieldRef={talkFieldRef} />
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
             In your own words, once, top to bottom. It goes into the project's record as yours, today, when you write the outline.
             {talkSaved ? ` · ${talkSaved}` : ""}

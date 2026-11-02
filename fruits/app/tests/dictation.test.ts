@@ -15,13 +15,22 @@ import { createFinalTextBuffer, removeFillers } from "../../dictation/fillers.js
 import { signTicket, verifyTicket } from "../../dictation/ticket.js";
 import { attachDictationRelay, DICTATION_PATH } from "../../dictation/relay.js";
 import { buildDictationContext } from "../modules/dictationTerms";
-import { insertFinal } from "../oxmarkdown/DictateButtonPlugin";
+import { insertFinal, showProvisional, PROVISIONAL_TAG } from "../oxmarkdown/DictateButtonPlugin";
+import { insertText } from "../components/DictateButton";
 
 // ── The start route's checks ───────────────────────────────────────────────
 const state = vi.hoisted(() => ({
   user: { _id: "h1" } as { _id: string } | null,
   cards: [] as { fileName: string; fileId: string; projectFolderId: string }[],
   features: ["dailyLog", "feeds"] as string[],
+  letterManager: true,
+}));
+vi.mock("../data/letterManager.server", () => ({
+  letterForManager: vi.fn(async (_req: Request, fileId: string) =>
+    state.letterManager && fileId === "letter1"
+      ? { user: state.user, file: { _id: fileId }, project: { _id: "p2", name: "Coronado" }, role: null }
+      : Response.json({ error: "Not found" }, { status: 404 }),
+  ),
 }));
 vi.mock("../modules/auth/auth.server", () => ({ getUser: vi.fn(async () => state.user) }));
 vi.mock("robustness-core/data/dailyLog.server", () => ({ getDailyLogCards: vi.fn(async () => state.cards) }));
@@ -50,6 +59,14 @@ describe("starting a recording", () => {
     state.user = { _id: "h1" };
     state.cards = [{ fileName: "card-p1.md", fileId: "f1", projectFolderId: "p1" }];
     state.features = ["dailyLog", "feeds"];
+    state.letterManager = true;
+  });
+
+  it("for a letter's brief, only for someone who may manage the letter, with its project's terms", async () => {
+    const res = await startRequest({ letterFile: "letter1" });
+    expect(verifyTicket((await res.json()).ticket).context.terms).toEqual(["Coronado", "Gerald Bowen"]);
+    state.letterManager = false;
+    expect((await startRequest({ letterFile: "letter1" })).status).toBe(404);
   });
 
   it("is refused with no session", async () => {
@@ -328,5 +345,58 @@ describe("inserting settled words", () => {
     insertFinal(editor, point, " Second words");
     await flush();
     expect(textOf(editor)).toBe("First line Second words");
+  });
+});
+
+describe("words not settled yet", () => {
+  it("show in the entry after the settled words, are replaced by them, and are never what a save sees", async () => {
+    const editor = createEditor({ onError: (e) => { throw e; } });
+    editor.update(() => {
+      const p = $createParagraphNode();
+      p.append($createTextNode("Site walk:"));
+      $getRoot().append(p);
+    }, { discrete: true });
+    const saved: string[] = [];
+    editor.registerUpdateListener(({ editorState, tags, dirtyLeaves, dirtyElements }) => {
+      if (dirtyLeaves.size === 0 && dirtyElements.size === 0) return;
+      if (tags.has(PROVISIONAL_TAG)) return;
+      saved.push(editorState.read(() => $getRoot().getTextContent()));
+    });
+    const textOf = () => editor.getEditorState().read(() => $getRoot().getTextContent());
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const key = editor.getEditorState().read(() => $getRoot().getFirstDescendant()!.getKey());
+    const point = { current: { key, offset: "Site walk:".length, type: "text" as const } };
+    const prov = { current: null as string | null };
+
+    showProvisional(editor, point, prov, " poured the sla");
+    await tick();
+    expect(textOf()).toBe("Site walk: poured the sla");
+
+    insertFinal(editor, point, " Poured the", prov);
+    await tick();
+    showProvisional(editor, point, prov, " slab");
+    await tick();
+    expect(textOf()).toBe("Site walk: Poured the slab");
+
+    showProvisional(editor, point, prov, "");
+    await tick();
+    expect(textOf()).toBe("Site walk: Poured the");
+    // Every save held settled words only.
+    expect(saved).toEqual(["Site walk: Poured the", "Site walk: Poured the"]);
+  });
+});
+
+describe("dictating into a text box", () => {
+  it("inserts at the cursor and keeps following on from there", () => {
+    let { next, pos } = insertText("Brief reads fine. ", 18, " The vapor layer");
+    expect(next).toBe("Brief reads fine. The vapor layer");
+    ({ next, pos } = insertText(next, pos, " goes first."));
+    expect(next).toBe("Brief reads fine. The vapor layer goes first.");
+  });
+
+  it("joins mid-text with one space and keeps what follows", () => {
+    const { next } = insertText("Start.End", 6, "Middle");
+    expect(next).toBe("Start. MiddleEnd");
+    expect(insertText("", 5, " Hello").next).toBe("Hello");
   });
 });
