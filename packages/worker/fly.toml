@@ -44,7 +44,16 @@ path = '/metrics'
 # the default rolling strategy (stop old, start new) is fine, since an
 # in-flight job either finishes before its machine is replaced or gets
 # retried by BullMQ.
+# Bumped 1gb -> 2gb (Gerald, 2026-11-02) after a real OOM: a GraphLog run
+# on a large project ("This Healthy House", 414 files/825MB, several
+# 40-120MB videos uploaded the same day) overlapped with a concurrent
+# media-rendition job on the same 1GB machine. Both the video-streaming
+# fix (`mediaRenditions.server.ts`) and `MALLOC_ARENA_MAX=2` above already
+# address PER-FILE memory use -- this is headroom for two memory-hungry
+# jobs legitimately landing on the same machine at once, not a fix for a
+# specific leak. See the `fly-oom-kill` Grafana alert
+# (ops/grafana/provisioning/alerting/rules.yaml) if this recurs anyway.
 [[vm]]
-memory = '1gb'
+memory = '2gb'
 cpu_kind = 'shared'
 cpus = 1
