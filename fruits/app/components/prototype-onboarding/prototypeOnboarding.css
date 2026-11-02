@@ -1,0 +1,146 @@
+/* Client-facing onboarding funnel prototype (garden/1-seeds/
+   project-map.md's "Next step") — a real-UI pass, deliberately with NO
+   annotation styling (no red/handwritten anything): unlike the sibling
+   project-map-mockup, this is meant to read as real product, not a
+   reviewed exploration. Plain CSS on stamps' semantic variables, same
+   pattern as projectMapMockup.css. */
+
+.proto-steps {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+  margin-bottom: 28px;
+  font-size: 0.78rem;
+  color: var(--color-text-subtle);
+}
+.proto-steps__item { position: relative; padding-bottom: 4px; }
+.proto-steps__item--current { color: var(--color-text-brand); font-weight: 700; }
+.proto-steps__item--done { color: var(--color-text-primary); }
+.proto-steps__item--current::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--color-text-brand);
+}
+
+.proto-backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-subtle);
+  text-decoration: none;
+}
+.proto-backlink:hover { color: var(--color-text-brand); }
+
+/* --- /guides stand-in --- */
+.proto-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.proto-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  height: 100%;
+}
+.proto-plan-card__bullets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.proto-plan-card__bullets li { font-size: 0.82rem; color: var(--color-text-subtle); padding-left: 14px; position: relative; }
+.proto-plan-card__bullets li::before { content: "\2022"; position: absolute; left: 0; color: var(--color-text-brand); }
+
+/* --- Scheduling --- */
+.proto-day-grid, .proto-time-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* --- Hold / loader --- */
+.proto-hold {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 48px 20px;
+  text-align: center;
+}
+.proto-hold-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  border: 3px solid var(--color-surface-border);
+  border-top-color: var(--color-text-brand);
+  animation: proto-spin 0.9s linear infinite;
+}
+@keyframes proto-spin { to { transform: rotate(360deg); } }
+.proto-hold-phases { display: flex; flex-direction: column; gap: 6px; }
+.proto-hold-phase { font-size: 0.85rem; color: var(--color-text-subtle); }
+.proto-hold-phase--current { color: var(--color-text-primary); font-weight: 700; }
+.proto-hold-phase--done { color: var(--green); }
+
+/* --- Project Seed --- */
+.proto-eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--color-text-subtle);
+  margin: 0 0 2px;
+}
+.proto-stat { display: flex; flex-direction: column; gap: 2px; }
+.proto-stat__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-subtle);
+}
+.proto-stat__value { font-size: 0.92rem; font-weight: 600; }
+
+.proto-guest-banner {
+  border: 1px solid var(--color-surface-border);
+  background: var(--color-surface-inset);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  color: var(--color-text-subtle);
+}
+.proto-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.proto-checklist li { display: flex; gap: 8px; align-items: flex-start; font-size: 0.9rem; }
+.proto-checklist .proto-check {
+  flex: 0 0 auto;
+  width: 18px; height: 18px; border-radius: 5px; margin-top: 1px;
+  border: 2px solid var(--color-surface-border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.68rem; color: var(--white);
+}
+.proto-checklist li[data-done="true"] .proto-check { background: var(--green); border-color: var(--green); }
+.proto-checklist li[data-done="true"] .proto-checklist__label { color: var(--color-text-subtle); text-decoration: line-through; }
+
+.proto-note-editor {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-field-border);
+  background: var(--color-field-bg);
+  color: var(--color-field-text);
+  resize: vertical;
+  min-height: 90px;
+  width: 100%;
+}
+.proto-file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.proto-file-list li { font-size: 0.85rem; color: var(--color-text-subtle); }
+
+.proto-code-box {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.proto-next-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.proto-next-steps li { font-size: 0.88rem; color: var(--color-text-subtle); padding-left: 16px; position: relative; }
+.proto-next-steps li::before { content: "\2022"; position: absolute; left: 0; color: var(--color-text-brand); }
