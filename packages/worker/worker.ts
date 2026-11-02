@@ -69,7 +69,7 @@ import {
   type PublicZipJobResult,
   type PublicZipProgress,
 } from "robustness-core/data/publicZip.server";
-import { startQueueMetricsServer } from "./queueMetrics";
+import { startQueueMetricsServer, recordJobFailure } from "./queueMetrics";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 // Sequential per worker process on purpose — this worker's own
@@ -352,6 +352,7 @@ graphLogWorker.on("completed", (job) => {
 });
 graphLogWorker.on("failed", (job, err) => {
   console.error(`[worker] ${job?.name} ${job?.id} failed:`, err);
+  recordJobFailure(GRAPHLOG_QUEUE_NAME);
 });
 
 console.log(`[worker] GraphLog worker listening on queue "${GRAPHLOG_QUEUE_NAME}" (concurrency ${CONCURRENCY}).`);
@@ -414,6 +415,7 @@ adminScriptsWorker.on("completed", (job) => {
 });
 adminScriptsWorker.on("failed", (job, err) => {
   console.error(`[worker] admin-script "${job?.data.scriptName}" (${job?.id}) failed:`, err);
+  recordJobFailure(ADMIN_SCRIPTS_QUEUE_NAME);
 });
 
 console.log(
@@ -448,6 +450,7 @@ mediaWorker.on("completed", (job) => {
 });
 mediaWorker.on("failed", (job, err) => {
   console.error(`[worker] renditions ${job?.data.fileId} failed:`, err);
+  recordJobFailure(MEDIA_QUEUE_NAME);
 });
 console.log(`[worker] Media worker listening on queue "${MEDIA_QUEUE_NAME}" (concurrency ${MEDIA_CONCURRENCY}).`);
 
@@ -487,6 +490,7 @@ publicZipWorker.on("completed", (job) => {
 });
 publicZipWorker.on("failed", (job, err) => {
   console.error(`[worker] public zip ${job?.id} failed:`, err);
+  recordJobFailure(PUBLIC_ZIP_QUEUE_NAME);
 });
 
 console.log(
@@ -519,6 +523,7 @@ letterPdfWorker.on("completed", (job) => {
 });
 letterPdfWorker.on("failed", (job, err) => {
   console.error(`[worker] letter pdf ${job?.data.fileId} failed:`, err);
+  recordJobFailure(LETTER_PDF_QUEUE_NAME);
 });
 console.log(`[worker] Letter PDF worker listening on queue "${LETTER_PDF_QUEUE_NAME}" (concurrency ${LETTER_PDF_CONCURRENCY}).`);
 
@@ -549,6 +554,7 @@ letterRecordingWorker.on("completed", (job) => {
 });
 letterRecordingWorker.on("failed", (job, err) => {
   console.error(`[worker] letter recording ${job?.data.fileId} failed:`, err);
+  recordJobFailure(LETTER_RECORDING_QUEUE_NAME);
 });
 console.log(`[worker] Letter recording worker listening on queue "${LETTER_RECORDING_QUEUE_NAME}" (concurrency ${LETTER_RECORDING_CONCURRENCY}).`);
 

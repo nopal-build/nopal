@@ -118,19 +118,26 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Worker Queue Failed Jobs",
-      "description": "Jobs BullMQ gave up retrying, per queue. A nonzero/rising value here is worth investigating even if nothing is currently firing an alert.",
+      "title": "Worker Job Failures",
+      "description": "When failures actually happened, per queue -- a count of NEW failures per time bucket (from the worker's own `Worker.on('failed', ...)` handlers), not the current backlog total. Collapses the two worker machines' identical counters with max() rather than sum(), since summing would double-count.",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "fly-prometheus" },
-          "expr": "max(bullmq_queue_jobs{app=~\"$cluster\", state=\"failed\"}) by (queue)",
+          "expr": "max(increase(bullmq_job_failures_total{app=~\"$cluster\"}[$__interval])) by (queue)",
           "legendFormat": "{{queue}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "drawStyle": "bars", "fillOpacity": 80, "lineWidth": 0, "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      }
     }
   ],
   "refresh": "1m",

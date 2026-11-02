@@ -12,7 +12,7 @@
 // accidentally affecting job processing.
 import { Queue } from "bullmq";
 import { createServer } from "node:http";
-import { Registry, Gauge } from "@prometheus-io/client";
+import { Registry, Gauge, Counter } from "@prometheus-io/client";
 import { GRAPHLOG_QUEUE_NAME } from "robustness-core/data/graphLogQueue.server";
 import { ADMIN_SCRIPTS_QUEUE_NAME } from "robustness-core/data/adminScriptsQueue.server";
 import { MEDIA_QUEUE_NAME } from "robustness-core/data/mediaQueue.server";
@@ -58,6 +58,26 @@ new Gauge({
     );
   },
 });
+
+// A Counter, unlike the Gauge above, is incremented at the MOMENT a job
+// fails (see worker.ts's own `.on("failed", ...)` handlers) rather than
+// polled from current queue state. The Gauge's "failed" state only ever
+// shows today's total backlog of not-yet-retried failures -- it can't
+// show WHEN failures happened, since `increase()` on a value that can also
+// go down (a retry/cleanup removes a failed job) is meaningless. This is
+// what the "Worker Queue Failed Jobs" dashboard panel's bar chart uses
+// instead, via `increase(bullmq_job_failures_total[...])`.
+const jobFailures = new Counter({
+  name: "bullmq_job_failures_total",
+  help: "Total BullMQ job failures observed by this worker process since it started (resets on restart/deploy, which is fine -- Prometheus's increase()/rate() handle counter resets correctly).",
+  labelNames: ["queue"],
+  registers: [registry],
+});
+
+/** Call from a Worker's own `.on("failed", ...)` handler -- see worker.ts. */
+export function recordJobFailure(queueName: string): void {
+  jobFailures.inc({ queue: queueName });
+}
 
 /** Starts the scrape endpoint Fly's `[metrics]` config (fly.toml) polls
  * every 15s. Internal-only -- this worker still has no public
