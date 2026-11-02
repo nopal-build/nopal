@@ -37,6 +37,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # See ci.yml's own comment -- same build, same reason
+      # (`heicDecodeInChild.test.ts` spawns this binary at its default
+      # path).
+      - name: Build heic-decode
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y pkg-config zlib1g-dev libheif-dev libheif-plugin-libde265
+          cd crates/heic-decode
+          cargo build --release
+
       - run: pnpm --filter remix run test --run
       - run: pnpm --filter fruits run test --run
 
