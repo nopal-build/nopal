@@ -32,6 +32,19 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # `heicDecodeInChild.test.ts` exercises the real `heicToJpeg`,
+      # which spawns this binary at its default path (no `HEIC_DECODE_BIN`
+      # override in CI) -- build it before the test step that needs it,
+      # same system deps `packages/worker/Dockerfile`'s own `rust-build`
+      # stage installs. `cargo`/`rustc` are already on GitHub's
+      # `ubuntu-latest` runner image; only the C library is missing.
+      - name: Build heic-decode
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y pkg-config zlib1g-dev libheif-dev libheif-plugin-libde265
+          cd crates/heic-decode
+          cargo build --release
+
       - run: pnpm --filter remix run test --run
       - run: pnpm --filter fruits run test --run
 
