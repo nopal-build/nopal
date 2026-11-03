@@ -29,6 +29,7 @@ import {
   getFolderAncestry,
   getFolderById,
   getReadmeFileForFolder,
+  isOrgGuideForFolder,
   updateFileRef,
   type VaultFolder,
 } from "./vault.server";
@@ -205,6 +206,14 @@ export async function canActAsProjectOwner(
     const folder = await getFolderById(folderId);
     const project = folder ? await findOwningProjectFolder(folder) : null;
     if (project) return !!(await getProjectRole(project, actingHumanId))?.isOwner;
+    // Not a project at all — the other case this same "act as owner"
+    // grant needs to cover: a folder/file under the `org` Vault Root
+    // (e.g. `org/kanban-projects/`, garden/3-growing/
+    // guide-projects-phases.md), where an org Guide plays the same role
+    // an owner-tier Sharing Role plays on a project. See
+    // `isOrgGuideForFolder`'s own doc for why `findOwningProjectFolder`
+    // above never matches this case at all.
+    if (folder && (await isOrgGuideForFolder(actingHumanId, folder))) return true;
   }
   return actingHumanId === ownerHumanId;
 }

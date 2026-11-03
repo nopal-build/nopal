@@ -201,6 +201,30 @@ export async function canViewFolderOrgAware(
 }
 
 /**
+ * Whether a non-owning `humanId` may act as a full owner-tier
+ * collaborator on a folder under the `org` Vault Root (e.g.
+ * `org/kanban-projects/`, garden/3-growing/guide-projects-phases.md) —
+ * an org Guide, the same way an org Guide already acts as a project
+ * owner-tier collaborator on every one of their Organization's projects
+ * (Phase C, `getProjectRole`'s own org-Guide fallback in
+ * `projectSharing.server.ts`). Deliberately scoped to `vault_root_key
+ * === "org"` only — a PROJECT folder's equivalent check already lives in
+ * `getProjectRole`/`getProjectRoleForFolderId`, which never resolves
+ * anything for an `org` folder (it requires `findOwningProjectFolder`,
+ * which only ever matches `vault_root_key === "projects"`) — this fills
+ * exactly that gap, nothing more. Callers are responsible for the "is
+ * this even a non-owner" check first, same convention
+ * `getProjectRoleForFolderId`'s own call sites already use.
+ */
+export async function isOrgGuideForFolder(
+  humanId: string,
+  folder: Pick<VaultFolder, "vault_root_key" | "organization_id">,
+): Promise<boolean> {
+  if (folder.vault_root_key !== "org" || !folder.organization_id) return false;
+  return (await getOrganizationRole(humanId, folder.organization_id)) === "Guide";
+}
+
+/**
  * Whether `humanId` is allowed to view (not necessarily download/manage)
  * `file` — either because they own it, or because it sits in a folder
  * they've been granted view access to. Mirrors the visibility FileCard

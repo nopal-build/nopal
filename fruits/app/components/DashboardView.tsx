@@ -95,19 +95,28 @@ function GuideProjects({
   rows,
   activeStatus,
   counts,
+  isOrgGuide,
 }: {
   rows: DashboardRow[];
   activeStatus: ProjectStatus;
   counts: Record<ProjectStatus, number>;
+  isOrgGuide: boolean;
 }) {
   return (
     <Stack gap={3}>
-      <h2
-        className={`${textSize.sm} ${sprinkles({ fontWeight: "bold", textTransform: "uppercase", letterSpacing: "wider" })}`}
-        style={subtle}
-      >
-        Projects
-      </h2>
+      <Cluster gap={3} align="flex-start" style={{ justifyContent: "space-between" }}>
+        <h2
+          className={`${textSize.sm} ${sprinkles({ fontWeight: "bold", textTransform: "uppercase", letterSpacing: "wider" })}`}
+          style={subtle}
+        >
+          Projects
+        </h2>
+        {isOrgGuide && (
+          <Link to="/guide-projects" className={textSize.sm} style={{ color: "inherit" }}>
+            View all projects →
+          </Link>
+        )}
+      </Cluster>
       <Cluster gap={2}>
         {STATUS_TABS.map((tab) => (
           <Link key={tab.key} to={tab.key === "active" ? "/" : `/?status=${tab.key}`} style={{ textDecoration: "none" }}>
@@ -147,7 +156,15 @@ function GuideProjects({
  * page. Takes only what the loader returned, so a render test can hand it
  * any view.
  */
-export function DashboardView({ activeStatus, dashboard }: { activeStatus: ProjectStatus; dashboard: Dashboard }) {
+export function DashboardView({
+  activeStatus,
+  dashboard,
+  isOrgGuide,
+}: {
+  activeStatus: ProjectStatus;
+  dashboard: Dashboard;
+  isOrgGuide: boolean;
+}) {
   // Someone whose every role is Client (ADR-023): their projects, each a
   // way in, and nothing that counts.
   if (dashboard.view === "client") {
@@ -164,6 +181,7 @@ export function DashboardView({ activeStatus, dashboard }: { activeStatus: Proje
       rows={dashboard.rows}
       activeStatus={activeStatus}
       counts={dashboard.counts ?? { active: 0, completed: 0, trashed: 0 }}
+      isOrgGuide={isOrgGuide}
     />
   );
 }

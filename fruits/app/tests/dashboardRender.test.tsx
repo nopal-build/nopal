@@ -23,9 +23,12 @@ const row = (over: Partial<DashboardRow>): DashboardRow => ({
   ...over,
 });
 
-// A data router, since the rows are links.
-function render(dashboard: Dashboard) {
-  const element = <DashboardView activeStatus="active" dashboard={dashboard} />;
+// A data router, since the rows are links. `isOrgGuide` defaults to
+// false — none of these tests are about the "View all projects" link
+// (guide-projects-phases garden seed); keeping it off preserves every
+// existing assertion's original behavior unchanged.
+function render(dashboard: Dashboard, isOrgGuide = false) {
+  const element = <DashboardView activeStatus="active" dashboard={dashboard} isOrgGuide={isOrgGuide} />;
   const router = createMemoryRouter([{ path: "/", element }]);
   return renderToStaticMarkup(<RouterProvider router={router} />);
 }
@@ -89,6 +92,14 @@ describe("no freak-out (test 3, markup)", () => {
     const note = html.slice(html.indexOf("data-steep-note"), html.indexOf("</p>", html.indexOf("data-steep-note")));
     expect(note).toContain("Dana: Oh crap on Sep 23, was Uphill");
     expect(note).not.toMatch(/danger|warning|alert|red|error|badge/i);
+  });
+});
+
+describe("View all projects link (guide-projects-phases)", () => {
+  it("shows only for an org Guide, never for a client", () => {
+    expect(render(guideDash, true)).toContain("View all projects");
+    expect(render(guideDash, false)).not.toContain("View all projects");
+    expect(render(clientDash, true)).not.toContain("View all projects");
   });
 });
 
