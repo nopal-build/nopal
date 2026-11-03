@@ -31,7 +31,7 @@ import { localDateString } from "./TodayLog";
 /** The sentence under the New letter form, and the confirms on the
  * controls that run the model: each is a run, and the click is the
  * decision (the print button's rule, Austin, 2026-10-01 and 2026-10-28). */
-export const BRIEF_RUN_NOTE = "Starting the letter writes its brief: a model run over everything logged on this project. It takes a few minutes, and each brief costs a run.";
+export const BRIEF_RUN_NOTE = "Writing the brief first is a model run over everything logged on this project. It takes a few minutes, and each brief costs a run. Going straight to the letter runs nothing, and you can write the brief later from the letter.";
 export const BRIEF_AGAIN_ASK = "Write the brief again? It reads everything logged on this project since, replaces this one, and each brief costs a model run.";
 export const OUTLINE_ASK = "Put your talk-through on the project's record as yours, today, and write the outline? Each outline costs a model run.";
 export const OUTLINE_AGAIN_ASK = "Write the outline again from the same talk-through? It replaces this one, and each outline costs a model run.";
