@@ -1,10 +1,10 @@
 /**
  * The second way to a file, next to the `shared_with` cache: through the
  * features list. A Client is never in the cache (ADR-023), so the cache
- * refuses them every file; this lets them open a project's photos when
- * their group gets `photos`, by the same rule the Photos tab shows
- * (`isReachablePhoto`): a photo, never a cost file, a photo of a receipt
- * included.
+ * refuses them every file; this lets them open what their project tabs
+ * show, by the rule the tabs use (`rowsForReader`): Photos, and Files
+ * since 2026-11-03, never a cost file (a photo of a receipt included) and
+ * nothing still Unsorted.
  *
  * And a photo the moment it's posted (Austin, 2026-09-28): until a sync
  * copies a Card's attachment into the project, the project page serves the
@@ -35,7 +35,8 @@ import type { FileRef, VaultFolder } from "./vault.types";
 import { query } from "./generic.server";
 import { findOwningProjectFolder, getProjectRole } from "./projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "./fileFolders.server";
-import { isReachablePhoto, rowsForReader } from "./projectView.server";
+import { rowsForReader } from "./projectView.server";
+import type { Feature } from "./features";
 
 /** How long a project's photo list is reused: a thumbnail grid asks once
  * per photo, and the list is about ten queries. A file refiled as a cost
@@ -147,35 +148,36 @@ async function reachableCopy(humanId: string, file: FileRef): Promise<FileRef | 
   return found;
 }
 
-/** Which project's photos a person reaches from a folder, or null, reused
- * as long as the photo list: without it every thumbnail walked the folder
- * up to its project and read the README for the role. A role change
- * lands within this long. */
-const photoReach = new Map<string, { at: number; project: VaultFolder | null }>();
+/** Which project a person reads files on from a folder, and with what
+ * features, or null, reused as long as the file list: without it every
+ * thumbnail walked the folder up to its project and read the README for
+ * the role. A role change lands within this long. */
+const readerReach = new Map<string, { at: number; reach: { project: VaultFolder; features: Feature[] } | null }>();
 
-async function photoProjectFor(humanId: string, folderId: string): Promise<VaultFolder | null> {
+async function readerProjectFor(humanId: string, folderId: string): Promise<{ project: VaultFolder; features: Feature[] } | null> {
   const key = `${humanId}:${folderId}`;
-  const cached = photoReach.get(key);
-  if (cached && Date.now() - cached.at < PHOTO_LIST_MS) return cached.project;
+  const cached = readerReach.get(key);
+  if (cached && Date.now() - cached.at < PHOTO_LIST_MS) return cached.reach;
   const folder = await getFolderById(folderId);
   const owning = folder ? await findOwningProjectFolder(folder) : null;
   const role = owning ? await getProjectRole(owning, humanId) : null;
-  const project = role?.features.includes("photos") ? owning : null;
-  photoReach.set(key, { at: Date.now(), project });
-  return project;
+  const reach = owning && role && (role.features.includes("photos") || role.features.includes("files")) ? { project: owning, features: role.features } : null;
+  readerReach.set(key, { at: Date.now(), reach });
+  return reach;
 }
 
 /** Whether `humanId` may open `file`'s bytes: the cache's answer
- * (`canViewFileRef`), a photo on a project whose group gets `photos`, or
- * a Card's attachment not yet copied into its project (`attachedReach`). */
+ * (`canViewFileRef`), a file one of their project tabs serves (Photos,
+ * and Files for a Client since 2026-11-03; never a cost file or an
+ * Unsorted one without `costs`: `rowsForReader`), or a Card's attachment
+ * not yet copied into its project (`attachedReach`). */
 export async function canReadFile(humanId: string, file: FileRef): Promise<boolean> {
   if (await canViewFileRef(humanId, file)) return true;
   if (!file.folder_id) return false;
-  const project = await photoProjectFor(humanId, file.folder_id);
-  // The files a project's Photos tab serves (not cost files), by the id
-  // each is served as.
-  const isPhoto = (rows: ProjectFileRow[]) => rows.some((r) => r.serveId === file._id && isReachablePhoto(r, ["photos"]));
-  if (project && isPhoto(await rowsFinding(project, isPhoto))) return true;
+  const reach = await readerProjectFor(humanId, file.folder_id);
+  // The files the reader's tabs serve, by the id each is served as.
+  const served = (rows: ProjectFileRow[]) => rowsForReader(rows, reach?.features ?? []).some((r) => r.serveId === file._id);
+  if (reach && served(await rowsFinding(reach.project, served))) return true;
   return attachedReach(humanId, file);
 }
 

@@ -1,0 +1,60 @@
+/* "All Projects" Kanban view (garden/3-growing/guide-projects-phases.md).
+   Same shape as the throwaway mockup's `guideProjectsMockup.css`
+   (`gp-kanban`/`gp-toolbar`), ported for real — the reviewer-panel/
+   annotation chrome that CSS also carried (`.pm-*`) is mockup-only and
+   deliberately not brought over. */
+
+.gp-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+/* One column per org Phase, horizontally scrollable so it never breaks
+   the page layout — the real mobile tradeoff a Kanban view always
+   carries (see the seed's own open question on this). */
+.gp-kanban {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.gp-kanban__column {
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gp-kanban__column-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 2px 8px;
+  border-bottom: 2px solid var(--color-surface-border);
+}
+.gp-kanban__column-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 40px;
+}
+.gp-kanban__card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-surface-border);
+  background: var(--color-surface-card);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gp-kanban__card-name { font-size: 0.85rem; font-weight: 600; }
+.gp-kanban__card-meta { font-size: 0.75rem; color: var(--color-text-subtle); }
+.gp-kanban__card-move {
+  margin-top: 4px;
+  align-self: flex-start;
+}
+
+@media (max-width: 700px) {
+  .gp-kanban__column { flex-basis: 180px; }
+}

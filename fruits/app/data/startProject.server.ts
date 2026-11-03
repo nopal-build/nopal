@@ -11,6 +11,7 @@ import type { Human } from "robustness-core/data/humans.server";
 import { createVaultFolder, ensureVaultRootFolders, listFolderChildren } from "robustness-core/data/vault.server";
 import type { VaultFolder } from "robustness-core/data/vault.types";
 import { openSeedRound } from "robustness-core/data/seedPackets.server";
+import { createBoardCardForNewProject } from "robustness-core/data/guideProjectsBoard.server";
 
 export type StartProjectResult = { ok: true; folder: VaultFolder } | { ok: false; error: string; status: 400 | 403 | 409 | 500 };
 
@@ -30,5 +31,9 @@ export async function startProject(user: Pick<Human, "_id" | "role">, rawName: s
   // A new project opens with a seeding round (Austin, 2026-09-30): each
   // person added gets a seed packet until a guide ends the round.
   await openSeedRound(folder._id, user._id);
+  // Guide Projects board (garden/3-growing/guide-projects-phases.md): a
+  // Seed-phase card for the new project, if the org's Kanban board
+  // exists yet — a no-op otherwise, never blocking project creation.
+  await createBoardCardForNewProject(folder, user._id);
   return { ok: true, folder };
 }

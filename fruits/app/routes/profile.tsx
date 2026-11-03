@@ -64,6 +64,10 @@ import {
   revokeApiToken,
   type ApiToken,
 } from "robustness-core/data/apiTokens.server";
+import {
+  getOrganization,
+  getOrganizationsForHuman,
+} from "robustness-core/data/organizations.server";
 import { AppLayout } from "../components/AppLayout";
 import { ProfilePayments, type ProfileCharge, type ProfilePlan } from "../components/ProfilePayments";
 import { listPlans } from "robustness-core/data/billingPlans.server";
@@ -99,15 +103,25 @@ function isAdminOrSuper(user: Human): boolean {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  const [waivers, relatedHumans, passkeys, relationships, apiTokens, clientProjects] =
+  const [waivers, relatedHumans, passkeys, relationships, apiTokens, organizationMemberships, clientProjects] =
     await Promise.all([
       getLegalDocumentsByEmail(user.email),
       getRelatedHumans(user, { includeRevoked: true }),
       getPasskeysByHuman(user._id),
       getRelationshipsForHuman(user._id),
       getApiTokensByHuman(user._id),
+      getOrganizationsForHuman(user._id),
       clientProjectsFor(user._id),
     ]);
+  // Static, informational only (not editable here) — which Organization
+  // this Human belongs to. Nopal is the one Organization that exists
+  // today, but this reads it generally rather than hard-coding the name,
+  // so a second Organization needs no change here (garden/3-growing/
+  // organizations.md). `undefined` only if the backfill hasn't reached
+  // this Human yet.
+  const organization = organizationMemberships[0]
+    ? await getOrganization(organizationMemberships[0].organization_id)
+    : undefined;
 
   // The bills on every project this person is a Client on. Withdrawn
   // ones aren't shown.
@@ -152,6 +166,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     apiTokens,
     inviteExpired,
     revokedRelationships,
+    organizationName: organization?.name ?? null,
     billing,
     plans,
     planLevels: MENU_PLANS.map((p) => ({ value: p, label: MENU_PLAN_LABELS[p] })),
@@ -1586,6 +1601,7 @@ export default function Profile() {
     apiTokens: allApiTokens,
     inviteExpired,
     revokedRelationships,
+    organizationName,
     billing,
     plans,
     planLevels,
@@ -2079,8 +2095,23 @@ export default function Profile() {
                   )}
                 </div>
 
+                {organizationName && (
+                  <>
+                    <hr style={{ borderColor: "currentColor", opacity: 0.12 }} />
+
+                    {/* ── Organization (static, not editable here) ───── */}
+                    <div className="flex flex-col gap-2">
+                      <label className="purple-text font-bold text-sm">
+                        Organization
+                      </label>
+                      <span>{organizationName}</span>
+                    </div>
+                  </>
+                )}
+
                 <hr style={{ borderColor: "currentColor", opacity: 0.12 }} />
 
+                {/* ── Email ────────────────────────────── */}
                 {/* ── Email ─────────────────────────────────────────── */}
                 <div className="flex flex-col gap-3">
                   <label className="purple-text font-bold text-sm">Email</label>

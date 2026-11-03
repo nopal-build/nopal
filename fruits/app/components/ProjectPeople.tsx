@@ -248,8 +248,9 @@ function InviteRow({
 }
 
 /** Someone found by the search, not on the project yet: added in the
- * group chosen beside the button. Client, the group that reaches least,
- * is the default. */
+ * group chosen beside the button. Defaults to their Nopal org role
+ * (Phase B, garden/3-growing/organizations.md) when they're a member of
+ * one; Client, the group that reaches least, otherwise. */
 function AddRow({
   person,
   projectId,
@@ -269,6 +270,11 @@ function AddRow({
   useEffect(() => {
     if (added) onAdded();
   }, [added, onAdded]);
+  // Their org role, but only when the viewer may actually give it (e.g. a
+  // non-admin Guide can't offer "Guide" — same restriction `GroupSelect`
+  // already applies to an existing member's own dropdown).
+  const defaultGroup =
+    person.organizationRole && groups.includes(person.organizationRole) ? person.organizationRole : "Client";
   return (
     <fetcher.Form method="post" action={action} data-add={`${person.id}:${projectId}`}>
       <input type="hidden" name="humanId" value={person.id} />
@@ -286,7 +292,7 @@ function AddRow({
             hideLabel
             size="small"
             name="group"
-            defaultValue="Client"
+            defaultValue={defaultGroup}
             options={groupOptions(groups)}
           />
           <button type="submit" disabled={fetcher.state !== "idle"} className={ACT}>

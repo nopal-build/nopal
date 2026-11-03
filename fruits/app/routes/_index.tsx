@@ -20,14 +20,14 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { listProjectsFor } from "robustness-core/data/projectSharing.server";
+import { isStaff } from "robustness-core/data/humans.server";
+import { getOrganizationRole } from "robustness-core/data/organizations.server";
 import { navFor } from "../data/nav.server";
 import { firstName } from "robustness-core/data/humanNames";
-import { loadDashboard } from "robustness-core/data/dashboard.server";
-import {
-  DEFAULT_PROJECT_STATUS,
-  PROJECT_STATUSES,
-  type ProjectStatus,
-} from "robustness-core/data/project.types";
+import { loadDashboard, type DashboardFilter } from "robustness-core/data/dashboard.server";
+
+const DASHBOARD_FILTERS: DashboardFilter[] = ["active", "done", "archive"];
+const DEFAULT_DASHBOARD_FILTER: DashboardFilter = "active";
 
 export const meta: MetaFunction = () => [{ title: "O.No · My Projects" }];
 
@@ -37,11 +37,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const statusParam = url.searchParams.get("status");
-  const activeStatus: ProjectStatus = PROJECT_STATUSES.includes(
-    statusParam as ProjectStatus,
+  const activeStatus: DashboardFilter = DASHBOARD_FILTERS.includes(
+    statusParam as DashboardFilter,
   )
-    ? (statusParam as ProjectStatus)
-    : DEFAULT_PROJECT_STATUS;
+    ? (statusParam as DashboardFilter)
+    : DEFAULT_DASHBOARD_FILTER;
 
   // Every project the person holds a role on (ADR-023): what the dashboard
   // arranges.
@@ -51,6 +51,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (nav.home.projectId) return redirect(`/newspaper/${nav.home.projectId}`);
 
   const dashboard = await loadDashboard(user._id, activeStatus, memberships);
+  // Guide Projects "All Projects" link (garden/3-growing/
+  // guide-projects-phases.md) — org-Guide (or platform Admin/Super)
+  // only, same gate that route's own loader re-checks server-side.
+  const isOrgGuide = isStaff(user) || (await getOrganizationRole(user._id)) === "Guide";
 
   return {
     // `role` too: the nav reads it through `useUser()` (without it the
@@ -60,6 +64,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...nav,
     activeStatus,
     dashboard,
+    isOrgGuide,
   };
 }
 
@@ -135,7 +140,7 @@ function AppStatusMenu() {
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { user, activeStatus, dashboard } = useLoaderData<typeof loader>();
+  const { user, activeStatus, dashboard, isOrgGuide } = useLoaderData<typeof loader>();
   return (
     <AppLayout>
       <CenterContent maxWidth={860}>
@@ -146,7 +151,7 @@ export default function DashboardPage() {
             </h1>
             <AppStatusMenu />
           </Cluster>
-          <DashboardView activeStatus={activeStatus} dashboard={dashboard} />
+          <DashboardView activeStatus={activeStatus} dashboard={dashboard} isOrgGuide={isOrgGuide} />
         </Stack>
       </CenterContent>
     </AppLayout>

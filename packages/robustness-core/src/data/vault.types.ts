@@ -174,6 +174,16 @@ export type VaultFolder = {
    * context rules (one `skills` + one `syncs` per project/personal; sync
    * types only directly inside a `syncs` folder) honest over time. */
   is_folder_type_root?: boolean;
+  /**
+   * Which Organization (see `organizations.server.ts`) this folder belongs
+   * to — only ever set on a project (a direct child of the `projects` root)
+   * and denormalized onto every descendant, same trick `vault_root_key`/
+   * `folder_type` use. Nopal is the one hard-coded Organization today, and
+   * every project defaults to it (`NOPAL_ORGANIZATION_ID`) — null/absent
+   * only for a non-project folder (`personal`, `daily-logs`, and their
+   * contents) or a legacy project folder not yet backfilled.
+   */
+  organization_id?: string | null;
   /** Whether THIS folder (and everything inside it, recursively — resolved
    * dynamically, not cascaded onto descendants) is published to a public,
    * unauthenticated URL. See resolvePublicRootFolder in vault.server.ts. */
@@ -192,6 +202,14 @@ export type VaultFolder = {
    * trash-cleanup cron (`api.vault.trash-cleanup.tsx`) measures a
    * "trashed" project's age against. */
   project_status_at?: string | null;
+  /** A project's `archived` flag (garden/3-growing/
+   * guide-projects-phases.md) — DENORMALIZED CACHE of that project's own
+   * README.md `archived` front matter, kept in sync by
+   * `projectStatus.server.ts`'s `setProjectArchived` — never write this
+   * directly. Null/absent means `false` (not yet archived, or predates
+   * this field). Independent of `project_status`, which `setProjectArchived`
+   * recomputes alongside it (see that function's own doc). */
+  project_archived?: boolean | null;
   /**
    * Whether this `project-n02` root folder (a project OR a `personal`
    * space) runs GraphLog's nightly — see `graphLogSchedule.server.ts`.

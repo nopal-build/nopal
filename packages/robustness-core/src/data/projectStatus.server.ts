@@ -26,9 +26,20 @@ import {
   DEFAULT_PROJECT_STATUS,
   PROJECT_STATUSES,
   withProjectStatus,
+  withProjectArchived,
   type ProjectStatus,
 } from "./project.types";
 import { getProjectRole, isProjectFolder } from "./projectSharing.server";
+
+// `guideProjectsBoard.server` statically imports FROM this file's sibling
+// `vault.server` already (for plain CRUD) -- this file reaching INTO it
+// (to check a project's current Kanban-card phase) needs the same lazy
+// `import()` treatment `vault.server.ts` itself already documents in
+// full for its own back-edges into `fileReferences.server`/etc.
+let guideProjectsBoardModule: Promise<typeof import("./guideProjectsBoard.server")> | undefined;
+function getGuideProjectsBoardModule() {
+  return (guideProjectsBoardModule ??= import("./guideProjectsBoard.server"));
+}
 
 export type { ProjectStatus };
 
@@ -94,6 +105,110 @@ export async function setProjectStatus(
   });
 
   return { ok: true, status };
+}
+
+/** A project folder's current `archived` flag — reads the denormalized
+ * cache directly (see module doc); defaults to `false` for a project
+ * folder that predates this field. */
+export function isProjectArchived(projectFolder: VaultFolder): boolean {
+  return projectFolder.project_archived === true;
+}
+
+/**
+ * Recomputes and (if changed) rewrites a project's `active`/`completed`
+ * status from its CURRENT `archived` flag and Kanban-board phase
+ * (garden/3-growing/guide-projects-phases.md): `completed` if archived
+ * OR the project's card currently sits in an End-type phase, else
+ * `active`. Deliberately never touches `trashed` — that stays its own
+ * independent, higher-precedence axis (reserved for a project actually
+ * on its way to permanent deletion, not a stand-in for "archived"; see
+ * `migrateTrashedToArchivedProject` below for the one-time correction
+ * of data that blurred that line before `archived` existed).
+ *
+ * Called from two places: `setProjectArchived` (below), and
+ * `vault.server.ts`'s `updateFileRef` whenever a Kanban board card
+ * moves. Exported so both can share it rather than each recomputing the
+ * same rule independently.
+ */
+export async function recomputeProjectStatus(projectFolder: VaultFolder): Promise<void> {
+  const current = getProjectStatus(projectFolder);
+  if (current === "trashed") return;
+
+  const archived = isProjectArchived(projectFolder);
+  let computed: ProjectStatus = "active";
+  if (archived) {
+    computed = "completed";
+  } else {
+    const { isProjectCardInEndPhase } = await getGuideProjectsBoardModule();
+    computed = (await isProjectCardInEndPhase(projectFolder._id)) ? "completed" : "active";
+  }
+  if (computed === current) return;
+
+  const readme = await getOrCreateReadme(projectFolder.human_id, projectFolder._id);
+  const updatedContent = withProjectStatus(readme.content ?? "", computed);
+  await updateFileRef(readme._id, { content: updatedContent });
+  await updateVaultFolder(projectFolder._id, {
+    project_status: computed,
+    project_status_at: new Date().toISOString(),
+  });
+}
+
+export type SetProjectArchivedResult =
+  | { ok: true; archived: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Sets a project's `archived` flag — the only intended writer of both the
+ * README's `archived` front matter AND the `vault_folders.
+ * project_archived` cache — then recomputes `status` to match
+ * (`recomputeProjectStatus`). Same permission rule as `setProjectStatus`
+ * (the project's own Guide, not just its creator — matches
+ * `getProjectRole`'s `guiding` check, the same one `setProjectStatus`
+ * itself already uses).
+ */
+export async function setProjectArchived(
+  actingHumanId: string,
+  projectFolder: VaultFolder,
+  archived: boolean,
+): Promise<SetProjectArchivedResult> {
+  if (!(await isProjectFolder(projectFolder))) {
+    return { ok: false, error: "Archiving only applies to project folders" };
+  }
+  if (!(await getProjectRole(projectFolder, actingHumanId))?.guiding) {
+    return { ok: false, error: "You don't have permission to archive this project" };
+  }
+
+  const readme = await getOrCreateReadme(projectFolder.human_id, projectFolder._id);
+  const updatedContent = withProjectArchived(readme.content ?? "", archived);
+  await updateFileRef(readme._id, { content: updatedContent });
+
+  const updated = await updateVaultFolder(projectFolder._id, { project_archived: archived });
+  await recomputeProjectStatus(updated ?? { ...projectFolder, project_archived: archived });
+
+  return { ok: true, archived };
+}
+
+/**
+ * One-time data correction ("Migrate Trashed Projects To Archived" admin
+ * script), NOT the ongoing `archived` write path above — a project
+ * marked `trashed` before `archived` existed was, in practice, being
+ * used to mean "I'm done with this" rather than "delete this
+ * permanently" (the human's own call, 2026-11-02): this moves it OUT of
+ * `trashed` into `archived` + `completed` outright, deliberately
+ * bypassing `recomputeProjectStatus`'s own "never touch trashed" guard
+ * — that guard protects an intentionally-trashed project going forward,
+ * which is exactly what this one-time pass is correcting away from.
+ */
+export async function migrateTrashedToArchivedProject(projectFolder: VaultFolder): Promise<void> {
+  const readme = await getOrCreateReadme(projectFolder.human_id, projectFolder._id);
+  let updatedContent = withProjectArchived(readme.content ?? "", true);
+  updatedContent = withProjectStatus(updatedContent, "completed");
+  await updateFileRef(readme._id, { content: updatedContent });
+  await updateVaultFolder(projectFolder._id, {
+    project_archived: true,
+    project_status: "completed",
+    project_status_at: new Date().toISOString(),
+  });
 }
 
 /**

@@ -25,7 +25,7 @@ import { firstName } from "./humanNames";
 import { query } from "./generic.server";
 import { getHumansById } from "./humans.server";
 import type { VaultFolder } from "./vault.types";
-import { getProjectStatus } from "./projectStatus.server";
+import { getProjectStatus, isProjectArchived } from "./projectStatus.server";
 import type { ProjectSharingEntry, ProjectStatus } from "./project.types";
 import { listProjectsFor, roleIn, type ProjectMembership } from "./projectSharing.server";
 import { CLIENT_ROLE } from "./sharingRoles.server";
@@ -38,11 +38,34 @@ import type { SteepPosition } from "./steepScale";
  * a steep stretch visible past a weekend without becoming a record. */
 export const STEEP_NOTE_DAYS = 7;
 
+/** The dashboard's own three tabs (garden/3-growing/
+ * guide-projects-phases.md) — distinct from `ProjectStatus` itself:
+ * "done" and "archive" both read `status === "completed"` projects, just
+ * split by WHY they're completed (`archived`, or the Kanban board's
+ * End-type phase — see `recomputeProjectStatus`), which a single
+ * `ProjectStatus` value can't tell apart on its own. A project actually
+ * `trashed` (on its way to permanent deletion) shows on none of the
+ * three — reserved for that one meaning now (`projectStatus.server.ts`'s
+ * module doc), not a stand-in for "put away" anymore. */
+export type DashboardFilter = "active" | "done" | "archive";
+
+function matchesFilter(project: { status: ProjectStatus; archived: boolean }, filter: DashboardFilter): boolean {
+  switch (filter) {
+    case "active":
+      return project.status === "active";
+    case "archive":
+      return project.archived;
+    case "done":
+      return project.status === "completed" && !project.archived;
+  }
+}
+
 export type DashboardProjectInput = {
   id: string;
   name: string;
   status: ProjectStatus;
   statusAt: string | null;
+  archived: boolean;
   /** When a Card was last written to the project; null if none ever was. */
   lastAddedAt: string | null;
   sharing: ProjectSharingEntry[];
@@ -68,6 +91,7 @@ export type DashboardRow = {
   role: string;
   status: ProjectStatus;
   statusAt: string | null;
+  archived: boolean;
   /** The Efforts page's opening. Null on a Client row. */
   read: string | null;
   /** The page's one ask. Null on a Client row. */
@@ -84,9 +108,9 @@ export type DashboardRow = {
 };
 
 export type Dashboard = {
-  /** Projects per status, for the guide view's tabs. Null in the client
+  /** Projects per tab, for the guide view's tabs. Null in the client
    * view, which shows no counts and so receives none. */
-  counts: Record<ProjectStatus, number> | null;
+  counts: Record<DashboardFilter, number> | null;
   /** "client" when every role this person holds is Client: today's log
    * and a Steep-o-meter per project, nothing else. */
   view: "guide" | "client";
@@ -102,9 +126,9 @@ export function buildDashboard(input: {
   projects: DashboardProjectInput[];
   readings: SteepReading[];
   names: Map<string, string>;
-  status: ProjectStatus;
+  filter: DashboardFilter;
 }): Dashboard {
-  const { viewerId, projects, readings, names, status } = input;
+  const { viewerId, projects, readings, names, filter } = input;
 
   const held = projects
     .map((p) => ({ project: p, role: roleIn(p.sharing, viewerId) }))
@@ -115,7 +139,7 @@ export function buildDashboard(input: {
 
   const rows: DashboardRow[] = held
     // The client view only ever holds active projects: no tabs, no counts.
-    .filter((x) => (view === "client" ? x.project.status === "active" : x.project.status === status))
+    .filter((x) => (view === "client" ? x.project.status === "active" : matchesFilter(x.project, filter)))
     // Most recently added to first; never-logged last, in arrival order
     // (the sort is stable).
     .sort((a, b) => (b.project.lastAddedAt ?? "").localeCompare(a.project.lastAddedAt ?? ""))
@@ -129,6 +153,7 @@ export function buildDashboard(input: {
         role,
         status: project.status,
         statusAt: project.statusAt,
+        archived: project.archived,
         read: role === CLIENT_ROLE ? null : project.read,
         ask: role === CLIENT_ROLE ? null : project.ask,
         notes: featuresOf(role).includes("steepReadings") ? clientNotes(project, onProject, viewerId, names) : [],
@@ -140,8 +165,12 @@ export function buildDashboard(input: {
   const tappable = rows.filter((r) => r.canTap);
   let counts: Dashboard["counts"] = null;
   if (view === "guide") {
-    counts = { active: 0, completed: 0, trashed: 0 };
-    for (const x of held) counts[x.project.status]++;
+    counts = { active: 0, done: 0, archive: 0 };
+    for (const x of held) {
+      if (matchesFilter(x.project, "active")) counts.active++;
+      if (matchesFilter(x.project, "done")) counts.done++;
+      if (matchesFilter(x.project, "archive")) counts.archive++;
+    }
   }
   return {
     counts,
@@ -259,7 +288,7 @@ export async function ownLatestReading(
  * caller already has it. */
 export async function loadDashboard(
   viewerId: string,
-  status: ProjectStatus,
+  filter: DashboardFilter,
   memberships?: ProjectMembership[],
 ): Promise<Dashboard> {
   memberships ??= await listProjectsFor(viewerId);
@@ -279,10 +308,11 @@ export async function loadDashboard(
     id: f._id,
     name: f.name,
     status: getProjectStatus(f),
+    archived: isProjectArchived(f),
     statusAt: f.project_status_at ?? null,
     lastAddedAt: lastAdded.get(f._id) ?? null,
     sharing,
     ...readSidecarReadAndAsk(sidecars.get(f._id)),
   }));
-  return buildDashboard({ viewerId, projects, readings, names, status });
+  return buildDashboard({ viewerId, projects, readings, names, filter });
 }

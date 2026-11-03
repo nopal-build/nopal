@@ -1,8 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getProjectRole } from "robustness-core/data/projectSharing.server";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
-import { canViewFolder } from "robustness-core/data/vault.types";
+import { canViewFolderOrgAware, getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
 import { createMark, pageMarkUnits, snapshotUnit } from "robustness-core/data/graphLogMarks.server";
 import { checkMove, recordMove } from "robustness-core/data/graphLogMoves.server";
@@ -43,7 +42,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const folder = await getFolderById(body.projectFolderId);
-  if (!folder || !canViewFolder(user._id, folder)) {
+  if (!folder || !(await canViewFolderOrgAware(user._id, folder))) {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
   // Moving someone's words to another project changes the content: `edit`

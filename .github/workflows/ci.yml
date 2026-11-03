@@ -45,6 +45,18 @@ jobs:
           cd crates/heic-decode
           cargo build --release
 
+      # `typstRenderer.test.ts` runs a real `typst compile` and reads the
+      # PDF back with `pdftotext` (poppler) -- same "test against the
+      # real binary, not just the generated source string" discipline as
+      # the HEIC decode above. A single static download, no compiling
+      # (see `packages/worker/Dockerfile`'s own copy of this same step).
+      - name: Install typst
+        run: |
+          curl -fsSL https://github.com/typst/typst/releases/download/v0.15.1/typst-x86_64-unknown-linux-musl.tar.xz -o /tmp/typst.tar.xz
+          tar -xJf /tmp/typst.tar.xz -C /tmp
+          sudo mv /tmp/typst-x86_64-unknown-linux-musl/typst /usr/local/bin/typst
+          sudo apt-get install --no-install-recommends -y poppler-utils
+
       - run: pnpm --filter remix run test --run
       - run: pnpm --filter fruits run test --run
 

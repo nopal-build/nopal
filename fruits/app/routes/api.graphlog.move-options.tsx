@@ -1,7 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
-import { getAccessibleProjectFolders, getFileRefById, getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
-import { canViewFolder } from "robustness-core/data/vault.types";
+import { canViewFolderOrgAware, getAccessibleProjectFolders, getFileRefById, getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
 import { pageMarkUnits } from "robustness-core/data/graphLogMarks.server";
 import { cardChunks } from "robustness-core/data/graphLogMoves.server";
@@ -33,7 +32,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const hash = url.searchParams.get("pageHash") ?? "";
 
   const folder = await getFolderById(projectFolderId);
-  if (!folder || !canViewFolder(user._id, folder)) {
+  if (!folder || !(await canViewFolderOrgAware(user._id, folder))) {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
   // The same `edit` the move itself asks for (`api.graphlog.moves.tsx`):

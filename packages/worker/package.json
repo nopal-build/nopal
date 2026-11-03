@@ -10,7 +10,6 @@
   "dependencies": {
     "@prometheus-io/client": "^0.16.1",
     "bullmq": "^5.60.0",
-    "playwright-core": "1.62.1",
     "robustness-core": "workspace:*",
     "vite": "^5.2.12",
     "vite-node": "^2.1.8"

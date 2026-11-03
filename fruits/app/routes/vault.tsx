@@ -55,12 +55,14 @@ import {
 import {
   buildOwnedFolderAncestry,
   canViewFileRef,
+  canViewFolderOrgAware,
   ensureVaultRootFolders,
   getFileRefById,
   getFolderAncestry,
   getFolderById,
   getFoldersByHuman,
   getSharedFoldersForHuman,
+  isOrgGuideForFolder,
   listFolderChildren,
 } from "robustness-core/data/vault.server";
 import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
@@ -304,6 +306,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // file/folder outright but holds an owner-tier Sharing Role on the
   // project it lives under.
   let viewerIsOwnerTierOnProject = false;
+  // Same idea, for a folder/file under the `org` Vault Root (e.g.
+  // `org/kanban-projects/`, garden/3-growing/guide-projects-phases.md) —
+  // an org Guide, not a project Sharing Role, since `org` folders aren't
+  // projects at all (`isOrgGuideForFolder`'s own doc explains why
+  // `viewerIsOwnerTierOnProject` above never covers this case).
+  let viewerIsOrgGuideOnOrgFolder = false;
   // Runs its people (`people`, a Guide): the "People…" item goes to the Maker.
   let viewerGuidesProject = false;
   // A letter's page, for a guide (`canManageLetters`, staff or guiding;
@@ -367,6 +375,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
       viewerGuidesProject = Boolean(role?.guiding);
+      const fileContainingFolder = ancestry[ancestry.length - 1];
+      if (fileContainingFolder) {
+        viewerIsOrgGuideOnOrgFolder = await timeRequestPerf("fn", "isOrgGuideForFolder", { folderId: fileContainingFolder._id }, () =>
+          isOrgGuideForFolder(user._id, fileContainingFolder),
+        );
+      }
     }
     if (fileFolderId && isLettersFolderType(ancestry[ancestry.length - 1]?.folder_type) && isMarkdownFile(file)) {
       const roleForLetter = await timeRequestPerf("fn", "getProjectRoleForFolderId", { folderId: fileFolderId }, () =>
@@ -394,7 +408,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const folder = await timeRequestPerf("fn", "getFolderById", { folderId: folderParam }, () =>
       getFolderById(folderParam),
     );
-    if (!folder || !canViewFolder(user._id, folder)) {
+    if (!folder || !(await canViewFolderOrgAware(user._id, folder))) {
       throw new Response("Folder not found", { status: 404 });
     }
     // Ancestry includes the folder itself (root container → … → folder).
@@ -450,6 +464,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
       viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
       viewerGuidesProject = Boolean(role?.guiding);
+      viewerIsOrgGuideOnOrgFolder = await timeRequestPerf("fn", "isOrgGuideForFolder", { folderId: folder._id }, () =>
+        isOrgGuideForFolder(user._id, folder),
+      );
     }
     const websiteAnchorForFolder = findWebsiteAnchor(ancestry);
     const websitePageMetaForFolder =
@@ -476,6 +493,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     relatedHumans,
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
+    viewerIsOrgGuideOnOrgFolder,
     viewerGuidesProject,
     letterBrief,
     letterSend,
@@ -2623,6 +2641,7 @@ export default function VaultV2Page() {
     relatedHumans,
     topLevelSharedFolders,
     viewerIsOwnerTierOnProject,
+    viewerIsOrgGuideOnOrgFolder,
     viewerGuidesProject,
     letterBrief,
     letterSend,
@@ -3788,7 +3807,7 @@ export default function VaultV2Page() {
     (current.kind === "folder"
       ? current.folder.human_id === user._id
       : current.file.human_id === user._id);
-  const isEffectiveOwner = isOwnedByViewer || viewerIsOwnerTierOnProject;
+  const isEffectiveOwner = isOwnedByViewer || viewerIsOwnerTierOnProject || viewerIsOrgGuideOnOrgFolder;
 
   const currentIsRootContainer =
     current.kind === "folder" && isVaultRootFolder(current.folder);

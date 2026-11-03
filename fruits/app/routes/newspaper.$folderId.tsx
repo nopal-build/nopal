@@ -19,8 +19,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, redirect, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { useCallback, useMemo, useState } from "react";
 import { getUser } from "../modules/auth/auth.server";
-import { canViewFolder } from "robustness-core/data/vault.types";
-import { getFolderById, getReadmeFileForFolder } from "robustness-core/data/vault.server";
+import { getFolderById, getReadmeFileForFolder, canViewFolderOrgAware } from "robustness-core/data/vault.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
 import { listMarksOnPage, pageMarkUnits, readableMark } from "robustness-core/data/graphLogMarks.server";
 import { listSuggestions } from "robustness-core/data/suggestions.server";
@@ -28,7 +27,7 @@ import { isWebsiteFolder } from "robustness-core/data/vaultFolderTypes";
 import { resolveProjectManifest } from "robustness-core/data/project.server";
 import { getProjectStatus } from "robustness-core/data/projectStatus.server";
 import { isIncompleteBannerText, splitFrontmatter } from "robustness-core/data/project.types";
-import { getProjectSharing, isProjectFolder, resolveRole } from "robustness-core/data/projectSharing.server";
+import { getProjectRole, getProjectSharing, isProjectFolder } from "robustness-core/data/projectSharing.server";
 import { loadProjectFiles, type ProjectFileRow } from "robustness-core/data/fileFolders.server";
 import { FILING_KINDS } from "robustness-core/data/syncFiling.server";
 import { pageLogs, projectLogbook } from "robustness-core/data/citedLogs.server";
@@ -54,6 +53,12 @@ import {
   type SensorDataTab,
 } from "robustness-core/data/loadCellSensorData.server";
 import { SensorDataView } from "../components/SensorDataView";
+import {
+  findBoxHardwareAnalysisFolder,
+  loadBoxHardwareDataTab,
+  type BoxHardwareDataTab,
+} from "robustness-core/data/boxHardwareData.server";
+import { BoxHardwareView } from "../components/BoxHardwareView";
 import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
 import { ownLatestReading } from "robustness-core/data/dashboard.server";
 import { navFor } from "../data/nav.server";
@@ -103,25 +108,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // What this page shows is the viewer's group's features (`features.ts`).
   // Someone in the cache with no role on the list (a share from before
   // roles) reads as an Observer, as they did; a Client is never in the
-  // cache and reaches the page through their features alone.
+  // cache and reaches the page through their features alone. An org
+  // Guide with no entry at all resolves to Guide here too (Phase C,
+  // garden/3-growing/organizations.md — `getProjectRole`'s own fallback).
   const sharing = await getProjectSharing(folder);
-  const own = sharing.find((e) => e.human === user._id);
-  const role = own && groupOf(own.role) ? resolveRole(own.role) : null;
+  const role = await getProjectRole(folder, user._id);
   // Work on hold for money 10 days past due: a Client sees only what to
   // pay (Austin, 2026-11-03). The APIs refuse them too (`getProjectRole`).
+  const own = sharing.find((e) => e.human === user._id);
   if (own?.role === CLIENT_ROLE) {
     const hold = await projectHold(folder._id);
     if (hold?.kind === "bill") return redirect(`/pay/${hold.chargeId}`);
     if (hold) return redirect(`/pay/plan/${folder._id}`);
   }
-  const inCache = canViewFolder(user._id, folder);
+  const inCache = await canViewFolderOrgAware(user._id, folder);
   const features = role ? role.features : inCache ? featuresOf("Observer") : [];
   // Sensor Data only ever shows up on a project that actually has a
-  // recognized `load-cell` sync-api folder (loadCellSensorData.server.ts,
-  // Gerald 2026-10-02: kept deliberately narrow) — filtered out of
-  // `allowed` entirely rather than shown empty.
+  // recognized `load-cell` AND/OR `box-hardware-data` sync-api folder
+  // (loadCellSensorData.server.ts/boxHardwareData.server.ts, Gerald
+  // 2026-10-02: kept deliberately narrow — a different sensor gets its own
+  // recognizer, never a generic "any sync-api folder" view) — filtered out
+  // of `allowed` entirely rather than shown empty.
   const loadCellFolder = features.includes("sensorData") ? await findLoadCellAnalysisFolder(folder) : null;
-  const allowed = tabsFor(features).filter((t) => t !== "sensorData" || !!loadCellFolder);
+  const boxHardwareFolder = features.includes("sensorData") ? await findBoxHardwareAnalysisFolder(folder) : null;
+  const allowed = tabsFor(features).filter((t) => t !== "sensorData" || !!loadCellFolder || !!boxHardwareFolder);
   const tab = resolveProjectTab(new URL(request.url).searchParams.get("tab"), allowed);
   if (!tab) throw new Response("Not found", { status: 404 });
   const base = `/newspaper/${folder._id}`;
@@ -197,6 +207,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     tab === "sensorData" && loadCellFolder
       ? await loadSensorDataTab(loadCellFolder, new URL(request.url).searchParams.get("run"))
       : null;
+  const boxHardwareData: BoxHardwareDataTab | null =
+    tab === "sensorData" && boxHardwareFolder
+      ? await loadBoxHardwareDataTab(boxHardwareFolder, new URL(request.url).searchParams.get("boxRun"))
+      : null;
 
   const budgetView = tab === "costs" && new URL(request.url).searchParams.get("view") === "budget";
   if (budgetView && !features.includes("budget")) throw new Response("Not found", { status: 404 });
@@ -241,7 +255,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const marks = !canMark ? [] : await Promise.all(
     (await listMarksOnPage(folder._id, readme?.content ?? "", suggestionsFor)).map(async (mark) => {
       const dest = mark.moveDestFolderId ? await getFolderById(mark.moveDestFolderId) : null;
-      return readableMark(mark, !!dest && canViewFolder(user._id, dest));
+      return readableMark(mark, !!dest && (await canViewFolderOrgAware(user._id, dest)));
     }),
   );
   // Where "Read the full log" is offered (the pen, a citation's `*`):
@@ -313,6 +327,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     manageLetters,
     sharedLetters,
     sensorData,
+    boxHardwareData,
     seeding,
     budgetView,
     budget,
@@ -498,7 +513,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, sharedLetters, openBills, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, sharedLetters, openBills, sensorData, boxHardwareData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders, loadCellGraphs } = project;
@@ -761,6 +776,9 @@ export default function NewspaperRoute() {
           )}
           {tab === "sensorData" && sensorData && (
             <SensorDataView projectFolderId={folder._id} data={sensorData} />
+          )}
+          {tab === "sensorData" && boxHardwareData && (
+            <BoxHardwareView projectFolderId={folder._id} data={boxHardwareData} />
           )}
           {logbook && <Logbook cards={logbook} fileIds={logbookFileIds ?? {}} />}
           {suggestions && (

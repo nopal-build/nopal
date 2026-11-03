@@ -145,10 +145,12 @@ enum Command {
         #[command(subcommand)]
         command: SyncApiCommand,
     },
-    /// Kanban Garden board helpers (create a board, move a card between
-    /// columns) layered on top of the generic `nopal vault` primitives —
-    /// see the `vault` skill. Not a security boundary; `nopal vault
-    /// mkdir`/`nopal vault mv` can always do the same thing directly.
+    /// Kanban Garden board helpers (create a board, inspect/move cards,
+    /// edit a board's declared phases) layered on top of the generic
+    /// `nopal vault` primitives — see the `vault` skill and the
+    /// `guide-projects-phases` garden seed. Not a security boundary;
+    /// everything here could also be done with `nopal vault` directly.
+    #[command(alias = "kanban")]
     Garden {
         #[command(subcommand)]
         command: GardenCommand,
@@ -383,7 +385,9 @@ enum VaultCommand {
         /// EMAIL:ROLE:SEAT where SEAT is guide, client or observer
         /// (repeatable). Replaces the current collaborator list rather
         /// than adding to it; a person named without a seat keeps theirs.
-        #[arg(long = "with", value_name = "EMAIL:ROLE[:SEAT]")]
+        /// EMAIL alone (no `:ROLE`) uses their Nopal Organization role as
+        /// the default, if they have one.
+        #[arg(long = "with", value_name = "EMAIL[:ROLE[:SEAT]]")]
         with: Vec<String>,
     },
     /// Publish a folder to a public URL — no login required to view it.
@@ -559,6 +563,126 @@ enum GardenCommand {
         card: String,
         /// Destination column name (a sibling of the card's current one).
         column: String,
+    },
+    /// List every Kanban Garden board reachable under a path (the whole
+    /// vault if omitted) — no way to discover boards today without
+    /// already knowing their path.
+    Boards {
+        /// Vault path to search under. Omit to search the whole vault.
+        #[arg(default_value = "")]
+        scope: String,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List a board's columns, in its README-declared order when it has
+    /// one (`phases:` front matter — see `guide-projects-phases`),
+    /// alphabetical otherwise.
+    Columns {
+        /// Vault path to the board anchor.
+        board: String,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List cards — every column's, or just one's.
+    Cards {
+        /// Vault path to the board anchor.
+        board: String,
+        /// Limit to one column. Omit to list every column.
+        column: Option<String>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a new card directly in a column.
+    New {
+        /// Vault path to the board anchor.
+        board: String,
+        /// Destination column name.
+        column: String,
+        /// The new card's file name (`.md` added if missing).
+        name: String,
+        /// Local file whose content becomes the card's content. Omit for
+        /// a blank card (same default content `nopal vault` gives any
+        /// new markdown file).
+        #[arg(short, long)]
+        file: Option<PathBuf>,
+    },
+    /// Print a card's full content (front matter + body) — for scripting
+    /// or inspecting a board non-interactively, without downloading it.
+    Show {
+        /// Vault path of the card.
+        card: String,
+    },
+    /// Edit a board's declared phase list (`phases:` front matter — see
+    /// `guide-projects-phases`). Not possible from the web UI today;
+    /// this is the only way to adjust one.
+    Phase {
+        #[command(subcommand)]
+        command: PhaseCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PhaseCommand {
+    /// Declares a new phase (and creates its matching column folder, if
+    /// one doesn't already exist yet).
+    Add {
+        /// Vault path to the board anchor.
+        board: String,
+        /// The new phase's name (and its column folder's name).
+        name: String,
+        /// `start`, `normal`, or `end`. A board needs exactly one `start`
+        /// and one `end` phase declared somewhere.
+        #[arg(long, default_value = "normal")]
+        r#type: String,
+        /// Insert right after this existing phase. Omit to append at the end.
+        #[arg(long)]
+        after: Option<String>,
+    },
+    /// Removes a phase from the board's declared list — refuses if its
+    /// column still has cards in it. The column folder itself is left in
+    /// place either way; delete it separately with `nopal vault rm` if
+    /// it should go away too.
+    Rm {
+        /// Vault path to the board anchor.
+        board: String,
+        /// The phase to remove.
+        name: String,
+    },
+    /// Reorders a declared phase relative to another.
+    Mv {
+        /// Vault path to the board anchor.
+        board: String,
+        /// The phase to move.
+        name: String,
+        /// Move it to right before this phase.
+        #[arg(long)]
+        before: Option<String>,
+        /// Move it to right after this phase.
+        #[arg(long)]
+        after: Option<String>,
+    },
+    /// Renames a declared phase — and its matching column folder, to
+    /// keep the two in sync.
+    Rename {
+        /// Vault path to the board anchor.
+        board: String,
+        /// The phase's current name.
+        old_name: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Changes a declared phase's type.
+    SetType {
+        /// Vault path to the board anchor.
+        board: String,
+        /// The phase to change.
+        name: String,
+        /// `start`, `normal`, or `end`.
+        #[arg(long)]
+        r#type: String,
     },
 }
 
@@ -1042,6 +1166,45 @@ fn main() {
             let result = match command {
                 GardenCommand::Init { path } => garden::init(&path),
                 GardenCommand::Mv { card, column } => garden::mv(&card, &column),
+                GardenCommand::Boards { scope, json } => garden::boards(&scope, json),
+                GardenCommand::Columns { board, json } => garden::columns(&board, json),
+                GardenCommand::Cards {
+                    board,
+                    column,
+                    json,
+                } => garden::cards(&board, column.as_deref(), json),
+                GardenCommand::New {
+                    board,
+                    column,
+                    name,
+                    file,
+                } => garden::new_card(&board, &column, &name, file.as_deref()),
+                GardenCommand::Show { card } => garden::show(&card),
+                GardenCommand::Phase { command } => match command {
+                    PhaseCommand::Add {
+                        board,
+                        name,
+                        r#type,
+                        after,
+                    } => garden::phase_add(&board, &name, &r#type, after.as_deref()),
+                    PhaseCommand::Rm { board, name } => garden::phase_rm(&board, &name),
+                    PhaseCommand::Mv {
+                        board,
+                        name,
+                        before,
+                        after,
+                    } => garden::phase_mv(&board, &name, before.as_deref(), after.as_deref()),
+                    PhaseCommand::Rename {
+                        board,
+                        old_name,
+                        new_name,
+                    } => garden::phase_rename(&board, &old_name, &new_name),
+                    PhaseCommand::SetType {
+                        board,
+                        name,
+                        r#type,
+                    } => garden::phase_set_type(&board, &name, &r#type),
+                },
             };
             if let Err(e) = result {
                 eprintln!("{e}");

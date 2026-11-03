@@ -41,6 +41,7 @@
 
 import { run as runRecascadeSharedWith } from "./adminScripts/recascadeSharedWith.server";
 import { run as runRepairDuplicateSkillsFolders } from "./adminScripts/repairDuplicateSkillsFolders.server";
+import { run as runRepairDuplicateSkillFiles } from "./adminScripts/repairDuplicateSkillFiles.server";
 import { run as runDedupeDailyLogReadmes } from "./adminScripts/migrateDedupeDailyLogReadmes.server";
 import { run as runMergeDuplicateVaultFolders } from "./adminScripts/migrateMergeDuplicateVaultFolders.server";
 import { run as runBackfillSharingRoles } from "./adminScripts/migrateBackfillSharingRoles.server";
@@ -50,6 +51,10 @@ import { run as runBackfillSyncedDailyLogDates } from "./adminScripts/backfillSy
 import { run as runReseedGraphlogSkills } from "./adminScripts/reseedGraphlogSkills.server";
 import { run as runDedupeSummaries } from "./adminScripts/dedupeSummaries.server";
 import { run as runMergeSkillsSyncsCaseVariants } from "./adminScripts/migrateMergeSkillsSyncsCaseVariants.server";
+import { run as runBackfillOrganizations } from "./adminScripts/backfillOrganizations.server";
+import { run as runEnsureOrgKanbanBoard } from "./adminScripts/ensureOrgKanbanBoard.server";
+import { run as runBackfillGuideProjectsBoard } from "./adminScripts/backfillGuideProjectsBoard.server";
+import { run as runMigrateTrashedToArchived } from "./adminScripts/migrateTrashedToArchived.server";
 import type { AdminScriptDefinition } from "./adminScripts/types";
 
 export type { AdminScriptDefinition, AdminScriptRunOpts, AdminScriptResult } from "./adminScripts/types";
@@ -146,6 +151,43 @@ const REGISTRY: AdminScriptDefinition[] = [
     description:
       "Merges duplicate skills/syncs space folders that differ only by capitalization (e.g. 'Syncs' and 'syncs') into one properly-capitalized survivor — content merged (file-name collisions get an auto-dedupe suffix, never silently dropped), connector folders (e.g. a published sync-one-way folder) kept at their original id so a public link survives. Idempotent.",
     run: runMergeSkillsSyncsCaseVariants,
+  },
+  {
+    name: "repair-duplicate-skill-files",
+    label: "Repair duplicate Skill files",
+    description:
+      "Deletes duplicate files (KNOWLEDGE.md, GRAPH.md, ...) inside a Skills folder (any project's, or personal/skills) left by a since-fixed race in ensureSkillFile — keeps the oldest if copies are identical, or the non-default edit if one copy was hand-edited; disagreeing non-default copies are reported and skipped. Idempotent.",
+    run: runRepairDuplicateSkillFiles,
+  },
+  {
+    name: "backfill-organizations",
+    label: "Backfill Organizations",
+    description:
+      "Adds every Human with no Nopal org membership (role defaulted from platform role: Super/Admin -> Guide, Human -> Client — hand-correct any it miscategorizes), and stamps organization_id = Nopal onto every project folder that doesn't have one yet. Idempotent.",
+    run: runBackfillOrganizations,
+  },
+  {
+    name: "ensure-org-kanban-board",
+    label: "Ensure Org Kanban Board",
+    description:
+      "Provisions the org/ Vault Root and its org/kanban-projects/ kanban-garden board (README + starter Seed/Discovery/Design/Done phase folders) for Nopal, and points organizations.kanban_folder_id at it — the vault-plumbing foundation for the Guide-facing All Projects Kanban view (garden/3-growing/guide-projects-phases.md). Idempotent.",
+    argLabel: "Owner email (the Human who'll own the new org/kanban-projects folder)",
+    argRequired: true,
+    run: runEnsureOrgKanbanBoard,
+  },
+  {
+    name: "backfill-guide-projects-board",
+    label: "Backfill Guide Projects Board",
+    description:
+      "Creates a Kanban card for every existing project-n02 project not yet represented anywhere on the org's Projects board (website projects excluded) — completed projects land in the End-type phase, active projects in the Start-type phase (trashed projects are skipped entirely). Idempotent.",
+    run: runBackfillGuideProjectsBoard,
+  },
+  {
+    name: "migrate-trashed-to-archived",
+    label: "Migrate Trashed Projects To Archived",
+    description:
+      "One-time correction: every project currently marked 'trashed' is moved to archived + completed instead, cancelling its 30-day trash-cleanup countdown — 'trashed' going forward is reserved for projects actually meant to be permanently deleted. Idempotent.",
+    run: runMigrateTrashedToArchived,
   },
 ];
 

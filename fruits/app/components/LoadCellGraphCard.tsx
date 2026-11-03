@@ -18,6 +18,9 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors, colors } from "stamps/tokens";
 import { Cluster } from "stamps/Cluster";
+import { ExpandIcon } from "stamps/ExpandIcon";
+import { Modal } from "stamps/Modal";
+import { CircleButton } from "stamps/CircleButton";
 
 /** Builds the URL a download button fetches from, given a raw/cleaned
  * CSV's own fileId. Defaults to the authenticated vault route every caller
@@ -211,29 +214,53 @@ export function LoadCellGraphCard({
 
 type ChartPoint = { x: number; y: number };
 
-/** A small, hand-rolled SVG line chart — no charting dependency (same
- * instinct as `SlopeGauge`'s own hand-rolled SVG dial). Hover anywhere in
- * the plot area to see the nearest point's exact values. */
-function MiniLineChart({
-  title,
-  xLabel,
-  yLabel,
-  points,
-  color,
-  markers = false,
-}: {
+type ChartBodyProps = {
   title: string;
   xLabel: string;
   yLabel: string;
   points: ChartPoint[];
   color: string;
   markers?: boolean;
-}) {
+  width: number;
+  height: number;
+  hoverIdx: number | null;
+  onHoverIdx: (idx: number | null) => void;
+};
+
+/** A small, hand-rolled SVG line chart — no charting dependency (same
+ * instinct as `SlopeGauge`'s own hand-rolled SVG dial). Hover anywhere in
+ * the plot area to see the nearest point's exact values. An expand button
+ * opens the exact same chart, bigger, in a `Modal` — sharing `hoverIdx`
+ * with the inline chart rather than tracking its own, so it reads the same
+ * hovered value either way. */
+function MiniLineChart(props: Omit<ChartBodyProps, "width" | "height" | "hoverIdx" | "onHoverIdx">) {
+  const { title } = props;
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [enlarged, setEnlarged] = useState(false);
+
+  return (
+    <div style={{ flex: "1 1 420px", minWidth: 300 }}>
+      <Cluster gap={2} align="center" style={{ justifyContent: "space-between" }}>
+        <div className={textSize.xs} style={{ fontWeight: 600, marginBottom: 4 }}>
+          {title}
+        </div>
+        <CircleButton size={20} onClick={() => setEnlarged(true)} aria-label={`Enlarge ${title}`}>
+          <ExpandIcon size={11} />
+        </CircleButton>
+      </Cluster>
+      <ChartBody {...props} width={520} height={280} hoverIdx={hoverIdx} onHoverIdx={setHoverIdx} />
+      {enlarged && (
+        <Modal open onClose={() => setEnlarged(false)} title={title} maxWidth={960}>
+          <ChartBody {...props} width={880} height={480} hoverIdx={hoverIdx} onHoverIdx={setHoverIdx} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function ChartBody({ title, xLabel, yLabel, points, color, markers = false, width: W, height: H, hoverIdx, onHoverIdx }: ChartBodyProps) {
   const svgRef = useRef<SVGSVGElement>(null);
 
-  const W = 520;
-  const H = 280;
   const PAD_L = 52;
   const PAD_R = 16;
   const PAD_T = 16;
@@ -258,11 +285,8 @@ function MiniLineChart({
   const hovered = hoverIdx !== null ? points[hoverIdx] : null;
 
   return (
-    <div style={{ flex: "1 1 420px", minWidth: 300 }}>
-      <div className={textSize.xs} style={{ fontWeight: 600, marginBottom: 4 }}>
-        {title}
-      </div>
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={title}>
+    <div>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label={title}>
         {Array.from({ length: yTicks + 1 }, (_, i) => {
           const v = (i / yTicks) * yMax;
           const y = yScale(v);
@@ -337,9 +361,9 @@ function MiniLineChart({
                 nearest = i;
               }
             }
-            setHoverIdx(nearest);
+            onHoverIdx(nearest);
           }}
-          onPointerLeave={() => setHoverIdx(null)}
+          onPointerLeave={() => onHoverIdx(null)}
         />
       </svg>
       <div className={textSize.xs} style={{ color: semanticColors.textSubtle }}>

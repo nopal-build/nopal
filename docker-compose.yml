@@ -221,11 +221,10 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
-      # The letter PDF: the worker prints the public page from the
-      # fruits service (its container port; see fruits' `allowedHosts`),
-      # with the Chromium Dockerfile.dev installs.
-      APP_BASE_URL: http://fruits:3000
-      CHROMIUM_PATH: /usr/bin/chromium
+      # The letter PDF compiles with Typst (a static binary, found on
+      # `PATH` the same way local dev has it after `brew install typst` --
+      # `TYPST_BIN` below overrides this if dev needs a different path).
+      TYPST_BIN: ${TYPST_BIN:-typst}
       # The model key, from the host's `.env`, so a GraphLog stage can run
       # on the dev stack (a letter's brief, 2026-10-28). Empty when the
       # host has none: the stage then says GraphLog isn't configured.

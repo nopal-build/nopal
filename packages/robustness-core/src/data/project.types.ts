@@ -77,8 +77,23 @@ export type ProjectManifest = {
   /** Defaults to "active". Written exclusively via
    * `projectStatus.server.ts`'s `setProjectStatus`, which also keeps
    * `vault_folders.project_status` (a denormalized read cache, same trick
-   * `shared_with` uses for `sharing`) in sync. */
+   * `shared_with` uses for `sharing`) in sync. As of
+   * `garden/3-growing/guide-projects-phases.md`, `completed` is no longer
+   * freely chosen directly — it's DERIVED from `archived` (below) OR the
+   * project's Kanban card sitting in an End-type phase, recomputed by
+   * `setProjectArchived`/the board's card-move hook, not hand-set. Direct
+   * `setProjectStatus` calls still work (an escape hatch, and still the
+   * only way to set/clear `trashed`), just aren't how archiving happens
+   * anymore. */
   status?: ProjectStatus;
+  /** Defaults to `false`. A project-level flag, independent of `status`
+   * (garden/3-growing/guide-projects-phases.md) — archiving ends a
+   * project's active life without the `trashed` 30-day countdown to
+   * permanent deletion. Written exclusively via
+   * `projectStatus.server.ts`'s `setProjectArchived`, which also
+   * recomputes `status` (and keeps `vault_folders.project_archived`, a
+   * denormalized cache, in sync). */
+  archived?: boolean;
   /** This project's collaborators and their Sharing Role — see
    * `projectSharing.server.ts`. Convenience passthrough for callers already
    * resolving the full manifest (e.g. the project rollup page); read
@@ -223,6 +238,22 @@ export function parseProjectStatus(markdown: string): ProjectStatus {
   }
 }
 
+/** Reads just the `archived` field from a README's front matter — same
+ * convention `parseProjectStatus` uses. Defaults to `false` for a
+ * project with no README/front matter, malformed front matter, no
+ * `archived` key, or a non-boolean value. */
+export function parseProjectArchived(markdown: string): boolean {
+  const { frontmatter } = splitFrontmatter(markdown);
+  if (!frontmatter) return false;
+  try {
+    const data = parseYaml(frontmatter);
+    if (!data || typeof data !== "object") return false;
+    return (data as Record<string, unknown>).archived === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Rewrites ONLY the `sharing` key of a README's front matter, preserving
  * every other front-matter field (title/type/layout/...) and the body
@@ -286,6 +317,34 @@ export function withProjectStatus(markdown: string, status: ProjectStatus): stri
   }
   if (status !== DEFAULT_PROJECT_STATUS) data.status = status;
   else delete data.status;
+
+  if (Object.keys(data).length === 0) return body;
+  const yamlText = stringifyYaml(data).trimEnd();
+  return `---\n${yamlText}\n---\n${body}`;
+}
+
+/**
+ * Rewrites ONLY the `archived` key of a README's front matter, preserving
+ * every other field untouched — the sole intended writer of a project's
+ * `archived` flag (`projectStatus.server.ts`'s `setProjectArchived`).
+ * Setting the default (`false`) removes the `archived` key entirely, same
+ * convention `withProjectStatus` uses for the default status.
+ */
+export function withProjectArchived(markdown: string, archived: boolean): string {
+  const { frontmatter, body } = splitFrontmatter(markdown);
+  let data: Record<string, unknown> = {};
+  if (frontmatter) {
+    try {
+      const parsed = parseYaml(frontmatter);
+      if (parsed && typeof parsed === "object") {
+        data = { ...(parsed as Record<string, unknown>) };
+      }
+    } catch {
+      data = {};
+    }
+  }
+  if (archived) data.archived = true;
+  else delete data.archived;
 
   if (Object.keys(data).length === 0) return body;
   const yamlText = stringifyYaml(data).trimEnd();
@@ -464,6 +523,7 @@ export function parseProjectManifest(markdown: string): {
         type: typeof data.type === "string" ? data.type : undefined,
         layout: data.layout,
         status: parseStatus((data as Record<string, unknown>).status),
+        archived: (data as Record<string, unknown>).archived === true,
         sharing: parseSharingList((data as Record<string, unknown>).sharing),
       },
       body,
