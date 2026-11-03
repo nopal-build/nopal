@@ -64,15 +64,17 @@ export function resolveProjectTab(requested: string | null, allowed: readonly Pr
 
 /** The file rows a member with these features is sent: only rows that
  * sit in a tab they're given; without `costs`, no cost file at all (a
- * photo of a receipt is a cost file) and no cost read off anything;
- * without `logbook`, not the log's words around an attachment. */
+ * photo of a receipt is a cost file), no cost read off anything, and
+ * nothing still Unsorted (a file not yet read may be a receipt; 2026-11-03,
+ * when Clients got Files); without `logbook`, not the log's words around
+ * an attachment. */
 export function rowsForReader(rows: readonly ProjectFileRow[], features: readonly Feature[]): ProjectFileRow[] {
   const folders = new Set(tabsFor(features).flatMap((t) => TAB_FOLDERS[t] ?? []));
   const costs = features.includes("costs");
   const logbook = features.includes("logbook");
   return rows
     .filter((r) => r.folders.some((f) => folders.has(f)))
-    .filter((r) => costs || !r.folders.includes("costs"))
+    .filter((r) => costs || (!r.folders.includes("costs") && !r.folders.includes("unsorted")))
     .map((r) => (costs && logbook ? r : { ...r, cost: costs ? r.cost : null, context: logbook ? r.context : "" }));
 }
 
