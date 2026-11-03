@@ -23,6 +23,8 @@ const calls = vi.hoisted(() => ({
 const fx = vi.hoisted(() => ({
   setupIntent: {} as Record<string, unknown>,
   invoice: {} as Record<string, unknown>,
+  pauseSchedules: [] as unknown[],
+  subStatus: "active",
 }));
 
 vi.mock("robustness-core/data/generic.server", () => {
@@ -74,7 +76,7 @@ vi.mock("robustness-core/data/stripe.server", () => {
         subscription: "sub_1",
         status: "active",
         end_behavior: "release",
-        pause_schedules: [],
+        pause_schedules: fx.pauseSchedules,
         current_phase: { start_date: 1 },
         phases: [{ start_date: 1, end_date: null, items: [{ price: price("guide") }] }],
       }),
@@ -86,7 +88,7 @@ vi.mock("robustness-core/data/stripe.server", () => {
       },
       retrieve: async () => ({
         id: "sub_1",
-        status: "active",
+        status: fx.subStatus,
         cancel_at: null,
         metadata: { project_folder_id: "attic" },
         items: { data: [{ price: price("guide"), current_period_end: Math.floor(Date.now() / 1000) + 30 * day }] },
@@ -101,7 +103,7 @@ vi.mock("robustness-core/data/stripe.server", () => {
   };
 });
 
-import { applyPlanEvent, getPlan, isOnHold, pauseCheck, setPlanLevel } from "robustness-core/data/billingPlans.server";
+import { applyPlanEvent, approveResume, getPlan, isOnHold, pauseCheck, pausePlan, setPlanLevel } from "robustness-core/data/billingPlans.server";
 import { dayIn, firstBillingTime } from "robustness-core/data/billingRules";
 
 const TODAY = dayIn(new Date());
@@ -124,6 +126,8 @@ beforeEach(() => {
   calls.scheduleCreates.length = 0;
   calls.subscriptionUpdates.length = 0;
   calls.scheduleUpdates.length = 0;
+  fx.pauseSchedules = [];
+  fx.subStatus = "active";
 });
 
 describe("the guide picks a level", () => {
@@ -208,6 +212,27 @@ it("a plan carries no discount: the schedule bills the level's price", async () 
   const phase = (calls.scheduleCreates[0].phases as Record<string, unknown>[])[0];
   expect(phase.discounts).toBeUndefined();
   expect(phase.items).toEqual([{ price: "price_guide" }]);
+});
+
+describe("the guide's own controls", () => {
+  it("a guide's pause says who paused, and keeps it while paused", async () => {
+    await setPlanLevel({ folderId: "attic", level: "guide", startDay: TODAY });
+    await linked();
+    fx.pauseSchedules = [{ pause: { pause_at: 2_000_000_000, status: { type: "scheduled" } } }];
+    const notices = await pausePlan((await getPlan("attic"))!, "guide");
+    expect(notices[0]).toMatchObject({ type: "pause_scheduled", by: "guide" });
+    expect(plan()).toMatchObject({ status: "pause_scheduled", pause_by: "guide" });
+  });
+
+  it("a guide resumes a pause nobody asked to end", async () => {
+    await setPlanLevel({ folderId: "attic", level: "guide", startDay: TODAY });
+    await linked();
+    fx.subStatus = "paused";
+    await applyPlanEvent(event("customer.subscription.paused", { id: "sub_1" }));
+    expect(plan()?.status).toBe("paused");
+    fx.subStatus = "active";
+    expect((await approveResume("attic"))[0]).toMatchObject({ type: "debit_moved", reason: "resume" });
+  });
 });
 
 describe("work on hold", () => {

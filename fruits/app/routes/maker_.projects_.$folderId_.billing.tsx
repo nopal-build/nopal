@@ -8,7 +8,11 @@
 // - `plan`: set the project's plan level (or None) and its monthly
 //   billing day, which a new plan must have; emails what it changes.
 //   Plans take no discount: every client pays the same monthly rate.
-// - `approve_resume`: approve a Client's request to resume a paused plan.
+// - `approve_resume`: resume a paused plan, on a Client's request or the
+//   guide's own say.
+// - `pause`, `undo_pause`, `cancel`: the guide's own plan controls
+//   (Austin, 2026-11-03): the same rules as the Client's (a pause from the
+//   next billing date; a cancel with 30 days' notice).
 // - `bill`: raise a bill, with any discount off a priced kind and any of
 //   the project's receipts or PDFs
 //   attached, and email it to every Client on the project.
@@ -21,7 +25,7 @@ import { runsPeople } from "../data/projectPeople.server";
 import { attachableFiles, clientsOn, sendPaymentRequest } from "../data/payments.server";
 import { cancelCharge, createCharge, getCharge } from "robustness-core/data/billing.server";
 import { hasTypedAmount, isMenuPlan, isOneTimeKind, parseDiscountPercent, parseUsdToCents } from "robustness-core/data/billingRules";
-import { approveResume, setPlanLevel } from "robustness-core/data/billingPlans.server";
+import { approveResume, cancelPlan, getPlan, pausePlan, setPlanLevel, undoPause } from "robustness-core/data/billingPlans.server";
 import { sendPlanNotices } from "../data/billingNotices.server";
 
 export type BillingActionResult = { ok: true; message?: string } | { error: string };
@@ -75,6 +79,21 @@ export async function action({ request, params }: ActionFunctionArgs): Promise<B
     } catch (err) {
       return { error: err instanceof Error ? err.message : "Couldn't resume it." };
     }
+  }
+
+  if (intent === "pause" || intent === "undo_pause" || intent === "cancel") {
+    const plan = await getPlan(folder._id);
+    if (!plan) return { error: "This project has no plan." };
+    try {
+      if (intent === "pause") await sendPlanNotices(await pausePlan(plan, "guide"), origin);
+      else if (intent === "undo_pause") await undoPause(plan);
+      else await sendPlanNotices(await cancelPlan(plan), origin);
+    } catch (err) {
+      console.error(`billing: guide ${intent} on ${folder._id} failed`, err);
+      return { error: err instanceof Error ? err.message : "That didn't go through." };
+    }
+    const message = intent === "pause" ? "Paused from the next billing date, and the client has an email." : intent === "cancel" ? "Ending, and the client has an email." : "The pause is off.";
+    return { ok: true, message };
   }
 
   if (intent === "bill") {

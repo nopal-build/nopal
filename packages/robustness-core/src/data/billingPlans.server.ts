@@ -84,6 +84,8 @@ export type BillingPlan = Data & {
   pending_level: MenuPlan | null;
   pending_at: string | null;
   pause_at: string | null;
+  /** Who asked for the pause: a guide's pause isn't the client's to undo. */
+  pause_by?: "client" | "guide" | null;
   paused_at: string | null;
   resume_requested_at: string | null;
   resume_requested_by: string | null;
@@ -104,7 +106,7 @@ export type PlanNotice =
   | { type: "setup_requested"; folderId: string; level: MenuPlan }
   | { type: "plan_started"; folderId: string; level: MenuPlan; firstDebit: string }
   | { type: "debit_moved"; folderId: string; level: MenuPlan; date: string; amountCents: number; reason: "change" | "resume" }
-  | { type: "pause_scheduled"; folderId: string; date: string }
+  | { type: "pause_scheduled"; folderId: string; date: string; by: "client" | "guide" }
   | { type: "resume_requested"; folderId: string; byHumanId: string }
   | { type: "canceling"; folderId: string; date: string }
   | { type: "payment_failed"; folderId: string; amountCents: number }
@@ -147,6 +149,7 @@ function emptyPlan(): Omit<BillingPlan, "id" | "_id"> {
     pending_level: null,
     pending_at: null,
     pause_at: null,
+    pause_by: null,
     paused_at: null,
     resume_requested_at: null,
     resume_requested_by: null,
@@ -225,11 +228,14 @@ export async function setPlanLevel(input: {
   return changePlan(plan, input.level, input.now ?? new Date());
 }
 
-/** A guide approves a Client's resume request: billing resumes now, on a
- * new full month from today. */
+/** A guide resumes a paused plan, on a Client's request or their own
+ * (Austin, 2026-11-03): billing resumes now, on a new full month from
+ * today. */
 export async function approveResume(folderId: string): Promise<PlanNotice[]> {
   const plan = await getPlan(folderId);
-  if (!plan?.stripe_schedule_id || plan.status !== "resume_requested") throw new Error("Nothing is waiting to resume");
+  if (!plan?.stripe_schedule_id || (plan.status !== "resume_requested" && plan.status !== "paused")) {
+    throw new Error("Nothing is paused to resume");
+  }
   const schedule = await stripe().subscriptionSchedules.retrieve(plan.stripe_schedule_id);
   const entry = schedule.pause_schedules?.[0];
   await stripe().subscriptionSchedules.update(plan.stripe_schedule_id, {
@@ -300,15 +306,17 @@ export async function changePlan(plan: BillingPlan, level: MenuPlan, now = new D
   ];
 }
 
-/** Pause from the next billing date. Undoable until then. */
-export async function pausePlan(plan: BillingPlan): Promise<PlanNotice[]> {
+/** Pause from the next billing date, by a Client or the guide. Undoable
+ * until then, by whoever can (a guide's pause is the guide's to undo). */
+export async function pausePlan(plan: BillingPlan, by: "client" | "guide" = "client"): Promise<PlanNotice[]> {
   if (plan.status !== "active" || !plan.stripe_schedule_id || !plan.current_period_end) throw new Error("Only a running plan can pause");
   const at = Math.floor(new Date(plan.current_period_end).getTime() / 1000);
   await stripe().subscriptionSchedules.update(plan.stripe_schedule_id, {
     pause_schedules: [{ pause: { pause_at: { type: "timestamp", timestamp: at } } }],
   });
+  await savePlan(plan._id, { pause_by: by });
   await syncPlanFromStripe(plan._id);
-  return [{ type: "pause_scheduled", folderId: plan._id, date: plan.current_period_end }];
+  return [{ type: "pause_scheduled", folderId: plan._id, date: plan.current_period_end, by }];
 }
 
 export async function undoPause(plan: BillingPlan): Promise<void> {
@@ -529,6 +537,7 @@ export async function syncPlanFromStripe(folderId: string): Promise<BillingPlan 
     pending_at: pendingLevel && pendingLevel !== currentLevel && nextPhase ? iso(nextPhase.start_date) : null,
     pause_at: pauseWaiting && pauseAt ? iso(pauseAt) : null,
     paused_at: status === "paused" || status === "resume_requested" ? (plan.paused_at ?? new Date().toISOString()) : null,
+    pause_by: status === "pause_scheduled" || status === "paused" || status === "resume_requested" ? (plan.pause_by ?? null) : null,
     pause_warned_at: status === "paused" || status === "resume_requested" ? plan.pause_warned_at : null,
     pause_alerted_at: status === "paused" || status === "resume_requested" ? plan.pause_alerted_at : null,
     past_due_since: status === "past_due" ? (plan.past_due_since ?? new Date().toISOString()) : null,

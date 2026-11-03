@@ -189,6 +189,52 @@ function BillThisProject({
  * billing day the guide must set (Austin, 2026-11-03). Once
  * a client has linked a bank account, a new level is a plan change at
  * the next billing date, and None ends the plan when the month closes. */
+/** The guide's own pause and end (Austin, 2026-11-03), on the same rules
+ * as the client's: a pause starts at the next billing date and can be
+ * undone until then; ending takes the terms' 30 days' notice. */
+function GuidePlanControls({ plan, action }: { plan: PlanView; action: string }) {
+  const fetcher = useFetcher<BillingActionResult>();
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  const busy = fetcher.state !== "idle";
+  const result = fetcher.state === "idle" ? fetcher.data : undefined;
+  const send = (intent: string) => fetcher.submit({ intent }, { method: "post", action });
+  if (!plan.canPause && !plan.canUndoPause && !plan.canCancel) return null;
+  return (
+    <Stack gap={2}>
+      <Cluster gap={3} align="center">
+        {plan.canPause && (
+          <button type="button" className={button({ variant: "secondary" })} disabled={busy} onClick={() => send("pause")}>
+            Pause from the next billing date
+          </button>
+        )}
+        {plan.canUndoPause && (
+          <button type="button" className={button({ variant: "secondary" })} disabled={busy} onClick={() => send("undo_pause")}>
+            Undo the pause
+          </button>
+        )}
+        {plan.canCancel &&
+          (confirmEnd ? (
+            <>
+              <span className={textSize.sm}>End the plan? It ends on the first renewal date at least 30 days from today.</span>
+              <button type="button" className={button({ variant: "secondary" })} disabled={busy} onClick={() => send("cancel")}>
+                End it
+              </button>
+              <button type="button" className={`${link} ${textSize.sm}`} onClick={() => setConfirmEnd(false)}>
+                Keep it
+              </button>
+            </>
+          ) : (
+            <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={() => setConfirmEnd(true)}>
+              End the plan
+            </button>
+          ))}
+      </Cluster>
+      {result && "error" in result && <Notice tone="danger">{result.error}</Notice>}
+      {result && "ok" in result && result.message && <Notice tone="subtle">{result.message}</Notice>}
+    </Stack>
+  );
+}
+
 function PlanPicker({
   action,
   plan,
@@ -215,7 +261,7 @@ function PlanPicker({
         {plan.onHold && <Badge>Work on hold</Badge>}
       </Cluster>
       <Notice tone="subtle">{plan.line}</Notice>
-      {plan.canApproveResume && (
+      {(plan.canApproveResume || plan.canResumeNow) && (
         <Cluster gap={3} align="center">
           <button
             type="button"
@@ -223,11 +269,12 @@ function PlanPicker({
             disabled={resume.state !== "idle"}
             onClick={() => resume.submit({ intent: "approve_resume" }, { method: "post", action })}
           >
-            Approve the resume
+            {plan.canApproveResume ? "Approve the resume" : "Resume the plan"}
           </button>
           <Notice tone="subtle">Billing starts again today, on a new monthly date.</Notice>
         </Cluster>
       )}
+      <GuidePlanControls plan={plan} action={action} />
       {resumed && "error" in resumed && <Notice tone="danger">{resumed.error}</Notice>}
       {resumed && "ok" in resumed && resumed.message && <Notice tone="subtle">{resumed.message}</Notice>}
       <fetcher.Form method="post" action={action}>

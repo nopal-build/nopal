@@ -14,7 +14,8 @@ import { listChargesForProjects } from "robustness-core/data/billing.server";
 import { formatUsd } from "robustness-core/data/billingRules";
 import { listPlans } from "robustness-core/data/billingPlans.server";
 import { billingDate } from "../data/billingNotices.server";
-import { loadLedger, UPCOMING_DAYS, type LedgerRow, type LedgerState } from "../data/paymentsLedger.server";
+import { loadLedger, UPCOMING_DAYS } from "../data/paymentsLedger.server";
+import type { LedgerRow, LedgerState } from "../data/paymentsLedger.server";
 import { navFor } from "../data/nav.server";
 import { isStaff } from "../data/projectPeople.server";
 import { AppLayout } from "../components/AppLayout";
@@ -52,6 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     needsYou: ledger.needsYou.map(view),
     upcoming: ledger.upcoming.map(view),
     recent: ledger.recent.map(view),
+    upcomingDays: UPCOMING_DAYS,
   };
 }
 
@@ -120,7 +122,7 @@ function Section({ title, rows, empty }: { title: string; rows: RowView[]; empty
 }
 
 export default function MakerPayments() {
-  const { needsYou, upcoming, recent } = useLoaderData<typeof loader>();
+  const { needsYou, upcoming, recent, upcomingDays } = useLoaderData<typeof loader>();
   return (
     <AppLayout>
       <CenterContent maxWidth={820}>
@@ -132,7 +134,7 @@ export default function MakerPayments() {
             </p>
           </Stack>
           <Section title="Needs you" rows={needsYou} empty={null} />
-          <Section title="Upcoming" rows={upcoming} empty={`Nothing due in the next ${UPCOMING_DAYS} days.`} />
+          <Section title="Upcoming" rows={upcoming} empty={`Nothing due in the next ${upcomingDays} days.`} />
           <Section title="Recent" rows={recent} empty="No payments yet." />
         </Stack>
       </CenterContent>

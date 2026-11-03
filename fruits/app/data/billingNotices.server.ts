@@ -108,13 +108,24 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
         {
           to: "clients",
           subject: `${project}'s plan pauses on ${billingDate(notice.date)}`,
-          lines: [
-            `${project}'s plan pauses on ${billingDate(notice.date)}. Nothing is billed while it's paused.`,
-            "You can undo this from your profile until then. When you're ready to come back, ask to resume there and your guide will confirm.",
-          ],
+          lines:
+            notice.by === "guide"
+              ? [
+                  `Your guide paused ${project}'s plan from ${billingDate(notice.date)}. Nothing is billed while it's paused.`,
+                  "Your guide will pick it back up with you. You can also ask to resume from your profile.",
+                ]
+              : [
+                  `${project}'s plan pauses on ${billingDate(notice.date)}. Nothing is billed while it's paused.`,
+                  "You can undo this from your profile until then. When you're ready to come back, ask to resume there and your guide will confirm.",
+                ],
           button: profile,
         },
-        { to: "guides", subject: `${project}'s plan pauses on ${billingDate(notice.date)}`, lines: [`The client paused ${project}'s plan from ${billingDate(notice.date)}.`], button: maker },
+        {
+          to: "guides",
+          subject: `${project}'s plan pauses on ${billingDate(notice.date)}`,
+          lines: [`${notice.by === "guide" ? "A guide" : "The client"} paused ${project}'s plan from ${billingDate(notice.date)}.`],
+          button: maker,
+        },
       ];
     case "resume_requested": {
       const [who] = await getHumansById([notice.byHumanId]);
@@ -286,6 +297,8 @@ export type PlanView = {
   canUndoPause: boolean;
   canRequestResume: boolean;
   canApproveResume: boolean;
+  /** A guide resuming a pause nobody asked to end. */
+  canResumeNow: boolean;
   canCancel: boolean;
   canUpdateBank: boolean;
   awaitingSetup: boolean;
@@ -344,9 +357,11 @@ export function describePlan(plan: BillingPlan | null, audience: "guide" | "clie
     line,
     canChange: status === "active" || status === "pause_scheduled" || status === "past_due",
     canPause: status === "active",
-    canUndoPause: status === "pause_scheduled",
+    // A guide's pause isn't the client's to undo.
+    canUndoPause: status === "pause_scheduled" && (audience === "guide" || plan?.pause_by !== "guide"),
     canRequestResume: status === "paused",
     canApproveResume: status === "resume_requested",
+    canResumeNow: audience === "guide" && status === "paused",
     canCancel: ["active", "pause_scheduled", "paused", "resume_requested", "past_due"].includes(status),
     canUpdateBank: ["active", "pause_scheduled", "paused", "resume_requested", "past_due"].includes(status),
     awaitingSetup: status === "awaiting_setup",
