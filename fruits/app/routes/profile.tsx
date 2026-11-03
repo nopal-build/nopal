@@ -64,6 +64,10 @@ import {
   revokeApiToken,
   type ApiToken,
 } from "robustness-core/data/apiTokens.server";
+import {
+  getOrganization,
+  getOrganizationsForHuman,
+} from "robustness-core/data/organizations.server";
 import { AppLayout } from "../components/AppLayout";
 import { useHome } from "../hooks/useUser";
 import { displayName } from "robustness-core/data/humanNames";
@@ -93,14 +97,24 @@ function isAdminOrSuper(user: Human): boolean {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  const [waivers, relatedHumans, passkeys, relationships, apiTokens] =
+  const [waivers, relatedHumans, passkeys, relationships, apiTokens, organizationMemberships] =
     await Promise.all([
       getLegalDocumentsByEmail(user.email),
       getRelatedHumans(user, { includeRevoked: true }),
       getPasskeysByHuman(user._id),
       getRelationshipsForHuman(user._id),
       getApiTokensByHuman(user._id),
+      getOrganizationsForHuman(user._id),
     ]);
+  // Static, informational only (not editable here) — which Organization
+  // this Human belongs to. Nopal is the one Organization that exists
+  // today, but this reads it generally rather than hard-coding the name,
+  // so a second Organization needs no change here (garden/3-growing/
+  // organizations.md). `undefined` only if the backfill hasn't reached
+  // this Human yet.
+  const organization = organizationMemberships[0]
+    ? await getOrganization(organizationMemberships[0].organization_id)
+    : undefined;
 
   // Revoked relationships are excluded from `relatedHumans` for regular
   // Human accounts, but Admins/Supers see *everyone* regardless of
@@ -127,6 +141,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     apiTokens,
     inviteExpired,
     revokedRelationships,
+    organizationName: organization?.name ?? null,
   };
 }
 
@@ -1557,6 +1572,7 @@ export default function Profile() {
     apiTokens: allApiTokens,
     inviteExpired,
     revokedRelationships,
+    organizationName,
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const { revalidate } = useRevalidator();
@@ -2044,8 +2060,23 @@ export default function Profile() {
                   )}
                 </div>
 
+                {organizationName && (
+                  <>
+                    <hr style={{ borderColor: "currentColor", opacity: 0.12 }} />
+
+                    {/* ── Organization (static, not editable here) ───── */}
+                    <div className="flex flex-col gap-2">
+                      <label className="purple-text font-bold text-sm">
+                        Organization
+                      </label>
+                      <span>{organizationName}</span>
+                    </div>
+                  </>
+                )}
+
                 <hr style={{ borderColor: "currentColor", opacity: 0.12 }} />
 
+                {/* ── Email ────────────────────────────── */}
                 {/* ── Email ─────────────────────────────────────────── */}
                 <div className="flex flex-col gap-3">
                   <label className="purple-text font-bold text-sm">Email</label>
