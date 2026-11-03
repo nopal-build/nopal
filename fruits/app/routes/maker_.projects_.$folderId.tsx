@@ -16,6 +16,8 @@ import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { AppLayout } from "../components/AppLayout";
 import { MakerErrorBoundary } from "../components/MakerErrorBoundary";
 import { ProjectPeople } from "../components/ProjectPeople";
+import { ProjectPayments } from "../components/ProjectPayments";
+import { projectPaymentsViews } from "../data/projectPaymentsView.server";
 import { CenterContent } from "stamps/CenterContent";
 import { Cluster } from "stamps/Cluster";
 import { Stack } from "stamps/Stack";
@@ -39,7 +41,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const staff = isStaff(user);
   const [project, everyone, nav] = await Promise.all([peopleOn(folder), candidatesFor(user), navFor(user._id)]);
+  const payments = (await projectPaymentsViews([project], url.origin)).get(project.id)!;
   return {
+    payments,
     user: { name: user.name ?? null, email: user.email, role: user.role },
     project,
     everyone,
@@ -65,7 +69,7 @@ export function ErrorBoundary() {
 }
 
 export default function MakerProject() {
-  const { project, everyone, groups, staff } = useLoaderData<typeof loader>();
+  const { project, everyone, groups, staff, payments } = useLoaderData<typeof loader>();
   const subtle = { color: semanticColors.textSubtle };
   return (
     <AppLayout>
@@ -80,9 +84,6 @@ export default function MakerProject() {
               <Link to={project.href} className={`${link} ${textSize.sm}`}>
                 Open the project →
               </Link>
-              <Link to={`/maker/projects/${project.id}/billing`} className={`${link} ${textSize.sm}`}>
-                Billing →
-              </Link>
             </Cluster>
           </Stack>
 
@@ -95,6 +96,10 @@ export default function MakerProject() {
               Only an admin can make a Guide.
             </p>
           )}
+
+          <Surface className={sprinkles({ p: 4 })}>
+            <ProjectPayments projectId={project.id} {...payments} />
+          </Surface>
         </Stack>
       </CenterContent>
     </AppLayout>

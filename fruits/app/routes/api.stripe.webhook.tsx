@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { applyStripeEvent } from "robustness-core/data/billing.server";
 import { stripe } from "robustness-core/data/stripe.server";
+import { sendPlanNotices } from "../data/billingNotices.server";
 
 /**
  * POST /api/stripe/webhook
@@ -10,8 +11,9 @@ import { stripe } from "robustness-core/data/stripe.server";
  * `request.text()` and never `request.json()`; server.js has no JSON body
  * parser in front of it. A bad signature is a 400 and nothing is read.
  *
- * What each event writes is `applyStripeEvent`'s. Anything that throws
- * there returns 500 so Stripe retries it.
+ * What each event writes is `applyStripeEvent`'s, and the emails it calls
+ * for are `sendPlanNotices`'s. Anything that throws while applying returns
+ * 500 so Stripe retries it.
  *
  * Locally: `stripe listen --forward-to localhost:3001/api/stripe/webhook`
  * prints the STRIPE_WEBHOOK_SECRET to use.
@@ -40,7 +42,10 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    const applied = await applyStripeEvent(event);
+    const { applied, notices } = await applyStripeEvent(event);
+    // Emails go after the event is recorded; a failed send doesn't make
+    // Stripe resend an event that has already been applied.
+    await sendPlanNotices(notices, new URL(request.url).origin);
     return Response.json({ received: true, applied });
   } catch (err) {
     console.error(`stripe-webhook: ${event.type} ${event.id} failed`, err);

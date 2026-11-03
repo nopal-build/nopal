@@ -18,12 +18,12 @@ import {
   ONE_TIME_LABELS,
   formatUsd,
   type MenuPlan,
-  type OneTimeKind,
+  type PricedKind,
 } from "robustness-core/data/billingRules";
 
 type Item =
   | { key: MenuPlan; name: string; cents: number; monthly: true }
-  | { key: Exclude<OneTimeKind, "custom">; name: string; cents: number; monthly: false };
+  | { key: PricedKind; name: string; cents: number; monthly: false };
 
 const ITEMS: Item[] = [
   { key: "light_guide", name: MENU_PLAN_LABELS.light_guide, cents: 1_500_00, monthly: true },

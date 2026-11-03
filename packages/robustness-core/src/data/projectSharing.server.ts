@@ -37,6 +37,7 @@ import { parseCreatorRemoved, parseProjectSharing, withProjectSharing, type Proj
 import { CLIENT_ROLE, GUIDING_ROLE, reachesProjectWork } from "./sharingRoles.server";
 import { featuresOf, groupOf, type Feature } from "./features";
 import { isWebsiteFolder } from "./vaultFolderTypes";
+import { projectOnHold } from "./planHold.server";
 import { query, formatRecord } from "./generic.server";
 import { getHumanById, getHumansById, isStaff, type Human } from "./humans.server";
 
@@ -149,7 +150,12 @@ export async function getProjectRole(
 ): Promise<ResolvedProjectRole | null> {
   const entry = (await getProjectSharing(projectFolder)).find((e) => e.human === humanId);
   // A name that isn't a group is no role at all.
-  return entry && groupOf(entry.role) ? resolveRole(entry.role) : null;
+  if (!entry || !groupOf(entry.role)) return null;
+  const role = resolveRole(entry.role);
+  // Work on hold for a missing bank link: a Client keeps the role (the pay
+  // pages and the hold notice read it) but reaches none of the project.
+  if (entry.role === CLIENT_ROLE && (await projectOnHold(projectFolder._id))) return { ...role, features: [] };
+  return role;
 }
 
 /** The role name `humanId` holds in a sharing list already in hand. */

@@ -59,6 +59,11 @@ import { ownLatestReading } from "robustness-core/data/dashboard.server";
 import { navFor } from "../data/nav.server";
 import { SteepGauge } from "../components/SteepGauge";
 import { LettersTile } from "../components/LettersTile";
+import { PaymentsTile } from "../components/PaymentsTile";
+import { isPayable, listChargesForProject } from "robustness-core/data/billing.server";
+import { formatUsd } from "robustness-core/data/billingRules";
+import { CLIENT_ROLE } from "robustness-core/data/sharingRoles.server";
+import { projectHold } from "robustness-core/data/planHold.server";
 import { AppLayout } from "../components/AppLayout";
 import { CardTabs } from "../components/stamps-candidates/CardTabs";
 import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
@@ -102,6 +107,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const sharing = await getProjectSharing(folder);
   const own = sharing.find((e) => e.human === user._id);
   const role = own && groupOf(own.role) ? resolveRole(own.role) : null;
+  // Work on hold for money 10 days past due: a Client sees only what to
+  // pay (Austin, 2026-11-03). The APIs refuse them too (`getProjectRole`).
+  if (own?.role === CLIENT_ROLE) {
+    const hold = await projectHold(folder._id);
+    if (hold?.kind === "bill") return redirect(`/pay/${hold.chargeId}`);
+    if (hold) return redirect(`/pay/plan/${folder._id}`);
+  }
   const inCache = canViewFolder(user._id, folder);
   const features = role ? role.features : inCache ? featuresOf("Observer") : [];
   // Sensor Data only ever shows up on a project that actually has a
@@ -273,6 +285,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     steep: role?.features.includes("steepTap") && getProjectStatus(folder) === "active"
       ? { mine: await ownLatestReading(user._id, folder._id) }
       : null,
+    // A Client's open bills on this project (payments seed); nobody
+    // else sees the tile.
+    openBills:
+      own?.role === CLIENT_ROLE
+        ? (await listChargesForProject(folder._id))
+            .filter(isPayable)
+            .map((c) => ({ id: c._id, label: c.label, amount: formatUsd(c.amount_cents), failed: c.status === "failed" }))
+        : [],
     // A client has no Vault: a photo opens as itself.
     openInVault: inCache,
     ...(await navFor(user._id)),
@@ -478,7 +498,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, sharedLetters, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, sharedLetters, openBills, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders, loadCellGraphs } = project;
@@ -665,7 +685,7 @@ export default function NewspaperRoute() {
               ← My Projects
             </Link>
           )}
-          {(steep || seeding?.mine || sharedLetters.length > 0) && (
+          {(steep || seeding?.mine || sharedLetters.length > 0 || openBills.length > 0) && (
             <Cluster gap={6} align="flex-start" style={{ justifyContent: "space-between" }}>
               {steep && <SteepGauge projectFolderId={folder._id} mine={steep.mine} size="compact" />}
               <Stack gap={4} align="flex-end" style={{ flex: 1 }}>
@@ -673,6 +693,8 @@ export default function NewspaperRoute() {
                 {seeding?.mine && <SeedPacket projectFolderId={folder._id} files={seeding.mine} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
                 {/* What a guide has shared, only when something is. */}
                 <LettersTile links={sharedLetters} />
+                {/* A bill the guide sent, only to a Client, only while open. */}
+                <PaymentsTile bills={openBills} />
               </Stack>
             </Cluster>
           )}

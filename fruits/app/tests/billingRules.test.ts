@@ -5,10 +5,18 @@
 import { describe, expect, it } from "vitest";
 import {
   addMonthsClamped,
+  billDueAt,
+  cancelEffectiveAt,
+  holdStartsAt,
   CUSTOM_AMOUNT_MAX_CENTS,
-  firstBillingDay,
+  dayIn,
+  discounted,
+  discountNote,
+  firstBillingTime,
+  isSettableFirstBillingDay,
   formatUsd,
   lookupKeyFor,
+  parseDiscountPercent,
   parseUsdToCents,
   pauseMilestone,
   planChangeEffectiveAt,
@@ -28,15 +36,23 @@ describe("addMonthsClamped", () => {
   });
 });
 
-describe("firstBillingDay", () => {
-  it("is the day the form was finished when the guide set no start", () => {
-    expect(day(firstBillingDay(d("2026-10-31")))).toBe("2026-10-31");
+describe("the first billing day", () => {
+  // 2026-11-03 at 6am UTC is still 2026-11-02 in Mountain time.
+  const now = new Date("2026-11-03T06:00:00Z");
+  it("reads days in Mountain time", () => {
+    expect(dayIn(now)).toBe("2026-11-02");
   });
-  it("is the guide's start date when it is still ahead", () => {
-    expect(day(firstBillingDay(d("2026-11-02"), d("2026-11-15")))).toBe("2026-11-15");
+  it("can be today or later", () => {
+    expect(isSettableFirstBillingDay("2026-11-02", now)).toBe(true);
+    expect(isSettableFirstBillingDay("2026-12-01", now)).toBe(true);
   });
-  it("ignores a guide start date already passed", () => {
-    expect(day(firstBillingDay(d("2026-11-02"), d("2026-10-01")))).toBe("2026-11-02");
+  it("can't be a day already gone, or something that isn't a day", () => {
+    expect(isSettableFirstBillingDay("2026-11-01", now)).toBe(false);
+    expect(isSettableFirstBillingDay("", now)).toBe(false);
+    expect(isSettableFirstBillingDay("12/01/2026", now)).toBe(false);
+  });
+  it("bills at noon UTC, so it never lands on the day before in Mountain time", () => {
+    expect(dayIn(firstBillingTime("2026-12-01"))).toBe("2026-12-01");
   });
 });
 
@@ -84,4 +100,36 @@ describe("custom amounts", () => {
 
 it("keys Stripe prices by item", () => {
   expect(lookupKeyFor("guide")).toBe("nopal_guide");
+});
+
+describe("a guide's discount", () => {
+  it("takes a whole percent, blank or 0 meaning none", () => {
+    expect(parseDiscountPercent("20")).toBe(20);
+    expect(parseDiscountPercent(" 15% ")).toBe(15);
+    expect(parseDiscountPercent("")).toBeNull();
+    expect(parseDiscountPercent("0")).toBeNull();
+  });
+  it("refuses 100, fractions and junk", () => {
+    for (const bad of ["100", "12.5", "-5", "abc"]) expect(parseDiscountPercent(bad), bad).toBe("invalid");
+  });
+  it("comes off the fixed price to the cent", () => {
+    expect(discounted(250_00, 20)).toBe(200_00);
+    expect(discounted(333_33, 15)).toBe(283_33);
+    expect(discounted(250_00, null)).toBe(250_00);
+    expect(discountNote(250_00, 20)).toBe("20% off $250");
+    expect(discountNote(null, 20)).toBeNull();
+  });
+});
+
+describe("the terms' timing", () => {
+  it("a bill is due 30 days after it's sent, and holds 10 days after that", () => {
+    expect(day(billDueAt("2026-11-03T12:00:00Z"))).toBe("2026-12-03");
+    expect(day(holdStartsAt("2026-12-03T12:00:00Z"))).toBe("2026-12-13");
+  });
+  it("a cancel takes 30 days' notice, then the next billing date", () => {
+    // Next billing date 3 days off: ends the one after.
+    expect(day(cancelEffectiveAt(d("2026-11-06"), d("2026-11-03")))).toBe("2026-12-06");
+    // 31 days off: ends then.
+    expect(day(cancelEffectiveAt(d("2026-12-04"), d("2026-11-03")))).toBe("2026-12-04");
+  });
 });

@@ -1,47 +1,30 @@
-// app/routes/maker_.projects_.$folderId_.billing.tsx → /maker/projects/:id/billing
-// A project's billing, for its Guide (payments seed): raise a one-time
-// charge for someone on the project, copy its pay link to send them, see
-// whether it's paid, withdraw one nobody has paid. The guide sends the
-// link; O.No doesn't email it, so the ask comes from a person. Same
-// access as the people page: the project's Guide or an admin, else 404.
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
-import { Link, data, redirect, useFetcher, useLoaderData } from "react-router";
+// app/routes/maker_.projects_.$folderId_.billing.tsx → POST /maker/projects/:id/billing
+// What the Payments panel on a project's Maker page posts to (payments
+// seed, Austin 2026-11-03: billing is set on the project's Maker page).
+// No page of its own: the panel lives on `/maker/projects/:id`. Same
+// access as that page: the project's Guide or an admin, else 404.
+//
+// Intents:
+// - `plan`: set the project's plan level (or None) and its monthly
+//   billing day, which a new plan must have; emails what it changes.
+//   Plans take no discount: every client pays the same monthly rate.
+// - `approve_resume`: approve a Client's request to resume a paused plan.
+// - `bill`: raise a bill, with any discount off a priced kind and any of
+//   the project's receipts or PDFs
+//   attached, and email it to every Client on the project.
+// - `withdraw`: withdraw a bill nobody has paid.
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { getFolderById } from "robustness-core/data/vault.server";
-import { peopleOn, runsPeople } from "../data/projectPeople.server";
-import { navFor } from "../data/nav.server";
-import {
-  cancelCharge,
-  createCharge,
-  getCharge,
-  listChargesForProject,
-  type BillingCharge,
-} from "robustness-core/data/billing.server";
-import {
-  ONE_TIME_KINDS,
-  ONE_TIME_LABELS,
-  formatUsd,
-  isOneTimeKind,
-  parseUsdToCents,
-} from "robustness-core/data/billingRules";
-import { stripeConfigured } from "robustness-core/data/stripe.server";
-import { AppLayout } from "../components/AppLayout";
-import { MakerErrorBoundary } from "../components/MakerErrorBoundary";
-import { CenterContent } from "stamps/CenterContent";
-import { Cluster } from "stamps/Cluster";
-import { CopyField } from "stamps/CopyField";
-import { Input } from "stamps/Input";
-import { Select } from "stamps/Select";
-import { Stack } from "stamps/Stack";
-import { Surface } from "stamps/Surface";
-import { Badge } from "stamps/Badge";
-import { button } from "stamps/button.css";
-import { link } from "stamps/link.css";
-import { sprinkles } from "stamps/sprinkles.css";
-import { textSize } from "stamps/typography.css";
-import { semanticColors } from "stamps/tokens";
+import { runsPeople } from "../data/projectPeople.server";
+import { attachableFiles, clientsOn, sendPaymentRequest } from "../data/payments.server";
+import { cancelCharge, createCharge, getCharge } from "robustness-core/data/billing.server";
+import { hasTypedAmount, isMenuPlan, isOneTimeKind, parseDiscountPercent, parseUsdToCents } from "robustness-core/data/billingRules";
+import { approveResume, setPlanLevel } from "robustness-core/data/billingPlans.server";
+import { sendPlanNotices } from "../data/billingNotices.server";
 
-export const meta: MetaFunction = () => [{ title: "O.No · Billing" }];
+export type BillingActionResult = { ok: true; message?: string } | { error: string };
 
 async function guidedFolder(request: Request, folderId: string | undefined) {
   const user = await getUser(request);
@@ -51,73 +34,99 @@ async function guidedFolder(request: Request, folderId: string | undefined) {
   return { user, folder };
 }
 
+/** `?files=1`: the project's receipts and PDFs a bill can carry, for the
+ * panel's picker (loaded when the guide opens it, not with the page).
+ * Anything else: the panel is on the project's Maker page. */
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { user, folder } = await guidedFolder(request, params.folderId);
-  const [project, charges, nav] = await Promise.all([
-    peopleOn(folder),
-    listChargesForProject(folder._id),
-    navFor(user._id),
-  ]);
-  const names = new Map(project.members.map((m) => [m.id, m.name]));
-  const origin = new URL(request.url).origin;
-  return {
-    user: { name: user.name ?? null, email: user.email, role: user.role },
-    ...nav,
-    project: { id: project.id, name: project.name },
-    // Anyone on the project can be the one who pays; Clients first.
-    payers: [...project.members]
-      .sort((a, b) => Number(b.group === "Client") - Number(a.group === "Client"))
-      .map((m) => ({ value: m.id, label: `${m.name} (${m.group})` })),
-    charges: charges.map((c) => ({
-      id: c._id,
-      label: c.label,
-      amount: formatUsd(c.amount_cents),
-      status: c.status,
-      payer: names.get(c.payer_human_id) ?? "someone no longer on the project",
-      payLink: `${origin}/pay/${c._id}`,
-      createdAt: c.created_at,
-    })),
-    configured: stripeConfigured(),
-  };
+  if (!new URL(request.url).searchParams.has("files")) return redirect(`/maker/projects/${params.folderId ?? ""}`);
+  const { folder } = await guidedFolder(request, params.folderId);
+  return { files: await attachableFiles(folder) };
 }
 
-type ActionResult = { ok: true } | { error: string };
-
-export async function action({ request, params }: ActionFunctionArgs): Promise<ActionResult> {
+export async function action({ request, params }: ActionFunctionArgs): Promise<BillingActionResult> {
   const { user, folder } = await guidedFolder(request, params.folderId);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
 
-  if (intent === "charge") {
-    const kind = form.get("kind");
-    const payerHumanId = String(form.get("payer") ?? "");
-    if (!isOneTimeKind(kind)) return { error: "Pick what the charge is for." };
-    const project = await peopleOn(folder);
-    if (!project.members.some((m) => m.id === payerHumanId)) return { error: "Pick who pays from the people on this project." };
-    let customAmountCents: number | null = null;
-    if (kind === "custom") {
-      customAmountCents = parseUsdToCents(String(form.get("amount") ?? ""));
-      if (!customAmountCents) return { error: "Type an amount in dollars, like 1000." };
+  const origin = new URL(request.url).origin;
+
+  if (intent === "plan") {
+    const raw = String(form.get("level") ?? "");
+    const level = raw === "none" ? null : isMenuPlan(raw) ? raw : undefined;
+    if (level === undefined) return { error: "Pick a plan, or None." };
+    const startDay = String(form.get("start") ?? "").trim() || null;
+    if (level && (await clientsOn(folder)).length === 0) {
+      return { error: "Nobody on this project is a Client yet, so there's nobody to set the plan up." };
     }
     try {
-      await createCharge({
+      const notices = await setPlanLevel({ folderId: folder._id, level, startDay });
+      await sendPlanNotices(notices, origin);
+      return { ok: true, message: notices.length ? "Saved, and the client has an email." : "Saved." };
+    } catch (err) {
+      console.error("billing: set plan failed", err);
+      return { error: err instanceof Error ? err.message : "Stripe didn't take that." };
+    }
+  }
+
+  if (intent === "approve_resume") {
+    try {
+      await sendPlanNotices(await approveResume(folder._id), origin);
+      return { ok: true, message: "Resumed. Billing starts again today." };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Couldn't resume it." };
+    }
+  }
+
+  if (intent === "bill") {
+    const kind = form.get("kind");
+    if (!isOneTimeKind(kind)) return { error: "Pick what the bill is for." };
+    if ((await clientsOn(folder)).length === 0) {
+      return { error: "Nobody on this project is a Client yet, so there's nobody to send it to." };
+    }
+    const note = String(form.get("note") ?? "").trim();
+    if (!note) return { error: "Say what the bill is for, the way the client should read it." };
+    let typedAmountCents: number | null = null;
+    if (hasTypedAmount(kind)) {
+      typedAmountCents = parseUsdToCents(String(form.get("amount") ?? ""));
+      if (!typedAmountCents) return { error: "Type an amount in dollars, like 1000." };
+    }
+    const discountPercent = hasTypedAmount(kind) ? null : parseDiscountPercent(String(form.get("discount") ?? ""));
+    if (discountPercent === "invalid") return { error: "A discount is a whole percent, 1 to 99." };
+    // Only the project's own receipts and PDFs, whatever the form says.
+    const picked = new Set(form.getAll("files").map(String));
+    const attachments = picked.size
+      ? (await attachableFiles(folder))
+          .filter((f) => picked.has(f.fileId))
+          .map(({ fileId, name, contentType }) => ({ fileId, name, contentType }))
+      : [];
+    if (attachments.length !== picked.size) return { error: "One of those files isn't on this project." };
+    let charge;
+    try {
+      charge = await createCharge({
+        attachments,
         projectFolderId: folder._id,
-        payerHumanId,
         createdBy: user._id,
         kind,
-        customAmountCents,
-        note: String(form.get("note") ?? ""),
+        typedAmountCents,
+        discountPercent,
+        note,
       });
     } catch (err) {
       console.error("billing: create charge failed", err);
-      return { error: "Stripe didn't take that. Check the setup and try again." };
+      return { error: err instanceof Error && err.message.includes("terms") ? err.message : "Stripe didn't take that. Check the setup and try again." };
     }
-    return { ok: true };
+    try {
+      const sent = await sendPaymentRequest({ charge, folder, guide: user, origin });
+      return { ok: true, message: `Sent to ${sent === 1 ? "the client" : `${sent} clients`}.` };
+    } catch (err) {
+      console.error(`billing: emailing bill ${charge._id} failed`, err);
+      return { ok: true, message: "The bill is up, but the email didn't go. Copy its link and send it yourself." };
+    }
   }
 
   if (intent === "withdraw") {
     const charge = await getCharge(String(form.get("chargeId") ?? ""));
-    if (!charge || charge.project_folder_id !== folder._id) return { error: "That charge isn't on this project." };
+    if (!charge || charge.project_folder_id !== folder._id) return { error: "That bill isn't on this project." };
     try {
       await cancelCharge(charge);
     } catch (err) {
@@ -127,118 +136,4 @@ export async function action({ request, params }: ActionFunctionArgs): Promise<A
   }
 
   return { error: "Unknown action." };
-}
-
-export function ErrorBoundary() {
-  return <MakerErrorBoundary notFound="Not a project you guide." backTo={{ to: "/maker/projects", label: "← Projects and humans" }} />;
-}
-
-const STATUS_LABEL: Record<BillingCharge["status"], string> = {
-  open: "Waiting",
-  processing: "Paying (bank transfer clears in a few days)",
-  paid: "Paid",
-  failed: "Payment failed",
-  canceled: "Withdrawn",
-};
-
-function NewCharge({ payers }: { payers: { value: string; label: string }[] }) {
-  const fetcher = useFetcher<ActionResult>();
-  const busy = fetcher.state !== "idle";
-  const error = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
-  return (
-    <fetcher.Form method="post">
-      <input type="hidden" name="intent" value="charge" />
-      <Stack gap={3}>
-        <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Charge once</h2>
-        <Select label="Who pays" name="payer" options={payers} placeholder="Someone on the project" required />
-        <Select
-          label="For"
-          name="kind"
-          options={ONE_TIME_KINDS.map((k) => ({ value: k, label: ONE_TIME_LABELS[k] }))}
-          defaultValue="custom"
-          required
-        />
-        <Input label="Amount, for a custom charge (dollars)" name="amount" placeholder="1000" />
-        <Input label="What it's for, as they'll see it (optional)" name="note" placeholder="Attic assembly report" />
-        {error && (
-          <p className={`${textSize.sm} ${sprinkles({ m: 0 })}`} style={{ color: semanticColors.textDanger }}>
-            {error}
-          </p>
-        )}
-        <Cluster gap={3}>
-          <button type="submit" className={button({ variant: "secondary" })} disabled={busy}>
-            {busy ? "Making the link…" : "Make a pay link"}
-          </button>
-        </Cluster>
-      </Stack>
-    </fetcher.Form>
-  );
-}
-
-function ChargeRow({ charge }: { charge: ReturnType<typeof useLoaderData<typeof loader>>["charges"][number] }) {
-  const fetcher = useFetcher<ActionResult>();
-  const error = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
-  const unpaid = charge.status === "open" || charge.status === "failed";
-  return (
-    <Stack gap={2}>
-      <Cluster gap={3} align="baseline">
-        <strong>{charge.amount}</strong>
-        <span>{charge.label}</span>
-        <span className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
-          {charge.payer}
-        </span>
-        <Badge>{STATUS_LABEL[charge.status]}</Badge>
-      </Cluster>
-      {unpaid && (
-        <Cluster gap={3} align="center">
-          <CopyField value={charge.payLink} ariaLabel={`Pay link for ${charge.label}`} copyLabel="Copy link" />
-          <button
-            type="button"
-            className={`${link} ${textSize.xs}`}
-            disabled={fetcher.state !== "idle"}
-            onClick={() => fetcher.submit({ intent: "withdraw", chargeId: charge.id }, { method: "post" })}
-          >
-            Withdraw
-          </button>
-        </Cluster>
-      )}
-      {error && (
-        <p className={`${textSize.sm} ${sprinkles({ m: 0 })}`} style={{ color: semanticColors.textDanger }}>
-          {error}
-        </p>
-      )}
-    </Stack>
-  );
-}
-
-export default function ProjectBilling() {
-  const { project, payers, charges, configured } = useLoaderData<typeof loader>();
-  return (
-    <AppLayout>
-      <CenterContent maxWidth={720}>
-        <Stack gap={6} className={sprinkles({ mb: 8 })}>
-          <Link to={`/maker/projects/${project.id}`} className={`${link} ${textSize.xs}`}>
-            ← {project.name}
-          </Link>
-          <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Billing</h1>
-
-          {!configured ? (
-            <p className={textSize.sm}>Stripe isn't set up on this server yet.</p>
-          ) : (
-            <Surface className={sprinkles({ p: 4 })}>
-              <NewCharge payers={payers} />
-            </Surface>
-          )}
-
-          {charges.length > 0 && (
-            <Stack gap={4}>
-              {charges.map((c) => (
-                <ChargeRow key={c.id} charge={c} />
-              ))}
-            </Stack>
-          )}
-        </Stack>
-      </CenterContent>
-    </AppLayout>
-  );
 }

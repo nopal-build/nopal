@@ -65,10 +65,12 @@ import {
   type ApiToken,
 } from "robustness-core/data/apiTokens.server";
 import { AppLayout } from "../components/AppLayout";
-import { ProfileBilling, type ProfileCharge } from "../components/ProfileBilling";
-import { listChargesForPayer } from "robustness-core/data/billing.server";
-import { formatUsd } from "robustness-core/data/billingRules";
-import { getFolderById } from "robustness-core/data/vault.server";
+import { ProfilePayments, type ProfileCharge, type ProfilePlan } from "../components/ProfilePayments";
+import { listPlans } from "robustness-core/data/billingPlans.server";
+import { describePlan } from "../data/billingNotices.server";
+import { listChargesForProjects } from "robustness-core/data/billing.server";
+import { clientProjectsFor } from "../data/payments.server";
+import { MENU_PLANS, MENU_PLAN_LABELS, formatUsd } from "robustness-core/data/billingRules";
 import { useHome } from "../hooks/useUser";
 import { displayName } from "robustness-core/data/humanNames";
 import { Input } from "stamps/Input";
@@ -97,24 +99,26 @@ function isAdminOrSuper(user: Human): boolean {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  const [waivers, relatedHumans, passkeys, relationships, apiTokens, charges] =
+  const [waivers, relatedHumans, passkeys, relationships, apiTokens, clientProjects] =
     await Promise.all([
       getLegalDocumentsByEmail(user.email),
       getRelatedHumans(user, { includeRevoked: true }),
       getPasskeysByHuman(user._id),
       getRelationshipsForHuman(user._id),
       getApiTokensByHuman(user._id),
-      listChargesForPayer(user._id),
+      clientProjectsFor(user._id),
     ]);
 
-  // What this person has been asked to pay, with each project's name.
-  const projectNames = new Map(
-    await Promise.all(
-      [...new Set(charges.map((c) => c.project_folder_id))].map(
-        async (id) => [id, (await getFolderById(id))?.name ?? "A project"] as const,
-      ),
-    ),
+  // The bills on every project this person is a Client on. Withdrawn
+  // ones aren't shown.
+  const projectNames = new Map(clientProjects.map((f) => [f._id, f.name]));
+  const charges = (await listChargesForProjects(clientProjects.map((f) => f._id))).filter(
+    (c) => c.status !== "canceled",
   );
+  // Each Client project's plan, once its guide has picked one.
+  const plans: ProfilePlan[] = (await listPlans(clientProjects.map((f) => f._id)))
+    .filter((p) => p.status !== "none")
+    .map((p) => ({ folderId: p._id, project: projectNames.get(p._id) ?? "A project", view: describePlan(p, "client") }));
   const billing: ProfileCharge[] = charges.map((c) => ({
     id: c._id,
     label: c.label,
@@ -149,6 +153,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     inviteExpired,
     revokedRelationships,
     billing,
+    plans,
+    planLevels: MENU_PLANS.map((p) => ({ value: p, label: MENU_PLAN_LABELS[p] })),
   };
 }
 
@@ -1565,7 +1571,7 @@ function ApiTokenCard({ token }: { token: ApiToken }) {
 
 const PROFILE_SECTIONS = [
   { id: "basic", label: "Basic" },
-  { id: "billing", label: "Billing" },
+  { id: "payments", label: "Payments" },
   { id: "relationships", label: "Relationships" },
   { id: "security", label: "Security" },
   { id: "waivers", label: "Waivers" },
@@ -1581,9 +1587,12 @@ export default function Profile() {
     inviteExpired,
     revokedRelationships,
     billing,
+    plans,
+    planLevels,
   } = useLoaderData<typeof loader>();
-  // Billing shows only for someone who has been asked to pay.
-  const sections = PROFILE_SECTIONS.filter((s) => s.id !== "billing" || billing.length > 0);
+  // Payments shows only for a Client with a plan or a bill.
+  const hasPayments = billing.length > 0 || plans.length > 0;
+  const sections = PROFILE_SECTIONS.filter((s) => s.id !== "payments" || hasPayments);
   const actionData = useActionData<typeof action>();
   const { revalidate } = useRevalidator();
 
@@ -2289,9 +2298,9 @@ export default function Profile() {
               </div>
             </section>
 
-            {billing.length > 0 && (
-              <section id="billing">
-                <ProfileBilling charges={billing} />
+            {hasPayments && (
+              <section id="payments">
+                <ProfilePayments charges={billing} plans={plans} levels={planLevels} />
               </section>
             )}
 

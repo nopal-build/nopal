@@ -7,7 +7,7 @@
  * a dashboard setting someone has to keep in step.
  */
 import Stripe from "stripe";
-import { lookupKeyFor, type MenuPlan, type OneTimeKind } from "./billingRules";
+import { lookupKeyFor, type MenuPlan, type PricedKind } from "./billingRules";
 
 export const STRIPE_API_VERSION = "2026-10-28.endive" as const;
 
@@ -32,7 +32,7 @@ export const RECURRING_METHODS = ["us_bank_account"] as const;
 
 /** The active Price behind a menu plan or priced one-time kind, by its
  * lookup key. Throws if the setup script hasn't been run. */
-export async function priceFor(item: MenuPlan | Exclude<OneTimeKind, "custom">): Promise<Stripe.Price> {
+export async function priceFor(item: MenuPlan | PricedKind): Promise<Stripe.Price> {
   const key = lookupKeyFor(item);
   const { data } = await stripe().prices.list({ lookup_keys: [key], active: true, limit: 1 });
   if (!data[0]) throw new Error(`No active Stripe price with lookup key ${key}; run fruits/scripts/stripe-setup.ts`);

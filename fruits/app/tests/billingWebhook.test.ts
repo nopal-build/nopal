@@ -11,6 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const store = vi.hoisted(() => new Map<string, Record<string, unknown>>());
+const canceledIds = vi.hoisted(() => [] as string[]);
 const retrieve = vi.hoisted(() => ({ fn: (_id: string): Promise<unknown> => Promise.reject(new Error("unset")) }));
 vi.hoisted(() => {
   process.env.STRIPE_SECRET_KEY = "sk_test_unit";
@@ -42,9 +43,20 @@ vi.mock("robustness-core/data/stripe.server", async () => {
     "robustness-core/data/stripe.server",
   );
   const real = actual.stripe();
-  const fake = { webhooks: real.webhooks, paymentIntents: { retrieve: (id: string) => retrieve.fn(id) } };
+  const fake = {
+    webhooks: real.webhooks,
+    paymentIntents: {
+      retrieve: (id: string) => retrieve.fn(id),
+      cancel: async (id: string) => {
+        canceledIds.push(id);
+        return { id, status: "canceled" };
+      },
+    },
+  };
   return { ...actual, stripe: () => fake };
 });
+
+vi.mock("../data/billingNotices.server", () => ({ sendPlanNotices: async () => {} }));
 
 import { applyStripeEvent } from "robustness-core/data/billing.server";
 import { stripe } from "robustness-core/data/stripe.server";
@@ -52,15 +64,19 @@ import { action } from "../routes/api.stripe.webhook";
 
 type PiStatus = "requires_payment_method" | "processing" | "succeeded" | "canceled";
 
-function pi(status: PiStatus, opts: { chargeId?: string | null; failed?: boolean } = {}) {
+/** Sue's own intent on the bill, or (`payer: "tom"`) the other Client's. */
+function pi(status: PiStatus, opts: { chargeId?: string | null; failed?: boolean; payer?: "sue" | "tom" } = {}) {
   const chargeId = opts.chargeId === undefined ? "sue1" : opts.chargeId;
+  const payer = opts.payer ?? "sue";
   return {
-    id: "pi_sue",
+    id: `pi_${payer}`,
     object: "payment_intent",
     status,
     amount: 1_000_00,
     currency: "usd",
-    metadata: chargeId ? { charge_id: chargeId } : {},
+    metadata: chargeId
+      ? { charge_id: chargeId, payer_human_id: payer, terms_category: "service", terms_version: "v-test" }
+      : {},
     last_payment_error: opts.failed ? { code: "payment_method_provider_decline" } : null,
   };
 }
@@ -69,9 +85,9 @@ function event(id: string, type: string, object: unknown) {
   return { id, object: "event", type, created: 1_793_000_000, livemode: false, data: { object } } as never;
 }
 
-/** Stripe answers every re-read with this PaymentIntent. */
-function stripeSays(intent: ReturnType<typeof pi>) {
-  retrieve.fn = async () => intent;
+/** Stripe answers every re-read with these PaymentIntents, by id. */
+function stripeSays(...intents: ReturnType<typeof pi>[]) {
+  retrieve.fn = async (id) => intents.find((i) => i.id === id) ?? intents[0];
 }
 
 const charge = () => store.get("billing_charges:sue1");
@@ -79,14 +95,21 @@ const marked = (eventId: string) => store.has(`stripe_events:${eventId}`);
 
 beforeEach(() => {
   store.clear();
+  canceledIds.length = 0;
+  // A bill on a project with two Clients, Sue and Tom, both of whom
+  // opened the pay page (each has their own intent). Nobody has paid.
   store.set("billing_charges:sue1", {
     project_folder_id: "madison-attic",
-    payer_human_id: "sue",
     kind: "custom",
+    category: "service",
     label: "Report",
     amount_cents: 1_000_00,
     status: "open",
-    stripe_payment_intent_id: "pi_sue",
+    terms_version: "v-raised",
+    payment_intents: { sue: "pi_sue", tom: "pi_tom" },
+    stripe_payment_intent_id: null,
+    paid_by_human_id: null,
+    accepted_at: null,
     paid_at: null,
   });
 });
@@ -94,7 +117,7 @@ beforeEach(() => {
 describe("applyStripeEvent", () => {
   it("marks a charge paid from Stripe's re-read, not the event's snapshot", async () => {
     stripeSays(pi("succeeded"));
-    expect(await applyStripeEvent(event("evt_1", "payment_intent.processing", pi("processing")))).toBe(true);
+    expect((await applyStripeEvent(event("evt_1", "payment_intent.processing", pi("processing")))).applied).toBe(true);
     expect(charge()?.status).toBe("paid");
     expect(charge()?.paid_at).toBeTruthy();
     expect(marked("evt_1")).toBe(true);
@@ -117,7 +140,7 @@ describe("applyStripeEvent", () => {
     stripeSays(pi("succeeded"));
     await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")));
     store.set("billing_charges:sue1", { ...charge(), status: "open" });
-    expect(await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")))).toBe(false);
+    expect((await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")))).applied).toBe(false);
     expect(charge()?.status).toBe("open");
   });
 
@@ -146,7 +169,7 @@ describe("applyStripeEvent", () => {
     retrieve.fn = async () => {
       throw new Error("should not be called");
     };
-    expect(await applyStripeEvent(event("evt_1", "customer.created", { id: "cus_1" }))).toBe(true);
+    expect((await applyStripeEvent(event("evt_1", "customer.created", { id: "cus_1" }))).applied).toBe(true);
     expect(marked("evt_1")).toBe(true);
   });
 
@@ -158,7 +181,57 @@ describe("applyStripeEvent", () => {
     expect(marked("evt_1")).toBe(false);
 
     stripeSays(pi("succeeded"));
-    expect(await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")))).toBe(true);
+    expect((await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")))).applied).toBe(true);
+    expect(charge()?.status).toBe("paid");
+  });
+});
+
+describe("a bill any Client on the project may pay", () => {
+  it("records who paid and the terms version they accepted", async () => {
+    stripeSays(pi("succeeded"), pi("requires_payment_method", { payer: "tom" }));
+    await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")));
+    expect(charge()?.paid_by_human_id).toBe("sue");
+    expect(charge()?.terms_version).toBe("v-test");
+    expect(charge()?.accepted_at).toBeTruthy();
+    expect(charge()?.stripe_payment_intent_id).toBe("pi_sue");
+  });
+
+  it("closes the other Client's intent once one pays", async () => {
+    stripeSays(pi("succeeded"), pi("requires_payment_method", { payer: "tom" }));
+    await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")));
+    expect(canceledIds).toEqual(["pi_tom"]);
+  });
+
+  it("keeps the first payer when a second payment lands on a paid bill", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    stripeSays(pi("succeeded"), pi("succeeded", { payer: "tom" }));
+    await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")));
+    await applyStripeEvent(event("evt_2", "payment_intent.succeeded", pi("succeeded", { payer: "tom" })));
+    expect(charge()?.paid_by_human_id).toBe("sue");
+    expect(charge()?.stripe_payment_intent_id).toBe("pi_sue");
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("paid twice"));
+  });
+
+  it("a returned bank transfer makes the bill payable again", async () => {
+    stripeSays(pi("processing"));
+    await applyStripeEvent(event("evt_1", "payment_intent.processing", pi("processing")));
+    expect(charge()?.status).toBe("processing");
+    stripeSays(pi("requires_payment_method", { failed: true }));
+    await applyStripeEvent(event("evt_2", "payment_intent.payment_failed", pi("requires_payment_method")));
+    expect(charge()?.status).toBe("failed");
+  });
+
+  it("another Client's failed try doesn't touch a bill being paid", async () => {
+    stripeSays(pi("processing"), pi("requires_payment_method", { payer: "tom", failed: true }));
+    await applyStripeEvent(event("evt_1", "payment_intent.processing", pi("processing")));
+    await applyStripeEvent(event("evt_2", "payment_intent.payment_failed", pi("requires_payment_method", { payer: "tom" })));
+    expect(charge()?.status).toBe("processing");
+  });
+
+  it("an intent closed because someone else paid changes nothing", async () => {
+    stripeSays(pi("succeeded"), pi("canceled", { payer: "tom" }));
+    await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")));
+    await applyStripeEvent(event("evt_2", "payment_intent.canceled", pi("canceled", { payer: "tom" })));
     expect(charge()?.status).toBe("paid");
   });
 });
