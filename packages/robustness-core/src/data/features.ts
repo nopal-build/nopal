@@ -76,14 +76,15 @@ const READING: Feature[] = ["efforts", "letters", "photos", "files", "costs", "l
  * Observer reads what a Crafter reads, writes Cards and notes, and doesn't
  * edit; what they write waits as a suggestion until a Guide takes it
  * (Austin, 2026-09-28);
- * Client gets Efforts, Photos, the pen for a note, their own tap and
- * their own log (Austin, 2026-09-28: "clients should be able to mark
- * with the annotation"; moving, filing and confirming stay `edit`). */
+ * Client gets Efforts, Photos, Files, the pen for a note, their own tap
+ * and their own log (Austin, 2026-09-28: "clients should be able to mark
+ * with the annotation"; moving, filing and confirming stay `edit`; Files
+ * added 2026-11-03: "they need access to that tab", without costs). */
 export const GROUP_FEATURES: Record<Group, readonly Feature[]> = {
   Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people", "feeds", "suggestions", "budget", "print"],
   Crafter: [...READING, "marks", "steepTap", "dailyLog", "edit", "feeds", "print"],
   Observer: [...READING, "marks", "steepTap", "dailyLog", "print"],
-  Client: ["efforts", "photos", "marks", "steepTap", "dailyLog", "feeds", "print"],
+  Client: ["efforts", "photos", "files", "marks", "steepTap", "dailyLog", "feeds", "print"],
 };
 
 /** The groups someone may give: every group for an admin; a Guide who

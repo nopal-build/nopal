@@ -25,7 +25,8 @@ const receiptPhoto = row("receipt", ["gallery", "costs"], {
   on: null,
 });
 const drawing = row("drawing", ["documents"]);
-const rows = [photo, receiptPhoto, drawing];
+const notYetRead = row("unread", ["unsorted"]);
+const rows = [photo, receiptPhoto, drawing, notYetRead];
 
 describe("the groups", () => {
   it("Owner reads as Guide; an unknown name is no group and gets nothing", () => {
@@ -70,18 +71,19 @@ describe("the groups", () => {
     expect(seesSuggestions(featuresOf("Observer"))).toBe(true);
   });
 
-  it("a Client gets Efforts, Photos, the pen, their own tap and their own log, and runs nothing", () => {
+  it("a Client gets Efforts, Photos, Files, the pen, their own tap and their own log, and runs nothing", () => {
     const client = resolveRole("Client");
     // No Letters tab (Austin, 2026-10-22): the tab is where guides
     // work; a client reaches what is shared through the banner's tile.
-    expect(tabsFor(client.features)).toEqual(["efforts", "photos"]);
+    // Files added 2026-11-03 (Austin: "they need access to that tab").
+    expect(tabsFor(client.features)).toEqual(["efforts", "photos", "files"]);
     expect(client.features).toEqual(expect.arrayContaining(["steepTap", "dailyLog"]));
     expect(client).toMatchObject({ isOwner: false, guiding: false });
     expect(client.features).not.toContain("steepReadings");
     // A note with the pen (Austin, 2026-09-28); moving, filing and
     // confirming a cost are `edit`, which a Client never has.
     expect(client.features).toContain("marks");
-    for (const f of ["edit", "files", "costs", "people", "suggestions"] as Feature[]) expect(client.features).not.toContain(f);
+    for (const f of ["edit", "costs", "people", "suggestions"] as Feature[]) expect(client.features).not.toContain(f);
   });
 
   it("the pen's \"Read the full log\" is the Logbook's: every group that marks but a Client (2026-10-01)", () => {
@@ -92,9 +94,9 @@ describe("the groups", () => {
 describe("test 1: what a Client is sent", () => {
   const client = featuresOf("Client");
 
-  it("the Photos rows only: no receipt photo, no document, no cost, not the log's words", () => {
+  it("the Photos and Files rows: no receipt photo, nothing Unsorted, no cost, not the log's words", () => {
     const sent = rowsForReader(rows, client);
-    expect(sent.map((r) => r.fileId)).toEqual(["photo"]);
+    expect(sent.map((r) => r.fileId)).toEqual(["photo", "drawing"]);
     expect(sent[0].cost).toBeNull();
     expect(sent[0].context).toBe("");
   });
@@ -108,10 +110,14 @@ describe("test 1: what a Client is sent", () => {
   it("a typed tab it isn't given is refused", () => {
     const allowed = tabsFor(client);
     expect(resolveProjectTab("costs", allowed)).toBeNull();
-    expect(resolveProjectTab("files", allowed)).toBeNull();
+    expect(resolveProjectTab("files", allowed)).toBe("files");
     expect(resolveProjectTab("logbook", allowed)).toBeNull();
     expect(resolveProjectTab("photos", allowed)).toBe("photos");
     expect(resolveProjectTab(null, allowed)).toBe("efforts");
+  });
+
+  it("an Observer, who has Costs, still gets Unsorted", () => {
+    expect(rowsForReader(rows, featuresOf("Observer")).map((r) => r.fileId)).toContain("unread");
   });
 
   it("a Guide is sent every row as it was", () => {
@@ -149,9 +155,9 @@ describe("test 2: one row", () => {
   const client = featuresOf("Client", withoutPhotos);
 
   it("taking Photos from clients takes the tab, the rows and the files, and nothing else", () => {
-    expect(tabsFor(client)).toEqual(["efforts"]);
+    expect(tabsFor(client)).toEqual(["efforts", "files"]);
     expect(resolveProjectTab("photos", tabsFor(client))).toBeNull();
-    expect(rowsForReader(rows, client)).toEqual([]);
+    expect(rowsForReader(rows, client).map((r) => r.fileId)).toEqual(["drawing"]);
     expect(isReachablePhoto(photo, client)).toBe(false);
     expect(client).toEqual(expect.arrayContaining(["efforts", "steepTap", "dailyLog"]));
     for (const g of ["Guide", "Crafter", "Observer"] as Group[]) {
