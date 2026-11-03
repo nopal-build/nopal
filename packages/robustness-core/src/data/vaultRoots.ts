@@ -20,7 +20,7 @@
 
 import type { Role } from "./humans.server";
 
-export type VaultRootKey = "daily-logs" | "projects" | "personal";
+export type VaultRootKey = "daily-logs" | "projects" | "personal" | "org";
 
 export type VaultRootPolicy = {
   /** Display name in the UI. */
@@ -73,9 +73,38 @@ export const VAULT_ROOTS: Record<VaultRootKey, VaultRootPolicy> = {
     childSort: "name-asc",
     writable: "owner",
   },
+  // `org` (garden/3-growing/guide-projects-phases.md) — the first root
+  // that ISN'T provisioned per-human (see `PER_HUMAN_VAULT_ROOT_KEYS`
+  // below): one per Organization, hosting that org's `kanban-garden`
+  // Projects board (`org/kanban-projects/`). Not shareable via the
+  // generic per-folder Sharing Roles mechanism — access is governed by
+  // Organization membership/role instead (`organizations.server.ts`).
+  // `writable: "owner"` is the same coarse default every other root
+  // uses; the real gate for `org/*` is an org-Guide-or-admin check
+  // layered on top (same pattern Sharing Roles already use for
+  // projects — see `getProjectRoleForFolderId`'s org-Guide fallback),
+  // not this field — see the seed's "Vault architecture" section.
+  org: {
+    label: "Organization",
+    shareable: false,
+    publishable: false,
+    childSort: "name-asc",
+    writable: "owner",
+  },
 };
 
 export const VAULT_ROOT_KEYS = Object.keys(VAULT_ROOTS) as VaultRootKey[];
+
+/** The subset of `VAULT_ROOT_KEYS` that `ensureVaultRootFolders` creates
+ * ONE OF PER HUMAN. `org` is deliberately excluded — it's one per
+ * ORGANIZATION, not per human, and is provisioned separately (see the
+ * "Ensure Org Kanban Board" admin script) rather than by that per-human
+ * loop. Keep this in sync by hand if a future root ever needs the same
+ * exclusion — there's no mechanical way to derive "per-human or not"
+ * from `VaultRootPolicy` alone. */
+export const PER_HUMAN_VAULT_ROOT_KEYS = VAULT_ROOT_KEYS.filter(
+  (key): key is Exclude<VaultRootKey, "org"> => key !== "org",
+);
 
 export function isVaultRootKey(value: unknown): value is VaultRootKey {
   return typeof value === "string" && value in VAULT_ROOTS;

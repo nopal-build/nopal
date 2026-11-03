@@ -52,6 +52,7 @@ import { run as runReseedGraphlogSkills } from "./adminScripts/reseedGraphlogSki
 import { run as runDedupeSummaries } from "./adminScripts/dedupeSummaries.server";
 import { run as runMergeSkillsSyncsCaseVariants } from "./adminScripts/migrateMergeSkillsSyncsCaseVariants.server";
 import { run as runBackfillOrganizations } from "./adminScripts/backfillOrganizations.server";
+import { run as runEnsureOrgKanbanBoard } from "./adminScripts/ensureOrgKanbanBoard.server";
 import type { AdminScriptDefinition } from "./adminScripts/types";
 
 export type { AdminScriptDefinition, AdminScriptRunOpts, AdminScriptResult } from "./adminScripts/types";
@@ -162,6 +163,15 @@ const REGISTRY: AdminScriptDefinition[] = [
     description:
       "Adds every Human with no Nopal org membership (role defaulted from platform role: Super/Admin -> Guide, Human -> Client — hand-correct any it miscategorizes), and stamps organization_id = Nopal onto every project folder that doesn't have one yet. Idempotent.",
     run: runBackfillOrganizations,
+  },
+  {
+    name: "ensure-org-kanban-board",
+    label: "Ensure Org Kanban Board",
+    description:
+      "Provisions the org/ Vault Root and its org/kanban-projects/ kanban-garden board (README + starter Seed/Discovery/Design/Done phase folders) for Nopal, and points organizations.kanban_folder_id at it — the vault-plumbing foundation for the Guide-facing All Projects Kanban view (garden/3-growing/guide-projects-phases.md). Idempotent.",
+    argLabel: "Owner email (the Human who'll own the new org/kanban-projects folder)",
+    argRequired: true,
+    run: runEnsureOrgKanbanBoard,
   },
 ];
 

@@ -20,6 +20,7 @@ import type {
   VaultFolder,
 } from "./vault.types";
 import {
+  PER_HUMAN_VAULT_ROOT_KEYS,
   VAULT_ROOT_KEYS,
   VAULT_ROOTS,
   canWriteToRoot,
@@ -487,10 +488,13 @@ export async function createVaultFolder(data: {
  *    given type needs more than context/singleton checks.
  *  - Kanban types (`kanban-garden`): the first type with MULTIPLE valid
  *    parent contexts at once rather than exactly one — directly inside
- *    the `projects` root itself (a standalone top-level board) OR
- *    directly inside a `project-n02` container (a project, or `personal`,
- *    same context space types use). Not singleton — any number of boards
- *    may exist side by side in a given parent.
+ *    the `projects` root itself (a standalone top-level board), directly
+ *    inside a `project-n02` container (a project, or `personal`, same
+ *    context space types use), OR directly inside the `org` root (an
+ *    Organization's own board — see `garden/3-growing/
+ *    guide-projects-phases.md`, e.g. `org/kanban-projects/`). Not
+ *    singleton — any number of boards may exist side by side in a given
+ *    parent.
  */
 export async function validateFolderTypeForParent(
   parent: VaultFolder,
@@ -557,8 +561,13 @@ export async function validateFolderTypeForParent(
 
     const isProjectsRoot = !parent.parent_folder_id && parent.vault_root_key === "projects";
     const isProjectContainer = parent.folder_type === "project-n02" && parent.is_folder_type_root;
-    if (!isProjectsRoot && !isProjectContainer) {
-      return `${def.label} folders can only be created directly inside Projects, a project, or your Personal space`;
+    // `org/kanban-projects` (garden/3-growing/guide-projects-phases.md) is
+    // the fourth valid context — directly inside the `org` root, which
+    // (unlike `projects`/`personal`) is provisioned once per Organization,
+    // not per human (see `PER_HUMAN_VAULT_ROOT_KEYS`, `vaultRoots.ts`).
+    const isOrgRoot = !parent.parent_folder_id && parent.vault_root_key === "org";
+    if (!isProjectsRoot && !isProjectContainer && !isOrgRoot) {
+      return `${def.label} folders can only be created directly inside Projects, a project, your Personal space, or the Organization folder`;
     }
 
     if (def.comingSoon) {
@@ -1243,7 +1252,7 @@ export async function ensureVaultRootFolders(
        AND parent_folder_id = null
        AND name IN $names
      ORDER BY created_at ASC`,
-    { humanId, names: VAULT_ROOT_KEYS },
+    { humanId, names: PER_HUMAN_VAULT_ROOT_KEYS },
   );
   const existingByName = new Map<string, VaultFolder>();
   for (const row of (existingResult?.[0] ?? []).map(formatRecord)) {
@@ -1251,7 +1260,7 @@ export async function ensureVaultRootFolders(
   }
 
   const roots: VaultFolder[] = [];
-  for (const key of VAULT_ROOT_KEYS) {
+  for (const key of PER_HUMAN_VAULT_ROOT_KEYS) {
     // Same check-then-create race `getOrCreateVaultFolder` above documents
     // in full — and the same fix: `ORDER BY` for a stable pick among any
     // ALREADY-existing duplicates, plus a deterministic `id` (below) so a
