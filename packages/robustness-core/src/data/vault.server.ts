@@ -20,6 +20,7 @@ import type {
   VaultFolder,
 } from "./vault.types";
 import {
+  PER_HUMAN_VAULT_ROOT_KEYS,
   VAULT_ROOT_KEYS,
   VAULT_ROOTS,
   canWriteToRoot,
@@ -86,6 +87,19 @@ function getProjectN02Module() {
 let websiteModule: Promise<typeof import("./website.server")> | undefined;
 function getWebsiteModule() {
   return (websiteModule ??= import("./website.server"));
+}
+// Same reasoning as the three above: both of these statically import
+// FROM this file already (guideProjectsBoard.server for vault CRUD,
+// projectStatus.server for the same), so this file reaching back into
+// them for the Kanban-card-move status hook below needs the same lazy
+// `import()` treatment.
+let guideProjectsBoardModule: Promise<typeof import("./guideProjectsBoard.server")> | undefined;
+function getGuideProjectsBoardModule() {
+  return (guideProjectsBoardModule ??= import("./guideProjectsBoard.server"));
+}
+let projectStatusModule: Promise<typeof import("./projectStatus.server")> | undefined;
+function getProjectStatusModule() {
+  return (projectStatusModule ??= import("./projectStatus.server"));
 }
 
 // ─── FileRef CRUD ─────────────────────────────────────────────────────────────
@@ -200,6 +214,46 @@ export async function canViewFolderOrgAware(
 }
 
 /**
+ * Whether a non-owning `humanId` may act as a full owner-tier
+ * collaborator on a folder under the `org` Vault Root (e.g.
+ * `org/kanban-projects/`, garden/3-growing/guide-projects-phases.md) —
+ * an org Guide, the same way an org Guide already acts as a project
+ * owner-tier collaborator on every one of their Organization's projects
+ * (Phase C, `getProjectRole`'s own org-Guide fallback in
+ * `projectSharing.server.ts`). Deliberately scoped to `vault_root_key
+ * === "org"` only — a PROJECT folder's equivalent check already lives in
+ * `getProjectRole`/`getProjectRoleForFolderId`, which never resolves
+ * anything for an `org` folder (it requires `findOwningProjectFolder`,
+ * which only ever matches `vault_root_key === "projects"`) — this fills
+ * exactly that gap, nothing more. Callers are responsible for the "is
+ * this even a non-owner" check first, same convention
+ * `getProjectRoleForFolderId`'s own call sites already use.
+ */
+export async function isOrgGuideForFolder(
+  humanId: string,
+  folder: Pick<VaultFolder, "vault_root_key" | "organization_id">,
+): Promise<boolean> {
+  if (folder.vault_root_key !== "org" || !folder.organization_id) return false;
+  return (await getOrganizationRole(humanId, folder.organization_id)) === "Guide";
+}
+
+/** The Organization's own singleton `org` Vault Root folder — unlike
+ * every other root (see `PER_HUMAN_VAULT_ROOT_KEYS`, `vaultRoots.ts`),
+ * this one isn't provisioned per-human, so it can't be found via
+ * `ensureVaultRootFolders`. `undefined` until the "Ensure Org Kanban
+ * Board" admin script has provisioned one. */
+export async function getOrgRootFolder(organizationId: string): Promise<VaultFolder | undefined> {
+  const result = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders
+     WHERE vault_root_key = "org" AND organization_id = $organizationId AND parent_folder_id = null
+     ORDER BY created_at ASC LIMIT 1`,
+    { organizationId },
+  );
+  const [row] = (result?.[0] ?? []).map(formatRecord);
+  return row;
+}
+
+/**
  * Whether `humanId` is allowed to view (not necessarily download/manage)
  * `file` — either because they own it, or because it sits in a folder
  * they've been granted view access to. Mirrors the visibility FileCard
@@ -266,6 +320,25 @@ export async function updateFileRef(
       // (which rewrites `content`'s front matter), and renames/moves.
       const { invalidateWebsiteCacheForFile } = await getWebsiteModule();
       await invalidateWebsiteCacheForFile(updated);
+    }
+    if ("folder_id" in updates && updated.folder_id) {
+      // Guide Projects board (garden/3-growing/guide-projects-phases.md):
+      // a no-op for the overwhelming majority of file moves -- only does
+      // real work when the moved file is a Kanban board card (its new
+      // parent folder is under the `org` Vault Root), recomputing the
+      // real project it points at (`active`/`completed` now DERIVED from
+      // being in an End-type phase, or the `archived` flag -- never
+      // touches `trashed`, see `recomputeProjectStatus`'s own doc).
+      const newParent = await getFolderById(updated.folder_id);
+      if (newParent?.vault_root_key === "org") {
+        const { resolveCardProjectFolderId } = await getGuideProjectsBoardModule();
+        const projectFolderId = await resolveCardProjectFolderId(updated.content);
+        const projectFolder = projectFolderId ? await getFolderById(projectFolderId) : undefined;
+        if (projectFolder) {
+          const { recomputeProjectStatus } = await getProjectStatusModule();
+          await recomputeProjectStatus(projectFolder);
+        }
+      }
     }
   }
   return updated;
@@ -487,10 +560,13 @@ export async function createVaultFolder(data: {
  *    given type needs more than context/singleton checks.
  *  - Kanban types (`kanban-garden`): the first type with MULTIPLE valid
  *    parent contexts at once rather than exactly one — directly inside
- *    the `projects` root itself (a standalone top-level board) OR
- *    directly inside a `project-n02` container (a project, or `personal`,
- *    same context space types use). Not singleton — any number of boards
- *    may exist side by side in a given parent.
+ *    the `projects` root itself (a standalone top-level board), directly
+ *    inside a `project-n02` container (a project, or `personal`, same
+ *    context space types use), OR directly inside the `org` root (an
+ *    Organization's own board — see `garden/3-growing/
+ *    guide-projects-phases.md`, e.g. `org/kanban-projects/`). Not
+ *    singleton — any number of boards may exist side by side in a given
+ *    parent.
  */
 export async function validateFolderTypeForParent(
   parent: VaultFolder,
@@ -557,8 +633,13 @@ export async function validateFolderTypeForParent(
 
     const isProjectsRoot = !parent.parent_folder_id && parent.vault_root_key === "projects";
     const isProjectContainer = parent.folder_type === "project-n02" && parent.is_folder_type_root;
-    if (!isProjectsRoot && !isProjectContainer) {
-      return `${def.label} folders can only be created directly inside Projects, a project, or your Personal space`;
+    // `org/kanban-projects` (garden/3-growing/guide-projects-phases.md) is
+    // the fourth valid context — directly inside the `org` root, which
+    // (unlike `projects`/`personal`) is provisioned once per Organization,
+    // not per human (see `PER_HUMAN_VAULT_ROOT_KEYS`, `vaultRoots.ts`).
+    const isOrgRoot = !parent.parent_folder_id && parent.vault_root_key === "org";
+    if (!isProjectsRoot && !isProjectContainer && !isOrgRoot) {
+      return `${def.label} folders can only be created directly inside Projects, a project, your Personal space, or the Organization folder`;
     }
 
     if (def.comingSoon) {
@@ -692,6 +773,9 @@ export async function updateVaultFolder(
      * intended writer of these two. */
     project_status: string | null;
     project_status_at: string | null;
+    /** See `projectStatus.server.ts`'s `setProjectArchived` — the only
+     * intended writer. */
+    project_archived: boolean | null;
     /** See `graphLogSchedule.server.ts`'s `setGraphLogScheduled` — the only
      * intended writer of these two. */
     graphlog_scheduled: boolean | null;
@@ -1243,7 +1327,7 @@ export async function ensureVaultRootFolders(
        AND parent_folder_id = null
        AND name IN $names
      ORDER BY created_at ASC`,
-    { humanId, names: VAULT_ROOT_KEYS },
+    { humanId, names: PER_HUMAN_VAULT_ROOT_KEYS },
   );
   const existingByName = new Map<string, VaultFolder>();
   for (const row of (existingResult?.[0] ?? []).map(formatRecord)) {
@@ -1251,7 +1335,7 @@ export async function ensureVaultRootFolders(
   }
 
   const roots: VaultFolder[] = [];
-  for (const key of VAULT_ROOT_KEYS) {
+  for (const key of PER_HUMAN_VAULT_ROOT_KEYS) {
     // Same check-then-create race `getOrCreateVaultFolder` above documents
     // in full — and the same fix: `ORDER BY` for a stable pick among any
     // ALREADY-existing duplicates, plus a deterministic `id` (below) so a

@@ -5,7 +5,7 @@
  * or moving a file/folder can find and fix every place it's referenced in
  * O(references-to-that-target) instead of scanning the whole vault.
  *
- * Two reference KINDS are tracked (see the `vault` skill's "File
+ * Three reference KINDS are tracked (see the `vault` skill's "File
  * Referencing & Renaming" section):
  *
  *   - `"mention"` — an `@`-mention link (`[@Name](/humanId:path/to/target)`,
@@ -21,6 +21,18 @@
  *     folder's direct children by name, mirroring exactly how
  *     `project.server.ts`'s `resolveProjectManifest` already resolves them
  *     for rendering.
+ *   - `"frontmatter-field"` — a front-matter field (named in
+ *     `FRONTMATTER_REFERENCE_FIELDS` below, currently just `project`) whose
+ *     value is a `/humanId:path` string, same format a mention's own href
+ *     already uses (see `resolveVaultPath`/`computeCurrentMentionTarget`,
+ *     reused as-is for this kind too). Added for a Kanban card under
+ *     `org/kanban-projects/` (garden/3-growing/guide-projects-phases.md) to
+ *     point back at the real project it represents — a lightweight card
+ *     file is NOT the project itself, just a display/pointer stand-in for
+ *     it, so this is how that pointer survives the real project being
+ *     renamed or moved. On deletion of the target, the stale value is left
+ *     untouched (no human-visible "label" to annotate the way a mention's
+ *     is), same precedent `directive-attr` already sets.
  *
  * `@mention`s can point at content in ANOTHER human's vault (now that
  * Sharing Roles make cross-human project access real) — resolution/rewrite
@@ -52,9 +64,11 @@ import {
   findLeafDirectiveOccurrences,
   replaceDirectiveAttrInMatch,
 } from "../util/nopalDirectives";
+import { splitFrontmatter } from "./project.types";
+import { parse as parseYaml } from "yaml";
 
 export type ReferenceTargetType = "file" | "folder";
-export type ReferenceKind = "mention" | "directive-attr";
+export type ReferenceKind = "mention" | "directive-attr" | "frontmatter-field";
 
 export type FileReference = Data & {
   source_file_id: string;
@@ -63,12 +77,17 @@ export type FileReference = Data & {
   target_id: string;
   kind: ReferenceKind;
   /** The exact raw text currently expressing the reference — a mention's
-   * whole `[@Name](path)` span, or a directive-attr's plain attribute
-   * value (e.g. `"budget.csv"`). See the module doc for why this is a
-   * cache, not a second source of truth. */
+   * whole `[@Name](path)` span, a directive-attr's plain attribute value
+   * (e.g. `"budget.csv"`), or a frontmatter-field's whole `/humanId:path`
+   * value. See the module doc for why this is a cache, not a second
+   * source of truth. */
   ref_text: string;
   directive_name?: string | null;
   attr_name?: "file" | "folder" | null;
+  /** Which front-matter FIELD this reference came from, when `kind` is
+   * `"frontmatter-field"` (e.g. `"project"` — see
+   * `FRONTMATTER_REFERENCE_FIELDS`). `null` for the other two kinds. */
+  field_name?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -178,6 +197,7 @@ type ExtractedReference = {
   ref_text: string;
   directive_name?: string;
   attr_name?: "file" | "folder";
+  field_name?: string;
 };
 
 async function extractMentionReferences(
@@ -226,6 +246,50 @@ async function extractMentionReferences(
  * `::file`'s case, not even present) is never a human-renameable reference
  * and must be excluded from the generic scan below. */
 const BUILTIN_ID_BASED_DIRECTIVES = new Set(["file", "card"]);
+
+/** Front-matter field names tracked as references, when their value is a
+ * `/humanId:path` string (same format a mention's own href already uses).
+ * Starts with just `project` — a Kanban card's pointer back at the real
+ * project it represents (garden/3-growing/guide-projects-phases.md). Add
+ * more here as other features grow their own front-matter reference
+ * fields, rather than writing a new ad hoc extractor each time. */
+const FRONTMATTER_REFERENCE_FIELDS = new Set(["project"]);
+
+async function extractFrontmatterReferences(
+  content: string,
+): Promise<ExtractedReference[]> {
+  const { frontmatter } = splitFrontmatter(content);
+  if (!frontmatter) return [];
+
+  let data: unknown;
+  try {
+    data = parseYaml(frontmatter);
+  } catch {
+    // Malformed front matter shouldn't ever block a save — same philosophy
+    // `parseProjectManifest`/`parseStatus` already use, just index nothing.
+    return [];
+  }
+  if (!data || typeof data !== "object") return [];
+
+  const out: ExtractedReference[] = [];
+  for (const field of FRONTMATTER_REFERENCE_FIELDS) {
+    const raw = (data as Record<string, unknown>)[field];
+    if (typeof raw !== "string" || !raw) continue;
+    const match = MENTION_HREF_RE.exec(raw);
+    if (!match) continue; // not in /humanId:path form — nothing to track
+    const [, targetHumanId, rawPath] = match;
+    const resolved = await resolveVaultPath(targetHumanId, rawPath);
+    if (!resolved) continue; // already broken/unrecognized — nothing to track
+    out.push({
+      target_type: resolved.type,
+      target_id: resolved.id,
+      kind: "frontmatter-field",
+      ref_text: raw,
+      field_name: field,
+    });
+  }
+  return out;
+}
 
 async function extractDirectiveAttrReferences(
   sourceFile: Pick<FileRef, "human_id" | "folder_id">,
@@ -294,13 +358,14 @@ export async function syncFileReferences(file: FileRef): Promise<void> {
 
   if (!isReferenceTrackable(file) || file.content == null) return;
 
-  const [mentions, directiveAttrs] = await Promise.all([
+  const [mentions, directiveAttrs, frontmatterFields] = await Promise.all([
     extractMentionReferences(file.content),
     extractDirectiveAttrReferences(file, file.content),
+    extractFrontmatterReferences(file.content),
   ]);
 
   const now = new Date().toISOString();
-  for (const ref of [...mentions, ...directiveAttrs]) {
+  for (const ref of [...mentions, ...directiveAttrs, ...frontmatterFields]) {
     await upsert("file_references", {
       source_file_id: file._id,
       source_human_id: file.human_id,
@@ -310,6 +375,7 @@ export async function syncFileReferences(file: FileRef): Promise<void> {
       ref_text: ref.ref_text,
       directive_name: ref.directive_name ?? null,
       attr_name: ref.attr_name ?? null,
+      field_name: ref.field_name ?? null,
       created_at: now,
       updated_at: now,
     });
@@ -405,6 +471,13 @@ export async function propagateTargetChange(targets: TargetRef[]): Promise<void>
         const newSnippet = `[@${fresh.name}](${fresh.href})`;
         if (content.includes(ref.ref_text)) {
           content = content.split(ref.ref_text).join(newSnippet);
+        }
+      } else if (ref.kind === "frontmatter-field") {
+        // The whole field VALUE is the reference (no separate label to
+        // rebuild, unlike a mention's `[@Name](href)` span) — a plain
+        // swap of the old `/humanId:path` string for the fresh one.
+        if (content.includes(ref.ref_text)) {
+          content = content.split(ref.ref_text).join(fresh.href);
         }
       } else if (ref.attr_name && ref.directive_name) {
         content = rewriteDirectiveAttrOccurrences(

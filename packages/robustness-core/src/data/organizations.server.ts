@@ -17,6 +17,7 @@ import {
   select,
   formatRecord,
   upsert,
+  merge,
   remove,
 } from "./generic.server";
 import { RecordId } from "surrealdb";
@@ -25,6 +26,13 @@ import type { Group } from "./features";
 export type Organization = Data & {
   name: string;
   created_at: string;
+  /** The `vault_folders` id of this Organization's `kanban-garden` Projects
+   * board anchor (`org/kanban-projects/` — see `garden/3-growing/
+   * guide-projects-phases.md`). `null`/absent until the "Ensure Org Kanban
+   * Board" admin script provisions it — the Organization entity stays
+   * DB-only (no reversal of this module's own Phase A decision); this is
+   * just a pointer TO a vault folder, not the Organization living there. */
+  kanban_folder_id?: string | null;
 };
 
 /** The one hard-coded Organization — see this module's own doc above. */
@@ -142,6 +150,21 @@ export async function setOrganizationMemberRole(
   });
   const record = Array.isArray(result) ? result[0] : result;
   return record ? formatRecord(record as unknown as OrganizationMember) : undefined;
+}
+
+/** Points this Organization at its `kanban-garden` Projects board anchor
+ * once the "Ensure Org Kanban Board" admin script has created one — the
+ * one intended writer of this field. */
+export async function setOrganizationKanbanFolderId(
+  folderId: string,
+  organizationId: string = NOPAL_ORGANIZATION_ID,
+): Promise<Organization | undefined> {
+  // `merge`, not `upsert` — this row already exists (seeded by migration
+  // `0014_organizations.surql`); `upsert`'s `CONTENT` semantics would
+  // REPLACE the whole record (wiping `name`/`created_at`), same pitfall
+  // `merge`'s own precedent elsewhere in this codebase exists to avoid.
+  const record = await merge("organizations", organizationId, { kanban_folder_id: folderId });
+  return record ? formatRecord(record as unknown as Organization) : undefined;
 }
 
 export async function removeOrganizationMember(

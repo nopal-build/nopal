@@ -6,22 +6,25 @@ import { Surface } from "stamps/Surface";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
-import type { Dashboard, DashboardRow, SteepNote } from "robustness-core/data/dashboard.server";
-import type { ProjectStatus } from "robustness-core/data/project.types";
+import type { Dashboard, DashboardFilter, DashboardRow, SteepNote } from "robustness-core/data/dashboard.server";
 import { steepLabel } from "robustness-core/data/steepScale";
 
-// ─── Rows ───────────────────────────────────────────────────────────────────
+// ─── Rows ─────────────────────────────────────────────────────────────────────────
 
-const STATUS_TABS: { key: ProjectStatus; label: string }[] = [
+// "Done"/"Archive" (garden/3-growing/guide-projects-phases.md): both read
+// `status === "completed"` projects, split by WHY — Done is the Kanban
+// board's End-type phase, Archive is the `archived` flag. See
+// `dashboard.server.ts`'s own `DashboardFilter`/`matchesFilter` doc.
+const STATUS_TABS: { key: DashboardFilter; label: string }[] = [
   { key: "active", label: "Active" },
-  { key: "completed", label: "Completed" },
-  { key: "trashed", label: "Trashed" },
+  { key: "done", label: "Done" },
+  { key: "archive", label: "Archive" },
 ];
 
-const EMPTY_MESSAGE: Record<ProjectStatus, string> = {
+const EMPTY_MESSAGE: Record<DashboardFilter, string> = {
   active: "No active projects yet.",
-  completed: "No completed projects yet.",
-  trashed: "Nothing in the trash.",
+  done: "Nothing done yet.",
+  archive: "Nothing archived.",
 };
 
 function shortDate(date: string): string {
@@ -95,19 +98,28 @@ function GuideProjects({
   rows,
   activeStatus,
   counts,
+  isOrgGuide,
 }: {
   rows: DashboardRow[];
-  activeStatus: ProjectStatus;
-  counts: Record<ProjectStatus, number>;
+  activeStatus: DashboardFilter;
+  counts: Record<DashboardFilter, number>;
+  isOrgGuide: boolean;
 }) {
   return (
     <Stack gap={3}>
-      <h2
-        className={`${textSize.sm} ${sprinkles({ fontWeight: "bold", textTransform: "uppercase", letterSpacing: "wider" })}`}
-        style={subtle}
-      >
-        Projects
-      </h2>
+      <Cluster gap={3} align="flex-start" style={{ justifyContent: "space-between" }}>
+        <h2
+          className={`${textSize.sm} ${sprinkles({ fontWeight: "bold", textTransform: "uppercase", letterSpacing: "wider" })}`}
+          style={subtle}
+        >
+          Projects
+        </h2>
+        {isOrgGuide && (
+          <Link to="/guide-projects" className={textSize.sm} style={{ color: "inherit" }}>
+            View all projects →
+          </Link>
+        )}
+      </Cluster>
       <Cluster gap={2}>
         {STATUS_TABS.map((tab) => (
           <Link key={tab.key} to={tab.key === "active" ? "/" : `/?status=${tab.key}`} style={{ textDecoration: "none" }}>
@@ -117,11 +129,7 @@ function GuideProjects({
           </Link>
         ))}
       </Cluster>
-      {activeStatus === "trashed" && rows.length > 0 && (
-        <p className={textSize.xs} style={subtle}>
-          Trashed projects are deleted after 30 days.
-        </p>
-      )}
+
       {rows.length === 0 ? (
         <p className={textSize.sm} style={subtle}>
           {EMPTY_MESSAGE[activeStatus]}
@@ -147,7 +155,15 @@ function GuideProjects({
  * page. Takes only what the loader returned, so a render test can hand it
  * any view.
  */
-export function DashboardView({ activeStatus, dashboard }: { activeStatus: ProjectStatus; dashboard: Dashboard }) {
+export function DashboardView({
+  activeStatus,
+  dashboard,
+  isOrgGuide,
+}: {
+  activeStatus: DashboardFilter;
+  dashboard: Dashboard;
+  isOrgGuide: boolean;
+}) {
   // Someone whose every role is Client (ADR-023): their projects, each a
   // way in, and nothing that counts.
   if (dashboard.view === "client") {
@@ -163,7 +179,8 @@ export function DashboardView({ activeStatus, dashboard }: { activeStatus: Proje
     <GuideProjects
       rows={dashboard.rows}
       activeStatus={activeStatus}
-      counts={dashboard.counts ?? { active: 0, completed: 0, trashed: 0 }}
+      counts={dashboard.counts ?? { active: 0, done: 0, archive: 0 }}
+      isOrgGuide={isOrgGuide}
     />
   );
 }

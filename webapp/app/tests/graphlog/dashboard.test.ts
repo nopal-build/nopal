@@ -24,6 +24,7 @@ function project(id: string, name: string, sharing: DashboardProjectInput["shari
     name,
     status: "active",
     statusAt: null,
+    archived: false,
     lastAddedAt: null,
     sharing,
     read: `${name} is at the end of the climb.`,
@@ -63,14 +64,14 @@ const names = new Map([
 
 describe("only your projects", () => {
   it("a guide on two projects sees two", () => {
-    const d = buildDashboard({ viewerId: GUIDE, projects: [crouch, coronado], readings, names, status: "active" });
+    const d = buildDashboard({ viewerId: GUIDE, projects: [crouch, coronado], readings, names, filter: "active" });
     expect(d.view).toBe("guide");
     expect(d.rows.map((r) => r.id)).toEqual([CROUCH, CORONADO]);
   });
 
   it("a client on one sees one, and no trace of any other in the payload", () => {
     // Even handed a project they are not on, the builder drops it.
-    const d = buildDashboard({ viewerId: CLIENT, projects: [crouch, coronado], readings, names, status: "active" });
+    const d = buildDashboard({ viewerId: CLIENT, projects: [crouch, coronado], readings, names, filter: "active" });
     expect(d.view).toBe("client");
     expect(d.rows.map((r) => r.id)).toEqual([CROUCH]);
     const payload = JSON.stringify(d);
@@ -81,7 +82,7 @@ describe("only your projects", () => {
   });
 
   it("a client gets no read, no ask, no one's readings, only their own tap", () => {
-    const d = buildDashboard({ viewerId: CLIENT, projects: [crouch], readings, names, status: "active" });
+    const d = buildDashboard({ viewerId: CLIENT, projects: [crouch], readings, names, filter: "active" });
     const [row] = d.rows;
     expect(row.ask).toBeNull();
     expect(row.notes).toEqual([]);
@@ -91,7 +92,7 @@ describe("only your projects", () => {
 
   it("Client on one project and Owner of another: each shows by its own role", () => {
     const mixed = project(CORONADO, "Coronado ADU", [{ human: CLIENT, role: "Owner" }]);
-    const d = buildDashboard({ viewerId: CLIENT, projects: [crouch, mixed], readings, names, status: "active" });
+    const d = buildDashboard({ viewerId: CLIENT, projects: [crouch, mixed], readings, names, filter: "active" });
     expect(d.view).toBe("guide");
     const byId = new Map(d.rows.map((r) => [r.id, r]));
     expect(byId.get(CROUCH)?.role).toBe("Client");
@@ -102,13 +103,13 @@ describe("only your projects", () => {
 
 describe("a steep reading is a quiet note for the guides (test 3, server half)", () => {
   it("reaches a guide as words, with the slope, and a guide's own reading stays theirs", () => {
-    const d = buildDashboard({ viewerId: GUIDE, projects: [crouch], readings, names, status: "active" });
+    const d = buildDashboard({ viewerId: GUIDE, projects: [crouch], readings, names, filter: "active" });
     expect(d.rows[0].notes).toEqual([{ who: "Dana", position: "oh-crap", date: "2026-09-23", previous: "uphill" }]);
     expect(d.rows[0].mine).toEqual({ position: "steep", date: "2026-09-23" });
   });
 
   it("does not reach an Observer or a Crafter, who still tap (readings are the Owners')", () => {
-    const d = buildDashboard({ viewerId: LEAD, projects: [crouch], readings, names, status: "active" });
+    const d = buildDashboard({ viewerId: LEAD, projects: [crouch], readings, names, filter: "active" });
     expect(d.view).toBe("guide");
     expect(d.rows[0].notes).toEqual([]);
     expect(d.rows[0].canTap).toBe(true);
@@ -116,7 +117,7 @@ describe("a steep reading is a quiet note for the guides (test 3, server half)",
 
   it("a Crafter, the level that does the work, sees the ask but no one's readings", () => {
     const withCrafter = project(CROUCH, "Crouch Casita", [...crouch.sharing, { human: OTHER_CLIENT, role: "Crafter" }]);
-    const d = buildDashboard({ viewerId: OTHER_CLIENT, projects: [withCrafter], readings, names, status: "active" });
+    const d = buildDashboard({ viewerId: OTHER_CLIENT, projects: [withCrafter], readings, names, filter: "active" });
     expect(d.rows[0].ask).toContain("window supplier");
     expect(d.rows[0].notes).toEqual([]);
   });
@@ -126,7 +127,7 @@ describe("a steep reading is a quiet note for the guides (test 3, server half)",
       { human: GUIDE, role: "Owner" },
       { human: LEAD, role: "Owner" },
     ]);
-    const d = buildDashboard({ viewerId: LEAD, projects: [withTwoGuides], readings, names, status: "active" });
+    const d = buildDashboard({ viewerId: LEAD, projects: [withTwoGuides], readings, names, filter: "active" });
     expect(d.rows[0].notes).toEqual([]);
   });
 
@@ -153,15 +154,15 @@ describe("my projects, most recently added to first", () => {
     const older = at(project("aaaaaaaaaaaaaaaaaaa2", "Older", sharing), "2026-09-20T10:00:00.000Z");
     const silent = project("aaaaaaaaaaaaaaaaaaa3", "Silent", sharing);
     const newest = at(project("aaaaaaaaaaaaaaaaaaa4", "Newest", sharing), "2026-10-01T09:00:00.000Z");
-    const d = buildDashboard({ viewerId: GUIDE, projects: [quiet, older, silent, newest], readings: [], names: new Map(), status: "active" });
+    const d = buildDashboard({ viewerId: GUIDE, projects: [quiet, older, silent, newest], readings: [], names: new Map(), filter: "active" });
     expect(d.rows.map((r) => r.name)).toEqual(["Newest", "Older", "Quiet", "Silent"]);
   });
 });
 
 describe("the top of the screen", () => {
   it("one project to tap on puts the meter at the top; two put it on the rows", () => {
-    expect(buildDashboard({ viewerId: CLIENT, projects: [crouch], readings, names, status: "active" }).topMeterProjectId).toBe(CROUCH);
-    expect(buildDashboard({ viewerId: GUIDE, projects: [crouch, coronado], readings, names, status: "active" }).topMeterProjectId).toBeNull();
+    expect(buildDashboard({ viewerId: CLIENT, projects: [crouch], readings, names, filter: "active" }).topMeterProjectId).toBe(CROUCH);
+    expect(buildDashboard({ viewerId: GUIDE, projects: [crouch, coronado], readings, names, filter: "active" }).topMeterProjectId).toBeNull();
   });
 });
 

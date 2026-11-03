@@ -8,13 +8,14 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { DashboardView } from "../components/DashboardView";
 import type { Dashboard, DashboardRow } from "robustness-core/data/dashboard.server";
 
-const counts = { active: 2, completed: 0, trashed: 0 };
+const counts = { active: 2, done: 0, archive: 0 };
 const row = (over: Partial<DashboardRow>): DashboardRow => ({
   id: "a1b2c3d4e5f6g7h8i9j0",
   name: "Crouch Casita",
   role: "Guide",
   status: "active",
   statusAt: null,
+  archived: false,
   read: null,
   ask: "Pick the window supplier this week.",
   notes: [],
@@ -23,9 +24,12 @@ const row = (over: Partial<DashboardRow>): DashboardRow => ({
   ...over,
 });
 
-// A data router, since the rows are links.
-function render(dashboard: Dashboard) {
-  const element = <DashboardView activeStatus="active" dashboard={dashboard} />;
+// A data router, since the rows are links. `isOrgGuide` defaults to
+// false — none of these tests are about the "View all projects" link
+// (guide-projects-phases garden seed); keeping it off preserves every
+// existing assertion's original behavior unchanged.
+function render(dashboard: Dashboard, isOrgGuide = false) {
+  const element = <DashboardView activeStatus="active" dashboard={dashboard} isOrgGuide={isOrgGuide} />;
   const router = createMemoryRouter([{ path: "/", element }]);
   return renderToStaticMarkup(<RouterProvider router={router} />);
 }
@@ -92,11 +96,19 @@ describe("no freak-out (test 3, markup)", () => {
   });
 });
 
+describe("View all projects link (guide-projects-phases)", () => {
+  it("shows only for an org Guide, never for a client", () => {
+    expect(render(guideDash, true)).toContain("View all projects");
+    expect(render(guideDash, false)).not.toContain("View all projects");
+    expect(render(clientDash, true)).not.toContain("View all projects");
+  });
+});
+
 describe("a client is never counted or nagged", () => {
   it("no status tabs, no counts, no 'last logged'", () => {
     const html = render(clientDash);
     expect(html).not.toMatch(/\(\d+\)/);
-    expect(html).not.toMatch(/Active|Completed|Trashed/);
+    expect(html).not.toMatch(/Active|Done|Archive/);
     expect(html).not.toMatch(/streak|days since|last logged/i);
   });
 });
