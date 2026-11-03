@@ -134,6 +134,25 @@ function parseCardFrontmatter(content: string | null | undefined): {
 
 const MENTION_HREF_RE = /^\/([^:/]+):(.+)$/;
 
+/** Resolves a card's raw `project:` front-matter value (a `/humanId:path`
+ * string) to the real project's CURRENT folder id — `null` if the card
+ * has no such field, it's not in the expected form, or it no longer
+ * resolves (e.g. the project was deleted). Exported so
+ * `projectStatus.server.ts`'s card-move hook (`vault.server.ts`'s
+ * `updateFileRef`) can reuse this exact resolution instead of
+ * duplicating it. */
+export async function resolveCardProjectFolderId(
+  cardContent: string | null | undefined,
+): Promise<string | null> {
+  const { projectRef } = parseCardFrontmatter(cardContent);
+  if (!projectRef) return null;
+  const match = MENTION_HREF_RE.exec(projectRef);
+  if (!match) return null;
+  const [, targetHumanId, rawPath] = match;
+  const resolved = await resolveVaultPath(targetHumanId, rawPath);
+  return resolved?.type === "folder" ? resolved.id : null;
+}
+
 /** Every card file inside one phase folder, with its front matter parsed
  * and its `project:` pointer freshly RESOLVED to an id (not just parsed
  * as a string) — so a stale/renamed-since path still resolves correctly
@@ -147,15 +166,7 @@ export async function listPhaseCards(phase: BoardPhase): Promise<BoardCard[]> {
     const file = await getFileRefById(listing._id);
     if (!file) continue;
     const parsed = parseCardFrontmatter(file.content);
-    let projectFolderId: string | null = null;
-    if (parsed.projectRef) {
-      const match = MENTION_HREF_RE.exec(parsed.projectRef);
-      if (match) {
-        const [, targetHumanId, rawPath] = match;
-        const resolved = await resolveVaultPath(targetHumanId, rawPath);
-        if (resolved?.type === "folder") projectFolderId = resolved.id;
-      }
-    }
+    const projectFolderId = await resolveCardProjectFolderId(file.content);
     cards.push({
       file,
       title: parsed.title ?? file.name.replace(/\.md$/i, ""),
@@ -165,6 +176,30 @@ export async function listPhaseCards(phase: BoardPhase): Promise<BoardCard[]> {
     });
   }
   return cards;
+}
+
+/** Creates a Kanban card for `project` in a specific phase — the shared
+ * mechanic both `createBoardCardForNewProject` (always Start) and the
+ * "Backfill Guide Projects Board" admin script (Start or End, depending
+ * on the project's EXISTING `active`/`completed` status) build on. A
+ * no-op, not an error, when the target phase can't be resolved — same
+ * "don't block the primary action on a secondary one" philosophy
+ * `startProject` already applies to `openSeedRound`. */
+export async function createBoardCardForProject(
+  project: VaultFolder,
+  guideHumanId: string,
+  phase: BoardPhase,
+): Promise<void> {
+  const projectTarget = await computeCurrentMentionTarget({ type: "folder", id: project._id });
+  if (!projectTarget) return;
+
+  await createFileRef({
+    human_id: phase.folder.human_id,
+    name: `${project.name}.md`,
+    content: `---\ntitle: ${JSON.stringify(project.name)}\nguide: ${guideHumanId}\nproject: ${projectTarget.href}\n---\n`,
+    content_type: "text/markdown",
+    folder_id: phase.folder._id,
+  });
 }
 
 /** Creates a Kanban card for a brand-new project, placed in the board's
@@ -183,15 +218,26 @@ export async function createBoardCardForNewProject(
   const phases = await listBoardPhases(anchor);
   const startPhase = phases.find((p) => p.type === "start");
   if (!startPhase) return;
-
-  const projectTarget = await computeCurrentMentionTarget({ type: "folder", id: project._id });
-  if (!projectTarget) return;
-
-  await createFileRef({
-    human_id: anchor.human_id,
-    name: `${project.name}.md`,
-    content: `---\ntitle: ${JSON.stringify(project.name)}\nguide: ${guideHumanId}\nproject: ${projectTarget.href}\n---\n`,
-    content_type: "text/markdown",
-    folder_id: startPhase.folder._id,
-  });
+  await createBoardCardForProject(project, guideHumanId, startPhase);
 }
+
+/** Whether `projectFolderId`'s current Kanban card (if it has one) sits
+ * in the board's End-type phase — what `projectStatus.server.ts`'s
+ * `recomputeProjectStatus` ORs together with the `archived` flag to
+ * decide "completed" (garden/3-growing/guide-projects-phases.md).
+ * `false` (not an error) when there's no board, no End-type phase, or
+ * the project simply has no card there — a project's status must still
+ * resolve to something even before/without a Kanban board at all. */
+export async function isProjectCardInEndPhase(
+  projectFolderId: string,
+  organizationId: string = NOPAL_ORGANIZATION_ID,
+): Promise<boolean> {
+  const anchor = await getOrgBoardAnchor(organizationId);
+  if (!anchor) return false;
+  const phases = await listBoardPhases(anchor);
+  const endPhase = phases.find((p) => p.type === "end");
+  if (!endPhase) return false;
+  const cards = await listPhaseCards(endPhase);
+  return cards.some((c) => c.projectFolderId === projectFolderId);
+}
+

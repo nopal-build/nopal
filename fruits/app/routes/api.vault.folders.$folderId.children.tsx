@@ -3,11 +3,14 @@ import { getUserFromRequest } from "../modules/auth/auth.server";
 import {
   canViewFolderOrgAware,
   getFolderById,
+  getOrgRootFolder,
   getTopLevelSharedFolders,
   listFolderChildren,
   ensureVaultRootFolders,
 } from "robustness-core/data/vault.server";
 import { nameSyncedAuthors } from "robustness-core/data/syncedAuthors.server";
+import { isStaff } from "robustness-core/data/humans.server";
+import { getOrganizationRole, NOPAL_ORGANIZATION_ID } from "robustness-core/data/organizations.server";
 
 /**
  * GET /api/vault/folders/:folderId/children
@@ -47,6 +50,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   if (folderId === "root") {
     const folders = await ensureVaultRootFolders(user._id);
+    // `org` isn't provisioned per-human (garden/3-growing/
+    // guide-projects-phases.md, `PER_HUMAN_VAULT_ROOT_KEYS`) — without
+    // this, it's unreachable by PATH at all (not just hidden from the
+    // sidebar), for the CLI (`nopal garden`/`nopal kanban`) just as much
+    // as the web Vault. Surfaced only for an org Guide (or platform
+    // Admin/Super) — same gate `canViewFolderOrgAware` already applies
+    // once you're actually inside it.
+    const orgRole = await getOrganizationRole(user._id, NOPAL_ORGANIZATION_ID);
+    if (isStaff(user) || orgRole === "Guide") {
+      const org = await getOrgRootFolder(NOPAL_ORGANIZATION_ID);
+      if (org) folders.push(org);
+    }
     return Response.json({ folders, files: [] });
   }
 

@@ -202,6 +202,14 @@ export type VaultFolder = {
    * trash-cleanup cron (`api.vault.trash-cleanup.tsx`) measures a
    * "trashed" project's age against. */
   project_status_at?: string | null;
+  /** A project's `archived` flag (garden/3-growing/
+   * guide-projects-phases.md) — DENORMALIZED CACHE of that project's own
+   * README.md `archived` front matter, kept in sync by
+   * `projectStatus.server.ts`'s `setProjectArchived` — never write this
+   * directly. Null/absent means `false` (not yet archived, or predates
+   * this field). Independent of `project_status`, which `setProjectArchived`
+   * recomputes alongside it (see that function's own doc). */
+  project_archived?: boolean | null;
   /**
    * Whether this `project-n02` root folder (a project OR a `personal`
    * space) runs GraphLog's nightly — see `graphLogSchedule.server.ts`.

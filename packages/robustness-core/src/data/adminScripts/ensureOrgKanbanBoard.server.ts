@@ -38,6 +38,7 @@ import {
   createVaultFolder,
   createFileRef,
   getFolderById,
+  getOrgRootFolder,
   type VaultFolder,
 } from "../vault.server";
 import {
@@ -72,17 +73,6 @@ project folder under \`projects/\`. Moving a project's phase means moving
 its card file between these folders — see \`garden/3-growing/
 guide-projects-phases.md\`.
 `;
-}
-
-async function findExistingOrgRoot(organizationId: string): Promise<VaultFolder | undefined> {
-  const result = await query<[VaultFolder[]]>(
-    `SELECT * FROM vault_folders
-     WHERE vault_root_key = "org" AND organization_id = $organizationId AND parent_folder_id = null
-     ORDER BY created_at ASC LIMIT 1`,
-    { organizationId },
-  );
-  const [row] = (result?.[0] ?? []).map(formatRecord);
-  return row;
 }
 
 async function findExistingAnchor(orgRootId: string): Promise<VaultFolder | undefined> {
@@ -124,7 +114,7 @@ export async function run({ dryRun, args, log }: AdminScriptRunOpts): Promise<Ad
     `${dryRun ? "Would provision" : "Provisioning"} org/kanban-projects for "${organizationId}", owned by ${owner.name ?? owner.email} (${owner._id})…`,
   );
 
-  let orgRoot = await findExistingOrgRoot(organizationId);
+  let orgRoot = await getOrgRootFolder(organizationId);
   if (orgRoot) {
     log(`  org/ already exists (${orgRoot._id}) — reusing it.`);
   } else if (dryRun) {

@@ -88,6 +88,19 @@ let websiteModule: Promise<typeof import("./website.server")> | undefined;
 function getWebsiteModule() {
   return (websiteModule ??= import("./website.server"));
 }
+// Same reasoning as the three above: both of these statically import
+// FROM this file already (guideProjectsBoard.server for vault CRUD,
+// projectStatus.server for the same), so this file reaching back into
+// them for the Kanban-card-move status hook below needs the same lazy
+// `import()` treatment.
+let guideProjectsBoardModule: Promise<typeof import("./guideProjectsBoard.server")> | undefined;
+function getGuideProjectsBoardModule() {
+  return (guideProjectsBoardModule ??= import("./guideProjectsBoard.server"));
+}
+let projectStatusModule: Promise<typeof import("./projectStatus.server")> | undefined;
+function getProjectStatusModule() {
+  return (projectStatusModule ??= import("./projectStatus.server"));
+}
 
 // ─── FileRef CRUD ─────────────────────────────────────────────────────────────
 
@@ -224,6 +237,22 @@ export async function isOrgGuideForFolder(
   return (await getOrganizationRole(humanId, folder.organization_id)) === "Guide";
 }
 
+/** The Organization's own singleton `org` Vault Root folder — unlike
+ * every other root (see `PER_HUMAN_VAULT_ROOT_KEYS`, `vaultRoots.ts`),
+ * this one isn't provisioned per-human, so it can't be found via
+ * `ensureVaultRootFolders`. `undefined` until the "Ensure Org Kanban
+ * Board" admin script has provisioned one. */
+export async function getOrgRootFolder(organizationId: string): Promise<VaultFolder | undefined> {
+  const result = await query<[VaultFolder[]]>(
+    `SELECT * FROM vault_folders
+     WHERE vault_root_key = "org" AND organization_id = $organizationId AND parent_folder_id = null
+     ORDER BY created_at ASC LIMIT 1`,
+    { organizationId },
+  );
+  const [row] = (result?.[0] ?? []).map(formatRecord);
+  return row;
+}
+
 /**
  * Whether `humanId` is allowed to view (not necessarily download/manage)
  * `file` — either because they own it, or because it sits in a folder
@@ -291,6 +320,25 @@ export async function updateFileRef(
       // (which rewrites `content`'s front matter), and renames/moves.
       const { invalidateWebsiteCacheForFile } = await getWebsiteModule();
       await invalidateWebsiteCacheForFile(updated);
+    }
+    if ("folder_id" in updates && updated.folder_id) {
+      // Guide Projects board (garden/3-growing/guide-projects-phases.md):
+      // a no-op for the overwhelming majority of file moves -- only does
+      // real work when the moved file is a Kanban board card (its new
+      // parent folder is under the `org` Vault Root), recomputing the
+      // real project it points at (`active`/`completed` now DERIVED from
+      // being in an End-type phase, or the `archived` flag -- never
+      // touches `trashed`, see `recomputeProjectStatus`'s own doc).
+      const newParent = await getFolderById(updated.folder_id);
+      if (newParent?.vault_root_key === "org") {
+        const { resolveCardProjectFolderId } = await getGuideProjectsBoardModule();
+        const projectFolderId = await resolveCardProjectFolderId(updated.content);
+        const projectFolder = projectFolderId ? await getFolderById(projectFolderId) : undefined;
+        if (projectFolder) {
+          const { recomputeProjectStatus } = await getProjectStatusModule();
+          await recomputeProjectStatus(projectFolder);
+        }
+      }
     }
   }
   return updated;
@@ -725,6 +773,9 @@ export async function updateVaultFolder(
      * intended writer of these two. */
     project_status: string | null;
     project_status_at: string | null;
+    /** See `projectStatus.server.ts`'s `setProjectArchived` — the only
+     * intended writer. */
+    project_archived: boolean | null;
     /** See `graphLogSchedule.server.ts`'s `setGraphLogScheduled` — the only
      * intended writer of these two. */
     graphlog_scheduled: boolean | null;

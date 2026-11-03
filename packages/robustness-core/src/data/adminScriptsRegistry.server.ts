@@ -53,6 +53,8 @@ import { run as runDedupeSummaries } from "./adminScripts/dedupeSummaries.server
 import { run as runMergeSkillsSyncsCaseVariants } from "./adminScripts/migrateMergeSkillsSyncsCaseVariants.server";
 import { run as runBackfillOrganizations } from "./adminScripts/backfillOrganizations.server";
 import { run as runEnsureOrgKanbanBoard } from "./adminScripts/ensureOrgKanbanBoard.server";
+import { run as runBackfillGuideProjectsBoard } from "./adminScripts/backfillGuideProjectsBoard.server";
+import { run as runMigrateTrashedToArchived } from "./adminScripts/migrateTrashedToArchived.server";
 import type { AdminScriptDefinition } from "./adminScripts/types";
 
 export type { AdminScriptDefinition, AdminScriptRunOpts, AdminScriptResult } from "./adminScripts/types";
@@ -172,6 +174,20 @@ const REGISTRY: AdminScriptDefinition[] = [
     argLabel: "Owner email (the Human who'll own the new org/kanban-projects folder)",
     argRequired: true,
     run: runEnsureOrgKanbanBoard,
+  },
+  {
+    name: "backfill-guide-projects-board",
+    label: "Backfill Guide Projects Board",
+    description:
+      "Creates a Kanban card for every existing project-n02 project not yet represented anywhere on the org's Projects board (website projects excluded) — completed projects land in the End-type phase, active projects in the Start-type phase (trashed projects are skipped entirely). Idempotent.",
+    run: runBackfillGuideProjectsBoard,
+  },
+  {
+    name: "migrate-trashed-to-archived",
+    label: "Migrate Trashed Projects To Archived",
+    description:
+      "One-time correction: every project currently marked 'trashed' is moved to archived + completed instead, cancelling its 30-day trash-cleanup countdown — 'trashed' going forward is reserved for projects actually meant to be permanently deleted. Idempotent.",
+    run: runMigrateTrashedToArchived,
   },
 ];
 
