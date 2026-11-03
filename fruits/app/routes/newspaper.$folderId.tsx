@@ -53,6 +53,12 @@ import {
   type SensorDataTab,
 } from "robustness-core/data/loadCellSensorData.server";
 import { SensorDataView } from "../components/SensorDataView";
+import {
+  findBoxHardwareAnalysisFolder,
+  loadBoxHardwareDataTab,
+  type BoxHardwareDataTab,
+} from "robustness-core/data/boxHardwareData.server";
+import { BoxHardwareView } from "../components/BoxHardwareView";
 import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
 import { ownLatestReading } from "robustness-core/data/dashboard.server";
 import { navFor } from "../data/nav.server";
@@ -105,11 +111,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const inCache = await canViewFolderOrgAware(user._id, folder);
   const features = role ? role.features : inCache ? featuresOf("Observer") : [];
   // Sensor Data only ever shows up on a project that actually has a
-  // recognized `load-cell` sync-api folder (loadCellSensorData.server.ts,
-  // Gerald 2026-10-02: kept deliberately narrow) — filtered out of
-  // `allowed` entirely rather than shown empty.
+  // recognized `load-cell` AND/OR `box-hardware-data` sync-api folder
+  // (loadCellSensorData.server.ts/boxHardwareData.server.ts, Gerald
+  // 2026-10-02: kept deliberately narrow — a different sensor gets its own
+  // recognizer, never a generic "any sync-api folder" view) — filtered out
+  // of `allowed` entirely rather than shown empty.
   const loadCellFolder = features.includes("sensorData") ? await findLoadCellAnalysisFolder(folder) : null;
-  const allowed = tabsFor(features).filter((t) => t !== "sensorData" || !!loadCellFolder);
+  const boxHardwareFolder = features.includes("sensorData") ? await findBoxHardwareAnalysisFolder(folder) : null;
+  const allowed = tabsFor(features).filter((t) => t !== "sensorData" || !!loadCellFolder || !!boxHardwareFolder);
   const tab = resolveProjectTab(new URL(request.url).searchParams.get("tab"), allowed);
   if (!tab) throw new Response("Not found", { status: 404 });
   const base = `/newspaper/${folder._id}`;
@@ -184,6 +193,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const sensorData: SensorDataTab | null =
     tab === "sensorData" && loadCellFolder
       ? await loadSensorDataTab(loadCellFolder, new URL(request.url).searchParams.get("run"))
+      : null;
+  const boxHardwareData: BoxHardwareDataTab | null =
+    tab === "sensorData" && boxHardwareFolder
+      ? await loadBoxHardwareDataTab(boxHardwareFolder, new URL(request.url).searchParams.get("boxRun"))
       : null;
 
   const budgetView = tab === "costs" && new URL(request.url).searchParams.get("view") === "budget";
@@ -293,6 +306,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     manageLetters,
     sharedLetters,
     sensorData,
+    boxHardwareData,
     seeding,
     budgetView,
     budget,
@@ -478,7 +492,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, sharedLetters, sensorData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, sharedLetters, sensorData, boxHardwareData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders, loadCellGraphs } = project;
@@ -739,6 +753,9 @@ export default function NewspaperRoute() {
           )}
           {tab === "sensorData" && sensorData && (
             <SensorDataView projectFolderId={folder._id} data={sensorData} />
+          )}
+          {tab === "sensorData" && boxHardwareData && (
+            <BoxHardwareView projectFolderId={folder._id} data={boxHardwareData} />
           )}
           {logbook && <Logbook cards={logbook} fileIds={logbookFileIds ?? {}} />}
           {suggestions && (

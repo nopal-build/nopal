@@ -60,6 +60,7 @@
     "./data/seedPackets.server": "./src/data/seedPackets.server.ts",
     "./data/sowScore": "./src/data/sowScore.ts",
     "./data/steepScale": "./src/data/steepScale.ts",
+    "./data/boxHardwareData.server": "./src/data/boxHardwareData.server.ts",
     "./data/budget.server": "./src/data/budget.server.ts",
     "./data/budgetLines": "./src/data/budgetLines.ts",
     "./data/humanNames": "./src/data/humanNames.ts",
