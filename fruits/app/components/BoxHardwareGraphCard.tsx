@@ -11,7 +11,10 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors, colors } from "stamps/tokens";
 import { Cluster } from "stamps/Cluster";
+import { Chip } from "stamps/Chip";
 import { downloadFromUrl, vaultDownloadUrl, type LoadCellDownloadUrlFn } from "./LoadCellGraphCard";
+import { useTemperatureUnitPref } from "../hooks/useTemperatureUnitPref";
+import { celsiusDeltaToDisplay, celsiusToDisplay, temperatureUnitLabel, type TemperatureUnit } from "../util/temperature";
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -52,8 +55,22 @@ function fmtHours(s: number): string {
   return `${(s / 3600).toFixed(1)}h`;
 }
 
-function fmtDelta(c: number | null): string {
-  return c === null ? "—" : `${c >= 0 ? "+" : ""}${c.toFixed(1)}\u00b0C`;
+function fmtDelta(deltaC: number | null, unit: TemperatureUnit): string {
+  if (deltaC === null) return "—";
+  const v = celsiusDeltaToDisplay(deltaC, unit);
+  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}${temperatureUnitLabel(unit)}`;
+}
+
+function UnitToggle({ unit, onChange }: { unit: TemperatureUnit; onChange: (next: TemperatureUnit) => void }) {
+  return (
+    <Cluster gap={2} align="center">
+      {(["F", "C"] as const).map((option) => (
+        <Chip key={option} active={unit === option} onClick={() => onChange(option)}>
+          °{option}
+        </Chip>
+      ))}
+    </Cluster>
+  );
 }
 
 export function BoxHardwareGraphCard({
@@ -67,19 +84,24 @@ export function BoxHardwareGraphCard({
   tableMaxRows = 500,
   downloadUrl = vaultDownloadUrl,
 }: BoxHardwareGraphCardProps) {
+  const [unit, setUnit] = useTemperatureUnitPref();
+  const unitLabel = temperatureUnitLabel(unit);
+
   const tempSeries: ChartSeries[] = [
-    { label: "Inside ambient", color: colors.purple, dashed: true, points: pointsFor(rows, "inside_ambient_c") },
-    { label: "Inside wall grid avg", color: colors.purple, dashed: false, points: pointsFor(rows, "inside_grid_mean_c") },
-    { label: "Outside ambient", color: colors.red, dashed: true, points: pointsFor(rows, "outside_ambient_c") },
-    { label: "Outside wall grid avg", color: colors.red, dashed: false, points: pointsFor(rows, "outside_grid_mean_c") },
+    { label: "Inside ambient", color: colors.purple, dashed: true, points: pointsFor(rows, "inside_ambient_c", (c) => celsiusToDisplay(c, unit)) },
+    { label: "Inside wall grid avg", color: colors.purple, dashed: false, points: pointsFor(rows, "inside_grid_mean_c", (c) => celsiusToDisplay(c, unit)) },
+    { label: "Outside ambient", color: colors.red, dashed: true, points: pointsFor(rows, "outside_ambient_c", (c) => celsiusToDisplay(c, unit)) },
+    { label: "Outside wall grid avg", color: colors.red, dashed: false, points: pointsFor(rows, "outside_grid_mean_c", (c) => celsiusToDisplay(c, unit)) },
   ];
   const deltaSeries: ChartSeries[] = [
-    { label: "Ambient delta", color: colors.yellow, dashed: true, points: pointsFor(rows, "ambient_delta_c") },
-    { label: "Wall grid avg delta", color: colors.green, dashed: false, points: pointsFor(rows, "grid_mean_delta_c") },
+    { label: "Ambient delta", color: colors.yellow, dashed: true, points: pointsFor(rows, "ambient_delta_c", (c) => celsiusDeltaToDisplay(c, unit)) },
+    { label: "Wall grid avg delta", color: colors.green, dashed: false, points: pointsFor(rows, "grid_mean_delta_c", (c) => celsiusDeltaToDisplay(c, unit)) },
   ];
 
   const truncated = showTable && rows.length > tableMaxRows;
   const visibleRows = truncated ? rows.slice(0, tableMaxRows) : rows;
+  const fmtAbs = (c: number | null) => (c === null ? "" : celsiusToDisplay(c, unit).toFixed(2));
+  const fmtRowDelta = (c: number | null) => (c === null ? "" : celsiusDeltaToDisplay(c, unit).toFixed(2));
 
   return (
     <div className="ox-box-hardware-graph">
@@ -92,9 +114,10 @@ export function BoxHardwareGraphCard({
         <Cluster gap={5} align="baseline">
           <Stat label="Cycles" value={String(meta.cycleCount)} />
           <Stat label="Duration" value={fmtHours(meta.durationS)} />
-          <Stat label="Peak ambient delta" value={fmtDelta(meta.peakAmbientDeltaC)} />
-          <Stat label="Peak wall grid delta" value={fmtDelta(meta.peakGridMeanDeltaC)} />
+          <Stat label="Peak ambient delta" value={fmtDelta(meta.peakAmbientDeltaC, unit)} />
+          <Stat label="Peak wall grid delta" value={fmtDelta(meta.peakGridMeanDeltaC, unit)} />
         </Cluster>
+        <UnitToggle unit={unit} onChange={setUnit} />
         {downloadUrl && (
           <Cluster gap={3}>
             <button
@@ -117,8 +140,8 @@ export function BoxHardwareGraphCard({
       </Cluster>
 
       <div className={sprinkles({ display: "flex", gap: 6, flexWrap: "wrap", mt: 5 })}>
-        <MiniMultiLineChart title="Temperature vs. Time" yLabel="\u00b0C" series={tempSeries} />
-        <MiniMultiLineChart title="Delta T vs. Time (outside \u2212 inside)" yLabel="\u00b0C" series={deltaSeries} zeroLine />
+        <MiniMultiLineChart title="Temperature vs. Time" yLabel={unitLabel} series={tempSeries} />
+        <MiniMultiLineChart title={`Delta T vs. Time (outside \u2212 inside)`} yLabel={unitLabel} series={deltaSeries} zeroLine />
       </div>
 
       {showTable && (
@@ -129,12 +152,12 @@ export function BoxHardwareGraphCard({
                 <tr>
                   <th>Timestamp</th>
                   <th>Elapsed (s)</th>
-                  <th>Inside ambient (C)</th>
-                  <th>Inside grid avg (C)</th>
-                  <th>Outside ambient (C)</th>
-                  <th>Outside grid avg (C)</th>
-                  <th>Ambient delta (C)</th>
-                  <th>Grid avg delta (C)</th>
+                  <th>Inside ambient ({unitLabel})</th>
+                  <th>Inside grid avg ({unitLabel})</th>
+                  <th>Outside ambient ({unitLabel})</th>
+                  <th>Outside grid avg ({unitLabel})</th>
+                  <th>Ambient delta ({unitLabel})</th>
+                  <th>Grid avg delta ({unitLabel})</th>
                 </tr>
               </thead>
               <tbody>
@@ -142,12 +165,12 @@ export function BoxHardwareGraphCard({
                   <tr key={i}>
                     <td>{r.timestamp}</td>
                     <td>{r.elapsed_s}</td>
-                    <td>{r.inside_ambient_c ?? ""}</td>
-                    <td>{r.inside_grid_mean_c ?? ""}</td>
-                    <td>{r.outside_ambient_c ?? ""}</td>
-                    <td>{r.outside_grid_mean_c ?? ""}</td>
-                    <td>{r.ambient_delta_c ?? ""}</td>
-                    <td>{r.grid_mean_delta_c ?? ""}</td>
+                    <td>{fmtAbs(r.inside_ambient_c)}</td>
+                    <td>{fmtAbs(r.inside_grid_mean_c)}</td>
+                    <td>{fmtAbs(r.outside_ambient_c)}</td>
+                    <td>{fmtAbs(r.outside_grid_mean_c)}</td>
+                    <td>{fmtRowDelta(r.ambient_delta_c)}</td>
+                    <td>{fmtRowDelta(r.grid_mean_delta_c)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -166,11 +189,15 @@ export function BoxHardwareGraphCard({
 type ChartPoint = { x: number; y: number };
 type ChartSeries = { label: string; color: string; dashed: boolean; points: ChartPoint[] };
 
-function pointsFor(rows: BoxHardwareCleanedRow[], key: keyof BoxHardwareCleanedRow): ChartPoint[] {
+function pointsFor(
+  rows: BoxHardwareCleanedRow[],
+  key: keyof BoxHardwareCleanedRow,
+  convert: (c: number) => number,
+): ChartPoint[] {
   const points: ChartPoint[] = [];
   for (const r of rows) {
     const y = r[key];
-    if (typeof y === "number") points.push({ x: r.elapsed_s, y });
+    if (typeof y === "number") points.push({ x: r.elapsed_s, y: convert(y) });
   }
   return points;
 }
