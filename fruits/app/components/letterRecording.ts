@@ -79,3 +79,22 @@ export function clock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
+
+/** The cameras or mics the browser lists, as picker options (Austin,
+ * 2026-11-03: pick the camera and mic, and see them, before recording).
+ * A browser hides names until it's been allowed the devices once; then
+ * they're numbered. */
+export function deviceOptions(devices: Pick<MediaDeviceInfo, "deviceId" | "kind" | "label">[], kind: "videoinput" | "audioinput"): { value: string; label: string }[] {
+  const noun = kind === "videoinput" ? "Camera" : "Microphone";
+  return devices
+    .filter((d) => d.kind === kind && d.deviceId)
+    .map((d, i) => ({ value: d.deviceId, label: d.label || `${noun} ${i + 1}` }));
+}
+
+/** How loud the mic is, 0 to 1, from an analyser's time-domain samples
+ * (128 is silence): enough to see it's hearing you. */
+export function micLevel(samples: Uint8Array): number {
+  let sum = 0;
+  for (const v of samples) sum += ((v - 128) / 128) ** 2;
+  return Math.min(1, Math.sqrt(sum / Math.max(1, samples.length)) * 4);
+}

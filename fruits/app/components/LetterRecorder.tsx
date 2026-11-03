@@ -22,17 +22,28 @@
 // the bubble is outside that element, so the video has the drawn face
 // and no Stop button; where it can only crop, the drawn face covers the
 // bubble and the Stop button shows in the corner of the video.
+//
+// Before recording, a setup window picks the camera (or none) and the mic
+// and shows them live: the face as the circle will frame it, and a level
+// bar for the mic (Austin, 2026-11-03). The recording uses that same
+// stream, so what was previewed is what's recorded. The picks are
+// remembered on this device.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
+import { Modal } from "stamps/Modal";
+import { Select } from "stamps/Select";
+import { Stack } from "stamps/Stack";
 import { localDateString } from "./TodayLog";
 import { uploadToVaultFolder } from "./vaultUpload";
 import {
   RECORDING_MINUTES_LIMIT,
   RECORDING_VIDEO_BITS_PER_SECOND,
   clock,
+  deviceOptions,
   faceCircle,
+  micLevel,
   letterHasText,
   pickRecorderMimeType,
   recordingFile,
@@ -50,6 +61,25 @@ type Phase =
 /** The longest edge the canvas is drawn at; the worker caps the height
  * at 1080 anyway. Even, for H.264. */
 const MAX_CANVAS_HEIGHT = 1080;
+
+const DEVICE_KEY = "letter-recorder-devices";
+const NO_CAMERA = "none";
+type DevicePicks = { camera: string; mic: string };
+function rememberedPicks(): DevicePicks {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DEVICE_KEY) ?? "null") as Partial<DevicePicks> | null;
+    return { camera: saved?.camera ?? "", mic: saved?.mic ?? "" };
+  } catch {
+    return { camera: "", mic: "" };
+  }
+}
+function rememberPicks(picks: DevicePicks) {
+  try {
+    localStorage.setItem(DEVICE_KEY, JSON.stringify(picks));
+  } catch {
+    // A browser that won't keep it just asks again next time.
+  }
+}
 
 type Session = {
   recorder: MediaRecorder;
@@ -79,8 +109,92 @@ export function LetterRecorder({
   onRecorded: (recordingFileId: string) => void;
 }) {
   const [phase, setPhase] = useState<Phase>({ at: "idle" });
-  const [camera, setCamera] = useState(true);
   const session = useRef<Session | null>(null);
+  // Setup: the live camera and mic the guide picked, kept for the recording.
+  const [picks, setPicks] = useState<DevicePicks>({ camera: "", mic: "" });
+  const [devices, setDevices] = useState<{ cameras: { value: string; label: string }[]; mics: { value: string; label: string }[] }>({ cameras: [], mics: [] });
+  const [preview, setPreview] = useState<MediaStream | null>(null);
+  const previewRef = useRef<MediaStream | null>(null);
+  const [level, setLevel] = useState(0);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const camera = picks.camera !== NO_CAMERA;
+
+  const stopPreview = () => {
+    for (const t of previewRef.current?.getTracks() ?? []) t.stop();
+    previewRef.current = null;
+    setPreview(null);
+  };
+
+  /** Open (or reopen) the camera and mic the guide picked, and list what
+   * else there is. */
+  const acquire = async (want: DevicePicks): Promise<void> => {
+    stopPreview();
+    setSetupError(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setSetupError("This browser can't use a camera or microphone here.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, ...(want.mic ? { deviceId: { exact: want.mic } } : {}) },
+        video:
+          want.camera === NO_CAMERA
+            ? false
+            : { width: { ideal: 640 }, height: { ideal: 640 }, ...(want.camera ? { deviceId: { exact: want.camera } } : { facingMode: "user" }) },
+      });
+      previewRef.current = stream;
+      setPreview(stream);
+      const listed = await navigator.mediaDevices.enumerateDevices();
+      setDevices({ cameras: deviceOptions(listed, "videoinput"), mics: deviceOptions(listed, "audioinput") });
+      const used = {
+        camera: want.camera === NO_CAMERA ? NO_CAMERA : (stream.getVideoTracks()[0]?.getSettings().deviceId ?? want.camera),
+        mic: stream.getAudioTracks()[0]?.getSettings().deviceId ?? want.mic,
+      };
+      setPicks(used);
+      rememberPicks(used);
+    } catch (err) {
+      // A remembered device that's gone: try the defaults once.
+      if (err instanceof DOMException && err.name === "OverconstrainedError" && (want.camera || want.mic)) {
+        return acquire({ camera: want.camera === NO_CAMERA ? NO_CAMERA : "", mic: "" });
+      }
+      const denied = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError");
+      setSetupError(denied ? "The browser wasn't allowed the camera or microphone. Allow them in the address bar, then try again." : "The camera or microphone didn't open.");
+    }
+  };
+
+  const openSetup = () => {
+    setPhase({ at: "setup" });
+    void acquire(rememberedPicks());
+  };
+  const cancelSetup = () => {
+    stopPreview();
+    setPhase({ at: "idle" });
+  };
+
+  // The mic's level while setting up.
+  const settingUp = phase.at === "setup";
+  useEffect(() => {
+    if (!settingUp || !preview || preview.getAudioTracks().length === 0) return;
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    ctx.createMediaStreamSource(new MediaStream(preview.getAudioTracks())).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    let frame = 0;
+    const tick = () => {
+      analyser.getByteTimeDomainData(samples);
+      setLevel(micLevel(samples));
+      frame = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => {
+      cancelAnimationFrame(frame);
+      void ctx.close();
+      setLevel(0);
+    };
+  }, [settingUp, preview]);
   // The floating bubble: the camera on its own (the canvas has its own
   // copy), and where on the screen the video's face circle lands.
   const [faceStream, setFaceStream] = useState<MediaStream | null>(null);
@@ -97,7 +211,13 @@ export function LetterRecorder({
     setFaceStream(null);
     setBubble(null);
   };
-  useEffect(() => release, []);
+  useEffect(
+    () => () => {
+      release();
+      stopPreview();
+    },
+    [],
+  );
 
   // The bubble follows the letter's pane if the window changes size.
   const recording = phase.at === "recording";
@@ -192,10 +312,15 @@ export function LetterRecorder({
         }
       }
 
-      const user = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-        video: camera ? { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: "user" } : false,
-      });
+      // The camera and mic previewed in setup, handed over as they are.
+      const user =
+        previewRef.current ??
+        (await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+          video: camera ? { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: "user" } : false,
+        }));
+      previewRef.current = null;
+      setPreview(null);
       tracks.push(...user.getTracks());
 
       const screen = document.createElement("video");
@@ -296,26 +421,71 @@ export function LetterRecorder({
           className="vault-toolbar-btn"
           disabled={!hasText}
           title={hasText ? undefined : "Write the letter first"}
-          onClick={() => setPhase({ at: "setup" })}
+          onClick={openSetup}
         >
           {phase.at === "ready" ? "Record again" : "Read it to them"}
         </button>
       )}
-      {phase.at === "setup" && (
-        <>
-          <span style={note}>Your browser will ask what to share. Pick this tab.</span>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <input type="checkbox" checked={camera} onChange={(e) => setCamera(e.target.checked)} />
-            Camera
-          </label>
-          <button type="button" className="vault-toolbar-btn" onClick={() => void start()}>
-            Start
-          </button>
-          <button type="button" className="vault-toolbar-btn" onClick={() => setPhase({ at: "idle" })}>
-            Cancel
-          </button>
-        </>
-      )}
+      <Modal open={phase.at === "setup"} onClose={cancelSetup} title="Read it to them">
+        <Stack gap={3}>
+          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+            <div
+              style={{ width: 128, height: 128, borderRadius: "50%", overflow: "hidden", background: "#222", border: "3px solid #ffffff", boxShadow: "0 0 0 1px #ccc", flexShrink: 0 }}
+              data-letter-recorder-preview
+            >
+              {camera && preview && preview.getVideoTracks().length > 0 ? (
+                <video
+                  autoPlay
+                  muted
+                  playsInline
+                  ref={(el) => {
+                    if (el && el.srcObject !== preview) el.srcObject = preview;
+                  }}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scaleX(-1)" }}
+                />
+              ) : (
+                <span className={textSize.xs} style={{ color: "#ffffff", display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+                  {camera ? "Opening…" : "No camera"}
+                </span>
+              )}
+            </div>
+            <Stack gap={2}>
+              <Select
+                label="Camera"
+                name="camera"
+                options={[...devices.cameras, { value: NO_CAMERA, label: "No camera, voice only" }]}
+                value={picks.camera || devices.cameras[0]?.value || NO_CAMERA}
+                onChange={(e) => void acquire({ ...picks, camera: e.target.value })}
+              />
+              <Select
+                label="Microphone"
+                name="mic"
+                options={devices.mics.length ? devices.mics : [{ value: "", label: "Default microphone" }]}
+                value={picks.mic || devices.mics[0]?.value || ""}
+                onChange={(e) => void acquire({ ...picks, mic: e.target.value })}
+              />
+              <div aria-label="Microphone level" role="meter" aria-valuemin={0} aria-valuemax={1} aria-valuenow={level} style={{ height: 6, borderRadius: 3, background: "#e5e5e5", overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(level * 100)}%`, height: "100%", background: semanticColors.textBrand, transition: "width 80ms linear" }} />
+              </div>
+              <span style={note}>Say something: the bar moves when the mic hears you.</span>
+            </Stack>
+          </div>
+          {setupError && (
+            <span style={{ color: semanticColors.textDanger }} role="alert">
+              {setupError}
+            </span>
+          )}
+          <span style={note}>After Start, your browser asks what to share. Pick this tab.</span>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button type="button" className="vault-toolbar-btn" onClick={cancelSetup}>
+              Cancel
+            </button>
+            <button type="button" className="vault-toolbar-btn" disabled={!preview} onClick={() => void start()}>
+              Start recording
+            </button>
+          </div>
+        </Stack>
+      </Modal>
       {phase.at === "recording" &&
         bubble &&
         createPortal(

@@ -20,9 +20,11 @@ import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import {
   RECORDING_MINUTES_LIMIT,
+  deviceOptions,
   faceCircle,
   leadingRecordingId,
   letterHasText,
+  micLevel,
   pickRecorderMimeType,
   recordingBlock,
   recordingFile,
@@ -201,3 +203,24 @@ describe("the worker's half", () => {
 function readFileSyncText(file: string): string {
   return readFileSync(file, "utf8");
 }
+
+describe("picking the camera and mic (2026-11-03)", () => {
+  it("lists each kind, named once the browser allows it, numbered before", () => {
+    const listed = [
+      { deviceId: "c1", kind: "videoinput", label: "FaceTime HD Camera" },
+      { deviceId: "m1", kind: "audioinput", label: "" },
+      { deviceId: "m2", kind: "audioinput", label: "" },
+      { deviceId: "", kind: "audioinput", label: "" },
+    ] as never;
+    expect(deviceOptions(listed, "videoinput")).toEqual([{ value: "c1", label: "FaceTime HD Camera" }]);
+    expect(deviceOptions(listed, "audioinput").map((o) => o.label)).toEqual(["Microphone 1", "Microphone 2"]);
+  });
+  it("reads silence as nothing and a loud signal as full", () => {
+    expect(micLevel(new Uint8Array(64).fill(128))).toBe(0);
+    expect(micLevel(Uint8Array.from({ length: 64 }, (_, i) => (i % 2 ? 255 : 0)))).toBe(1);
+  });
+  it("hands the previewed stream to the recording, not a second ask", () => {
+    const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../components/LetterRecorder.tsx"), "utf8");
+    expect(src).toMatch(/const user =\s*previewRef\.current \?\?/);
+  });
+});
