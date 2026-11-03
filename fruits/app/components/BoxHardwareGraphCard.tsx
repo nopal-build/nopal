@@ -12,6 +12,9 @@ import { textSize } from "stamps/typography.css";
 import { semanticColors, colors } from "stamps/tokens";
 import { Cluster } from "stamps/Cluster";
 import { Chip } from "stamps/Chip";
+import { ExpandIcon } from "stamps/ExpandIcon";
+import { Modal } from "stamps/Modal";
+import { CircleButton } from "stamps/CircleButton";
 import { downloadFromUrl, vaultDownloadUrl, type LoadCellDownloadUrlFn } from "./LoadCellGraphCard";
 import { useTemperatureUnitPref } from "../hooks/useTemperatureUnitPref";
 import { celsiusDeltaToDisplay, celsiusToDisplay, temperatureUnitLabel, type TemperatureUnit } from "../util/temperature";
@@ -202,28 +205,54 @@ function pointsFor(
   return points;
 }
 
+type ChartBodyProps = {
+  title: string;
+  yLabel: string;
+  series: ChartSeries[];
+  zeroLine?: boolean;
+  width: number;
+  height: number;
+  hoverPct: number | null;
+  onHoverPct: (pct: number | null) => void;
+};
+
 /** A small, hand-rolled multi-series SVG line chart — no charting
  * dependency, same instinct as `LoadCellGraphCard.tsx`'s own
  * `MiniLineChart` (extended here to overlay several named series on one
  * axis, since a wall-temperature comparison is inherently "inside vs.
  * outside" rather than a single curve). Hover anywhere in the plot area
- * to see every series' nearest value at that elapsed time. */
-function MiniMultiLineChart({
-  title,
-  yLabel,
-  series,
-  zeroLine = false,
-}: {
-  title: string;
-  yLabel: string;
-  series: ChartSeries[];
-  zeroLine?: boolean;
-}) {
+ * to see every series' nearest value at that elapsed time. An expand
+ * button opens the exact same chart, bigger, in a `Modal` — sharing
+ * `hoverPct` with the inline chart rather than tracking its own, so it
+ * reads the same hovered values either way. */
+function MiniMultiLineChart(props: Omit<ChartBodyProps, "width" | "height" | "hoverPct" | "onHoverPct">) {
+  const { title } = props;
   const [hoverPct, setHoverPct] = useState<number | null>(null);
+  const [enlarged, setEnlarged] = useState(false);
+
+  return (
+    <div style={{ flex: "1 1 420px", minWidth: 300 }}>
+      <Cluster gap={2} align="center" style={{ justifyContent: "space-between" }}>
+        <div className={textSize.xs} style={{ fontWeight: 600, marginBottom: 4 }}>
+          {title}
+        </div>
+        <CircleButton size={20} onClick={() => setEnlarged(true)} aria-label={`Enlarge ${title}`}>
+          <ExpandIcon size={11} />
+        </CircleButton>
+      </Cluster>
+      <ChartBody {...props} width={520} height={280} hoverPct={hoverPct} onHoverPct={setHoverPct} />
+      {enlarged && (
+        <Modal open onClose={() => setEnlarged(false)} title={title} maxWidth={960}>
+          <ChartBody {...props} width={880} height={480} hoverPct={hoverPct} onHoverPct={setHoverPct} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function ChartBody({ title, yLabel, series, zeroLine = false, width: W, height: H, hoverPct, onHoverPct }: ChartBodyProps) {
   const svgRef = useRef<SVGSVGElement>(null);
 
-  const W = 520;
-  const H = 280;
   const PAD_L = 52;
   const PAD_R = 16;
   const PAD_T = 16;
@@ -274,11 +303,8 @@ function MiniMultiLineChart({
   };
 
   return (
-    <div style={{ flex: "1 1 420px", minWidth: 300 }}>
-      <div className={textSize.xs} style={{ fontWeight: 600, marginBottom: 4 }}>
-        {title}
-      </div>
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={title}>
+    <div>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label={title}>
         {Array.from({ length: yTicks + 1 }, (_, i) => {
           const v = yMin + (i / yTicks) * ySpan;
           const y = yScale(v);
@@ -342,9 +368,9 @@ function MiniMultiLineChart({
             const rect = svgRef.current.getBoundingClientRect();
             const px = ((e.clientX - rect.left) / rect.width) * W;
             const pct = Math.min(100, Math.max(0, ((px - PAD_L) / plotW) * 100));
-            setHoverPct(pct);
+            onHoverPct(pct);
           }}
-          onPointerLeave={() => setHoverPct(null)}
+          onPointerLeave={() => onHoverPct(null)}
         />
       </svg>
       <Cluster gap={4} style={{ flexWrap: "wrap" }}>

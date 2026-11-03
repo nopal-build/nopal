@@ -11,11 +11,16 @@ export function Modal({
   open,
   onClose,
   title: titleText,
+  maxWidth,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title?: string;
+  /** Overrides the panel's default 400px cap — e.g. for wider content
+   * like an enlarged chart. Accepts the same values a CSS `max-width`
+   * would (a bare number is treated as px). */
+  maxWidth?: number | string;
   children: ReactNode;
 }) {
   useEffect(() => {
@@ -33,6 +38,7 @@ export function Modal({
     <div className={backdrop} onClick={onClose}>
       <Surface
         className={panel}
+        style={maxWidth !== undefined ? { maxWidth } : undefined}
         role="dialog"
         aria-modal="true"
         aria-label={titleText}
