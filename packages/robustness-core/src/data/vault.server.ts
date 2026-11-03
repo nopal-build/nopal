@@ -1,6 +1,7 @@
 import { RecordId } from "surrealdb";
 import { query, formatRecord, upsert, remove, merge } from "./generic.server";
 import { deleteFromS3 } from "./file.server";
+import { NOPAL_ORGANIZATION_ID, getOrganizationIdsWhereGuide, getOrganizationRole } from "./organizations.server";
 
 // ─── Types (defined in vault.types.ts; re-exported from here for convenience) ──
 export type {
@@ -181,6 +182,24 @@ export async function getFileRefById(id: string): Promise<FileRef | undefined> {
 }
 
 /**
+ * `canViewFolder` plus Phase C (garden/3-growing/organizations.md): an org
+ * Guide reaches every project their Organization owns with no `sharing`
+ * entry needed. A separate, ASYNC function rather than a change to
+ * `canViewFolder` itself — that one stays sync/pure on purpose (several
+ * callers use it inside a plain `Array.filter`/`findIndex`), so this is
+ * the one to reach for wherever an extra `await` is affordable (every
+ * caller below already is).
+ */
+export async function canViewFolderOrgAware(
+  humanId: string,
+  folder: VaultFolder,
+): Promise<boolean> {
+  if (canViewFolder(humanId, folder)) return true;
+  if (!folder.organization_id) return false;
+  return (await getOrganizationRole(humanId, folder.organization_id)) === "Guide";
+}
+
+/**
  * Whether `humanId` is allowed to view (not necessarily download/manage)
  * `file` — either because they own it, or because it sits in a folder
  * they've been granted view access to. Mirrors the visibility FileCard
@@ -195,7 +214,7 @@ export async function canViewFileRef(
   if (!file.folder_id) return false;
   const folder = await getFolderById(file.folder_id);
   if (!folder) return false;
-  return canViewFolder(humanId, folder);
+  return canViewFolderOrgAware(humanId, folder);
 }
 
 export async function updateFileRef(
@@ -329,6 +348,15 @@ export async function createVaultFolder(data: {
    * responsible for validating the type is allowed for this parent (see
    * `validateFolderTypeForParent`) — this function is mechanical only. */
   folder_type?: VaultFolderTypeKey | null;
+  /**
+   * Which Organization (see `organizations.server.ts`) this folder belongs
+   * to. Only meaningful for a project (a direct child of `projects`) and
+   * its descendants — left unset for anything else. Omit to inherit from
+   * the parent, same as `folder_type`; a brand-new project with nothing
+   * inherited defaults to Nopal (`NOPAL_ORGANIZATION_ID`), the one
+   * Organization that exists today.
+   */
+  organization_id?: string | null;
   /** Use this EXACT id instead of letting SurrealDB generate one — see
    * `createFileRef`'s own doc for why (only `scripts/pull-daily-logs.ts`
    * needs this today). */
@@ -383,6 +411,15 @@ export async function createVaultFolder(data: {
     isFolderTypeRoot = true;
   }
 
+  // Organizations (foundation only — see organizations.server.ts): same
+  // inherit-from-parent trick as vault_root_key/folder_type. A brand-new
+  // project with nothing inherited and nothing passed explicitly defaults
+  // to Nopal, the one Organization that exists today.
+  let organizationId: string | null = data.organization_id ?? parent?.organization_id ?? null;
+  if (isNewProject && !organizationId) {
+    organizationId = NOPAL_ORGANIZATION_ID;
+  }
+
   // Same inherit-from-parent trick as vault_root_key/folder_type: a new
   // folder is invisible to anyone the PARENT is shared with unless it
   // starts out with the same shared_with cache — otherwise it silently
@@ -399,6 +436,7 @@ export async function createVaultFolder(data: {
     vault_root_key: rootKey,
     folder_type: folderType,
     is_folder_type_root: isFolderTypeRoot,
+    organization_id: organizationId,
     created_at: now,
     updated_at: now,
   });
@@ -609,12 +647,17 @@ export async function getFileRefListingsByIds(ids: string[]): Promise<FileRefLis
 export async function getSharedFoldersForHuman(
   humanId: string,
 ): Promise<VaultFolder[]> {
+  // Phase C (garden/3-growing/organizations.md): an org Guide reaches
+  // every project their Organization owns, no `shared_with` entry
+  // needed — matched on `organization_id`, which cascades onto every
+  // descendant exactly like `shared_with` already does.
+  const guideOrgIds = await getOrganizationIdsWhereGuide(humanId);
   const result = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders
      WHERE human_id != $humanId
-       AND $humanId IN shared_with
+       AND ($humanId IN shared_with OR organization_id IN $guideOrgIds)
      ORDER BY human_id, name ASC`,
-    { humanId },
+    { humanId, guideOrgIds },
   );
   return (result?.[0] ?? []).map(formatRecord);
 }
@@ -1473,11 +1516,14 @@ export async function getProjectFolders(humanId: string): Promise<VaultFolder[]>
 export async function getAccessibleProjectFolders(
   humanId: string,
 ): Promise<VaultFolder[]> {
+  // Phase C (garden/3-growing/organizations.md): an org Guide reaches
+  // every project their Organization owns, `shared_with` or not.
+  const guideOrgIds = await getOrganizationIdsWhereGuide(humanId);
   const result = await query<[VaultFolder[]]>(
     `SELECT * FROM vault_folders
-     WHERE vault_root_key = "projects" AND $humanId IN shared_with
+     WHERE vault_root_key = "projects" AND ($humanId IN shared_with OR organization_id IN $guideOrgIds)
      ORDER BY name ASC`,
-    { humanId },
+    { humanId, guideOrgIds },
   );
   const reached = (result?.[0] ?? []).map(formatRecord);
   const ids = new Set(reached.map((f) => f._id));

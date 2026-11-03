@@ -39,6 +39,7 @@ import { featuresOf, groupOf, type Feature } from "./features";
 import { isWebsiteFolder } from "./vaultFolderTypes";
 import { query, formatRecord } from "./generic.server";
 import { getHumanById, getHumansById, isStaff, type Human } from "./humans.server";
+import { getOrganizationIdsWhereGuide, getOrganizationRole } from "./organizations.server";
 
 export type { ProjectSharingEntry };
 
@@ -142,6 +143,13 @@ export function resolveRole(role: string): ResolvedProjectRole {
  * Resolves `humanId`'s role on `projectFolder` from the README's `sharing`
  * list, or `null` when they hold none. A creator the list doesn't name is
  * Owner (`withCreator`).
+ *
+ * Phase C (garden/3-growing/organizations.md): when the list names them
+ * nothing, an org Guide on the Organization that owns this project (its
+ * `organization_id`) reaches it anyway, exactly as if `sharing` held a
+ * `Guide` entry for them — no entry needed. Sharing Roles themselves
+ * don't change; this is a fallback checked only once the list has
+ * nothing to say.
  */
 export async function getProjectRole(
   projectFolder: VaultFolder,
@@ -149,7 +157,12 @@ export async function getProjectRole(
 ): Promise<ResolvedProjectRole | null> {
   const entry = (await getProjectSharing(projectFolder)).find((e) => e.human === humanId);
   // A name that isn't a group is no role at all.
-  return entry && groupOf(entry.role) ? resolveRole(entry.role) : null;
+  if (entry && groupOf(entry.role)) return resolveRole(entry.role);
+  if (projectFolder.organization_id) {
+    const orgRole = await getOrganizationRole(humanId, projectFolder.organization_id);
+    if (orgRole === GUIDING_ROLE) return resolveRole(GUIDING_ROLE);
+  }
+  return null;
 }
 
 /** The role name `humanId` holds in a sharing list already in hand. */
@@ -330,7 +343,9 @@ export type ProjectMembership = { folder: VaultFolder; sharing: ProjectSharingEn
  * order: what the dashboard, the Daily Log's "Add a card" and the
  * Steep-o-meter work from. A project they created is theirs as Guide
  * unless its list says otherwise, README or not. A role name that isn't a
- * group is no membership. */
+ * group is no membership. Phase C (garden/3-growing/organizations.md):
+ * also includes every project belonging to an Organization they're a
+ * Guide on, with no `sharing` entry needed (`readProjectLists`). */
 export async function listProjectsFor(humanId: string): Promise<ProjectMembership[]> {
   const out: ProjectMembership[] = [];
   for (const { folder, sharing } of await readProjectLists(humanId)) {
@@ -353,7 +368,10 @@ export async function listEveryProject(): Promise<{ folder: VaultFolder; sharing
  * roots, the projects, their READMEs. Membership lives in each README, so
  * there is no index to ask. Given `humanId`, only the READMEs that
  * mention them or belong to their own projects are read, and only those
- * projects come back. */
+ * projects come back — PLUS (Phase C, garden/3-growing/organizations.md)
+ * every project belonging to an Organization `humanId` is a Guide on,
+ * README or not, with a synthetic Guide entry added to its list so
+ * `listProjectsFor`'s `roleIn` finds them without one ever being written. */
 async function readProjectLists(
   humanId?: string,
 ): Promise<{ folder: VaultFolder; sharing: ProjectSharingEntry[] }[]> {
@@ -372,6 +390,7 @@ async function readProjectLists(
        ${humanId ? `AND (human_id = $humanId OR string::contains(content ?? "", $humanId))` : ""}`,
     { ids: folders.map((f) => f._id), humanId },
   );
+  const guideOrgIds = humanId ? await getOrganizationIdsWhereGuide(humanId) : [];
   const byFolder = new Map(folders.map((f) => [f._id, f]));
   const lists = new Map<string, { sharing: ProjectSharingEntry[]; creatorRemoved: boolean }>();
   for (const row of readmes?.[0] ?? []) {
@@ -382,10 +401,22 @@ async function readProjectLists(
     }
   }
   return folders
-    .filter((folder) => !humanId || lists.has(folder._id) || folder.human_id === humanId)
+    .filter(
+      (folder) =>
+        !humanId ||
+        lists.has(folder._id) ||
+        folder.human_id === humanId ||
+        (folder.organization_id && guideOrgIds.includes(folder.organization_id)),
+    )
     .map((folder) => {
       const list = lists.get(folder._id);
-      return { folder, sharing: withCreator(folder, list?.sharing ?? [], list?.creatorRemoved) };
+      const sharing = withCreator(folder, list?.sharing ?? [], list?.creatorRemoved);
+      const isOrgGuide =
+        !!humanId && !!folder.organization_id && guideOrgIds.includes(folder.organization_id);
+      return {
+        folder,
+        sharing: isOrgGuide && !sharing.some((e) => e.human === humanId) ? [...sharing, { human: humanId!, role: GUIDING_ROLE }] : sharing,
+      };
     })
     .sort((x, y) => x.folder.name.localeCompare(y.folder.name));
 }

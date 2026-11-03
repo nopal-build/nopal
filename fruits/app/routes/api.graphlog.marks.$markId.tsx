@@ -1,8 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { eraseMark, getMark, MARK_TEXT_LIMIT, rewriteMark } from "robustness-core/data/graphLogMarks.server";
-import { getFolderById } from "robustness-core/data/vault.server";
-import { canViewFolder } from "robustness-core/data/vault.types";
+import { canViewFolderOrgAware, getFolderById } from "robustness-core/data/vault.server";
 
 /**
  * POST /api/graphlog/marks/:markId
@@ -26,7 +25,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // has since lost access does not keep editing that project's files.
   const mark = await getMark(markId);
   const folder = mark ? await getFolderById(mark.project_folder_id) : null;
-  if (!mark || !folder || !canViewFolder(user._id, folder)) {
+  if (!mark || !folder || !(await canViewFolderOrgAware(user._id, folder))) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
