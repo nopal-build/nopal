@@ -65,6 +65,10 @@ import {
   type ApiToken,
 } from "robustness-core/data/apiTokens.server";
 import { AppLayout } from "../components/AppLayout";
+import { ProfileBilling, type ProfileCharge } from "../components/ProfileBilling";
+import { listChargesForPayer } from "robustness-core/data/billing.server";
+import { formatUsd } from "robustness-core/data/billingRules";
+import { getFolderById } from "robustness-core/data/vault.server";
 import { useHome } from "../hooks/useUser";
 import { displayName } from "robustness-core/data/humanNames";
 import { Input } from "stamps/Input";
@@ -93,14 +97,31 @@ function isAdminOrSuper(user: Human): boolean {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  const [waivers, relatedHumans, passkeys, relationships, apiTokens] =
+  const [waivers, relatedHumans, passkeys, relationships, apiTokens, charges] =
     await Promise.all([
       getLegalDocumentsByEmail(user.email),
       getRelatedHumans(user, { includeRevoked: true }),
       getPasskeysByHuman(user._id),
       getRelationshipsForHuman(user._id),
       getApiTokensByHuman(user._id),
+      listChargesForPayer(user._id),
     ]);
+
+  // What this person has been asked to pay, with each project's name.
+  const projectNames = new Map(
+    await Promise.all(
+      [...new Set(charges.map((c) => c.project_folder_id))].map(
+        async (id) => [id, (await getFolderById(id))?.name ?? "A project"] as const,
+      ),
+    ),
+  );
+  const billing: ProfileCharge[] = charges.map((c) => ({
+    id: c._id,
+    label: c.label,
+    amount: formatUsd(c.amount_cents),
+    status: c.status,
+    project: projectNames.get(c.project_folder_id) ?? "A project",
+  }));
 
   // Revoked relationships are excluded from `relatedHumans` for regular
   // Human accounts, but Admins/Supers see *everyone* regardless of
@@ -127,6 +148,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     apiTokens,
     inviteExpired,
     revokedRelationships,
+    billing,
   };
 }
 
@@ -1543,6 +1565,7 @@ function ApiTokenCard({ token }: { token: ApiToken }) {
 
 const PROFILE_SECTIONS = [
   { id: "basic", label: "Basic" },
+  { id: "billing", label: "Billing" },
   { id: "relationships", label: "Relationships" },
   { id: "security", label: "Security" },
   { id: "waivers", label: "Waivers" },
@@ -1557,7 +1580,10 @@ export default function Profile() {
     apiTokens: allApiTokens,
     inviteExpired,
     revokedRelationships,
+    billing,
   } = useLoaderData<typeof loader>();
+  // Billing shows only for someone who has been asked to pay.
+  const sections = PROFILE_SECTIONS.filter((s) => s.id !== "billing" || billing.length > 0);
   const actionData = useActionData<typeof action>();
   const { revalidate } = useRevalidator();
 
@@ -2263,6 +2289,12 @@ export default function Profile() {
               </div>
             </section>
 
+            {billing.length > 0 && (
+              <section id="billing">
+                <ProfileBilling charges={billing} />
+              </section>
+            )}
+
             {/* ── Relationships ──────────────────────────────────────── */}
             <section id="relationships">
               <h2 className="font-bold text-lg mb-1">Relationships</h2>
@@ -2554,7 +2586,7 @@ export default function Profile() {
             className="hidden md:flex md:flex-col gap-1 w-40 shrink-0 md:sticky"
             style={{ top: "24px" }}
           >
-            {PROFILE_SECTIONS.map((section) => (
+            {sections.map((section) => (
               <a
                 key={section.id}
                 href={`#${section.id}`}

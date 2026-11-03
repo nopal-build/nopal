@@ -80,6 +80,9 @@ export default function MakerProject() {
               <Link to={project.href} className={`${link} ${textSize.sm}`}>
                 Open the project →
               </Link>
+              <Link to={`/maker/projects/${project.id}/billing`} className={`${link} ${textSize.sm}`}>
+                Billing →
+              </Link>
             </Cluster>
           </Stack>
 
