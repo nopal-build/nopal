@@ -8,13 +8,14 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { DashboardView } from "../components/DashboardView";
 import type { Dashboard, DashboardRow } from "robustness-core/data/dashboard.server";
 
-const counts = { active: 2, completed: 0, trashed: 0 };
+const counts = { active: 2, done: 0, archive: 0 };
 const row = (over: Partial<DashboardRow>): DashboardRow => ({
   id: "a1b2c3d4e5f6g7h8i9j0",
   name: "Crouch Casita",
   role: "Guide",
   status: "active",
   statusAt: null,
+  archived: false,
   read: null,
   ask: "Pick the window supplier this week.",
   notes: [],
@@ -107,7 +108,7 @@ describe("a client is never counted or nagged", () => {
   it("no status tabs, no counts, no 'last logged'", () => {
     const html = render(clientDash);
     expect(html).not.toMatch(/\(\d+\)/);
-    expect(html).not.toMatch(/Active|Completed|Trashed/);
+    expect(html).not.toMatch(/Active|Done|Archive/);
     expect(html).not.toMatch(/streak|days since|last logged/i);
   });
 });

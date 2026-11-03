@@ -6,22 +6,25 @@ import { Surface } from "stamps/Surface";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
-import type { Dashboard, DashboardRow, SteepNote } from "robustness-core/data/dashboard.server";
-import type { ProjectStatus } from "robustness-core/data/project.types";
+import type { Dashboard, DashboardFilter, DashboardRow, SteepNote } from "robustness-core/data/dashboard.server";
 import { steepLabel } from "robustness-core/data/steepScale";
 
-// ─── Rows ───────────────────────────────────────────────────────────────────
+// ─── Rows ─────────────────────────────────────────────────────────────────────────
 
-const STATUS_TABS: { key: ProjectStatus; label: string }[] = [
+// "Done"/"Archive" (garden/3-growing/guide-projects-phases.md): both read
+// `status === "completed"` projects, split by WHY — Done is the Kanban
+// board's End-type phase, Archive is the `archived` flag. See
+// `dashboard.server.ts`'s own `DashboardFilter`/`matchesFilter` doc.
+const STATUS_TABS: { key: DashboardFilter; label: string }[] = [
   { key: "active", label: "Active" },
-  { key: "completed", label: "Completed" },
-  { key: "trashed", label: "Trashed" },
+  { key: "done", label: "Done" },
+  { key: "archive", label: "Archive" },
 ];
 
-const EMPTY_MESSAGE: Record<ProjectStatus, string> = {
+const EMPTY_MESSAGE: Record<DashboardFilter, string> = {
   active: "No active projects yet.",
-  completed: "No completed projects yet.",
-  trashed: "Nothing in the trash.",
+  done: "Nothing done yet.",
+  archive: "Nothing archived.",
 };
 
 function shortDate(date: string): string {
@@ -98,8 +101,8 @@ function GuideProjects({
   isOrgGuide,
 }: {
   rows: DashboardRow[];
-  activeStatus: ProjectStatus;
-  counts: Record<ProjectStatus, number>;
+  activeStatus: DashboardFilter;
+  counts: Record<DashboardFilter, number>;
   isOrgGuide: boolean;
 }) {
   return (
@@ -126,11 +129,7 @@ function GuideProjects({
           </Link>
         ))}
       </Cluster>
-      {activeStatus === "trashed" && rows.length > 0 && (
-        <p className={textSize.xs} style={subtle}>
-          Trashed projects are deleted after 30 days.
-        </p>
-      )}
+
       {rows.length === 0 ? (
         <p className={textSize.sm} style={subtle}>
           {EMPTY_MESSAGE[activeStatus]}
@@ -161,7 +160,7 @@ export function DashboardView({
   dashboard,
   isOrgGuide,
 }: {
-  activeStatus: ProjectStatus;
+  activeStatus: DashboardFilter;
   dashboard: Dashboard;
   isOrgGuide: boolean;
 }) {
@@ -180,7 +179,7 @@ export function DashboardView({
     <GuideProjects
       rows={dashboard.rows}
       activeStatus={activeStatus}
-      counts={dashboard.counts ?? { active: 0, completed: 0, trashed: 0 }}
+      counts={dashboard.counts ?? { active: 0, done: 0, archive: 0 }}
       isOrgGuide={isOrgGuide}
     />
   );

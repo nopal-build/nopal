@@ -24,12 +24,10 @@ import { isStaff } from "robustness-core/data/humans.server";
 import { getOrganizationRole } from "robustness-core/data/organizations.server";
 import { navFor } from "../data/nav.server";
 import { firstName } from "robustness-core/data/humanNames";
-import { loadDashboard } from "robustness-core/data/dashboard.server";
-import {
-  DEFAULT_PROJECT_STATUS,
-  PROJECT_STATUSES,
-  type ProjectStatus,
-} from "robustness-core/data/project.types";
+import { loadDashboard, type DashboardFilter } from "robustness-core/data/dashboard.server";
+
+const DASHBOARD_FILTERS: DashboardFilter[] = ["active", "done", "archive"];
+const DEFAULT_DASHBOARD_FILTER: DashboardFilter = "active";
 
 export const meta: MetaFunction = () => [{ title: "O.No · My Projects" }];
 
@@ -39,11 +37,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const statusParam = url.searchParams.get("status");
-  const activeStatus: ProjectStatus = PROJECT_STATUSES.includes(
-    statusParam as ProjectStatus,
+  const activeStatus: DashboardFilter = DASHBOARD_FILTERS.includes(
+    statusParam as DashboardFilter,
   )
-    ? (statusParam as ProjectStatus)
-    : DEFAULT_PROJECT_STATUS;
+    ? (statusParam as DashboardFilter)
+    : DEFAULT_DASHBOARD_FILTER;
 
   // Every project the person holds a role on (ADR-023): what the dashboard
   // arranges.
