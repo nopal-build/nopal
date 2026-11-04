@@ -361,7 +361,8 @@ describe("the purpose line (2026-10-28)", () => {
     expect(html).toContain('name="name"');
     expect(html).toContain("What is this letter for?");
     expect(html).toMatch(/<textarea[^>]*name="purpose"[^>]*required/);
-    expect(html).toContain("Start the letter");
+    expect(html).toContain("Write the brief first");
+    expect(html).toContain("Go straight to the letter");
     expect(html).toContain("in your words");
     expect(readFileSync(path.join(here, "../components/LettersView.tsx"), "utf8")).not.toContain("window.prompt");
   });
@@ -390,10 +391,18 @@ describe("the purpose line (2026-10-28)", () => {
 describe("the brief on the letter's page (2026-10-28)", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
 
-  it("the New letter form says that starting the letter runs the model", () => {
+  it("the New letter form says the brief runs the model and going straight to the letter runs nothing", () => {
     const html = renderToStaticMarkup(<NewLetterModal open busy={false} error={null} onClose={() => {}} onStart={() => {}} />);
-    expect(html).toContain("Starting the letter writes its brief");
+    expect(html).toContain("Writing the brief first is a model run");
     expect(html).toContain("costs a run");
+    expect(html).toContain("Going straight to the letter runs nothing");
+  });
+
+  it("going straight to the letter skips the brief: the route asks for one only without brief=skip", () => {
+    const src = readFileSync(path.join(here, "../routes/api.projects.$folderId.letters.tsx"), "utf8");
+    expect(src).toMatch(/if \(String\(form\.get\("brief"\) \?\? ""\) !== "skip"\) \{\s*try \{\s*const asked = await requestBrief/);
+    expect((src.match(/requestBrief\(/g) ?? []).length).toBe(1);
+    expect(readFileSync(path.join(here, "../components/LettersView.tsx"), "utf8")).toContain('form.append("brief", "skip")');
   });
 
   it("no brief yet: the first line and the button; a brief: rendered, with its citation marker and Write it again; failed: the reason", () => {

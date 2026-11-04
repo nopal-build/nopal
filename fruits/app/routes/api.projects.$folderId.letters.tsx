@@ -42,10 +42,12 @@ const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
  *   (`markDate`, the daily log's rule). Refused without one. An upload
  *   may carry `purpose` too; without it the letter has none until the
  *   brief asks.
- *   Starting a letter is also the click that writes its brief (Austin,
- *   2026-10-28; the form says so): the new-letter path asks the worker
- *   for it (`requestBrief`) once the letter and its purpose exist. The
- *   upload path does not; "Write it again" on the letter's page does.
+ *   Starting a letter with "Write the brief first" is also the click that
+ *   writes its brief (Austin, 2026-10-28; the form says so): the route
+ *   asks the worker for it (`requestBrief`) once the letter and its
+ *   purpose exist. `brief=skip` ("Go straight to the letter", Austin
+ *   2026-11-03) runs nothing; the letter's page offers the brief later.
+ *   The upload path does not; "Write it again" on the letter's page does.
  * A Guide on the project or staff (`canManageLetters`). Replacing an
  * existing one is `/api/vault/replace/:fileId`, which keeps the id and so
  * the link. Nothing is shared by this route: the link is a separate
@@ -101,11 +103,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
     // The brief starts as the letter opens. A queue that refuses leaves a
     // letter with no brief and the page's own button; never a lost letter.
     let briefJobId: string | null = null;
-    try {
-      const asked = await requestBrief(project, { ...fileRef, purpose }, user._id);
-      if (asked.ok) briefJobId = asked.jobId;
-    } catch (err) {
-      console.error("Brief enqueue error:", err);
+    if (String(form.get("brief") ?? "") !== "skip") {
+      try {
+        const asked = await requestBrief(project, { ...fileRef, purpose }, user._id);
+        if (asked.ok) briefJobId = asked.jobId;
+      } catch (err) {
+        console.error("Brief enqueue error:", err);
+      }
     }
     return Response.json({ fileId: fileRef._id, pictures: 0, unmatched: [], briefJobId }, { status: 201 });
   }

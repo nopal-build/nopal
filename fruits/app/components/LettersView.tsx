@@ -109,10 +109,11 @@ export function LettersView({
   const [starting, setStarting] = useState(false);
 
   /** An empty letter with a title and a purpose, opened in the editor. */
-  const create = async (name: string, purpose: string) => {
+  const create = async (name: string, purpose: string, withBrief: boolean) => {
     const form = new FormData();
     form.append("name", name);
     form.append("purpose", purpose);
+    if (!withBrief) form.append("brief", "skip");
     form.append("date", localDateString());
     const data = await send(`/api/projects/${projectFolderId}/letters`, form);
     if (data?.fileId) window.location.assign(`/vault?file=${data.fileId}`);
@@ -162,7 +163,7 @@ export function LettersView({
           busy={busy}
           error={error}
           onClose={() => setStarting(false)}
-          onStart={(name, purpose) => void create(name, purpose)}
+          onStart={(name, purpose, withBrief) => void create(name, purpose, withBrief)}
         />
       )}
       {error && !starting && (
@@ -202,10 +203,11 @@ export function LettersView({
   );
 }
 
-/** Two fields and one button. The title names the file; the purpose line
+/** Two fields and two ways in. The title names the file; the purpose line
  * is one sentence the guide writes, and it is theirs in the project's
  * record from that day. Both are required: a letter starts with what it
- * is for. */
+ * is for. Then the guide picks: write the brief first (a model run), or
+ * go straight to the letter and run nothing (Austin, 2026-11-03). */
 export function NewLetterModal({
   open,
   busy,
@@ -217,7 +219,7 @@ export function NewLetterModal({
   busy: boolean;
   error: string | null;
   onClose: () => void;
-  onStart: (name: string, purpose: string) => void;
+  onStart: (name: string, purpose: string, withBrief: boolean) => void;
 }) {
   return (
     <Modal open={open} onClose={onClose} title="New letter">
@@ -228,14 +230,15 @@ export function NewLetterModal({
           const name = String(form.get("name") ?? "").trim();
           const purpose = String(form.get("purpose") ?? "").trim();
           if (!name || !purpose) return;
-          onStart(name, purpose);
+          const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+          onStart(name, purpose, submitter?.value !== "skip");
         }}
       >
         <Stack gap={3}>
           <Input name="name" label="Title" required autoFocus />
           <Input type="textarea" name="purpose" label="What is this letter for?" required />
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
-            A sentence or three, in your words: what the letter is about, what it has to settle, and for whom. It goes into the project's record as yours, today, and the brief is written from it.
+            A sentence or three, in your words: what the letter is about, what it has to settle, and for whom. It goes into the project's record as yours, today, and a brief is written from it.
           </p>
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-run-note>
             {BRIEF_RUN_NOTE}
@@ -249,8 +252,11 @@ export function NewLetterModal({
             <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className={button({ variant: "primary" })} disabled={busy}>
-              {busy ? "Starting…" : "Start the letter"}
+            <button type="submit" name="start" value="skip" className={button({ variant: "secondary" })} disabled={busy}>
+              Go straight to the letter
+            </button>
+            <button type="submit" name="start" value="brief" className={button({ variant: "primary" })} disabled={busy}>
+              {busy ? "Starting…" : "Write the brief first"}
             </button>
           </div>
         </Stack>
