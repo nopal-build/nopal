@@ -1,6 +1,6 @@
 // "Read it to them" on a letter's page (Austin, 2026-10-27): the guide
 // records themselves reading the letter, with the rendered letter as the
-// screen and, if they want, their face in a circle bottom right, all in
+// screen and, if they want, their face in a nopal pad bottom right, all in
 // one video. The browser captures and encodes; the worker makes it
 // web-safe (`letterRecording.server.ts`); the recording becomes the
 // letter's first block (`setLeadingRecording`), so it is an unsent change
@@ -22,17 +22,35 @@
 // the bubble is outside that element, so the video has the drawn face
 // and no Stop button; where it can only crop, the drawn face covers the
 // bubble and the Stop button shows in the corner of the video.
+//
+// Before recording, a setup window picks the camera (or none) and the mic
+// and shows them live: the face as the pad will frame it, and a level
+// bar for the mic (Austin, 2026-11-03). The recording uses that same
+// stream, so what was previewed is what's recorded. The picks are
+// remembered on this device.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
+import { Modal } from "stamps/Modal";
+import { Select } from "stamps/Select";
+import { Stack } from "stamps/Stack";
 import { localDateString } from "./TodayLog";
 import { uploadToVaultFolder } from "./vaultUpload";
 import {
   RECORDING_MINUTES_LIMIT,
   RECORDING_VIDEO_BITS_PER_SECOND,
+  CAMERA_FAILED,
+  MIC_FAILED,
   clock,
-  faceCircle,
+  deviceOptions,
+  PAD_ASPECT,
+  PAD_UNIT_PATH,
+  facePad,
+  padCrop,
+  micLevel,
+  openMedia,
+  type MediaOpened,
   letterHasText,
   pickRecorderMimeType,
   recordingFile,
@@ -50,6 +68,26 @@ type Phase =
 /** The longest edge the canvas is drawn at; the worker caps the height
  * at 1080 anyway. Even, for H.264. */
 const MAX_CANVAS_HEIGHT = 1080;
+
+const DEVICE_KEY = "letter-recorder-devices";
+const NO_CAMERA = "none";
+const PAD_CLIP_ID = "letter-recorder-pad";
+type DevicePicks = { camera: string; mic: string };
+function rememberedPicks(): DevicePicks {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DEVICE_KEY) ?? "null") as Partial<DevicePicks> | null;
+    return { camera: saved?.camera ?? "", mic: saved?.mic ?? "" };
+  } catch {
+    return { camera: "", mic: "" };
+  }
+}
+function rememberPicks(picks: DevicePicks) {
+  try {
+    localStorage.setItem(DEVICE_KEY, JSON.stringify(picks));
+  } catch {
+    // A browser that won't keep it just asks again next time.
+  }
+}
 
 type Session = {
   recorder: MediaRecorder;
@@ -79,12 +117,103 @@ export function LetterRecorder({
   onRecorded: (recordingFileId: string) => void;
 }) {
   const [phase, setPhase] = useState<Phase>({ at: "idle" });
-  const [camera, setCamera] = useState(true);
   const session = useRef<Session | null>(null);
+  // Setup: the live camera and mic the guide picked, kept for the recording.
+  const [picks, setPicks] = useState<DevicePicks>({ camera: "", mic: "" });
+  const [devices, setDevices] = useState<{ cameras: { value: string; label: string }[]; mics: { value: string; label: string }[] }>({ cameras: [], mics: [] });
+  const [preview, setPreview] = useState<MediaStream | null>(null);
+  const previewRef = useRef<MediaStream | null>(null);
+  const [level, setLevel] = useState(0);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const camera = picks.camera !== NO_CAMERA;
+
+  const stopPreview = () => {
+    for (const t of previewRef.current?.getTracks() ?? []) t.stop();
+    previewRef.current = null;
+    setPreview(null);
+  };
+
+  /** Open (or reopen) the camera and mic the guide picked, and list what
+   * else there is. */
+  const acquire = async (want: DevicePicks): Promise<void> => {
+    stopPreview();
+    setSetupError(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setSetupError("This browser can't use a camera or microphone here.");
+      return;
+    }
+    let opened: MediaOpened;
+    try {
+      opened = await openMedia(
+        (c) => navigator.mediaDevices.getUserMedia(c),
+        { echoCancellation: true, noiseSuppression: true, ...(want.mic ? { deviceId: { exact: want.mic } } : {}) },
+        want.camera === NO_CAMERA
+          ? false
+          : { width: { ideal: 640 }, height: { ideal: 640 }, ...(want.camera ? { deviceId: { exact: want.camera } } : { facingMode: "user" }) },
+      );
+    } catch (err) {
+      // A remembered device that's gone: try the defaults once.
+      if (want.camera || want.mic) return acquire({ camera: want.camera === NO_CAMERA ? NO_CAMERA : "", mic: "" });
+      opened = { stream: null, voiceOnly: true, error: err instanceof Error ? err.message : MIC_FAILED };
+    }
+    // List the devices even when one failed, so the guide can pick another.
+    try {
+      const listed = await navigator.mediaDevices.enumerateDevices();
+      setDevices({ cameras: deviceOptions(listed, "videoinput"), mics: deviceOptions(listed, "audioinput") });
+    } catch {
+      // No list: the pickers keep the defaults.
+    }
+    setSetupError(opened.error);
+    const stream = opened.stream;
+    if (!stream) return;
+    previewRef.current = stream;
+    setPreview(stream);
+    const used = {
+      camera: opened.voiceOnly ? NO_CAMERA : (stream.getVideoTracks()[0]?.getSettings().deviceId ?? want.camera),
+      mic: stream.getAudioTracks()[0]?.getSettings().deviceId ?? want.mic,
+    };
+    setPicks(used);
+    // A camera that failed this time isn't remembered as "no camera".
+    rememberPicks(opened.error === CAMERA_FAILED ? { ...used, camera: want.camera } : used);
+  };
+
+  const openSetup = () => {
+    setPhase({ at: "setup" });
+    void acquire(rememberedPicks());
+  };
+  const cancelSetup = () => {
+    stopPreview();
+    setPhase({ at: "idle" });
+  };
+
+  // The mic's level while setting up.
+  const settingUp = phase.at === "setup";
+  useEffect(() => {
+    if (!settingUp || !preview || preview.getAudioTracks().length === 0) return;
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    ctx.createMediaStreamSource(new MediaStream(preview.getAudioTracks())).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    let frame = 0;
+    const tick = () => {
+      analyser.getByteTimeDomainData(samples);
+      setLevel(micLevel(samples));
+      frame = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => {
+      cancelAnimationFrame(frame);
+      void ctx.close();
+      setLevel(0);
+    };
+  }, [settingUp, preview]);
   // The floating bubble: the camera on its own (the canvas has its own
-  // copy), and where on the screen the video's face circle lands.
+  // copy), and where on the screen the video's face pad lands.
   const [faceStream, setFaceStream] = useState<MediaStream | null>(null);
-  const [bubble, setBubble] = useState<{ left: number; top: number; size: number } | null>(null);
+  const [bubble, setBubble] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   const release = () => {
     const s = session.current;
@@ -97,7 +226,13 @@ export function LetterRecorder({
     setFaceStream(null);
     setBubble(null);
   };
-  useEffect(() => release, []);
+  useEffect(
+    () => () => {
+      release();
+      stopPreview();
+    },
+    [],
+  );
 
   // The bubble follows the letter's pane if the window changes size.
   const recording = phase.at === "recording";
@@ -107,8 +242,8 @@ export function LetterRecorder({
       const pane = previewElement();
       if (!pane) return;
       const rect = pane.getBoundingClientRect();
-      const c = faceCircle(rect.width, rect.height);
-      setBubble({ left: rect.left + c.cx - c.r, top: rect.top + c.cy - c.r, size: c.r * 2 });
+      const p = facePad(rect.width, rect.height);
+      setBubble({ left: rect.left + p.x, top: rect.top + p.y, width: p.w, height: p.h });
     };
     place();
     window.addEventListener("resize", place);
@@ -192,10 +327,15 @@ export function LetterRecorder({
         }
       }
 
-      const user = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-        video: camera ? { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: "user" } : false,
-      });
+      // The camera and mic previewed in setup, handed over as they are.
+      const user =
+        previewRef.current ??
+        (await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+          video: camera ? { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: "user" } : false,
+        }));
+      previewRef.current = null;
+      setPreview(null);
       tracks.push(...user.getTracks());
 
       const screen = document.createElement("video");
@@ -216,7 +356,9 @@ export function LetterRecorder({
       canvas.height = Math.max(2, Math.round(((screen.videoHeight || 720) * scale) / 2) * 2);
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("This browser can't draw the recording.");
-      const circle = faceCircle(canvas.width, canvas.height);
+      const pad = facePad(canvas.width, canvas.height);
+      const padPath = new Path2D();
+      padPath.addPath(new Path2D(PAD_UNIT_PATH), new DOMMatrix([pad.w, 0, 0, pad.h, pad.x, pad.y]));
 
       const draw = () => {
         ctx.fillStyle = "#ffffff";
@@ -227,18 +369,14 @@ export function LetterRecorder({
         const fit = Math.min(canvas.width / sw, canvas.height / sh);
         ctx.drawImage(screen, (canvas.width - sw * fit) / 2, (canvas.height - sh * fit) / 2, sw * fit, sh * fit);
         if (face && face.videoWidth) {
-          const side = Math.min(face.videoWidth, face.videoHeight);
+          const crop = padCrop(face.videoWidth, face.videoHeight);
           ctx.save();
-          ctx.beginPath();
-          ctx.arc(circle.cx, circle.cy, circle.r, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.drawImage(face, (face.videoWidth - side) / 2, (face.videoHeight - side) / 2, side, side, circle.cx - circle.r, circle.cy - circle.r, circle.r * 2, circle.r * 2);
+          ctx.clip(padPath);
+          ctx.drawImage(face, crop.sx, crop.sy, crop.sw, crop.sh, pad.x, pad.y, pad.w, pad.h);
           ctx.restore();
-          ctx.beginPath();
-          ctx.arc(circle.cx, circle.cy, circle.r, 0, Math.PI * 2);
-          ctx.lineWidth = Math.max(2, Math.round(circle.r * 0.04));
+          ctx.lineWidth = Math.max(2, Math.round(pad.w * 0.04));
           ctx.strokeStyle = "#ffffff";
-          ctx.stroke();
+          ctx.stroke(padPath);
         }
         if (session.current) session.current.frame = requestAnimationFrame(draw);
       };
@@ -296,26 +434,79 @@ export function LetterRecorder({
           className="vault-toolbar-btn"
           disabled={!hasText}
           title={hasText ? undefined : "Write the letter first"}
-          onClick={() => setPhase({ at: "setup" })}
+          onClick={openSetup}
         >
           {phase.at === "ready" ? "Record again" : "Read it to them"}
         </button>
       )}
-      {phase.at === "setup" && (
-        <>
-          <span style={note}>Your browser will ask what to share. Pick this tab.</span>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <input type="checkbox" checked={camera} onChange={(e) => setCamera(e.target.checked)} />
-            Camera
-          </label>
-          <button type="button" className="vault-toolbar-btn" onClick={() => void start()}>
-            Start
-          </button>
-          <button type="button" className="vault-toolbar-btn" onClick={() => setPhase({ at: "idle" })}>
-            Cancel
-          </button>
-        </>
-      )}
+      {/* The pad the face is framed in, for the preview and the bubble. */}
+      <svg width={0} height={0} style={{ position: "absolute" }} aria-hidden>
+        <defs>
+          <clipPath id={PAD_CLIP_ID} clipPathUnits="objectBoundingBox">
+            <path d={PAD_UNIT_PATH} />
+          </clipPath>
+        </defs>
+      </svg>
+      <Modal open={phase.at === "setup"} onClose={cancelSetup} title="Read it to them">
+        <Stack gap={3}>
+          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+            <div
+              style={{ width: Math.round(144 * PAD_ASPECT), height: 144, clipPath: `url(#${PAD_CLIP_ID})`, background: "#222", flexShrink: 0 }}
+              data-letter-recorder-preview
+            >
+              {camera && preview && preview.getVideoTracks().length > 0 ? (
+                <video
+                  autoPlay
+                  muted
+                  playsInline
+                  ref={(el) => {
+                    if (el && el.srcObject !== preview) el.srcObject = preview;
+                  }}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scaleX(-1)" }}
+                />
+              ) : (
+                <span className={textSize.xs} style={{ color: "#ffffff", display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+                  {camera ? "Opening…" : "No camera"}
+                </span>
+              )}
+            </div>
+            <Stack gap={2}>
+              <Select
+                label="Camera"
+                name="camera"
+                options={[...devices.cameras, { value: NO_CAMERA, label: "No camera, voice only" }]}
+                value={picks.camera || devices.cameras[0]?.value || NO_CAMERA}
+                onChange={(e) => void acquire({ ...picks, camera: e.target.value })}
+              />
+              <Select
+                label="Microphone"
+                name="mic"
+                options={devices.mics.length ? devices.mics : [{ value: "", label: "Default microphone" }]}
+                value={picks.mic || devices.mics[0]?.value || ""}
+                onChange={(e) => void acquire({ ...picks, mic: e.target.value })}
+              />
+              <div aria-label="Microphone level" role="meter" aria-valuemin={0} aria-valuemax={1} aria-valuenow={level} style={{ height: 6, borderRadius: 3, background: "#e5e5e5", overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(level * 100)}%`, height: "100%", background: semanticColors.textBrand, transition: "width 80ms linear" }} />
+              </div>
+              <span style={note}>Say something: the bar moves when the mic hears you.</span>
+            </Stack>
+          </div>
+          {setupError && (
+            <span style={{ color: semanticColors.textDanger }} role="alert">
+              {setupError}
+            </span>
+          )}
+          <span style={note}>After Start, your browser asks what to share. Pick this tab.</span>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button type="button" className="vault-toolbar-btn" onClick={cancelSetup}>
+              Cancel
+            </button>
+            <button type="button" className="vault-toolbar-btn" disabled={!preview} onClick={() => void start()}>
+              Start recording
+            </button>
+          </div>
+        </Stack>
+      </Modal>
       {phase.at === "recording" &&
         bubble &&
         createPortal(
@@ -325,8 +516,8 @@ export function LetterRecorder({
               position: "fixed",
               left: bubble.left,
               top: bubble.top,
-              width: bubble.size,
-              height: bubble.size,
+              width: bubble.width,
+              height: bubble.height,
               zIndex: 400,
             }}
           >
@@ -342,9 +533,7 @@ export function LetterRecorder({
                   width: "100%",
                   height: "100%",
                   objectFit: "cover",
-                  borderRadius: "50%",
-                  border: "3px solid #ffffff",
-                  boxSizing: "border-box",
+                  clipPath: `url(#${PAD_CLIP_ID})`,
                   display: "block",
                 }}
               />
