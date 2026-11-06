@@ -90,8 +90,16 @@ services:
     # before its node_modules were ready (e.g. "vite-node: not found",
     # Error 127) — a real, hit-in-practice race, not hypothetical.
     # generous retries*interval to cover a cold, from-scratch pnpm install.
+    #
+    # `/api/health`, not `/`: the home page is the website project's
+    # README, read from the database, so on a fresh database (no website
+    # project yet) `/` answers 404, this check never passed, and Caddy,
+    # which waits on it, never started. `/api/health` is served by the
+    # same dev server, so it still only answers once the install and the
+    # server are up, and it needs no data (it is the route Fly's own
+    # checks use).
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health || exit 1"]
       interval: 3s
       timeout: 5s
       retries: 60
@@ -263,8 +271,18 @@ services:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
 
+  # MinIO took its own images off Docker Hub and Quay (`minio/minio` and
+  # `minio/mc` both stopped resolving, seen 2026-11-05), so a machine with
+  # no cached copy could not bring the stack up at all. This is a community
+  # build of the same upstream source (github.com/minio/minio), pinned to a
+  # release instead of `latest` so it can't move or vanish under us the
+  # same way. It carries the server, the `mc` client and a shell, which is
+  # everything this service's healthcheck and `minio-init` below use. An
+  # existing `minio_data` volume keeps working: same software, a release
+  # the same as or newer than the last one MinIO published. Local dev only;
+  # production's storage is Tigris.
   minio:
-    image: minio/minio:latest
+    image: ghcr.io/coollabsio/minio:RELEASE.2025-10-15T17-29-55Z
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -285,8 +303,10 @@ services:
       retries: 5
       start_period: 10s
 
+  # The same image as `minio` above: it bundles `mc`, and `minio/mc` is
+  # gone with the rest.
   minio-init:
-    image: minio/mc:latest
+    image: ghcr.io/coollabsio/minio:RELEASE.2025-10-15T17-29-55Z
     depends_on:
       minio:
         condition: service_healthy
