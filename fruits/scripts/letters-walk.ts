@@ -61,7 +61,9 @@ async function main() {
 ${PEOPLE.map((p) => `    ${`${p.role}:`.padEnd(20)} ${p.email}`).join("\n")}
 
   The walk:
-    1. As a guide, New letter: a title, what it is for, and who it is for. Pick the clients. Write a line, then Send.
+    1. As a guide, New letter: a title, what it is for, and who it is for. Pick the clients. You land at the desk,
+       in the project, on a page with only the letter (not in the Vault). Write a line, then Send.
+       "The desk" goes back to the list; "Edit" on a row comes back here; a draft has Delete, a sent letter does not.
     2. As each client, open the project: the flag is up. Open the mailbox, then the letter.
        The flag comes down for that client and stays up for the other.
     3. As a guide, write another, this time for the team, and send it. The other guide and the crafter get the flag.

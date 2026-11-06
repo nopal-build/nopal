@@ -35,7 +35,7 @@ import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import OxRenderer from "./OxRenderer";
-import { DictateIntoText } from "./DictateButton";
+import { DictatedTextBox } from "./DictateButton";
 
 /** The sentence under the New letter form, and the confirms on the
  * controls that run the model: each is a run, and the click is the
@@ -161,7 +161,6 @@ export function LetterBrief({
   // one line otherwise, so a finished letter doesn't carry an empty box.
   const [talkOpen, setTalkOpen] = useState(!!initial.brief || openByDefault || !!initial.talk.draft);
   const hadBrief = useRef(!!initial.brief);
-  const talkFieldRef = useRef<HTMLDivElement>(null);
   const [talkSaved, setTalkSaved] = useState<"" | "Saving…" | "Saved">("");
   const [editing, setEditing] = useState(false);
   const [outlineDraft, setOutlineDraft] = useState("");
@@ -358,20 +357,9 @@ export function LetterBrief({
           </div>
           {talkOpen && (
             <>
-          <div ref={talkFieldRef}>
-            <Input
-              type="textarea"
-              name="talk"
-              label="Talk it through"
-              hideLabel
-              value={talk}
-              onChange={(e) => onTalkChange(e.target.value)}
-              placeholder={state.brief ? TALK_PROMPT_WITH_BRIEF : TALK_PROMPT}
-            />
-          </div>
           {/* Thinking out loud is the point here, so it can be dictated.
               The letter itself never can (see DictateButton's header). */}
-          <DictateIntoText target={{ letterFile: fileId }} value={talk} onChange={onTalkChange} fieldRef={talkFieldRef} />
+          <DictatedTextBox target={{ letterFile: fileId }} value={talk} onChange={onTalkChange} name="talk" label="Talk it through" placeholder={state.brief ? TALK_PROMPT_WITH_BRIEF : TALK_PROMPT} />
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
             {TALK_HINT}
             {talkSaved ? ` · ${talkSaved}` : ""}

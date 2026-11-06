@@ -81,6 +81,14 @@ export function letterPublicPath(fileId: string): string {
   return `/public/letter/${fileId}`;
 }
 
+/** Where a letter is written: the desk in its project, a page of its own
+ * (`routes/newspaper.$folderId_.letter.$fileId.tsx`). Not the Vault. */
+export function letterDeskPath(projectFolderId: string, fileId: string): string {
+  return `/newspaper/${projectFolderId}/letter/${fileId}`;
+}
+
+export const LETTER_DELETE_DRAFT_ASK = "Delete this draft? It goes for good, with its talk-through and outline.";
+
 function longDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
@@ -89,7 +97,6 @@ export function LettersView({
   projectFolderId,
   rows,
   manage,
-  openInVault,
   asksHouse = false,
   startFrom = null,
   onChanged,
@@ -98,9 +105,6 @@ export function LettersView({
   rows: LetterTabRow[];
   /** Upload, Replace and the share switch. */
   manage: boolean;
-  /** Whether a row opens the Vault's file view; a client has no Vault
-   * and opens the public page when there is one. */
-  openInVault: boolean;
   /** The project has clients, so a new letter says who it is for. */
   asksHouse?: boolean;
   /** Arrived from "Write a letter from this" on a letter's page: the
@@ -172,7 +176,7 @@ export function LettersView({
     if (!withBrief || from) form.append("brief", "skip");
     form.append("date", localDateString());
     const data = await send(`/api/projects/${projectFolderId}/letters`, form);
-    if (data?.fileId) window.location.assign(`/vault?file=${data.fileId}`);
+    if (data?.fileId) window.location.assign(letterDeskPath(projectFolderId, data.fileId));
   };
 
   const onDrop = (e: DragEvent<HTMLElement>) => {
@@ -264,12 +268,16 @@ export function LettersView({
                     key={row.fileId}
                     row={row}
                     manage={manage}
-                    openInVault={openInVault}
+                    projectFolderId={projectFolderId}
                     busy={busy}
                     onReplace={(file) => {
                       const form = new FormData();
                       form.append("file", file);
                       void send(`/api/vault/replace/${row.fileId}`, form);
+                    }}
+                    onDelete={() => {
+                      if (!window.confirm(LETTER_DELETE_DRAFT_ASK)) return;
+                      void send(`/api/letter/${row.fileId}/remove`, new FormData());
                     }}
                     onChanged={onChanged}
                   />
@@ -425,25 +433,31 @@ export function NewLetterModal({
 function LetterRowView({
   row,
   manage,
-  openInVault,
+  projectFolderId,
   busy,
   onReplace,
+  onDelete,
   onChanged,
 }: {
   row: LetterTabRow;
   manage: boolean;
-  openInVault: boolean;
+  projectFolderId: string;
   busy: boolean;
   onReplace: (file: File) => void;
+  onDelete: () => void;
   onChanged: () => void;
 }) {
   const replaceInput = useRef<HTMLInputElement>(null);
   const publicPath = letterPublicPath(row.fileId);
-  const vaultPath = `/vault?file=${row.fileId}`;
+  // Writing happens at the desk, in the project (Austin, 2026-11-06).
+  const deskPath = letterDeskPath(projectFolderId, row.fileId);
+  // Only a draft can be deleted here: one that was sent, or whose link
+  // was ever on, is in someone's hands. The route refuses the rest.
+  const draft = !row.sentDate && !row.sharedAt;
   // The title opens exactly what the client sees (Austin, 2026-10-21): the
   // letter's page. Before the send that page admits a manager as a
   // preview, so a manager's title always goes there; a reader's title is
-  // a link only once it's sent. The raw file is "Edit".
+  // a link only once it's sent. Writing it is "Edit", at the desk.
   const href = row.sentDate || manage ? publicPath : null;
   const title = href ? (
     <a href={href} className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} style={{ color: "inherit" }}>
@@ -512,10 +526,13 @@ function LetterRowView({
           <button type="button" className={textSize.xs} disabled={busy} onClick={() => replaceInput.current?.click()} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, padding: 0, cursor: "pointer" }}>
             Replace
           </button>
-          {openInVault && (
-            <a href={vaultPath} className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
-              Edit
-            </a>
+          <a href={deskPath} className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-letter-edit>
+            Edit
+          </a>
+          {draft && (
+            <button type="button" className={textSize.xs} disabled={busy} onClick={onDelete} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, cursor: "pointer", padding: 0, textDecoration: "underline" }} data-letter-delete>
+              Delete
+            </button>
           )}
         </div>
       )}

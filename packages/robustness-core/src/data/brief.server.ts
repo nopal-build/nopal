@@ -35,7 +35,7 @@
 import { RecordId } from "surrealdb";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { countPageWords } from "./effortReadings.server";
-import { defineTable, formatRecord, merge, select, upsert, type Data } from "./generic.server";
+import { defineTable, formatRecord, merge, remove, select, upsert, type Data } from "./generic.server";
 import { getEffectiveGraphLogDefaultSkill } from "./graphLogDefaults.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { getGraphLogRunStartedAt } from "./graphLogPerf.server";
@@ -502,6 +502,14 @@ export async function writeLetterBriefRow(letterFileId: string, patch: Partial<O
   const existing = await getLetterBriefRow(letterFileId);
   if (existing) await merge(TABLE, letterFileId, patch);
   else await upsert(new RecordId(TABLE, letterFileId), { content: null, written_at: null, by_human_id: null, run_id: null, model: null, incomplete: [], bounced: [], unmatched: [], pending_job_id: null, ...patch });
+}
+
+/** The row goes with a draft that is deleted (`letterDesk.server.ts`):
+ * its brief, and a talk-through and outline that never reached the
+ * record. Nothing to do when the letter never had one. */
+export async function removeLetterBriefRow(letterFileId: string): Promise<void> {
+  await ensureTable();
+  await remove(TABLE, letterFileId);
 }
 
 // ─── The stage ──────────────────────────────────────────────────────────

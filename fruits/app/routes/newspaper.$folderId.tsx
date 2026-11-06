@@ -778,7 +778,7 @@ export default function NewspaperRoute() {
             />
           )}
           {letters && (
-            <LettersView projectFolderId={folder._id} rows={letters} manage={manageLetters} openInVault={openInVault} asksHouse={lettersAskHouse} startFrom={letterStartFrom} onChanged={() => revalidator.revalidate()} />
+            <LettersView projectFolderId={folder._id} rows={letters} manage={manageLetters} asksHouse={lettersAskHouse} startFrom={letterStartFrom} onChanged={() => revalidator.revalidate()} />
           )}
           {tab === "sensorData" && sensorData && (
             <SensorDataView projectFolderId={folder._id} data={sensorData} />

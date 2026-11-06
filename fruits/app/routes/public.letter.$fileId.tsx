@@ -58,6 +58,7 @@ import { getUser, isImpersonating } from "../modules/auth/auth.server";
 import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
 import { LetterReflection, ReflectionTwirl } from "../components/LetterReflection";
+import { letterDeskPath } from "../components/LettersView";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { buildLoadCellGraphDirectiveRegistry } from "../oxmarkdown/loadCellGraphDirective";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
@@ -106,7 +107,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // the pictures and no downloads. Anyone else: not found, as before.
   const mine = user && params.fileId ? await resolveLetterForManager(params.fileId, user) : null;
   if (!mine) throw new Response("Not Found", { status: 404 });
-  return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING };
+  // The way back to where it is being written, for whoever is looking at
+  // their own draft: the desk in its project.
+  return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING, writeAt: letterDeskPath(mine.project._id, mine.file._id) };
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -124,7 +127,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicLetterPage() {
-  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs, videoViewUrlBase, from, toHouse, reflection, writeBackIn } = useLoaderData<typeof loader>();
+  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs, videoViewUrlBase, from, toHouse, reflection, writeBackIn, ...rest } = useLoaderData<typeof loader>();
+  // Only a guide's preview of their own draft carries the way back to the desk.
+  const writeAt = "writeAt" in rest ? rest.writeAt : null;
   const { fileId } = useParams();
   // The reader's own talk-through: one line until they open it, open
   // already when they left words half said. Open, it sits beside the
@@ -181,6 +186,14 @@ export default function PublicLetterPage() {
           {preview ? `Updated ${updated}` : `Sent ${updated}`}
           {resent && <span data-resent>{" · "}updated</span>}
           {preview && <span data-preview-note>{" · "}Only Guides can see this until it's sent.</span>}
+          {preview && writeAt && (
+            <span className={hideInPrint}>
+              {" · "}
+              <a href={writeAt} data-keep-writing>
+                Keep writing
+              </a>
+            </span>
+          )}
           {!preview && (
             /* The PDF is the download; the source is the quieter second
                option. Offered on any sent copy: the worker prints a

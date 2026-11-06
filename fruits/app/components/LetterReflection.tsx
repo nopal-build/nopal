@@ -26,7 +26,6 @@
 // Code: who is given the box, the draft's autosave, the Card.
 import { useEffect, useRef, useState } from "react";
 import type { ReflectionForPage } from "robustness-core/data/letterReflection.server";
-import { Input } from "stamps/Input";
 import { Stack } from "stamps/Stack";
 import { button } from "stamps/button.css";
 import { link } from "stamps/link.css";
@@ -34,7 +33,7 @@ import { hideInPrint } from "stamps/print.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
-import { DictateIntoText } from "./DictateButton";
+import { DictatedTextBox } from "./DictateButton";
 import { localDateString } from "./TodayLog";
 
 // Words a person reads (Nopal's voice; listed in the round's return leg).
@@ -95,7 +94,6 @@ export function LetterReflection({
   const [saved, setSaved] = useState<"" | "Saving…" | "Saved">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fieldRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alive = useRef(true);
@@ -161,11 +159,8 @@ export function LetterReflection({
                 </p>
               ))}
             </div>
-            <div ref={fieldRef}>
-              <Input type="textarea" name="reflection" label={REFLECT_LABEL} hideLabel value={text} onChange={(e) => onChange(e.target.value)} />
-            </div>
             {/* Thinking out loud is the point here, so it can be dictated. */}
-            <DictateIntoText target={{ reflectOn: fileId }} value={text} onChange={onChange} fieldRef={fieldRef} />
+            <DictatedTextBox target={{ reflectOn: fileId }} value={text} onChange={onChange} name="reflection" label={REFLECT_LABEL} />
             <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
               {REFLECT_HINT}
               {saved ? ` · ${saved}` : ""}

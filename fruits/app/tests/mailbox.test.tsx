@@ -17,7 +17,7 @@ import { resolveRole } from "robustness-core/data/projectSharing.server";
 import { Mailbox } from "../components/stamps-candidates/Mailbox";
 import { MailList, MAILBOX_EMPTY, MAILBOX_LABEL, MAILBOX_SAYS_NEW, MAILBOX_SAYS_QUIET } from "../components/ProjectMailbox";
 import { LetterSendControl, sendAsk } from "../components/LetterSendControl";
-import { DESK_DRAFTS, DESK_LETTERS, LETTER_FOR_ASK, LETTER_FOR_LABEL, LETTER_START, LettersView, NewLetterModal, deskGroups, letterStartFromLine, type LetterTabRow } from "../components/LettersView";
+import { DESK_DRAFTS, DESK_LETTERS, LETTER_DELETE_DRAFT_ASK, LETTER_FOR_ASK, LETTER_FOR_LABEL, LETTER_START, LettersView, NewLetterModal, deskGroups, letterStartFromLine, type LetterTabRow } from "../components/LettersView";
 import { LetterReflection, ReflectionTwirl, REFLECT_HINT, REFLECT_KEEP, REFLECT_KEEP_ASK, REFLECT_KEPT_NOTE, REFLECT_KEPT_SUGGESTION, REFLECT_LABEL, REFLECT_PROMPTS, REFLECT_WRITE_BACK } from "../components/LetterReflection";
 import { HOUSE_NOT_CHOSEN } from "robustness-core/data/letterHouses";
 import { existsSync } from "node:fs";
@@ -196,7 +196,7 @@ describe("the desk", () => {
     expect(deskGroups(rows).drafts.map((r) => r.fileId)).toEqual(["d1", "r1"]);
     // Edited since it was sent, it is still a letter that went.
     expect(deskGroups(rows).letters.map((r) => r.fileId)).toEqual(["s1", "s2", "old"]);
-    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} openInVault={false} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} onChanged={() => {}} />);
     expect((html.match(/data-desk-group/g) ?? []).length).toBe(2);
     expect(html.indexOf(DESK_DRAFTS)).toBeLessThan(html.indexOf("Being written"));
     expect(html.indexOf("Being written")).toBeLessThan(html.indexOf(`>${DESK_LETTERS}<`));
@@ -205,7 +205,7 @@ describe("the desk", () => {
   });
 
   it("each letter says who it is from and where it went; a draft says where it is going; a letter from before houses says neither", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} openInVault={false} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} onChanged={() => {}} />);
     expect(html).toContain("From Lucas, to the clients");
     expect(html).toContain("From Susan, to the team");
     expect(html).toMatch(/Addressed and not sent[\s\S]*?data-letter-houses[^>]*>To the clients</);
@@ -213,7 +213,7 @@ describe("the desk", () => {
   });
 
   it("a crafter and an observer read the desk and get no way to start, send or share a letter; the server refuses each of those anyway", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} openInVault={true} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} onChanged={() => {}} />);
     expect(html).not.toMatch(/New letter|Upload a letter|>Replace<|>Edit<|Share link/);
     for (const group of ["Crafter", "Observer", "Client"]) {
       expect(canManageLetters({ role: "Human" }, resolveRole(group)), group).toBe(false);
@@ -247,7 +247,7 @@ describe("one letter, alone", () => {
     expect(page).toContain("const user = rendering ? null : await getUser(request);");
     expect(page).toContain("const asThemself = !!user && !(await isImpersonating(request));");
     expect(page).toMatch(/const person = asThemself && request\.method === "GET" && [^;]*prefetch[^;]*;/);
-    expect(page).toContain("return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING };");
+    expect(page).toContain("return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING, writeAt: letterDeskPath(mine.project._id, mine.file._id) };");
   });
 
   it("has no Reply: writing back is a new letter started at the desk, never a button on the letter (Austin, 2026-11-05)", () => {
@@ -311,6 +311,27 @@ describe("one letter, alone", () => {
     const view = readFileSync(path.join(here, "../components/LettersView.tsx"), "utf8");
     expect(view).toContain('if (from) form.append("from", from.letterFileId);');
     expect(view).toContain('if (!withBrief || from) form.append("brief", "skip");');
+  });
+
+  it("at the desk, whoever manages letters gets Edit on every row and Delete on a draft only; a reader gets neither (2026-11-06)", () => {
+    const row = (over: Partial<LetterTabRow>): LetterTabRow => ({
+      fileId: "x", name: "x.md", title: "X", updatedAt: "2026-11-05T08:00:00Z", size: 10, sharedAt: null, contentHash: "h", purpose: null,
+      sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null, ...over,
+    });
+    const draftRow = row({ fileId: "d1", title: "Still writing", toHouse: "clients" });
+    const sentRow = row({ fileId: "s1", title: "Went out", sentDate: "2026-11-04", sentCount: 1, from: "Lucas", houses: { fromHumanId: "guideA", fromHouse: "guides", toHouse: "clients" } });
+    const manager = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[draftRow, sentRow]} manage onChanged={() => {}} />);
+    expect((manager.match(/data-letter-edit/g) ?? []).length).toBe(2);
+    expect(manager).toContain('href="/newspaper/p/letter/d1"');
+    expect(manager).toContain('href="/newspaper/p/letter/s1"');
+    expect((manager.match(/data-letter-delete/g) ?? []).length).toBe(1);
+    expect(manager.indexOf("data-letter-delete")).toBeLessThan(manager.indexOf('data-letter="s1"'));
+    // A link that was ever on is a letter someone may hold: no Delete.
+    const linked = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[row({ fileId: "k1", sharedAt: "2026-10-20T10:00:00Z" })]} manage onChanged={() => {}} />);
+    expect(linked).not.toContain("data-letter-delete");
+    const reader = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[draftRow, sentRow]} manage={false} onChanged={() => {}} />);
+    expect(reader).not.toMatch(/data-letter-edit|data-letter-delete|\/letter\/d1/);
+    expect(LETTER_DELETE_DRAFT_ASK).not.toMatch(/—/);
   });
 
   it("the words around a letter are plain", () => {

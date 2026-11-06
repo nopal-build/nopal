@@ -16,7 +16,9 @@ import { signTicket, verifyTicket } from "../../dictation/ticket.js";
 import { attachDictationRelay, DICTATION_PATH } from "../../dictation/relay.js";
 import { buildDictationContext } from "../modules/dictationTerms";
 import { insertFinal, showProvisional, PROVISIONAL_TAG } from "../oxmarkdown/DictateButtonPlugin";
-import { insertText } from "../components/DictateButton";
+import { insertText, shownText } from "../components/DictateButton";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // ── The start route's checks ───────────────────────────────────────────────
 const state = vi.hoisted(() => ({
@@ -398,5 +400,35 @@ describe("dictating into a text box", () => {
     const { next } = insertText("Start.End", 6, "Middle");
     expect(next).toBe("Start. MiddleEnd");
     expect(insertText("", 5, " Hello").next).toBe("Hello");
+  });
+});
+
+// Words land where typing would, never by the button (ADR-032).
+describe("unsettled words in a text box", () => {
+  it("show in the box where the next settled words will go, and leave it when they settle", () => {
+    // Dictation began with the cursor after "fine."; the engine's guess
+    // shows there, plain, ahead of what follows.
+    expect(shownText("Brief reads fine. Then more.", 17, " the vapor")).toBe("Brief reads fine. the vapor Then more.");
+    // Settled, the words go through onChange as the caller's value and
+    // nothing is left to show.
+    expect(shownText("Brief reads fine. The vapor Then more.", 27, "")).toBe("Brief reads fine. The vapor Then more.");
+  });
+
+  it("never reach the caller: the box's value holds settled words only", () => {
+    // The caller's `value` is what is saved; the unsettled words are state
+    // inside the box and are only ever composed into what is shown.
+    const source = readFileSync(fileURLToPath(new URL("../components/DictateButton.tsx", import.meta.url)), "utf8");
+    const box = source.slice(source.indexOf("export function DictatedTextBox"), source.indexOf("export function shownText"));
+    expect(box).toContain("value={shownText(value, posRef.current, provisional)}");
+    expect(box).toContain("onProvisional={setProvisional}");
+    expect(box).not.toMatch(/onChange\([^)]*provisional/);
+  });
+
+  it("the button draws nothing but its label and the note when dictation stops", () => {
+    const source = readFileSync(fileURLToPath(new URL("../components/DictateButton.tsx", import.meta.url)), "utf8");
+    const button = source.slice(source.indexOf("export function DictateButton"), source.indexOf("function MicIcon"));
+    expect(button).toContain("onProvisional: (text: string) => void;");
+    expect(button).not.toContain("useState(\"\")");
+    expect(button).not.toMatch(/\{provisional\s*&&/);
   });
 });
