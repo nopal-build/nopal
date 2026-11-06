@@ -18,8 +18,12 @@ import {
   OUTLINE_TAIL,
   OUTLINE_WORD_BUDGET,
   assembleOutline,
+  LETTER_BACK_BUDGETS,
+  buildLetterBackOutlineSystemPrompt,
   buildOutlineSystemPrompt,
   buildTalkOutlineSystemPrompt,
+  letterBackOutlineText,
+  letterBackOutlineWriteNotes,
   isOwnLine,
   outlineFromTalkText,
   outlineText,
@@ -191,16 +195,94 @@ describe("without a brief: the talk and nothing else (2026-11-05)", () => {
 
   it("its skill is a default only: short, never given the number, naming no guide, client, brief or graph, and never a file in a project", () => {
     const defaults = source("packages/robustness-core/src/data/graphLogDefaults.server.ts");
-    const skill = defaults.slice(defaults.indexOf("export const DEFAULT_OUTLINE_TALK_SKILL = `"), defaults.indexOf("export type GraphLogDefaultStage"));
+    const skill = defaults.slice(defaults.indexOf("export const DEFAULT_OUTLINE_TALK_SKILL = `"), defaults.indexOf("/** The outline for a letter started from what its writer said"));
     expect(skill).toMatch(/you are not given the number/i);
     expect(skill).not.toMatch(/\b750\b/);
     expect(skill).not.toMatch(/\bguide\b|\bclient\b|\bbrief\b|\bgraph\b|\bnode\b|Go do|Position:/i);
     const outlineSkill = defaults.slice(defaults.indexOf("export const DEFAULT_OUTLINE_SKILL = `"), defaults.indexOf("/** The outline for a letter that has no brief"));
     expect(skill.length).toBeLessThan(outlineSkill.length / 2);
     expect(defaults).toContain("outlineTalk: existing?.outlineTalk ?? null");
-    expect(defaults).toContain('export type GraphLogDefaultOnlyStage = "outlineTalk";');
+    expect(defaults).toMatch(/export type GraphLogDefaultOnlyStage = "outlineTalk"[^;]*;/);
     expect(source("packages/robustness-core/src/data/projectN02.server.ts")).not.toMatch(/outlineTalk|OUTLINE[-_]TALK/);
     expect(source("fruits/app/routes/maker_.graphlog_.defaults.tsx")).toContain('stage="outlineTalk"');
+  });
+});
+
+describe("a letter back: the reflection, the letter read and the sender's older words (2026-11-06)", () => {
+  const BACK = `## What you're saying\n\nThe fan comes before the floor, and the windows are why.\n\n## Where it starts\n\n- The fan is undersized.\n- Lucas said so in September.\n\n## The middle\n\n- The gable windows stay cracked.\n\n## Where it lands\n\n- The floor waits for spring.\n\n## Leave for another letter\n\n- The merch.\n`;
+  const backBase = {
+    letterTitle: "What I make of it",
+    today: "2026-11-06",
+    writerName: "Gerald",
+    reflection: "The fan matters more than the floor.",
+    letterRead: { title: "The attic floor", fromName: "Lucas", text: "# The attic floor\n\nWe should do the floor first.\n" },
+    senderWords: [{ date: "2026-09-12", quote: "The fan is undersized." }],
+    skill: "skill",
+  };
+
+  it("the prompt is the skill, the letter being written, the letter read, the reflection and the sender's dated words; with none, it says so", () => {
+    const system = buildLetterBackOutlineSystemPrompt("THE LETTER BACK SKILL", backBase);
+    for (const held of ["THE LETTER BACK SKILL", 'The letter being written: "What I make of it".', "The person writing it, whose reflection this is: Gerald.", 'The letter they read, "The attic floor", from Lucas:', "We should do the floor first.", "Gerald's reflection on it, their words, unedited:", "The fan matters more than the floor.", "Lucas's own older words on this project, each with the day it was said:", "2026-09-12: The fan is undersized."]) expect(system).toContain(held);
+    expect(system).not.toMatch(/The brief|Every node|The people:|Its purpose|:ref\{/);
+    const bare = buildLetterBackOutlineSystemPrompt("s", { ...backBase, letterRead: { ...backBase.letterRead, fromName: null }, senderWords: [] });
+    expect(bare).toContain('The letter they read, "The attic floor", from the sender:');
+    expect(bare).toContain("(None on the record.)");
+  });
+
+  it("code holds the shape and the counts: the sentence first and inside its words, three or four moves each inside its words and lines, the leave list last and uncounted, no numbers, no citation", () => {
+    const B = LETTER_BACK_BUDGETS;
+    expect(B).toEqual({ saying: 30, move: 75, moveLines: 3, movesMin: 3, movesMax: 4 });
+    expect(letterBackOutlineWriteNotes(BACK).hard).toEqual([]);
+    // The leave list can run long, or be left out.
+    expect(letterBackOutlineWriteNotes(BACK.replace("- The merch.", `- ${words(200)}`)).hard).toEqual([]);
+    expect(letterBackOutlineWriteNotes(BACK.replace(/## Leave for another letter[\s\S]*$/, "")).hard).toEqual([]);
+
+    expect(letterBackOutlineWriteNotes(BACK.replace("The fan comes before the floor, and the windows are why.", words(31))).hard).toEqual(['"What you\'re saying" is 31 words against a budget of 30']);
+    expect(letterBackOutlineWriteNotes(BACK.replace(/## What you're saying[\s\S]*?## Where it starts/, "## Where it starts")).hard).toEqual(['"What you\'re saying" is not written: one plain sentence, first']);
+    expect(letterBackOutlineWriteNotes(BACK.replace("## The middle\n\n- The gable windows stay cracked.\n\n", "")).hard).toEqual(["2 move(s); the letter goes in 3 or 4"]);
+    expect(letterBackOutlineWriteNotes(BACK.replace("## Where it lands", "## One more\n\n- a\n\n## And another\n\n- b\n\n## Where it lands")).hard).toEqual(["5 move(s); the letter goes in 3 or 4"]);
+    expect(letterBackOutlineWriteNotes(BACK.replace("- The gable windows stay cracked.", `- ${words(76)}`)).hard).toEqual(['"The middle" is 76 words against a budget of 75']);
+    expect(letterBackOutlineWriteNotes(BACK.replace("- The gable windows stay cracked.", "- a\n- b\n- c\n- d")).hard).toEqual(['"The middle" has 4 lines; a move has at most 3']);
+    expect(letterBackOutlineWriteNotes(BACK.replace("## The middle", "## 2. The middle")).hard).toEqual(['"2. The middle" is numbered; headings carry no numbers']);
+    expect(letterBackOutlineWriteNotes(BACK.replace("- Lucas said so in September.", `- Lucas said so. ${REF}`)).hard).toEqual(["a citation: put the sender's older words in the line as their words, with no citation"]);
+    const leaveFirst = BACK.replace("## Leave for another letter\n\n- The merch.\n", "").replace("## Where it lands", "## Leave for another letter\n\n- The merch.\n\n## Where it lands");
+    expect(letterBackOutlineWriteNotes(leaveFirst).hard).toEqual(['"Leave for another letter" is not the last section']);
+  });
+
+  it("over its counts it is sent back once with them and the resend is kept as written, with nothing left for the page to warn about", async () => {
+    const long = BACK.replace("- The gable windows stay cracked.", `- ${words(80)}`);
+    const provider = scripted([response([write(long)]), response([write(long)])]);
+    const result = await letterBackOutlineText({ ...backBase, provider });
+    expect(provider.seen[1][0]).toMatch(/^Not written yet\. The outline as sent:\n- "The middle" is 80 words against a budget of 75/);
+    expect(result.turns).toBe(2);
+    expect(result.content).toBe(long);
+    expect(result.incomplete).toEqual([]);
+
+    const clean = await letterBackOutlineText({ ...backBase, provider: scripted([response([write(BACK)])]) });
+    expect(clean.turns).toBe(1);
+    expect(clean.content).toBe(BACK);
+    expect(clean.bounced).toEqual([]);
+  });
+
+  it("its skill is the hand-tested one, a default only: the friend across the table, three parts, no questions, never given the numbers, and never a reply", () => {
+    const defaults = source("packages/robustness-core/src/data/graphLogDefaults.server.ts");
+    const skill = defaults.slice(defaults.indexOf("export const DEFAULT_OUTLINE_LETTER_BACK_SKILL = `"), defaults.indexOf("export type GraphLogDefaultStage"));
+    for (const held of ["the friend across the table", "What you're saying", "Three or four", "Leave for another letter", "No questions to the writer", "The phrasing of the letter is the writer's", "you are not given the numbers"]) expect(skill, held).toContain(held);
+    expect(skill).not.toMatch(/\breply\b|being answered|\bgraph\b|\b30\b|\b75\b/i);
+    expect(defaults).toContain('export type GraphLogDefaultOnlyStage = "outlineTalk" | "outlineLetterBack";');
+    expect(defaults).toContain("outlineLetterBack: existing?.outlineLetterBack ?? null");
+    expect(source("packages/robustness-core/src/data/projectN02.server.ts")).not.toMatch(/outlineLetterBack|LETTER[-_]BACK/);
+    expect(source("fruits/app/routes/maker_.graphlog_.defaults.tsx")).toContain('stage="outlineLetterBack"');
+  });
+
+  it("it runs only from the outline's own control: nothing enqueues one when a reflection is kept or a letter is started from it", () => {
+    expect(source("packages/robustness-core/src/data/letterReflection.server.ts")).not.toMatch(/enqueueGraphLogJob|outline\.server/);
+    const route = source("fruits/app/routes/api.projects.$folderId.letters.tsx");
+    expect(route).not.toMatch(/enqueueGraphLogJob|requestOutline|runOutline/);
+    const fromBranch = route.slice(route.indexOf("if (startFrom) {"), route.indexOf("// The brief starts as the letter opens."));
+    expect(fromBranch).toContain("reflects_on_letter_file_id: fromLetterId");
+    expect(fromBranch).not.toContain("requestBrief");
+    expect(source("fruits/app/routes/api.letter.$fileId.reflection.tsx")).not.toMatch(/outline|enqueue/i);
   });
 });
 
@@ -224,6 +306,10 @@ describe("the talk goes onto the Card by the daily log's rules, and only when th
     expect(giving).not.toMatch(/appendToCard|runDailyLogSync/);
     const stage = outline.slice(outline.indexOf("export async function runOutline("), outline.indexOf("export type TalkResult"));
     expect(stage).not.toMatch(/appendToCard|runDailyLogSync/);
+    // The reader's keep is the Card door's other caller, in its own module (2026-11-06).
+    const reflection = source("packages/robustness-core/src/data/letterReflection.server.ts");
+    expect((reflection.match(/appendToCard\(/g) ?? []).length).toBe(1);
+    expect(reflection.slice(reflection.indexOf("export async function keepReflection("), reflection.indexOf("export async function reflectionToStartFrom("))).toContain("appendToCard(");
     const callers = ["packages/robustness-core/src/data/letterSend.server.ts", "packages/robustness-core/src/data/outline.server.ts", "packages/worker/worker.ts", "fruits/app/routes/api.letter.$fileId.talk.tsx", "fruits/app/routes/api.letter.$fileId.outline.tsx"];
     expect(callers.filter((f) => /await landTalkThrough\(/.test(source(f)))).toEqual(["packages/robustness-core/src/data/letterSend.server.ts"]);
     // No brief is asked for anywhere on the talk's or the outline's path.

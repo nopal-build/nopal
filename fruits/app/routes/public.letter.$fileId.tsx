@@ -27,6 +27,14 @@
 // is a new letter started at the desk, never a button here ("that feels
 // like an email").
 //
+// What a reader does get (Austin, 2026-11-06; `LetterReflection`): their
+// own talk-through of the letter, one line until they open it, then
+// beside the letter on a wide screen. Theirs alone on this page: the
+// loader hands over the viewer's own and nobody else's, and none at all
+// to a visitor off the project, the worker's render, a preview, or an
+// admin looking as someone. Its writes go to their own route
+// (`api.letter.$fileId.reflection.tsx`); this module still has no action.
+//
 // Opening this page is what lowers the reader's own mailbox flag for the
 // letter, and nothing else does (the mailbox's list doesn't). It is a
 // write in a loader, on purpose: there is no action here, and the write
@@ -37,8 +45,9 @@
 // The PDF is this page, printed by the worker (`letterPdf.server.ts`);
 // the download links take Stamps' `hideInPrint` so the file carries no
 // button to itself, and `oxmarkdown.css` sets the type for paper.
+import { useState } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useParams } from "react-router";
 import { resolveLetterPage, resolveLetterForManager, resolveSentLetter, resolveSentLetterForMember, resolveSharedLetter, type LetterPage } from "robustness-core/data/letters.server";
 import { readLetter, type LetterReading } from "robustness-core/data/letterReading.server";
 import { HOUSE_LABEL } from "robustness-core/data/letterHouses";
@@ -48,6 +57,7 @@ import type { FileRef, VaultFolder } from "robustness-core/data/vault.types";
 import { getUser, isImpersonating } from "../modules/auth/auth.server";
 import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
+import { LetterReflection, ReflectionTwirl } from "../components/LetterReflection";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { buildLoadCellGraphDirectiveRegistry } from "../oxmarkdown/loadCellGraphDirective";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
@@ -56,13 +66,15 @@ import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { hideInPrint } from "stamps/print.css";
 
-const NO_READING: LetterReading = { from: null, toHouse: null };
+const NO_READING: LetterReading = { from: null, toHouse: null, reflection: null, writeBackIn: null };
 
 /** The page with what goes around the letter for this reader
  * (`readLetter`). `person` is the signed-in reader when this request is
- * their own opening of the letter, which lowers their flag for it. */
-async function opened(found: { file: FileRef; project: VaultFolder }, page: LetterPage, viewer: Human | null, person: boolean) {
-  return { ...page, ...(await readLetter(found.file, found.project, viewer, { lowers: person })) };
+ * their own opening of the letter, which lowers their flag for it.
+ * `asThemself` is the signed-in reader with nobody looking as them: the
+ * only reader handed their talk-through of it. */
+async function opened(found: { file: FileRef; project: VaultFolder }, page: LetterPage, viewer: Human | null, person: boolean, asThemself: boolean) {
+  return { ...page, ...(await readLetter(found.file, found.project, viewer, { lowers: person, reflects: asThemself })) };
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -72,22 +84,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // A person's own opening: signed in, a plain GET, not the worker's
   // render, not a prefetch, and not an admin viewing as them.
   const user = rendering ? null : await getUser(request);
-  const person = !!user && request.method === "GET" && !/prefetch/i.test(request.headers.get("Sec-Purpose") ?? request.headers.get("Purpose") ?? "") && !(await isImpersonating(request));
+  const asThemself = !!user && !(await isImpersonating(request));
+  const person = asThemself && request.method === "GET" && !/prefetch/i.test(request.headers.get("Sec-Purpose") ?? request.headers.get("Purpose") ?? "");
   // The whole of what leaves the server (`letterPage`, resolved via
   // `resolveLetterPage` so a `::LoadCellGraph{fileId="..."}` directive in
   // the body renders for real instead of showing as an unknown block).
   // The link on: anyone, no login. Someone on the project who opens it
   // this way has still opened it.
-  if (shared) return opened(shared, await resolveLetterPage(shared.file, origin), user, person);
+  if (shared) return opened(shared, await resolveLetterPage(shared.file, origin), user, person, asThemself);
   // Link off, sent: the worker printing it, with no session.
   const printing = params.fileId && rendering ? await resolveSentLetter(params.fileId) : null;
-  if (printing) return opened(printing, await resolveLetterPage(printing.file, origin), null, false);
+  if (printing) return opened(printing, await resolveLetterPage(printing.file, origin), null, false, false);
   // Link off, sent: someone on the project reads the sent copy logged
   // in, the pictures served by the letter's own routes with the session.
   // A letter the guides sent the guides is not there for a Client
   // (`resolveSentLetterForMember`).
   const sent = user && params.fileId ? await resolveSentLetterForMember(params.fileId, user._id) : null;
-  if (sent) return opened(sent, await resolveLetterPage(sent.file, origin), user, person);
+  if (sent) return opened(sent, await resolveLetterPage(sent.file, origin), user, person, asThemself);
   // Not sent: a Guide on the project still sees the page as the client
   // will (the tab's title always opens this), with the session serving
   // the pictures and no downloads. Anyone else: not found, as before.
@@ -111,7 +124,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicLetterPage() {
-  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs, videoViewUrlBase, from, toHouse } = useLoaderData<typeof loader>();
+  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs, videoViewUrlBase, from, toHouse, reflection, writeBackIn } = useLoaderData<typeof loader>();
+  const { fileId } = useParams();
+  // The reader's own talk-through: one line until they open it, open
+  // already when they left words half said. Open, it sits beside the
+  // letter, so the page widens to hold both.
+  const [reflecting, setReflecting] = useState(!!reflection?.draft);
+  const [keptOn, setKeptOn] = useState(reflection?.kept?.date ?? null);
+  const beside = !!reflection && reflecting;
   // The letter's own `/api/letter/:fileId/download` route already encodes
   // its fileId (`downloadUrl` above) -- a `::LoadCellGraph{...}`'s raw/
   // cleaned CSV downloads from the SAME route family, just one path
@@ -133,7 +153,14 @@ export default function PublicLetterPage() {
     preview ? undefined : { downloadUrl: (id) => `${downloadUrl}/${id}` },
   );
   return (
-    <AuthShell maxWidth="820px">
+    <AuthShell maxWidth={beside ? "1240px" : "820px"}>
+      {/* The letter in its reading column, and the reader's box after it
+          in a wrapping row: beside the column when there is room, under
+          it when there isn't. The row is outside the column, which is
+          capped at the reading width and has no room in it. The box's
+          wrapper is always here, so folding it keeps its words. */}
+      <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 6 })}>
+      <div style={{ flex: "999 1 480px", minWidth: 0 }}>
       {/* One column for everything: who it is from and the letter share
           the letter's own inset, so the lines above start where the
           words do. */}
@@ -169,6 +196,7 @@ export default function PublicLetterPage() {
             </span>
           )}
         </p>
+        {reflection && <ReflectionTwirl open={reflecting} keptDate={keptOn} onToggle={() => setReflecting((o) => !o)} />}
       </header>
         <OxRenderer
           markdown={body}
@@ -178,6 +206,13 @@ export default function PublicLetterPage() {
           className="ox-no-dots ox-no-heading-marks website-page-ox"
         />
       </WebsitePageContent>
+      </div>
+      {reflection && fileId && (
+        <div className={`${hideInPrint} ${sprinkles({ px: 6 })}`} style={beside ? { flex: "1 1 340px", minWidth: 0, position: "sticky", top: 12 } : { display: "none" }} data-reflection-column>
+          <LetterReflection fileId={fileId} initial={reflection} writeBackIn={writeBackIn} open={reflecting} onKept={setKeptOn} />
+        </div>
+      )}
+      </div>
     </AuthShell>
   );
 }

@@ -97,6 +97,16 @@ export function houseMayOpen(file: LetterHouseFields, viewerHouse: House | null)
   return houses.fromHouse === viewerHouse || houses.toHouse === viewerHouse;
 }
 
+/** Whether someone may talk a letter through on its page (Austin,
+ * 2026-11-06: "an option to talk through the letter while you are
+ * viewing it"): anyone the letter is shown to, once it is sent. Both
+ * houses of a letter between them, so a writer may reflect on their own
+ * side's letter; a letter with no house, anyone on the project. The
+ * caller has already found the viewer on the project. */
+export function mayReflect(file: LetterHouseFields, viewerHouse: House | null, sent: boolean): boolean {
+  return sent && !!viewerHouse && houseMayOpen(file, viewerHouse);
+}
+
 /** Whether the letter is in this person's mailbox: sent to their house by
  * someone other than them. A houseless letter is in every mailbox, the
  * way it was on every tile. The caller passes sent letters only. */

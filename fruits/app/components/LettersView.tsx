@@ -28,6 +28,14 @@ export const DESK_DRAFTS = "On the desk";
 export const DESK_LETTERS = "Letters";
 export const DESK_NO_DRAFTS = "Nothing being written.";
 export const DESK_NO_LETTERS = "No letters sent or received yet.";
+/** What the New letter form is told when it opens from "Write a letter
+ * from this": the letter the writer kept a talk-through of. */
+export type LetterStartFrom = { letterFileId: string; title: string; from: string | null };
+export function letterStartFromLine(start: LetterStartFrom): string {
+  return start.from ? `Starting from what you said about "${start.title}", from ${start.from}.` : `Starting from what you said about "${start.title}".`;
+}
+export const LETTER_START = "Start the letter";
+export const LETTER_PURPOSE_HINT_PLAIN = "A sentence or three, in your words: what the letter is about, what it has to settle, and for whom. It goes into the project's record as yours, today.";
 export const LETTER_FOR_ASK = "Who is it for?";
 export const LETTER_FOR_LABEL: Record<House, string> = { clients: "The clients", guides: "The team" };
 
@@ -83,6 +91,7 @@ export function LettersView({
   manage,
   openInVault,
   asksHouse = false,
+  startFrom = null,
   onChanged,
 }: {
   projectFolderId: string;
@@ -94,6 +103,10 @@ export function LettersView({
   openInVault: boolean;
   /** The project has clients, so a new letter says who it is for. */
   asksHouse?: boolean;
+  /** Arrived from "Write a letter from this" on a letter's page: the
+   * letter the viewer kept a talk-through of (the project page's loader
+   * has checked it is theirs to start from). The form opens by itself. */
+  startFrom?: LetterStartFrom | null;
   onChanged: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +151,16 @@ export function LettersView({
   // 2026-10-22). The purpose line is the guide's words: the route keeps
   // it on the letter and puts it in the graph in their name, dated the
   // day on this device, the daily log's rule.
+  // Opened by itself from "Write a letter from this", but only once the
+  // page is ready: a form drawn open by the server can be submitted
+  // before its handlers exist, and would post nothing.
   const [starting, setStarting] = useState(false);
+  useEffect(() => {
+    if (startFrom) setStarting(true);
+  }, [startFrom]);
+  // The form stays "from what you said" only while it is the one that
+  // opened that way; closed and opened again it is a plain new letter.
+  const [from, setFrom] = useState<LetterStartFrom | null>(startFrom ?? null);
 
   /** An empty letter with a title and a purpose, opened in the editor. */
   const create = async (name: string, purpose: string, withBrief: boolean, to: House | null) => {
@@ -146,7 +168,8 @@ export function LettersView({
     form.append("name", name);
     form.append("purpose", purpose);
     if (to) form.append("to", to);
-    if (!withBrief) form.append("brief", "skip");
+    if (from) form.append("from", from.letterFileId);
+    if (!withBrief || from) form.append("brief", "skip");
     form.append("date", localDateString());
     const data = await send(`/api/projects/${projectFolderId}/letters`, form);
     if (data?.fileId) window.location.assign(`/vault?file=${data.fileId}`);
@@ -195,8 +218,12 @@ export function LettersView({
           open={starting}
           busy={busy}
           error={error}
-          onClose={() => setStarting(false)}
+          onClose={() => {
+            setStarting(false);
+            setFrom(null);
+          }}
           asksHouse={asksHouse}
+          startFrom={from}
           onStart={(name, purpose, withBrief, to) => void create(name, purpose, withBrief, to)}
         />
       )}
@@ -271,6 +298,7 @@ export function NewLetterModal({
   busy,
   error,
   asksHouse = false,
+  startFrom = null,
   onClose,
   onStart,
 }: {
@@ -279,6 +307,10 @@ export function NewLetterModal({
   error: string | null;
   /** The project has clients, so the form asks who the letter is for. */
   asksHouse?: boolean;
+  /** The letter this one is started from what the writer said about. The
+   * same three questions, nothing picked for them; no brief to choose,
+   * since the letter they read stands where a brief would. */
+  startFrom?: LetterStartFrom | null;
   onClose: () => void;
   onStart: (name: string, purpose: string, withBrief: boolean, to: House | null) => void;
 }) {
@@ -309,10 +341,15 @@ export function NewLetterModal({
         }}
       >
         <Stack gap={3}>
+          {startFrom && (
+            <p className={textSize.sm} style={{ margin: 0 }} data-letter-start-from>
+              {letterStartFromLine(startFrom)}
+            </p>
+          )}
           <Input name="name" label="Title" required autoFocus />
           <Input type="textarea" name="purpose" label="What is this letter for?" required />
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
-            A sentence or three, in your words: what the letter is about, what it has to settle, and for whom. It goes into the project's record as yours, today, and a brief is written from it.
+            {startFrom ? LETTER_PURPOSE_HINT_PLAIN : `${LETTER_PURPOSE_HINT_PLAIN.slice(0, -1)}, and a brief is written from it.`}
           </p>
           {asksHouse && (
             <fieldset style={{ border: 0, padding: 0, margin: 0 }} data-letter-for>
@@ -342,9 +379,11 @@ export function NewLetterModal({
               )}
             </fieldset>
           )}
-          <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-run-note>
-            {BRIEF_RUN_NOTE}
-          </p>
+          {!startFrom && (
+            <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-run-note>
+              {BRIEF_RUN_NOTE}
+            </p>
+          )}
           {error && (
             <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert">
               {error}
@@ -357,6 +396,12 @@ export function NewLetterModal({
             <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={onClose}>
               Cancel
             </button>
+            {startFrom ? (
+              <button type="submit" name="start" value="skip" className={button({ variant: "purple" })} style={{ whiteSpace: "nowrap", padding: "8px 16px" }} disabled={busy} data-letter-start>
+                {busy ? "Starting…" : LETTER_START}
+              </button>
+            ) : (
+            <>
             <button type="submit" name="start" value="skip" className={button({ variant: "secondary" })} style={{ whiteSpace: "nowrap" }} disabled={busy}>
               Go straight to the letter
             </button>
@@ -368,6 +413,8 @@ export function NewLetterModal({
             <button type="submit" name="start" value="brief" className={button({ variant: "purple" })} style={{ whiteSpace: "nowrap", padding: "8px 16px" }} disabled={busy}>
               {busy ? "Starting…" : "Write the brief first"}
             </button>
+            </>
+            )}
           </Cluster>
         </Stack>
       </form>

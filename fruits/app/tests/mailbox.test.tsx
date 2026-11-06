@@ -17,7 +17,8 @@ import { resolveRole } from "robustness-core/data/projectSharing.server";
 import { Mailbox } from "../components/stamps-candidates/Mailbox";
 import { MailList, MAILBOX_EMPTY, MAILBOX_LABEL, MAILBOX_SAYS_NEW, MAILBOX_SAYS_QUIET } from "../components/ProjectMailbox";
 import { LetterSendControl, sendAsk } from "../components/LetterSendControl";
-import { DESK_DRAFTS, DESK_LETTERS, LETTER_FOR_ASK, LETTER_FOR_LABEL, LettersView, NewLetterModal, deskGroups, type LetterTabRow } from "../components/LettersView";
+import { DESK_DRAFTS, DESK_LETTERS, LETTER_FOR_ASK, LETTER_FOR_LABEL, LETTER_START, LettersView, NewLetterModal, deskGroups, letterStartFromLine, type LetterTabRow } from "../components/LettersView";
+import { LetterReflection, ReflectionTwirl, REFLECT_HINT, REFLECT_KEEP, REFLECT_KEEP_ASK, REFLECT_KEPT_NOTE, REFLECT_KEPT_SUGGESTION, REFLECT_LABEL, REFLECT_PROMPTS, REFLECT_WRITE_BACK } from "../components/LetterReflection";
 import { HOUSE_NOT_CHOSEN } from "robustness-core/data/letterHouses";
 import { existsSync } from "node:fs";
 
@@ -240,11 +241,12 @@ describe("one letter, alone", () => {
   });
 
   it("opening it is what lowers the flag: once the link-on door or the member's door has let the reader in, never for a render, a preview, a prefetch or an admin looking as someone", () => {
-    expect(page).toContain("if (shared) return opened(shared, await resolveLetterPage(shared.file, origin), user, person);");
-    expect(page).toContain("if (sent) return opened(sent, await resolveLetterPage(sent.file, origin), user, person);");
-    expect(page).toContain("if (printing) return opened(printing, await resolveLetterPage(printing.file, origin), null, false);");
+    expect(page).toContain("if (shared) return opened(shared, await resolveLetterPage(shared.file, origin), user, person, asThemself);");
+    expect(page).toContain("if (sent) return opened(sent, await resolveLetterPage(sent.file, origin), user, person, asThemself);");
+    expect(page).toContain("if (printing) return opened(printing, await resolveLetterPage(printing.file, origin), null, false, false);");
     expect(page).toContain("const user = rendering ? null : await getUser(request);");
-    expect(page).toMatch(/const person = !!user && request\.method === "GET" && [^;]*prefetch[^;]*&& !\(await isImpersonating\(request\)\);/);
+    expect(page).toContain("const asThemself = !!user && !(await isImpersonating(request));");
+    expect(page).toMatch(/const person = asThemself && request\.method === "GET" && [^;]*prefetch[^;]*;/);
     expect(page).toContain("return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING };");
   });
 
@@ -252,6 +254,63 @@ describe("one letter, alone", () => {
     expect(page).not.toMatch(/<button|Reply<|\/reply|canReply/);
     expect(existsSync(path.join(here, "../routes/api.letter.$fileId.reply.tsx"))).toBe(false);
     for (const name of ["letterHouses.ts", "letterSend.server.ts", "letters.server.ts", "vault.types.ts"]) expect(core(name), name).not.toMatch(/answers_file_id|replyOffered|startReply/);
+  });
+
+  it("the reader's own talk-through is the one thing beside the letter: a line under the header, the box after the letter, both out of print, and only when the loader hands one over (2026-11-06)", () => {
+    expect(page).toContain("{reflection && <ReflectionTwirl open={reflecting} keptDate={keptOn} onToggle={() => setReflecting((o) => !o)} />}");
+    expect(page).toMatch(/\{reflection && fileId && \(\s*<div className=\{`\$\{hideInPrint\}[^>]*data-reflection-column>\s*<LetterReflection /);
+    // The box is outside the reading column, which is capped and has no room in it.
+    expect(page.indexOf("</WebsitePageContent>")).toBeLessThan(page.indexOf("data-reflection-column"));
+    expect(page).toContain("return { ...page, ...(await readLetter(found.file, found.project, viewer, { lowers: person, reflects: asThemself })) };");
+    expect(page).toContain("const NO_READING: LetterReading = { from: null, toHouse: null, reflection: null, writeBackIn: null };");
+    // Still no action on the page: the reflection's writes are its own route's.
+    expect(page).not.toMatch(/export (async )?function action/);
+    expect(route("api.letter.$fileId.reflection.tsx")).toContain("letterForReader(request, params.fileId)");
+    expect(route("api.dictation.start.tsx")).toMatch(/if \(body\.reflectOn\) \{\s*const got = await letterForReader\(request, body\.reflectOn\);/);
+
+    const none = { draft: null, kept: null };
+    const line = renderToStaticMarkup(<ReflectionTwirl open={false} keptDate={null} onToggle={() => {}} />);
+    expect(line).toContain("Talk it through ▸");
+    expect(line).not.toContain("Kept");
+    expect(renderToStaticMarkup(<ReflectionTwirl open={false} keptDate="2026-11-06" onToggle={() => {}} />)).toContain("Kept Nov 6, 2026");
+    // Closed, the box draws nothing; open, both prompts, the box and Keep it.
+    expect(renderToStaticMarkup(<LetterReflection fileId="l1" initial={none} writeBackIn={null} open={false} onKept={() => {}} />)).toBe("");
+    const open = renderToStaticMarkup(<LetterReflection fileId="l1" initial={{ draft: "so far", kept: null }} writeBackIn="proj" open onKept={() => {}} />);
+    for (const prompt of REFLECT_PROMPTS) expect(open).toContain(prompt.replaceAll("'", "&#x27;"));
+    expect(open).toContain("so far");
+    expect(open).toContain("data-reflection-keep");
+    expect(open).not.toContain("data-reflection-write-back");
+    // Kept: their words and, for someone who may write letters, the way to start one. Nobody else gets the link.
+    const kept = { draft: null, kept: { text: "The fan matters more than the floor.", date: "2026-11-06", suggestion: false } };
+    const mine = renderToStaticMarkup(<LetterReflection fileId="l1" initial={kept} writeBackIn="proj" open onKept={() => {}} />);
+    expect(mine).toContain("The fan matters more than the floor.");
+    expect(mine).toContain('href="/newspaper/proj?tab=letters&amp;from=l1"');
+    expect(mine).not.toContain("<textarea");
+    const clients = renderToStaticMarkup(<LetterReflection fileId="l1" initial={{ draft: null, kept: { ...kept.kept, suggestion: true } }} writeBackIn={null} open onKept={() => {}} />);
+    expect(clients).not.toContain("data-reflection-write-back");
+    expect(clients).toContain(REFLECT_KEPT_SUGGESTION);
+    for (const words of [REFLECT_LABEL, ...REFLECT_PROMPTS, REFLECT_HINT, REFLECT_KEEP, REFLECT_KEEP_ASK, REFLECT_KEPT_NOTE, REFLECT_KEPT_SUGGESTION, REFLECT_WRITE_BACK, letterStartFromLine({ letterFileId: "l1", title: "The attic floor", from: "Lucas" }), LETTER_START]) {
+      expect(words).not.toMatch(/—|\breply\b|\bhouse\b/i);
+    }
+  });
+
+  it("a letter started from a kept talk-through opens the same form: what it comes from, the same three questions with nothing picked, one button and no brief", () => {
+    const html = renderToStaticMarkup(<NewLetterModal open busy={false} error={null} asksHouse startFrom={{ letterFileId: "l1", title: "The attic floor", from: "Lucas" }} onClose={() => {}} onStart={() => {}} />);
+    expect(html).toContain("Starting from what you said about &quot;The attic floor&quot;, from Lucas.");
+    expect(html).toContain("data-letter-start");
+    expect(html).toContain("Start the letter");
+    expect(html).not.toMatch(/Write the brief first|Go straight to the letter|data-brief-run-note|a brief is written from it/);
+    expect(html).toContain("What is this letter for?");
+    expect(html).toContain("data-letter-for");
+    expect(html).not.toMatch(/checked=""/);
+    // The plain form is as it was.
+    const plain = renderToStaticMarkup(<NewLetterModal open busy={false} error={null} asksHouse onClose={() => {}} onStart={() => {}} />);
+    expect(plain).toContain("Write the brief first");
+    expect(plain).toContain("and a brief is written from it.");
+    expect(plain).not.toContain("data-letter-start-from");
+    const view = readFileSync(path.join(here, "../components/LettersView.tsx"), "utf8");
+    expect(view).toContain('if (from) form.append("from", from.letterFileId);');
+    expect(view).toContain('if (!withBrief || from) form.append("brief", "skip");');
   });
 
   it("the words around a letter are plain", () => {
@@ -266,7 +325,9 @@ describe("layout that broke on a real screen (2026-11-05)", () => {
     const src = readFileSync(path.join(here, "../components/LettersView.tsx"), "utf8");
     const footer = src.slice(src.indexOf("Cancel") - 400, src.indexOf("Write the brief first") + 200);
     expect(footer).toContain("<Cluster gap={3}");
-    expect((footer.match(/whiteSpace: "nowrap"/g) ?? []).length).toBe(2);
+    // Two side by side on a plain new letter; the third is the one button
+    // a letter started from a kept talk-through gets in their place.
+    expect((footer.match(/whiteSpace: "nowrap"/g) ?? []).length).toBe(3);
     expect(src).toContain('title="New letter" maxWidth={620}');
     // The two choices are one size: same padding, told apart by colour.
     expect(footer).toContain('className={button({ variant: "purple" })} style={{ whiteSpace: "nowrap", padding: "8px 16px" }}');

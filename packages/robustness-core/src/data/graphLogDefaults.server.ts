@@ -997,13 +997,67 @@ Code counts the outline and sends it back once if it is long; you are not given 
 
 Plain, specific, first names, no em dashes. One line, one thing they said.`;
 
+/** The outline for a letter started from what its writer said about a
+ * letter they read (`outline.server.ts`, `letterBackOutlineText`; Austin,
+ * 2026-11-06). This is `Letter reply test/REPLY-OUTLINE.md` v3 from the
+ * vault, the skill that produced the outline Austin wrote his letter to
+ * Gerald from on 2026-10-29 ("The letter was only OK but it wasn't the
+ * fault of the outline"), with two changes made with the code in view:
+ * "the project's graph" is the sender's own older words, which is all
+ * the call is given; and it speaks of a letter back, never a reply,
+ * since there is no Reply. A default only. Length lives in code
+ * (`LETTER_BACK_BUDGETS`), never in this text. */
+export const DEFAULT_OUTLINE_LETTER_BACK_SKILL = `You are the friend across the table while the writer talked it out: the kind of friend William Zinsser or Steven Pressfield would be. They read a letter, and then they said what it stirred and what is on their own mind. Now they are sitting down to write a letter of their own. The writer has already reflected; don't ask them to do it again. You heard everything they said, and you hand it back clear: what they're saying, in the order the letter can say it, each move carrying the substance they gave you in plain words. Not a framework to fill in, not questions, and not the letter. A clear picture to write from.
+
+## What you read
+
+Everything you read is given to you below this file, in this prompt.
+
+- The letter they read.
+- The writer's reflection on it: what the letter stirred, and what's on their mind that the letter didn't touch.
+- The sender's own older words on this project, each with the day it was said, where there are any. Use them where they meet the reflection. The writer's own words are already in the reflection.
+
+## How you write
+
+One tool, and nothing outside it: no planning, no preamble, no summary. \`write_outline\` takes the whole outline as one markdown document.
+
+## What you hand back
+
+\`\`\`markdown
+## What you're saying
+
+<One plain sentence.>
+
+## <A move, under a short plain heading>
+
+- <Two or three lines.>
+
+## Leave for another letter
+
+- <What the sender raised that this letter skips.>
+\`\`\`
+
+- **What you're saying.** One plain sentence: what the letter means underneath its topics, for the writer to correct.
+- **The letter, in moves.** Three or four, start to landing, each a short plain heading with two or three lines under it. The lines carry the writer's ideas from the reflection, clarified and connected, close to their words. Where the sender's older words meet an idea, put them in the line, as their words and the day they said them. The landing is last.
+- **Leave for another letter.** What the sender raised that this letter skips, so the writer can say so in a line. Leave the section out when nothing is skipped.
+
+## Rules
+
+- Plain words. Your sentences say things back clearly; they don't perform. No crafted pivots, no "X, not Y" lines, no lines written to be quoted.
+- The phrasing of the letter is the writer's. You can name what they mean; you never draft how they say it.
+- Where the two see something differently, put both views in the line, plainly. You don't say who's right.
+- No questions to the writer. They've reflected; the outline is what came of it.
+- No numbers on sections, no bold claims.
+- No citations or links. The sender's older words go in as words.
+- Length is checked by code after you write, and you are not given the numbers ahead. If it sends the outline back, cut to the counts it gives, once. The resend is accepted as written.`;
+
 export type GraphLogDefaultStage = "knowledge" | "filing" | "graph" | "graphStructure" | "projectView" | "voice" | "sow" | "brief" | "outline";
 
 /** A default that is not a stage's file: kept and edited here like the
  * others (`/maker/graphlog/defaults`), never seeded into a project's
  * `skills/` and never read from there. `projectN02.server.ts` keys its
  * file table by `GraphLogDefaultStage`, so a name here gets no file. */
-export type GraphLogDefaultOnlyStage = "outlineTalk";
+export type GraphLogDefaultOnlyStage = "outlineTalk" | "outlineLetterBack";
 export type GraphLogAnyDefaultStage = GraphLogDefaultStage | GraphLogDefaultOnlyStage;
 
 const STAGE_HARDCODED_DEFAULT: Record<GraphLogAnyDefaultStage, string> = {
@@ -1017,6 +1071,7 @@ const STAGE_HARDCODED_DEFAULT: Record<GraphLogAnyDefaultStage, string> = {
   brief: DEFAULT_BRIEF_SKILL,
   outline: DEFAULT_OUTLINE_SKILL,
   outlineTalk: DEFAULT_OUTLINE_TALK_SKILL,
+  outlineLetterBack: DEFAULT_OUTLINE_LETTER_BACK_SKILL,
 };
 
 const TABLE = "graphlog_default_skills";
@@ -1033,6 +1088,7 @@ type GraphLogDefaultSkillsRow = Data & {
   brief?: string | null;
   outline?: string | null;
   outlineTalk?: string | null;
+  outlineLetterBack?: string | null;
   updatedAt?: string;
   updatedByHumanId?: string;
 };
@@ -1107,6 +1163,7 @@ export async function getAllEffectiveGraphLogDefaultSkills(): Promise<
     brief: resolve("brief"),
     outline: resolve("outline"),
     outlineTalk: resolve("outlineTalk"),
+    outlineLetterBack: resolve("outlineLetterBack"),
   };
 }
 
@@ -1134,6 +1191,7 @@ export async function setGraphLogDefaultSkillOverride(
     brief: existing?.brief ?? null,
     outline: existing?.outline ?? null,
     outlineTalk: existing?.outlineTalk ?? null,
+    outlineLetterBack: existing?.outlineLetterBack ?? null,
     [stage]: content && content.trim().length > 0 ? content : null,
     updatedAt: new Date().toISOString(),
     updatedByHumanId,

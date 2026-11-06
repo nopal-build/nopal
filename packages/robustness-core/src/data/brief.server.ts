@@ -471,6 +471,11 @@ export type LetterBriefRow = Data & {
    * from the moment it was given. */
   talk_through_date?: string | null;
   talk_through_card_file_id?: string | null;
+  /** The letter its writer was reading when they said the talk-through:
+   * set when a letter is started from a kept reflection
+   * (`letterReflection.server.ts`). For the outline alone; the letter's
+   * own record names no other letter, and no reader is shown this. */
+  reflects_on_letter_file_id?: string | null;
   outline?: string | null;
   outline_written_at?: string | null;
   outline_by_human_id?: string | null;
@@ -656,8 +661,10 @@ export type LetterBriefForPage = {
   brief: { content: string; writtenAt: string; byName: string; incomplete: string[] } | null;
   job: LetterJobForPage | null;
   /** `sent` is the talk once given. `onRecord` is the day it went onto
-   * its speaker's Card, null while it waits for the letter to be sent. */
-  talk: { draft: string | null; sent: { text: string; at: string; onRecord: string | null; byName: string } | null };
+   * its speaker's Card, null while it waits for the letter to be sent.
+   * `about` is the letter the speaker was reading, when this letter was
+   * started from what they said about it: such a letter has no brief. */
+  talk: { draft: string | null; sent: { text: string; at: string; onRecord: string | null; byName: string; about?: { title: string; from: string | null } | null } | null };
   outline: { content: string; writtenAt: string; byName: string; incomplete: string[]; editedAt: string | null } | null;
   outlineJob: LetterJobForPage | null;
 };
@@ -685,18 +692,25 @@ export function talkOnRecord(row: Pick<LetterBriefRow, "talk_through_at" | "talk
 
 export async function getLetterBriefForPage(letterFileId: string): Promise<LetterBriefForPage> {
   const row = await getLetterBriefRow(letterFileId);
-  const ids = [row?.by_human_id, row?.talk_through_by_human_id, row?.outline_by_human_id].filter((v): v is string => !!v);
+  const read = row?.reflects_on_letter_file_id ? await getFileRefById(row.reflects_on_letter_file_id) : undefined;
+  const readFromId = read ? (read.from_human_id ?? read.sent_by_human_id ?? null) : null;
+  const about = row?.reflects_on_letter_file_id ? { title: read ? letterTitle(read) : "a letter", from: null as string | null } : null;
+  const ids = [row?.by_human_id, row?.talk_through_by_human_id, row?.outline_by_human_id, readFromId].filter((v): v is string => !!v);
   const names = new Map((await getHumansById([...new Set(ids)])).map((h) => [h._id, firstName(h)]));
   const nameOf = (id: string | null | undefined) => (id && names.get(id)) || "a guide";
+  if (about && readFromId) about.from = names.get(readFromId) ?? null;
   const brief = row?.content && row.written_at ? { content: row.content, writtenAt: row.written_at, byName: nameOf(row.by_human_id), incomplete: row.incomplete ?? [] } : null;
   const talk = {
     draft: row?.talk_draft ?? null,
     sent:
       row?.talk_through && row.talk_through_at
-        ? { text: row.talk_through, at: row.talk_through_at, onRecord: talkOnRecord(row), byName: nameOf(row.talk_through_by_human_id) }
+        ? { text: row.talk_through, at: row.talk_through_at, onRecord: talkOnRecord(row), byName: nameOf(row.talk_through_by_human_id), about }
         : null,
   };
-  const outline = row?.outline && row.outline_written_at ? { content: row.outline, writtenAt: row.outline_written_at, byName: nameOf(row.outline_by_human_id), incomplete: row.outline_incomplete ?? [], editedAt: row.outline_edited_at ?? null } : null;
+  // An outline for a letter back carries no "Not finished" line: its
+  // length is code's, sent back once, and the person never sees a warning
+  // (the `reply-pause` seed's gate). A job that fails still says so.
+  const outline = row?.outline && row.outline_written_at ? { content: row.outline, writtenAt: row.outline_written_at, byName: nameOf(row.outline_by_human_id), incomplete: about ? [] : (row.outline_incomplete ?? []), editedAt: row.outline_edited_at ?? null } : null;
   return { brief, job: await jobForPage(row?.pending_job_id), talk, outline, outlineJob: await jobForPage(row?.outline_pending_job_id) };
 }
 

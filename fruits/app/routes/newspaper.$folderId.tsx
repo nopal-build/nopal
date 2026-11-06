@@ -18,7 +18,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, redirect, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { useCallback, useMemo, useState } from "react";
-import { getUser } from "../modules/auth/auth.server";
+import { getUser, isImpersonating } from "../modules/auth/auth.server";
 import { getFolderById, getReadmeFileForFolder, canViewFolderOrgAware } from "robustness-core/data/vault.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
 import { listMarksOnPage, pageMarkUnits, readableMark } from "robustness-core/data/graphLogMarks.server";
@@ -74,6 +74,7 @@ import { ShareLinkControl } from "../components/ShareLinkControl";
 import { canManageLetters, listLetters, mailboxLines } from "robustness-core/data/letters.server";
 import { flaggedLetterIds } from "robustness-core/data/letterFlags.server";
 import { houseOf } from "robustness-core/data/letterHouses";
+import { reflectionToStartFrom } from "robustness-core/data/letterReflection.server";
 import { letterPdfState } from "robustness-core/data/letterPdf.server";
 import { ProjectView } from "../components/ProjectView";
 import type { CitedLogsForPen, MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
@@ -139,6 +140,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // everyone with the tab; upload, replace and the share switch for a
   // Guide on the project or staff. The server refuses the rest anyway.
   const manageLetters = tab === "letters" && canManageLetters(user, role);
+  // "Write a letter from this", from a letter's page (`?from=`, that
+  // letter's id): the New letter form opens, told which letter the
+  // viewer kept a talk-through of. Only for someone who may write
+  // letters here, as themself, whose kept words are about a letter in
+  // this project they may still open (`reflectionToStartFrom`). The
+  // route that creates the letter asks all of it again.
+  const fromLetterId = manageLetters ? new URL(request.url).searchParams.get("from") : null;
+  const startFrom = fromLetterId && !(await isImpersonating(request)) ? await reflectionToStartFrom(folder, fromLetterId, user._id) : null;
+  const letterStartFrom = startFrom && fromLetterId ? { letterFileId: fromLetterId, title: startFrom.title, from: startFrom.from } : null;
   // A manager also sees each shared file's PDF state (ready, preparing,
   // failed with the worker's reason): the outcome of a worker job shows
   // on the page that asked for it, not in a log (`letterPdf.server.ts`).
@@ -323,6 +333,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     manageLetters,
     // A new letter asks who it is for when there are clients to send to.
     lettersAskHouse: sharing.some((e) => houseOf(e.role) === "clients"),
+    letterStartFrom,
     mail,
     sensorData,
     boxHardwareData,
@@ -511,7 +522,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, lettersAskHouse, mail, sensorData, boxHardwareData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, lettersAskHouse, letterStartFrom, mail, sensorData, boxHardwareData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders, loadCellGraphs } = project;
@@ -767,7 +778,7 @@ export default function NewspaperRoute() {
             />
           )}
           {letters && (
-            <LettersView projectFolderId={folder._id} rows={letters} manage={manageLetters} openInVault={openInVault} asksHouse={lettersAskHouse} onChanged={() => revalidator.revalidate()} />
+            <LettersView projectFolderId={folder._id} rows={letters} manage={manageLetters} openInVault={openInVault} asksHouse={lettersAskHouse} startFrom={letterStartFrom} onChanged={() => revalidator.revalidate()} />
           )}
           {tab === "sensorData" && sensorData && (
             <SensorDataView projectFolderId={folder._id} data={sensorData} />

@@ -1,12 +1,13 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import { getUserFromRequest, isImpersonating } from "../modules/auth/auth.server";
 import { createFileRef, getFileRefsByFolderIds, getFolderById, updateFileRef } from "robustness-core/data/vault.server";
 import { uploadFileToS3 } from "robustness-core/data/file.server";
 import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { getProjectRole, isProjectFolder } from "robustness-core/data/projectSharing.server";
 import { createMark, markDate } from "robustness-core/data/graphLogMarks.server";
-import { requestBrief } from "robustness-core/data/brief.server";
+import { requestBrief, writeLetterBriefRow } from "robustness-core/data/brief.server";
+import { reflectionToStartFrom } from "robustness-core/data/letterReflection.server";
 import {
   canManageLetters,
   letterFileName,
@@ -60,6 +61,9 @@ const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
  * the link. Nothing is shared by this route: the link is a separate
  * switch.
  */
+// Words a person reads (Nopal's voice; listed in the round's return leg).
+const LETTER_FROM_GONE = "What you said about that letter isn't there to start from.";
+
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
   if (!user) return Response.json({ error: "Not authenticated" }, { status: 401 });
@@ -101,6 +105,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
     // delivers it there.
     const address = houseAtStart({ projectHasClients: (await houseMembers(project)).some((m) => m.house === "clients"), asked: form.get("to") });
     if (!address.ok) return Response.json({ error: address.error }, { status: address.status });
+    // Started from what this guide said about a letter they read (`from`,
+    // that letter's id; Austin, 2026-11-06: "spending the time to sit
+    // down and write a letter back, based on those thoughts"). Still a
+    // new letter with its own title, purpose and address. Asked again
+    // here, whatever the page offered: theirs, kept, a letter they may
+    // still open, in this project; and never for an admin looking as
+    // them, since it carries their words into a letter.
+    const fromLetterId = typeof form.get("from") === "string" ? String(form.get("from")) : "";
+    const startFrom = fromLetterId && !(await isImpersonating(request)) ? await reflectionToStartFrom(project, fromLetterId, user._id) : null;
+    if (fromLetterId && !startFrom) return Response.json({ error: LETTER_FROM_GONE }, { status: 400 });
     const folder = await ensureLettersFolder(project);
     const content = newLetterContent(name);
     const fileRef = await createFileRef({
@@ -116,6 +130,24 @@ export async function action({ request, params }: ActionFunctionArgs) {
     // `merge`: the address is not one of the fields a save may set.
     await merge("file_refs", fileRef._id, { to_house: address.toHouse });
     await recordPurpose(fileRef);
+    if (startFrom) {
+      // Their reflection is this letter's talk-through, and it is already
+      // on the record (its Card and day come with it, so Send lands
+      // nothing twice). Which letter was read is kept on the letter's
+      // workings, for the outline; the letter's own record names no other
+      // letter. No brief: the letter they read stands where it would.
+      await writeLetterBriefRow(fileRef._id, {
+        letter_file_id: fileRef._id,
+        project_folder_id: project._id,
+        talk_through: startFrom.row.text,
+        talk_through_at: startFrom.row.kept_at ?? new Date().toISOString(),
+        talk_through_by_human_id: user._id,
+        talk_through_date: startFrom.row.kept_date ?? null,
+        talk_through_card_file_id: startFrom.row.card_file_id ?? null,
+        reflects_on_letter_file_id: fromLetterId,
+      });
+      return Response.json({ fileId: fileRef._id, pictures: 0, unmatched: [], briefJobId: null }, { status: 201 });
+    }
     // The brief starts as the letter opens. A queue that refuses leaves a
     // letter with no brief and the page's own button; never a lost letter.
     let briefJobId: string | null = null;

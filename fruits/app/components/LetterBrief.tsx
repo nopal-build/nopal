@@ -12,6 +12,11 @@
 // the talk alone. Either way the talk goes on the project's record when
 // the letter is sent, not when it is given.
 //
+// A letter started from what its writer said about a letter they read
+// (Austin, 2026-11-06; `LetterReflection`) arrives with that as its
+// talk-through, already on the record. It has no brief: the letter they
+// read stands where the brief would, and the outline is given it.
+//
 // Who decides what. A person: starting the letter, the talk, "Write the
 // outline", editing the outline, "Write it again", sending, and what to
 // make of any of it. Code: the jobs and their state, the Card write at
@@ -46,6 +51,14 @@ export const TALK_WAITS = "They go on the project's record when the letter is se
 export const TALK_PROMPT_WITH_BRIEF = "What makes sense, what doesn't, how the pieces fit.";
 export const TALK_PROMPT = "What you want this letter to say, and why it matters.";
 export const OUTLINE_AGAIN_ASK = "Write the outline again from the same talk-through? It replaces this one, and each outline costs a model run.";
+/** The first outline for a talk already given: nothing to replace, and
+ * nothing about the record, which a kept reflection is already on. */
+export const OUTLINE_FIRST_ASK = "Write the outline from what was said? Each outline costs a model run.";
+/** Under a talk-through that began as its writer's words about a letter
+ * they read. */
+export function talkAboutLine(about: { title: string; from: string | null }): string {
+  return about.from ? `Said while reading "${about.title}", from ${about.from}.` : `Said while reading "${about.title}".`;
+}
 
 /** A letter not yet written: front matter and its own title heading, and
  * nothing else. The brief opens by itself then. */
@@ -162,6 +175,8 @@ export function LetterBrief({
     };
   }, []);
 
+  // Started from a reflection: no brief on this letter.
+  const about = state.talk.sent?.about ?? null;
   const briefRunning = isRunning(state.job);
   const outlineRunning = isRunning(state.outlineJob);
   const running = briefRunning || outlineRunning;
@@ -261,8 +276,10 @@ export function LetterBrief({
   );
 
   return (
-    <section className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 })} aria-label="The brief, the talk-through and the outline" data-letter-brief data-brief-state={briefState} data-outline-state={outlineState}>
+    <section className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 })} aria-label="The brief, the talk-through and the outline" data-letter-brief data-brief-state={briefState} data-outline-state={outlineState} data-from-reflection={about ? "true" : undefined}>
       {/* ── The brief ── */}
+      {!about && (
+      <>
       <Cluster gap={3} align="center" ref={briefHeading}>
         <button type="button" className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} onClick={() => setBriefOpen((o) => !o)} aria-expanded={briefOpen} style={twirlStyle}>
           The brief {briefOpen ? "▾" : "▸"}
@@ -284,14 +301,16 @@ export function LetterBrief({
           The brief didn't get written: {briefFailed}
         </p>
       )}
-      {message && (
-        <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert">
-          {message}
-        </p>
-      )}
       {!briefRunning && !state.brief && !briefFailed && (
         <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textSubtle }}>
           {hasPurpose ? "This letter has no brief yet." : "This letter has no brief yet. Say what it is for first."}
+        </p>
+      )}
+      </>
+      )}
+      {message && (
+        <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert">
+          {message}
         </p>
       )}
       {/* The brief and the talk-through side by side while both are up
@@ -386,6 +405,11 @@ export function LetterBrief({
               · {state.talk.sent.onRecord ? `on the record ${longDate(`${state.talk.sent.onRecord}T12:00:00`)}, ${state.talk.sent.byName}'s words` : `${state.talk.sent.byName}'s words. ${TALK_WAITS}`}
             </span>
           </span>
+          {about && (
+            <span className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-talk-about>
+              {talkAboutLine(about)}
+            </span>
+          )}
           <p className={textSize.sm} style={{ margin: 0, whiteSpace: "pre-wrap" }}>
             {state.talk.sent.text}
           </p>
@@ -431,7 +455,7 @@ export function LetterBrief({
                 className={button({ variant: "secondary", size: "compact" })}
                 disabled={busy || running}
                 onClick={() => {
-                  if (!window.confirm(OUTLINE_AGAIN_ASK)) return;
+                  if (!window.confirm(state.outline ? OUTLINE_AGAIN_ASK : OUTLINE_FIRST_ASK)) return;
                   void post("outline").then((ok) => ok && setOutlineOpen(true));
                 }}
                 data-outline-again

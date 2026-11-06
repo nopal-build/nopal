@@ -32,7 +32,7 @@ import { WebsitePageContent } from "stamps/WebsitePageContent";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { LettersView, NewLetterModal, pdfLine } from "../components/LettersView";
-import { LetterBrief, OUTLINE_ASK, TALK_HINT, TALK_PROMPT, TALK_PROMPT_WITH_BRIEF, TALK_WAITS, isLetterOnlyItsHeading, splitBriefHalves } from "../components/LetterBrief";
+import { LetterBrief, OUTLINE_ASK, OUTLINE_FIRST_ASK, talkAboutLine, TALK_HINT, TALK_PROMPT, TALK_PROMPT_WITH_BRIEF, TALK_WAITS, isLetterOnlyItsHeading, splitBriefHalves } from "../components/LetterBrief";
 import { MailList } from "../components/ProjectMailbox";
 import { LetterSendControl, SEND_AGAIN_ASK, SEND_ASK, sendStateAfterSaves } from "../components/LetterSendControl";
 import { preparingPage } from "robustness-core/data/letterPdf.server";
@@ -542,6 +542,26 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     expect(done).toContain("data-outline-again");
     expect(done).toContain("This letter has no brief yet.");
     for (const words of [OUTLINE_ASK, TALK_HINT, TALK_WAITS, TALK_PROMPT]) expect(words).not.toMatch(/—|\btoday\b/);
+  });
+
+  it("a letter started from what its writer said about a letter they read: no brief block, the talk as given with what it was about, the outline's own first question, and never a warning (2026-11-06)", () => {
+    const sent = { text: "The fan matters more than the floor.", at: "2026-11-06T11:00:00Z", onRecord: "2026-11-06", byName: "Austin", about: { title: "The attic floor", from: "Lucas" } };
+    const html = renderToStaticMarkup(<LetterBrief fileId="l1" initial={{ brief: null, job: null, talk: { draft: null, sent }, outline: null, outlineJob: null }} hasPurpose openByDefault />);
+    expect(html).toContain('data-from-reflection="true"');
+    expect(html).not.toMatch(/The brief [▾▸]|Write the brief|no brief yet|data-brief-button/);
+    expect(html).toContain("The fan matters more than the floor.");
+    expect(html).toContain("Said while reading &quot;The attic floor&quot;, from Lucas.");
+    expect(html).toContain("on the record Nov 6, 2026");
+    expect(html).not.toContain("<textarea");
+    expect(html).toContain("data-outline-again");
+    expect(html).toContain("Write the outline");
+    expect(talkAboutLine({ title: "Old news", from: null })).toBe('Said while reading "Old news".');
+    // The first run asks its own question: nothing to replace, and nothing about Send.
+    expect(OUTLINE_FIRST_ASK).not.toMatch(/again|replaces|send/i);
+    expect(readFileSync(path.join(here, "../components/LetterBrief.tsx"), "utf8")).toContain("if (!window.confirm(state.outline ? OUTLINE_AGAIN_ASK : OUTLINE_FIRST_ASK)) return;");
+    // The page is handed no "Not finished" line for this outline.
+    const core = readFileSync(path.join(here, "../../../packages/robustness-core/src/data/brief.server.ts"), "utf8");
+    expect(core).toContain("incomplete: about ? [] : (row.outline_incomplete ?? [])");
   });
 
   it("without a purpose line the button is disabled and says why", () => {

@@ -67,7 +67,16 @@ ${PEOPLE.map((p) => `    ${`${p.role}:`.padEnd(20)} ${p.email}`).join("\n")}
     3. As a guide, write another, this time for the team, and send it. The other guide and the crafter get the flag.
        As a client, that letter is not in the mailbox, and its link is not found.
     4. As the other guide, read it. There is no Reply on it: writing back is a new letter from the desk.
-    5. As the crafter, the desk lists every letter in both directions and offers no way to write one.`);
+    5. As the crafter, the desk lists every letter in both directions and offers no way to write one.
+    6. As a guide, New letter and go straight to the letter: the talk box is above the editor with no brief.
+       Say something, Write the outline. What you said goes on the record when you Send, not before.
+    7. As a client, open a letter from the mailbox. Under its header: Talk it through. Open it; it sits beside
+       the letter. Say something and leave: it is a draft only you see. Keep it: now it is on the record as yours.
+       The other client's page shows none of it.
+    8. As the other guide, talk the team's letter through and keep it. Write a letter from this: the New letter
+       form, saying what it comes from. Title, what it is for, who it is for. No brief.
+    9. On that letter's page: what you said, what you were reading, and Write the outline. The outline has read
+       the letter you were reading. Send: nothing is added to your Card a second time.`);
   process.exit(0);
 }
 

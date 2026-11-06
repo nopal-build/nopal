@@ -408,7 +408,7 @@ describe("what a reader is told around the letter", () => {
 
   it("everyone is told who it is from; only someone it is shown to is told where it went", async () => {
     const letter = sentTo("g2c", toClients);
-    expect(await readLetter(letter, folders.proj as never, null, { lowers: false })).toEqual({ from: "Lucas", toHouse: null });
+    expect(await readLetter(letter, folders.proj as never, null, { lowers: false })).toEqual({ from: "Lucas", toHouse: null, reflection: null, writeBackIn: null });
     expect(await readLetter(letter, folders.proj as never, { _id: "stranger" }, { lowers: true })).toMatchObject({ from: "Lucas", toHouse: null });
     expect(await readLetter(letter, folders.proj as never, { _id: "clientA" }, { lowers: false })).toMatchObject({ from: "Lucas", toHouse: "clients" });
   });
@@ -422,13 +422,15 @@ describe("what a reader is told around the letter", () => {
     expect(await flagsOf("clientB")).toEqual(["l1"]);
   });
 
-  it("says nothing of other letters and offers no reply: who it is from, where it went, and that is all", async () => {
+  it("says nothing of other letters and offers no reply: who it is from, where it went, and the reader's own talk-through of it (`letterReflection.test.ts`), none here", async () => {
     const letter = sentTo("g2g", toGuides);
-    expect(Object.keys(await readLetter(letter, folders.proj as never, { _id: "guideB" }, { lowers: false })).sort()).toEqual(["from", "toHouse"]);
+    const reading = await readLetter(letter, folders.proj as never, { _id: "guideB" }, { lowers: false });
+    expect(Object.keys(reading).sort()).toEqual(["from", "reflection", "toHouse", "writeBackIn"]);
+    expect(reading).toMatchObject({ reflection: null, writeBackIn: null });
   });
 
   it("a letter with no house says nothing around it, as before", async () => {
-    expect(await readLetter(sentTo("old", {}), folders.proj as never, { _id: "clientA" }, { lowers: true })).toEqual({ from: null, toHouse: null });
+    expect(await readLetter(sentTo("old", {}), folders.proj as never, { _id: "clientA" }, { lowers: true })).toEqual({ from: null, toHouse: null, reflection: null, writeBackIn: null });
   });
 });
 

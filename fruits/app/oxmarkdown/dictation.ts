@@ -15,8 +15,10 @@ import { withScreenAwake } from "../util/wakeLock";
 
 /** What a recording is for, which decides its terms and who may start
  * it: a daily log Card (its `::card{file}` name), a letter's brief
- * (`letterFile`, its file id), or the day's own prose when neither is set. */
-export type DictationTarget = { cardFile?: string; letterFile?: string };
+ * (`letterFile`, its file id), a reader's talk-through of a letter
+ * (`reflectOn`, that letter's file id), or the day's own prose when none
+ * is set. */
+export type DictationTarget = { cardFile?: string; letterFile?: string; reflectOn?: string };
 
 export type DictationHandlers = {
   /** Settled words, fillers already removed. Append; never changes. */
@@ -82,7 +84,7 @@ export async function startDictation(
   const res = await fetch("/api/dictation/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ date, cardFile: target.cardFile, letterFile: target.letterFile }),
+    body: JSON.stringify({ date, cardFile: target.cardFile, letterFile: target.letterFile, reflectOn: target.reflectOn }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.ticket) throw new Error(body?.error ?? "Couldn't start dictating.");

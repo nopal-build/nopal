@@ -14,6 +14,15 @@
  * and its input has no field a node or a brief could ride in on.
  * `OUTLINE-TALK` is its skill, a default only.
  *
+ * A letter started from what its writer said about a letter they read
+ * (Austin, 2026-11-06; `letterReflection.server.ts`) has a third call,
+ * `letterBackOutlineText`: their reflection, the letter they read, and
+ * the sender's own older words from the project's record, and nothing
+ * else. Its shape and budgets are the `reply-pause` seed's, hand-tested
+ * over ten rounds (2026-10-29): one sentence, three or four moves, what
+ * is left for another letter. `OUTLINE-LETTER-BACK` is its skill, a
+ * default only.
+ *
  * Who decides what. A person: the talk (typed on the letter's page), the
  * click, editing the outline, judging it, and sending the letter, which
  * is what puts the talk on the record (Austin, 2026-11-05: "you could
@@ -50,7 +59,9 @@ import { countCitations, loadGraphNodes } from "./graphProjectView.server";
 import { formatNodeVerbatim, type GraphLogNode } from "./graphNodeIndex.server";
 import { firstName } from "./humanNames";
 import { getHumansById } from "./humans.server";
-import { letterHome, letterTitle } from "./letters.server";
+import { houseOf } from "./letterHouses";
+import { letterSenderId } from "./letterReflection.server";
+import { letterHome, letterTitle, resolveSentLetterForMember, sentCopyOf } from "./letters.server";
 import type { LlmProvider, ToolDefinition } from "./llmProvider";
 import { splitFrontmatter, splitReadmeSections } from "./project.types";
 import { composeStageSkill, findProjectGraphFolder, getProjectStageSkill, isSkipInstruction, listExtraSkillFiles } from "./projectN02.server";
@@ -375,6 +386,181 @@ export async function outlineFromTalkText(input: TalkOutlineTextInput): Promise<
   };
 }
 
+// ─── A letter back: the reflection, the letter read, the sender's older words ──
+
+/** The two fixed headings, and the budgets code holds (the `reply-pause`
+ * seed's, first guesses from one letter: Austin re-reads them when an
+ * outline feels long or thin). Everything between the two headings is a
+ * move. The leave list is not counted. */
+export const LETTER_BACK_SAYING = { key: "what you're saying", heading: "What you're saying" } as const;
+export const LETTER_BACK_LEAVE = { key: "leave for another letter", heading: "Leave for another letter" } as const;
+export const LETTER_BACK_BUDGETS = { saying: 30, move: 75, moveLines: 3, movesMin: 3, movesMax: 4 } as const;
+
+/** A section's lines: its bullets when it is a list, its non-empty lines
+ * when it is prose. */
+function sectionLines(markdown: string): string[] {
+  const bullets = sectionBullets(markdown);
+  return bullets.length > 0 ? bullets : markdown.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+/**
+ * Everything code has to say about one write of an outline for a letter
+ * back. All of it is hard, and all of it goes back once with the counts:
+ * the sentence missing, not first, or over its words; fewer than three
+ * moves or more than four; a move over its words or its lines; the leave
+ * list anywhere but last; a numbered heading; a `:ref{...}` citation (the
+ * sender's older words go in a line as their words, never as a link into
+ * the record). The resend is kept as written and the person is shown no
+ * warning.
+ */
+export function letterBackOutlineWriteNotes(markdown: string): WriteNotes & { words: number } {
+  const hard: string[] = [];
+  const B = LETTER_BACK_BUDGETS;
+  const sections = parseOutlineDocument(markdown, []).topics;
+  const saying = sections.findIndex((s) => s.key === LETTER_BACK_SAYING.key);
+  const leave = sections.findIndex((s) => s.key === LETTER_BACK_LEAVE.key);
+  if (saying === -1) hard.push(`"${LETTER_BACK_SAYING.heading}" is not written: one plain sentence, first`);
+  else {
+    if (saying !== 0) hard.push(`"${LETTER_BACK_SAYING.heading}" is not the first section`);
+    const words = countPageWords(sections[saying].markdown);
+    if (words > B.saying) hard.push(`"${LETTER_BACK_SAYING.heading}" is ${words} words against a budget of ${B.saying}`);
+  }
+  if (leave !== -1 && leave !== sections.length - 1) hard.push(`"${LETTER_BACK_LEAVE.heading}" is not the last section`);
+  const moves = sections.filter((_, i) => i !== saying && i !== leave);
+  if (moves.length < B.movesMin || moves.length > B.movesMax) hard.push(`${moves.length} move(s); the letter goes in ${B.movesMin} or ${B.movesMax}`);
+  for (const move of moves) {
+    const words = countPageWords(move.markdown);
+    if (words > B.move) hard.push(`"${move.heading}" is ${words} words against a budget of ${B.move}`);
+    const lines = sectionLines(move.markdown).length;
+    if (lines > B.moveLines) hard.push(`"${move.heading}" has ${lines} lines; a move has at most ${B.moveLines}`);
+  }
+  for (const section of sections) {
+    if (/^\d/.test(section.heading)) hard.push(`"${section.heading}" is numbered; headings carry no numbers`);
+  }
+  if (/:ref\{/.test(markdown)) hard.push("a citation: put the sender's older words in the line as their words, with no citation");
+  return { hard, soft: [], words: countPageWords(markdown) };
+}
+
+export const LETTER_BACK_OUTLINE_TOOL: ToolDefinition = {
+  name: "write_outline",
+  description:
+    "The whole outline, once: What you're saying, the three or four moves, then Leave for another letter. Code counts it and may send it back once with the counts; send it again whole, and the resend is accepted as written.",
+  inputSchema: {
+    type: "object",
+    properties: { markdown: { type: "string", description: "The outline as a markdown document." } },
+    required: ["markdown"],
+  },
+};
+
+/** What the call is given. The letter read is one the writer was shown;
+ * the sender's words are the sender's own, from the project's record.
+ * No brief, no other node, no people, no purpose: nowhere to put them. */
+export type LetterBackOutlineTextInput = {
+  letterTitle: string;
+  today: string;
+  writerName: string;
+  reflection: string;
+  letterRead: { title: string; fromName: string | null; text: string };
+  senderWords: readonly { date: string; quote: string }[];
+  skill: string;
+  provider?: LlmProvider;
+  log?: (line: string) => void;
+  checkCancelled?: () => Promise<void>;
+};
+
+export function buildLetterBackOutlineSystemPrompt(skill: string, input: Pick<LetterBackOutlineTextInput, "letterTitle" | "today" | "writerName" | "reflection" | "letterRead" | "senderWords">): string {
+  const sender = input.letterRead.fromName ?? "the sender";
+  return [
+    "You are GraphLog's outline step, turning what someone said after reading a letter into the outline they write their own letter from, per the instructions below. You work only through the tool: write_outline, the whole outline in one call. You are given the letter they read, what they said, and the sender's own older words where there are any. Write nothing outside the tool call.",
+    "",
+    skill,
+    "",
+    "---",
+    "",
+    `Today's actual date: ${input.today}`,
+    "",
+    `The letter being written: "${input.letterTitle}".`,
+    `The person writing it, whose reflection this is: ${input.writerName}.`,
+    "",
+    `The letter they read, "${input.letterRead.title}", from ${sender}:`,
+    "",
+    input.letterRead.text.trim(),
+    "",
+    "---",
+    "",
+    `${input.writerName}'s reflection on it, their words, unedited:`,
+    "",
+    input.reflection.trim(),
+    "",
+    "---",
+    "",
+    `${sender}'s own older words on this project, each with the day it was said:`,
+    "",
+    input.senderWords.length > 0 ? input.senderWords.map((w) => `${w.date}: ${w.quote.trim()}`).join("\n\n") : "(None on the record.)",
+  ].join("\n");
+}
+
+/** The model's half for a letter back. No database. */
+export async function letterBackOutlineText(input: LetterBackOutlineTextInput): Promise<OutlineTextResult> {
+  const provider = input.provider ?? AnthropicProvider.forStage("brief");
+  const result = await writeWholeDocument({
+    provider,
+    system: buildLetterBackOutlineSystemPrompt(input.skill, input),
+    firstMessage: `Write the outline for the letter "${input.letterTitle}" from ${input.writerName}'s reflection, whole, in one write_outline call.`,
+    tool: LETTER_BACK_OUTLINE_TOOL,
+    what: "outline",
+    maxTokens: BRIEF_MAX_OUTPUT_TOKENS,
+    log: input.log,
+    checkCancelled: input.checkCancelled,
+    notes: (markdown) => {
+      const { hard, soft } = letterBackOutlineWriteNotes(markdown);
+      return { hard, soft };
+    },
+  });
+  const parsed = result.markdown ? parseOutlineDocument(result.markdown, []) : { topics: [], tail: new Map<string, OutlineSection>(), order: [] };
+  const content = assembleOutline(parsed);
+  return {
+    content,
+    topics: parsed.topics.map((t) => t.heading),
+    bounced: result.bouncedWith,
+    unmatched: [],
+    words: countPageWords(content),
+    incomplete: result.incomplete,
+    usage: result.usage,
+    model: result.model,
+    turns: result.turns,
+  };
+}
+
+/**
+ * What a letter-back outline may be given, or null when the letter read
+ * can no longer stand behind it: the reflection's speaker can't open it
+ * any more (archived, their house changed, off the project), or it has
+ * left this project. Asked again at every run, whoever clicked. The
+ * sender's older words are the nodes logged under the sender's account,
+ * and are read only for a speaker in the guides' house: nobody in the
+ * clients' house is handed anything from the graph.
+ */
+async function letterBackInputs(projectFolder: VaultFolder, readLetterId: string, speakerId: string, log: (line: string) => void): Promise<Pick<LetterBackOutlineTextInput, "letterRead" | "senderWords"> | null> {
+  const read = await resolveSentLetterForMember(readLetterId, speakerId);
+  if (!read || read.project._id !== projectFolder._id) return null;
+  const senderId = letterSenderId(read.file);
+  const sender = senderId ? (await getHumansById([senderId]))[0] : undefined;
+  const letterRead = { title: letterTitle(read.file), fromName: sender ? firstName(sender) : null, text: splitFrontmatter(sentCopyOf(read.file)?.content ?? "").body };
+  const speakerRole = await getProjectRole(projectFolder, speakerId);
+  if (!senderId || houseOf(speakerRole?.role) !== "guides") return { letterRead, senderWords: [] };
+  const graphFolder = await findProjectGraphFolder(projectFolder);
+  if (!graphFolder) return { letterRead, senderWords: [] };
+  const { files } = await listFolderChildren(projectFolder.human_id, graphFolder._id);
+  const { allNodes, issues } = await loadGraphNodes(files);
+  for (const issue of issues) log(`outline: ${issue}.`);
+  const senderWords = allNodes
+    .filter((n) => n.authorHumanId === senderId)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.number - b.number)
+    .map((n) => ({ date: n.date, quote: n.quote }));
+  return { letterRead, senderWords };
+}
+
 // ─── The stage ──────────────────────────────────────────────────────────
 
 export type OutlineRunResult = { ok: true; topics: string[]; bounced: string[]; unmatched: string[]; words: number; incomplete: string[] } | { ok: false; error: string };
@@ -431,7 +617,17 @@ export async function runOutline(projectFolder: VaultFolder, letterFileId: strin
   const checkCancelled = () => throwIfGraphLogCancelled(projectFolder._id);
 
   let write: () => Promise<OutlineTextResult>;
-  if (!row.content) {
+  // A letter started from what its writer said about a letter they read,
+  // with no brief: that letter and its sender's older words go in beside
+  // the reflection. When the letter read can't stand behind it any more,
+  // the outline is made from the talk alone, like any letter with no brief.
+  const back = !row.content && row.reflects_on_letter_file_id ? await letterBackInputs(projectFolder, row.reflects_on_letter_file_id, row.talk_through_by_human_id ?? actingHumanId, log) : null;
+  if (back) {
+    const skill = await getEffectiveGraphLogDefaultSkill("outlineLetterBack");
+    const writerName = writer ? firstName(writer) : "the writer";
+    log(`outline: writing the outline for "${title}" from ${writerName}'s reflection on "${back.letterRead.title}" and ${back.senderWords.length} of the sender's older node(s).`);
+    write = () => letterBackOutlineText({ letterTitle: title, today, writerName, reflection: talk, ...back, skill, provider: opts.provider, log, checkCancelled });
+  } else if (!row.content) {
     // No brief: the talk and nothing else. The default skill alone, so
     // nothing a project keeps in `skills/` rides along either.
     const skill = await getEffectiveGraphLogDefaultSkill("outlineTalk");
@@ -514,6 +710,10 @@ export async function sendTalkThrough(
   const text = input.text.trim();
   if (!text) return { ok: false, status: 400, error: "Say something first." };
   const row = await getLetterBriefRow(letter._id);
+  // One talk per letter, held here and not only by the page hiding the
+  // box: a second would clear the Card the first is on, and Send would
+  // write those words to the record again.
+  if (row?.talk_through?.trim()) return { ok: false, status: 409, error: "This letter has been talked through already." };
   if (await jobIsRunning(row?.outline_pending_job_id)) return { ok: false, status: 409, error: "The outline is being written. Give it a few minutes." };
   if (!actor.features.includes("dailyLog")) return { ok: false, status: 403, error: "You're not on this project's log, so your talk-through can't go on its record." };
   const jobId = await enqueueGraphLogJob("brief", { actingHumanId: actor.humanId, projectFolderId: projectFolder._id, fileId: letter._id, kind: "outline" });

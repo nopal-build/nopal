@@ -67,7 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 }
 
-const VALID_STAGES = new Set<GraphLogAnyDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice", "sow", "brief", "outline", "outlineTalk"]);
+const VALID_STAGES = new Set<GraphLogAnyDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice", "sow", "brief", "outline", "outlineTalk", "outlineLetterBack"]);
 
 /**
  * Saves or resets one stage's default-skill override -- see
@@ -192,6 +192,11 @@ const STAGE_META: Record<GraphLogAnyDefaultStage, { title: string; file: string;
     title: "Outline, no brief",
     file: "no file: this default is used as it is",
     blurb: "The outline for a letter that has no brief, made from the writer's talk-through and nothing else: no brief, no node, nothing a project keeps in skills/. The writer may be a guide or a client. Never seeded into a project: every project reads this one. Read by the brief stage's outline call when the letter has no brief. Length is counted by code, never stated here.",
+  },
+  outlineLetterBack: {
+    title: "Outline, a letter back",
+    file: "no file: this default is used as it is",
+    blurb: "The outline for a letter started from what its writer said about a letter they read: that letter, their reflection, and the sender's own older words on the project, and nothing else. One plain sentence, three or four moves, what is left for another letter. From the hand test of 2026-10-29 (REPLY-OUTLINE v3). Never seeded into a project: every project reads this one. The words and lines per part are counted by code and sent back once, never stated here.",
   },
 };
 
@@ -395,6 +400,11 @@ export default function FruitsMakerGraphLogDefaults() {
             stage="outlineTalk"
             initialContent={defaultSkills.outlineTalk.content}
             overridden={defaultSkills.outlineTalk.overridden}
+          />
+          <DefaultSkillEditor
+            stage="outlineLetterBack"
+            initialContent={defaultSkills.outlineLetterBack.content}
+            overridden={defaultSkills.outlineLetterBack.overridden}
           />
         </div>
       </div>
