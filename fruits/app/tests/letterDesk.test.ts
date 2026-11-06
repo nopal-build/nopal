@@ -27,6 +27,7 @@ const lists: Record<string, { human: string; role: string }[]> = {
     { human: "crafter", role: "Crafter" },
     { human: "observer", role: "Observer" },
     { human: "clientA", role: "Client" },
+    { human: "clientB", role: "Client" },
     { human: "staffCrafter", role: "Crafter" },
   ],
   other: [{ human: "guideA", role: "Guide" }],
@@ -112,27 +113,43 @@ beforeEach(() => {
 });
 
 describe("who the writing page opens for", () => {
-  it("a Guide on the project; not a Crafter, an Observer or a Client", async () => {
+  it("a Guide on the project, for the guides' letters; not a Crafter, an Observer, a Client or a stranger", async () => {
     draft("l1");
-    for (const guide of ["guideA", "guideB"]) expect((await letterWriter(project, "l1", person(guide)))?._id, guide).toBe("l1");
+    for (const guide of ["guideA", "guideB"]) expect((await letterWriter(project, "l1", person(guide)))?.file._id, guide).toBe("l1");
     for (const other of ["crafter", "observer", "clientA", "stranger"]) expect(await letterWriter(project, "l1", person(other)), other).toBeNull();
+    expect((await letterWriter(project, "l1", person("guideA")))?.writer).toBe("guide");
   });
 
-  it("only someone the save route would also take: staff who are not on the project, or on it as a Crafter, get nothing, and a Client who owns the file is still a Client", async () => {
+  it("staff who are not on the project, or on it as a Crafter, get nothing: writing means a role on the project (Austin, 2026-11-06)", async () => {
     draft("l1");
     expect(await letterWriter(project, "l1", person("staffOutside", "Admin"))).toBeNull();
     expect(await letterWriter(project, "l1", person("staffCrafter", "Admin"))).toBeNull();
-    draft("mine", { human_id: "clientA" });
-    expect(await letterWriter(project, "mine", person("clientA"))).toBeNull();
-    // The function asks the same thing the save route asks, in the same words.
-    expect(app("routes/api.vault.$fileId.tsx")).toContain("isOwner || (await canActAsProjectOwner(user._id, file.human_id, file.folder_id))");
-    expect(core("letterDesk.server.ts")).toContain("mine.file.human_id === user._id || (await canActAsProjectOwner(user._id, mine.file.human_id, mine.file.folder_id))");
+    // The page, its save and every write route ask one rule, not the Vault's.
+    expect(core("letterDesk.server.ts")).toContain("resolveLetterForWriter(fileId, user)");
+    expect(core("letterDesk.server.ts")).not.toContain("canActAsProjectOwner");
+    expect(app("routes/api.letter.$fileId.tsx")).toContain("letterForWriter(request, params.fileId)");
+    expect(app("components/LetterDesk.tsx")).toContain("fetch(`/api/letter/${fileId}`");
+    expect(app("components/LetterDesk.tsx")).not.toContain("/api/vault/");
+  });
+
+  it("a client, for a letter from them and no other; a guide never for a client's draft (Austin, 2026-11-05: a client's draft is theirs alone)", async () => {
+    draft("mine", { from_human_id: "clientA" });
+    expect((await letterWriter(project, "mine", person("clientA")))?.writer).toBe("client");
+    for (const other of ["clientB", "guideA", "crafter", "observer", "staffOutside"]) expect(await letterWriter(project, "mine", person(other, other === "staffOutside" ? "Admin" : "Human")), other).toBeNull();
+    // Owning the file in the Vault's sense is not the rule: a client's
+    // letter is theirs by who it is from.
+    draft("owned", { human_id: "clientA" });
+    expect(await letterWriter(project, "owned", person("clientA"))).toBeNull();
+    // Sent, a client's letter stays theirs to send again, by its house.
+    draft("sentMine", { ...sent, from_human_id: "clientA", from_house: "clients", to_house: "guides" });
+    expect((await letterWriter(project, "sentMine", person("clientA")))?.writer).toBe("client");
+    expect(await letterWriter(project, "sentMine", person("guideA"))).toBeNull();
   });
 
   it("only this project's letters under this project's address, and only a letter: not one in another project, an archived one, one in a trashed project, a file that is not markdown, or a file outside the Letters folder", async () => {
     draft("elsewhere", { folder_id: "lettersOther" });
     expect(await letterWriter(project, "elsewhere", person("guideA"))).toBeNull();
-    expect((await letterWriter(folders.other as never, "elsewhere", person("guideA")))?._id).toBe("elsewhere");
+    expect((await letterWriter(folders.other as never, "elsewhere", person("guideA")))?.file._id).toBe("elsewhere");
     draft("archived", { archived_at: "2026-11-06T00:00:00Z" });
     expect(await letterWriter(project, "archived", person("guideA"))).toBeNull();
     draft("trashed", { folder_id: "lettersGone" });
@@ -219,9 +236,9 @@ describe("the workflow leads to the desk and names the Vault nowhere", () => {
     expect(writing).not.toMatch(/MoreMenu|Rename|Move/);
   });
 
-  it("the desk's page saves through the route the Vault uses and never throws: a failed save is said on the page", () => {
+  it("the desk's page saves through the letter's own route and never throws: a failed save is said on the page", () => {
     const desk = app("components/LetterDesk.tsx");
-    expect(desk).toMatch(/fetch\(`\/api\/vault\/\$\{fileId\}`, \{ method: "PATCH"/);
+    expect(desk).toMatch(/fetch\(`\/api\/letter\/\$\{fileId\}`, \{ method: "PATCH"/);
     expect(desk).toMatch(/if \(!res\.ok\) \{\s*setProblem\(data\?\.error \?\? LETTER_SAVE_FAILED\);\s*return null;/);
     expect(desk).toMatch(/\} catch \{\s*setProblem\(LETTER_SAVE_FAILED\);\s*return null;/);
     expect(desk).toContain('role="alert" data-desk-problem');

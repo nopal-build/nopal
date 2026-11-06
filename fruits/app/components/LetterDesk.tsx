@@ -37,6 +37,7 @@ export function LetterDesk({
   letter,
   brief,
   send,
+  writer = "guide",
   onSent,
   onDeleted,
 }: {
@@ -44,6 +45,8 @@ export function LetterDesk({
   letter: LetterBeingWritten & { title: string; goneOut: boolean };
   brief: LetterBriefForPage | null;
   send: LetterSendState | null;
+  /** Whose letter (`letterWritingFor`): a client's has no brief block. */
+  writer?: "guide" | "client";
   onSent: () => void;
   /** Given the desk's address to go back to. */
   onDeleted: (desk: string) => void;
@@ -52,11 +55,12 @@ export function LetterDesk({
   const [busy, setBusy] = useState(false);
   const desk = `/newspaper/${project._id}?tab=letters`;
 
-  // The save the Vault makes, from here. Never throws: `LetterWriting`
-  // reads a truthy answer as "it landed", and a failure is said on the page.
+  // The letter's own save (`api.letter.$fileId.tsx`), behind the same
+  // rule as this page. Never throws: `LetterWriting` reads a truthy
+  // answer as "it landed", and a failure is said on the page.
   const save = useCallback(async (fileId: string, content: string) => {
     try {
-      const res = await fetch(`/api/vault/${fileId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) });
+      const res = await fetch(`/api/letter/${fileId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }) });
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
       if (!res.ok) {
         setProblem(data?.error ?? LETTER_SAVE_FAILED);
@@ -111,6 +115,7 @@ export function LetterDesk({
               projectFolderId={project._id}
               brief={brief}
               send={send}
+              writer={writer}
               editable
               headerLeft={
                 <span className={`${textSize.lg} ${sprinkles({ fontWeight: "semibold" })}`} data-desk-title>

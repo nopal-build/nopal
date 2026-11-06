@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { letterForManager } from "../data/letterManager.server";
+import { letterForWriter } from "../data/letterWriter.server";
 import { saveTalkDraft, sendTalkThrough } from "robustness-core/data/outline.server";
 
 /**
@@ -9,7 +9,8 @@ import { saveTalkDraft, sendTalkThrough } from "robustness-core/data/outline.ser
  *                                             outline is asked for, with or
  *                                             without a brief
  *
- * Guides only (`letterForManager`). Nothing goes on the project's record
+ * Whoever may write the letter (`letterForWriter`: a guide, or a client
+ * on their own). Nothing goes on the project's record
  * here: the talk waits for the letter to be sent (`sendLetter`,
  * `landTalkThrough`), and its Card then follows the daily log's own
  * rules (`appendToCard`: `dailyLog` to write, a suggestion without
@@ -17,7 +18,7 @@ import { saveTalkDraft, sendTalkThrough } from "robustness-core/data/outline.ser
  */
 export async function action({ request, params }: ActionFunctionArgs) {
   if (request.method !== "POST" && request.method !== "PUT") return Response.json({ error: "Method not allowed" }, { status: 405 });
-  const got = await letterForManager(request, params.fileId);
+  const got = await letterForWriter(request, params.fileId);
   if (got instanceof Response) return got;
   const body = (await request.json().catch(() => ({}))) as { draft?: unknown; text?: unknown };
 

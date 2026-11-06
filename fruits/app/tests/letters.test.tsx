@@ -166,19 +166,19 @@ describe("the sent copy (2026-10-28)", () => {
     expect(src).toContain("Sent ${updated}");
   });
 
-  it("sending is refused outside Letters, for a non-markdown file and for anyone who doesn't manage; the link is refused on an unsent letter", () => {
-    expect(letterSendRefusal({ manages: true, inLetters: true, isMarkdown: true })).toBeNull();
-    expect(letterSendRefusal({ manages: true, inLetters: false, isMarkdown: true })?.status).toBe(400);
-    expect(letterSendRefusal({ manages: true, inLetters: true, isMarkdown: false })?.status).toBe(400);
-    expect(letterSendRefusal({ manages: false, inLetters: true, isMarkdown: true })?.status).toBe(403);
+  it("sending is refused outside Letters, for a non-markdown file and for anyone who may not write the letter; the link is refused on an unsent letter", () => {
+    expect(letterSendRefusal({ writes: true, inLetters: true, isMarkdown: true })).toBeNull();
+    expect(letterSendRefusal({ writes: true, inLetters: false, isMarkdown: true })?.status).toBe(400);
+    expect(letterSendRefusal({ writes: true, inLetters: true, isMarkdown: false })?.status).toBe(400);
+    expect(letterSendRefusal({ writes: false, inLetters: true, isMarkdown: true })).toEqual({ status: 403, error: "This letter isn't yours to send." });
     expect(letterShareRefusal({ manages: true, inLetters: true, isMarkdown: true, sent: false, on: true })).toEqual({ status: 400, error: "Send the letter first. The link is a second step." });
     expect(letterShareRefusal({ manages: true, inLetters: true, isMarkdown: true, sent: false, on: false })).toBeNull();
     expect(letterShareRefusal({ manages: true, inLetters: true, isMarkdown: true, sent: true, on: true })).toBeNull();
   });
 
-  it("the send route is the one writer of the sent fields, with the guides' gate; the save and replace routes no longer ask for a PDF", () => {
+  it("the send route is the one writer of the sent fields, with the writer's gate; the save and replace routes no longer ask for a PDF", () => {
     const send = readFileSync(path.join(here, "../routes/api.letter.$fileId.send.tsx"), "utf8");
-    expect(send).toContain("letterForManager(");
+    expect(send).toContain("letterForWriter(");
     expect(send).toContain("sendLetter(");
     for (const file of ["api.vault.$fileId.tsx", "api.vault.replace.$fileId.tsx"]) {
       expect(readFileSync(path.join(here, "../routes", file), "utf8"), file).not.toMatch(/enqueueLetterPdfIf(Shared|Sent)/);
@@ -186,19 +186,18 @@ describe("the sent copy (2026-10-28)", () => {
   });
 });
 
-describe("a Guide's preview before the link is on", () => {
-  it("is the same page with the session's own file URLs, marked as a preview", () => {
+describe("the writer's preview before the letter is sent", () => {
+  it("is the same page, the draft's files through the letter's own routes (which serve them to the writer: letterDraftFile), marked as a preview", () => {
     const page = letterPage({ _id: FILE, name: "madison-attic.md", content: PAGE, updated_at: "2026-10-21T08:00:00Z" }, "https://o.nopal.build", true);
     expect(page.preview).toBe(true);
-    expect(page.body).toContain("/api/vault/view/ntfc5km0612jeex7fjiv");
-    expect(page.body).not.toContain("/api/letter/");
+    expect(page.body).toContain(`/api/letter/${FILE}/view/ntfc5km0612jeex7fjiv`);
+    expect(page.body).not.toContain("/api/vault/view/");
     expect(page.body).not.toContain("title: Madison attic");
-    // No letter-scoped route to admit an unsent draft's files through
-    // (`letterPageFile` has no "manager preview" door) -- a `::video{...}`
-    // directive falls through to `OxRenderer`'s own default
-    // (`/api/vault/view/<id>`), the session serving it directly, same as a
-    // plain picture already does in a preview.
-    expect(page.videoViewUrlBase).toBe(null);
+    // A `::video{...}` directive loads from the same route, as on the
+    // sent page: since 2026-11-06 the route has a door for a draft's
+    // writer, which is how a client sees their own pictures (the Vault's
+    // routes refuse a Client, ADR-023).
+    expect(page.videoViewUrlBase).toBe(`/api/letter/${FILE}/view`);
   });
 
 });
@@ -265,13 +264,16 @@ describe("the old name keeps answering", () => {
     const src = readFileSync(path.join(here, "../../../packages/robustness-core/src/data/featureAccess.server.ts"), "utf8");
     expect(src).toMatch(/export async function canReadFile\(/);
     expect(src).not.toMatch(/letters|isLettersFolder/);
-    expect(featuresOf("Client")).not.toContain("letters");
+    // Since 2026-11-06 a Client has the tab (`letters`), and the feature
+    // still opens no file bytes: a client's own draft reaches them through
+    // the letter's own routes (`letterDraftFile`), never the Vault's.
+    expect(featuresOf("Client")).toContain("letters");
   });
 });
 
 describe("the tab", () => {
-  it("every group but a Client reads it, second after Efforts; a Client has no tab (2026-10-22)", () => {
-    expect(tabsFor(featuresOf("Client"))).not.toContain("letters");
+  it("every group reads it, second after Efforts; a Client since clients write (2026-11-06)", () => {
+    expect(tabsFor(featuresOf("Client")).slice(0, 2)).toEqual(["efforts", "letters"]);
     expect(tabsFor(featuresOf("Guide")).slice(0, 2)).toEqual(["efforts", "letters"]);
     expect(tabsFor(featuresOf("Observer"))).toContain("letters");
   });
@@ -292,15 +294,18 @@ describe("the tab", () => {
   });
 
   const rows = [
-    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", sentDate: "2026-10-22", sentCount: 2, sentHash: "h0", editedSinceSent: true, houses: null, toHouse: null, pdf: { state: "failed" as const, reason: "the public page answered 500", at: "2026-10-21T09:01:00Z" } },
-    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null },
+    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", sentDate: "2026-10-22", sentCount: 2, sentHash: "h0", editedSinceSent: true, houses: null, fromHumanId: null, toHouse: null, writes: true, pdf: { state: "failed" as const, reason: "the public page answered 500", at: "2026-10-21T09:01:00Z" } },
+    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, fromHumanId: null, toHouse: null, writes: true, pdf: null },
     // Shared with the link on but never sent can't happen from here on
     // (`letterShareRefusal`); a row like it reads as unsent.
-    { fileId: "odd1", name: "odd.md", title: "Odd", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: "2026-10-20T09:00:00Z", contentHash: "h3", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null },
+    { fileId: "odd1", name: "odd.md", title: "Odd", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: "2026-10-20T09:00:00Z", contentHash: "h3", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, fromHumanId: null, toHouse: null, writes: true, pdf: null },
   ];
+  // A reader's rows, as the loader marks them (`deskRows`): nothing to write,
+  // and "edited since" withheld.
+  const readerRows = rows.map((r) => ({ ...r, writes: false, editedSinceSent: false }));
 
   it("a reader sees the list and no controls; a sent page is the client's link, an unsent one is not a link", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={false} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={readerRows} manage={false} onChanged={() => {}} />);
     expect(html).toContain(`href="/public/letter/${FILE}"`);
     expect(html).not.toContain('href="/public/letter/draft1"');
     expect(html).not.toContain("/vault?file=");
@@ -342,7 +347,7 @@ describe("the tab", () => {
     expect(html).toContain(`<a href="/public/letter/${FILE}" class="typography_textSize_base`);
     expect(html).toContain(`<a href="/public/letter/draft1" class="typography_textSize_base`);
     expect(html).not.toContain(`<a href="/vault?file=${FILE}" class="typography_textSize_base`);
-    const reader = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={false} onChanged={() => {}} />);
+    const reader = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={readerRows} manage={false} onChanged={() => {}} />);
     expect(reader).toContain(`<a href="/public/letter/${FILE}"`);
     expect(reader).not.toContain("/vault?file=draft1");
     expect(reader).not.toContain(">Edit<");
@@ -353,8 +358,8 @@ describe("the tab", () => {
 describe("the purpose line (2026-10-28)", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
 
-  it("shows under the row that has one, to anyone with the tab, and nothing under one that doesn't", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={false} onChanged={() => {}} />);
+  it("shows under the row that has one, to anyone in the guides' house with the tab (a client's rows carry none: deskRows), and nothing under one that doesn't", () => {
+    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows.map((r) => ({ ...r, writes: false }))} manage={false} onChanged={() => {}} />);
     expect((html.match(/data-letter-purpose/g) ?? []).length).toBe(1);
     expect(html).toContain("Tell Susan what the attic floor should be.");
   });
@@ -386,8 +391,8 @@ describe("the purpose line (2026-10-28)", () => {
   });
 
   const rows = [
-    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null },
-    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null },
+    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, fromHumanId: null, toHouse: null, writes: true, pdf: null },
+    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, fromHumanId: null, toHouse: null, writes: true, pdf: null },
   ];
 });
 
@@ -403,7 +408,7 @@ describe("the brief on the letter's page (2026-10-28)", () => {
 
   it("going straight to the letter skips the brief: the route asks for one only without brief=skip", () => {
     const src = readFileSync(path.join(here, "../routes/api.projects.$folderId.letters.tsx"), "utf8");
-    expect(src).toMatch(/if \(String\(form\.get\("brief"\) \?\? ""\) !== "skip"\) \{\s*try \{\s*const asked = await requestBrief/);
+    expect(src).toMatch(/if \(!asClient && String\(form\.get\("brief"\) \?\? ""\) !== "skip"\) \{\s*try \{\s*const asked = await requestBrief/);
     expect((src.match(/requestBrief\(/g) ?? []).length).toBe(1);
     expect(readFileSync(path.join(here, "../components/LettersView.tsx"), "utf8")).toContain('form.append("brief", "skip")');
   });
@@ -686,12 +691,12 @@ describe("read only", () => {
     expect(print).not.toMatch(/:root|@page/);
   });
 
-  it("with the link off, the public route admits the worker's render, then someone on the project once sent, else a manager as a preview", () => {
+  it("with the link off, the public route admits the worker's render, then someone on the project once sent, else the letter's writer as a preview", () => {
     const src = readFileSync(path.join(here, "../routes/public.letter.$fileId.tsx"), "utf8");
     const shared = src.indexOf("resolveSharedLetter(");
     const printing = src.indexOf("requestHasRenderPass(request, params.fileId)");
     const member = src.indexOf("resolveSentLetterForMember(");
-    const manager = src.indexOf("resolveLetterForManager(");
+    const manager = src.indexOf("resolveLetterForWriter(");
     expect(shared).toBeGreaterThan(-1);
     expect(shared).toBeLessThan(printing);
     expect(printing).toBeLessThan(member);

@@ -24,32 +24,39 @@
 import { merge } from "./generic.server";
 import { markDate } from "./graphLogMarks.server";
 import { raiseLetterFlags } from "./letterFlags.server";
-import { flagRecipients, houseAtSend, housesOf, sendAsksForHouse, type House } from "./letterHouses";
+import { flagRecipients, houseAtSend, housesOf, mayWriteLetter, sendAsksForHouse, type House } from "./letterHouses";
 import { houseMembers, houseOfActor } from "./letterHouses.server";
 import { enqueueLetterPdfIfSent } from "./letterPdf.server";
 import { syncLettersProjection } from "./letterSync.server";
 import { landTalkThrough } from "./outline.server";
-import { canManageLetters, contentFingerprint, isMarkdownFileName, letterEditedSinceSent, letterHome, letterSendRefusal, sentCopyOf, type LetterRefusal } from "./letters.server";
+import { contentFingerprint, isMarkdownFileName, letterEditedSinceSent, letterHome, letterSendRefusal, letterViewerOf, sentCopyOf, type LetterRefusal } from "./letters.server";
 import { getProjectRole } from "./projectSharing.server";
 import type { Human } from "./humans.server";
 import type { FileRef } from "./vault.types";
 
 export type SendLetterResult = { ok: true; sentAt: string; count: number; toHouse: House } | ({ ok: false } & LetterRefusal);
 
-/** The only writer of a letter's sent fields, and of who it is from and
- * its two houses. `merge`, never `updateFileRef`: the draft's
- * `updated_at` stays, so the editor keyed on it doesn't remount and the
- * tab doesn't reorder.
+/** The only writer of a letter's sent fields and its two houses, and of
+ * who a guide's letter is from (a client's draft says who it is from
+ * from the start, written by the route that starts it; Send keeps it).
+ * `merge`, never `updateFileRef`: the draft's `updated_at` stays, so the
+ * editor keyed on it doesn't remount and the tab doesn't reorder.
+ *
+ * Who may send is who may write the letter (`mayWriteLetter`): a Guide
+ * on the project for the guides' letters, a client for their own, and a
+ * client's letter is sent again only by that client (Austin,
+ * 2026-11-05).
  *
  * The house (Austin, 2026-11-05; `houseAtSend` has the order): a letter
  * that has one keeps it; a draft goes where it was addressed when it was
- * started (the New letter form); only a draft with no address (an upload,
- * or one from before the form asked) has the guide say which at Send
- * (`toHouse`), with no default. The first send that has a house writes
- * `from_human_id`, `from_house` and `to_house`, and no later send
- * touches them: a send again by someone else leaves the letter from
- * whoever first sent it. A letter sent before houses is asked like any
- * other the next time it is sent, and is from whoever last sent it.
+ * started (the New letter form; a client's is always the team); only a
+ * draft with no address (an upload, or one from before the form asked)
+ * has the guide say which at Send (`toHouse`), with no default. The
+ * first send that has a house writes `from_human_id`, `from_house` and
+ * `to_house`, and no later send touches them: a send again by someone
+ * else leaves the letter from whoever first sent it. A letter sent
+ * before houses is asked like any other the next time it is sent, and
+ * is from whoever last sent it.
  *
  * Then the flags (`letterFlags.server.ts`): up for everyone in the
  * receiving house now, except whoever is sending and whoever it is from.
@@ -57,16 +64,17 @@ export type SendLetterResult = { ok: true; sentAt: string; count: number; toHous
 export async function sendLetter(actor: Pick<Human, "_id" | "role">, file: FileRef, input: { date?: string; toHouse?: unknown } = {}): Promise<SendLetterResult> {
   const home = await letterHome(file);
   const role = home ? await getProjectRole(home.project, actor._id) : null;
-  const refusal = letterSendRefusal({ manages: canManageLetters(actor, role), inLetters: !!home, isMarkdown: isMarkdownFileName(file.name) });
+  const members = home ? await houseMembers(home.project) : [];
+  const refusal = letterSendRefusal({ writes: mayWriteLetter(letterViewerOf(actor._id, role), file, members), inLetters: !!home, isMarkdown: isMarkdownFileName(file.name) });
   if (refusal || !home) return { ok: false, ...(refusal ?? { status: 400, error: "Only a file in the project's Letters folder can be sent" }) };
 
-  // Whoever may send is a Guide on the project or staff: the guides' house.
+  // Whoever may send is a Guide on the project (the guides' house) or a
+  // client (theirs).
   const senderHouse = houseOfActor(actor, role) ?? "guides";
-  const members = await houseMembers(home.project);
   const decided = houseAtSend({ current: file, senderHouse, projectHasClients: members.some((m) => m.house === "clients"), asked: input.toHouse });
   if (!decided.ok) return decided;
   const kept = housesOf(file);
-  const fromHumanId = kept?.fromHumanId ?? file.sent_by_human_id ?? actor._id;
+  const fromHumanId = kept?.fromHumanId ?? file.from_human_id ?? file.sent_by_human_id ?? actor._id;
 
   const before = sentCopyOf(file);
   // The instant, and apart from it the sender's day (the device's date,

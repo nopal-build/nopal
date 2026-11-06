@@ -2,8 +2,9 @@
 // A letter as it was sent (`sentCopyOf`). Four doors, in order: the
 // link on, anyone with the URL, no login; the worker printing a sent
 // letter under a render pass (`letterRenderPass.server.ts`); someone on
-// the project (a Client included) logged in, once the letter is sent; a
-// Guide logged in, the draft as a preview. 404 for anyone else, the same as a file
+// the project (a Client included) logged in, once the letter is sent; the
+// letter's writer logged in (a guide, or a client on their own), the
+// draft as a preview. 404 for anyone else, the same as a file
 // that doesn't exist. Rendered the way the website renders a page
 // (`WebsitePageContent` + the website directive registry), with no Vault
 // chrome: a contractor sees the finished page and nothing else.
@@ -48,7 +49,7 @@
 import { useState } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData, useParams } from "react-router";
-import { resolveLetterPage, resolveLetterForManager, resolveSentLetter, resolveSentLetterForMember, resolveSharedLetter, type LetterPage } from "robustness-core/data/letters.server";
+import { resolveLetterPage, resolveLetterForWriter, resolveSentLetter, resolveSentLetterForMember, resolveSharedLetter, type LetterPage } from "robustness-core/data/letters.server";
 import { readLetter, type LetterReading } from "robustness-core/data/letterReading.server";
 import { HOUSE_LABEL } from "robustness-core/data/letterHouses";
 import { requestHasRenderPass } from "robustness-core/data/letterRenderPass.server";
@@ -102,10 +103,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // (`resolveSentLetterForMember`).
   const sent = user && params.fileId ? await resolveSentLetterForMember(params.fileId, user._id) : null;
   if (sent) return opened(sent, await resolveLetterPage(sent.file, origin), user, person, asThemself);
-  // Not sent: a Guide on the project still sees the page as the client
-  // will (the tab's title always opens this), with the session serving
-  // the pictures and no downloads. Anyone else: not found, as before.
-  const mine = user && params.fileId ? await resolveLetterForManager(params.fileId, user) : null;
+  // Not sent: the letter's writer (a guide, or a client on their own)
+  // sees the page as its readers will (the tab's title always opens
+  // this), the draft's files served by the letter's own routes to its
+  // writer (`letterDraftFile`), and no downloads. Anyone else: not
+  // found, as before.
+  const mine = user && params.fileId ? await resolveLetterForWriter(params.fileId, user) : null;
   if (!mine) throw new Response("Not Found", { status: 404 });
   // The way back to where it is being written, for whoever is looking at
   // their own draft: the desk in its project.
@@ -142,17 +145,16 @@ export default function PublicLetterPage() {
   // cleaned CSV downloads from the SAME route family, just one path
   // segment deeper (`.../download/:id`, `api.letter.$fileId.download.$id.tsx`),
   // so no separate fileId needs threading through here -- EXCEPT in
-  // `preview` (a Guide looking at an unsent draft): that letter-scoped
-  // route can't admit an unsent draft at all (`letterAttachmentFile`'s own
-  // `resolveReadableLetter` has no "manager preview" door, same as the
-  // existing `letterPageFile`), which is exactly why `preview`'s own body
-  // keeps ORDINARY `/api/vault/view/<id>` picture URLs instead of
-  // letter-scoped ones -- "the session serving the pictures" `LetterPage`
-  // itself documents. Omitting `downloadUrl` entirely here (rather than
-  // passing `null`) falls through to `LoadCellGraphCard`'s own default,
-  // the SAME ordinary authenticated `/api/vault/download/:fileId` route
-  // the Sensor Data tab uses -- works for a preview because the Guide
-  // already has real vault access to their own project's files.
+  // `preview` (the writer looking at an unsent draft): that letter-scoped
+  // download can't admit an unsent draft (`letterAttachmentFile`'s own
+  // `resolveReadableLetter` has no writer door; the pictures have one,
+  // `letterDraftFile`, since 2026-11-06, a graph's CSV does not).
+  // Omitting `downloadUrl` entirely here (rather than passing `null`)
+  // falls through to `LoadCellGraphCard`'s own default, the SAME ordinary
+  // authenticated `/api/vault/download/:fileId` route the Sensor Data tab
+  // uses -- works for a guide's preview because the Guide already has
+  // real vault access to their own project's files; a client's letter
+  // holds no graph.
   const loadCellDirectives = buildLoadCellGraphDirectiveRegistry(
     loadCellGraphs,
     preview ? undefined : { downloadUrl: (id) => `${downloadUrl}/${id}` },
@@ -185,7 +187,7 @@ export default function PublicLetterPage() {
         <p className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
           {preview ? `Updated ${updated}` : `Sent ${updated}`}
           {resent && <span data-resent>{" · "}updated</span>}
-          {preview && <span data-preview-note>{" · "}Only Guides can see this until it's sent.</span>}
+          {preview && <span data-preview-note>{" · "}Only you can see this until it's sent.</span>}
           {preview && writeAt && (
             <span className={hideInPrint}>
               {" · "}

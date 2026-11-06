@@ -26,9 +26,9 @@
 import { firstName } from "./humanNames";
 import { getHumanById, type Human } from "./humans.server";
 import { lowerLetterFlag } from "./letterFlags.server";
-import { houseMayOpen, houseOf, housesOf, mayReflect, type House } from "./letterHouses";
+import { houseMayOpen, houseOf, housesOf, mayReflect, mayStartLetter, type House } from "./letterHouses";
 import { getReflection, reflectionForPage, type ReflectionForPage } from "./letterReflection.server";
-import { canManageLetters, sentCopyOf } from "./letters.server";
+import { letterViewerOf, sentCopyOf } from "./letters.server";
 import { getProjectRole } from "./projectSharing.server";
 import type { FileRef, VaultFolder } from "./vault.types";
 
@@ -69,7 +69,10 @@ export async function readLetter(
   const house = role ? houseOf(role.role) : null;
   const reflects = !!viewer && !!role && opts.reflects && role.features.includes("dailyLog") && mayReflect(file, house, !!sentCopyOf(file));
   const reflection = reflects ? reflectionForPage(await getReflection(file._id, viewer._id)) : null;
-  const writeBackIn = reflection && canManageLetters(viewer, role) ? project._id : null;
+  // "Write a letter from this": for whoever may start a letter here
+  // (`mayStartLetter`: a Guide, or a client), as the route that starts
+  // one asks again.
+  const writeBackIn = reflection && viewer && mayStartLetter(letterViewerOf(viewer._id, role)) ? project._id : null;
 
   const houses = housesOf(file);
   if (!houses) return { from: null, toHouse: null, reflection, writeBackIn };

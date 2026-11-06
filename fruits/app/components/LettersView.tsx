@@ -7,12 +7,17 @@
 // nothing more: no filters, no sorting controls. The mailbox on the
 // project's page is where mail is received and read.
 //
-// One markdown file each, newest change first (`letters.server.ts`).
-// Everyone with the tab reads the list; a manager (a Guide on the
-// project, or staff) starts a letter, uploads, replaces in place (same
-// id, so the same link) and flips each file's public link. The server
-// refuses those for anyone else; `manage` only hides them. Crafters and
-// Observers read here and do not write.
+// One markdown file each, newest change first (`letters.server.ts`),
+// already filtered for the viewer (`deskRows`: a client sees their own
+// drafts and the letters between the houses). Whoever may start a letter
+// (`writes`: a Guide, or a client) gets New letter; a manager (a Guide on
+// the project, or staff) also uploads, replaces in place (same id, so
+// the same link) and flips each file's public link. Each row says whether
+// the viewer may write it (`row.writes`: Edit, Delete, the preview). The
+// server refuses all of it for anyone else; the props only hide. Crafters
+// and Observers read here and do not write. A client's form is a title
+// alone (Austin, 2026-11-05: no purpose line, no brief, and theirs always
+// goes to the team).
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import type { LetterRow } from "robustness-core/data/letters.server";
 import type { LetterPdfState } from "robustness-core/data/letterPdf.server";
@@ -21,9 +26,10 @@ import type { LetterPdfState } from "robustness-core/data/letterPdf.server";
  * the link is on) what became of its PDF, and the first name of who a
  * housed letter is from (optional, so a caller without it still draws a
  * row). */
-export type LetterTabRow = LetterRow & { pdf: LetterPdfState | null; from?: string | null };
+export type LetterTabRow = LetterRow & { pdf: LetterPdfState | null; from?: string | null; writes: boolean };
 
 // Words a person reads (Nopal's voice; listed in the round's return leg).
+export const LETTER_TO_TEAM_NOTE = "Your letter goes to the team. Say what's on your mind first, and an outline comes back to write from.";
 export const DESK_DRAFTS = "On the desk";
 export const DESK_LETTERS = "Letters";
 export const DESK_NO_DRAFTS = "Nothing being written.";
@@ -97,6 +103,8 @@ export function LettersView({
   projectFolderId,
   rows,
   manage,
+  writes = manage,
+  asClient = false,
   asksHouse = false,
   startFrom = null,
   onChanged,
@@ -105,6 +113,10 @@ export function LettersView({
   rows: LetterTabRow[];
   /** Upload, Replace and the share switch. */
   manage: boolean;
+  /** New letter (`mayStartLetter`). */
+  writes?: boolean;
+  /** The viewer is a client: the form asks a title and nothing else. */
+  asClient?: boolean;
   /** The project has clients, so a new letter says who it is for. */
   asksHouse?: boolean;
   /** Arrived from "Write a letter from this" on a letter's page: the
@@ -192,32 +204,36 @@ export function LettersView({
       onDragOver={manage ? (e) => e.preventDefault() : undefined}
       onDrop={manage ? onDrop : undefined}
     >
-      {manage && (
+      {writes && (
         <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 })}>
-          <input
-            ref={uploadInput}
-            type="file"
-            multiple
-            accept=".md,text/markdown,image/*"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const files = Array.from(e.currentTarget.files ?? []);
-              e.currentTarget.value = "";
-              upload(files);
-            }}
-          />
           <button type="button" className={button({ variant: "secondary", size: "compact" })} disabled={busy} onClick={() => setStarting(true)}>
             New letter
           </button>
-          <button type="button" className={button({ variant: "secondary", size: "compact" })} disabled={busy} onClick={() => uploadInput.current?.click()}>
-            Upload a letter
-          </button>
-          <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
-            A markdown file, with its pictures alongside. Or drop them here.
-          </span>
+          {manage && (
+            <>
+              <input
+                ref={uploadInput}
+                type="file"
+                multiple
+                accept=".md,text/markdown,image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const files = Array.from(e.currentTarget.files ?? []);
+                  e.currentTarget.value = "";
+                  upload(files);
+                }}
+              />
+              <button type="button" className={button({ variant: "secondary", size: "compact" })} disabled={busy} onClick={() => uploadInput.current?.click()}>
+                Upload a letter
+              </button>
+              <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+                A markdown file, with its pictures alongside. Or drop them here.
+              </span>
+            </>
+          )}
         </div>
       )}
-      {manage && (
+      {writes && (
         <NewLetterModal
           open={starting}
           busy={busy}
@@ -226,7 +242,8 @@ export function LettersView({
             setStarting(false);
             setFrom(null);
           }}
-          asksHouse={asksHouse}
+          asksHouse={asksHouse && !asClient}
+          asClient={asClient}
           startFrom={from}
           onStart={(name, purpose, withBrief, to) => void create(name, purpose, withBrief, to)}
         />
@@ -306,6 +323,7 @@ export function NewLetterModal({
   busy,
   error,
   asksHouse = false,
+  asClient = false,
   startFrom = null,
   onClose,
   onStart,
@@ -315,6 +333,10 @@ export function NewLetterModal({
   error: string | null;
   /** The project has clients, so the form asks who the letter is for. */
   asksHouse?: boolean;
+  /** A client's letter: a title, and it goes to the team. No purpose
+   * line (it feeds the brief, which a client doesn't get), no house to
+   * pick, no brief to choose (Austin, 2026-11-05). */
+  asClient?: boolean;
   /** The letter this one is started from what the writer said about. The
    * same three questions, nothing picked for them; no brief to choose,
    * since the letter they read stands where a brief would. */
@@ -324,6 +346,8 @@ export function NewLetterModal({
 }) {
   const [to, setTo] = useState<House | null>(null);
   const [unpicked, setUnpicked] = useState(false);
+  // A client's letter has nowhere to pick: it goes to the team.
+  const picksHouse = asksHouse && !asClient;
   // A form opened again starts with nothing picked.
   useEffect(() => {
     if (!open) {
@@ -339,13 +363,13 @@ export function NewLetterModal({
           const form = new FormData(e.currentTarget);
           const name = String(form.get("name") ?? "").trim();
           const purpose = String(form.get("purpose") ?? "").trim();
-          if (!name || !purpose) return;
-          if (asksHouse && !to) {
+          if (!name || (!purpose && !asClient)) return;
+          if (picksHouse && !to) {
             setUnpicked(true);
             return;
           }
           const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
-          onStart(name, purpose, submitter?.value !== "skip", asksHouse ? to : null);
+          onStart(name, purpose, submitter?.value !== "skip", picksHouse ? to : null);
         }}
       >
         <Stack gap={3}>
@@ -355,11 +379,20 @@ export function NewLetterModal({
             </p>
           )}
           <Input name="name" label="Title" required autoFocus />
-          <Input type="textarea" name="purpose" label="What is this letter for?" required />
-          <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
-            {startFrom ? LETTER_PURPOSE_HINT_PLAIN : `${LETTER_PURPOSE_HINT_PLAIN.slice(0, -1)}, and a brief is written from it.`}
-          </p>
-          {asksHouse && (
+          {!asClient && (
+            <>
+              <Input type="textarea" name="purpose" label="What is this letter for?" required />
+              <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
+                {startFrom ? LETTER_PURPOSE_HINT_PLAIN : `${LETTER_PURPOSE_HINT_PLAIN.slice(0, -1)}, and a brief is written from it.`}
+              </p>
+            </>
+          )}
+          {asClient && (
+            <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-letter-to-team>
+              {LETTER_TO_TEAM_NOTE}
+            </p>
+          )}
+          {picksHouse && (
             <fieldset style={{ border: 0, padding: 0, margin: 0 }} data-letter-for>
               <legend className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} style={{ padding: 0, marginBottom: 8 }}>
                 {LETTER_FOR_ASK}
@@ -387,7 +420,7 @@ export function NewLetterModal({
               )}
             </fieldset>
           )}
-          {!startFrom && (
+          {!startFrom && !asClient && (
             <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-run-note>
               {BRIEF_RUN_NOTE}
             </p>
@@ -404,7 +437,7 @@ export function NewLetterModal({
             <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={onClose}>
               Cancel
             </button>
-            {startFrom ? (
+            {startFrom || asClient ? (
               <button type="submit" name="start" value="skip" className={button({ variant: "purple" })} style={{ whiteSpace: "nowrap", padding: "8px 16px" }} disabled={busy} data-letter-start>
                 {busy ? "Starting…" : LETTER_START}
               </button>
@@ -454,11 +487,13 @@ function LetterRowView({
   // Only a draft can be deleted here: one that was sent, or whose link
   // was ever on, is in someone's hands. The route refuses the rest.
   const draft = !row.sentDate && !row.sharedAt;
-  // The title opens exactly what the client sees (Austin, 2026-10-21): the
-  // letter's page. Before the send that page admits a manager as a
-  // preview, so a manager's title always goes there; a reader's title is
-  // a link only once it's sent. Writing it is "Edit", at the desk.
-  const href = row.sentDate || manage ? publicPath : null;
+  // The title opens exactly what the reader sees (Austin, 2026-10-21):
+  // the letter's page. Before the send that page admits the letter's
+  // writer as a preview, so a writer's title always goes there; anyone
+  // else's title is a link only once it's sent. Writing it is "Edit", at
+  // the desk. Only a letter's writer gets either (`row.writes`: a guide
+  // for the guides' letters, a client for their own).
+  const href = row.sentDate || row.writes ? publicPath : null;
   const title = href ? (
     <a href={href} className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} style={{ color: "inherit" }}>
       {row.title}
@@ -479,7 +514,7 @@ function LetterRowView({
             {row.sentCount > 1 && ", updated"}
           </Badge>
         )}
-        {manage && row.editedSinceSent && (
+        {row.writes && row.editedSinceSent && (
           <span className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-letter-edited-since>
             edited since
           </span>
@@ -503,33 +538,39 @@ function LetterRowView({
           {pdfLine(row.pdf)}
         </p>
       )}
-      {manage && (
+      {(manage || row.writes) && (
         <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 })}>
-          {row.sentDate ? (
-            <ShareLinkControl what="this letter" path={publicPath} endpoint={`/api/letter/${row.fileId}/share`} sharedAt={row.sharedAt} onChanged={onChanged} />
-          ) : (
-            <span className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-letter-send-first>
-              Send it first. The link is a second step.
-            </span>
+          {manage && (
+            <>
+              {row.sentDate ? (
+                <ShareLinkControl what="this letter" path={publicPath} endpoint={`/api/letter/${row.fileId}/share`} sharedAt={row.sharedAt} onChanged={onChanged} />
+              ) : (
+                <span className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-letter-send-first>
+                  Send it first. The link is a second step.
+                </span>
+              )}
+              <input
+                ref={replaceInput}
+                type="file"
+                accept=".md,text/markdown"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.currentTarget.files?.[0];
+                  e.currentTarget.value = "";
+                  if (file) onReplace(file);
+                }}
+              />
+              <button type="button" className={textSize.xs} disabled={busy} onClick={() => replaceInput.current?.click()} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, padding: 0, cursor: "pointer" }}>
+                Replace
+              </button>
+            </>
           )}
-          <input
-            ref={replaceInput}
-            type="file"
-            accept=".md,text/markdown"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const file = e.currentTarget.files?.[0];
-              e.currentTarget.value = "";
-              if (file) onReplace(file);
-            }}
-          />
-          <button type="button" className={textSize.xs} disabled={busy} onClick={() => replaceInput.current?.click()} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, padding: 0, cursor: "pointer" }}>
-            Replace
-          </button>
-          <a href={deskPath} className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-letter-edit>
-            Edit
-          </a>
-          {draft && (
+          {row.writes && (
+            <a href={deskPath} className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-letter-edit>
+              Edit
+            </a>
+          )}
+          {row.writes && draft && (
             <button type="button" className={textSize.xs} disabled={busy} onClick={onDelete} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, cursor: "pointer", padding: 0, textDecoration: "underline" }} data-letter-delete>
               Delete
             </button>

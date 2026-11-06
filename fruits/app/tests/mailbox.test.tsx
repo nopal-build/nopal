@@ -123,12 +123,13 @@ describe("who a letter is for, picked when it is started", () => {
     expect(modal(false)).not.toContain("data-letter-for");
   });
 
-  it("the route refuses a new letter with nobody picked, keeps the pick on the draft, and is the only writer of it besides Send", () => {
+  it("the route refuses a new letter with nobody picked, keeps the pick on the draft, and is the only writer of it besides Send; a client's goes to the team and says who it is from", () => {
     const src = route("api.projects.$folderId.letters.tsx");
-    expect(src).toMatch(/const address = houseAtStart\(\{ projectHasClients: [^}]*asked: form\.get\("to"\) \}\);\s*if \(!address\.ok\) return Response\.json\(\{ error: address\.error \}, \{ status: address\.status \}\);/);
-    expect(src).toContain('await merge("file_refs", fileRef._id, { to_house: address.toHouse });');
+    expect(src).toMatch(/: houseAtStart\(\{ projectHasClients: [^}]*asked: form\.get\("to"\) \}\);\s*if \(!address\.ok\) return Response\.json\(\{ error: address\.error \}, \{ status: address\.status \}\);/);
+    expect(src).toContain('{ ok: true, toHouse: "guides" } as const');
+    expect(src).toContain('await merge("file_refs", fileRef._id, { to_house: address.toHouse, ...(asClient ? { from_human_id: user._id } : {}) });');
     expect((src.match(/to_house/g) ?? []).length).toBe(1);
-    expect(src).not.toMatch(/from_house|from_human_id/);
+    expect(src).not.toMatch(/from_house/);
     expect(readFileSync(path.join(here, "../components/LettersView.tsx"), "utf8")).toContain('if (to) form.append("to", to);');
   });
 });
@@ -182,7 +183,7 @@ describe("the house at Send", () => {
 describe("the desk", () => {
   const row = (over: Partial<LetterTabRow>): LetterTabRow => ({
     fileId: "x", name: "x.md", title: "X", updatedAt: "2026-11-05T08:00:00Z", size: 10, sharedAt: null, contentHash: "h", purpose: null,
-    sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null, ...over,
+    sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, fromHumanId: null, toHouse: null, writes: true, pdf: null, ...over,
   });
   const rows = [
     row({ fileId: "d1", title: "Being written" }),
@@ -213,18 +214,22 @@ describe("the desk", () => {
   });
 
   it("a crafter and an observer read the desk and get no way to start, send or share a letter; the server refuses each of those anyway", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows.map((r) => ({ ...r, writes: false }))} manage={false} writes={false} onChanged={() => {}} />);
     expect(html).not.toMatch(/New letter|Upload a letter|>Replace<|>Edit<|Share link/);
     for (const group of ["Crafter", "Observer", "Client"]) {
       expect(canManageLetters({ role: "Human" }, resolveRole(group)), group).toBe(false);
       expect(letterShareRefusal({ manages: false, inLetters: true, isMarkdown: true, sent: true, on: true })).toMatchObject({ status: 403 });
     }
-    // Starting a letter, the brief, the talk box, the outline, the
-    // recording and the send all sit behind the Guide-or-staff gate.
-    expect(route("api.projects.$folderId.letters.tsx")).toMatch(/if \(!canManageLetters\(user, await getProjectRole\(project, user\._id\)\)\) \{\s*return Response\.json\(\{ error: "Only a Guide on this project can add a letter" \}, \{ status: 403 \}\);/);
-    for (const name of ["brief", "talk", "outline", "recording", "send"]) {
-      expect(route(`api.letter.$fileId.${name}.tsx`), name).toMatch(/letterForManager\(request, (params\.)?fileId\)/);
+    // Starting a letter is a Guide's or a client's (`mayStartLetter`);
+    // the talk box, the outline, the recording and the send sit behind
+    // the writer's gate (`letterForWriter`, `mayWriteLetter`: nothing
+    // for a Crafter or an Observer); the brief's own writing stays the
+    // manager's.
+    expect(route("api.projects.$folderId.letters.tsx")).toMatch(/if \(!manages && !mayStartLetter\(viewer\)\) \{\s*return Response\.json\(\{ error: LETTER_START_REFUSED \}, \{ status: 403 \}\);/);
+    for (const name of ["talk", "outline", "recording", "send"]) {
+      expect(route(`api.letter.$fileId.${name}.tsx`), name).toMatch(/letterForWriter\(request, (params\.)?fileId\)/);
     }
+    expect(route("api.letter.$fileId.brief.tsx")).toMatch(/export async function action[\s\S]*letterForManager\(request, params\.fileId\)/);
     // And the side door: writing any file in the Letters folder is a Guide's.
     expect(core("projectSharing.server.ts")).toContain("if (project) return writesInFolder(await getProjectRole(project, actingHumanId), folder!);");
   });
@@ -313,10 +318,10 @@ describe("one letter, alone", () => {
     expect(view).toContain('if (!withBrief || from) form.append("brief", "skip");');
   });
 
-  it("at the desk, whoever manages letters gets Edit on every row and Delete on a draft only; a reader gets neither (2026-11-06)", () => {
+  it("at the desk, a letter's writer gets Edit on the row and Delete on a draft only; a reader gets neither (2026-11-06)", () => {
     const row = (over: Partial<LetterTabRow>): LetterTabRow => ({
       fileId: "x", name: "x.md", title: "X", updatedAt: "2026-11-05T08:00:00Z", size: 10, sharedAt: null, contentHash: "h", purpose: null,
-      sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null, ...over,
+      sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, fromHumanId: null, toHouse: null, writes: true, pdf: null, ...over,
     });
     const draftRow = row({ fileId: "d1", title: "Still writing", toHouse: "clients" });
     const sentRow = row({ fileId: "s1", title: "Went out", sentDate: "2026-11-04", sentCount: 1, from: "Lucas", houses: { fromHumanId: "guideA", fromHouse: "guides", toHouse: "clients" } });
@@ -329,7 +334,7 @@ describe("one letter, alone", () => {
     // A link that was ever on is a letter someone may hold: no Delete.
     const linked = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[row({ fileId: "k1", sharedAt: "2026-10-20T10:00:00Z" })]} manage onChanged={() => {}} />);
     expect(linked).not.toContain("data-letter-delete");
-    const reader = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[draftRow, sentRow]} manage={false} onChanged={() => {}} />);
+    const reader = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[draftRow, sentRow].map((r) => ({ ...r, writes: false }))} manage={false} writes={false} onChanged={() => {}} />);
     expect(reader).not.toMatch(/data-letter-edit|data-letter-delete|\/letter\/d1/);
     expect(LETTER_DELETE_DRAFT_ASK).not.toMatch(/—/);
   });

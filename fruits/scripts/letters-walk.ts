@@ -78,7 +78,12 @@ ${PEOPLE.map((p) => `    ${`${p.role}:`.padEnd(20)} ${p.email}`).join("\n")}
     8. As the other guide, talk the team's letter through and keep it. Write a letter from this: the New letter
        form, saying what it comes from. Title, what it is for, who it is for. No brief.
     9. On that letter's page: what you said, what you were reading, and Write the outline. The outline has read
-       the letter you were reading. Send: nothing is added to your Card a second time.`);
+       the letter you were reading. Send: nothing is added to your Card a second time.
+   10. As a client, the Letters tab is there: your own drafts and the letters between you and the team, with
+       no purpose lines. New letter asks a title and nothing else; the letter goes to the team. The same desk
+       page: talk it through, Write the outline, write, Add picture, Read it to them, Send. No brief block.
+       The other client and the guide never see your draft; once sent they read it with its pictures, and
+       the guide's flag goes up. As a guide, the client's letter has no Edit on the desk.`);
   process.exit(0);
 }
 

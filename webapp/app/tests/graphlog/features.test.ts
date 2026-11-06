@@ -71,12 +71,13 @@ describe("the groups", () => {
     expect(seesSuggestions(featuresOf("Observer"))).toBe(true);
   });
 
-  it("a Client gets Efforts, Photos, Files, the pen, their own tap and their own log, and runs nothing", () => {
+  it("a Client gets Efforts, Letters, Photos, Files, the pen, their own tap and their own log, and runs nothing", () => {
     const client = resolveRole("Client");
-    // No Letters tab (Austin, 2026-10-22): the tab is where guides
-    // work; a client reaches what is shared through the banner's tile.
+    // The Letters tab since 2026-11-06 (Austin, 2026-11-05: both houses
+    // write), drawn with less on it; before that a client reached what
+    // was shared through the banner's tile, then the mailbox.
     // Files added 2026-11-03 (Austin: "they need access to that tab").
-    expect(tabsFor(client.features)).toEqual(["efforts", "photos", "files"]);
+    expect(tabsFor(client.features)).toEqual(["efforts", "letters", "photos", "files"]);
     expect(client.features).toEqual(expect.arrayContaining(["steepTap", "dailyLog"]));
     expect(client).toMatchObject({ isOwner: false, guiding: false });
     expect(client.features).not.toContain("steepReadings");
@@ -155,7 +156,7 @@ describe("test 2: one row", () => {
   const client = featuresOf("Client", withoutPhotos);
 
   it("taking Photos from clients takes the tab, the rows and the files, and nothing else", () => {
-    expect(tabsFor(client)).toEqual(["efforts", "files"]);
+    expect(tabsFor(client)).toEqual(["efforts", "letters", "files"]);
     expect(resolveProjectTab("photos", tabsFor(client))).toBeNull();
     expect(rowsForReader(rows, client).map((r) => r.fileId)).toEqual(["drawing"]);
     expect(isReachablePhoto(photo, client)).toBe(false);

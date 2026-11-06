@@ -11,7 +11,7 @@ import {
   isFolderUnderSyncs,
 } from "robustness-core/data/vault.server";
 import { dailyLogStamp } from "../modules/dailyLogStamp.server";
-import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
+import { canUploadToFolder } from "robustness-core/data/letterUpload.server";
 
 // A markdown file (by name or content type -- same check the vault UI's
 // own `isMarkdownFile` uses) is stored as a DB-content ref, same as
@@ -91,7 +91,11 @@ export async function action({ request }: ActionFunctionArgs) {
   if (folderId && !folder) {
     return Response.json({ error: "Folder not found" }, { status: 404 });
   }
-  if (folder && !(await canActAsProjectOwner(user._id, folder.human_id, folderId))) {
+  // A letter's writer may put a picture or a recording beside their own
+  // letter (`letterFileId`, the letter's id; `canUploadToFolder`): the
+  // door a client has, since the Letters folder is otherwise a Guide's.
+  const letterFileId = (form.get("letterFileId") as string | null) || null;
+  if (folder && !(await canUploadToFolder(user, folder, letterFileId))) {
     return Response.json(
       { error: "You don't have permission to upload files here" },
       { status: 403 },

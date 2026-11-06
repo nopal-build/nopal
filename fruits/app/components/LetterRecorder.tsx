@@ -254,7 +254,9 @@ export function LetterRecorder({
     try {
       setPhase({ at: "uploading", fraction: 0 });
       const file = recordingFile(blob, mimeType, localDateString());
-      const recordingFileId = await uploadToVaultFolder(file, folderId, (fraction) => setPhase({ at: "uploading", fraction }));
+      // Beside the letter, by the letter's own door (`letterFileId`:
+      // `canUploadToFolder` lets a client in on their own letter).
+      const recordingFileId = await uploadToVaultFolder(file, folderId, (fraction) => setPhase({ at: "uploading", fraction }), { letterFileId });
       onRecorded(recordingFileId);
       const res = await fetch(`/api/letter/${letterFileId}/recording`, {
         method: "POST",

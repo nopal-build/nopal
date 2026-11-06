@@ -42,6 +42,7 @@
     "./data/letterHouses.server": "./src/data/letterHouses.server.ts",
     "./data/letterFlags.server": "./src/data/letterFlags.server.ts",
     "./data/letterDesk.server": "./src/data/letterDesk.server.ts",
+    "./data/letterUpload.server": "./src/data/letterUpload.server.ts",
     "./data/letterReading.server": "./src/data/letterReading.server.ts",
     "./data/letterReflection.server": "./src/data/letterReflection.server.ts",
     "./data/letterSync.server": "./src/data/letterSync.server.ts",

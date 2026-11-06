@@ -317,10 +317,15 @@ describe("the talk goes onto the Card by the daily log's rules, and only when th
     expect((outline.match(/enqueueGraphLogJob\("brief", \{[^}]*kind: "outline"/g) ?? []).length).toBe(2);
     expect(source("packages/robustness-core/src/data/graphLogAgent.server.ts")).not.toMatch(/outline|appendToCard/i);
     expect(source("fruits/app/routes/api.vault.$fileId.tsx")).not.toMatch(/outline\.server|appendToCard/);
-    for (const route of ["fruits/app/routes/api.letter.$fileId.talk.tsx", "fruits/app/routes/api.letter.$fileId.outline.tsx", "fruits/app/routes/api.letter.$fileId.brief.tsx"]) {
-      expect(source(route)).toContain("letterForManager(request, params.fileId)");
+    // The talk and the outline are the letter's writer's (a guide, or a
+    // client on their own: `letterForWriter`, since 2026-11-06); writing
+    // the brief stays the manager's.
+    for (const route of ["fruits/app/routes/api.letter.$fileId.talk.tsx", "fruits/app/routes/api.letter.$fileId.outline.tsx"]) {
+      expect(source(route)).toContain("letterForWriter(request, params.fileId)");
     }
+    expect(source("fruits/app/routes/api.letter.$fileId.brief.tsx")).toMatch(/export async function action[\s\S]*letterForManager\(request, params\.fileId\)/);
     expect(source("fruits/app/data/letterManager.server.ts")).toContain("canManageLetters(user, role)");
+    expect(source("fruits/app/data/letterWriter.server.ts")).toContain("resolveLetterForWriter(fileId, user)");
   });
 
   it("the outline is a job kind on the brief's stage, with its own skill seeded and reserved", () => {

@@ -133,11 +133,16 @@ export function LetterBrief({
   initial,
   hasPurpose,
   openByDefault,
+  withBrief = true,
 }: {
   fileId: string;
   initial: LetterBriefForPage;
   /** Without a purpose line there is nothing to brief from. */
   hasPurpose: boolean;
+  /** False on a client's letter: a client does not get the brief
+   * (Austin, 2026-11-05), so the block is not drawn, not even greyed.
+   * The talk box and the outline stay. */
+  withBrief?: boolean;
   /** Open while the letter is still only its heading: the brief is read
    * before the letter is written. */
   openByDefault: boolean;
@@ -174,8 +179,9 @@ export function LetterBrief({
     };
   }, []);
 
-  // Started from a reflection: no brief on this letter.
+  // Started from a reflection, or a client's: no brief on this letter.
   const about = state.talk.sent?.about ?? null;
+  const briefShown = withBrief && !about;
   const briefRunning = isRunning(state.job);
   const outlineRunning = isRunning(state.outlineJob);
   const running = briefRunning || outlineRunning;
@@ -275,9 +281,9 @@ export function LetterBrief({
   );
 
   return (
-    <section className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 })} aria-label="The brief, the talk-through and the outline" data-letter-brief data-brief-state={briefState} data-outline-state={outlineState} data-from-reflection={about ? "true" : undefined}>
+    <section className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 })} aria-label={briefShown ? "The brief, the talk-through and the outline" : "The talk-through and the outline"} data-letter-brief data-brief-state={briefState} data-outline-state={outlineState} data-from-reflection={about ? "true" : undefined}>
       {/* ── The brief ── */}
-      {!about && (
+      {briefShown && (
       <>
       <Cluster gap={3} align="center" ref={briefHeading}>
         <button type="button" className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} onClick={() => setBriefOpen((o) => !o)} aria-expanded={briefOpen} style={twirlStyle}>

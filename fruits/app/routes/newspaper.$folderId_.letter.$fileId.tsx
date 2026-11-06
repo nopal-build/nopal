@@ -55,13 +55,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     },
     brief: writing.brief,
     send: writing.send,
+    writer: writing.writer,
     ...(await navFor(user._id)),
   };
 }
 
 export default function LetterDeskRoute() {
-  const { project, letter, brief, send } = useLoaderData<typeof loader>();
+  const { project, letter, brief, send, writer } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const navigate = useNavigate();
-  return <LetterDesk project={project} letter={letter} brief={brief} send={send} onSent={() => revalidator.revalidate()} onDeleted={(desk) => navigate(desk)} />;
+  return <LetterDesk project={project} letter={letter} brief={brief} send={send} writer={writer} onSent={() => revalidator.revalidate()} onDeleted={(desk) => navigate(desk)} />;
 }

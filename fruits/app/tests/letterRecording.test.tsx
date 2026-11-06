@@ -150,9 +150,9 @@ describe("the browser's half", () => {
 });
 
 describe("the worker's half", () => {
-  it("asks only for a guide, and only for a video beside the letter", () => {
+  it("asks only for the letter's writer (a guide, or a client on their own), and only for a video beside the letter", () => {
     const route = readFileSyncText(path.join(here, "../routes/api.letter.$fileId.recording.tsx"));
-    expect(route).toContain("letterForManager(request, fileId)");
+    expect(route).toContain("letterForWriter(request, fileId)");
     expect(route).toContain("recording.folder_id !== got.file.folder_id");
     expect(route).toContain('recording.content_type.startsWith("video/")');
     expect(route).not.toMatch(/ffmpeg|letterRecording\.server"/);

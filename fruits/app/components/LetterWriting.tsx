@@ -48,12 +48,15 @@ export function LetterWriting({
   brief,
   send,
   editable,
+  writer = "guide",
   headerLeft,
   toolbarExtra,
   save,
   onSent,
 }: {
   file: LetterBeingWritten;
+  /** Whose letter: a client's page has no brief block. */
+  writer?: "guide" | "client";
   /** Where "Add picture" looks first. */
   projectFolderId: string | null;
   /** The letter's workings, for whoever manages letters; null hides them. */
@@ -83,7 +86,7 @@ export function LetterWriting({
 
   return (
     <>
-      {brief && <LetterBrief key={`brief-${file._id}`} fileId={file._id} initial={brief} hasPurpose={!!file.purpose?.trim()} openByDefault={isLetterOnlyItsHeading(file.content ?? "")} />}
+      {brief && <LetterBrief key={`brief-${file._id}`} fileId={file._id} initial={brief} hasPurpose={!!file.purpose?.trim()} withBrief={writer !== "client"} openByDefault={isLetterOnlyItsHeading(file.content ?? "")} />}
       <LetterSplitEditor
         key={loadedKey}
         fileId={file._id}

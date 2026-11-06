@@ -27,10 +27,10 @@ const state = vi.hoisted(() => ({
   features: ["dailyLog", "feeds"] as string[],
   letterManager: true,
 }));
-vi.mock("../data/letterManager.server", () => ({
-  letterForManager: vi.fn(async (_req: Request, fileId: string) =>
+vi.mock("../data/letterWriter.server", () => ({
+  letterForWriter: vi.fn(async (_req: Request, fileId: string) =>
     state.letterManager && fileId === "letter1"
-      ? { user: state.user, file: { _id: fileId }, project: { _id: "p2", name: "Coronado" }, role: null }
+      ? { user: state.user, file: { _id: fileId }, project: { _id: "p2", name: "Coronado" }, role: null, writer: "guide" }
       : Response.json({ error: "Not found" }, { status: 404 }),
   ),
 }));
@@ -64,7 +64,7 @@ describe("starting a recording", () => {
     state.letterManager = true;
   });
 
-  it("for a letter's brief, only for someone who may manage the letter, with its project's terms", async () => {
+  it("for a letter's talk box, only for someone who may write the letter (a guide, or a client on their own), with its project's terms", async () => {
     const res = await startRequest({ letterFile: "letter1" });
     expect(verifyTicket((await res.json()).ticket).context.terms).toEqual(["Coronado", "Gerald Bowen"]);
     state.letterManager = false;

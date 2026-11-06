@@ -18,15 +18,28 @@
  * for (Austin, 2026-11-05: "when you sit down to write a letter, it's:
  * what is it, what's the title, why are you writing it, and who are you
  * writing it to"): the letters route writes `to_house` on the draft
- * (`houseAtStart`). `sendLetter` writes the other two the first time it
- * is sent, and from then none of the three changes. A draft that only
- * has `to_house` is addressed, not housed: `housesOf` reads it as having
- * no house, so it refuses and flags nobody. A letter sent before
+ * (`houseAtStart`), and `from_human_id` too when a client starts one.
+ * `sendLetter` writes what is still missing the first time it is sent,
+ * and from then none of the three changes. A draft that has only
+ * `to_house`, or that and `from_human_id`, is addressed, not housed:
+ * `housesOf` reads it as having no house, so it refuses and flags
+ * nobody. A letter sent before
  * 2026-11-05 has none of the three: nothing can tell who it was for, so
  * it is outside every rule here and shows to everyone, as it did.
  *
  * On screen the guides' house is "the team": Guides write, and Crafters
  * and Observers read every letter in both directions and reply to none.
+ *
+ * Who writes which letter (`mayWriteLetter`, Austin 2026-11-05/06): a
+ * Guide on the project writes any letter that is not a client's; a
+ * client writes a letter that is from them and nothing else; everyone
+ * else, Crafters, Observers and staff with no role on the project
+ * included, writes nothing ("staff join the project to write there").
+ * A client's letter is from them from the moment it is started: the
+ * route that starts it writes `from_human_id` on the draft, so the draft
+ * is theirs before it has a house. A guide's draft says who it is from
+ * only once sent. The rule reads `from_house` on a sent letter and, for
+ * a draft, whether the person it is from is in the clients' house now.
  *
  * Every housed letter has the guides' house on one side (a client writes
  * the guides; a guide writes the clients or the guides), so the one
@@ -105,6 +118,73 @@ export function houseMayOpen(file: LetterHouseFields, viewerHouse: House | null)
  * caller has already found the viewer on the project. */
 export function mayReflect(file: LetterHouseFields, viewerHouse: House | null, sent: boolean): boolean {
   return sent && !!viewerHouse && houseMayOpen(file, viewerHouse);
+}
+
+/** Someone looking at a letter, as the write rules see them: who, which
+ * house, and whether they guide the project (`ResolvedProjectRole.guiding`,
+ * a Guide there). Staff with no role on the project have no house and
+ * do not guide: they write nothing here. */
+export type LetterViewer = { humanId: string; house: House | null; guiding: boolean };
+
+/** Whether a letter is a client's: it came from the clients' house once
+ * sent, or its draft is from someone in that house now. */
+export function isClientsLetter(file: LetterHouseFields, members: readonly { human: string; house: House | null }[]): boolean {
+  if (file.from_house === "clients") return true;
+  if (!file.from_human_id) return false;
+  return members.some((m) => m.human === file.from_human_id && m.house === "clients");
+}
+
+/** Whether `viewer` may write this letter: its words, its talk-through
+ * and outline, its pictures and recording, its send, and its delete
+ * while a draft. See the header. */
+export function mayWriteLetter(viewer: LetterViewer, file: LetterHouseFields, members: readonly { human: string; house: House | null }[]): boolean {
+  if (viewer.house === "clients") return !!file.from_human_id && file.from_human_id === viewer.humanId;
+  if (viewer.guiding) return !isClientsLetter(file, members);
+  return false;
+}
+
+/** Whether `viewer` may start a letter on the project: a Guide there, or
+ * someone in the clients' house. Crafters, Observers and staff with no
+ * role start none. */
+export function mayStartLetter(viewer: Pick<LetterViewer, "house" | "guiding">): boolean {
+  return viewer.guiding || viewer.house === "clients";
+}
+
+/** A tab row as the desk filter reads it (`LetterRow` has all of it). */
+export type DeskRowFields = {
+  sentDate: string | null;
+  houses: LetterHouses | null;
+  fromHumanId: string | null;
+  toHouse: House | null;
+  editedSinceSent: boolean;
+  purpose: string | null;
+};
+
+/** The desk's rows for one viewer (Austin, 2026-11-05: "The desk holds
+ * what you are writing, what your house has sent and what your house has
+ * received"; a client's desk is "the same place with less on it"):
+ * - a draft shows to whoever may write it, and to the rest of the guides'
+ *   house as it always did; a client's draft shows to that client alone;
+ * - a sent letter shows to both of its houses (`houseMayOpen`), and a
+ *   letter with no house to everyone, as before;
+ * - each row says whether the viewer may write it (`writes`: Edit,
+ *   Delete, the preview link), and "edited since sent" is told to a
+ *   letter's writers only, since a client's unsent edits are theirs
+ *   alone;
+ * - a client is told no purpose line: it is the guide's own line, kept
+ *   off the letter's page on purpose, and a client's letters have none.
+ * Pure. */
+export function deskRows<R extends DeskRowFields>(rows: readonly R[], viewer: LetterViewer, members: readonly { human: string; house: House | null }[]): (R & { writes: boolean })[] {
+  const asClient = viewer.house === "clients";
+  const out: (R & { writes: boolean })[] = [];
+  for (const row of rows) {
+    const fields: LetterHouseFields = { from_human_id: row.fromHumanId, from_house: row.houses?.fromHouse ?? null, to_house: row.houses?.toHouse ?? row.toHouse };
+    const writes = mayWriteLetter(viewer, fields, members);
+    const shown = row.sentDate ? houseMayOpen(fields, viewer.house) : asClient ? writes : !isClientsLetter(fields, members);
+    if (!shown) continue;
+    out.push({ ...row, writes, editedSinceSent: writes && row.editedSinceSent, purpose: asClient ? null : row.purpose });
+  }
+  return out;
 }
 
 /** Whether the letter is in this person's mailbox: sent to their house by

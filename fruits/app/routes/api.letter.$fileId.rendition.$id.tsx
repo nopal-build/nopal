@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
-import { letterPageFile } from "robustness-core/data/letters.server";
+import { letterDraftFile, letterPageFile } from "robustness-core/data/letters.server";
 import { getUser } from "../modules/auth/auth.server";
 import { requestHasRenderPass } from "robustness-core/data/letterRenderPass.server";
 import { getPresignedViewUrl, objectExists } from "robustness-core/data/file.server";
@@ -21,7 +21,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // the project and the letter sent.
   const viewer = fileId && id ? await getUser(request) : null;
   const rendering = fileId && id ? await requestHasRenderPass(request, fileId) : false;
-  const file = fileId && id ? await letterPageFile(fileId, id, viewer?._id ?? null, rendering) : null;
+  // A draft's files, to the letter's writer (`letterDraftFile`), after
+  // the page's doors say no.
+  const file = fileId && id ? ((await letterPageFile(fileId, id, viewer?._id ?? null, rendering)) ?? (viewer ? await letterDraftFile(fileId, id, viewer) : null)) : null;
   if (!file) return Response.json({ error: "Not found" }, { status: 404 });
   if (!file.s3_key) return Response.json({ error: "No viewable file attached" }, { status: 400 });
 

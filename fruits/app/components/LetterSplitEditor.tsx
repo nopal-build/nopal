@@ -9,6 +9,7 @@ import { semanticColors } from "stamps/tokens";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import OxRenderer from "./OxRenderer";
+import { rewriteViewUrls } from "robustness-core/data/publicBody";
 import { LetterRecorder } from "./LetterRecorder";
 import { setLeadingRecording } from "./letterRecording";
 import { MarkdownSplitEditor } from "./MarkdownSplitEditor";
@@ -82,6 +83,9 @@ export function LetterSplitEditor({
         const form = new FormData();
         form.append("file", file);
         form.append("folderId", folderId);
+        // The letter this is for: a client's door into the Letters
+        // folder (`canUploadToFolder`); a guide passes anyway.
+        form.append("letterFileId", fileId);
         const res = await fetch("/api/vault/upload", { method: "POST", body: form });
         const data = (await res.json().catch(() => null)) as { fileRef?: { _id: string }; error?: string } | null;
         if (!res.ok || !data?.fileRef?._id) throw new Error(data?.error ?? `${file.name} didn't upload. Try again.`);
@@ -90,7 +94,7 @@ export function LetterSplitEditor({
       }
       return out;
     },
-    [folderId],
+    [folderId, fileId],
   );
 
   // Simpler than the website editor on purpose (Austin, 2026-10-21): the
@@ -143,8 +147,14 @@ export function LetterSplitEditor({
       }
       renderPreview={(body, previewScheme) => (
         <WebsitePageContent>
+          {/* The preview draws the letter's files through the letter's
+              own routes, as the sent page does (`publicLetterBody`), so
+              it is what the page will be for everyone: the Vault's file
+              routes refuse a client (ADR-023), the letter's serve its
+              writer (`letterPageFile`). The stored text keeps
+              `/api/vault/view/`; only what is drawn changes. */}
           <OxRenderer
-            markdown={body}
+            markdown={rewriteViewUrls(body, (id) => `/api/letter/${fileId}/view/${id}`)}
             directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme: previewScheme })}
             className="ox-no-dots ox-no-heading-marks website-page-ox"
           />

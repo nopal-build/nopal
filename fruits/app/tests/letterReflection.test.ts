@@ -367,10 +367,11 @@ describe("the letter's page is handed the viewer's own reflection and nobody els
     expect(reading).toMatchObject({ from: null, toHouse: null, reflection: { draft: null, kept: null } });
   });
 
-  it("only someone who may write letters is told where a letter can be started from it", async () => {
+  it("only someone who may start a letter here is told where one can be started from it: a guide, and a client since clients write (2026-11-06)", async () => {
     const letter = sent("c2g", fromClient);
     expect((await readLetter(letter, project, as("guideB"), here)).writeBackIn).toBe("proj");
-    for (const reader of ["crafter", "observer", "clientB"]) expect((await readLetter(letter, project, as(reader), here)).writeBackIn, reader).toBeNull();
+    expect((await readLetter(letter, project, as("clientB"), here)).writeBackIn).toBe("proj");
+    for (const reader of ["crafter", "observer"]) expect((await readLetter(letter, project, as(reader), here)).writeBackIn, reader).toBeNull();
   });
 });
 
