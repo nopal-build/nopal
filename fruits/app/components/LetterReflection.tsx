@@ -53,10 +53,7 @@ function longDay(day: string): string {
 
 const twirlStyle = { background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "inherit" } as const;
 
-/** The path that starts a letter from the kept reflection on `fileId`. */
-export function writeBackPath(projectFolderId: string, fileId: string): string {
-  return `/newspaper/${projectFolderId}?tab=letters&from=${fileId}`;
-}
+import { writeBackPath } from "./letterPaths";
 
 /** The one line under the letter's header. */
 export function ReflectionTwirl({ open, keptDate, onToggle }: { open: boolean; keptDate: string | null; onToggle: () => void }) {

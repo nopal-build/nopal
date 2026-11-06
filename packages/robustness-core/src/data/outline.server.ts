@@ -61,7 +61,7 @@ import { firstName } from "./humanNames";
 import { getHumansById } from "./humans.server";
 import { houseOf } from "./letterHouses";
 import { letterSenderId } from "./letterReflection.server";
-import { letterHome, letterTitle, resolveSentLetterForMember, sentCopyOf } from "./letters.server";
+import { letterHome, letterTitle, resolveSentLetterForHouse, sentCopyOf } from "./letters.server";
 import type { LlmProvider, ToolDefinition } from "./llmProvider";
 import { splitFrontmatter, splitReadmeSections } from "./project.types";
 import { composeStageSkill, findProjectGraphFolder, getProjectStageSkill, isSkipInstruction, listExtraSkillFiles } from "./projectN02.server";
@@ -542,7 +542,7 @@ export async function letterBackOutlineText(input: LetterBackOutlineTextInput): 
  * clients' house is handed anything from the graph.
  */
 async function letterBackInputs(projectFolder: VaultFolder, readLetterId: string, speakerId: string, log: (line: string) => void): Promise<Pick<LetterBackOutlineTextInput, "letterRead" | "senderWords"> | null> {
-  const read = await resolveSentLetterForMember(readLetterId, speakerId);
+  const read = await resolveSentLetterForHouse(readLetterId, speakerId);
   if (!read || read.project._id !== projectFolder._id) return null;
   const senderId = letterSenderId(read.file);
   const sender = senderId ? (await getHumansById([senderId]))[0] : undefined;

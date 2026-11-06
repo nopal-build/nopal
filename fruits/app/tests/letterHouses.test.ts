@@ -236,7 +236,7 @@ vi.mock("robustness-core/data/outline.server", () => ({ landTalkThrough: vi.fn(a
 
 const { sendLetter, letterSendStateFor } = await import("robustness-core/data/letterSend.server");
 const { flaggedLetterIds, lowerLetterFlag } = await import("robustness-core/data/letterFlags.server");
-const { resolveSentLetterForMember, resolveReadableLetter, letterPageFile, mailboxLines, listLetters } = await import("robustness-core/data/letters.server");
+const { resolveSentLetterForHouse, resolveReadableLetter, letterPageFile, mailboxLines, listLetters } = await import("robustness-core/data/letters.server");
 const { readLetter } = await import("robustness-core/data/letterReading.server");
 const { writesInFolder, resolveRole } = await import("robustness-core/data/projectSharing.server");
 
@@ -345,7 +345,7 @@ describe("the member's door, by house", () => {
   it("a client is refused a letter the guides sent to the guides: its page, its pictures and its PDF's door", async () => {
     sentTo("g2g", toGuides);
     files.pic1 = { _id: "pic1", name: "p.jpg" };
-    expect(await resolveSentLetterForMember("g2g", "clientA")).toBeNull();
+    expect(await resolveSentLetterForHouse("g2g", "clientA")).toBeNull();
     expect(await resolveReadableLetter("g2g", { viewerHumanId: "clientA" })).toBeNull();
     expect(await letterPageFile("g2g", "pic1", "clientA")).toBeNull();
   });
@@ -353,7 +353,7 @@ describe("the member's door, by house", () => {
   it("everyone in the guides' house opens it: a guide, a crafter, an observer, an org Guide", async () => {
     sentTo("g2g", toGuides);
     for (const reader of ["guideA", "guideB", "crafter", "observer", "orgGuide"]) {
-      expect((await resolveSentLetterForMember("g2g", reader))?.file._id).toBe("g2g");
+      expect((await resolveSentLetterForHouse("g2g", reader))?.file._id).toBe("g2g");
     }
   });
 
@@ -361,16 +361,16 @@ describe("the member's door, by house", () => {
     sentTo("g2c", toClients);
     sentTo("c2g", fromClient);
     for (const reader of ["clientA", "clientB", "guideB", "crafter", "observer"]) {
-      expect((await resolveSentLetterForMember("g2c", reader))?.file._id).toBe("g2c");
-      expect((await resolveSentLetterForMember("c2g", reader))?.file._id).toBe("c2g");
+      expect((await resolveSentLetterForHouse("g2c", reader))?.file._id).toBe("g2c");
+      expect((await resolveSentLetterForHouse("c2g", reader))?.file._id).toBe("c2g");
     }
   });
 
   it("a letter with no house opens for anyone on the project, a client included, and for nobody off it", async () => {
     sentTo("old", {});
-    expect((await resolveSentLetterForMember("old", "clientA"))?.file._id).toBe("old");
-    expect((await resolveSentLetterForMember("old", "crafter"))?.file._id).toBe("old");
-    expect(await resolveSentLetterForMember("old", "stranger")).toBeNull();
+    expect((await resolveSentLetterForHouse("old", "clientA"))?.file._id).toBe("old");
+    expect((await resolveSentLetterForHouse("old", "crafter"))?.file._id).toBe("old");
+    expect(await resolveSentLetterForHouse("old", "stranger")).toBeNull();
   });
 
   it("the public link still opens a guides' letter for anyone who has it, as before", async () => {

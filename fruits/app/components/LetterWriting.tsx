@@ -26,6 +26,7 @@ import { CopyLinkButton } from "./CopyLinkButton";
 import { LetterBrief, isLetterOnlyItsHeading } from "./LetterBrief";
 import { LetterSendControl, sendStateAfterSaves, type LetterSendState } from "./LetterSendControl";
 import { LetterSplitEditor } from "./LetterSplitEditor";
+import { letterPublicPath } from "./letterPaths";
 
 /** What of a letter's record the writing page reads. */
 export type LetterBeingWritten = {
@@ -109,7 +110,7 @@ export function LetterWriting({
                 }}
               />
             )}
-            {file.shared_at && <CopyLinkButton path={`/public/letter/${file._id}`} />}
+            {file.shared_at && <CopyLinkButton path={letterPublicPath(file._id)} />}
             {toolbarExtra}
           </>
         }

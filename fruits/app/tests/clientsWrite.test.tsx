@@ -73,7 +73,7 @@ vi.mock("robustness-core/data/featureAccess.server", () => ({
 }));
 
 const { mayWriteLetter, mayStartLetter, isClientsLetter, deskRows } = await import("robustness-core/data/letterHouses");
-const { resolveLetterForWriter, letterDraftFile, letterViewerOf } = await import("robustness-core/data/letters.server");
+const { resolveLetterForWriter, letterDraftFile, letterViewerOf, letterChangeRefusal } = await import("robustness-core/data/letters.server");
 const { canUploadToFolder } = await import("robustness-core/data/letterUpload.server");
 const { featuresOf } = await import("robustness-core/data/features");
 const { LettersView, NewLetterModal, LETTER_TO_TEAM_NOTE } = await import("../components/LettersView");
@@ -260,9 +260,20 @@ describe("the doors the rule stands behind", () => {
     expect(app("components/vaultUpload.ts")).toContain('form.append("letterFileId", meta.letterFileId)');
   });
 
-  it("the Vault's own write rule is untouched: the Letters folder is still a Guide's there", () => {
+  it("the Vault is no second door: its PATCH, DELETE and Replace ask the letter's rule for a letter, and its folder rule stays a Guide's for everything else", async () => {
     expect(core("projectSharing.server.ts")).toContain("if (project) return writesInFolder(await getProjectRole(project, actingHumanId), folder!);");
     expect(app("routes/api.vault.$fileId.tsx")).toContain("isOwner || (await canActAsProjectOwner(user._id, file.human_id, file.folder_id))");
+    expect(app("routes/api.vault.$fileId.tsx")).toMatch(/if \(request\.method === "DELETE" \|\| request\.method === "PATCH"\) \{\s*const letter = await letterChangeRefusal\(file, user\);/);
+    expect(core("fileReplace.server.ts")).toContain("letter: await letterChangeRefusal(existing, acting.user)");
+    file("a1", { from_human_id: "clientA" });
+    file("g1");
+    files.note = { _id: "note", human_id: "owner", name: "notes.md", folder_id: "photos" };
+    expect(await letterChangeRefusal(files.a1 as never, person("guideA"))).toEqual({ status: 403, error: "This letter isn't yours to change." });
+    expect(await letterChangeRefusal(files.a1 as never, person("clientA"))).toBeNull();
+    expect(await letterChangeRefusal(files.g1 as never, person("guideA"))).toBeNull();
+    expect(await letterChangeRefusal(files.g1 as never, person("clientA"))).toEqual({ status: 403, error: "This letter isn't yours to change." });
+    // Not a letter: the Vault's own rules decide.
+    expect(await letterChangeRefusal(files.note as never, person("clientA"))).toBeNull();
   });
 });
 

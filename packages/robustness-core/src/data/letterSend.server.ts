@@ -34,7 +34,11 @@ import { getProjectRole } from "./projectSharing.server";
 import type { Human } from "./humans.server";
 import type { FileRef } from "./vault.types";
 
-export type SendLetterResult = { ok: true; sentAt: string; count: number; toHouse: House } | ({ ok: false } & LetterRefusal);
+/** `missed`: what follows a send that did not finish this time (the
+ * flags, the graph's copy, the talk-through, the PDF). The letter is
+ * sent regardless, and each is done again at the next send. */
+export type SendLetterResult = { ok: true; sentAt: string; count: number; toHouse: House; missed: SendFollowUp[] } | ({ ok: false } & LetterRefusal);
+export type SendFollowUp = "flags" | "projection" | "talk" | "pdf";
 
 /** The only writer of a letter's sent fields and its two houses, and of
  * who a guide's letter is from (a client's draft says who it is from
@@ -93,25 +97,38 @@ export async function sendLetter(actor: Pick<Human, "_id" | "role">, file: FileR
   };
   await merge("file_refs", file._id, sent);
   const after: FileRef = { ...file, ...sent };
-  await raiseLetterFlags({
-    letterFileId: file._id,
-    projectFolderId: home.project._id,
-    humanIds: flagRecipients(members, decided.toHouse, [actor._id, fromHumanId]),
-    at: sentAt,
-  });
-  await syncLettersProjection(home.project);
+  // The record write above is the send. What follows are its
+  // consequences, and the letter is sent whichever of them fails: a
+  // failure is logged, named to the caller, and done again at the next
+  // send (every send raises the flags, syncs the projection and asks for
+  // the PDF; a talk that could not land is still waiting). Reporting a
+  // failed consequence as a failed send would have the writer send again
+  // and every reader see "updated".
+  const missed: SendFollowUp[] = [];
+  const follow = async (what: SendFollowUp, step: () => Promise<unknown>) => {
+    try {
+      await step();
+    } catch (err) {
+      missed.push(what);
+      console.error(`[letters] after sending letter ${file._id}, ${what} did not finish:`, err);
+    }
+  };
+  await follow("flags", () =>
+    raiseLetterFlags({
+      letterFileId: file._id,
+      projectFolderId: home.project._id,
+      humanIds: flagRecipients(members, decided.toHouse, [actor._id, fromHumanId]),
+      at: sentAt,
+    }),
+  );
+  await follow("projection", () => syncLettersProjection(home.project));
   // What was said toward this letter goes on the record with it, as its
-  // speaker's words, once. The letter is sent whatever happens here: a
-  // talk that could not land is still waiting and lands at the next send.
-  try {
-    await landTalkThrough(home.project, file._id, sent.sent_date);
-  } catch (err) {
-    console.error(`[letters] the talk-through for letter ${file._id} did not go on the record at Send:`, err);
-  }
+  // speaker's words, once.
+  await follow("talk", () => landTalkThrough(home.project, file._id, sent.sent_date));
   // The PDF is of the sent copy, made when the link is on and after each
   // send while it is (`letterPdf.server.ts`).
-  await enqueueLetterPdfIfSent(after);
-  return { ok: true, sentAt, count: sent.sent_count, toHouse: decided.toHouse };
+  await follow("pdf", () => enqueueLetterPdfIfSent(after));
+  return { ok: true, sentAt, count: sent.sent_count, toHouse: decided.toHouse, missed };
 }
 
 /** What the send control on a letter's page is given (`LetterSendControl`):

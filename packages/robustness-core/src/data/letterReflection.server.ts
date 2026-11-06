@@ -42,7 +42,7 @@ import { markDate } from "./graphLogMarks.server";
 import { firstName } from "./humanNames";
 import { getHumanById } from "./humans.server";
 import { housesOf } from "./letterHouses";
-import { letterTitle, resolveSentLetterForMember } from "./letters.server";
+import { letterTitle, resolveSentLetterForHouse } from "./letters.server";
 import type { FileRef, VaultFolder } from "./vault.types";
 
 const TABLE = "letter_reflections";
@@ -169,14 +169,14 @@ export async function keepReflection(
 /**
  * A kept reflection a letter may be started from, or null. All of: it is
  * this person's, it is kept, they may still open the letter it is about
- * (`resolveSentLetterForMember`: sent, not archived, their house), and
+ * (`resolveSentLetterForHouse`: sent, not archived, their house), and
  * that letter is in this project. The last is what keeps a letter's
  * words, and what was said about it, from being carried into another
  * project's workings. Whether this person may write letters at all, and
  * that nobody is looking as them, is the caller's to ask.
  */
 export async function reflectionToStartFrom(project: VaultFolder, letterFileId: string, humanId: string): Promise<{ row: LetterReflectionRow & { text: string }; letter: FileRef; title: string; from: string | null } | null> {
-  const read = await resolveSentLetterForMember(letterFileId, humanId);
+  const read = await resolveSentLetterForHouse(letterFileId, humanId);
   if (!read || read.project._id !== project._id) return null;
   const row = await getReflection(letterFileId, humanId);
   if (!row?.text || !row.card_file_id) return null;

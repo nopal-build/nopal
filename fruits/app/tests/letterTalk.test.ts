@@ -11,8 +11,13 @@
  * nothing in the graph. The store, the Card door, the queue and the
  * model are stubbed; the rules are what is under test.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LlmProvider, LlmResponse } from "robustness-core/data/llmProvider";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 const sharing = [
   { human: "guideA", role: "Guide" },
@@ -156,7 +161,13 @@ vi.mock("robustness-core/data/seed.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("robustness-core/data/seed.server")>();
   return { ...actual, findSeedSyncFolder: vi.fn(async () => null) };
 });
-vi.mock("robustness-core/data/letterSync.server", () => ({ syncLettersProjection: vi.fn(async () => ({ written: 0 })) }));
+let projectionDoor: "open" | "broken" = "open";
+vi.mock("robustness-core/data/letterSync.server", () => ({
+  syncLettersProjection: vi.fn(async () => {
+    if (projectionDoor === "broken") throw new Error("the projection folder could not be written");
+    return { written: 0 };
+  }),
+}));
 vi.mock("robustness-core/data/letterPdf.server", () => ({ enqueueLetterPdfIfSent: vi.fn(async () => undefined) }));
 
 const { sendTalkThrough, requestOutline, runOutline, landTalkThrough, talkIsWaiting } = await import("robustness-core/data/outline.server");
@@ -271,12 +282,31 @@ describe("the talk-through goes on the record when the letter is sent, and not b
     await sendTalkThrough(project, file, { humanId: "guideA", features: featuresOf("Guide") }, { text: TALK });
     cardDoor = "broken";
     const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(await sendLetter(person("guideA"), file, { date: "2026-11-06" })).toMatchObject({ ok: true });
+    expect(await sendLetter(person("guideA"), file, { date: "2026-11-06" })).toMatchObject({ ok: true, missed: ["talk"] });
     quiet.mockRestore();
     expect(talkIsWaiting(rows.get("l1"))).toBe(true);
     cardDoor = "open";
     await sendLetter(person("guideA"), files.l1 as never, { date: "2026-11-07" });
     expect(cards).toEqual([{ humanId: "guideA", date: "2026-11-07", projectFolderId: "proj", text: TALK }]);
+  });
+
+  it("the record write is the send: a consequence that fails (the graph's copy here) is named, not reported as a failed send, and the rest still run", async () => {
+    const file = letter("l1");
+    await sendTalkThrough(project, file, { humanId: "guideA", features: featuresOf("Guide") }, { text: TALK });
+    projectionDoor = "broken";
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sent = await sendLetter(person("guideA"), file, { date: "2026-11-06" });
+    quiet.mockRestore();
+    projectionDoor = "open";
+    expect(sent).toMatchObject({ ok: true, count: 1, missed: ["projection"] });
+    expect(files.l1).toMatchObject({ sent_count: 1 });
+    // The talk still landed after the failed step.
+    expect(cards).toEqual([{ humanId: "guideA", date: "2026-11-06", projectFolderId: "proj", text: TALK }]);
+    // A clean send names nothing.
+    expect(await sendLetter(person("guideA"), files.l1 as never, { date: "2026-11-07" })).toMatchObject({ ok: true, missed: [] });
+    // The route hands `missed` to the page, which says so beside "Sent".
+    expect(readFileSync(path.join(here, "../routes/api.letter.$fileId.send.tsx"), "utf8")).toContain("missed: result.missed");
+    expect(readFileSync(path.join(here, "../components/LetterSendControl.tsx"), "utf8")).toContain("setError(body.missed?.length ? SEND_FOLLOWUP_MISSED : null);");
   });
 
   it("a speaker who has left the project's log by Send: the letter goes, their talk stays off the record", async () => {

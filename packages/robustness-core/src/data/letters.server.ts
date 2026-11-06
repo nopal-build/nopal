@@ -39,7 +39,7 @@
  *   to and the house it came from (`letterHouses.ts`). The mailbox on the
  *   project's page holds what came to the viewer's house
  *   (`mailboxLines`); the member's door refuses a Client a letter the
- *   guides sent the guides (`resolveSentLetterForMember`). A letter sent
+ *   guides sent the guides (`resolveSentLetterForHouse`). A letter sent
  *   before houses has none and shows to everyone, as it did.
  *
  * The PDF is the public page printed by the worker, keyed by the file's
@@ -356,20 +356,19 @@ export async function ensureSentCopy(file: FileRef): Promise<FileRef> {
 }
 
 /**
- * A sent letter, for someone on the project (any group, a Client
- * included: ADR-023 keeps them out of the cache, so this is their door)
- * when the link is off. Null for a draft, for someone off the project,
- * or for a trashed project.
- *
- * And null for a letter that has a house and neither came from nor went
- * to the viewer's (`houseMayOpen`, Austin 2026-11-05): a Client and a
- * letter the guides sent to the guides. This is a Client's only door to
+ * A sent letter, for someone in one of its houses (`houseMayOpen`,
+ * Austin 2026-11-05): on the project, any group, a Client included
+ * (ADR-023 keeps them out of the cache, so this is their door), when the
+ * link is off. Null for a draft, for someone off the project, for a
+ * trashed project, and for a letter that has a house and neither came
+ * from nor went to the viewer's: a Client and a letter the guides sent
+ * the guides. This is a Client's only door to
  * a sent letter's words, its pictures and its PDF (the letter's routes
  * all ask it, through `resolveReadableLetter` or directly), so the
  * refusal is here once. A letter with no house is past the check before
  * anyone's house is looked at, and reads as it always did.
  */
-export async function resolveSentLetterForMember(fileId: string, humanId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
+export async function resolveSentLetterForHouse(fileId: string, humanId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
   const sent = await resolveSentLetter(fileId);
   if (!sent) return null;
   const role = await getProjectRole(sent.project, humanId);
@@ -379,7 +378,7 @@ export async function resolveSentLetterForMember(fileId: string, humanId: string
 }
 
 /** A sent letter whatever its link, for whoever the caller has already
- * let in: someone on the project (`resolveSentLetterForMember`), or the
+ * let in: someone on the project (`resolveSentLetterForHouse`), or the
  * worker printing it under a render pass (`letterRenderPass.server.ts`).
  * Null for a draft, a non-letter, or a trashed project. */
 export async function resolveSentLetter(fileId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
@@ -403,7 +402,7 @@ export async function resolveReadableLetter(
   const shared = await resolveSharedLetter(fileId);
   if (shared) return shared;
   if (reader.rendering) return resolveSentLetter(fileId);
-  return reader.viewerHumanId ? resolveSentLetterForMember(fileId, reader.viewerHumanId) : null;
+  return reader.viewerHumanId ? resolveSentLetterForHouse(fileId, reader.viewerHumanId) : null;
 }
 
 /** Where the public page loads one of the letter's files from. */
@@ -663,6 +662,20 @@ export async function resolveLetterForWriter(
   if (!mayWriteLetter(viewer, file, await houseMembers(home.project))) return null;
   return { file, project: home.project, writer: viewer.house === "clients" ? "client" : "guide" };
 }
+
+/** The Vault's back room asks this before it changes a letter's file
+ * (`api.vault.$fileId.tsx`'s PATCH and DELETE, `fileReplaceRefusal`):
+ * a letter is changed by whoever may write it and nobody else, in the
+ * Vault as at the desk, so a guide cannot edit, delete or replace a
+ * client's draft there (Austin, 2026-11-05: a client's draft is theirs
+ * alone). Null for a file that is not a letter, which the Vault's own
+ * rules decide. */
+export async function letterChangeRefusal(file: FileRef, actor: Pick<Human, "_id" | "role">): Promise<{ status: 403; error: string } | null> {
+  if (!isMarkdownFileName(file.name) || !(await letterHome(file))) return null;
+  return (await resolveLetterForWriter(file._id, actor)) ? null : { status: 403, error: LETTER_NOT_YOURS };
+}
+
+export const LETTER_NOT_YOURS = "This letter isn't yours to change.";
 
 /** The text a new letter starts with: a title in front matter (the
  * tab and the public page read it) and the heading the page opens on. */

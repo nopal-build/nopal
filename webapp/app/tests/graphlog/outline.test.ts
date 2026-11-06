@@ -311,7 +311,7 @@ describe("the talk goes onto the Card by the daily log's rules, and only when th
     expect((reflection.match(/appendToCard\(/g) ?? []).length).toBe(1);
     expect(reflection.slice(reflection.indexOf("export async function keepReflection("), reflection.indexOf("export async function reflectionToStartFrom("))).toContain("appendToCard(");
     const callers = ["packages/robustness-core/src/data/letterSend.server.ts", "packages/robustness-core/src/data/outline.server.ts", "packages/worker/worker.ts", "fruits/app/routes/api.letter.$fileId.talk.tsx", "fruits/app/routes/api.letter.$fileId.outline.tsx"];
-    expect(callers.filter((f) => /await landTalkThrough\(/.test(source(f)))).toEqual(["packages/robustness-core/src/data/letterSend.server.ts"]);
+    expect(callers.filter((f) => /landTalkThrough\(home\.project|await landTalkThrough\(/.test(source(f)))).toEqual(["packages/robustness-core/src/data/letterSend.server.ts"]);
     // No brief is asked for anywhere on the talk's or the outline's path.
     expect(outline).not.toMatch(/Read the brief first|has no brief yet/);
     expect((outline.match(/enqueueGraphLogJob\("brief", \{[^}]*kind: "outline"/g) ?? []).length).toBe(2);

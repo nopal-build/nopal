@@ -49,7 +49,7 @@
 import { useState } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData, useParams } from "react-router";
-import { resolveLetterPage, resolveLetterForWriter, resolveSentLetter, resolveSentLetterForMember, resolveSharedLetter, type LetterPage } from "robustness-core/data/letters.server";
+import { resolveLetterPage, resolveLetterForWriter, resolveSentLetter, resolveSentLetterForHouse, resolveSharedLetter, type LetterPage } from "robustness-core/data/letters.server";
 import { readLetter, type LetterReading } from "robustness-core/data/letterReading.server";
 import { HOUSE_LABEL } from "robustness-core/data/letterHouses";
 import { requestHasRenderPass } from "robustness-core/data/letterRenderPass.server";
@@ -59,7 +59,7 @@ import { getUser, isImpersonating } from "../modules/auth/auth.server";
 import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
 import { LetterReflection, ReflectionTwirl } from "../components/LetterReflection";
-import { letterDeskPath } from "../components/LettersView";
+import { letterDeskPath } from "../components/letterPaths";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { buildLoadCellGraphDirectiveRegistry } from "../oxmarkdown/loadCellGraphDirective";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
@@ -102,8 +102,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Link off, sent: someone on the project reads the sent copy logged
   // in, the pictures served by the letter's own routes with the session.
   // A letter the guides sent the guides is not there for a Client
-  // (`resolveSentLetterForMember`).
-  const sent = user && params.fileId ? await resolveSentLetterForMember(params.fileId, user._id) : null;
+  // (`resolveSentLetterForHouse`).
+  const sent = user && params.fileId ? await resolveSentLetterForHouse(params.fileId, user._id) : null;
   if (sent) return opened(sent, await resolveLetterPage(sent.file, origin), user, person, asThemself);
   // Not sent: the letter's writer (a guide, or a client on their own)
   // sees the page as its readers will (the tab's title always opens

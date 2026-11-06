@@ -83,15 +83,7 @@ import { dayLabel } from "./dayLabel";
 import { BRIEF_RUN_NOTE } from "./LetterBrief";
 import { localDateString } from "./TodayLog";
 
-export function letterPublicPath(fileId: string): string {
-  return `/public/letter/${fileId}`;
-}
-
-/** Where a letter is written: the desk in its project, a page of its own
- * (`routes/newspaper.$folderId_.letter.$fileId.tsx`). Not the Vault. */
-export function letterDeskPath(projectFolderId: string, fileId: string): string {
-  return `/newspaper/${projectFolderId}/letter/${fileId}`;
-}
+import { letterDeskPath, letterPublicPath } from "./letterPaths";
 
 export const LETTER_DELETE_DRAFT_ASK = "Delete this draft? It goes for good, with its talk-through and outline.";
 
@@ -563,7 +555,7 @@ function LetterRowView({
                 }}
               />
               {row.writes && (
-                <button type="button" className={textSize.xs} disabled={busy} onClick={() => replaceInput.current?.click()} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, padding: 0, cursor: "pointer" }}>
+                <button type="button" className={`${link} ${textSize.xs}`} disabled={busy} onClick={() => replaceInput.current?.click()}>
                   Replace
                 </button>
               )}
@@ -575,7 +567,7 @@ function LetterRowView({
             </a>
           )}
           {row.writes && draft && (
-            <button type="button" className={textSize.xs} disabled={busy} onClick={onDelete} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, cursor: "pointer", padding: 0, textDecoration: "underline" }} data-letter-delete>
+            <button type="button" className={`${link} ${textSize.xs}`} disabled={busy} onClick={onDelete} data-letter-delete>
               Delete
             </button>
           )}

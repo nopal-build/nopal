@@ -23,5 +23,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const body = (await request.json().catch(() => ({}))) as { date?: unknown; to?: unknown };
   const result = await sendLetter(got.user, got.file, { date: typeof body.date === "string" ? body.date : undefined, toHouse: body.to });
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
-  return Response.json({ sentAt: result.sentAt, count: result.count, to: result.toHouse }, { status: 202 });
+  // `missed`: consequences of the send that did not finish (done again at
+  // the next send); the page says so beside "Sent".
+  return Response.json({ sentAt: result.sentAt, count: result.count, to: result.toHouse, missed: result.missed }, { status: 202 });
 }

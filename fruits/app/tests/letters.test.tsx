@@ -695,7 +695,7 @@ describe("read only", () => {
     const src = readFileSync(path.join(here, "../routes/public.letter.$fileId.tsx"), "utf8");
     const shared = src.indexOf("resolveSharedLetter(");
     const printing = src.indexOf("requestHasRenderPass(request, params.fileId)");
-    const member = src.indexOf("resolveSentLetterForMember(");
+    const member = src.indexOf("resolveSentLetterForHouse(");
     const manager = src.indexOf("resolveLetterForWriter(");
     expect(shared).toBeGreaterThan(-1);
     expect(shared).toBeLessThan(printing);
@@ -709,7 +709,7 @@ describe("read only", () => {
       expect(readFileSync(path.join(here, "../routes", file), "utf8"), file).toContain("letterPageFile(fileId, id, viewer?._id ?? null, rendering)");
     }
     const download = readFileSync(path.join(here, "../routes/api.letter.$fileId.download.tsx"), "utf8");
-    expect(download).toContain("resolveSentLetterForMember(");
+    expect(download).toContain("resolveSentLetterForHouse(");
     expect(download).toContain("new Response(sent.content,");
   });
 

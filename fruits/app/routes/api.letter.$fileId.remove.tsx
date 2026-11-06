@@ -7,7 +7,7 @@ import { removeDraftLetter } from "robustness-core/data/letterDesk.server";
  *
  * Deletes a draft letter from the desk, with its workings (the brief, a
  * talk-through and an outline that never reached the record). Only for
- * someone who could write the letter (`letterWriter`), and only a draft:
+ * someone who could write the letter (`resolveLetterAtDesk`), and only a draft:
  * a letter that was sent, or whose link was ever on, is refused here on
  * the server, whatever the page offered (Austin, 2026-11-06: a sent
  * letter is in someone's mailbox and stays). The Vault's own Delete is a

@@ -45,7 +45,7 @@ import type { FileRef, VaultFolder } from "./vault.types";
  * `project` is the project an address names, and the letter has to be in
  * it; a caller with no address (the delete, by the letter's own id)
  * passes null and the letter's own project is the one asked about. */
-export async function letterWriter(project: Pick<VaultFolder, "_id"> | null, fileId: string | undefined, user: Pick<Human, "_id" | "role">): Promise<{ file: FileRef; writer: LetterWriterKind } | null> {
+export async function resolveLetterAtDesk(project: Pick<VaultFolder, "_id"> | null, fileId: string | undefined, user: Pick<Human, "_id" | "role">): Promise<{ file: FileRef; writer: LetterWriterKind } | null> {
   const mine = fileId ? await resolveLetterForWriter(fileId, user) : null;
   if (!mine || (project && mine.project._id !== project._id)) return null;
   return { file: mine.file, writer: mine.writer };
@@ -56,10 +56,10 @@ export async function letterWriter(project: Pick<VaultFolder, "_id"> | null, fil
  * and nothing else differs. */
 export type LetterWritingPage = { file: FileRef; writer: LetterWriterKind; brief: LetterBriefForPage; send: Awaited<ReturnType<typeof letterSendStateFor>> };
 
-/** What the writing page is handed, or null for anyone `letterWriter`
+/** What the writing page is handed, or null for anyone `resolveLetterAtDesk`
  * refuses. */
 export async function letterWritingFor(project: Pick<VaultFolder, "_id">, fileId: string | undefined, user: Pick<Human, "_id" | "role">): Promise<LetterWritingPage | null> {
-  const mine = await letterWriter(project, fileId, user);
+  const mine = await resolveLetterAtDesk(project, fileId, user);
   if (!mine) return null;
   return { file: mine.file, writer: mine.writer, brief: await getLetterBriefForPage(mine.file._id), send: await letterSendStateFor(mine.file) };
 }
@@ -76,7 +76,7 @@ export type RemoveDraftResult = { ok: true } | { ok: false; status: 400 | 404; e
  * button, for a letter that has gone out and for anyone who could not
  * write it. */
 export async function removeDraftLetter(fileId: string | undefined, user: Pick<Human, "_id" | "role">): Promise<RemoveDraftResult> {
-  const mine = await letterWriter(null, fileId, user);
+  const mine = await resolveLetterAtDesk(null, fileId, user);
   if (!mine) return { ok: false, status: 404, error: "Not found" };
   if (letterHasGoneOut(mine.file)) return { ok: false, status: 400, error: LETTER_SENT_STAYS };
   await deleteFileRef(mine.file._id);

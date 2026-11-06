@@ -95,7 +95,7 @@ vi.mock("robustness-core/data/brief.server", async (importOriginal) => {
   };
 });
 
-const { letterWriter, letterWritingFor, removeDraftLetter, letterHasGoneOut, LETTER_SENT_STAYS } = await import("robustness-core/data/letterDesk.server");
+const { resolveLetterAtDesk, letterWritingFor, removeDraftLetter, letterHasGoneOut, LETTER_SENT_STAYS } = await import("robustness-core/data/letterDesk.server");
 
 const project = folders.proj as never;
 const person = (id: string, role = "Human") => ({ _id: id, role: role as never });
@@ -115,15 +115,15 @@ beforeEach(() => {
 describe("who the writing page opens for", () => {
   it("a Guide on the project, for the guides' letters; not a Crafter, an Observer, a Client or a stranger", async () => {
     draft("l1");
-    for (const guide of ["guideA", "guideB"]) expect((await letterWriter(project, "l1", person(guide)))?.file._id, guide).toBe("l1");
-    for (const other of ["crafter", "observer", "clientA", "stranger"]) expect(await letterWriter(project, "l1", person(other)), other).toBeNull();
-    expect((await letterWriter(project, "l1", person("guideA")))?.writer).toBe("guide");
+    for (const guide of ["guideA", "guideB"]) expect((await resolveLetterAtDesk(project, "l1", person(guide)))?.file._id, guide).toBe("l1");
+    for (const other of ["crafter", "observer", "clientA", "stranger"]) expect(await resolveLetterAtDesk(project, "l1", person(other)), other).toBeNull();
+    expect((await resolveLetterAtDesk(project, "l1", person("guideA")))?.writer).toBe("guide");
   });
 
   it("staff who are not on the project, or on it as a Crafter, get nothing: writing means a role on the project (Austin, 2026-11-06)", async () => {
     draft("l1");
-    expect(await letterWriter(project, "l1", person("staffOutside", "Admin"))).toBeNull();
-    expect(await letterWriter(project, "l1", person("staffCrafter", "Admin"))).toBeNull();
+    expect(await resolveLetterAtDesk(project, "l1", person("staffOutside", "Admin"))).toBeNull();
+    expect(await resolveLetterAtDesk(project, "l1", person("staffCrafter", "Admin"))).toBeNull();
     // The page, its save and every write route ask one rule, not the Vault's.
     expect(core("letterDesk.server.ts")).toContain("resolveLetterForWriter(fileId, user)");
     expect(core("letterDesk.server.ts")).not.toContain("canActAsProjectOwner");
@@ -134,32 +134,32 @@ describe("who the writing page opens for", () => {
 
   it("a client, for a letter from them and no other; a guide never for a client's draft (Austin, 2026-11-05: a client's draft is theirs alone)", async () => {
     draft("mine", { from_human_id: "clientA" });
-    expect((await letterWriter(project, "mine", person("clientA")))?.writer).toBe("client");
-    for (const other of ["clientB", "guideA", "crafter", "observer", "staffOutside"]) expect(await letterWriter(project, "mine", person(other, other === "staffOutside" ? "Admin" : "Human")), other).toBeNull();
+    expect((await resolveLetterAtDesk(project, "mine", person("clientA")))?.writer).toBe("client");
+    for (const other of ["clientB", "guideA", "crafter", "observer", "staffOutside"]) expect(await resolveLetterAtDesk(project, "mine", person(other, other === "staffOutside" ? "Admin" : "Human")), other).toBeNull();
     // Owning the file in the Vault's sense is not the rule: a client's
     // letter is theirs by who it is from.
     draft("owned", { human_id: "clientA" });
-    expect(await letterWriter(project, "owned", person("clientA"))).toBeNull();
+    expect(await resolveLetterAtDesk(project, "owned", person("clientA"))).toBeNull();
     // Sent, a client's letter stays theirs to send again, by its house.
     draft("sentMine", { ...sent, from_human_id: "clientA", from_house: "clients", to_house: "guides" });
-    expect((await letterWriter(project, "sentMine", person("clientA")))?.writer).toBe("client");
-    expect(await letterWriter(project, "sentMine", person("guideA"))).toBeNull();
+    expect((await resolveLetterAtDesk(project, "sentMine", person("clientA")))?.writer).toBe("client");
+    expect(await resolveLetterAtDesk(project, "sentMine", person("guideA"))).toBeNull();
   });
 
   it("only this project's letters under this project's address, and only a letter: not one in another project, an archived one, one in a trashed project, a file that is not markdown, or a file outside the Letters folder", async () => {
     draft("elsewhere", { folder_id: "lettersOther" });
-    expect(await letterWriter(project, "elsewhere", person("guideA"))).toBeNull();
-    expect((await letterWriter(folders.other as never, "elsewhere", person("guideA")))?.file._id).toBe("elsewhere");
+    expect(await resolveLetterAtDesk(project, "elsewhere", person("guideA"))).toBeNull();
+    expect((await resolveLetterAtDesk(folders.other as never, "elsewhere", person("guideA")))?.file._id).toBe("elsewhere");
     draft("archived", { archived_at: "2026-11-06T00:00:00Z" });
-    expect(await letterWriter(project, "archived", person("guideA"))).toBeNull();
+    expect(await resolveLetterAtDesk(project, "archived", person("guideA"))).toBeNull();
     draft("trashed", { folder_id: "lettersGone" });
-    expect(await letterWriter(folders.gone as never, "trashed", person("guideA"))).toBeNull();
+    expect(await resolveLetterAtDesk(folders.gone as never, "trashed", person("guideA"))).toBeNull();
     draft("picture", { name: "roof.jpg" });
-    expect(await letterWriter(project, "picture", person("guideA"))).toBeNull();
+    expect(await resolveLetterAtDesk(project, "picture", person("guideA"))).toBeNull();
     draft("note", { folder_id: "photos" });
-    expect(await letterWriter(project, "note", person("guideA"))).toBeNull();
-    expect(await letterWriter(project, undefined, person("guideA"))).toBeNull();
-    expect(await letterWriter(project, "nothing", person("guideA"))).toBeNull();
+    expect(await resolveLetterAtDesk(project, "note", person("guideA"))).toBeNull();
+    expect(await resolveLetterAtDesk(project, undefined, person("guideA"))).toBeNull();
+    expect(await resolveLetterAtDesk(project, "nothing", person("guideA"))).toBeNull();
   });
 
   it("a draft's words and its workings are read for the page only after the gate: nobody it refuses is handed either", async () => {
@@ -215,7 +215,12 @@ describe("Delete is for a draft", () => {
 describe("the workflow leads to the desk and names the Vault nowhere", () => {
   it("starting a letter, Edit on a row, Write a letter from this, and a guide's own preview all point at the desk", () => {
     const view = app("components/LettersView.tsx");
-    expect(view).toContain("return `/newspaper/${projectFolderId}/letter/${fileId}`;");
+    // Every address in the workflow comes from one module.
+    expect(app("components/letterPaths.ts")).toContain("return `/newspaper/${projectFolderId}/letter/${fileId}`;");
+    for (const file of ["components/LettersView.tsx", "components/LetterReflection.tsx", "components/LetterDesk.tsx", "components/LetterWriting.tsx"]) {
+      expect(app(file), file).toContain('from "./letterPaths"');
+      expect(app(file), file).not.toMatch(/`\/public\/letter\/|`\/newspaper\/\$\{[^}]*\}\/letter|tab=letters/);
+    }
     expect(view).toContain("if (data?.fileId) window.location.assign(letterDeskPath(projectFolderId, data.fileId));");
     expect(view).toContain("const deskPath = letterDeskPath(projectFolderId, row.fileId);");
     for (const file of ["components/LettersView.tsx", "components/LetterReflection.tsx", "components/LetterDesk.tsx", "components/LetterWriting.tsx", "components/LetterBrief.tsx", "components/ProjectMailbox.tsx", "routes/public.letter.$fileId.tsx", "routes/newspaper.$folderId_.letter.$fileId.tsx"]) {

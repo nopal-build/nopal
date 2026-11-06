@@ -16,6 +16,7 @@ import { enqueueRenditionsJob } from "./mediaQueue.server";
 import { deleteFromS3 } from "./file.server";
 import { merge } from "./generic.server";
 import type { Role } from "./humans.server";
+import { letterChangeRefusal } from "./letters.server";
 import { canActAsProjectOwner } from "./projectSharing.server";
 import { canWriteToFolderId, explainWriteRefusal, isFolderUnderSyncs } from "./vault.server";
 import { isFileRefLocked, type FileRef } from "./vault.types";
@@ -34,6 +35,8 @@ export type ReplaceFacts = {
   /** What to say when it doesn't. */
   writeRefusal: string;
   locked: boolean;
+  /** A letter that is not the actor's to change (`letterChangeRefusal`). */
+  letter: ReplaceRefusal | null;
 };
 
 /**
@@ -42,6 +45,7 @@ export type ReplaceFacts = {
  */
 export function replaceRefusalFor(facts: ReplaceFacts): ReplaceRefusal | null {
   if (!facts.actsAsOwner) return { status: 403, error: "Forbidden" };
+  if (facts.letter) return facts.letter;
   if (facts.syncScoped && !facts.underSyncs) return { status: 403, error: "Forbidden" };
   if (!facts.folderWritable) return { status: 403, error: facts.writeRefusal };
   if (facts.locked) {
@@ -66,6 +70,7 @@ export async function fileReplaceRefusal(
     folderWritable,
     writeRefusal: folderWritable ? "" : await explainWriteRefusal(existing.folder_id, acting.user.role),
     locked: isFileRefLocked(existing),
+    letter: await letterChangeRefusal(existing, acting.user),
   });
 }
 

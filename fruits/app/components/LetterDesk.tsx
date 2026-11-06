@@ -24,7 +24,8 @@ import { textSize } from "stamps/typography.css";
 import { AppLayout } from "./AppLayout";
 import type { LetterSendState } from "./LetterSendControl";
 import { LetterWriting, type LetterBeingWritten } from "./LetterWriting";
-import { LETTER_DELETE_DRAFT_ASK, letterPublicPath } from "./LettersView";
+import { LETTER_DELETE_DRAFT_ASK } from "./LettersView";
+import { deskPath, letterPublicPath } from "./letterPaths";
 
 // Words a person reads (Nopal's voice; listed in the round's return leg).
 export const DESK_BACK = "The desk";
@@ -53,7 +54,7 @@ export function LetterDesk({
 }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const desk = `/newspaper/${project._id}?tab=letters`;
+  const desk = deskPath(project._id);
 
   // The letter's own save (`api.letter.$fileId.tsx`), behind the same
   // rule as this page. Never throws: `LetterWriting` reads a truthy

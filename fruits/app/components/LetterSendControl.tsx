@@ -27,6 +27,7 @@ export const SEND_ASK_TAIL = "It goes in their mailbox on the project page as it
 export const SEND_AGAIN_ASK_VERB = "Send the update";
 export const SEND_AGAIN_ASK_TAIL = "They see the letter as it is now, marked as updated, and their flag goes up again.";
 export const SEND_ASK = `${SEND_ASK_VERB}? ${SEND_ASK_TAIL}`;
+export const SEND_FOLLOWUP_MISSED = "Sent. Something that follows a send didn't finish; it's done again the next time you send.";
 export const SEND_AGAIN_ASK = `${SEND_AGAIN_ASK_VERB}? ${SEND_AGAIN_ASK_TAIL}`;
 
 /** The question before a send, naming the house when it is known. */
@@ -71,6 +72,11 @@ export function LetterSendControl({ fileId, state, onSent }: { fileId: string; s
         setError(body.error ?? "The letter didn't get sent.");
         return;
       }
+      // Sent. What follows a send (the flags, the record's copy, the
+      // PDF) can miss and is done again at the next send; the writer is
+      // told, not asked to send again.
+      const body = (await res.json().catch(() => ({}))) as { missed?: string[] };
+      setError(body.missed?.length ? SEND_FOLLOWUP_MISSED : null);
       onSent();
     } finally {
       setBusy(false);
